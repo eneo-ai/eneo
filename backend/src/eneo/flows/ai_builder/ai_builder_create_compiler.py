@@ -652,7 +652,9 @@ def _result_contract_output_fields_from_planning_state(
     if contract is None:
         return ()
 
-    field_names: list[str] = []
+    field_names = [
+        requirement.canonical_name for requirement in contract.required_output_fields
+    ]
     if contract.post_processing_goal == "compare_or_validate":
         field_names.append("matches")
     if "missing_information_policy" in contract.secondary_obligations:
@@ -726,6 +728,30 @@ def _result_contract_output_field_description(
             "Öppna frågor som behöver besvaras innan slutsatsen är komplett."
             if swedish
             else "Open questions that must be answered before the conclusion is complete."
+        )
+    if field_name == "decisions":
+        return (
+            "Beslut som framgår av underlaget."
+            if swedish
+            else "Decisions stated in the source material."
+        )
+    if field_name == "actions":
+        return (
+            "Åtgärder eller nästa steg som framgår av underlaget."
+            if swedish
+            else "Actions or next steps stated in the source material."
+        )
+    if field_name == "owners":
+        return (
+            "Ansvariga för åtgärderna, eller ospecificerat när uppgiften saknas."
+            if swedish
+            else "Owners for the actions, or unspecified when absent."
+        )
+    if field_name == "deadlines":
+        return (
+            "Tidsfrister för åtgärderna, eller ospecificerat när uppgiften saknas."
+            if swedish
+            else "Deadlines for the actions, or unspecified when absent."
         )
     raise ValueError(f"Unsupported result contract output field: {field_name}")
 

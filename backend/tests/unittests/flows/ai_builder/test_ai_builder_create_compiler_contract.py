@@ -721,6 +721,13 @@ def test_compile_context_does_not_turn_report_obligations_into_reader_fields() -
 
     assert context is not None
     assert context.source_reader_required_fields == ()
+    assert [field.name for field in context.result_contract_output_fields] == [
+        "decisions",
+        "actions",
+        "owners",
+        "deadlines",
+        "open_questions",
+    ]
 
 
 def test_compile_context_derives_analysis_fields_from_result_obligations() -> None:

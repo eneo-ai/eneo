@@ -15,7 +15,6 @@ from eneo.flows.ai_builder.ai_builder_discovery_profile_builder import (
     expresses_task_intent,
 )
 from eneo.flows.ai_builder.ai_builder_discovery_signal_inference import (
-    infer_post_processing_goal,
     infer_structured_io_contract,
 )
 from eneo.flows.ai_builder.ai_builder_discovery_text_matcher import (
@@ -30,6 +29,10 @@ from eneo.flows.ai_builder.ai_builder_framework_policy import (
     latest_pending_structured_question,
     mentions_output_change,
     mentions_runtime_metadata,
+)
+from eneo.flows.ai_builder.ai_builder_slot_classification_contract import (
+    UNKNOWN_SLOT_VALUE,
+    SlotClassificationResult,
 )
 
 EXTERNAL_DELIVERY_UNSUPPORTED_ISSUE_ID: Final = "external_delivery_unsupported"
@@ -232,31 +235,55 @@ def ultra_vague_terminal_output_choice_is_vague(profile: DiscoveryProfile) -> bo
     return profile.document_like_input or profile.audio_like_input
 
 
-def post_processing_goal_is_vague(profile: DiscoveryProfile) -> bool:
+def post_processing_goal_is_vague(
+    profile: DiscoveryProfile,
+    *,
+    slot_classification_result: SlotClassificationResult | None = None,
+) -> bool:
     if _family_inactive(profile, "post_processing_goal"):
         return False
-    resolved_goal = profile.resolved_slot("post_processing_goal")
-    if resolved_goal is not None:
-        return False
-    if "post_processing_goal" in profile.answers:
-        return False
-    if _explicit_post_processing_goal_present(profile.text):
+    if profile.resolved_slot("post_processing_goal") is not None:
         return False
     if needs_pdf_generation_mode_choice(profile):
         return False
     if _json_to_json_semantic_flow(profile):
         return False
-    if _outcome_wording_is_vague(profile):
-        return True
+
+    if slot_classification_result is not None:
+        classified_goal = next(
+            (
+                slot
+                for slot in slot_classification_result.slots
+                if slot.slot_name == "post_processing_goal"
+            ),
+            None,
+        )
+        if classified_goal is not None:
+            # The classifier contract returns `unknown` with low confidence
+            # for ordinary semantic ambiguity — that is exactly the
+            # unresolved case the purpose question exists for, not only
+            # explicit user uncertainty.
+            return (
+                classified_goal.value == UNKNOWN_SLOT_VALUE
+                or classified_goal.confidence == "low"
+            )
+        return any(
+            slot.slot_name != "post_processing_goal"
+            and slot.value != UNKNOWN_SLOT_VALUE
+            for slot in slot_classification_result.slots
+        )
+
+    return _post_processing_goal_classifier_outage_requires_question(profile)
+
+
+def _post_processing_goal_classifier_outage_requires_question(
+    profile: DiscoveryProfile,
+) -> bool:
     return (
         profile.audio_like_input
         or profile.document_like_input
         or profile.final_output_text_or_docx
     )
-
-
-def _explicit_post_processing_goal_present(text: str) -> bool:
-    return infer_post_processing_goal(text) is not None
 
 
 def structured_io_contract_is_vague(profile: DiscoveryProfile) -> bool:
@@ -275,24 +302,6 @@ def _json_to_json_semantic_flow(profile: DiscoveryProfile) -> bool:
     return (
         profile.input_intent.primary_runtime_input == "json"
         and profile.output_intent.terminal_output == "structured_json"
-    )
-
-
-def _outcome_wording_is_vague(profile: DiscoveryProfile) -> bool:
-    return contains_any_phrase(
-        profile.text,
-        (
-            "något användbart",
-            "nagot anvandbart",
-            "something useful",
-            "dela vidare",
-            "share afterwards",
-            "professionellt",
-            "professional",
-            "process documents",
-            "processa dokument",
-            "bearbeta dokument",
-        ),
     )
 
 

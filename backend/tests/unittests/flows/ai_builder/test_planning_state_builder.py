@@ -1629,28 +1629,6 @@ class TestPolicyDefaults:
 
         assert "terminal_output" not in state.resolved_slots
 
-    def test_meeting_followup_goal_resolves_without_structured_analysis_default(
-        self,
-    ) -> None:
-        state = build_planning_state_from_conversation(
-            [
-                ConversationMessage(
-                    role="user",
-                    content=(
-                        "Jag har en svensk ljudinspelning från ett möte. Flödet "
-                        "ska transkribera ljudet och ta fram beslut, nästa steg, "
-                        "ansvariga, deadlines och öppna frågor."
-                    ),
-                )
-            ]
-        )
-
-        goal = state.resolved_slots["post_processing_goal"]
-        assert goal.value == "action_followup"
-        assert goal.source == "heuristic"
-        assert goal.confidence == "high"
-        assert "structured_analysis_need" not in state.resolved_slots
-
     def test_medium_model_goal_does_not_create_structured_analysis_default(
         self,
     ) -> None:
@@ -1681,24 +1659,6 @@ class TestPolicyDefaults:
 
         apply_policy_defaults_from_resolved_slots(state, freeform_text="")
 
-        assert "structured_analysis_need" not in state.resolved_slots
-
-    def test_transcript_only_goal_does_not_derive_structured_analysis(self) -> None:
-        state = build_planning_state_from_conversation(
-            [
-                ConversationMessage(
-                    role="user",
-                    content=(
-                        "Transkribera ljudfilen ordagrant och skapa en PDF med "
-                        "bara transkriptionen. Ingen sammanfattning eller analys."
-                    ),
-                )
-            ]
-        )
-
-        assert state.resolved_slots["post_processing_goal"].value == (
-            "stop_after_primary_operation"
-        )
         assert "structured_analysis_need" not in state.resolved_slots
 
     def test_bare_transcription_goal_stays_unresolved(self) -> None:

@@ -249,6 +249,20 @@ def test_policy_prioritizes_missing_core_slots_before_discovery_targets() -> Non
     )
 
 
+def test_vague_purpose_question_precedes_terminal_output_core_gap() -> None:
+    policy = build_planner_action_policy(
+        session_state=PlanningState.empty(),
+        selected_discovery_question_ids=("post_processing_goal",),
+    )
+
+    assert policy.allowed_action_kinds == ("ask_question",)
+    assert policy.allowed_ask_question_targets == (
+        "primary_runtime_input",
+        "post_processing_goal",
+        "terminal_output",
+    )
+
+
 def test_policy_does_not_force_inferred_metadata_default_into_questions() -> None:
     state = _state_with_resolved_slots(
         "primary_runtime_input",

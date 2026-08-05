@@ -249,6 +249,14 @@ def _dynamic_issue_priority_offset(
     issue: DiscoveryIssue,
     profile: DiscoveryProfile,
 ) -> int:
+    if (
+        issue.issue_id == "post_processing_goal"
+        and profile.resolved_slot("post_processing_goal") is None
+        and profile.output_intent.terminal_output is None
+        and profile.resolved_slot("terminal_output") is None
+        and not profile.edit_mode
+    ):
+        return -15
     if issue.issue_id == "comparison_scope" and profile.comparison_requested:
         return -25
     if (

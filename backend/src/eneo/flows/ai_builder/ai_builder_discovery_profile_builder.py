@@ -308,7 +308,6 @@ def build_discovery_profile(
     )
     comparison_requested = _comparison_requested(
         text=text,
-        answers=answers,
         planning_state=planning_state,
     )
     reference_source = resolve_reference_source(
@@ -346,12 +345,9 @@ def build_discovery_profile(
 def _comparison_requested(
     *,
     text: str,
-    answers: dict[str, set[str]],
     planning_state: PlanningState,
 ) -> bool:
     if contains_any_token_prefix(text, _COMPARISON_REQUEST_MARKERS):
-        return True
-    if "compare_or_validate" in answers.get("post_processing_goal", set()):
         return True
     goal = planning_state.resolved_slots.get("post_processing_goal")
     return goal is not None and goal.value == "compare_or_validate"

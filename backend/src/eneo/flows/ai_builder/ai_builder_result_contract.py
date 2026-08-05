@@ -27,6 +27,13 @@ ResultObligation = Literal[
     "recommendations",
     "missing_information_policy",
 ]
+ResultOutputFieldRole = Literal[
+    "decisions",
+    "actions",
+    "owners",
+    "deadlines",
+    "open_questions",
+]
 
 RESULT_OBLIGATION_SIGNAL_ID = "result_obligation"
 RESULT_OBLIGATION_VALUES: tuple[ResultObligation, ...] = (
@@ -46,12 +53,53 @@ RESULT_OBLIGATION_VALUES: tuple[ResultObligation, ...] = (
 
 
 @dataclass(frozen=True, slots=True)
+class ResultOutputFieldRequirement:
+    role: ResultOutputFieldRole
+    canonical_name: str
+    accepted_names: frozenset[str]
+
+
+@dataclass(frozen=True, slots=True)
 class ResultContract:
     terminal_output: str | None
     post_processing_goal: str | None
     secondary_obligations: tuple[ResultObligation, ...] = ()
     required_sections: tuple[str, ...] = ()
     result_policies: tuple[str, ...] = ()
+    required_output_fields: tuple[ResultOutputFieldRequirement, ...] = ()
+
+    @property
+    def required_output_field_roles(self) -> tuple[ResultOutputFieldRole, ...]:
+        return tuple(field.role for field in self.required_output_fields)
+
+
+_ACTION_FOLLOWUP_OUTPUT_FIELDS: tuple[ResultOutputFieldRequirement, ...] = (
+    ResultOutputFieldRequirement(
+        role="decisions",
+        canonical_name="decisions",
+        accepted_names=frozenset({"decision", "decisions", "beslut"}),
+    ),
+    ResultOutputFieldRequirement(
+        role="actions",
+        canonical_name="actions",
+        accepted_names=frozenset({"action", "actions", "next_steps", "atgarder"}),
+    ),
+    ResultOutputFieldRequirement(
+        role="owners",
+        canonical_name="owners",
+        accepted_names=frozenset({"owner", "owners", "responsible", "ansvarig"}),
+    ),
+    ResultOutputFieldRequirement(
+        role="deadlines",
+        canonical_name="deadlines",
+        accepted_names=frozenset({"deadline", "deadlines", "due_date"}),
+    ),
+    ResultOutputFieldRequirement(
+        role="open_questions",
+        canonical_name="open_questions",
+        accepted_names=frozenset({"open_questions", "oppna_fragor"}),
+    ),
+)
 
 
 _GOAL_REQUIRED_SECTIONS: dict[str, tuple[str, ...]] = {
@@ -173,6 +221,11 @@ def derive_result_contract(planning_state: PlanningState) -> ResultContract | No
     secondary_obligations = _secondary_obligations(planning_state)
 
     required_sections = _GOAL_REQUIRED_SECTIONS.get(post_processing_goal or "", ())
+    required_output_fields = (
+        _ACTION_FOLLOWUP_OUTPUT_FIELDS
+        if post_processing_goal == "action_followup"
+        else ()
+    )
     result_policies = _dedupe_policies(
         (
             *_GOAL_POLICIES.get(post_processing_goal or "", ()),
@@ -201,6 +254,19 @@ def derive_result_contract(planning_state: PlanningState) -> ResultContract | No
         secondary_obligations=secondary_obligations,
         required_sections=required_sections,
         result_policies=result_policies,
+        required_output_fields=required_output_fields,
+    )
+
+
+def resolve_result_output_field_roles(
+    contract: ResultContract,
+    field_names: set[str],
+) -> frozenset[ResultOutputFieldRole]:
+    normalized_names = {name.casefold() for name in field_names}
+    return frozenset(
+        requirement.role
+        for requirement in contract.required_output_fields
+        if requirement.accepted_names & normalized_names
     )
 
 
@@ -292,6 +358,9 @@ __all__ = [
     "RESULT_OBLIGATION_VALUES",
     "ResultObligation",
     "ResultContract",
+    "ResultOutputFieldRequirement",
+    "ResultOutputFieldRole",
     "derive_result_contract",
     "render_result_contract_prompt_block",
+    "resolve_result_output_field_roles",
 ]

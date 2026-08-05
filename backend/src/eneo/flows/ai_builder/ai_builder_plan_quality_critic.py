@@ -39,6 +39,7 @@ from eneo.flows.ai_builder.ai_builder_planner_pattern_signals import (
 from eneo.flows.ai_builder.ai_builder_requirements_state import (
     resolve_requirements_state,
 )
+from eneo.flows.ai_builder.ai_builder_result_contract import derive_result_contract
 from eneo.flows.ai_builder.planning_state import AggregationIntent, PlanningState
 from eneo.flows.domain.flow import Flow
 from eneo.flows.flow_authoring_spec import (
@@ -155,6 +156,19 @@ def build_conversation_critic_context(
         ),
         checkpoint_intents=(
             tuple(planning_state.checkpoint_intents)
+            if planning_state is not None
+            else None
+        ),
+        result_contract=(
+            derive_result_contract(planning_state)
+            if planning_state is not None
+            else None
+        ),
+        resolved_slots=(
+            planning_state.resolved_slots if planning_state is not None else {}
+        ),
+        output_schema_evidence=(
+            planning_state.output_schema_evidence
             if planning_state is not None
             else None
         ),

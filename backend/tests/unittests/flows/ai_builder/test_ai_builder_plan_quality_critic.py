@@ -26,6 +26,7 @@ from eneo.flows.ai_builder.ai_builder_plan_quality_critic import (
 from eneo.flows.ai_builder.ai_builder_requirements_state import (
     build_requirements_version,
 )
+from eneo.flows.ai_builder.ai_builder_schema_evidence import build_schema_evidence
 from eneo.flows.ai_builder.planning_state import (
     BUILDER_SCHEMA_VERSION,
     FCM_VERSION,
@@ -33,6 +34,7 @@ from eneo.flows.ai_builder.planning_state import (
     CheckpointIntent,
     PlanningSignal,
     PlanningState,
+    ResolvedSlot,
 )
 from eneo.flows.flow_authoring_spec import (
     AssistantSpec,
@@ -397,65 +399,324 @@ def test_build_conversation_critic_context_uses_canonical_requested_sections() -
     )
 
 
-def test_action_followup_goal_requires_followup_fields() -> None:
-    spec = FlowDraftSpecCore(
-        flow_name="Motesrapport",
+def test_action_followup_critic_uses_typed_goal_and_declared_schema_leaves() -> None:
+    planning_state = PlanningState.empty()
+    planning_state.resolved_slots["post_processing_goal"] = ResolvedSlot(
+        name="post_processing_goal",
+        value="action_followup",
+        source="structured_answer",
+        confidence="high",
+        evidence=["question_answer:post_processing_goal"],
+    )
+    incomplete_spec = FlowDraftSpecCore(
+        flow_name="Follow-up",
         steps=[
             _step(
                 "step_a",
-                "Sammanfatta mote",
-                "Sammanfatta transkriptionen till en kort rapport.",
+                "Process source",
+                "Process the supplied material.",
+                output_type=OutputType.JSON,
+                output_contract={
+                    "type": "object",
+                    "properties": {
+                        "decisions": {"type": "array"},
+                        "actions": {"type": "array"},
+                        "owners": {"type": "array"},
+                        "deadlines": {"type": "array"},
+                    },
+                },
+            )
+        ],
+    )
+    complete_step = incomplete_spec.steps[0].model_copy(
+        update={
+            "output_contract": {
+                "type": "object",
+                "properties": {
+                    "decisions": {"type": "array"},
+                    "actions": {"type": "array"},
+                    "owners": {"type": "array"},
+                    "deadlines": {"type": "array"},
+                    "open_questions": {"type": "array"},
+                },
+            }
+        }
+    )
+    complete_spec = incomplete_spec.model_copy(update={"steps": [complete_step]})
+
+    incomplete_issues = evaluate_critic_invariants(
+        build_conversation_critic_context(
+            [{"role": "user", "content": "Use this material."}],
+            incomplete_spec,
+            planning_state=planning_state,
+        )
+    )
+    complete_issues = evaluate_critic_invariants(
+        build_conversation_critic_context(
+            [{"role": "user", "content": "Use this material."}],
+            complete_spec,
+            planning_state=planning_state,
+        )
+    )
+
+    assert "action_followup_requires_followup_fields" in {
+        issue.id for issue in incomplete_issues
+    }
+    assert "action_followup_requires_followup_fields" not in {
+        issue.id for issue in complete_issues
+    }
+
+
+def test_field_reuse_requires_a_downstream_structured_reference() -> None:
+    # Terminal JSON bound only to earlier TEXT: nothing consumes the JSON
+    # producer's fields, so a reuse request is not satisfied.
+    unsatisfied_spec = FlowDraftSpecCore(
+        flow_name="Reuse",
+        steps=[
+            _step(
+                "step_a",
+                "Extrahera",
+                "Extrahera specifika fälten.",
+                output_type=OutputType.JSON,
+                output_contract={
+                    "type": "object",
+                    "properties": {"beslut": {"type": "array"}},
+                },
+            ),
+            _step(
+                "step_b",
+                "Sammanställ",
+                "Använd fälten i nästa steg.",
+                input_source=InputSource.PREVIOUS_STEP,
+                output_type=OutputType.TEXT,
+            ),
+        ],
+    )
+    satisfied_step = unsatisfied_spec.steps[1].model_copy(
+        update={
+            "input_bindings": {
+                "source_refs": [
+                    {
+                        "step_ref": "step_a",
+                        "output": "structured",
+                        "field_path": "beslut",
+                    }
+                ]
+            }
+        }
+    )
+    text_only_step = unsatisfied_spec.steps[1].model_copy(
+        update={
+            "input_bindings": {
+                "source_refs": [{"step_ref": "step_a", "output": "text"}]
+            }
+        }
+    )
+    satisfied_spec = unsatisfied_spec.model_copy(
+        update={"steps": [unsatisfied_spec.steps[0], satisfied_step]}
+    )
+    text_only_spec = unsatisfied_spec.model_copy(
+        update={"steps": [unsatisfied_spec.steps[0], text_only_step]}
+    )
+    conversation = [
+        {"role": "user", "content": "Extrahera specifika fälten och använd fälten."}
+    ]
+
+    unsatisfied_issues = evaluate_critic_invariants(
+        build_conversation_critic_context(conversation, unsatisfied_spec)
+    )
+    satisfied_issues = evaluate_critic_invariants(
+        build_conversation_critic_context(conversation, satisfied_spec)
+    )
+
+    assert "field_reuse_requires_input_bindings" in {
+        issue.id for issue in unsatisfied_issues
+    }
+    assert "field_reuse_requires_input_bindings" not in {
+        issue.id for issue in satisfied_issues
+    }
+    # A text-output reference to the producer is not structured reuse.
+    text_only_issues = evaluate_critic_invariants(
+        build_conversation_critic_context(conversation, text_only_spec)
+    )
+    assert "field_reuse_requires_input_bindings" in {
+        issue.id for issue in text_only_issues
+    }
+
+
+def test_field_reuse_with_only_a_terminal_producer_is_unsatisfiable() -> None:
+    # The reviewer's probe: TEXT -> terminal JSON, reuse requested, terminal
+    # step bound only to the earlier text. Nothing can consume the fields.
+    spec = FlowDraftSpecCore(
+        flow_name="Reuse",
+        steps=[
+            _step("step_a", "Läs", "Läs materialet.", output_type=OutputType.TEXT),
+            _step(
+                "step_b",
+                "Extrahera",
+                "Extrahera specifika fälten.",
+                input_source=InputSource.PREVIOUS_STEP,
+                output_type=OutputType.JSON,
+                output_contract={
+                    "type": "object",
+                    "properties": {"beslut": {"type": "array"}},
+                },
+                input_bindings={"text": "step_a.output.text"},
+            ),
+        ],
+    )
+
+    issues = evaluate_critic_invariants(
+        build_conversation_critic_context(
+            [
+                {
+                    "role": "user",
+                    "content": "Extrahera specifika fälten och använd fälten i nästa steg.",
+                }
+            ],
+            spec,
+        )
+    )
+
+    assert "field_reuse_requires_input_bindings" in {issue.id for issue in issues}
+
+
+def test_declared_terminal_json_contract_satisfies_explicit_request() -> None:
+    planning_state = PlanningState.empty()
+    planning_state.resolved_slots["terminal_output"] = ResolvedSlot(
+        name="terminal_output",
+        value="structured_json",
+        source="structured_answer",
+        confidence="high",
+        evidence=["question_answer:terminal_output"],
+    )
+    terminal_json_spec = FlowDraftSpecCore(
+        flow_name="Extraktion",
+        steps=[
+            _step(
+                "step_a",
+                "Extrahera",
+                "Extrahera fälten.",
+                output_type=OutputType.JSON,
+                output_contract={
+                    "type": "object",
+                    "properties": {"beslut": {"type": "array"}},
+                },
             )
         ],
     )
 
-    context = build_conversation_critic_context(
-        [
-            {
-                "role": "user",
-                "content": (
-                    "Jag har motesljud och vill fa ut beslut, nasta steg, "
-                    "ansvariga och deadlines."
-                ),
-            }
-        ],
-        spec,
+    issues = evaluate_critic_invariants(
+        build_conversation_critic_context(
+            [{"role": "user", "content": "Jag vill ha JSON."}],
+            terminal_json_spec,
+            planning_state=planning_state,
+        )
     )
 
-    issue_ids = {issue.id for issue in evaluate_critic_invariants(context)}
-    assert "action_followup_requires_followup_fields" in issue_ids
+    assert "explicit_json_contract_request_without_step" not in {
+        issue.id for issue in issues
+    }
 
 
-def test_action_followup_goal_accepts_explicit_followup_fields() -> None:
-    spec = FlowDraftSpecCore(
-        flow_name="Motesuppfoljning",
+def test_action_followup_roles_must_survive_into_the_outcome_contract() -> None:
+    planning_state = PlanningState.empty()
+    planning_state.resolved_slots["post_processing_goal"] = ResolvedSlot(
+        name="post_processing_goal",
+        value="action_followup",
+        source="structured_answer",
+        confidence="high",
+        evidence=["question_answer:post_processing_goal"],
+    )
+    # decisions/actions only in step one; the terminal contract drops them —
+    # a union across steps would wrongly accept this lossy topology.
+    split_spec = FlowDraftSpecCore(
+        flow_name="Follow-up",
         steps=[
             _step(
                 "step_a",
-                "Extrahera uppfoljning",
-                (
-                    "Extrahera beslut, nasta steg, atgarder, ansvarig person, "
-                    "deadline och oppna fragor fran transkriptionen."
-                ),
+                "Extract decisions",
+                "Extract decisions and actions.",
+                output_type=OutputType.JSON,
+                output_contract={
+                    "type": "object",
+                    "properties": {
+                        "decisions": {"type": "array"},
+                        "actions": {"type": "array"},
+                    },
+                },
+            ),
+            _step(
+                "step_b",
+                "Assign follow-up",
+                "Assign owners and deadlines.",
+                input_source=InputSource.PREVIOUS_STEP,
+                output_type=OutputType.JSON,
+                output_contract={
+                    "type": "object",
+                    "properties": {
+                        "owners": {"type": "array"},
+                        "deadlines": {"type": "array"},
+                        "open_questions": {"type": "array"},
+                    },
+                },
+            ),
+        ],
+    )
+
+    issues = evaluate_critic_invariants(
+        build_conversation_critic_context(
+            [{"role": "user", "content": "Use this material."}],
+            split_spec,
+            planning_state=planning_state,
+        )
+    )
+
+    assert "action_followup_requires_followup_fields" in {issue.id for issue in issues}
+
+
+def test_action_followup_critic_accepts_swedish_schema_names() -> None:
+    planning_state = PlanningState.empty()
+    planning_state.resolved_slots["post_processing_goal"] = ResolvedSlot(
+        name="post_processing_goal",
+        value="action_followup",
+        source="structured_answer",
+        confidence="high",
+        evidence=["question_answer:post_processing_goal"],
+    )
+    spec = FlowDraftSpecCore(
+        flow_name="Mötesuppföljning",
+        steps=[
+            _step(
+                "step_a",
+                "Bearbeta mötesunderlag",
+                "Bearbeta det tillhandahållna underlaget.",
+                output_type=OutputType.JSON,
+                output_contract={
+                    "type": "object",
+                    "properties": {
+                        "beslut": {"type": "array"},
+                        "atgarder": {"type": "array"},
+                        "ansvarig": {"type": "array"},
+                        "due_date": {"type": "array"},
+                        "oppna_fragor": {"type": "array"},
+                    },
+                },
             )
         ],
     )
 
-    context = build_conversation_critic_context(
-        [
-            {
-                "role": "user",
-                "content": (
-                    "Jag har motesljud och vill fa ut beslut, nasta steg, "
-                    "ansvariga och deadlines."
-                ),
-            }
-        ],
-        spec,
+    issues = evaluate_critic_invariants(
+        build_conversation_critic_context(
+            [{"role": "user", "content": "Använd underlaget."}],
+            spec,
+            planning_state=planning_state,
+        )
     )
 
-    issue_ids = {issue.id for issue in evaluate_critic_invariants(context)}
-    assert "action_followup_requires_followup_fields" not in issue_ids
+    assert "action_followup_requires_followup_fields" not in {
+        issue.id for issue in issues
+    }
 
 
 def _structured_source_step() -> StepSpec:
@@ -1920,31 +2181,169 @@ def test_anti_over_structuring_simple_summary_no_json_warning() -> None:
     assert build_conversation_aware_quality_feedback(conversation, spec) is None
 
 
-def test_flags_missing_json_contract_when_user_wants_structured_extraction() -> None:
-    """Warns when conversation explicitly asks for JSON extraction but spec has none."""
-    conversation = [
-        {
-            "role": "user",
-            "content": "Extrahera fält som JSON och skicka vidare till nästa steg.",
-        }
-    ]
+def test_json_contract_critic_uses_typed_schema_and_result_goal() -> None:
     spec = FlowDraftSpecCore(
-        flow_name="Extraktion",
+        flow_name="Process material",
         steps=[
             _step(
-                "step_a", "Extrahera", "Extrahera data.", input_type=InputType.DOCUMENT
-            ),
-            _step(
-                "step_b",
-                "Rapport",
-                "Skriv rapport.",
-                input_source=InputSource.PREVIOUS_STEP,
-            ),
+                "step_a",
+                "Process source",
+                "Process the supplied material.",
+                input_type=InputType.DOCUMENT,
+            )
         ],
     )
-    feedback = build_conversation_aware_quality_feedback(conversation, spec)
-    assert feedback is not None
-    assert "json" in feedback.lower()
+    planning_state = PlanningState.empty()
+    planning_state.resolved_slots = {
+        "terminal_output": ResolvedSlot(
+            name="terminal_output",
+            value="structured_text",
+            source="structured_answer",
+            confidence="high",
+            evidence=["question_answer:terminal_output"],
+        ),
+        "post_processing_goal": ResolvedSlot(
+            name="post_processing_goal",
+            value="extract_key_information",
+            source="structured_answer",
+            confidence="high",
+            evidence=["question_answer:post_processing_goal"],
+        ),
+    }
+    planning_state.output_schema_evidence = build_schema_evidence(
+        json_schema={
+            "type": "object",
+            "properties": {"result": {"type": "string"}},
+        },
+        source="declared_schema",
+        confidence="high",
+        evidence=("message:test-source",),
+    )
+    summarize_state = PlanningState.empty()
+    summarize_state.resolved_slots["terminal_output"] = ResolvedSlot(
+        name="terminal_output",
+        value="structured_text",
+        source="structured_answer",
+        confidence="high",
+        evidence=["question_answer:terminal_output"],
+    )
+    summarize_state.resolved_slots["post_processing_goal"] = ResolvedSlot(
+        name="post_processing_goal",
+        value="summarize_or_overview",
+        source="structured_answer",
+        confidence="high",
+        evidence=["question_answer:post_processing_goal"],
+    )
+    structured_json_summary_state = summarize_state.model_copy(deep=True)
+    structured_json_summary_state.resolved_slots["terminal_output"] = ResolvedSlot(
+        name="terminal_output",
+        value="structured_json",
+        source="structured_answer",
+        confidence="high",
+        evidence=["question_answer:terminal_output"],
+    )
+    explicit_schema_summary_state = planning_state.model_copy(deep=True)
+    explicit_schema_summary_state.resolved_slots["post_processing_goal"] = ResolvedSlot(
+        name="post_processing_goal",
+        value="summarize_or_overview",
+        source="structured_answer",
+        confidence="high",
+        evidence=["question_answer:post_processing_goal"],
+    )
+    structured_io_summary_state = summarize_state.model_copy(deep=True)
+    structured_io_summary_state.resolved_slots["structured_io_contract"] = ResolvedSlot(
+        name="structured_io_contract",
+        value="map_to_new_schema",
+        source="structured_answer",
+        confidence="high",
+        evidence=["question_answer:structured_io_contract"],
+    )
+    heuristic_structured_io_state = PlanningState.empty()
+    heuristic_structured_io_state.resolved_slots = {
+        "terminal_output": ResolvedSlot(
+            name="terminal_output",
+            value="structured_text",
+            source="structured_answer",
+            confidence="high",
+            evidence=["question_answer:terminal_output"],
+        ),
+        "post_processing_goal": ResolvedSlot(
+            name="post_processing_goal",
+            value="extract_key_information",
+            source="structured_answer",
+            confidence="high",
+            evidence=["question_answer:post_processing_goal"],
+        ),
+        "structured_io_contract": ResolvedSlot(
+            name="structured_io_contract",
+            value="map_to_new_schema",
+            source="heuristic",
+            confidence="high",
+            evidence=["heuristic:structured output wording"],
+        ),
+    }
+
+    extraction_issues = evaluate_critic_invariants(
+        build_conversation_critic_context(
+            [{"role": "user", "content": "Use this material."}],
+            spec,
+            planning_state=planning_state,
+        )
+    )
+    summary_issues = evaluate_critic_invariants(
+        build_conversation_critic_context(
+            [{"role": "user", "content": "Use this material."}],
+            spec,
+            planning_state=summarize_state,
+        )
+    )
+    structured_json_summary_issues = evaluate_critic_invariants(
+        build_conversation_critic_context(
+            [{"role": "user", "content": "Use this material."}],
+            spec,
+            planning_state=structured_json_summary_state,
+        )
+    )
+    explicit_schema_summary_issues = evaluate_critic_invariants(
+        build_conversation_critic_context(
+            [{"role": "user", "content": "Use this material."}],
+            spec,
+            planning_state=explicit_schema_summary_state,
+        )
+    )
+    structured_io_summary_issues = evaluate_critic_invariants(
+        build_conversation_critic_context(
+            [{"role": "user", "content": "Use this material."}],
+            spec,
+            planning_state=structured_io_summary_state,
+        )
+    )
+    heuristic_structured_io_issues = evaluate_critic_invariants(
+        build_conversation_critic_context(
+            [{"role": "user", "content": "Use this material."}],
+            spec,
+            planning_state=heuristic_structured_io_state,
+        )
+    )
+
+    assert "explicit_json_contract_request_without_step" in {
+        issue.id for issue in extraction_issues
+    }
+    assert "explicit_json_contract_request_without_step" not in {
+        issue.id for issue in summary_issues
+    }
+    assert "explicit_json_contract_request_without_step" in {
+        issue.id for issue in structured_json_summary_issues
+    }
+    assert "explicit_json_contract_request_without_step" in {
+        issue.id for issue in explicit_schema_summary_issues
+    }
+    assert "explicit_json_contract_request_without_step" in {
+        issue.id for issue in structured_io_summary_issues
+    }
+    assert "explicit_json_contract_request_without_step" not in {
+        issue.id for issue in heuristic_structured_io_issues
+    }
 
 
 def test_no_json_warning_when_spec_already_has_json_step() -> None:
@@ -2753,6 +3152,7 @@ def _final_text_step_critic_context(
     aggregation_intent: str = "linear",
     terminal_output: str | None = None,
     text: str = "",
+    typed_schema_request: bool = False,
 ) -> "CriticContext":
     from eneo.flows.ai_builder.ai_builder_critic_invariants import (
         CriticContext,
@@ -2763,6 +3163,7 @@ def _final_text_step_critic_context(
     from eneo.flows.ai_builder.ai_builder_planner_pattern_signals import (
         PlannerPatternSignals,
     )
+    from eneo.flows.ai_builder.ai_builder_result_contract import ResultContract
 
     return CriticContext(
         spec=spec,
@@ -2776,6 +3177,27 @@ def _final_text_step_critic_context(
         mixed_audio_doc_input=False,
         requested_output_sections=RequestedOutputSections.empty(),
         aggregation_intent=cast("AggregationIntent", aggregation_intent),
+        result_contract=(
+            ResultContract(
+                terminal_output=terminal_output,
+                post_processing_goal="extract_key_information",
+            )
+            if typed_schema_request
+            else None
+        ),
+        output_schema_evidence=(
+            build_schema_evidence(
+                json_schema={
+                    "type": "object",
+                    "properties": {"result": {"type": "string"}},
+                },
+                source="declared_schema",
+                confidence="high",
+                evidence=("message:test-source",),
+            )
+            if typed_schema_request
+            else None
+        ),
     )
 
 
@@ -2877,16 +3299,37 @@ class TestRedundantTerminalJsonFormatTailAfterFinalTextComposer:
         spec = _quality_chain_with_redundant_terminal_json_tail(
             terminal_text_unwrap=False
         )
+        planning_state = PlanningState.empty()
+        planning_state.resolved_slots = {
+            "terminal_output": ResolvedSlot(
+                name="terminal_output",
+                value="structured_json",
+                source="structured_answer",
+                confidence="high",
+                evidence=["question_answer:terminal_output"],
+            ),
+            "post_processing_goal": ResolvedSlot(
+                name="post_processing_goal",
+                value="summarize_or_overview",
+                source="structured_answer",
+                confidence="high",
+                evidence=["question_answer:post_processing_goal"],
+            ),
+        }
 
         issues = evaluate_critic_invariants(
-            _final_text_step_critic_context(spec, terminal_output="structured_json")
+            build_conversation_critic_context(
+                [{"role": "user", "content": "Use this material."}],
+                spec,
+                planning_state=planning_state,
+            )
         )
 
         assert not any(
             issue.id == _REDUNDANT_TERMINAL_JSON_TAIL_INVARIANT_ID for issue in issues
         )
 
-    def test_silent_when_conversation_requests_structured_terminal_data(
+    def test_silent_when_typed_schema_requests_structured_terminal_data(
         self,
     ) -> None:
         spec = _quality_chain_with_redundant_terminal_json_tail(
@@ -2896,10 +3339,8 @@ class TestRedundantTerminalJsonFormatTailAfterFinalTextComposer:
         issues = evaluate_critic_invariants(
             _final_text_step_critic_context(
                 spec,
-                text=(
-                    "Returnera både kort text och strukturerad data så att "
-                    "en extern app kan läsa klassificering och nästa steg."
-                ),
+                text="Use this material.",
+                typed_schema_request=True,
             )
         )
 
@@ -4395,34 +4836,20 @@ class TestCriticInvariantRegistry:
             issue for issue in default_issues if "template_fill" in issue
         ]
 
-    def test_public_helper_importable_from_invariants(self) -> None:
-        """`has_json_contract_step` stays public because external callers can
-        reuse the same semantics when composing their own invariants.
-        """
-        from eneo.flows.ai_builder.ai_builder_critic_invariants import (
-            has_json_contract_step,
-        )
-
-        spec = FlowDraftSpecCore(
-            flow_name="Rapport",
-            steps=[_step("step_a", "Skriv", "Skriv.", output_type=OutputType.TEXT)],
-        )
-
-        assert has_json_contract_step(spec) is False
-
 
 class TestRichWorkflowInvariants:
     """Fire/quiet coverage for the rich-workflow invariants declared at
     `ai_builder_critic_invariants.py:334/358/384`.
 
     The id-order lockdown in `TestCriticInvariantRegistry` pins *which*
-    invariants exist; these tests pin their *behavior* — each invariant
-    fires only when all of its planner-pattern signals agree AND the
-    spec is missing the required structure, and stays silent the moment
-    any precondition flips. The `generated_docx_without_structure` case
-    exists because a user who asks for a plain generated DOCX must not
-    be nagged about JSON steps or quality chains — that is the most
-    common false-positive shape for these three.
+    invariants exist; these tests pin their *behavior*. The form-field and
+    multi-step rules consume phrase-derived `PlannerPatternSignals`; the
+    JSON-contract rule instead derives its own typed document-artifact
+    eligibility from resolved slots and the result contract, so the two
+    sources are exercised independently here. The
+    `generated_docx_without_structure` case exists because a user who asks
+    for a plain generated DOCX must not be nagged about JSON steps or
+    quality chains — that is the most common false-positive shape.
     """
 
     def _context_with_signals(
@@ -4443,6 +4870,21 @@ class TestRichWorkflowInvariants:
         from eneo.flows.ai_builder.ai_builder_planner_pattern_signals import (
             PlannerPatternSignals,
         )
+        from eneo.flows.ai_builder.ai_builder_result_contract import ResultContract
+
+        output_schema_evidence = (
+            build_schema_evidence(
+                json_schema={
+                    "type": "object",
+                    "properties": {"result": {"type": "string"}},
+                },
+                source="declared_schema",
+                confidence="high",
+                evidence=("message:test-source",),
+            )
+            if rich and prefers_structured_intermediate
+            else None
+        )
 
         return CriticContext(
             spec=spec,
@@ -4460,6 +4902,28 @@ class TestRichWorkflowInvariants:
             output_intent=OutputIntentResolution(terminal_output=None),
             mixed_audio_doc_input=False,
             requested_output_sections=RequestedOutputSections.empty(),
+            result_contract=(
+                ResultContract(
+                    terminal_output="docx_document",
+                    post_processing_goal="extract_key_information",
+                )
+                if rich
+                else None
+            ),
+            resolved_slots=(
+                {
+                    "primary_runtime_input": ResolvedSlot(
+                        name="primary_runtime_input",
+                        value="documents",
+                        source="structured_answer",
+                        confidence="high",
+                        evidence=["question_answer:primary_runtime_input"],
+                    )
+                }
+                if rich
+                else {}
+            ),
+            output_schema_evidence=output_schema_evidence,
         )
 
     def test_rich_workflow_requires_form_fields_fires_when_form_fields_missing(
@@ -4636,9 +5100,46 @@ class TestRichWorkflowInvariants:
                 ),
             ],
         )
+        planning_state = PlanningState.empty()
+        planning_state.resolved_slots = {
+            "primary_runtime_input": ResolvedSlot(
+                name="primary_runtime_input",
+                value="audio",
+                source="structured_answer",
+                confidence="high",
+                evidence=["question_answer:primary_runtime_input"],
+            ),
+            "terminal_output": ResolvedSlot(
+                name="terminal_output",
+                value="docx_document",
+                source="structured_answer",
+                confidence="high",
+                evidence=["question_answer:terminal_output"],
+            ),
+            "post_processing_goal": ResolvedSlot(
+                name="post_processing_goal",
+                value="extract_key_information",
+                source="structured_answer",
+                confidence="high",
+                evidence=["question_answer:post_processing_goal"],
+            ),
+        }
+        planning_state.output_schema_evidence = build_schema_evidence(
+            json_schema={
+                "type": "object",
+                "properties": {"topic_sections": {"type": "array"}},
+            },
+            source="declared_schema",
+            confidence="high",
+            evidence=("message:test-source",),
+        )
 
         issues = evaluate_critic_invariants(
-            build_conversation_critic_context(conversation, spec)
+            build_conversation_critic_context(
+                conversation,
+                spec,
+                planning_state=planning_state,
+            )
         )
 
         assert "rich_workflow_requires_json_contract_step" in {

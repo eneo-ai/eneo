@@ -154,6 +154,22 @@ def test_server_builds_ask_question_for_allowed_target() -> None:
     assert decision.slot_name == "document_material_scope"
 
 
+def test_vague_purpose_question_survives_to_the_emitted_turn_decision() -> None:
+    # The dispatch seam: with the primary input resolved and terminal output
+    # still open, a discovery-selected vague purpose question must be the
+    # question the user actually receives.
+    state = _state(primary_runtime_input="documents")
+
+    decision = _decision(
+        state=state,
+        ui_language="sv",
+        selected_discovery_question_ids=("post_processing_goal",),
+    )
+
+    assert isinstance(decision, AskCanonicalQuestion)
+    assert decision.slot_name == "post_processing_goal"
+
+
 def test_server_routes_renderable_non_slot_discovery_question() -> None:
     state = _state(primary_runtime_input="documents", terminal_output="text")
 

@@ -16,6 +16,27 @@ from eneo.flows.ai_builder.ai_builder_discovery import (
 from eneo.flows.ai_builder.ai_builder_domain_models import (
     ConversationMessage,
 )
+from eneo.flows.ai_builder.planning_state import PlanningState, ResolvedSlot
+from eneo.flows.ai_builder.planning_state_builder import (
+    build_planning_state_from_conversation,
+)
+
+
+def _state_with_typed_goal(
+    conversation: list[ConversationMessage],
+    goal: str,
+) -> PlanningState:
+    state = build_planning_state_from_conversation(conversation)
+    state.resolved_slots["post_processing_goal"] = ResolvedSlot(
+        name="post_processing_goal",
+        value=goal,
+        source="model",
+        confidence="high",
+        evidence=["quote:user_message:test-source:typed classifier evidence"],
+        evidence_level="inferred",
+    )
+    return state
+
 
 # ---------------------------------------------------------------------------
 # Question taxonomy — every issue has the correct question_level
@@ -264,7 +285,13 @@ class TestQuestionBudget:
             ),
         ]
 
-        analysis = analyze_discovery(conversation)
+        analysis = analyze_discovery(
+            conversation,
+            planning_state=_state_with_typed_goal(
+                conversation,
+                "compare_or_validate",
+            ),
+        )
 
         assert analysis.ready_for_confirmation
         assert analysis.blocking_issues == ()
@@ -292,7 +319,13 @@ class TestQuestionBudget:
                 ),
             )
         ]
-        analysis = analyze_discovery(conversation)
+        analysis = analyze_discovery(
+            conversation,
+            planning_state=_state_with_typed_goal(
+                conversation,
+                "decision_support",
+            ),
+        )
         # Should be assessed as medium/advanced — not vague
         assert analysis.mvs_met
 

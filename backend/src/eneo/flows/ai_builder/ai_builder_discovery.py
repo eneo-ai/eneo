@@ -148,7 +148,11 @@ def analyze_discovery(
         planning_state=planning_state,
     )
     mvs_met = _has_minimum_viable_specification(profile)
-    raw_issues = _build_raw_discovery_issues(conversation, profile)
+    raw_issues = _build_raw_discovery_issues(
+        conversation,
+        profile,
+        slot_classification_result=slot_classification_result,
+    )
     if (
         planning_state is not None
         and _mapped_file_limit_is_relevant(planning_state)
@@ -312,12 +316,26 @@ def _classifier_resolved_question(
 def _build_raw_discovery_issues(
     conversation: list[ConversationMessage],
     profile: DiscoveryProfile,
+    *,
+    slot_classification_result: SlotClassificationResult | None,
 ) -> list[DiscoveryIssue]:
-    return [
+    issues = [
         issue
         for builder in _DISCOVERY_ISSUE_BUILDERS
         if (issue := builder(conversation, profile)) is not None
     ]
+    # The goal issue is built exactly once, with the actual classification
+    # result. A None result is the classifier-unavailable path and falls back
+    # to the outage predicate inside the rule.
+    if (
+        issue := _build_post_processing_goal_issue(
+            conversation,
+            profile,
+            slot_classification_result=slot_classification_result,
+        )
+    ) is not None:
+        issues.append(issue)
+    return issues
 
 
 def _build_comparison_scope_conflict_issue(
@@ -506,8 +524,13 @@ def _build_structured_io_contract_issue(
 def _build_post_processing_goal_issue(
     conversation: list[ConversationMessage],
     profile: DiscoveryProfile,
+    *,
+    slot_classification_result: SlotClassificationResult | None = None,
 ) -> DiscoveryIssue | None:
-    if not _post_processing_goal_is_vague(profile):
+    if not _post_processing_goal_is_vague(
+        profile,
+        slot_classification_result=slot_classification_result,
+    ):
         return None
     return DiscoveryIssue(
         issue_id="post_processing_goal",
@@ -684,7 +707,6 @@ _DISCOVERY_ISSUE_BUILDERS: Final[tuple[DiscoveryIssueBuilder, ...]] = (
     _build_comparison_scope_issue,
     _build_external_delivery_unsupported_issue,
     _build_structured_io_contract_issue,
-    _build_post_processing_goal_issue,
     _build_terminal_output_issue,
     _build_docx_output_mode_issue,
     _build_pdf_generation_mode_issue,

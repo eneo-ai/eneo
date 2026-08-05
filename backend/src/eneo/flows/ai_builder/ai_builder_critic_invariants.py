@@ -18,8 +18,8 @@ layer.
 
 from __future__ import annotations
 
-from collections.abc import Callable
-from dataclasses import dataclass
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Literal, cast
 
 from eneo.flows.ai_builder.ai_builder_architecture_errors import (
@@ -54,9 +54,15 @@ from eneo.flows.ai_builder.ai_builder_output_sections_signals import (
 from eneo.flows.ai_builder.ai_builder_planner_pattern_signals import (
     PlannerPatternSignals,
 )
+from eneo.flows.ai_builder.ai_builder_result_contract import (
+    ResultContract,
+    resolve_result_output_field_roles,
+)
 from eneo.flows.ai_builder.planning_state import (
     AggregationIntent,
     CheckpointIntent,
+    ResolvedSlot,
+    SchemaEvidence,
 )
 from eneo.flows.flow_authoring_spec import (
     FlowDraftSpecCore,
@@ -110,6 +116,11 @@ class CriticContext:
     source_reader_required_field_names: frozenset[str] = frozenset()
     checkpoint_intents: tuple[CheckpointIntent, ...] | None = None
     resource_catalog: "AIBuilderResourceCatalog | None" = None
+    result_contract: ResultContract | None = None
+    resolved_slots: Mapping[str, ResolvedSlot] = field(
+        default_factory=dict[str, ResolvedSlot]
+    )
+    output_schema_evidence: SchemaEvidence | None = None
 
 
 CriticCheck = Callable[[CriticContext], bool]
@@ -187,59 +198,6 @@ _SOURCE_SURFACING_INPUT_TYPES = frozenset(
     {InputType.AUDIO, InputType.DOCUMENT, InputType.FILE}
 )
 
-# Markers for the user explicitly asking for structured extraction for
-# downstream reuse. Terminal JSON output is resolved by `OutputIntentResolution`;
-# this list is deliberately stricter than a bare "json" mention.
-_JSON_CONTRACT_MARKERS: tuple[str, ...] = (
-    "strukturerad data",
-    "structured data",
-    "strukturerad json",
-    "structured json",
-    "som json",
-    "as json",
-    "i json",
-    "in json",
-    "till json",
-    "to json",
-    "json-schema",
-    "json schema",
-    "jsonfält",
-    "json-fält",
-    "json fields",
-    "json field",
-    "extract fields",
-    "extrahera fält",
-    "output contract",
-    "output_contract",
-)
-
-# Markers for a human-readable terminal result (summary, report, analysis) —
-# output_type=text is appropriate there; no JSON warning.
-_HUMAN_READABLE_TERMINAL_MARKERS: tuple[str, ...] = (
-    "sammanfatt",
-    "summarize",
-    "summary",
-    "rapport",
-    "report",
-    "analys",
-    "analysis",
-    "beslut",
-    "decision",
-    "overview",
-    "överblick",
-    "skriv",
-    "write",
-)
-
-_DOWNSTREAM_REUSE_MARKERS: tuple[str, ...] = (
-    "downstream",
-    "vidare",
-    "reuse",
-    "återanvänd",
-    "next step",
-    "nästa steg",
-)
-
 _FIELD_REUSE_MARKERS: tuple[str, ...] = (
     "specific fields",
     "specific json fields",
@@ -252,46 +210,54 @@ _FIELD_REUSE_MARKERS: tuple[str, ...] = (
 )
 
 
-def has_json_contract_step(spec: FlowDraftSpecCore) -> bool:
+def _has_json_contract_step(spec: FlowDraftSpecCore) -> bool:
     """True when the spec has a non-terminal JSON step with an output contract.
 
-    A single-step spec whose only step is JSON does not count — without a
-    downstream consumer the contract provides no value.
+    The terminal step never counts — without a downstream consumer the
+    contract provides no reuse value. Terminal-only declared contracts are
+    owned by `_spec_declares_json_output_contract`.
     """
-    for index, step in enumerate(spec.steps):
-        if step.output_type != OutputType.JSON:
-            continue
-        if step.output_contract is None:
-            continue
-        if index == len(spec.steps) - 1 and len(spec.steps) == 1:
-            continue
-        return True
-    return False
+    return any(
+        step.output_type == OutputType.JSON and step.output_contract is not None
+        for step in spec.steps[:-1]
+    )
 
 
 def _spec_uses_template_fill(spec: FlowDraftSpecCore) -> bool:
     return any(step.output_mode == OutputMode.TEMPLATE_FILL for step in spec.steps)
 
 
-def _conversation_requests_json_contract(text: str) -> bool:
-    return any(marker in text for marker in _JSON_CONTRACT_MARKERS)
+def _resolved_slot_value(context: CriticContext, slot_name: str) -> str | None:
+    slot = context.resolved_slots.get(slot_name)
+    return slot.value if slot is not None else None
 
 
-def _terminal_step_is_human_readable_only(text: str, spec: FlowDraftSpecCore) -> bool:
-    """True when the final step is clearly meant to produce human-readable
-    output and the conversation does not mention downstream reuse.
+def _commit_grade_resolved_slot_value(
+    context: CriticContext,
+    slot_name: str,
+) -> str | None:
+    slot = context.resolved_slots.get(slot_name)
+    return slot.value if slot is not None and slot.is_commit_grade else None
 
-    Used by the anti-over-structuring guardrail — suppresses the JSON warning
-    when the user simply wants a summary/report/analysis.
-    """
-    if not spec.steps:
-        return False
-    terminal = spec.steps[-1]
-    if terminal.output_type not in {OutputType.TEXT, OutputType.DOCX, OutputType.PDF}:
-        return False
-    if any(marker in text for marker in _DOWNSTREAM_REUSE_MARKERS):
-        return False
-    return any(marker in text for marker in _HUMAN_READABLE_TERMINAL_MARKERS)
+
+def _has_explicit_output_schema(context: CriticContext) -> bool:
+    evidence = context.output_schema_evidence
+    return evidence is not None and evidence.strength == "explicit"
+
+
+def _blocking_json_contract_requested_by_typed_evidence(
+    context: CriticContext,
+) -> bool:
+    # Blocking repair needs commit-grade evidence; ResultContract's softer
+    # guidance semantics (which admit heuristic slots) stay unchanged.
+    if (
+        _commit_grade_resolved_slot_value(context, "terminal_output")
+        == "structured_json"
+    ):
+        return True
+    if _commit_grade_resolved_slot_value(context, "structured_io_contract") is not None:
+        return True
+    return _has_explicit_output_schema(context)
 
 
 def _spec_handles_audio(spec: FlowDraftSpecCore) -> bool:
@@ -304,10 +270,6 @@ def _spec_handles_audio(spec: FlowDraftSpecCore) -> bool:
 
 def _conversation_requests_field_reuse(text: str) -> bool:
     return any(marker in text for marker in _FIELD_REUSE_MARKERS)
-
-
-def _spec_uses_input_bindings(spec: FlowDraftSpecCore) -> bool:
-    return any(step.input_bindings for step in spec.steps)
 
 
 def _spec_uses_all_previous_steps(spec: FlowDraftSpecCore) -> bool:
@@ -473,11 +435,21 @@ _RICH_WORKFLOW_REQUIRES_FORM_FIELDS = CriticInvariant(
 def _rich_workflow_requires_json_contract_step_evidence(
     context: CriticContext,
 ) -> bool:
-    patterns = context.planner_patterns
+    # Typed eligibility local to THIS rule: file-material input committed to a
+    # document artifact. Deliberately distinct from the phrase-derived
+    # PlannerPatternSignals.rich_document_workflow that the form-field and
+    # multi-step rules still consume.
+    result_contract = context.result_contract
+    typed_document_artifact_workflow = (
+        _resolved_slot_value(context, "primary_runtime_input")
+        in {"audio", "documents", "text_and_documents"}
+        and result_contract is not None
+        and result_contract.terminal_output in {"docx_document", "pdf_document"}
+    )
     return (
-        patterns.rich_document_workflow
-        and patterns.prefers_structured_intermediate
-        and not has_json_contract_step(context.spec)
+        typed_document_artifact_workflow
+        and _blocking_json_contract_requested_by_typed_evidence(context)
+        and not _has_json_contract_step(context.spec)
     )
 
 
@@ -624,7 +596,7 @@ def _structured_extraction_requires_json_contract_step_evidence(
         context.answer_signals,
         step_count=len(spec.steps),
         terminal_output_type=spec.steps[-1].output_type,
-    ) and not has_json_contract_step(spec)
+    ) and not _has_json_contract_step(spec)
 
 
 _STRUCTURED_EXTRACTION_REQUIRES_JSON_CONTRACT_STEP = CriticInvariant(
@@ -643,19 +615,26 @@ _STRUCTURED_EXTRACTION_REQUIRES_JSON_CONTRACT_STEP = CriticInvariant(
 )
 
 
+def _spec_declares_json_output_contract(spec: FlowDraftSpecCore) -> bool:
+    """True when any step, terminal included, declares a JSON output contract.
+
+    The explicit-request invariant needs a DECLARED contract anywhere; the
+    downstream-reuse invariants keep requiring a non-terminal one through
+    ``_has_json_contract_step``.
+    """
+
+    return any(
+        step.output_type == OutputType.JSON and step.output_contract is not None
+        for step in spec.steps
+    )
+
+
 def _explicit_json_contract_request_without_step_evidence(
     context: CriticContext,
 ) -> bool:
-    """Fire only when the user explicitly asks for structured JSON extraction
-    for downstream reuse — never for simple human-readable terminal output.
-    """
-    text = context.text
-    spec = context.spec
-    if not _conversation_requests_json_contract(text):
-        return False
-    if has_json_contract_step(spec):
-        return False
-    return not _terminal_step_is_human_readable_only(text, spec)
+    return _blocking_json_contract_requested_by_typed_evidence(
+        context
+    ) and not _spec_declares_json_output_contract(context.spec)
 
 
 _EXPLICIT_JSON_CONTRACT_REQUEST_WITHOUT_STEP = CriticInvariant(
@@ -780,38 +759,37 @@ _SOURCE_READER_REQUIRED_FIELDS_MUST_BE_CAPTURED = CriticInvariant(
 
 # ── Outcome contract invariants ──────────────────────────────────────────
 
-_ACTION_FOLLOWUP_REQUIRED_MARKER_GROUPS: tuple[tuple[str, ...], ...] = (
-    ("beslut", "decision", "decisions"),
-    ("nästa steg", "nasta steg", "next step", "next steps", "åtgärd", "action"),
-    ("ansvarig", "ansvariga", "owner", "owners", "responsible"),
-    ("deadline", "deadlines", "tidsfrist", "förfallodatum"),
-    ("öppen fråga", "öppna frågor", "oppen fraga", "oppna fragor", "open question"),
-)
-
 
 def _action_followup_requires_followup_fields_evidence(
     context: CriticContext,
 ) -> bool:
-    if "action_followup" not in context.answer_signals.get(
-        "post_processing_goal", set()
+    if (
+        context.result_contract is None
+        or context.result_contract.post_processing_goal != "action_followup"
     ):
         return False
 
-    semantic_text = _spec_semantic_text(context.spec)
-    return any(
-        not _contains_any(semantic_text, marker_group)
-        for marker_group in _ACTION_FOLLOWUP_REQUIRED_MARKER_GROUPS
+    # All follow-up roles must survive into ONE outcome-bearing structured
+    # contract — the last step that declares one. A union across steps would
+    # accept roles that an earlier step captures but the outcome contract
+    # drops.
+    outcome_contract = next(
+        (
+            step.output_contract
+            for step in reversed(context.spec.steps)
+            if step.output_contract is not None
+        ),
+        None,
     )
-
-
-def _spec_semantic_text(spec: FlowDraftSpecCore) -> str:
-    parts: list[str] = []
-    for step in spec.steps:
-        parts.append(step.name)
-        parts.append(step.assistant_spec.instructions)
-        if step.output_contract is not None:
-            parts.append(str(step.output_contract))
-    return "\n".join(parts).casefold()
+    if outcome_contract is None:
+        return True
+    declared_roles = resolve_result_output_field_roles(
+        context.result_contract,
+        set(schema_leaf_property_names(outcome_contract)),
+    )
+    return (
+        not set(context.result_contract.required_output_field_roles) <= declared_roles
+    )
 
 
 _ACTION_FOLLOWUP_REQUIRES_FOLLOWUP_FIELDS = CriticInvariant(
@@ -834,11 +812,58 @@ _ACTION_FOLLOWUP_REQUIRES_FOLLOWUP_FIELDS = CriticInvariant(
 # ── Field reuse across JSON steps ────────────────────────────────────────
 
 
+def _later_step_reuses_structured_output(
+    spec: FlowDraftSpecCore,
+    producer_index: int,
+) -> bool:
+    """True when a later step's typed bindings consume the producer's fields.
+
+    Only the supported binding vocabulary counts: a ``question`` template
+    whose analyzed references target the producer's structured output, or a
+    ``source_refs`` entry with ``output == "structured"`` for that step.
+    """
+
+    producer_ref = spec.steps[producer_index].plan_step_ref
+    for step_index, step in enumerate(spec.steps):
+        if step_index <= producer_index or not step.input_bindings:
+            continue
+        question = step.input_bindings.get("question")
+        if isinstance(
+            question, str
+        ) and producer_index in _prior_structured_step_indexes_referenced_by_template(
+            spec=spec,
+            template=question,
+            before_index=step_index,
+        ):
+            return True
+        source_refs = cast(object, step.input_bindings.get("source_refs"))
+        if isinstance(source_refs, list):
+            for ref in cast(list[object], source_refs):
+                if not isinstance(ref, Mapping):
+                    continue
+                typed_ref = cast(Mapping[str, object], ref)
+                if (
+                    typed_ref.get("step_ref") == producer_ref
+                    and typed_ref.get("output") == "structured"
+                ):
+                    return True
+    return False
+
+
 def _field_reuse_requires_input_bindings_evidence(context: CriticContext) -> bool:
-    return (
-        _conversation_requests_field_reuse(context.text)
-        and has_json_contract_step(context.spec)
-        and not _spec_uses_input_bindings(context.spec)
+    if not _conversation_requests_field_reuse(context.text):
+        return False
+    # Reuse is satisfied only when a contracted NON-terminal JSON producer
+    # exists AND a later step's typed bindings consume its structured output.
+    # A reuse request with no eligible producer is unsatisfiable and fires.
+    producer_indexes = [
+        index
+        for index, step in enumerate(context.spec.steps[:-1])
+        if step.output_type == OutputType.JSON and step.output_contract is not None
+    ]
+    return not any(
+        _later_step_reuses_structured_output(context.spec, index)
+        for index in producer_indexes
     )
 
 
@@ -1310,7 +1335,7 @@ def _redundant_terminal_json_format_tail_after_final_text_composer_evidence(
         return False
     if context.output_intent.terminal_output == "structured_json":
         return False
-    if _conversation_requests_json_contract(context.text):
+    if _blocking_json_contract_requested_by_typed_evidence(context):
         return False
     if len(spec.steps) < 4:
         return False

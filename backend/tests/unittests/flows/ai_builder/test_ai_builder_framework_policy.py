@@ -6,7 +6,6 @@ import pytest
 
 from eneo.flows.ai_builder.ai_builder_canonicalization import canonical_question_id
 from eneo.flows.ai_builder.ai_builder_discovery_signal_inference import (
-    infer_post_processing_goal,
     is_high_confidence_source_to_source_comparison,
 )
 from eneo.flows.ai_builder.ai_builder_domain_models import (
@@ -1070,60 +1069,22 @@ def test_extract_answer_signals_does_not_emit_structured_analysis_slot() -> None
     assert "structured_analysis_need" not in signals
 
 
-@pytest.mark.parametrize(
-    ("text", "expected_goal"),
-    [
-        (
-            "Strukturera materialet till tydliga anteckningar och ett kort memo.",
-            "structure_key_information",
-        ),
-        (
-            "Ta fram rekommendationer och möjliga vägval från underlaget.",
-            "decision_support",
-        ),
-        (
-            "Granska dokumentet och identifiera risker, avvikelser och problem.",
-            "risk_or_issue_review",
-        ),
-        (
-            "Jämför underlaget mot checklistan och validera att kraven följs.",
-            "compare_or_validate",
-        ),
-    ],
-)
-def test_infer_post_processing_goal_reaches_richer_goal_values(
-    text: str,
-    expected_goal: str,
-) -> None:
-    assert infer_post_processing_goal(text) == expected_goal
+def test_extract_answer_signals_does_not_infer_post_processing_goal_from_prose() -> (
+    None
+):
+    signals = extract_answer_signals(
+        [
+            {
+                "role": "user",
+                "content": (
+                    "Extract decisions, next steps, owners, deadlines, and open "
+                    "questions from the meeting material."
+                ),
+            }
+        ]
+    )
 
-
-@pytest.mark.parametrize(
-    "text",
-    [
-        "Jag vill ha ett transkriberingsflöde.",
-        "Jag vill transkribera samtal.",
-        "Create a transcription flow.",
-    ],
-)
-def test_infer_post_processing_goal_does_not_treat_bare_transcription_as_done(
-    text: str,
-) -> None:
-    assert infer_post_processing_goal(text) is None
-
-
-@pytest.mark.parametrize(
-    "text",
-    [
-        "Transkribera ljudet ordagrant utan sammanfattning.",
-        "Transcript only, no summary.",
-        "Transcribe meeting audio and produce a DOCX file with the transcription.",
-    ],
-)
-def test_infer_post_processing_goal_detects_explicit_transcript_only(
-    text: str,
-) -> None:
-    assert infer_post_processing_goal(text) == "stop_after_primary_operation"
+    assert "post_processing_goal" not in signals
 
 
 def test_transcribe_document_request_does_not_imply_audio_input() -> None:

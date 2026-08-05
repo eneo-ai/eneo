@@ -182,7 +182,17 @@ def _ordered_ask_targets(
     missing_core.sort(
         key=lambda target: (discovery_issue_priority(target), target),
     )
-    return tuple(missing_core) + tuple(selected)
+    ordered = missing_core + [
+        target for target in selected if target not in missing_core
+    ]
+    # Purpose-first: when discovery selected the vague processing goal as its
+    # top question it outranks every core gap except the primary runtime
+    # input — asking for an output format before the purpose is backwards.
+    if selected and selected[0] == "post_processing_goal":
+        ordered.remove("post_processing_goal")
+        insert_at = 1 if ordered and ordered[0] == "primary_runtime_input" else 0
+        ordered.insert(insert_at, "post_processing_goal")
+    return tuple(ordered)
 
 
 __all__ = [

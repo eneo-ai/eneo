@@ -2876,6 +2876,14 @@ async def test_runtime_discovery_uses_llm_baseline_for_natural_swedish_support_f
             {
                 "slots": [
                     {
+                        "slot_name": "post_processing_goal",
+                        "value": "extract_key_information",
+                        "confidence": "high",
+                        "reason": "the flow extracts support-routing information",
+                        "evidence": [_cited("klassificerar avsikt och prioritet")],
+                        "evidence_level": "explicit",
+                    },
+                    {
                         "slot_name": "primary_runtime_input",
                         "value": "text",
                         "confidence": "high",
@@ -2950,6 +2958,7 @@ async def test_runtime_discovery_uses_llm_baseline_for_natural_swedish_support_f
         slot.slot_name: (slot.value, slot.evidence_level)
         for slot in result.slot_classification_metadata.slots
     } == {
+        "post_processing_goal": ("extract_key_information", "explicit"),
         "primary_runtime_input": ("text", "explicit"),
         "terminal_output": ("structured_json", "explicit"),
     }
@@ -3037,6 +3046,18 @@ async def test_runtime_discovery_uses_llm_baseline_for_swedish_document_json_flo
                         "evidence": [_cited("strukturerad JSON")],
                         "evidence_level": "explicit",
                     },
+                    {
+                        "slot_name": "post_processing_goal",
+                        "value": "risk_or_issue_review",
+                        "confidence": "high",
+                        "reason": "the user asks to extract risks",
+                        "evidence": [
+                            _cited(
+                                "extraherar risker, rekommendationer och öppna frågor"
+                            )
+                        ],
+                        "evidence_level": "explicit",
+                    },
                 ]
             }
         )
@@ -3082,6 +3103,7 @@ async def test_runtime_discovery_uses_llm_baseline_for_swedish_document_json_flo
         "primary_runtime_input": "documents",
         "document_material_scope": "multiple_documents_case",
         "terminal_output": "structured_json",
+        "post_processing_goal": "risk_or_issue_review",
     }
 
 
@@ -3106,6 +3128,13 @@ async def test_discovery_block_runtime_uses_one_classification_for_analysis_and_
                         "value": "structured_text",
                         "confidence": "high",
                         "reason": "a readable summary is requested",
+                        "evidence": [_cited("läsbar sammanfattning")],
+                    },
+                    {
+                        "slot_name": "post_processing_goal",
+                        "value": "summarize_or_overview",
+                        "confidence": "high",
+                        "reason": "the user requests a readable summary",
                         "evidence": [_cited("läsbar sammanfattning")],
                     },
                 ]
@@ -3152,6 +3181,9 @@ async def test_discovery_block_runtime_uses_one_classification_for_analysis_and_
         "model"
     )
     assert result.planning_state.resolved_slots["terminal_output"].source == "model"
+    assert result.planning_state.resolved_slots["post_processing_goal"].source == (
+        "model"
+    )
     litellm_client.acompletion.assert_awaited_once()
 
 

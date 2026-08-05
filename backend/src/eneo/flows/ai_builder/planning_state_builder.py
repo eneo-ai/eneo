@@ -27,7 +27,6 @@ from eneo.flows.ai_builder.ai_builder_discovery_flow_defaults import (
 )
 from eneo.flows.ai_builder.ai_builder_discovery_signal_inference import (
     infer_answer_signals_from_text,
-    infer_post_processing_goal,
 )
 from eneo.flows.ai_builder.ai_builder_domain_models import (
     ConversationMessage,
@@ -1648,12 +1647,6 @@ def _heuristic_slot_confidence(
             and extract_runtime_input_field_hints(freeform_text)
         ):
             return "high"
-    if question_id == "post_processing_goal":
-        return (
-            "high"
-            if infer_post_processing_goal(freeform_text) == slot_value
-            else "medium"
-        )
     if question_id != "primary_runtime_input" or not freeform_text:
         return "medium"
 

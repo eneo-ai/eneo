@@ -99,12 +99,6 @@ KEYWORD_OUTAGE_FALLBACK_CASES = (
         id="multi-document-fallback-keeps-cardinality-only",
     ),
     pytest.param(
-        "Jag vill ladda upp text och plocka ut beslut, nästa steg och ansvariga.",
-        {"post_processing_goal": "action_followup"},
-        {"post_processing_goal"},
-        id="action-followup",
-    ),
-    pytest.param(
         "Bygg ett flöde som tar JSON och extraherar fält till ny JSON.",
         {"structured_io_contract": "extract_or_compute_fields"},
         {"structured_io_contract"},

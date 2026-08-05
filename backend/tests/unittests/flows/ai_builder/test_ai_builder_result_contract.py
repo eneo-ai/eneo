@@ -85,6 +85,13 @@ def test_result_contract_action_followup_requires_missing_value_policy() -> None
     )
 
     assert contract is not None
+    assert contract.required_output_field_roles == (
+        "decisions",
+        "actions",
+        "owners",
+        "deadlines",
+        "open_questions",
+    )
     assert "Decisions" in contract.required_sections
     assert "Deadlines" in contract.required_sections
     rendered = render_result_contract_prompt_block(contract)

@@ -1,4 +1,4 @@
-"""Deterministic phrase-routing contracts for AI Builder DOCX intent.
+"""Deterministic routing contracts for AI Builder DOCX intent.
 
 These cases exercise the owned heuristic and planning-state merge paths. They
 do not measure live model accuracy; the battle harness owns that separate gate.
@@ -31,18 +31,18 @@ def _question_ids_for(conversation: list[ConversationMessage]) -> list[str]:
     [
         (
             "Bygg ett flöde som genererar en DOCX-rapport från uppladdade PDF-dokument.",
-            "runtime_metadata_fields",
-            "runtime_metadata_fields",
+            "post_processing_goal",
+            "post_processing_goal",
         ),
         (
             "Bygg ett flöde som genererar en DOCX-rapport utan mall från uppladdade PDF-dokument.",
-            "runtime_metadata_fields",
-            "runtime_metadata_fields",
+            "post_processing_goal",
+            "post_processing_goal",
         ),
         (
             "Bygg ett flöde som fyller en DOCX-mall med data från uppladdade PDF-dokument.",
-            "runtime_metadata_fields",
-            "runtime_metadata_fields",
+            "post_processing_goal",
+            "post_processing_goal",
         ),
     ],
 )
@@ -85,7 +85,6 @@ def test_docx_output_deterministic_routing(
                     "flexible_document_case",
                     "policy_default",
                 ),
-                ("post_processing_goal", "structure_key_information", "heuristic"),
             ],
         ),
         (
@@ -99,7 +98,6 @@ def test_docx_output_deterministic_routing(
                     "flexible_document_case",
                     "policy_default",
                 ),
-                ("post_processing_goal", "structure_key_information", "heuristic"),
             ],
         ),
         (
@@ -113,7 +111,6 @@ def test_docx_output_deterministic_routing(
                     "flexible_document_case",
                     "policy_default",
                 ),
-                ("post_processing_goal", "extract_key_information", "heuristic"),
             ],
         ),
     ],

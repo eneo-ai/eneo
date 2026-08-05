@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from typing import Any, cast
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
@@ -93,6 +94,32 @@ from eneo.flows.domain.flow import Flow, FlowStep
 
 def _classifier_evidence(quote: str) -> tuple[ClassifiedEvidence, ...]:
     return (ClassifiedEvidence(source_id="user_message:test-source", quote=quote),)
+
+
+def _planning_state_with_post_processing_goal(value: str) -> PlanningState:
+    state = PlanningState.empty()
+    state.resolved_slots["post_processing_goal"] = ResolvedSlot(
+        name="post_processing_goal",
+        value=value,
+        source="model",
+        confidence="high",
+        evidence=["quote:user_message:test-source:typed classifier evidence"],
+        evidence_level="inferred",
+    )
+    return state
+
+
+def _battle_case_prompt(case_id: str) -> str:
+    cases_path = (
+        Path(__file__).resolve().parents[4]
+        / "scripts"
+        / "ai_builder_api_battle_cases.json"
+    )
+    payload = cast(
+        dict[str, object], json.loads(cases_path.read_text(encoding="utf-8"))
+    )
+    cases = cast(list[dict[str, str]], payload["cases"])
+    return next(case["prompt"] for case in cases if case["id"] == case_id)
 
 
 def test_mapped_file_limit_question_displays_current_policy_ceiling() -> None:
@@ -875,7 +902,13 @@ class TestExtendedClarificationHints:
             ),
         ]
 
-        analysis = analyze_discovery(conversation)
+        planning_state = build_planning_state_from_conversation(conversation)
+        planning_state.resolved_slots["post_processing_goal"] = (
+            _planning_state_with_post_processing_goal(
+                "structure_key_information"
+            ).resolved_slots["post_processing_goal"]
+        )
+        analysis = analyze_discovery(conversation, planning_state=planning_state)
         assert analysis.ready_for_confirmation
 
     def test_vague_case_analysis_prompt_is_resolved_after_full_answers(self) -> None:
@@ -938,7 +971,12 @@ class TestExtendedClarificationHints:
             ),
         ]
 
-        analysis = analyze_discovery(conversation)
+        analysis = analyze_discovery(
+            conversation,
+            planning_state=_planning_state_with_post_processing_goal(
+                "summarize_or_overview"
+            ),
+        )
         assert analysis.ready_for_confirmation
 
     def test_pdf_output_counts_as_explicit_output_choice(self) -> None:
@@ -1075,7 +1113,12 @@ class TestExtendedClarificationHints:
             )
         ]
 
-        analysis = analyze_discovery(conversation)
+        analysis = analyze_discovery(
+            conversation,
+            planning_state=_planning_state_with_post_processing_goal(
+                "stop_after_primary_operation"
+            ),
+        )
         question_ids = [
             issue.suggestion.question_id
             for issue in analysis.blocking_issues
@@ -1503,7 +1546,10 @@ class TestExtendedClarificationHints:
             )
         ]
 
-        analysis = analyze_discovery(conversation)
+        analysis = analyze_discovery(
+            conversation,
+            planning_state=_planning_state_with_post_processing_goal("action_followup"),
+        )
         question_ids = [
             issue.suggestion.question_id
             for issue in analysis.blocking_issues
@@ -1527,7 +1573,13 @@ class TestExtendedClarificationHints:
             )
         ]
 
-        analysis = analyze_discovery(conversation)
+        planning_state = build_planning_state_from_conversation(conversation)
+        planning_state.resolved_slots["post_processing_goal"] = (
+            _planning_state_with_post_processing_goal(
+                "structure_key_information"
+            ).resolved_slots["post_processing_goal"]
+        )
+        analysis = analyze_discovery(conversation, planning_state=planning_state)
         question_ids = [
             issue.suggestion.question_id
             for issue in analysis.blocking_issues
@@ -1553,8 +1605,8 @@ class TestExtendedClarificationHints:
             )
         ]
 
-        analysis = analyze_discovery(conversation)
-        state = build_planning_state_from_conversation(conversation)
+        state = _planning_state_with_post_processing_goal("extract_key_information")
+        analysis = analyze_discovery(conversation, planning_state=state)
 
         assert analysis.next_issue is not None
         assert analysis.next_issue.issue_id == "runtime_metadata_fields"
@@ -1723,110 +1775,178 @@ class TestExtendedClarificationHints:
         assert analysis.next_issue is None
         assert analysis.selected_question_ids == ()
 
-    def test_vague_audio_prompt_asks_outcome_before_output_format(self) -> None:
-        conversation = [
-            ConversationMessage(
-                role="user",
-                content=(
-                    "Jag har en svensk ljudinspelning från ett möte och vill "
-                    "göra ett flöde av den. Flödet ska ta ljudfilen, förstå "
-                    "vad som sades och skapa något användbart som jag kan dela "
-                    "vidare efteråt. Jag vet inte exakt vilket format "
-                    "slutresultatet ska vara ännu."
-                ),
-                metadata={"ui_language": "sv"},
-            )
-        ]
-
-        analysis = analyze_discovery(conversation)
-
-        assert analysis.next_issue is not None
-        assert analysis.next_issue.issue_id == "post_processing_goal"
-        assert analysis.next_issue.suggestion is not None
-        assert analysis.next_issue.suggestion.question_id == "post_processing_goal"
-
-    def test_vague_document_outcome_asks_post_processing_goal(self) -> None:
-        conversation = [
-            ConversationMessage(
-                role="user",
-                content=(
-                    "Jag vill bygga ett flöde som hjälper mig med dokument jag "
-                    "laddar upp. Det ska läsa dokumentet och skapa något "
-                    "användbart av det."
-                ),
-                metadata={"ui_language": "sv"},
-            )
-        ]
-
-        analysis = analyze_discovery(conversation)
-
-        assert analysis.next_issue is not None
-        assert analysis.next_issue.issue_id == "post_processing_goal"
-        assert analysis.next_issue.suggestion is not None
-        assert analysis.next_issue.suggestion.question_id == "post_processing_goal"
-        assert analysis.selected_question_ids[0] == "post_processing_goal"
-
-    @pytest.mark.asyncio
-    async def test_model_owned_goal_suppresses_duplicate_outcome_question(
+    @pytest.mark.parametrize(
+        ("case_id", "primary_runtime_input", "classified_goal"),
+        [
+            (
+                "interview_open_citizen_feedback",
+                "text",
+                ("unknown", "high", "user_explicit_uncertain"),
+            ),
+            # Ordinary semantic ambiguity: the classifier contract returns
+            # unknown with LOW confidence — the common vague-interview shape.
+            (
+                "interview_open_citizen_feedback",
+                "text",
+                ("unknown", "low", "The goal is ambiguous between options."),
+            ),
+            # A low-confidence guessed value is equally unresolved.
+            (
+                "interview_open_special_diet",
+                "text",
+                ("summarize_or_overview", "low", "Weakly implied by phrasing."),
+            ),
+            ("interview_open_special_diet", "text", None),
+        ],
+    )
+    def test_interview_open_cohort_asks_purpose_first_from_typed_classifier(
         self,
+        case_id: str,
+        primary_runtime_input: str,
+        classified_goal: tuple[str, str, str] | None,
     ) -> None:
+        prompt = _battle_case_prompt(case_id)
         conversation = [
             ConversationMessage(
                 message_id="test-source",
                 role="user",
-                content=(
-                    "Jag vill bygga ett flöde som hjälper mig med dokument jag "
-                    "laddar upp. Det ska läsa dokumentet och skapa något "
-                    "användbart av det."
-                ),
+                content=prompt,
                 metadata={"ui_language": "sv"},
             )
         ]
-
-        async def fake_classify_slots(**kwargs: Any) -> SlotClassificationAttempt:
-            result = SlotClassificationResult(
-                slots=(
-                    ClassifiedSlot(
-                        slot_name="post_processing_goal",
-                        value="summarize_or_overview",
-                        confidence="high",
-                        reason="The model guessed a useful document summary.",
-                        evidence=_classifier_evidence("skapa något användbart"),
-                    ),
+        planning_state = PlanningState.empty()
+        planning_state.resolved_slots["primary_runtime_input"] = ResolvedSlot(
+            name="primary_runtime_input",
+            value=primary_runtime_input,
+            source="model",
+            confidence="high",
+            evidence=[f"quote:user_message:test-source:{prompt}"],
+            evidence_level="explicit",
+        )
+        classified_slots = [
+            ClassifiedSlot(
+                slot_name="primary_runtime_input",
+                value=primary_runtime_input,
+                confidence="high",
+                reason="The runtime input is explicit.",
+                evidence=_classifier_evidence(prompt),
+                evidence_level="explicit",
+            )
+        ]
+        if classified_goal is not None:
+            goal_value, goal_confidence, goal_reason = classified_goal
+            classified_slots.append(
+                ClassifiedSlot(
+                    slot_name="post_processing_goal",
+                    value=goal_value,
+                    confidence=goal_confidence,
+                    reason=goal_reason,
+                    evidence=_classifier_evidence(prompt),
+                    evidence_level="inferred",
                 )
             )
-            return SlotClassificationAttempt(outcome="resolved", result=result)
 
-        with patch(
-            "eneo.flows.ai_builder.ai_builder_discovery_runtime.classify_slots",
-            side_effect=fake_classify_slots,
-        ):
-            context = await build_runtime_discovery_context(
-                conversation,
-                litellm_client=object(),
-                completion_model_route=ResolvedCompletionModelRoute(
-                    litellm_model="test-model",
-                    provider_type="openai",
-                    litellm_kwargs={},
-                    supported_model_kwargs=SupportedModelKwargs(),
-                ),
-                tenant_id=uuid4(),
-                max_input_tokens=100_000,
-                max_output_tokens=2_000,
+        analysis = analyze_discovery(
+            conversation,
+            planning_state=planning_state,
+            slot_classification_result=SlotClassificationResult(
+                slots=tuple(classified_slots)
+            ),
+        )
+
+        assert analysis.next_issue is not None
+        assert analysis.next_issue.issue_id == "post_processing_goal"
+        assert analysis.next_issue.suggestion is not None
+        assert analysis.next_issue.suggestion.question_id == "post_processing_goal"
+
+    def test_interview_input_cohort_keeps_input_first(self) -> None:
+        case_id = "interview_input_building_supplement"
+        prompt = _battle_case_prompt(case_id)
+        conversation = [
+            ConversationMessage(
+                message_id="test-source",
+                role="user",
+                content=prompt,
+                metadata={"ui_language": "sv"},
             )
-
-        assert context.planning_state.resolved_slots["post_processing_goal"].source == (
-            "model"
+        ]
+        planning_state = _planning_state_with_post_processing_goal(
+            "extract_key_information"
+        )
+        planning_state.resolved_slots["terminal_output"] = ResolvedSlot(
+            name="terminal_output",
+            value="structured_json",
+            source="model",
+            confidence="high",
+            evidence=[f"quote:user_message:test-source:{prompt}"],
+            evidence_level="explicit",
+        )
+        classification_result = SlotClassificationResult(
+            slots=(
+                ClassifiedSlot(
+                    slot_name="primary_runtime_input",
+                    value="unknown",
+                    confidence="high",
+                    reason="user_explicit_uncertain",
+                    evidence=_classifier_evidence(prompt),
+                    evidence_level="explicit",
+                ),
+                ClassifiedSlot(
+                    slot_name="post_processing_goal",
+                    value="extract_key_information",
+                    confidence="high",
+                    reason="The requested extraction outcome is explicit.",
+                    evidence=_classifier_evidence(prompt),
+                    evidence_level="explicit",
+                ),
+                ClassifiedSlot(
+                    slot_name="terminal_output",
+                    value="structured_json",
+                    confidence="high",
+                    reason="The JSON result is explicit.",
+                    evidence=_classifier_evidence(prompt),
+                    evidence_level="explicit",
+                ),
+            )
         )
 
         analysis = analyze_discovery(
             conversation,
-            planning_state=context.planning_state,
-            slot_classification_result=context.slot_classification_result,
+            planning_state=planning_state,
+            slot_classification_result=classification_result,
         )
 
         assert analysis.next_issue is not None
-        assert analysis.next_issue.issue_id == "terminal_output"
+        assert analysis.next_issue.issue_id == "primary_runtime_input"
+        assert "post_processing_goal" not in {
+            issue.issue_id for issue in analysis.issues
+        }
+
+    def test_resolved_post_processing_goal_slot_suppresses_outcome_question(
+        self,
+    ) -> None:
+        prompt = _battle_case_prompt("interview_open_meeting_audio")
+        conversation = [
+            ConversationMessage(
+                role="user",
+                content=prompt,
+                metadata={"ui_language": "sv"},
+            )
+        ]
+        planning_state = PlanningState.empty()
+        planning_state.resolved_slots["post_processing_goal"] = ResolvedSlot(
+            name="post_processing_goal",
+            value="summarize_or_overview",
+            source="structured_answer",
+            confidence="high",
+            evidence=["question_answer:post_processing_goal"],
+        )
+
+        analysis = analyze_discovery(
+            conversation,
+            planning_state=planning_state,
+        )
+
         assert "post_processing_goal" not in {
             issue.issue_id for issue in analysis.issues
         }
@@ -1960,30 +2080,6 @@ class TestExtendedClarificationHints:
         ]
         assert "post_processing_goal" not in question_ids
         assert "structured_io_contract" not in question_ids
-
-    def test_document_to_json_extraction_does_not_ask_post_processing_goal(
-        self,
-    ) -> None:
-        conversation = [
-            ConversationMessage(
-                role="user",
-                content=(
-                    "Användaren laddar upp ett PDF-avtal. Flödet ska extrahera "
-                    "kundnamn, datum, riskflaggor och saknad information som "
-                    "strukturerad JSON."
-                ),
-                metadata={"ui_language": "sv"},
-            )
-        ]
-
-        analysis = analyze_discovery(conversation)
-
-        question_ids = [
-            issue.suggestion.question_id
-            for issue in analysis.blocking_issues
-            if issue.suggestion is not None
-        ]
-        assert "post_processing_goal" not in question_ids
 
     def test_pdf_template_mode_question_suppresses_outcome_question(self) -> None:
         conversation = [
@@ -2404,7 +2500,12 @@ class TestExtendedClarificationHints:
             )
         ]
 
-        analysis = analyze_discovery(conversation)
+        analysis = analyze_discovery(
+            conversation,
+            planning_state=_planning_state_with_post_processing_goal(
+                "compare_or_validate"
+            ),
+        )
 
         assert analysis.next_issue is not None
         assert analysis.next_issue.issue_id == "comparison_scope"
@@ -2421,7 +2522,12 @@ class TestExtendedClarificationHints:
             )
         ]
 
-        analysis = analyze_discovery(conversation)
+        analysis = analyze_discovery(
+            conversation,
+            planning_state=_planning_state_with_post_processing_goal(
+                "compare_or_validate"
+            ),
+        )
 
         assert analysis.next_issue is not None
         assert analysis.next_issue.issue_id == "comparison_scope"
@@ -2463,7 +2569,12 @@ class TestExtendedClarificationHints:
             )
         ]
 
-        analysis = analyze_discovery(conversation)
+        analysis = analyze_discovery(
+            conversation,
+            planning_state=_planning_state_with_post_processing_goal(
+                "compare_or_validate"
+            ),
+        )
 
         assert analysis.next_issue is not None
         assert analysis.next_issue.issue_id == "comparison_scope"
