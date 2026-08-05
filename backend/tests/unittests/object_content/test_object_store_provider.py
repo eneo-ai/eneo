@@ -6,7 +6,7 @@ from uuid import UUID
 import pytest
 
 from eneo.object_content.configuration import ObjectContentSettings
-from eneo.object_content.content import ObjectContentConfigurationError
+from eneo.object_content.content import ObjectContentUnavailableError
 from eneo.object_content.object_store_connection import (
     ObjectStoreConnectionActor,
     ObjectStoreConnectionService,
@@ -247,11 +247,12 @@ async def test_admitted_revision_acquires_without_another_connection_read() -> N
     assert service.get_calls == 1
     await provider.publish(_stored(2))
     with pytest.raises(
-        ObjectContentConfigurationError,
-        match="changed after upload admission",
-    ):
+        ObjectContentUnavailableError,
+        match="changed during the upload; try again",
+    ) as error:
         async with provider.acquire(refresh=False, expected_revision=revision):
             pass
+    assert type(error.value) is ObjectContentUnavailableError
     assert service.get_calls == 1
     await provider.close()
 

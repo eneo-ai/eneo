@@ -7,7 +7,10 @@ from dataclasses import dataclass
 
 from eneo.main.logging import get_logger
 from eneo.object_content.configuration import ObjectContentSettings
-from eneo.object_content.content import ObjectContentConfigurationError
+from eneo.object_content.content import (
+    ObjectContentConfigurationError,
+    ObjectContentUnavailableError,
+)
 from eneo.object_content.object_store_connection import (
     ObjectStoreConnectionService,
     ObjectStoreConnectionSource,
@@ -188,8 +191,8 @@ class ObjectStoreProvider:
                 "Object-store content is not configured for this deployment"
             )
         if expected_revision is not None and snapshot.revision != expected_revision:
-            raise ObjectContentConfigurationError(
-                "Object-store configuration changed after upload admission"
+            raise ObjectContentUnavailableError(
+                "Object-store configuration changed during the upload; try again"
             )
         snapshot.active_users += 1
         try:
