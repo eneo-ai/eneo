@@ -5622,3 +5622,51 @@ def test_action_followup_critic_rejects_lookalike_field_names() -> None:
     )
 
     assert "action_followup_requires_followup_fields" in {issue.id for issue in issues}
+
+
+def test_prose_name_evidence_does_not_exempt_the_followup_critic() -> None:
+    # Only a user-DECLARED exact schema wins over the follow-up roles. Prose
+    # field names are hints, not a user-owned contract — they must not
+    # silence the obligation.
+    planning_state = PlanningState.empty()
+    planning_state.resolved_slots["post_processing_goal"] = ResolvedSlot(
+        name="post_processing_goal",
+        value="action_followup",
+        source="structured_answer",
+        confidence="high",
+        evidence=["question_answer:post_processing_goal"],
+    )
+    planning_state.output_schema_evidence = build_schema_evidence(
+        json_schema={
+            "type": "object",
+            "properties": {"beslut": {}},
+        },
+        source="prose_field_names",
+        confidence="high",
+        evidence=["user_message:prose-names"],
+    )
+    spec = FlowDraftSpecCore(
+        flow_name="Prosahintar",
+        steps=[
+            _step(
+                "step_a",
+                "Extrahera",
+                "Extrahera fälten.",
+                output_type=OutputType.JSON,
+                output_contract={
+                    "type": "object",
+                    "properties": {"beslut": {"type": "array"}},
+                },
+            )
+        ],
+    )
+
+    issues = evaluate_critic_invariants(
+        build_conversation_critic_context(
+            [{"role": "user", "content": "Jag nämnde fälten i texten."}],
+            spec,
+            planning_state=planning_state,
+        )
+    )
+
+    assert "action_followup_requires_followup_fields" in {issue.id for issue in issues}

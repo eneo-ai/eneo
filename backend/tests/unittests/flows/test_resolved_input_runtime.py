@@ -445,3 +445,57 @@ async def test_prepared_execution_adds_only_actual_prompt_substitutions(
     assert len(prepared.resolved_input_edges) == expected_edge_count
     if expected_edge_count:
         assert prepared.resolved_input_edges[0].source.kind == "flow_input"
+
+
+@pytest.mark.asyncio
+async def test_followup_writer_source_refs_deliver_narrative_and_extraction() -> None:
+    # The compiler binds a terminal writer after an inserted follow-up
+    # extraction step to BOTH sources via text source_refs. Compiled refs are
+    # only half the proof: this pins the runtime boundary where source_refs
+    # lower to an effective question and interpolate both materials.
+    run = _run()
+    narrative = _result(
+        step_order=1,
+        output_payload={"text": "Lättläst transkript av mötet."},
+    )
+    extraction = _result(
+        step_order=2,
+        output_payload={
+            "text": '{"decisions": ["Beslut 1"], "actions": ["Åtgärd 1"]}',
+            "structured": {"decisions": ["Beslut 1"], "actions": ["Åtgärd 1"]},
+        },
+    )
+
+    resolved = await resolve_step_input(
+        step=_step(
+            step_order=3,
+            input_source="previous_step",
+            input_bindings={
+                "source_refs": [
+                    {
+                        "step_ref": "step_1",
+                        "output": "text",
+                        "label": "Lättläst transkript",
+                    },
+                    {
+                        "step_ref": "step_2",
+                        "output": "text",
+                        "label": "Uppföljningspunkter",
+                    },
+                ]
+            },
+        ),
+        context={},
+        run=run,
+        prior_results=[narrative, extraction],
+        deps=_resolution_deps(),
+    )
+
+    assert "Lättläst transkript av mötet." in resolved.text
+    assert '"decisions"' in resolved.text
+    step_result_sources = {
+        edge.source.source_step_id
+        for edge in resolved.edges
+        if edge.source.kind == "step_result"
+    }
+    assert step_result_sources == {narrative.step_id, extraction.step_id}

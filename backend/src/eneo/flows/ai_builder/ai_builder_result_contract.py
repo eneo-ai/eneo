@@ -365,6 +365,17 @@ def render_result_contract_prompt_block(contract: ResultContract | None) -> str 
     if contract.required_sections:
         lines.append("- required_sections:")
         lines.extend(f"  - {section}" for section in contract.required_sections)
+    if contract.required_output_fields:
+        lines.append("- required_output_fields:")
+        lines.extend(
+            f"  - {requirement.canonical_name}"
+            for requirement in contract.required_output_fields
+        )
+        lines.append(
+            "- A human-readable outcome for this goal needs a structured "
+            "extraction step declaring these fields, feeding the final "
+            "writing step."
+        )
     if contract.result_policies:
         lines.append("- result_policies:")
         lines.extend(f"  - {policy}" for policy in contract.result_policies)

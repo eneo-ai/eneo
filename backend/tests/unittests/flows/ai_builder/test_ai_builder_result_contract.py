@@ -144,3 +144,49 @@ def test_result_contract_obligation_policies_are_deduped() -> None:
         )
         == 1
     )
+
+
+def test_prompt_block_renders_required_output_fields_for_action_followup() -> None:
+    # Prevention over repair: the proposal prompt must name the five roles
+    # and the structured-extraction requirement upfront, not leave the model
+    # to discover them through critic feedback.
+    planning_state = PlanningState.empty()
+    planning_state.resolved_slots["post_processing_goal"] = ResolvedSlot(
+        name="post_processing_goal",
+        value="action_followup",
+        source="structured_answer",
+        confidence="high",
+        evidence=["question_answer:post_processing_goal"],
+    )
+    contract = derive_result_contract(planning_state)
+    assert contract is not None
+
+    block = render_result_contract_prompt_block(contract)
+    assert block is not None
+    assert "required_output_fields:" in block
+    for canonical_name in (
+        "decisions",
+        "actions",
+        "owners",
+        "deadlines",
+        "open_questions",
+    ):
+        assert f"- {canonical_name}" in block
+    assert "structured extraction step" in block
+
+
+def test_prompt_block_omits_output_fields_without_required_roles() -> None:
+    planning_state = PlanningState.empty()
+    planning_state.resolved_slots["post_processing_goal"] = ResolvedSlot(
+        name="post_processing_goal",
+        value="summarize_or_overview",
+        source="structured_answer",
+        confidence="high",
+        evidence=["question_answer:post_processing_goal"],
+    )
+    contract = derive_result_contract(planning_state)
+    assert contract is not None
+
+    block = render_result_contract_prompt_block(contract)
+    assert block is not None
+    assert "required_output_fields:" not in block

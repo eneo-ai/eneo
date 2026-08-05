@@ -774,13 +774,14 @@ def _action_followup_requires_followup_fields_evidence(
     ):
         return False
 
-    # The same precedence the compiler applies: a user-supplied exact output
-    # schema becomes the terminal contract verbatim, and the model cannot
-    # modify it — demanding follow-up roles beyond it would loop repair
-    # forever on a constraint the model does not control.
+    # A user-DECLARED exact output schema becomes the terminal contract
+    # verbatim, and the model cannot modify it — demanding follow-up roles
+    # beyond it would loop repair forever on a constraint the model does not
+    # control. Only declared schemas carry that authority: prose field names
+    # and inferred examples are hints, not user-owned contracts.
     if (
         context.output_schema_evidence is not None
-        and context.output_schema_evidence.source != "template_placeholders"
+        and context.output_schema_evidence.source == "declared_schema"
         and context.spec.steps
         and context.spec.steps[-1].output_type == OutputType.JSON
     ):
