@@ -12,9 +12,11 @@ from eneo.ai_models.completion_models.completion_model import ResponseType
 from eneo.completion_models.infrastructure.adapters.tenant_model_adapter import (
     PROVIDER_UNAVAILABLE_CODE,
     PROVIDER_UNAVAILABLE_MESSAGE,
+    TOOL_RESULT_BUDGET_NOTICE,
     PreparedModelStream,
     TenantModelAdapter,
     _build_tool_result_with_references,
+    _ToolResultBudget,
 )
 from eneo.main.exceptions import OpenAIException
 from eneo.mcp_servers.infrastructure.tool_approval import (
@@ -166,7 +168,7 @@ def _make_adapter() -> TenantModelAdapter:
     adapter = object.__new__(TenantModelAdapter)
     adapter.litellm_model = "openai/test-model"
     adapter.provider_type = "openai"
-    adapter.model = SimpleNamespace(name="test-model")
+    adapter.model = SimpleNamespace(name="test-model", token_limit=8000)
     return adapter
 
 
@@ -460,6 +462,94 @@ async def test_non_streaming_supports_multiple_tool_rounds():
     assert {ref.uri for ref in completion.mcp_tool_references} == {
         "https://example.test/shared"
     }
+
+
+def test_tool_result_budget_admits_until_exhausted_then_withholds():
+    budget = _ToolResultBudget(token_limit=4, litellm_model="openai/test-model")
+
+    crossing = "one two three four five six seven eight nine ten"
+    assert budget.admit(crossing) == crossing
+    assert budget.admit("more") == TOOL_RESULT_BUDGET_NOTICE
+    assert budget.admit("again") == TOOL_RESULT_BUDGET_NOTICE
+
+
+@pytest.mark.asyncio
+async def test_non_streaming_withholds_tool_results_after_budget_exhaustion():
+    adapter = _make_completion_adapter()
+    adapter.model.token_limit = 2
+    mcp_proxy = _FakeMCPProxy()
+    responses = [
+        _response(
+            tool_calls=[_response_tool_call("call_1", '{"q":"first"}')],
+            finish_reason="tool_calls",
+        ),
+        _response(
+            tool_calls=[_response_tool_call("call_2", '{"q":"second"}')],
+            finish_reason="tool_calls",
+        ),
+        _response(content="final answer"),
+    ]
+
+    with patch(
+        "eneo.completion_models.infrastructure.adapters.tenant_model_adapter._acompletion_call",
+        AsyncMock(side_effect=responses),
+    ) as completion_call:
+        completion = await adapter.get_response(
+            context=SimpleNamespace(),
+            model_kwargs={},
+            mcp_proxy=mcp_proxy,
+        )
+
+    assert completion.text == "final answer"
+    assert completion_call.await_args is not None
+    tool_messages = [
+        message
+        for message in completion_call.await_args.kwargs["messages"]
+        if message["role"] == "tool"
+    ]
+    assert len(tool_messages) == 2
+    assert "tool-ok" in tool_messages[0]["content"]
+    assert tool_messages[1]["content"] == TOOL_RESULT_BUDGET_NOTICE
+
+
+@pytest.mark.asyncio
+async def test_iterate_stream_withholds_tool_results_after_budget_exhaustion():
+    adapter = _make_adapter()
+    adapter.model.token_limit = 2
+    mcp_proxy = _FakeMCPProxy()
+    messages: list[dict] = []
+    follow_ups = [
+        _AsyncChunkStream([_tool_call_chunk(tool_call_id="call_2")]),
+        _AsyncChunkStream([_text_chunk("done", finish_reason="stop")]),
+    ]
+
+    stream = _AsyncChunkStream(
+        [_tool_call_chunk()],
+        eneo_context={
+            "mcp_proxy": mcp_proxy,
+            "messages": messages,
+            "kwargs": {},
+            "has_tools": True,
+        },
+    )
+
+    with patch(
+        "eneo.completion_models.infrastructure.adapters.tenant_model_adapter._acompletion_call",
+        AsyncMock(side_effect=follow_ups),
+    ):
+        await _collect(
+            adapter,
+            stream,
+            require_tool_approval=False,
+            approval_manager=None,
+            approval_context=None,
+            pending_approval_ids=set(),
+        )
+
+    tool_messages = [message for message in messages if message["role"] == "tool"]
+    assert len(tool_messages) == 2
+    assert "tool-ok" in tool_messages[0]["content"]
+    assert tool_messages[1]["content"] == TOOL_RESULT_BUDGET_NOTICE
 
 
 def test_models_without_tool_capability_receive_no_tools():

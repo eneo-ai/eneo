@@ -42,6 +42,9 @@ from eneo.completion_models.infrastructure.adapters.base_adapter import (
     CompletionModelAdapter,
     ProviderInput,
 )
+from eneo.completion_models.infrastructure.context_builder import (
+    MIN_PERCENTAGE_KNOWLEDGE,
+)
 from eneo.completion_models.infrastructure.message_payload import (
     build_content,
     build_turn_messages,
@@ -345,6 +348,47 @@ def _is_provider_unavailable_error(exc: BaseException) -> bool:
 
 def _tool_metadata_arguments(tool: ToolCallMetadata) -> dict[str, Any] | None:
     return cast(dict[str, Any] | None, cast(Any, tool).arguments)
+
+
+TOOL_RESULT_BUDGET_NOTICE = (
+    "Tool-result budget for this turn is exhausted; this result was withheld. "
+    "Stop calling tools and answer now using the information already gathered."
+)
+
+
+class _ToolResultBudget:
+    """Aggregate cap on tool-result text fed back to the model in one turn.
+
+    Inject mode reserves at most ``MIN_PERCENTAGE_KNOWLEDGE`` of the context
+    window for retrieved knowledge; in tool mode the model steers retrieval
+    itself, so the same share is enforced here as an admission cap instead.
+    Per-call limits (proxy output truncation, the round cap) bound one call;
+    this bounds the turn, so a tool-happy model degrades to an explicit
+    notice instead of a provider-side context overflow failing the turn.
+    """
+
+    def __init__(self, *, token_limit: int, litellm_model: str) -> None:
+        self._remaining = int(token_limit * MIN_PERCENTAGE_KNOWLEDGE)
+        self._litellm_model = litellm_model
+        self._exhausted_logged = False
+
+    def admit(self, llm_text: str) -> str:
+        """Return ``llm_text`` while budget remains, the withhold notice after.
+
+        The result that crosses the line is admitted in full (a single result
+        is already bounded by the proxy's output truncation); only results
+        after exhaustion are withheld.
+        """
+        if self._remaining <= 0:
+            if not self._exhausted_logged:
+                logger.warning(
+                    "[MCP] Tool-result budget exhausted; withholding further "
+                    "tool results this turn"
+                )
+                self._exhausted_logged = True
+            return TOOL_RESULT_BUDGET_NOTICE
+        self._remaining -= count_tokens(llm_text, self._litellm_model)
+        return llm_text
 
 
 if TYPE_CHECKING:
@@ -1015,6 +1059,10 @@ class TenantModelAdapter(CompletionModelAdapter):
                 tool_round = 0
                 seen_prefixes: set[str] = set()
                 captured_refs: list[McpToolReference] = []
+                result_budget = _ToolResultBudget(
+                    token_limit=self.model.token_limit,
+                    litellm_model=self.litellm_model,
+                )
                 activation_available = (
                     skill_runtime is not None
                     and skill_runtime.tool_definition is not None
@@ -1118,7 +1166,7 @@ class TenantModelAdapter(CompletionModelAdapter):
                             {
                                 "role": "tool",
                                 "tool_call_id": call.call_id,
-                                "content": llm_text,
+                                "content": result_budget.admit(llm_text),
                             }
                         )
                     response = cast(
@@ -1608,6 +1656,10 @@ class TenantModelAdapter(CompletionModelAdapter):
 
                 max_rounds = self.MAX_TOOL_ROUNDS
                 tool_round = 0
+                result_budget = _ToolResultBudget(
+                    token_limit=self.model.token_limit,
+                    litellm_model=self.litellm_model,
+                )
 
                 while result.has_tool_calls and tool_round < max_rounds:
                     tool_round += 1
@@ -1951,7 +2003,7 @@ class TenantModelAdapter(CompletionModelAdapter):
                                 {
                                     "role": "tool",
                                     "tool_call_id": tc["id"],
-                                    "content": llm_text,
+                                    "content": result_budget.admit(llm_text),
                                 }
                             )
                             tool_info = mcp_proxy.get_tool_info(tc["function"]["name"])
