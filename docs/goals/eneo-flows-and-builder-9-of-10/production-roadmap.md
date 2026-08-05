@@ -967,6 +967,11 @@ returns. Execution order and binding decisions:
    template fill only for explicit authored choice, structural
    placeholders, or exactly-one explicit commit-grade user-owned template
    role; corpus answer-closure separate.
+**Ungated commits awaiting batch peer review** (self-validated: full flows
+suite + pyright + ruff): `8e720e359` A-closeout (prompt roles +
+declared-schema-only critic exemption + runtime input-resolution proof).
+Loss-matrix checklist: `notes/loss-matrix.md`.
+
 9. **G citations**: write ONLY the red end-to-end test
    (test_document_report_citation_survives_compose_render_and_public_artifact
    per the artifact's exact assertions); keep
