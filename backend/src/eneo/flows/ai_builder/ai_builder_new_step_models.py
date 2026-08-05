@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Sequence
 from typing import Any, Literal, cast
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -231,6 +232,21 @@ class NewStepDraft(BaseModel):
         if self.output_fields:
             ensure_structured_field_depth(self.output_fields)
         return self
+
+
+def structured_field_draft_names(
+    fields: Sequence[StructuredFieldDraft],
+) -> set[str]:
+    """Collect every declared field name, containers and children included."""
+
+    names: set[str] = set()
+    for field in fields:
+        names.add(field.name)
+        if field.fields:
+            names.update(structured_field_draft_names(field.fields))
+        if field.item_fields:
+            names.update(structured_field_draft_names(field.item_fields))
+    return names
 
 
 def ensure_structured_field_depth(

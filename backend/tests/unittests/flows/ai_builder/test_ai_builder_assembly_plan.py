@@ -18,6 +18,7 @@ from eneo.flows.ai_builder.ai_builder_assembly.plan import (
 )
 from eneo.flows.ai_builder.ai_builder_new_step_models import (
     PreviousFieldRef,
+    PreviousOutputRef,
     StructuredFieldDraft,
 )
 from eneo.flows.ai_builder.ai_builder_source_reader_contracts import SourceCaptureField
@@ -44,6 +45,7 @@ def _text_step(
     underlag_channel: UnderlagChannel = "flow_input",
     form_field_refs: tuple[str, ...] = (),
     previous_field_refs: tuple[PreviousFieldRef, ...] = (),
+    previous_output_refs: tuple[PreviousOutputRef, ...] = (),
     output_fields: tuple[StructuredFieldDraft, ...] = (),
 ) -> PlannedStep:
     return PlannedStep(
@@ -57,6 +59,7 @@ def _text_step(
         underlag_channel=underlag_channel,
         form_field_refs=form_field_refs,
         previous_field_refs=previous_field_refs,
+        previous_output_refs=previous_output_refs,
         output_fields=output_fields,
     )
 
@@ -444,3 +447,35 @@ def test_plan_rejects_localized_output_field_schema_keys() -> None:
 
     with pytest.raises(ValueError, match="ASCII English schema keys"):
         _plan(steps=(source_reader,))
+
+
+def test_plan_rejects_future_previous_output_refs() -> None:
+    first_step = _text_step(name="Extract facts", output_type=OutputType.JSON)
+    future_ref_step = _text_step(
+        name="Write final",
+        input_source=InputSource.PREVIOUS_STEP,
+        input_type=InputType.TEXT,
+        underlag_channel="whole_object",
+        previous_output_refs=(PreviousOutputRef(from_step=3, label="Later"),),
+    )
+
+    with pytest.raises(ValueError, match="no later than 1"):
+        _plan(steps=(first_step, future_ref_step))
+
+
+def test_flow_input_step_rejects_previous_output_refs() -> None:
+    with pytest.raises(ValueError, match="cannot reference previous output"):
+        _text_step(
+            name="Read input",
+            previous_output_refs=(PreviousOutputRef(from_step=1, label="Prior"),),
+        )
+
+
+def test_fan_in_step_rejects_previous_output_refs() -> None:
+    with pytest.raises(ValueError, match="cannot combine fan-in"):
+        _text_step(
+            name="Combine",
+            input_source=InputSource.ALL_PREVIOUS_STEPS,
+            underlag_channel="fan_in",
+            previous_output_refs=(PreviousOutputRef(from_step=1, label="Prior"),),
+        )

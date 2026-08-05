@@ -8,6 +8,7 @@ resolved user outcome so richer clarification changes plan quality.
 from __future__ import annotations
 
 import re
+import unicodedata
 from dataclasses import dataclass
 from typing import Literal
 
@@ -73,6 +74,11 @@ class ResultContract:
         return tuple(field.role for field in self.required_output_fields)
 
 
+# Accepted names are matched as exact FOLDED equality (fold_result_field_name)
+# — never substring containment, which misreads names like "transaction_id"
+# as roles. The vocabulary covers the product's own Swedish remediation words
+# (with diacritics folded) and the compound shapes explicit nested schemas
+# use for action items.
 _ACTION_FOLLOWUP_OUTPUT_FIELDS: tuple[ResultOutputFieldRequirement, ...] = (
     ResultOutputFieldRequirement(
         role="decisions",
@@ -82,17 +88,38 @@ _ACTION_FOLLOWUP_OUTPUT_FIELDS: tuple[ResultOutputFieldRequirement, ...] = (
     ResultOutputFieldRequirement(
         role="actions",
         canonical_name="actions",
-        accepted_names=frozenset({"action", "actions", "next_steps", "atgarder"}),
+        accepted_names=frozenset(
+            {
+                "action",
+                "actions",
+                "action_items",
+                "next_steps",
+                "nasta_steg",
+                "atgard",
+                "atgarder",
+            }
+        ),
     ),
     ResultOutputFieldRequirement(
         role="owners",
         canonical_name="owners",
-        accepted_names=frozenset({"owner", "owners", "responsible", "ansvarig"}),
+        accepted_names=frozenset(
+            {
+                "owner",
+                "owners",
+                "named_owner",
+                "responsible",
+                "ansvarig",
+                "ansvariga",
+            }
+        ),
     ),
     ResultOutputFieldRequirement(
         role="deadlines",
         canonical_name="deadlines",
-        accepted_names=frozenset({"deadline", "deadlines", "due_date"}),
+        accepted_names=frozenset(
+            {"deadline", "deadlines", "due_date", "stated_due_date"}
+        ),
     ),
     ResultOutputFieldRequirement(
         role="open_questions",
@@ -258,16 +285,67 @@ def derive_result_contract(planning_state: PlanningState) -> ResultContract | No
     )
 
 
+_FIELD_NAME_SEPARATOR_RE = re.compile(r"[^0-9a-z]+")
+
+
+def fold_result_field_name(name: str) -> str:
+    """Fold a schema field name for role matching.
+
+    Case, diacritics, and separator style must not decide whether a role is
+    recognized: proposals name fields in natural Swedish ("åtgärder",
+    "öppna frågor") while the accepted vocabulary is stored ASCII-folded.
+    """
+
+    decomposed = unicodedata.normalize("NFKD", name)
+    stripped = "".join(
+        character for character in decomposed if not unicodedata.combining(character)
+    )
+    return _FIELD_NAME_SEPARATOR_RE.sub("_", stripped.casefold()).strip("_")
+
+
+def _requirement_accepts_folded_names(
+    requirement: ResultOutputFieldRequirement,
+    folded_names: set[str],
+) -> bool:
+    folded_accepted = {
+        fold_result_field_name(name) for name in requirement.accepted_names
+    }
+    return bool(folded_accepted & folded_names)
+
+
 def resolve_result_output_field_roles(
     contract: ResultContract,
     field_names: set[str],
 ) -> frozenset[ResultOutputFieldRole]:
-    normalized_names = {name.casefold() for name in field_names}
+    folded_names = {fold_result_field_name(name) for name in field_names}
     return frozenset(
         requirement.role
         for requirement in contract.required_output_fields
-        if requirement.accepted_names & normalized_names
+        if _requirement_accepts_folded_names(requirement, folded_names)
     )
+
+
+_REQUIREMENT_BY_CANONICAL_NAME: dict[str, ResultOutputFieldRequirement] = {
+    requirement.canonical_name: requirement
+    for requirement in _ACTION_FOLLOWUP_OUTPUT_FIELDS
+}
+
+
+def structured_field_names_satisfy_result_field(
+    field_names: set[str],
+    canonical_name: str,
+) -> bool:
+    """True when an already-declared field covers a required contract field.
+
+    Assembly completion uses this to avoid appending a canonical duplicate
+    next to an equivalent field the proposal already carries.
+    """
+
+    folded_names = {fold_result_field_name(name) for name in field_names}
+    requirement = _REQUIREMENT_BY_CANONICAL_NAME.get(canonical_name)
+    if requirement is not None:
+        return _requirement_accepts_folded_names(requirement, folded_names)
+    return fold_result_field_name(canonical_name) in folded_names
 
 
 def render_result_contract_prompt_block(contract: ResultContract | None) -> str | None:
@@ -361,6 +439,8 @@ __all__ = [
     "ResultOutputFieldRequirement",
     "ResultOutputFieldRole",
     "derive_result_contract",
+    "fold_result_field_name",
     "render_result_contract_prompt_block",
     "resolve_result_output_field_roles",
+    "structured_field_names_satisfy_result_field",
 ]

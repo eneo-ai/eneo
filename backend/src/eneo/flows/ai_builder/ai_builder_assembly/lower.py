@@ -129,6 +129,7 @@ def _new_step_draft_from_planned_step(
         previous_item_map_enabled=step.previous_item_map_enabled,
         uses_form_fields=list(step.form_field_refs),
         uses_previous_fields=list(step.previous_field_refs),
+        uses_previous_outputs=list(step.previous_output_refs),
         output_fields=list(step.output_fields) if emit_output_fields else None,
         document_delivery_mode=step.document_delivery_mode,
         citations_requested=step.citations_requested,

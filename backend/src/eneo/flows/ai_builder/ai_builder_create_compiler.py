@@ -36,6 +36,7 @@ from eneo.flows.ai_builder.ai_builder_proposal_intent import (
     SemanticStepIntent,
 )
 from eneo.flows.ai_builder.ai_builder_result_contract import (
+    ResultOutputFieldRole,
     derive_result_contract,
 )
 from eneo.flows.ai_builder.ai_builder_runtime_input_fields import (
@@ -105,6 +106,7 @@ class CreateCompileContext:
     terminal_output_schema: JsonObject | None = None
     source_reader_required_fields: tuple[SourceCaptureField, ...] = ()
     result_contract_output_fields: tuple[StructuredFieldDraft, ...] = ()
+    result_contract_required_roles: tuple[ResultOutputFieldRole, ...] = ()
     requested_output_sections: RequestedOutputSections = EMPTY_REQUESTED_OUTPUT_SECTIONS
     report_disposition: ReportDisposition | None = None
     checkpoint_intents: tuple[CheckpointIntent, ...] | None = None
@@ -274,6 +276,9 @@ def compile_create_intent_to_spec(
         source_reader_required_fields=source_reader_required_fields,
         result_contract_output_fields=(
             context.result_contract_output_fields if context is not None else ()
+        ),
+        result_contract_required_roles=(
+            context.result_contract_required_roles if context is not None else ()
         ),
         requested_output_sections=(
             context.requested_output_sections
@@ -624,6 +629,9 @@ def create_compile_context_from_planning_state(
                 ui_language=ui_language,
             )
         ),
+        result_contract_required_roles=_result_contract_required_roles_from_planning_state(
+            planning_state
+        ),
         requested_output_sections=requested_output_sections,
         report_disposition=(
             architecture.report_disposition if architecture is not None else None
@@ -657,6 +665,15 @@ def _summary_source_reader_field_description(ui_language: str | None) -> str:
     if ui_language is None or ui_language.casefold().startswith("sv"):
         return "Kort sammanfattning grundad i källmaterialet."
     return "Concise summary grounded in the source material."
+
+
+def _result_contract_required_roles_from_planning_state(
+    planning_state: PlanningState,
+) -> tuple[ResultOutputFieldRole, ...]:
+    contract = derive_result_contract(planning_state)
+    if contract is None:
+        return ()
+    return contract.required_output_field_roles
 
 
 def _result_contract_output_fields_from_planning_state(

@@ -36,7 +36,9 @@ from eneo.flows.ai_builder.ai_builder_flow_schema_values import (
 )
 from eneo.flows.ai_builder.ai_builder_new_step_models import (
     PreviousFieldRef,
+    PreviousOutputRef,
     StructuredFieldDraft,
+    structured_field_draft_names,
 )
 from eneo.flows.ai_builder.ai_builder_output_sections_signals import (
     RequestedOutputSections,
@@ -44,6 +46,10 @@ from eneo.flows.ai_builder.ai_builder_output_sections_signals import (
 from eneo.flows.ai_builder.ai_builder_proposal_intent import (
     CreateFlowIntent,
     SemanticStepIntent,
+)
+from eneo.flows.ai_builder.ai_builder_result_contract import (
+    ResultOutputFieldRole,
+    structured_field_names_satisfy_result_field,
 )
 from eneo.flows.ai_builder.ai_builder_source_reader_contracts import (
     SourceCaptureField,
@@ -270,6 +276,7 @@ def try_compile_create_intent_with_assembly(
     terminal_output_schema: JsonObject | None,
     source_reader_required_fields: tuple[SourceCaptureField, ...],
     result_contract_output_fields: tuple[StructuredFieldDraft, ...],
+    result_contract_required_roles: tuple[ResultOutputFieldRole, ...],
     requested_output_sections: RequestedOutputSections,
     report_disposition: ReportDisposition | None,
     runtime_required: bool,
@@ -292,6 +299,7 @@ def try_compile_create_intent_with_assembly(
             terminal_output_schema=terminal_output_schema,
             source_reader_required_fields=source_reader_required_fields,
             result_contract_output_fields=result_contract_output_fields,
+            result_contract_required_roles=result_contract_required_roles,
             requested_output_sections=requested_output_sections,
             report_disposition=report_disposition,
             runtime_required=runtime_required,
@@ -321,6 +329,7 @@ def _assemble_create_intent(
     terminal_output_schema: JsonObject | None,
     source_reader_required_fields: tuple[SourceCaptureField, ...],
     result_contract_output_fields: tuple[StructuredFieldDraft, ...],
+    result_contract_required_roles: tuple[ResultOutputFieldRole, ...],
     requested_output_sections: RequestedOutputSections,
     report_disposition: ReportDisposition | None,
     runtime_required: bool,
@@ -430,12 +439,18 @@ def _assemble_create_intent(
         final_semantic_output_type=terminal_semantic_output_type,
         ui_language=ui_language,
     )
+    followup_step_index: int | None = None
     if report_disposition is None:
-        semantic_steps = _semantic_steps_with_result_contract_fields(
-            semantic_steps,
-            runtime_input_type=runtime_input_type,
-            final_semantic_output_type=terminal_semantic_output_type,
-            result_contract_output_fields=result_contract_output_fields,
+        semantic_steps, followup_step_index = (
+            _semantic_steps_with_result_contract_fields(
+                semantic_steps,
+                runtime_input_type=runtime_input_type,
+                final_semantic_output_type=terminal_semantic_output_type,
+                result_contract_output_fields=result_contract_output_fields,
+                result_contract_required_roles=result_contract_required_roles,
+                terminal_output_schema=terminal_output_schema,
+                ui_language=ui_language,
+            )
         )
     previous_output_type: OutputType | None = None
     has_source_prefix = False
@@ -510,6 +525,27 @@ def _assemble_create_intent(
                 is_terminal_semantic_step=is_terminal_semantic_step,
             )
         )
+        # Explicit refs replace implicit input, so a terminal writer after an
+        # inserted follow-up extraction step must name BOTH sources — the
+        # extraction object alone would erase the narrative it summarizes.
+        previous_output_refs: tuple[PreviousOutputRef, ...] = ()
+        if (
+            is_terminal_semantic_step
+            and followup_step_index is not None
+            and input_source == InputSource.PREVIOUS_STEP
+            and not previous_field_refs
+        ):
+            # The inserted extraction step is always the immediately
+            # preceding planned step here, so its one-based ref is simply
+            # the current planned-step count.
+            extraction_from_step = len(planned_steps)
+            previous_output_refs = tuple(
+                PreviousOutputRef(
+                    from_step=from_step,
+                    label=planned_steps[from_step - 1].name,
+                )
+                for from_step in (extraction_from_step - 1, extraction_from_step)
+            )
         planned_step = PlannedStep(
             role=_linear_step_role(
                 output_type=step_output_type,
@@ -540,6 +576,7 @@ def _assemble_create_intent(
             ),
             form_field_refs=tuple(semantic_step.uses_form_fields),
             previous_field_refs=previous_field_refs,
+            previous_output_refs=previous_output_refs,
             output_fields=tuple(semantic_step.output_fields or ()),
             model_ref=semantic_step.model_ref,
             knowledge_refs=tuple(semantic_step.knowledge_refs),
@@ -735,14 +772,13 @@ def _semantic_steps_with_result_contract_fields(
     runtime_input_type: InputType,
     final_semantic_output_type: OutputType,
     result_contract_output_fields: tuple[StructuredFieldDraft, ...],
-) -> tuple[SemanticStepIntent, ...]:
+    result_contract_required_roles: tuple[ResultOutputFieldRole, ...],
+    terminal_output_schema: JsonObject | None,
+    ui_language: str | None,
+) -> tuple[tuple[SemanticStepIntent, ...], int | None]:
     semantic_steps = tuple(steps)
-    if (
-        not result_contract_output_fields
-        or len(semantic_steps) < 2
-        or final_semantic_output_type != OutputType.TEXT
-    ):
-        return semantic_steps
+    if not result_contract_output_fields or not semantic_steps:
+        return semantic_steps, None
 
     terminal_step = semantic_steps[-1]
     terminal_output_type = _linear_step_output_type(
@@ -751,8 +787,33 @@ def _semantic_steps_with_result_contract_fields(
         final_output_type=final_semantic_output_type,
         is_terminal=True,
     )
+
+    if final_semantic_output_type == OutputType.JSON:
+        # A user-owned exact schema wins: never append canonical siblings.
+        if terminal_output_schema is not None:
+            return semantic_steps, None
+        if terminal_output_type != OutputType.JSON:
+            return semantic_steps, None
+        completed_fields = _complete_result_contract_output_fields(
+            tuple(terminal_step.output_fields or ()),
+            required_fields=result_contract_output_fields,
+        )
+        if completed_fields == tuple(terminal_step.output_fields or ()):
+            return semantic_steps, None
+        return (
+            *semantic_steps[:-1],
+            terminal_step.model_copy(
+                update={
+                    "output_type": OutputType.JSON,
+                    "output_fields": list(completed_fields),
+                }
+            ),
+        ), None
+
+    if final_semantic_output_type != OutputType.TEXT:
+        return semantic_steps, None
     if terminal_output_type != OutputType.TEXT:
-        return semantic_steps
+        return semantic_steps, None
 
     for index in range(len(semantic_steps) - 2, -1, -1):
         if index == 0 and runtime_input_type in _FILE_INPUT_TYPES:
@@ -771,7 +832,7 @@ def _semantic_steps_with_result_contract_fields(
             required_fields=result_contract_output_fields,
         )
         if completed_fields == tuple(candidate.output_fields or ()):
-            return semantic_steps
+            return semantic_steps, None
         updated_steps = list(semantic_steps)
         updated_steps[index] = candidate.model_copy(
             update={
@@ -779,9 +840,54 @@ def _semantic_steps_with_result_contract_fields(
                 "output_fields": list(completed_fields),
             }
         )
-        return tuple(updated_steps)
+        return tuple(updated_steps), None
 
-    return semantic_steps
+    # No structured producer exists for the required follow-up roles, and
+    # terminal text fields are folded away before this point — without a
+    # compiler-owned extraction step the critic would demand a contract no
+    # model repair can produce. The extraction step needs a preceding planned
+    # step to read (an earlier semantic step or the fixed audio
+    # transcription), so single-step flows over other inputs keep the model
+    # repair path instead.
+    if not result_contract_required_roles:
+        return semantic_steps, None
+    insert_at = len(semantic_steps) - 1
+    if insert_at == 0 and runtime_input_type != InputType.AUDIO:
+        return semantic_steps, None
+    logger.info(
+        "ai_builder_result_contract_followup_step_inserted",
+        extra={"terminal_step_name": terminal_step.name},
+    )
+    return (
+        *semantic_steps[:insert_at],
+        _result_contract_followup_step(
+            result_contract_output_fields,
+            ui_language=ui_language,
+        ),
+        *semantic_steps[insert_at:],
+    ), insert_at
+
+
+def _result_contract_followup_step(
+    result_contract_output_fields: tuple[StructuredFieldDraft, ...],
+    *,
+    ui_language: str | None,
+) -> SemanticStepIntent:
+    swedish = ui_language is None or ui_language.casefold().startswith("sv")
+    return SemanticStepIntent(
+        name="Uppföljningspunkter" if swedish else "Follow-up extraction",
+        instructions=(
+            "Identifiera uppföljningsfälten ur föregående material. "
+            "Markera saknade värden som ospecificerade."
+            if swedish
+            else (
+                "Identify the follow-up fields from the preceding material. "
+                "Mark missing values as unspecified."
+            )
+        ),
+        output_type=OutputType.JSON,
+        output_fields=list(result_contract_output_fields),
+    )
 
 
 def _complete_result_contract_output_fields(
@@ -789,35 +895,16 @@ def _complete_result_contract_output_fields(
     *,
     required_fields: tuple[StructuredFieldDraft, ...],
 ) -> tuple[StructuredFieldDraft, ...]:
+    declared_names = structured_field_draft_names(fields)
     completed_fields = list(fields)
     for required_field in required_fields:
-        if _structured_fields_have_leaf(
-            tuple(completed_fields),
+        if structured_field_names_satisfy_result_field(
+            declared_names,
             required_field.name,
         ):
             continue
         completed_fields.append(required_field)
     return tuple(completed_fields)
-
-
-def _structured_fields_have_leaf(
-    fields: tuple[StructuredFieldDraft, ...],
-    field_name: str,
-) -> bool:
-    for field in fields:
-        if field.name == field_name:
-            return True
-        if field.fields and _structured_fields_have_leaf(
-            tuple(field.fields),
-            field_name,
-        ):
-            return True
-        if field.item_fields and _structured_fields_have_leaf(
-            tuple(field.item_fields),
-            field_name,
-        ):
-            return True
-    return False
 
 
 def _is_plain_terminal_document_helper(

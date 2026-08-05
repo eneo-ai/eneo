@@ -6,6 +6,7 @@ from typing import Literal
 from eneo.flows.ai_builder.ai_builder_new_step_models import (
     DocumentDeliveryMode,
     PreviousFieldRef,
+    PreviousOutputRef,
     StructuredFieldDraft,
 )
 from eneo.flows.ai_builder.ai_builder_output_sections_signals import (
@@ -75,6 +76,7 @@ class PlannedStep:
     previous_item_map_enabled: bool = False
     form_field_refs: tuple[str, ...] = ()
     previous_field_refs: tuple[PreviousFieldRef, ...] = ()
+    previous_output_refs: tuple[PreviousOutputRef, ...] = ()
     output_fields: tuple[StructuredFieldDraft, ...] = ()
     model_ref: str | None = None
     knowledge_refs: tuple[str, ...] = ()
@@ -169,7 +171,7 @@ def _validate_underlag_channel_shape(step: PlannedStep) -> None:
                 f"Planned step {step.name!r} declares underlag_channel "
                 f"{step.underlag_channel!r}; expected 'flow_input'."
             )
-        if step.previous_field_refs:
+        if step.previous_field_refs or step.previous_output_refs:
             raise ValueError(
                 f"Planned step {step.name!r} cannot reference previous output "
                 "while reading flow input."
@@ -181,7 +183,11 @@ def _validate_underlag_channel_shape(step: PlannedStep) -> None:
                 f"Planned step {step.name!r} declares underlag_channel "
                 f"{step.underlag_channel!r}; expected 'fan_in'."
             )
-        if step.form_field_refs or step.previous_field_refs:
+        if (
+            step.form_field_refs
+            or step.previous_field_refs
+            or step.previous_output_refs
+        ):
             raise ValueError(
                 f"Planned step {step.name!r} cannot combine fan-in with "
                 "explicit form fields or previous refs."
@@ -309,6 +315,13 @@ def _validate_previous_refs(
     structured_field_paths_by_step: tuple[frozenset[str], ...],
     source_reader_steps: tuple[bool, ...],
 ) -> None:
+    for output_ref in step.previous_output_refs:
+        if output_ref.from_step < 1 or output_ref.from_step > expected_from_step:
+            raise ValueError(
+                f"Planned step {step.name!r} references step "
+                f"{output_ref.from_step}; expected an earlier step no later "
+                f"than {expected_from_step}."
+            )
     for ref in step.previous_field_refs:
         if ref.from_step < 1 or ref.from_step > expected_from_step:
             raise ValueError(

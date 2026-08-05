@@ -98,6 +98,28 @@ def schema_leaf_property_names(schema: dict[str, Any]) -> list[str]:
     return names
 
 
+def schema_property_names_at_any_depth(schema: dict[str, Any]) -> set[str]:
+    """Return every property name in the schema, containers included.
+
+    Role recognition must see a container field like ``actions`` (an array of
+    action objects) as a declared name — leaf-only flattening would lose it.
+    """
+
+    if schema.get("type") == "array":
+        items = _dict_or_none(schema.get("items"))
+        return schema_property_names_at_any_depth(items) if items is not None else set()
+
+    names: set[str] = set()
+    for raw_name, raw_schema in resolve_schema_properties(schema).items():
+        name = str(raw_name).strip()
+        if name:
+            names.add(name)
+        child_schema = _dict_or_none(raw_schema)
+        if child_schema is not None:
+            names.update(schema_property_names_at_any_depth(child_schema))
+    return names
+
+
 def resolve_schema_properties(schema: dict[str, Any]) -> dict[str, Any]:
     properties: dict[str, Any] = {}
     _merge_schema_properties(properties, [schema])

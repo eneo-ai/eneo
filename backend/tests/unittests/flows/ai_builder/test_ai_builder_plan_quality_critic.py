@@ -5475,3 +5475,150 @@ class TestRichWorkflowInvariants:
         assert not any(
             "återanvända strukturerad" in issue.casefold() for issue in issues
         )
+
+
+def test_action_followup_critic_accepts_authentic_swedish_field_names() -> None:
+    # The critic's own remediation asks (in Swedish) for beslut, åtgärder,
+    # ansvariga, deadlines och öppna frågor — a contract using exactly those
+    # words must satisfy it. Diacritics and plural forms are the live shapes.
+    planning_state = PlanningState.empty()
+    planning_state.resolved_slots["post_processing_goal"] = ResolvedSlot(
+        name="post_processing_goal",
+        value="action_followup",
+        source="structured_answer",
+        confidence="high",
+        evidence=["question_answer:post_processing_goal"],
+    )
+    spec = FlowDraftSpecCore(
+        flow_name="Mötesuppföljning",
+        steps=[
+            _step(
+                "step_a",
+                "Extrahera uppföljning",
+                "Extrahera uppföljningspunkter ur transkriptet.",
+                output_type=OutputType.JSON,
+                output_contract={
+                    "type": "object",
+                    "properties": {
+                        "beslut": {"type": "array"},
+                        "åtgärder": {"type": "array"},
+                        "ansvariga": {"type": "array"},
+                        "deadlines": {"type": "array"},
+                        "öppna_frågor": {"type": "array"},
+                    },
+                },
+            )
+        ],
+    )
+
+    issues = evaluate_critic_invariants(
+        build_conversation_critic_context(
+            [{"role": "user", "content": "Använd underlaget."}],
+            spec,
+            planning_state=planning_state,
+        )
+    )
+
+    assert "action_followup_requires_followup_fields" not in {
+        issue.id for issue in issues
+    }
+
+
+def test_action_followup_critic_recognizes_roles_nested_in_action_items() -> None:
+    # An explicit nested schema that carries owners and deadlines inside the
+    # action items satisfies those roles; flattened-alias matching must not
+    # misread it as a user-schema conflict.
+    planning_state = PlanningState.empty()
+    planning_state.resolved_slots["post_processing_goal"] = ResolvedSlot(
+        name="post_processing_goal",
+        value="action_followup",
+        source="structured_answer",
+        confidence="high",
+        evidence=["question_answer:post_processing_goal"],
+    )
+    spec = FlowDraftSpecCore(
+        flow_name="Uppföljning",
+        steps=[
+            _step(
+                "step_a",
+                "Extract follow-up",
+                "Extract the follow-up result.",
+                output_type=OutputType.JSON,
+                output_contract={
+                    "type": "object",
+                    "properties": {
+                        "decisions": {"type": "array"},
+                        "actions": {
+                            "type": "array",
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "description": {"type": "string"},
+                                    "named_owner": {"type": "string"},
+                                    "stated_due_date": {"type": "string"},
+                                },
+                            },
+                        },
+                        "open_questions": {"type": "array"},
+                    },
+                },
+            )
+        ],
+    )
+
+    issues = evaluate_critic_invariants(
+        build_conversation_critic_context(
+            [{"role": "user", "content": "Use the material."}],
+            spec,
+            planning_state=planning_state,
+        )
+    )
+
+    assert "action_followup_requires_followup_fields" not in {
+        issue.id for issue in issues
+    }
+
+
+def test_action_followup_critic_rejects_lookalike_field_names() -> None:
+    # Role recognition is a closed exact-folded vocabulary: names that merely
+    # contain an accepted alias must not satisfy the roles, or the quality
+    # contract becomes trivially spoofable.
+    planning_state = PlanningState.empty()
+    planning_state.resolved_slots["post_processing_goal"] = ResolvedSlot(
+        name="post_processing_goal",
+        value="action_followup",
+        source="structured_answer",
+        confidence="high",
+        evidence=["question_answer:post_processing_goal"],
+    )
+    spec = FlowDraftSpecCore(
+        flow_name="Lookalikes",
+        steps=[
+            _step(
+                "step_a",
+                "Extract",
+                "Extract the result.",
+                output_type=OutputType.JSON,
+                output_contract={
+                    "type": "object",
+                    "properties": {
+                        "indecision_reason": {"type": "string"},
+                        "transaction_id": {"type": "string"},
+                        "homeownership_status": {"type": "string"},
+                        "overdue_date": {"type": "string"},
+                        "open_questions_count": {"type": "number"},
+                    },
+                },
+            )
+        ],
+    )
+
+    issues = evaluate_critic_invariants(
+        build_conversation_critic_context(
+            [{"role": "user", "content": "Use the material."}],
+            spec,
+            planning_state=planning_state,
+        )
+    )
+
+    assert "action_followup_requires_followup_fields" in {issue.id for issue in issues}

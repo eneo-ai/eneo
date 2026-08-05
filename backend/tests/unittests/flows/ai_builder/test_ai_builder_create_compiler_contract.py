@@ -24,6 +24,9 @@ from eneo.flows.ai_builder.ai_builder_create_compiler import (
 from eneo.flows.ai_builder.ai_builder_critic_invariants import (
     evaluate_critic_invariants,
 )
+from eneo.flows.ai_builder.ai_builder_json_schema_paths import (
+    schema_leaf_property_names,
+)
 from eneo.flows.ai_builder.ai_builder_new_step_models import StructuredFieldDraft
 from eneo.flows.ai_builder.ai_builder_output_sections_signals import (
     RequestedOutputSections,
@@ -36,6 +39,9 @@ from eneo.flows.ai_builder.ai_builder_proposal_intent import (
     FlowInputFieldIntent,
     ProposalIntentArgumentError,
     parse_create_flow_intent_arguments,
+)
+from eneo.flows.ai_builder.ai_builder_result_contract import (
+    ResultOutputFieldRole,
 )
 from eneo.flows.ai_builder.ai_builder_runtime_input_fields import (
     RuntimeInputFieldHint,
@@ -5870,3 +5876,365 @@ def test_single_call_reader_removes_authored_runtime_source_file_id() -> None:
     assert item_properties["source_label"]["type"] == "string"
     assert "source_file_id" not in item_properties
     assert "source_file_id" not in reader.assistant_spec.instructions
+
+
+_ACTION_FOLLOWUP_ROLES: tuple[ResultOutputFieldRole, ...] = (
+    "decisions",
+    "actions",
+    "owners",
+    "deadlines",
+    "open_questions",
+)
+
+
+def _action_followup_contract_fields() -> tuple[StructuredFieldDraft, ...]:
+    return tuple(
+        StructuredFieldDraft(
+            name=name,
+            field_type="string",
+            description=f"{name} grundade i underlaget.",
+        )
+        for name in ("decisions", "actions", "owners", "deadlines", "open_questions")
+    )
+
+
+def test_action_followup_all_text_intent_gains_a_followup_contract_step() -> None:
+    # Mirrors the 2026-08-05 production failure: audio in, PDF out,
+    # action_followup goal, and a model intent with only readable text steps
+    # plus a render helper. Without a compiler-owned structured step the
+    # critic demands a contract no repair can produce — terminal text fields
+    # are folded away before completion looks.
+    intent = parse_create_flow_intent_arguments(
+        {
+            "flow_name": "Mötesuppföljning",
+            "plan_rationale": "Transkribera, sammanfatta och skapa PDF.",
+            "steps": [
+                {
+                    "name": "Lättläst transkript",
+                    "instructions": "Gör transkriptet lättläst med talare och stycken.",
+                    "output_type": "text",
+                },
+                {
+                    "name": "Sammanfattning och uppföljning",
+                    "instructions": "Sammanfatta mötet och lyft beslut och åtgärder.",
+                    "output_type": "text",
+                },
+                {
+                    "name": "Skapa PDF",
+                    "instructions": "Skapa PDF-dokumentet.",
+                    "output_type": "pdf",
+                },
+            ],
+        }
+    )
+
+    planning_state = PlanningState.empty()
+    planning_state.resolved_slots["post_processing_goal"] = _slot(
+        "post_processing_goal", "action_followup"
+    )
+    compiled = compile_create_intent_to_spec(
+        intent,
+        context=CreateCompileContext(
+            runtime_input_type=InputType.AUDIO,
+            final_output_type=OutputType.PDF,
+            result_contract_output_fields=_action_followup_contract_fields(),
+            result_contract_required_roles=_ACTION_FOLLOWUP_ROLES,
+            ui_language="sv",
+        ),
+    )
+
+    contract_steps = [
+        step for step in compiled.steps if step.output_contract is not None
+    ]
+    assert contract_steps, "expected a compiler-owned follow-up contract step"
+    leaf_names = set(schema_leaf_property_names(contract_steps[-1].output_contract))
+    assert {
+        "decisions",
+        "actions",
+        "owners",
+        "deadlines",
+        "open_questions",
+    } <= leaf_names
+    assert validate_spec(compiled).valid
+
+    # The terminal writer must keep BOTH inputs: the readable narrative it
+    # summarizes and the extracted follow-up object. Explicit bindings
+    # replace implicit input, so losing the narrative here reproduces the
+    # material-loss defect.
+    extraction_step = contract_steps[-1]
+    extraction_index = compiled.steps.index(extraction_step)
+    narrative_step = compiled.steps[extraction_index - 1]
+    writer_step = compiled.steps[extraction_index + 1]
+    assert writer_step.input_bindings is not None
+    bound_step_refs = {
+        ref["step_ref"] for ref in writer_step.input_bindings["source_refs"]
+    }
+    assert {
+        narrative_step.plan_step_ref,
+        extraction_step.plan_step_ref,
+    } <= bound_step_refs
+
+    issues = evaluate_critic_invariants(
+        build_conversation_critic_context(
+            [{"role": "user", "content": "Bygg flödet för mötesuppföljning."}],
+            compiled,
+            planning_state=planning_state,
+        )
+    )
+    assert "action_followup_requires_followup_fields" not in {
+        issue.id for issue in issues
+    }
+
+
+def test_action_followup_terminal_json_step_is_completed_without_duplicates() -> None:
+    # A single-step JSON outcome owned by the Builder: the compiler completes
+    # the missing follow-up roles in the terminal contract, and a Swedish
+    # field already covering a role must not gain a canonical duplicate.
+    intent = parse_create_flow_intent_arguments(
+        {
+            "flow_name": "Uppföljningsextraktion",
+            "plan_rationale": "Extrahera uppföljning.",
+            "steps": [
+                {
+                    "name": "Extrahera uppföljning",
+                    "instructions": "Extrahera uppföljningspunkter ur texten.",
+                    "output_type": "json",
+                    "output_fields": [
+                        {
+                            "name": "beslut",
+                            "field_type": "array",
+                            "description": "Beslut ur underlaget.",
+                        }
+                    ],
+                },
+            ],
+        }
+    )
+
+    compiled = compile_create_intent_to_spec(
+        intent,
+        context=CreateCompileContext(
+            runtime_input_type=InputType.TEXT,
+            final_output_type=OutputType.JSON,
+            result_contract_output_fields=_action_followup_contract_fields(),
+            result_contract_required_roles=_ACTION_FOLLOWUP_ROLES,
+            ui_language="sv",
+        ),
+    )
+
+    terminal = compiled.steps[-1]
+    assert terminal.output_contract is not None
+    leaf_names = set(schema_leaf_property_names(terminal.output_contract))
+    assert "beslut" in leaf_names
+    assert "decisions" not in leaf_names
+    assert {"actions", "owners", "deadlines", "open_questions"} <= leaf_names
+    assert validate_spec(compiled).valid
+
+
+def test_pinned_terminal_schema_is_never_completed_with_canonical_fields() -> None:
+    # A user-owned exact schema wins: the compiler must not append canonical
+    # follow-up siblings into it.
+    pinned_schema = cast(
+        JsonObject,
+        {
+            "type": "object",
+            "properties": {
+                "beslut": {"type": "array", "items": {"type": "string"}},
+            },
+            "required": ["beslut"],
+            "additionalProperties": False,
+        },
+    )
+    intent = parse_create_flow_intent_arguments(
+        {
+            "flow_name": "Exakt schema",
+            "plan_rationale": "Extrahera enligt schema.",
+            "steps": [
+                {
+                    "name": "Extrahera",
+                    "instructions": "Extrahera fälten enligt schemat.",
+                    "output_type": "json",
+                },
+            ],
+        }
+    )
+
+    compiled = compile_create_intent_to_spec(
+        intent,
+        context=CreateCompileContext(
+            runtime_input_type=InputType.TEXT,
+            final_output_type=OutputType.JSON,
+            terminal_output_schema=pinned_schema,
+            result_contract_output_fields=_action_followup_contract_fields(),
+            result_contract_required_roles=_ACTION_FOLLOWUP_ROLES,
+            ui_language="sv",
+        ),
+    )
+
+    terminal = compiled.steps[-1]
+    assert terminal.output_contract is not None
+    assert set(terminal.output_contract["properties"]) == {"beslut"}
+
+
+def test_pinned_schema_action_followup_passes_the_critic_end_to_end() -> None:
+    # The user-owned exact schema wins over the follow-up role obligations:
+    # the compiler must not append to it AND the critic must not demand roles
+    # the model cannot add — otherwise repair loops forever on a constraint
+    # it does not control.
+    pinned_schema = cast(
+        JsonObject,
+        {
+            "type": "object",
+            "properties": {
+                "beslut": {"type": "array", "items": {"type": "string"}},
+            },
+            "required": ["beslut"],
+            "additionalProperties": False,
+        },
+    )
+    planning_state = PlanningState.empty()
+    planning_state.resolved_slots["post_processing_goal"] = _slot(
+        "post_processing_goal", "action_followup"
+    )
+    planning_state.output_schema_evidence = build_schema_evidence(
+        json_schema=pinned_schema,
+        source="declared_schema",
+        confidence="high",
+        evidence=["user_message:exact-schema"],
+    )
+    intent = parse_create_flow_intent_arguments(
+        {
+            "flow_name": "Exakt uppföljningsschema",
+            "plan_rationale": "Extrahera enligt schema.",
+            "steps": [
+                {
+                    "name": "Extrahera",
+                    "instructions": "Extrahera fälten enligt schemat.",
+                    "output_type": "json",
+                },
+            ],
+        }
+    )
+
+    compiled = compile_create_intent_to_spec(
+        intent,
+        context=CreateCompileContext(
+            runtime_input_type=InputType.TEXT,
+            final_output_type=OutputType.JSON,
+            terminal_output_schema=pinned_schema,
+            result_contract_output_fields=_action_followup_contract_fields(),
+            result_contract_required_roles=_ACTION_FOLLOWUP_ROLES,
+            ui_language="sv",
+        ),
+    )
+
+    assert set(compiled.steps[-1].output_contract["properties"]) == {"beslut"}
+    issues = evaluate_critic_invariants(
+        build_conversation_critic_context(
+            [{"role": "user", "content": "Använd exakt mitt schema."}],
+            compiled,
+            planning_state=planning_state,
+        )
+    )
+    assert "action_followup_requires_followup_fields" not in {
+        issue.id for issue in issues
+    }
+
+
+def test_report_disposition_does_not_duplicate_swedish_result_fields() -> None:
+    # The document-report completion path must reuse the same role-aware
+    # merge: a model-declared Swedish field already covering a role must not
+    # gain a canonical English sibling in the overview contract.
+    intent = parse_create_flow_intent_arguments(
+        {
+            "flow_name": "Källrapport med uppföljning",
+            "plan_rationale": "Sammanställ rapport med uppföljningspunkter.",
+            "steps": [
+                {
+                    "name": "Sammanställ rapport",
+                    "instructions": "Sammanställ rapporten och uppföljningen.",
+                    "output_type": "json",
+                    "output_fields": [
+                        {
+                            "name": "beslut",
+                            "field_type": "array",
+                            "description": "Beslut ur underlaget.",
+                        },
+                        {
+                            "name": "atgarder",
+                            "field_type": "array",
+                            "description": "Åtgärder ur underlaget.",
+                        },
+                    ],
+                }
+            ],
+        }
+    )
+
+    compiled = compile_create_intent_to_spec(
+        intent,
+        context=CreateCompileContext(
+            runtime_input_type=InputType.DOCUMENT,
+            final_output_type=OutputType.PDF,
+            final_output_mode=OutputMode.RENDER_VERBATIM,
+            aggregation_intent="linear",
+            report_disposition="synthesized_overview",
+            result_contract_output_fields=_action_followup_contract_fields(),
+            result_contract_required_roles=_ACTION_FOLLOWUP_ROLES,
+            runtime_max_files=4,
+            ui_language="sv",
+        ),
+    )
+
+    for step in compiled.steps:
+        if step.output_contract is None:
+            continue
+        step_names = set(schema_leaf_property_names(step.output_contract))
+        assert not {"beslut", "decisions"} <= step_names, step.name
+        assert not {"atgarder", "actions"} <= step_names, step.name
+
+
+def test_secondary_open_questions_alone_does_not_insert_extraction_step() -> None:
+    # A non-action goal (e.g. summarize) with the secondary open_questions
+    # obligation contributes an open_questions result field but NO required
+    # roles — assembly must not graft the action-followup extraction topology
+    # (an extra model call) onto such flows.
+    intent = parse_create_flow_intent_arguments(
+        {
+            "flow_name": "Mötessammanfattning",
+            "plan_rationale": "Transkribera och sammanfatta.",
+            "steps": [
+                {
+                    "name": "Lättläst transkript",
+                    "instructions": "Gör transkriptet lättläst.",
+                    "output_type": "text",
+                },
+                {
+                    "name": "Sammanfattning",
+                    "instructions": "Sammanfatta mötet.",
+                    "output_type": "text",
+                },
+            ],
+        }
+    )
+
+    compiled = compile_create_intent_to_spec(
+        intent,
+        context=CreateCompileContext(
+            runtime_input_type=InputType.AUDIO,
+            final_output_type=OutputType.PDF,
+            result_contract_output_fields=(
+                StructuredFieldDraft(
+                    name="open_questions",
+                    field_type="string",
+                    description="Öppna frågor som behöver besvaras.",
+                ),
+            ),
+            result_contract_required_roles=(),
+            ui_language="sv",
+        ),
+    )
+
+    assert all(step.output_type != OutputType.JSON for step in compiled.steps)
+    assert all("Uppföljningspunkter" != step.name for step in compiled.steps)
+    assert validate_spec(compiled).valid

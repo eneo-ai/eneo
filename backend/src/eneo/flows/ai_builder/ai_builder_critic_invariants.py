@@ -51,6 +51,7 @@ from eneo.flows.ai_builder.ai_builder_input_architecture_policy import (
 )
 from eneo.flows.ai_builder.ai_builder_json_schema_paths import (
     schema_leaf_property_names,
+    schema_property_names_at_any_depth,
 )
 from eneo.flows.ai_builder.ai_builder_output_sections_signals import (
     RequestedOutputSections,
@@ -773,6 +774,18 @@ def _action_followup_requires_followup_fields_evidence(
     ):
         return False
 
+    # The same precedence the compiler applies: a user-supplied exact output
+    # schema becomes the terminal contract verbatim, and the model cannot
+    # modify it — demanding follow-up roles beyond it would loop repair
+    # forever on a constraint the model does not control.
+    if (
+        context.output_schema_evidence is not None
+        and context.output_schema_evidence.source != "template_placeholders"
+        and context.spec.steps
+        and context.spec.steps[-1].output_type == OutputType.JSON
+    ):
+        return False
+
     # All follow-up roles must survive into ONE outcome-bearing structured
     # contract — the last step that declares one. A union across steps would
     # accept roles that an earlier step captures but the outcome contract
@@ -789,7 +802,7 @@ def _action_followup_requires_followup_fields_evidence(
         return True
     declared_roles = resolve_result_output_field_roles(
         context.result_contract,
-        set(schema_leaf_property_names(outcome_contract)),
+        schema_property_names_at_any_depth(outcome_contract),
     )
     return (
         not set(context.result_contract.required_output_field_roles) <= declared_roles

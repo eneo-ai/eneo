@@ -18,6 +18,10 @@ def normalize_structured_field_list(
 ) -> list[dict[str, Any]] | None:
     """Coerce loose LLM-shaped field hints into strict field drafts."""
 
+    if isinstance(value, list) and not value:
+        # An explicit empty list is a statement ("no structured fields"),
+        # not lost content — logging it as dropped misleads incident triage.
+        return None
     raw_items = _coerce_field_items(value)
     if raw_items is None:
         if value is not None:

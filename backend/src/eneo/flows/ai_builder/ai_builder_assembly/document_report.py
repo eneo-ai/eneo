@@ -18,12 +18,18 @@ from eneo.flows.ai_builder.ai_builder_json_schema_paths import (
     missing_structured_output_path,
 )
 from eneo.flows.ai_builder.ai_builder_new_step_compiler import make_plan_step_ref
-from eneo.flows.ai_builder.ai_builder_new_step_models import StructuredFieldDraft
+from eneo.flows.ai_builder.ai_builder_new_step_models import (
+    StructuredFieldDraft,
+    structured_field_draft_names,
+)
 from eneo.flows.ai_builder.ai_builder_output_sections_signals import (
     RequestedOutputSectionContract,
     RequestedOutputSections,
 )
 from eneo.flows.ai_builder.ai_builder_proposal_intent import SemanticStepIntent
+from eneo.flows.ai_builder.ai_builder_result_contract import (
+    structured_field_names_satisfy_result_field,
+)
 from eneo.flows.ai_builder.ai_builder_source_reader_contracts import (
     SourceCaptureField,
     complete_structured_source_reader_fields,
@@ -990,11 +996,14 @@ def _complete_source_section_fields_for_compose(
             if include_runtime_file_id
             else ()
         ),
-        *result_contract_output_fields,
         *requested_section_fields,
     )
     for field in canonical_fields:
         item_fields = _set_canonical_structured_field(item_fields, field)
+    item_fields = _merge_result_contract_fields(
+        item_fields,
+        result_contract_output_fields,
+    )
     completed_array_field = array_field.model_copy(update={"item_fields": item_fields})
     return replace(planned_step, output_fields=(completed_array_field,))
 
@@ -1010,6 +1019,33 @@ def _set_canonical_structured_field(
         updated_fields[index] = field
         return updated_fields
     return [*fields, field]
+
+
+def _merge_result_contract_fields(
+    fields: list[StructuredFieldDraft],
+    result_contract_output_fields: tuple[StructuredFieldDraft, ...],
+) -> list[StructuredFieldDraft]:
+    """Add required result fields unless an equivalent field already exists.
+
+    Exact-name matches are upserted like layout fields; a Swedish or compound
+    field that already covers the role must not gain a canonical duplicate.
+    """
+
+    merged_fields = list(fields)
+    for required_field in result_contract_output_fields:
+        if any(existing.name == required_field.name for existing in merged_fields):
+            merged_fields = _set_canonical_structured_field(
+                merged_fields,
+                required_field,
+            )
+            continue
+        if structured_field_names_satisfy_result_field(
+            structured_field_draft_names(merged_fields),
+            required_field.name,
+        ):
+            continue
+        merged_fields.append(required_field)
+    return merged_fields
 
 
 def _section_title_field(ui_language: str | None) -> StructuredFieldDraft:
@@ -1114,15 +1150,15 @@ def _report_overview_fields(
         if field.name
         not in {"overview", COMPOSE_REPORT_TITLE_KEY, COMPOSE_OVERALL_OVERVIEW_KEY}
     ]
-    for report_field in (
-        *report_fields,
-        *result_contract_output_fields,
-        *requested_section_fields,
-    ):
+    for report_field in (*report_fields, *requested_section_fields):
         completed_fields = _set_canonical_structured_field(
             completed_fields,
             report_field,
         )
+    completed_fields = _merge_result_contract_fields(
+        completed_fields,
+        result_contract_output_fields,
+    )
     return tuple(completed_fields)
 
 
