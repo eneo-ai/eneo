@@ -444,6 +444,14 @@ external release gate (item 10); BM0.2 is external (item 10).
     flow with mutation-proven behavior tests. Deferred by honesty: the
     template-failure and edit-retention journeys return with executed-cohort
     and edit-session harness support respectively.
+    First tjansteskrivelse/attachment cohort attempt (2026-08-05,
+    `7d791c41a`): attachment cases still fixture-skip pending the
+    post-upload evidence-SHA capture loop (file IDs uploaded; capture in
+    progress). The vague tjansteskrivelse interview case showed run-to-run
+    variance: one run asked a non-preferred first question and errored, the
+    next produced a first-pass two-step plan but asked zero questions where
+    the rubric requires at least one — a purpose-first ask-rate signal to
+    watch across repetitions, not yet a policy change.
     The post-B7(h) smoke_v3 run (2026-08-05, served `a4894ee63`, locked
     Luna route, 9 live journeys) shows purpose-first live: every asked first
     question rated preferred, zero forbidden questions, the prior
