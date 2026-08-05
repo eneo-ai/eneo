@@ -831,26 +831,16 @@ plan above controls all other ordering.
   save-time prompt admission and typed runtime context-window refusal remain the
   fit owners. More than eight fields, a complete long description, and a short
   name already occurring inside authored instructions are covered without a
-  duplicate test matrix or admin setting. (e) PARTIAL —
-  deterministic report lowering and its assembly owner landed (`f2848f110`,
-  `70e30ac28`): per-disposition lowering is exhaustively typed (assert_never
-  over per_source_sections/synthesized_overview/both) and the low-level
-  assembly invariant stays fail-closed and non-model-repairable without
-  turn-controller duplication. A 2026-08-04 read-only source audit names the
-  remaining completion scope before (e) can close: (e-r1) multi-step committed
-  report plans still depend on the model naming a documents-family array for
-  the per-source reader (only single-step plans are rewritten;
-  `report_disposition` never reaches the proposal prompt), otherwise assembly
-  fail-closes; (e-r2) a committed disposition with `runtime_max_files`
-  unset or 1 never gets a per-source reader and dead-ends in
-  `assembly_document_report_compose_topology_missing` instead of being lowered
-  or blocked upstream; (e-r3) the lowered compose topology can trip semantic
-  critic invariants (`final_text_step_must_reference_relevant_structured_outputs`,
-  `requested_output_sections_require_section_writers`) whose remediation the
-  model cannot satisfy because lowering folds its changes back — exempt
-  compiler-owned compose topology or bind it so the rules are structurally
-  satisfied, and add a finalization-level no-critic-issues proof per
-  disposition. *(M)*
+  duplicate test matrix or admin setting. (e) **LANDED `fc5a7395d`** — report lowering is total for every
+  committed disposition: multi-step plans lower without model-named
+  documents arrays, retained structured producers bind into composition,
+  requested sections survive as typed {original_label, derived_key} pairs
+  (collision-proof keys, escaped grammar, verbatim labels), one canonical
+  producer/field selection carries through binding, postcondition, critic,
+  and single-call guidance, the three mapped-limit states have explicit
+  behaviors, and report-shape admission moved from assembly/create.py into
+  the document_report owner. The fail-closed assembly invariant remains for
+  corrupt plans (seven-iteration Codex gate, final green 8/10). *(M)*
 - **B11** (exact-template workflow topology): **LANDED `37777fab1`** —
   template flows admit model-authored analysis/validation stages between the
   fixed backend reader and the fixed TEMPLATE_FILL terminal (product
