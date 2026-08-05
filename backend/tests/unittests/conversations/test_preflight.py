@@ -231,7 +231,11 @@ async def test_preflight_counts_assistant_attachments_despite_inline_disabled(
 
     service = _make_service(assistant=assistant)
     service.assistant_service.get_preflight_baseline = AsyncMock(
-        return_value=(None, [attachment])
+        return_value=SimpleNamespace(
+            prompt_tokens=0,
+            attachments=[attachment],
+            skill_context_tokens=0,
+        )
     )
 
     result = await service.preflight_tokens(
