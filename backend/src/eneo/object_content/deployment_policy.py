@@ -96,6 +96,7 @@ class UploadAdmissionSnapshot:
     session_audio_maximum_bytes: int
     knowledge_file_maximum_bytes: int
     knowledge_audio_maximum_bytes: int
+    object_store_revision: int | None = None
 
 
 def project_upload_limits(
@@ -236,6 +237,7 @@ async def load_upload_admission_snapshot(
     *,
     inline_maximum_bytes: int,
     object_store_maximum_bytes: int | None,
+    object_store_revision: int | None = None,
 ) -> UploadAdmissionSnapshot:
     policy = await DeploymentPolicyRepository(session).get()
     projections = {
@@ -264,4 +266,5 @@ async def load_upload_admission_snapshot(
         knowledge_audio_maximum_bytes=projections[
             UploadLimitUseCase.KNOWLEDGE_AUDIO
         ].effective_bytes,
+        object_store_revision=object_store_revision,
     )

@@ -20,6 +20,7 @@ _UPLOAD_ADMISSION = UploadAdmissionSnapshot(
     session_audio_maximum_bytes=9,
     knowledge_file_maximum_bytes=10,
     knowledge_audio_maximum_bytes=12,
+    object_store_revision=7,
 )
 
 
@@ -165,7 +166,8 @@ async def test_queue_upload_file_preserves_file_on_success(
         == _UPLOAD_ADMISSION.knowledge_file_maximum_bytes
     )
     object_content.ensure_target_ready.assert_awaited_once_with(
-        StorageKind.OBJECT_STORE
+        StorageKind.OBJECT_STORE,
+        object_store_revision=7,
     )
     assert remaining[0].name == str(call.kwargs["job_id"])
 

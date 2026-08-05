@@ -61,7 +61,7 @@
 
   <div class="flex flex-wrap items-center justify-end gap-3">
     {#if lastRefreshed !== null}
-      <span class="text-muted text-xs">
+      <span class="text-muted text-sm">
         {m.storage_last_refreshed({ time: lastRefreshed })}
       </span>
     {/if}
@@ -116,11 +116,11 @@
       </Collapsible.Trigger>
       <Collapsible.Content id="storage-inventory-details" class="pt-3">
         {#if inventory.inventory.length === 0}
-          <p class="border-default text-muted rounded-lg border px-4 py-3 text-sm">
+          <p class="text-muted py-3 text-sm">
             {m.storage_inventory_empty()}
           </p>
         {:else}
-          <div class="border-default overflow-x-auto rounded-lg border">
+          <div class="border-default border-y [&_td]:px-3 [&_th]:px-3">
             <Table.Root class="min-w-[640px]">
               <Table.Caption class="sr-only">
                 {m.storage_inventory_caption()}

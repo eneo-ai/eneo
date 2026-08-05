@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from fastapi.testclient import TestClient
 from httpx import ASGITransport, AsyncClient
-from sqlalchemy.ext.asyncio import AsyncConnection
+from sqlalchemy.ext.asyncio import AsyncConnection, AsyncSession
 
 import eneo.object_content.runtime as runtime_module
 import eneo.server.main as server_main
@@ -51,6 +51,16 @@ class _CountingDisabledDatabase(DatabaseSessionManager):
             yield cast(AsyncConnection, connection)
         finally:
             self.connect_in_flight -= 1
+
+    @asynccontextmanager
+    async def session(self) -> AsyncGenerator[AsyncSession]:
+        session = MagicMock(spec=AsyncSession)
+        session.scalar = AsyncMock(return_value=None)
+        transaction = AsyncMock()
+        transaction.__aenter__.return_value = None
+        transaction.__aexit__.return_value = None
+        session.begin = MagicMock(return_value=transaction)
+        yield cast(AsyncSession, session)
 
 
 def test_liveness_stays_green_while_object_store_readiness_recovers(

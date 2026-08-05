@@ -68,6 +68,8 @@ def get_container(
     ) -> Container:
         if request.method == "OPTIONS":
             return container
+        if with_upload_admission:
+            await object_content_runtime.refresh_object_store_configuration()
 
         async def authenticate_and_prepare_container() -> UserInDB:
             user = await container.user_service().authenticate(
@@ -138,6 +140,9 @@ async def load_container_upload_admission(
         session,
         inline_maximum_bytes=object_content_runtime.inline_maximum_bytes,
         object_store_maximum_bytes=(object_content_runtime.object_store_maximum_bytes),
+        object_store_revision=(
+            object_content_runtime.object_store_configuration_revision
+        ),
     )
     container.upload_admission.override(  # pyright: ignore[reportUnknownMemberType]
         providers.Object(snapshot)
