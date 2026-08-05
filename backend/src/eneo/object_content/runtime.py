@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Callable
 from dataclasses import dataclass
 from enum import StrEnum
 from time import monotonic
+from uuid import UUID
 
 from sqlalchemy import exists, or_, select
 from sqlalchemy.exc import SQLAlchemyError
@@ -15,11 +17,14 @@ from eneo.database.tables.object_content_table import (
     ObjectContentOrphanCandidates,
     ObjectContents,
 )
+from eneo.main.logging import get_logger
 from eneo.object_content.configuration import (
     ObjectContentCoreSettings,
     ObjectContentSettings,
+    ObjectStoreOperatorSettings,
     load_object_content_core_settings,
     load_object_content_settings,
+    load_object_store_operator_settings,
 )
 from eneo.object_content.content import (
     ContentMoveState,
@@ -29,6 +34,16 @@ from eneo.object_content.content import (
     StorageKind,
 )
 from eneo.object_content.content_service import ObjectContentService
+from eneo.object_content.object_store_connection import (
+    ObjectStoreConnectionDatabaseUnavailable,
+    ObjectStoreConnectionError,
+    ObjectStoreConnectionInput,
+    ObjectStoreConnectionService,
+    ObjectStoreConnectionSource,
+    ObjectStoreCredentialRotation,
+    StoredObjectStoreConnection,
+)
+from eneo.object_content.object_store_provider import ObjectStoreProvider
 from eneo.object_content.reconciliation import (
     ObjectContentReconciler,
     ReconciliationResult,
@@ -37,6 +52,7 @@ from eneo.object_content.reconciliation_repository import (
     ObjectContentHealthFacts,
 )
 from eneo.object_content.s3_object_store import S3ObjectStore
+from eneo.settings.encryption_service import EncryptionService
 
 _ACTIVE_CONTENT_STATES = tuple(
     state.value for state in ContentState if state is not ContentState.TOMBSTONED
@@ -44,6 +60,8 @@ _ACTIVE_CONTENT_STATES = tuple(
 # Bound dependency amplification without hiding an outage or recovery for more
 # than one second. This is an internal probe-safety invariant, not product policy.
 _READINESS_CACHE_SECONDS = 1.0
+
+logger = get_logger(__name__)
 
 
 class ObjectContentReadinessCode(StrEnum):
@@ -81,8 +99,10 @@ class ObjectContentRuntime:
         self._database = database
         self._state = ObjectContentRuntimeState.NOT_STARTED
         self._core_settings: ObjectContentCoreSettings | None = None
-        self._settings: ObjectContentSettings | None = None
-        self._store: S3ObjectStore | None = None
+        self._legacy_settings: ObjectContentSettings | None = None
+        self._object_store_provider: ObjectStoreProvider | None = None
+        self._connection_service: ObjectStoreConnectionService | None = None
+        self._configuration_initialized = False
         self._service: ObjectContentService | None = None
         self._reconciler: ObjectContentReconciler | None = None
         self._readiness_lock = asyncio.Lock()
@@ -94,6 +114,9 @@ class ObjectContentRuntime:
         core_settings: ObjectContentCoreSettings | None = None,
         settings: ObjectContentSettings | None = None,
         store: S3ObjectStore | None = None,
+        operator_settings: ObjectStoreOperatorSettings | None = None,
+        encryption: EncryptionService | None = None,
+        store_factory: Callable[[ObjectContentSettings], S3ObjectStore] = S3ObjectStore,
     ) -> None:
         if self._state is not ObjectContentRuntimeState.NOT_STARTED:
             raise RuntimeError("Object-content runtime is already initialized")
@@ -104,45 +127,64 @@ class ObjectContentRuntime:
             if core_settings is not None
             else load_object_content_core_settings()
         )
-        resolved_settings = (
-            settings if settings is not None else load_object_content_settings()
-        )
-        if resolved_settings is None:
+        if settings is not None:
+            resolved_store = store or store_factory(settings)
+            provider = ObjectStoreProvider.fixed(settings, resolved_store)
+            legacy_settings = None
+            connection_service = None
+        else:
             if store is not None:
                 raise ValueError(
                     "An object-content store cannot be supplied without settings"
                 )
-            resolved_store = None
-        else:
-            resolved_store = store or S3ObjectStore(resolved_settings)
+            legacy_settings = load_object_content_settings()
+            resolved_operator_settings = (
+                operator_settings
+                if operator_settings is not None
+                else load_object_store_operator_settings()
+            )
+            connection_service = ObjectStoreConnectionService(
+                database=self._database,
+                core_settings=resolved_core_settings,
+                operator_settings=resolved_operator_settings,
+                encryption=encryption or EncryptionService(),
+                store_factory=store_factory,
+            )
+            provider = ObjectStoreProvider(
+                connection_service=connection_service,
+                legacy_settings=legacy_settings,
+                store_factory=store_factory,
+            )
         self._core_settings = resolved_core_settings
-        self._settings = resolved_settings
-        self._store = resolved_store
+        self._legacy_settings = legacy_settings
+        self._object_store_provider = provider
+        self._connection_service = connection_service
+        self._configuration_initialized = settings is not None
         self._service = ObjectContentService(
             resolved_core_settings,
             self._database,
-            object_store_settings=resolved_settings,
-            object_store=resolved_store,
+            object_store_provider=provider,
         )
         self._reconciler = ObjectContentReconciler(
             resolved_core_settings,
             self._database,
-            object_store_settings=resolved_settings,
-            object_store=resolved_store,
+            object_store_provider=provider,
         )
         self._state = ObjectContentRuntimeState.ENABLED
 
     async def stop(self) -> None:
-        store = self._store
+        provider = self._object_store_provider
         self._readiness_cache = None
         self._core_settings = None
-        self._settings = None
-        self._store = None
+        self._legacy_settings = None
+        self._object_store_provider = None
+        self._connection_service = None
+        self._configuration_initialized = False
         self._service = None
         self._reconciler = None
         self._state = ObjectContentRuntimeState.NOT_STARTED
-        if store is not None:
-            await store.close()
+        if provider is not None:
+            await provider.close()
 
     @property
     def state(self) -> ObjectContentRuntimeState:
@@ -154,7 +196,8 @@ class ObjectContentRuntime:
 
     @property
     def object_store_configured(self) -> bool:
-        return self._settings is not None
+        provider = self._object_store_provider
+        return provider is not None and provider.configured
 
     @property
     def inline_maximum_bytes(self) -> int:
@@ -167,10 +210,36 @@ class ObjectContentRuntime:
 
     @property
     def object_store_maximum_bytes(self) -> int | None:
-        settings = self._settings
-        if settings is None:
-            return None
-        return settings.maximum_multipart_bytes
+        provider = self._object_store_provider
+        return provider.maximum_bytes if provider is not None else None
+
+    @property
+    def object_store_configuration_revision(self) -> int | None:
+        provider = self._object_store_provider
+        return provider.configuration_revision if provider is not None else None
+
+    @property
+    def object_store_connection_source(self) -> ObjectStoreConnectionSource:
+        provider = self._object_store_provider
+        return (
+            provider.source
+            if provider is not None
+            else ObjectStoreConnectionSource.UNCONFIGURED
+        )
+
+    @property
+    def stored_object_store_connection(self) -> StoredObjectStoreConnection | None:
+        provider = self._object_store_provider
+        return provider.stored_connection if provider is not None else None
+
+    @property
+    def legacy_object_store_settings(self) -> ObjectContentSettings | None:
+        return self._legacy_settings
+
+    @property
+    def object_store_credentials_can_be_managed(self) -> bool:
+        service = self._connection_service
+        return service is not None and service.credential_encryption_active
 
     @property
     def service(self) -> ObjectContentService:
@@ -190,6 +259,75 @@ class ObjectContentRuntime:
             )
         return reconciler
 
+    async def refresh_object_store_configuration(self) -> None:
+        provider = self._object_store_provider
+        if provider is None:
+            raise ObjectContentUnavailableError(
+                "Durable object content is not initialized"
+            )
+        if not self._configuration_initialized:
+            await provider.initialize()
+            self._configuration_initialized = True
+        else:
+            await provider.refresh()
+        self._readiness_cache = None
+
+    async def create_object_store_connection(
+        self,
+        candidate: ObjectStoreConnectionInput,
+        *,
+        actor_user_id: UUID,
+    ) -> StoredObjectStoreConnection:
+        connection_service = self._connection_service
+        if connection_service is None:
+            raise ObjectContentConfigurationError(
+                "Admin-managed object storage is unavailable in this runtime"
+            )
+        stored = await connection_service.create(
+            candidate,
+            actor_user_id=actor_user_id,
+        )
+        await self._publish_saved_object_store_connection(stored)
+        return stored
+
+    async def rotate_object_store_credentials(
+        self,
+        replacement: ObjectStoreCredentialRotation,
+        *,
+        actor_user_id: UUID,
+    ) -> StoredObjectStoreConnection:
+        connection_service = self._connection_service
+        if connection_service is None:
+            raise ObjectContentConfigurationError(
+                "Admin-managed object storage is unavailable in this runtime"
+            )
+        stored = await connection_service.rotate_credentials(
+            replacement,
+            actor_user_id=actor_user_id,
+        )
+        await self._publish_saved_object_store_connection(stored)
+        return stored
+
+    async def _publish_saved_object_store_connection(
+        self,
+        stored: StoredObjectStoreConnection,
+    ) -> None:
+        self._readiness_cache = None
+        provider = self._object_store_provider
+        if provider is None:
+            logger.warning(
+                "object_store.connection_publication_skipped",
+                extra={"revision": stored.revision},
+            )
+            return
+        try:
+            await provider.publish(stored)
+        except Exception:
+            logger.exception(
+                "object_store.connection_publication_failed",
+                extra={"revision": stored.revision},
+            )
+
     async def readiness(self) -> ObjectContentReadiness:
         if self._state is ObjectContentRuntimeState.NOT_STARTED:
             return ObjectContentReadiness(
@@ -207,7 +345,24 @@ class ObjectContentRuntime:
             cached = self._cached_readiness()
             if cached is not None:
                 return cached
-            readiness = await self._refresh_readiness()
+            try:
+                await self.refresh_object_store_configuration()
+                readiness = await self._refresh_readiness()
+            except (
+                OSError,
+                SQLAlchemyError,
+                ObjectContentUnavailableError,
+                ObjectStoreConnectionDatabaseUnavailable,
+            ):
+                readiness = ObjectContentReadiness(
+                    ready=False,
+                    code=ObjectContentReadinessCode.DATABASE_UNAVAILABLE,
+                )
+            except ObjectStoreConnectionError:
+                readiness = ObjectContentReadiness(
+                    ready=False,
+                    code=ObjectContentReadinessCode.CONFIGURATION_REQUIRED,
+                )
             self._readiness_cache = (
                 readiness,
                 monotonic() + _READINESS_CACHE_SECONDS,
@@ -289,6 +444,9 @@ class ObjectContentRuntime:
                 ready=True,
                 code=ObjectContentReadinessCode.STORE_DEGRADED,
             )
+        provider = self._object_store_provider
+        if provider is not None:
+            await provider.adopt_validated_legacy()
         return ObjectContentReadiness(
             ready=True,
             code=ObjectContentReadinessCode.READY,
@@ -300,6 +458,7 @@ class ObjectContentRuntime:
             raise ObjectContentUnavailableError(
                 "Durable object content is not initialized"
             )
+        await self.refresh_object_store_configuration()
         requires_object_store = await self._requires_object_store_configuration()
         if not self.object_store_configured:
             if requires_object_store:
@@ -308,6 +467,9 @@ class ObjectContentRuntime:
                 )
             return
         await self.service.check_object_store_ready()
+        provider = self._object_store_provider
+        if provider is not None:
+            await provider.adopt_validated_legacy()
 
     async def _requires_object_store_configuration(self) -> bool:
         try:
@@ -353,6 +515,7 @@ class ObjectContentRuntime:
             raise ObjectContentUnavailableError(
                 "Durable object content is not initialized"
             )
+        await self.refresh_object_store_configuration()
         if (
             not self.object_store_configured
             and await self._requires_object_store_configuration()

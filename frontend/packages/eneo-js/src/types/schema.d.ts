@@ -6027,6 +6027,50 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/admin/object-store-connection": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get Object Store Connection
+     * @description Get the deployment-wide S3-compatible destination without returning credentials or internal object identifiers. Platform administrators only.
+     */
+    get: operations["get_object_store_connection_api_v1_admin_object_store_connection_get"];
+    put?: never;
+    /**
+     * Create Object Store Connection
+     * @description Test and save the first deployment-wide S3-compatible destination. This does not select it for new writes or move existing content.
+     */
+    post: operations["create_object_store_connection_api_v1_admin_object_store_connection_post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/admin/object-store-connection/credentials": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    /**
+     * Rotate Object Store Credentials
+     * @description Test and replace credentials for the configured destination without changing its endpoint, bucket, signing region, or addressing style.
+     */
+    put: operations["rotate_object_store_credentials_api_v1_admin_object_store_connection_credentials_put"];
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/spaces/{space_id}/skills/": {
     parameters: {
       query?: never;
@@ -14400,6 +14444,71 @@ export interface components {
       | "configuration_required"
       | "database_unavailable"
       | "store_degraded";
+    /** ObjectStoreConnectionInput */
+    ObjectStoreConnectionInput: {
+      /** Endpoint Url */
+      endpoint_url: string;
+      /** Region */
+      region: string;
+      /** Bucket */
+      bucket: string;
+      /**
+       * Access Key Id
+       * Format: password
+       */
+      access_key_id: string;
+      /**
+       * Secret Access Key
+       * Format: password
+       */
+      secret_access_key: string;
+      /**
+       * Addressing Style
+       * @default path
+       * @enum {string}
+       */
+      addressing_style?: "path" | "virtual";
+    };
+    /** ObjectStoreConnectionPublic */
+    ObjectStoreConnectionPublic: {
+      source: components["schemas"]["ObjectStoreConnectionSource"];
+      /** Configured */
+      configured: boolean;
+      /** Credentials Can Be Managed */
+      credentials_can_be_managed: boolean;
+      /** Revision */
+      revision?: number | null;
+      /** Endpoint Url */
+      endpoint_url?: string | null;
+      /** Region */
+      region?: string | null;
+      /** Bucket */
+      bucket?: string | null;
+      /** Addressing Style */
+      addressing_style?: ("path" | "virtual") | null;
+      /** Updated At */
+      updated_at?: string | null;
+    };
+    /**
+     * ObjectStoreConnectionSource
+     * @enum {string}
+     */
+    ObjectStoreConnectionSource: "unconfigured" | "environment" | "admin";
+    /** ObjectStoreCredentialRotation */
+    ObjectStoreCredentialRotation: {
+      /** Expected Revision */
+      expected_revision: number;
+      /**
+       * Access Key Id
+       * Format: password
+       */
+      access_key_id: string;
+      /**
+       * Secret Access Key
+       * Format: password
+       */
+      secret_access_key: string;
+    };
     /** OpenIdConnectLogin */
     OpenIdConnectLogin: {
       /** Code */
@@ -41120,6 +41229,182 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  get_object_store_connection_api_v1_admin_object_store_connection_get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ObjectStoreConnectionPublic"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  create_object_store_connection_api_v1_admin_object_store_connection_post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["ObjectStoreConnectionInput"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ObjectStoreConnectionPublic"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  rotate_object_store_credentials_api_v1_admin_object_store_connection_credentials_put: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["ObjectStoreCredentialRotation"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ObjectStoreConnectionPublic"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
     };

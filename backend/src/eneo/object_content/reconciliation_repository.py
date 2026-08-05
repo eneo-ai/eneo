@@ -67,6 +67,21 @@ class StoreBinding:
 
 
 @dataclass(frozen=True, slots=True)
+class StoreBindingSnapshot:
+    deployment_id: UUID | None
+    binding_id: UUID | None
+    confirmed: bool
+
+    @property
+    def unbound(self) -> bool:
+        return (
+            self.deployment_id is None
+            and self.binding_id is None
+            and not self.confirmed
+        )
+
+
+@dataclass(frozen=True, slots=True)
 class ObjectInventoryCursor:
     cycle_id: UUID
     cycle_started_at: datetime
@@ -1431,6 +1446,25 @@ class ObjectContentReconciliationRepository:
             confirmed=confirmed,
             claim_id=claim_id if owns_claim else None,
             creation_started=state.store_binding_create_started_at is not None,
+        )
+
+    async def store_binding_snapshot(self) -> StoreBindingSnapshot:
+        snapshot = (
+            await self._session.execute(
+                select(
+                    ObjectContentReconciliationState.store_deployment_id,
+                    ObjectContentReconciliationState.store_binding_id,
+                    ObjectContentReconciliationState.store_binding_confirmed_at,
+                ).where(ObjectContentReconciliationState.id == 1)
+            )
+        ).one_or_none()
+        if snapshot is None:
+            raise RuntimeError("Object-content reconciliation state is missing")
+        deployment_id, binding_id, confirmed_at = snapshot
+        return StoreBindingSnapshot(
+            deployment_id=deployment_id,
+            binding_id=binding_id,
+            confirmed=confirmed_at is not None,
         )
 
     async def mark_store_binding_creation_started(

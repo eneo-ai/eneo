@@ -345,13 +345,17 @@ class _BindingClient:
         self._lock = Lock()
         self._contains_durable_bytes = contains_durable_bytes
         self.put_calls = 0
+        self.put_keys: list[str] = []
+        self.delete_keys: list[str] = []
 
     def put_object(self, **request: object) -> dict[str, str]:
         assert request["IfNoneMatch"] == "*"
         assert "ChecksumSHA256" not in request
         payload = cast(bytes, request["Body"])
+        key = cast(str, request["Key"])
         with self._lock:
             self.put_calls += 1
+            self.put_keys.append(key)
             if self._payload is not None:
                 raise ClientError(
                     {
@@ -363,6 +367,13 @@ class _BindingClient:
                     "PutObject",
                 )
             self._payload = payload
+        return {}
+
+    def delete_object(self, **request: object) -> dict[str, object]:
+        key = cast(str, request["Key"])
+        with self._lock:
+            self.delete_keys.append(key)
+            self._payload = None
         return {}
 
     def get_object(self, **_request: object) -> dict[str, object]:
@@ -926,6 +937,19 @@ async def test_binding_create_is_atomic_and_idempotent_across_replicas() -> None
     assert await store.verify_binding(binding_id)
 
     assert client.put_calls == 2
+
+
+@pytest.mark.asyncio
+async def test_binding_probe_uses_and_removes_candidate_deployment_key() -> None:
+    client = _BindingClient()
+    settings = _settings()
+    store = S3ObjectStore(settings, client=cast("S3Client", client))
+
+    await store.probe_binding_creation()
+
+    binding_key = f"v1/.eneo-bindings/{settings.deployment_id.hex}"
+    assert client.put_keys == [binding_key]
+    assert client.delete_keys == [binding_key]
 
 
 @pytest.mark.asyncio

@@ -38,6 +38,7 @@ from eneo.object_content.content import (
     capture_content,
 )
 from eneo.object_content.content_service import ObjectContentService
+from eneo.object_content.object_store_provider import ObjectStoreProvider
 from eneo.object_content.reconciliation import ObjectContentReconciler
 from eneo.object_content.s3_object_store import (
     ObjectStoreNotFoundError,
@@ -196,8 +197,7 @@ def _service(
     return ObjectContentService(
         settings,
         database,
-        object_store_settings=settings,
-        object_store=store,
+        object_store_provider=ObjectStoreProvider.fixed(settings, store),
     )
 
 
@@ -209,8 +209,7 @@ def _reconciler(
     return ObjectContentReconciler(
         settings,
         database,
-        object_store_settings=settings,
-        object_store=store,
+        object_store_provider=ObjectStoreProvider.fixed(settings, store),
     )
 
 

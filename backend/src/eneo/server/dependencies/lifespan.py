@@ -11,10 +11,15 @@ from eneo.object_content.content import (
     ObjectContentConfigurationError,
     ObjectContentUnavailableError,
 )
+from eneo.object_content.object_store_connection import (
+    ObjectStoreConnectionDatabaseUnavailable,
+    ObjectStoreConnectionError,
+)
 from eneo.object_content.runtime import object_content_runtime
 from eneo.server.dependencies.modules import init_modules
 from eneo.server.dependencies.predefined_roles import init_predefined_roles
 from eneo.server.websockets.websocket_manager import websocket_manager
+from eneo.settings.encryption_service import EncryptionService
 
 
 @asynccontextmanager
@@ -37,15 +42,23 @@ async def startup():
     if settings.openapi_only_mode:
         return
 
-    # Remote configuration is optional; the inline-capable core always starts.
-    # Any partial configuration fails construction. Startup then verifies the
-    # durable PostgreSQL/object-store pairing before producers or workers run.
-    object_content_runtime.start()
-    aiohttp_client.start()
     sessionmanager.init(settings.database_url)
+    # PostgreSQL owns the optional administrator-managed connection, so it must
+    # be available before object-content imports or loads that configuration.
+    # The root encryption key remains deployment bootstrap material.
+    encryption_key = None if settings.testing else settings.encryption_key
+    object_content_runtime.start(
+        encryption=EncryptionService(encryption_key),
+    )
+    aiohttp_client.start()
     try:
         await object_content_runtime.validate_configuration()
-    except ObjectContentConfigurationError:
+    except ObjectStoreConnectionDatabaseUnavailable:
+        # Connection metadata lives in PostgreSQL. Treat an outage there like
+        # any other transient storage dependency failure and retry through
+        # readiness and reconciliation after startup.
+        pass
+    except (ObjectContentConfigurationError, ObjectStoreConnectionError):
         await object_content_runtime.stop()
         await sessionmanager.close()
         await aiohttp_client.stop()
