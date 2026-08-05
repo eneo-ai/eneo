@@ -1,6 +1,6 @@
 from collections.abc import Sequence
 from datetime import datetime
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, NamedTuple, cast
 from uuid import UUID
 
 import sqlalchemy as sa
@@ -43,6 +43,16 @@ if TYPE_CHECKING:
 
 
 _SKILL_PROVENANCE_ADAPTER = TypeAdapter(tuple[SkillExecutionReference, ...])
+_SKILL_ACTIVATION_ADAPTER = TypeAdapter(SkillActivationEvidenceV1)
+
+
+class StoredSkillActivation(NamedTuple):
+    evidence: SkillActivationEvidenceV1 | None
+
+
+class QuestionSessionPartner(NamedTuple):
+    assistant_id: UUID | None
+    group_chat_id: UUID | None
 
 
 class QuestionRepository:
@@ -186,11 +196,46 @@ class QuestionRepository:
 
         await self.session.execute(stmt)
 
-    async def get(self, id: UUID):
+    async def get(self, id: UUID) -> Question | None:
         question = await self.delegate.get(id)
         if question is None:
             return None
         return (await self._hydrate_questions([question]))[0]
+
+    async def get_for_tenant(self, *, id: UUID, tenant_id: UUID) -> Question | None:
+        question = await self.delegate.get_model_from_query(
+            sa.select(Questions).where(
+                Questions.id == id,
+                Questions.tenant_id == tenant_id,
+            )
+        )
+        if question is None:
+            return None
+        return (await self._hydrate_questions([question]))[0]
+
+    async def get_session_partner(
+        self,
+        *,
+        id: UUID,
+        tenant_id: UUID,
+    ) -> QuestionSessionPartner | None:
+        result = await self.session.execute(
+            sa.select(Sessions.assistant_id, Sessions.group_chat_id)
+            .select_from(Questions)
+            .join(Sessions, Sessions.id == Questions.session_id)
+            .where(
+                Questions.id == id,
+                Questions.tenant_id == tenant_id,
+            )
+        )
+        row = result.one_or_none()
+        if row is None:
+            return None
+        assistant_id, group_chat_id = row
+        return QuestionSessionPartner(
+            assistant_id=assistant_id,
+            group_chat_id=group_chat_id,
+        )
 
     async def get_with_skill_activation(
         self,
@@ -210,6 +255,33 @@ class QuestionRepository:
             return None
         return (await self._hydrate_questions([question]))[0]
 
+    async def get_skill_activation_evidence(
+        self,
+        *,
+        id: UUID,
+        session_id: UUID,
+        tenant_id: UUID,
+    ) -> StoredSkillActivation | None:
+        """Read one turn's typed evidence without hydrating message bodies."""
+        stmt = (
+            sa.select(Questions.skill_activation_data)
+            .where(Questions.id == id)
+            .where(Questions.session_id == session_id)
+            .where(Questions.tenant_id == tenant_id)
+        )
+        row = (await self.session.execute(stmt)).one_or_none()
+        if row is None:
+            return None
+
+        raw_evidence = row.skill_activation_data
+        return StoredSkillActivation(
+            evidence=(
+                _SKILL_ACTIVATION_ADAPTER.validate_python(raw_evidence)
+                if raw_evidence is not None
+                else None
+            )
+        )
+
     async def update_with_answer(
         self,
         *,
@@ -218,6 +290,9 @@ class QuestionRepository:
         answer: str,
         num_tokens_question: int | None = None,
         num_tokens_answer: int | None = None,
+        context_prompt_tokens: int | None = None,
+        context_completion_tokens: int | None = None,
+        skill_context_tokens: int | None = None,
         completion_model_id: UUID | None = None,
         tool_calls: list["ToolCallInfo"] | None = None,
         reasoning: str | None = None,
@@ -253,6 +328,12 @@ class QuestionRepository:
             update_values["num_tokens_question"] = num_tokens_question
         if num_tokens_answer is not None:
             update_values["num_tokens_answer"] = num_tokens_answer
+        if context_prompt_tokens is not None:
+            update_values["context_prompt_tokens"] = context_prompt_tokens
+        if context_completion_tokens is not None:
+            update_values["context_completion_tokens"] = context_completion_tokens
+        if skill_context_tokens is not None:
+            update_values["skill_context_tokens"] = skill_context_tokens
         if completion_model_id is not None:
             update_values["completion_model_id"] = completion_model_id
         if tool_calls is not None:

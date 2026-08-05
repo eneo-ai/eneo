@@ -123,7 +123,7 @@ describe("SkillBindingsEditor", () => {
       bindingSummaries: [summary],
       canEditBindings: true,
       canCreateSkills: false,
-      supportsActivationModes: true,
+      activationSurface: "assistant",
       skillRuntime: null,
       onListCatalog: vi.fn(),
       onGetSkillPreview: getPreview
@@ -155,7 +155,7 @@ describe("SkillBindingsEditor", () => {
       bindingSummaries: [summary],
       canEditBindings: true,
       canCreateSkills: false,
-      supportsActivationModes: true,
+      activationSurface: "assistant",
       skillRuntime: {
         effective_model_id: "model-1",
         effective_mode: "always_only",
@@ -175,6 +175,75 @@ describe("SkillBindingsEditor", () => {
     await page.getByRole("option", { name: m.skills_activation_mode_on_demand() }).click();
 
     await expect.element(activation).toHaveTextContent(m.skills_activation_mode_on_demand());
+  });
+
+  test("allows on-demand activation for Personal Chat when the tenant enables it", async () => {
+    const skill = makeSkill("policy-runtime");
+    const summary = makeSummary(skill, 1, 0);
+
+    render(SkillBindingsEditor, {
+      bindings: [
+        {
+          skill_id: skill.id,
+          skill_revision_id: summary.skill_revision_id,
+          activation_mode: "always"
+        }
+      ],
+      initialCatalogPage: makePage([skill]),
+      bindingSummaries: [summary],
+      canEditBindings: true,
+      canCreateSkills: false,
+      activationSurface: "personal_chat",
+      selectiveActivationEnabled: true,
+      skillRuntime: null,
+      onListCatalog: vi.fn(),
+      onGetSkillPreview: getPreview
+    });
+
+    const activation = page.getByRole("button", {
+      name: m.skills_activation_mode_label({ name: skill.display_name })
+    });
+    await activation.click();
+    await page.getByRole("option", { name: m.skills_activation_mode_on_demand() }).click();
+    await expect.element(activation).toHaveTextContent(m.skills_activation_mode_on_demand());
+    await expect
+      .element(page.getByText(m.skills_binding_personal_chat_draft_description()))
+      .toBeVisible();
+  });
+
+  test("names the disabled tenant runtime rather than the model requirements", async () => {
+    const skill = makeSkill("selective-disabled");
+    const summary = makeSummary(skill, 1, 0);
+
+    render(SkillBindingsEditor, {
+      bindings: [
+        {
+          skill_id: skill.id,
+          skill_revision_id: summary.skill_revision_id,
+          activation_mode: "always"
+        }
+      ],
+      initialCatalogPage: makePage([skill]),
+      bindingSummaries: [summary],
+      canEditBindings: true,
+      canCreateSkills: false,
+      activationSurface: "personal_chat",
+      selectiveActivationEnabled: false,
+      skillRuntime: null,
+      onListCatalog: vi.fn(),
+      onGetSkillPreview: getPreview
+    });
+
+    await expect
+      .element(page.getByText(m.skills_activation_runtime_disabled(), { exact: true }))
+      .toBeVisible();
+    await expect
+      .element(
+        page.getByRole("button", {
+          name: m.skills_activation_mode_label({ name: skill.display_name })
+        })
+      )
+      .toBeDisabled();
   });
 
   test("keeps activation controls off non-Assistant Skill surfaces", async () => {
@@ -216,7 +285,7 @@ describe("SkillBindingsEditor", () => {
       bindingSummaries: [summary],
       canEditBindings: true,
       canCreateSkills: false,
-      supportsActivationModes: true,
+      activationSurface: "assistant",
       skillRuntime: {
         effective_model_id: "model-1",
         effective_mode: "always_only",
@@ -348,6 +417,39 @@ describe("SkillBindingsEditor", () => {
         })
       )
       .toBeVisible();
+  });
+
+  test("exposes long instructions in a named keyboard-scrollable preview", async () => {
+    const skill = makeSkill("long-preview");
+    const instructions = Array.from(
+      { length: 160 },
+      (_, index) => `Step ${index + 1}: verify the complete instruction without truncation.`
+    ).join("\n");
+
+    render(SkillBindingsEditor, {
+      bindings: [],
+      initialCatalogPage: makePage([skill]),
+      bindingSummaries: [],
+      canEditBindings: true,
+      canCreateSkills: false,
+      onListCatalog: vi.fn(),
+      onGetSkillPreview: vi.fn(async (target: SkillBindingPreviewTarget) => ({
+        ...target,
+        revisionNumber: 1,
+        instructions
+      }))
+    });
+
+    await page.getByRole("combobox", { name: m.skills_add_existing() }).click();
+    await page.getByText(skill.display_name, { exact: true }).click();
+
+    const previewRegion = page.getByRole("region", { name: m.skills_preview_scroll_region() });
+    await expect.element(previewRegion).toBeVisible();
+    expect(previewRegion.element().getAttribute("tabindex")).toBe("0");
+    expect(previewRegion.element().className).toContain("overflow-y-auto");
+    expect(previewRegion.element().className).toContain("max-h-");
+    await expect.element(page.getByText("Step 160:", { exact: false })).toBeVisible();
+    await expect.element(page.getByRole("button", { name: m.skills_add_to_draft() })).toBeVisible();
   });
 
   test("ignores a stale preview response after closing and reopening the same Skill", async () => {

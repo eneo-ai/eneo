@@ -28,6 +28,7 @@ class Permission(str, Enum):
     INTEGRATIONS = "integrations"
     SHARED_SPACES = "shared_spaces"
     API_KEYS = "api_keys"
+    ASSISTANT_DEBUG = "assistant_debug"
 
 
 def validate_permissions(permission: Permission) -> Callable[[_F], _F]:

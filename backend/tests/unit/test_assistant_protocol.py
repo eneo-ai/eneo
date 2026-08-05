@@ -7,6 +7,7 @@ from eneo.ai_models.completion_models.completion_model import (
     Completion,
     McpToolReference,
     ResponseType,
+    TokenUsage,
     ToolCallMetadata,
 )
 from eneo.assistants.api.assistant_protocol import (
@@ -14,10 +15,11 @@ from eneo.assistants.api.assistant_protocol import (
     to_sse_response,
 )
 from eneo.questions.question import UseTools
-from eneo.sessions.session import SessionInDB
+from eneo.sessions.session import SessionInDB, TokenUsageEvent
 
 
 def test_non_streaming_conversation_response_includes_mcp_references():
+    question_id = uuid4()
     reference = McpToolReference(
         id=uuid4(),
         tool_call_id="call_1",
@@ -36,10 +38,12 @@ def test_non_streaming_conversation_response_includes_mcp_references():
         answer="Answer",
         info_blobs=[],
         tools=UseTools(assistants=[]),
+        question_id=question_id,
         mcp_tool_references=[reference],
     )
 
     assert len(response.mcp_tool_references) == 1
+    assert response.id == question_id
     assert response.mcp_tool_references[0].id == reference.id
     assert response.mcp_tool_references[0].content == "resource content"
 
@@ -62,6 +66,44 @@ def test_tool_call_sse_preserves_null_tool_call_id():
     payload = json.loads(event.data)
 
     assert payload["tools"][0]["tool_call_id"] is None
+
+
+def test_token_usage_sse_separates_turn_cost_from_context_headroom():
+    event = to_sse_response(
+        Completion(
+            response_type=ResponseType.TOKEN_USAGE,
+            skill_context_tokens=37,
+            usage=TokenUsage(
+                prompt_tokens=1020,
+                completion_tokens=60,
+                context_prompt_tokens=520,
+                context_completion_tokens=40,
+            ),
+        ),
+        uuid4(),
+    )
+
+    usage = json.loads(event.data)["usage"]
+
+    assert usage == {
+        "prompt_tokens": 1020,
+        "completion_tokens": 60,
+        "turn_tokens": 1080,
+        "context_prompt_tokens": 520,
+        "context_completion_tokens": 40,
+        "skill_context_tokens": 37,
+    }
+
+
+def test_token_usage_schema_documents_non_additive_context_semantics():
+    properties = TokenUsageEvent.model_json_schema()["properties"]
+
+    assert "Cumulative prompt tokens" in properties["prompt_tokens"]["description"]
+    assert (
+        "final provider request only"
+        in properties["context_prompt_tokens"]["description"]
+    )
+    assert "do not add it" in properties["skill_context_tokens"]["description"]
 
 
 def test_tool_approval_sse_requires_real_approval_id():

@@ -637,7 +637,7 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                         "metric_value": 1,
                     },
                 )
-                setattr(task_manager, "_job_already_handled", True)
+                task_manager.mark_job_handled()
                 return {
                     "status": "duplicate_skipped",
                     "job_id": str(job_id),
@@ -718,13 +718,16 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
             # session returns to pool immediately. This prevents holding a connection
             # for 5-30 minutes during the actual crawl operation.
             from eneo.database.database import sessionmanager
-            from eneo.database.tables.info_blobs_table import InfoBlobs
+            from eneo.database.tables.info_blobs_table import (
+                InfoBlobs,
+                active_info_blob_version,
+            )
             from eneo.database.tables.websites_table import Websites as WebsitesTable
 
             # These will be populated by bootstrap
             crawl_context: CrawlContext
             existing_titles: list[str] = []
-            existing_file_hashes: dict[str, bytes] = {}
+            existing_publications: dict[str, tuple[bytes, UUID]] = {}
             website_url: str = ""  # For logging after session closes
 
             start = time.time()
@@ -911,17 +914,21 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                 )
 
                 # Fetch existing titles for stale detection and file hashes for skip optimization
-                stmt = sa.select(InfoBlobs.title, InfoBlobs.content_hash).where(
-                    InfoBlobs.website_id == params.website_id
+                stmt = sa.select(
+                    InfoBlobs.title,
+                    InfoBlobs.content_hash,
+                    InfoBlobs.embedding_model_id,
+                ).where(
+                    InfoBlobs.website_id == params.website_id,
+                    active_info_blob_version(),
                 )
                 blob_result = await bootstrap_session.execute(stmt)
 
                 # Build lookups for O(1) operations
-                for title, hash_bytes in blob_result:
+                for title, hash_bytes, model_id in blob_result:
                     existing_titles.append(title)
-                    # Only store hashes for files (not URLs)
-                    if hash_bytes is not None and not title.startswith("http"):
-                        existing_file_hashes[title] = hash_bytes
+                    if hash_bytes is not None and model_id is not None:
+                        existing_publications[title] = (hash_bytes, model_id)
 
             finally:
                 # Always close the bootstrap session to return connection to pool
@@ -1079,6 +1086,7 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                             ctx=crawl_context,
                             embedding_model=embedding_model_spec,
                             container=container,
+                            existing_publications=existing_publications,
                         )
                         crawled_titles.update(successful_urls)
                         # Aggregate failure reasons and track failed URLs
@@ -1110,6 +1118,7 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                         ctx=crawl_context,
                         embedding_model=embedding_model_spec,
                         container=container,
+                        existing_publications=existing_publications,
                     )
                     crawled_titles.update(successful_urls)
                     # Aggregate failure reasons and track failed URLs
@@ -1143,11 +1152,11 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                         file_bytes = file.read_bytes()
                         new_file_hash = hashlib.sha256(file_bytes).digest()
 
-                        existing_file_hash = existing_file_hashes.get(filename)
+                        existing_file = existing_publications.get(filename)
 
-                        if (
-                            existing_file_hash is not None
-                            and new_file_hash == existing_file_hash
+                        if embedding_model_spec is not None and existing_file == (
+                            new_file_hash,
+                            embedding_model_spec.id,
                         ):
                             # File unchanged - skip processing
                             num_skipped_files += 1
@@ -1192,6 +1201,7 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                         crawled_titles.add(filename)
 
                     except Exception:
+                        failed_titles.add(filename)
                         logger.exception(
                             "Exception while uploading file",
                             extra={
@@ -1254,10 +1264,16 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                 from eneo.database.tables.info_blobs_table import (
                     InfoBlobs as InfoBlobsTable,
                 )
+                from eneo.database.tables.info_blobs_table import (
+                    active_info_blob_version,
+                )
 
                 update_size_stmt = (
                     sa.select(sa.func.coalesce(sa.func.sum(InfoBlobsTable.size), 0))
-                    .where(InfoBlobsTable.website_id == crawl_context.website_id)
+                    .where(
+                        InfoBlobsTable.website_id == crawl_context.website_id,
+                        active_info_blob_version(),
+                    )
                     .scalar_subquery()
                 )
                 stmt = (
@@ -1597,7 +1613,7 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
             # Signal task_manager to skip its complete_job() call
             # Why: We've already completed the job with a fresh session above,
             # task_manager's job_service has stale session references
-            setattr(task_manager, "_job_already_handled", True)
+            task_manager.mark_job_handled()
 
         return task_manager.successful()
     finally:

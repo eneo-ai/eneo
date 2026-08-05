@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Sequence
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, AsyncGenerator, Optional
 from uuid import UUID
 
@@ -24,6 +26,7 @@ from eneo.files.file_models import File, FileType
 from eneo.files.file_reference import file_reference_base_url
 from eneo.info_blobs.info_blob import InfoBlobChunkInDBWithScore
 from eneo.main.config import SETTINGS, Settings, get_settings
+from eneo.main.exceptions import ProviderInactiveException
 from eneo.main.logging import get_logger
 from eneo.mcp_servers.infrastructure.identity_headers import build_identity_headers
 from eneo.mcp_servers.infrastructure.proxy import (
@@ -48,6 +51,9 @@ if TYPE_CHECKING:
     from eneo.mcp_servers.domain.repositories.mcp_server_tool_repo import (
         MCPServerToolRepository,
     )
+    from eneo.model_providers.infrastructure.litellm_provider import (
+        ResolvedLiteLLMProvider,
+    )
     from eneo.settings.encryption_service import EncryptionService
     from eneo.tenants.tenant import TenantInDB
     from eneo.users.user import UserInDB
@@ -59,6 +65,12 @@ async def generate_image(prompt: str):
     flux = FluxAdapter()
 
     return await flux.generate_image(prompt=prompt)
+
+
+@dataclass(frozen=True)
+class SkillActivationPreflightAdapterLoad:
+    adapters: dict[UUID, "CompletionModelAdapter"]
+    unavailable_model_ids: frozenset[UUID]
 
 
 class CompletionService:
@@ -100,9 +112,6 @@ class CompletionService:
         All models must have a provider_id linking to a ModelProvider.
         Uses TenantModelAdapter which routes through LiteLLM.
         """
-        from eneo.completion_models.infrastructure.adapters.tenant_model_adapter import (
-            TenantModelAdapter,
-        )
         from eneo.model_providers.infrastructure.litellm_provider import (
             load_active_litellm_provider,
         )
@@ -140,6 +149,18 @@ class CompletionService:
             provider_id=model.provider_id,
             tenant_id=self.tenant.id,
         )
+        return self._create_tenant_model_adapter(model=model, provider=provider)
+
+    def _create_tenant_model_adapter(
+        self,
+        *,
+        model: CompletionModel,
+        provider: "ResolvedLiteLLMProvider",
+    ) -> "CompletionModelAdapter":
+        from eneo.completion_models.infrastructure.adapters.tenant_model_adapter import (
+            TenantModelAdapter,
+        )
+
         credential_resolver = provider.create_credential_resolver(
             self.encryption_service
         )
@@ -169,6 +190,7 @@ class CompletionService:
         prompt_files: list[File],
         mcp_servers: list["MCPServer"],
         skill_runtime: SkillActivationRuntime,
+        adapter: "CompletionModelAdapter | None" = None,
     ) -> ProviderInput:
         """Build a deterministic upper bound for save-time activation checks.
 
@@ -176,7 +198,8 @@ class CompletionService:
         discovery or a network connection. Runtime still performs the final
         per-user check after live tool narrowing.
         """
-        adapter = await self._get_adapter(model)
+        if adapter is None:
+            adapter = await self._get_adapter(model)
         enabled_servers = [server for server in mcp_servers if server.is_enabled]
         mcp_proxy: MCPProxySession | None = None
         if enabled_servers and model.supports_tool_calling:
@@ -275,6 +298,65 @@ class CompletionService:
                     },
                 ),
             )
+
+    async def load_skill_activation_preflight_adapters(
+        self,
+        models: Sequence[CompletionModel],
+        *,
+        allow_inactive_providers: bool = False,
+    ) -> SkillActivationPreflightAdapterLoad:
+        """Load each distinct model adapter once for one save-time preflight."""
+        from eneo.model_providers.infrastructure.litellm_provider import (
+            load_active_litellm_provider,
+        )
+
+        adapters: dict[UUID, CompletionModelAdapter] = {}
+        providers: dict[UUID, ResolvedLiteLLMProvider] = {}
+        inactive_provider_ids: set[UUID] = set()
+        unavailable_model_ids: set[UUID] = set()
+        for model in models:
+            if model.id in adapters:
+                continue
+            if not model.provider_id:
+                raise ValueError(
+                    f"Model '{model.name}' is missing required provider_id. "
+                    "All models must be associated with a ModelProvider."
+                )
+            if not self.session:
+                raise ValueError(
+                    f"Model '{model.name}' requires database session to load provider credentials. "
+                    "Please ensure the CompletionService is initialized with a database session."
+                )
+            if self.tenant is None:
+                raise ValueError(
+                    f"Model '{model.name}' requires tenant context to load its provider."
+                )
+            if model.provider_id in inactive_provider_ids:
+                unavailable_model_ids.add(model.id)
+                continue
+            provider = providers.get(model.provider_id)
+            if provider is None:
+                try:
+                    provider = await load_active_litellm_provider(
+                        session=self.session,
+                        provider_id=model.provider_id,
+                        tenant_id=self.tenant.id,
+                    )
+                except ProviderInactiveException:
+                    if not allow_inactive_providers:
+                        raise
+                    inactive_provider_ids.add(model.provider_id)
+                    unavailable_model_ids.add(model.id)
+                    continue
+                providers[model.provider_id] = provider
+            adapters[model.id] = self._create_tenant_model_adapter(
+                model=model,
+                provider=provider,
+            )
+        return SkillActivationPreflightAdapterLoad(
+            adapters=adapters,
+            unavailable_model_ids=frozenset(unavailable_model_ids),
+        )
 
     @staticmethod
     def is_valid_arguments(arguments: str):

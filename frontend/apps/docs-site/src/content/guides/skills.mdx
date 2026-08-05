@@ -143,6 +143,66 @@ On an organisation Skill's detail page, the adoption view shows:
 Configured resources load 25 at a time. The count shows how many are visible,
 and **Show more resources** loads the next page.
 
+### Moving Personal Chat to the published version
+
+When Personal Chat pins an older version of a Skill, a tenant admin can move
+that single binding to the currently published version without editing the rest
+of the Personal Chat policy. The move:
+
+- changes only which version the existing binding pins — its order, activation
+  mode, and every other bound Skill stay untouched;
+- never overwrites a concurrent edit: the binding moves only if it still
+  matches what the administrator reviewed, and concurrent policy edits are
+  serialized with the move;
+- re-runs the same validation that guards every Personal Chat policy save, so
+  it can never admit a configuration a normal save would reject;
+- is refused while the Skill is unpublished or blocked;
+- is recorded in the audit log when it changes anything, and repeating it is a
+  clean no-op.
+
+### Moving Assistant bindings to the published version
+
+When Assistants across the organisation pin older versions of a Skill, a
+tenant admin can move them all to the currently published version in one run.
+The run works through the fleet in chunks:
+
+- every binding pinned to any older version is included, whichever version it
+  currently pins;
+- each Assistant is validated against the published version before its pin
+  moves — an Assistant whose configuration no longer fits (for example, the
+  new version no longer fits the model's context window) is excluded and
+  reported, and the rest continue;
+- an Assistant edited while the run is in progress is skipped rather than
+  overwritten; a later run picks it up again from its current state;
+- stopping between chunks is always safe: pins already moved stay moved, and
+  starting again continues where the run effectively left off, because
+  already-moved bindings are no longer behind;
+- unpublishing, publishing a different version, or blocking the Skill during
+  the run ends it with a clear failure, and a fresh run is required;
+- when audit logging for Skill binding updates is enabled, each chunk that
+  changes anything writes one audit event with the run identity and the counts
+  of moved, skipped, and excluded Assistants.
+
+### Moving App bindings to the published version
+
+App bindings are eager: every new App run includes the exact Skill versions
+attached to the App. When publishing a version, a tenant admin can explicitly
+include Apps in the binding update. This option is off by default because it
+changes which Skill version future App runs use.
+
+The App update follows the same bounded, restartable pattern as the Assistant
+update, with two important guarantees:
+
+- each App is checked against the published version before its binding moves;
+  Apps whose resulting context is too large stay on their previous version;
+- runs that are already queued or running keep the Skill snapshot captured when
+  they were created. Only new runs use the updated binding.
+
+Concurrent App or binding edits are skipped instead of overwritten. Stopping
+between chunks is safe, and starting again picks up bindings that are still
+behind. Unpublishing, publishing a different version, or blocking the Skill
+ends the update and requires a fresh run.
+
 These are structural configuration facts:
 
 | Evidence   | Meaning                                                           |
@@ -158,10 +218,10 @@ The Assistant API accepts **always** or **on demand** for each binding:
 - **On demand** advertises a compact descriptor and loads the exact pinned
   instructions only when a tool-capable model requests them.
 
-The Assistant builder exposes this choice for each attached Skill. Apps and
-Personal Chat remain eager: their attached Skills enter every request in the
-configured order. Runtime evidence, rather than the adoption view, shows which
-Assistant Skills were eligible, requested, blocked, or included.
+The Assistant builder and Personal Chat administration expose this choice for
+each attached Skill. Apps remain eager: their attached Skills enter every run in
+the configured order. Runtime evidence, rather than the adoption view, shows
+which Skills were eligible, requested, blocked, or included.
 
 Tenant admins manage the stored runtime limits in Admin settings. The API owns
 the editable ranges; the selected model window and fixed platform safety bounds
@@ -219,7 +279,15 @@ grant access to organisation authoring.
 Tenant admins select and order published organisation Skill versions in the
 existing Personal Chat administration page. The organisation catalogue owns
 content and publication. Personal Chat settings own which approved versions
-apply to Personal Chat.
+apply to Personal Chat and whether each is **Always** or **On demand**.
+
+**On demand** is available only when the policy selects a finite list of models
+that all support tool calling. Selecting an entire provider or leaving model
+access unrestricted keeps **Always** available but disables **On demand**,
+because Eneo cannot safely validate current and future models as one bounded
+set. Saving rechecks the selected models, prompt, MCP configuration, and every
+existing Personal Chat baseline. If any candidate cannot fit, the save is
+rejected and the previous policy remains active.
 
 ### Default roles
 
@@ -287,6 +355,27 @@ Review the adoption view and update or remove unsafe versions before unblocking.
   execution** to stop those existing pins at runtime.
 </Callout>
 
+## When a change is blocked
+
+Eneo refuses a Skill change rather than silently overwriting someone else's work
+or breaking a resource that is in use. The message names the exact blocker and
+the next safe action.
+
+| Blocker                             | What happened                                                                                                                                                                 | What to do                                                                     |
+| ----------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------ |
+| Identifier already taken            | Another Skill in the same Space, or in the organisation catalogue, already uses that identifier                                                                               | Choose a different identifier                                                  |
+| Skill changed while you reviewed it | Someone saved a new version, or published a different one, between the moment the page loaded and the moment you saved; this covers restoring an older version and publishing | Reload the Skill, compare the latest version, then repeat the action           |
+| Published Skill cannot be deleted   | A Skill that has ever been published is kept for audit history and can never be deleted                                                                                       | Unpublish it to stop new attachments; existing ones keep working until removed |
+| Skill is still attached             | The Skill is attached to an Assistant, an App, or the organisation Personal Chat policy                                                                                       | Remove every attachment, then delete                                           |
+| App run in progress                 | A queued or running App run needs the Skill                                                                                                                                   | Wait for the run to finish, then delete                                        |
+| Execution block changed             | The block you reviewed was released or replaced before your unblock was applied                                                                                               | The page reloads the live block state; review it and try again                 |
+
+The Skill editor keeps unsaved edits when a save is refused, so nothing has to
+be retyped. A separate refusal applies at save time when the selected models or
+the organisation runtime policy cannot support **On demand**; that is a
+configuration limit rather than a conflict, described in
+[Versions and adoption](#versions-and-adoption).
+
 ## Current boundaries
 
 - Skills contain instructions and metadata. They do not execute scripts or
@@ -298,13 +387,25 @@ Review the adoption view and update or remove unsafe versions before unblocking.
   automatically.
 - This release has no external Skill marketplace or package installation flow.
 
+## Inspect Skill activation
+
+Deployments can expose an opt-in **Debug** panel in Assistant and Personal Chat
+with `SHOW_CHAT_DEBUG_PANEL=true` in both backend and frontend configuration.
+Only owners and users with the Assistant debug permission see it. Select a
+persisted turn to inspect which exact Skill revisions were available, entered
+the model context, were blocked, or were rejected, along with token
+measurement, activation rounds, and selection time.
+
+The panel is for development and support diagnostics. It does not expose Skill
+instructions, model reasoning, credentials, or an administrator's incident
+reason. Group chats and API keys cannot use it. Opening or closing the panel
+does not change what the Assistant records or affect separately configured
+Assistant logging.
+
 ## Planned next steps
 
-The next runtime work will make the existing activation evidence easier to
-inspect in the opt-in chat debug panel, including whether each Skill was always
-included or requested on demand and why a candidate was not loaded. Apps will
-remain eager until their execution contracts can preserve the same frozen-plan
-and audit guarantees.
+Apps remain eager until their execution contracts can preserve the same
+frozen-plan and audit guarantees.
 
 Editable Space copies with explicit source updates come later. External
 Marketplace distribution remains a separate final phase.

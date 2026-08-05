@@ -759,6 +759,7 @@ class Container(containers.DeclarativeContainer):
         AssistantRepository,
         session=session,
         factory=assistant_factory,
+        file_repo=file_repo,
         file_content_loader=file_content_loader,
         completion_model_repo=completion_model_repo2,
         user=user,
@@ -793,6 +794,7 @@ class Container(containers.DeclarativeContainer):
         session=session,
         factory=app_factory,
         file_content_loader=file_content_loader,
+        file_repo=file_repo,
         prompt_repo=prompt_repo,
         transcription_model_repo=transcription_model_repo,
     )
@@ -1030,12 +1032,6 @@ class Container(containers.DeclarativeContainer):
         space_service=space_service,
         actor_manager=actor_manager,
     )
-    organization_skill_service = providers.Factory(
-        OrganizationSkillService,
-        user=user,
-        repo=skill_repo,
-        space_service=space_service,
-    )
     api_key_policy_service = providers.Factory(
         ApiKeyPolicyService,
         space_service=space_service,
@@ -1082,7 +1078,7 @@ class Container(containers.DeclarativeContainer):
         user=user,
         file_size_service=file_size_service,
         job_service=job_service,
-        quota_service=quota_service,
+        object_content=object_content_service,
         upload_admission=upload_admission,
     )
     group_service = providers.Factory(
@@ -1104,9 +1100,6 @@ class Container(containers.DeclarativeContainer):
         space_repo=space_repo,
         actor_manager=actor_manager,
         group_service=group_service,
-    )
-    quota_service = providers.Factory(
-        QuotaService, user=user, info_blob_repo=info_blob_repo
     )
     allowed_origin_service = providers.Factory(
         AllowedOriginService,
@@ -1163,6 +1156,8 @@ class Container(containers.DeclarativeContainer):
         group_service=group_service,
         space_service=space_service,
         actor_manager=actor_manager,
+        datastore=datastore,
+        object_content=object_content_service,
     )
     prompt_service = providers.Factory(
         PromptService, user=user, repo=prompt_repo, factory=prompt_factory
@@ -1487,7 +1482,6 @@ class Container(containers.DeclarativeContainer):
         user_integration_repo=user_integration_repo,
         user=user,
         oauth_token_service=oauth_token_service,
-        datastore=datastore,
         info_blob_service=info_blob_service,
         integration_knowledge_repo=integration_knowledge_repo,
     )
@@ -1502,7 +1496,6 @@ class Container(containers.DeclarativeContainer):
         user_integration_repo=user_integration_repo,
         user=user,
         oauth_token_service=oauth_token_service,
-        datastore=datastore,
         info_blob_service=info_blob_service,
         integration_knowledge_repo=integration_knowledge_repo,
         session=session,
@@ -1604,7 +1597,6 @@ class Container(containers.DeclarativeContainer):
         TextProcessor,
         user=user,
         extractor=text_extractor,
-        datastore=datastore,
         info_blob_service=info_blob_service,
     )
     transcriber = providers.Factory(
@@ -1635,6 +1627,15 @@ class Container(containers.DeclarativeContainer):
         icon_repo=icon_repo,
         api_key_scope_revoker=api_key_scope_revoker,
         skill_service=skill_service,
+    )
+    organization_skill_service = providers.Factory(
+        OrganizationSkillService,
+        user=user,
+        repo=skill_repo,
+        space_service=space_service,
+        assistant_service=assistant_service,
+        app_service=app_service,
+        audit_service=audit_service,
     )
     app_run_service = providers.Factory(
         AppRunService,

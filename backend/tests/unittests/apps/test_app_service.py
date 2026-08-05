@@ -77,6 +77,7 @@ def _configure_editable_app(service: AppService):
     actor.can_edit_apps.return_value = True
     actor.get_app_permissions.return_value = []
     service.actor_manager.get_space_actor_from_space.return_value = actor
+    service.repo.get_for_update.return_value = app
     service.repo.update.return_value = app
     return app
 
@@ -89,6 +90,7 @@ async def test_update_app_omitted_skills_does_not_replace_or_run_fit(
 
     await service.update_app(app_id=app.id, name="Renamed")
 
+    service.repo.get_for_update.assert_not_awaited()
     service.skill_service.replace_app_bindings.assert_not_awaited()
     service._validate_configured_context.assert_not_awaited()
 
@@ -107,6 +109,7 @@ async def test_update_app_without_skills_keeps_legacy_context_fit_behavior(
 
     await service.update_app(app_id=app.id, attachment_ids=[])
 
+    service.repo.get_for_update.assert_awaited_once_with(app.id)
     context_assertion.assert_not_called()
 
 
@@ -521,6 +524,7 @@ async def test_publish_app_without_skills_keeps_legacy_context_fit_behavior(
     actor.can_publish_apps.return_value = True
     actor.get_app_permissions.return_value = []
     service.actor_manager.get_space_actor_from_space.return_value = actor
+    service.repo.get_for_update.return_value = app
     service.repo.update.return_value = app
     context_assertion = MagicMock()
     monkeypatch.setattr(
@@ -530,4 +534,5 @@ async def test_publish_app_without_skills_keeps_legacy_context_fit_behavior(
 
     await service.publish_app(app.id, True)
 
+    service.repo.get_for_update.assert_awaited_once_with(app.id)
     context_assertion.assert_not_called()

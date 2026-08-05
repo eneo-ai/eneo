@@ -1,17 +1,29 @@
+import gc
+from dataclasses import replace
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
+from weakref import ReferenceType, ref
 
 import pytest
 
-from eneo.ai_models.completion_models.completion_model import ModelKwargs
+from eneo.ai_models.completion_models.completion_model import (
+    ModelKwargs,
+    function_definition_to_tool,
+)
 from eneo.assistants.assistant import Assistant
+from eneo.assistants.assistant_repo import CompletionFileValidationProjection
 from eneo.assistants.assistant_service import AssistantService
 from eneo.completion_models.infrastructure.adapters.base_adapter import ProviderInput
+from eneo.completion_models.infrastructure.completion_service import (
+    SkillActivationPreflightAdapterLoad,
+)
 from eneo.files.attachment_budget import attachment_token_ceiling
 from eneo.files.file_models import FileType
 from eneo.main.exceptions import BadRequestException, UnauthorizedException
 from eneo.skills.domain.skill import (
+    AssistantPinAdvanceIncompatibleReason,
+    PersonalChatPinOverride,
     ResolvedSkillBinding,
     SkillActivationMode,
     SkillBindingProjection,
@@ -21,7 +33,8 @@ from eneo.skills.domain.skill import (
     SkillTurnEffectiveMode,
     SkillTurnPlan,
 )
-from eneo.tokens.token_utils import TokenCountSource
+from eneo.spaces.space_repo import AssistantMCPServerProjection
+from eneo.tokens.token_utils import TokenCountSource, measure_provider_input_tokens
 
 
 def _settings(**overrides):
@@ -38,6 +51,15 @@ def _patch_reserve(monkeypatch, reserve):
     monkeypatch.setattr(
         "eneo.files.attachment_budget.get_settings",
         lambda: _settings(attachment_context_reserve_tokens=reserve),
+    )
+
+
+def _runtime_policy() -> SkillRuntimePolicy:
+    return SkillRuntimePolicy(
+        selective_activation_enabled=True,
+        max_attached_skills=100,
+        context_share_percent=10,
+        max_activations_per_turn=3,
     )
 
 
@@ -58,15 +80,16 @@ def _service(file_service=None):
         lambda *, base_instructions, resolution: SkillTurnPlan.create(
             base_instructions=base_instructions,
             resolution=resolution,
-            policy=SkillRuntimePolicy(
-                selective_activation_enabled=True,
-                max_attached_skills=100,
-                context_share_percent=10,
-                max_activations_per_turn=3,
-            ),
+            policy=_runtime_policy(),
         )
     )
     completion_service = AsyncMock()
+    completion_service.load_skill_activation_preflight_adapters.side_effect = (
+        lambda models, **_kwargs: SkillActivationPreflightAdapterLoad(
+            adapters={model.id: MagicMock() for model in models},
+            unavailable_model_ids=frozenset(),
+        )
+    )
 
     async def prepare_activation_preflight(**kwargs):
         runtime = kwargs["skill_runtime"]
@@ -118,6 +141,18 @@ def _service(file_service=None):
         help_assistant_assignment_history_repo=AsyncMock(),
         skill_service=skill_service,
     )
+    service.repo.project_completion_file_metadata_for_validation.side_effect = (
+        lambda *, assistants, **_kwargs: {
+            assistant.id: CompletionFileValidationProjection(
+                derived_image_metadata=(),
+                is_stable=True,
+            )
+            for assistant in assistants
+        }
+    )
+    service.repo.hydrate_completion_files_for_validation.side_effect = (
+        lambda *, assistant, **_kwargs: tuple(assistant.attachments)
+    )
     return service
 
 
@@ -152,8 +187,10 @@ def _assistant_with(max_input_tokens, n_attachments=1, prompt_text=None, vision=
         is_default=False,
         completion_model=model,
         attachments=[_text_attachment() for _ in range(n_attachments)],
+        mcp_servers=[],
         prompt=prompt,
         get_prompt_text=lambda: prompt_text or "",
+        has_knowledge=lambda: False,
     )
 
 
@@ -179,6 +216,251 @@ def _resolved_skill(
         source=SkillBindingSource.SPACE,
         activation_mode=activation_mode,
     )
+
+
+@pytest.mark.asyncio
+async def test_candidate_pin_fit_uses_preloaded_resolution_without_repo_reads(
+    monkeypatch,
+):
+    _patch_reserve(monkeypatch, 10)
+    current = _resolved_skill(
+        name="Candidate",
+        position=3,
+        activation_mode=SkillActivationMode.ALWAYS,
+    )
+    assistant = _assistant_with_runtime_model()
+    assistant.completion_model.max_input_tokens = 1_000
+    candidate = replace(current, instructions="Candidate instructions")
+    service = _service()
+
+    verdict = await service.assert_assistant_fits_candidate_pin(
+        assistant=assistant,
+        space_is_personal=False,
+        candidate=PersonalChatPinOverride(
+            skill_id=current.skill_id,
+            from_revision_id=current.skill_revision_id,
+            to_revision_id=candidate.skill_revision_id,
+        ),
+        candidate_binding=candidate,
+        resolution=SkillRuntimeResolution(eligible=(current,), blocked=()),
+        runtime_policy=_runtime_policy(),
+        preflight_adapters={},
+        completion_prompt_files=assistant.attachments,
+    )
+
+    assert verdict is None
+    service.skill_service.resolve_assistant_bindings_for_runtime.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_candidate_pin_fit_stages_blocked_always_binding_for_full_save(
+    monkeypatch,
+):
+    _patch_reserve(monkeypatch, 10)
+    target = _resolved_skill(
+        name="Target",
+        position=0,
+        activation_mode=SkillActivationMode.ALWAYS,
+    )
+    blocked = replace(
+        _resolved_skill(
+            name="Blocked",
+            position=1,
+            activation_mode=SkillActivationMode.ALWAYS,
+        ),
+        instructions="overflow " * 10_000,
+    )
+    assistant = _assistant_with_runtime_model()
+    assistant.completion_model.max_input_tokens = 200
+    service = _service()
+
+    verdict = await service.assert_assistant_fits_candidate_pin(
+        assistant=assistant,
+        space_is_personal=False,
+        candidate=PersonalChatPinOverride(
+            skill_id=target.skill_id,
+            from_revision_id=target.skill_revision_id,
+            to_revision_id=target.skill_revision_id,
+        ),
+        candidate_binding=target,
+        resolution=SkillRuntimeResolution(
+            eligible=(target,),
+            blocked=(blocked,),
+        ),
+        runtime_policy=_runtime_policy(),
+        preflight_adapters={},
+        completion_prompt_files=assistant.attachments,
+    )
+
+    assert verdict is AssistantPinAdvanceIncompatibleReason.CONTEXT_WINDOW
+
+
+@pytest.mark.asyncio
+async def test_candidate_pin_fit_validates_every_on_demand_skill(monkeypatch):
+    _patch_reserve(monkeypatch, 10)
+    target = _resolved_skill(
+        name="Target",
+        position=0,
+        activation_mode=SkillActivationMode.ALWAYS,
+    )
+    on_demand = _resolved_skill(
+        name="On demand",
+        position=1,
+        activation_mode=SkillActivationMode.ON_DEMAND,
+    )
+    assistant = _assistant_with_runtime_model()
+    assistant.completion_model.supports_tool_calling = False
+    service = _service()
+
+    verdict = await service.assert_assistant_fits_candidate_pin(
+        assistant=assistant,
+        space_is_personal=False,
+        candidate=PersonalChatPinOverride(
+            skill_id=target.skill_id,
+            from_revision_id=target.skill_revision_id,
+            to_revision_id=target.skill_revision_id,
+        ),
+        candidate_binding=target,
+        resolution=SkillRuntimeResolution(
+            eligible=(target, on_demand),
+            blocked=(),
+        ),
+        runtime_policy=_runtime_policy(),
+        preflight_adapters={assistant.completion_model.id: MagicMock()},
+        completion_prompt_files=assistant.attachments,
+    )
+
+    assert verdict is AssistantPinAdvanceIncompatibleReason.ACTIVATION_UNAVAILABLE
+
+
+@pytest.mark.asyncio
+async def test_candidate_pin_fit_revalidates_unchanged_on_demand_binding(monkeypatch):
+    _patch_reserve(monkeypatch, 10)
+    current = _resolved_skill(
+        name="Candidate",
+        position=0,
+        activation_mode=SkillActivationMode.ON_DEMAND,
+    )
+    assistant = _assistant_with_runtime_model()
+    assistant.completion_model.supports_tool_calling = False
+    service = _service()
+
+    verdict = await service.assert_assistant_fits_candidate_pin(
+        assistant=assistant,
+        space_is_personal=False,
+        candidate=PersonalChatPinOverride(
+            skill_id=current.skill_id,
+            from_revision_id=current.skill_revision_id,
+            to_revision_id=current.skill_revision_id,
+        ),
+        candidate_binding=current,
+        resolution=SkillRuntimeResolution(eligible=(current,), blocked=()),
+        runtime_policy=_runtime_policy(),
+        preflight_adapters={assistant.completion_model.id: MagicMock()},
+        completion_prompt_files=assistant.attachments,
+    )
+
+    assert verdict is AssistantPinAdvanceIncompatibleReason.ACTIVATION_UNAVAILABLE
+
+
+@pytest.mark.parametrize(
+    ("include_on_demand", "expected"),
+    [
+        (True, AssistantPinAdvanceIncompatibleReason.ACTIVATION_UNAVAILABLE),
+        (False, None),
+    ],
+)
+@pytest.mark.asyncio
+async def test_candidate_pin_fit_without_model_matches_full_save_behavior(
+    include_on_demand,
+    expected,
+):
+    target = _resolved_skill(
+        name="Target",
+        position=0,
+        activation_mode=SkillActivationMode.ALWAYS,
+    )
+    on_demand = _resolved_skill(
+        name="On demand",
+        position=1,
+        activation_mode=SkillActivationMode.ON_DEMAND,
+    )
+    assistant = _assistant_with_runtime_model()
+    assistant.completion_model = None
+    service = _service()
+
+    verdict = await service.assert_assistant_fits_candidate_pin(
+        assistant=assistant,
+        space_is_personal=False,
+        candidate=PersonalChatPinOverride(
+            skill_id=target.skill_id,
+            from_revision_id=target.skill_revision_id,
+            to_revision_id=target.skill_revision_id,
+        ),
+        candidate_binding=target,
+        resolution=SkillRuntimeResolution(
+            eligible=(target, on_demand) if include_on_demand else (target,),
+            blocked=(),
+        ),
+        runtime_policy=_runtime_policy(),
+        preflight_adapters={},
+        completion_prompt_files=assistant.attachments,
+    )
+
+    assert verdict is expected
+
+
+@pytest.mark.asyncio
+async def test_candidate_pin_fit_reports_context_window_without_rejecting_current_pin(
+    monkeypatch,
+):
+    _patch_reserve(monkeypatch, 10)
+    current = _resolved_skill(
+        name="Candidate",
+        position=0,
+        activation_mode=SkillActivationMode.ALWAYS,
+    )
+    assistant = _assistant_with_runtime_model()
+    assistant.completion_model.max_input_tokens = 200
+    oversized = replace(
+        current,
+        skill_revision_id=uuid4(),
+        revision_number=2,
+        instructions="overflow " * 10_000,
+    )
+    service = _service()
+
+    current_verdict = await service.assert_assistant_fits_candidate_pin(
+        assistant=assistant,
+        space_is_personal=False,
+        candidate=PersonalChatPinOverride(
+            skill_id=current.skill_id,
+            from_revision_id=current.skill_revision_id,
+            to_revision_id=current.skill_revision_id,
+        ),
+        candidate_binding=current,
+        resolution=SkillRuntimeResolution(eligible=(current,), blocked=()),
+        runtime_policy=_runtime_policy(),
+        preflight_adapters={},
+        completion_prompt_files=assistant.attachments,
+    )
+    oversized_verdict = await service.assert_assistant_fits_candidate_pin(
+        assistant=assistant,
+        space_is_personal=False,
+        candidate=PersonalChatPinOverride(
+            skill_id=current.skill_id,
+            from_revision_id=current.skill_revision_id,
+            to_revision_id=oversized.skill_revision_id,
+        ),
+        candidate_binding=oversized,
+        resolution=SkillRuntimeResolution(eligible=(current,), blocked=()),
+        runtime_policy=_runtime_policy(),
+        preflight_adapters={},
+        completion_prompt_files=assistant.attachments,
+    )
+
+    assert current_verdict is None
+    assert oversized_verdict is AssistantPinAdvanceIncompatibleReason.CONTEXT_WINDOW
 
 
 def _assistant_with_runtime_model(*, prompt_text: str = "Base instructions"):
@@ -368,6 +650,10 @@ async def test_changed_on_demand_candidates_share_the_attachment_ceiling(
         "eneo.completion_models.domain.skill_activation.measure_provider_input_tokens",
         measure_provider_input,
     )
+    monkeypatch.setattr(
+        "eneo.assistants.assistant_service.measure_provider_input_tokens",
+        measure_provider_input,
+    )
     bindings = (
         _resolved_skill(
             name="Candidate one",
@@ -461,8 +747,6 @@ async def test_save_skill_share_uses_raw_model_window(monkeypatch):
             ),
         )
     )
-    service._assert_persistent_baseline_fits = AsyncMock()
-
     await service._validate_attachments_fit(
         assistant,
         space=space,
@@ -505,8 +789,6 @@ async def test_full_save_stages_blocked_on_demand_candidate(monkeypatch):
     service.skill_service.resolve_assistant_bindings_for_runtime.return_value = (
         SkillRuntimeResolution(eligible=(), blocked=(blocked_candidate,))
     )
-    service._assert_persistent_baseline_fits = AsyncMock()
-
     with pytest.raises(BadRequestException, match="Blocked candidate"):
         await service._validate_attachments_fit(
             assistant,
@@ -702,7 +984,11 @@ async def test_save_fit_uses_the_exact_initial_turn_runtime_prompt(
             policy=policy,
         )
     )
-    service._assert_persistent_baseline_fits = AsyncMock()
+    validated_prompt: dict[str, str] = {}
+    monkeypatch.setattr(
+        "eneo.assistants.assistant_service.assert_prompt_and_files_fit_context",
+        lambda **kwargs: validated_prompt.update(prompt=kwargs["prompt_text"]),
+    )
 
     expected_plan = SkillTurnPlan.create(
         base_instructions=assistant.get_prompt_text(),
@@ -717,10 +1003,7 @@ async def test_save_fit_uses_the_exact_initial_turn_runtime_prompt(
 
     await service._validate_attachments_fit(assistant, space=space)
 
-    assert (
-        service._assert_persistent_baseline_fits.await_args.kwargs["prompt_text"]
-        == expected_runtime.prompt
-    )
+    assert validated_prompt["prompt"] == expected_runtime.prompt
     service.skill_service.create_turn_plan.assert_awaited_once()
 
 
@@ -784,10 +1067,19 @@ async def test_preflight_baseline_uses_the_exact_initial_turn_runtime_prompt(
         supports_tool_calling=assistant.completion_model.supports_tool_calling,
     )
 
-    prompt, attachments = await service.get_preflight_baseline(assistant.id)
+    baseline = await service.get_preflight_baseline(assistant.id)
+    assert expected_runtime.tool_definition is not None
+    expected_prompt_tokens = measure_provider_input_tokens(
+        [{"role": "system", "content": expected_runtime.prompt}],
+        [function_definition_to_tool(expected_runtime.tool_definition)],
+        assistant.completion_model.get_model_route(),
+    ).tokens
 
-    assert prompt == expected_runtime.prompt
-    assert attachments == assistant.attachments
+    assert baseline.attachments == assistant.attachments
+    assert baseline.skill_context_tokens == 10
+    assert baseline.prompt_tokens == expected_prompt_tokens
+    assert "Instructions for Always" in expected_runtime.prompt
+    assert "Instructions for On demand" not in expected_runtime.prompt
 
 
 @pytest.mark.parametrize(
@@ -879,7 +1171,11 @@ async def test_explicit_on_demand_change_rejects_runtime_fallbacks(
             ),
         )
     )
-    service._assert_persistent_baseline_fits = AsyncMock()
+    baseline_check = MagicMock()
+    monkeypatch.setattr(
+        "eneo.assistants.assistant_service.assert_prompt_and_files_fit_context",
+        baseline_check,
+    )
 
     with pytest.raises(BadRequestException, match=message):
         await service._validate_attachments_fit(
@@ -888,7 +1184,7 @@ async def test_explicit_on_demand_change_rejects_runtime_fallbacks(
             on_demand_skill_ids_requiring_validation=frozenset({binding.skill_id}),
         )
 
-    service._assert_persistent_baseline_fits.assert_not_awaited()
+    baseline_check.assert_not_called()
 
 
 @pytest.mark.parametrize(
@@ -941,7 +1237,11 @@ async def test_explicit_on_demand_change_rejects_unloadable_candidate(
     service.skill_service.resolve_assistant_bindings_for_runtime.return_value = (
         SkillRuntimeResolution(eligible=(binding,), blocked=())
     )
-    service._assert_persistent_baseline_fits = AsyncMock()
+    baseline_check = MagicMock()
+    monkeypatch.setattr(
+        "eneo.assistants.assistant_service.assert_prompt_and_files_fit_context",
+        baseline_check,
+    )
 
     with pytest.raises(BadRequestException, match=message):
         await service._validate_attachments_fit(
@@ -950,7 +1250,7 @@ async def test_explicit_on_demand_change_rejects_unloadable_candidate(
             on_demand_skill_ids_requiring_validation=frozenset({binding.skill_id}),
         )
 
-    service._assert_persistent_baseline_fits.assert_not_awaited()
+    baseline_check.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -992,15 +1292,13 @@ async def test_existing_on_demand_binding_remains_saveable_during_policy_drift(
             ),
         )
     )
-    service._assert_persistent_baseline_fits = AsyncMock()
-
     await service._validate_attachments_fit(
         assistant,
         space=space,
         on_demand_skill_ids_requiring_validation=frozenset(),
     )
 
-    service._assert_persistent_baseline_fits.assert_awaited_once()
+    service.completion_service.prepare_skill_activation_preflight.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -1143,6 +1441,8 @@ async def test_fit_uses_governance_effective_model(monkeypatch):
     service._resolve_effective_config = AsyncMock(
         return_value=SimpleNamespace(
             models_enforced=True,
+            mcp_enforced=False,
+            available_mcp_servers=[],
             prompt_enforced=False,
             enforced_prompt_text=None,
             governance_skill_resolution=SkillRuntimeResolution(
@@ -1174,6 +1474,8 @@ async def test_fit_uses_governance_enforced_prompt(monkeypatch):
     service._resolve_effective_config = AsyncMock(
         return_value=SimpleNamespace(
             models_enforced=False,
+            mcp_enforced=False,
+            available_mcp_servers=[],
             prompt_enforced=True,
             enforced_prompt_text="x" * 95,
             governance_skill_resolution=SkillRuntimeResolution(
@@ -1191,6 +1493,11 @@ async def test_fit_uses_governance_enforced_prompt(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_governance_preflight_uses_each_assistants_effective_model():
+    on_demand = _resolved_skill(
+        name="On demand",
+        position=0,
+        activation_mode=SkillActivationMode.ON_DEMAND,
+    )
     allowed_current = SimpleNamespace(
         id=MagicMock(),
         max_input_tokens=100,
@@ -1241,26 +1548,642 @@ async def test_governance_preflight_uses_each_assistants_effective_model():
         prompt_enforced=False,
         enforced_prompt_text=None,
         governance_skill_resolution=SkillRuntimeResolution(
-            eligible=(),
+            eligible=(on_demand,),
             blocked=(),
         ),
     )
     service = _service()
-    service.repo.get_personal_defaults_for_tenant.return_value = assistants
+    service.repo.get_personal_defaults_page.return_value = SimpleNamespace(
+        items=[
+            SimpleNamespace(
+                assistant=assistant,
+                configured_mcp_servers=(),
+                has_knowledge=False,
+            )
+            for assistant in assistants
+        ],
+        next_after=None,
+    )
     service.effective_config_service = AsyncMock()
-    service.effective_config_service.resolve_for.return_value = effective_config
-    service._assert_persistent_baseline_fits = AsyncMock()
+    service.effective_config_service.resolve_personal_default.return_value = (
+        effective_config
+    )
+    service._validate_skill_activation_fit = AsyncMock()
 
     await service.assert_personal_default_governance_context_fit()
 
     selected_models = [
         call.kwargs["model"]
-        for call in service._assert_persistent_baseline_fits.await_args_list
+        for call in service._validate_skill_activation_fit.await_args_list
     ]
-    assert selected_models == [allowed_current, policy_default]
-    service.effective_config_service.resolve_for.assert_awaited_once_with(
-        assistants[0], space_is_personal=True
+    assert selected_models == [
+        allowed_current,
+        policy_default,
+        allowed_current,
+        policy_default,
+    ]
+    assert all(
+        call.kwargs["effective_mcp_servers"] == []
+        for call in service._validate_skill_activation_fit.await_args_list
     )
+    service.skill_service.create_turn_plan.assert_awaited_once()
+    service.effective_config_service.resolve_personal_default.assert_awaited_once_with()
+
+
+@pytest.mark.asyncio
+async def test_governance_preflight_projects_each_personal_assistants_mcp_tools():
+    on_demand = _resolved_skill(
+        name="On demand",
+        position=0,
+        activation_mode=SkillActivationMode.ON_DEMAND,
+    )
+    assistant = _assistant_with_runtime_model()
+    configured_server = MagicMock()
+    projected_server = MagicMock()
+    effective_config = SimpleNamespace(
+        models_enforced=True,
+        available_models=[assistant.completion_model],
+        locked_model=None,
+        policy_default_model=assistant.completion_model,
+        mcp_enforced=False,
+        available_mcp_servers=[],
+        prompt_enforced=False,
+        enforced_prompt_text=None,
+        governance_skill_resolution=SkillRuntimeResolution(
+            eligible=(on_demand,),
+            blocked=(),
+        ),
+    )
+    service = _service()
+    service.repo.get_personal_defaults_page.return_value = SimpleNamespace(
+        items=[
+            SimpleNamespace(
+                assistant=assistant,
+                configured_mcp_servers=(configured_server,),
+                has_knowledge=False,
+            )
+        ],
+        next_after=None,
+    )
+    service.space_repo.project_assistants_mcp_servers.return_value = {
+        assistant.id: [projected_server]
+    }
+    service.effective_config_service = AsyncMock()
+    service.effective_config_service.resolve_personal_default.return_value = (
+        effective_config
+    )
+    service._validate_skill_activation_fit = AsyncMock()
+
+    await service.assert_personal_default_governance_context_fit()
+
+    service.space_repo.project_assistants_mcp_servers.assert_awaited_once_with(
+        [
+            AssistantMCPServerProjection(
+                space_id=assistant.space_id,
+                assistant_id=assistant.id,
+                mcp_servers=(configured_server,),
+            )
+        ]
+    )
+    assert service._validate_skill_activation_fit.await_args_list[-1].kwargs[
+        "effective_mcp_servers"
+    ] == [projected_server]
+
+
+@pytest.mark.asyncio
+async def test_governance_preflight_walks_every_page_of_personal_defaults():
+    """Unrestricted scans retain projected adapters across every bounded page."""
+    first = _assistant_with_runtime_model()
+    second = _assistant_with_runtime_model()
+    second.completion_model = first.completion_model
+    configured_server = MagicMock()
+    projected_server = MagicMock()
+    retained_adapter = MagicMock()
+    effective_config = SimpleNamespace(
+        models_enforced=False,
+        available_models=[],
+        locked_model=None,
+        policy_default_model=first.completion_model,
+        mcp_enforced=False,
+        available_mcp_servers=[],
+        prompt_enforced=False,
+        enforced_prompt_text=None,
+        governance_skill_resolution=SkillRuntimeResolution(eligible=(), blocked=()),
+    )
+    service = _service()
+    service.completion_service.load_skill_activation_preflight_adapters.side_effect = [
+        SkillActivationPreflightAdapterLoad(
+            adapters={first.completion_model.id: retained_adapter},
+            unavailable_model_ids=frozenset(),
+        ),
+    ]
+    cursor = ("2026-07-01", first.id)
+    service.repo.get_personal_defaults_page.side_effect = [
+        SimpleNamespace(
+            items=[
+                SimpleNamespace(
+                    assistant=first,
+                    configured_mcp_servers=(configured_server,),
+                    has_knowledge=False,
+                )
+            ],
+            next_after=cursor,
+        ),
+        SimpleNamespace(
+            items=[
+                SimpleNamespace(
+                    assistant=second,
+                    configured_mcp_servers=(configured_server,),
+                    has_knowledge=False,
+                )
+            ],
+            next_after=None,
+        ),
+    ]
+    service.space_repo.project_assistants_mcp_servers.side_effect = [
+        {first.id: [projected_server]},
+        {second.id: [projected_server]},
+    ]
+    service.effective_config_service = AsyncMock()
+    service.effective_config_service.resolve_personal_default.return_value = (
+        effective_config
+    )
+    service._validate_skill_activation_fit = AsyncMock()
+
+    await service.assert_personal_default_governance_context_fit()
+
+    page_calls = service.repo.get_personal_defaults_page.await_args_list
+    assert len(page_calls) == 2
+    assert page_calls[0].kwargs["after"] is None
+    assert page_calls[1].kwargs["after"] == cursor
+    preload_calls = service.completion_service.load_skill_activation_preflight_adapters.await_args_list
+    assert len(preload_calls) == 1
+    assert preload_calls[0].args == ([first.completion_model],)
+    validation_calls = service._validate_skill_activation_fit.await_args_list
+    assert len(validation_calls) == 2
+    assert all(
+        call.kwargs["preflight_adapter"] is retained_adapter
+        for call in validation_calls
+    )
+    assert service.space_repo.project_assistants_mcp_servers.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_governance_preflight_does_not_load_unused_page_model_adapter():
+    assistant = _assistant_with_runtime_model()
+    effective_config = SimpleNamespace(
+        models_enforced=False,
+        available_models=[],
+        locked_model=None,
+        policy_default_model=assistant.completion_model,
+        mcp_enforced=False,
+        available_mcp_servers=[],
+        prompt_enforced=False,
+        enforced_prompt_text=None,
+        governance_skill_resolution=SkillRuntimeResolution(eligible=(), blocked=()),
+    )
+    service = _service()
+    service.completion_service.load_skill_activation_preflight_adapters.return_value = (
+        SkillActivationPreflightAdapterLoad(
+            adapters={},
+            unavailable_model_ids=frozenset(),
+        )
+    )
+    service.repo.get_personal_defaults_page.return_value = SimpleNamespace(
+        items=[
+            SimpleNamespace(
+                assistant=assistant,
+                configured_mcp_servers=(),
+                has_knowledge=False,
+            )
+        ],
+        next_after=None,
+    )
+    service.effective_config_service = AsyncMock()
+    service.effective_config_service.resolve_personal_default.return_value = (
+        effective_config
+    )
+    service._validate_skill_activation_fit = AsyncMock()
+
+    await service.assert_personal_default_governance_context_fit()
+
+    service.completion_service.load_skill_activation_preflight_adapters.assert_not_awaited()
+    assert (
+        service._validate_skill_activation_fit.await_args.kwargs["preflight_adapter"]
+        is None
+    )
+
+
+@pytest.mark.asyncio
+async def test_governance_preflight_hydrates_each_assistant_projection_separately():
+    class HydratedBlob:
+        pass
+
+    first = _assistant_with_runtime_model()
+    second = _assistant_with_runtime_model()
+    first_metadata = MagicMock()
+    second_metadata = MagicMock()
+    events: list[str] = []
+    first_blob_ref: ReferenceType[HydratedBlob] | None = None
+    second_blob_ref: ReferenceType[HydratedBlob] | None = None
+
+    async def hydrate_completion_files(*, assistant, derived_image_metadata):
+        nonlocal first_blob_ref, second_blob_ref
+        if assistant is second:
+            gc.collect()
+            assert first_blob_ref is not None
+            assert first_blob_ref() is None
+            events.append("release first")
+        blob = HydratedBlob()
+        if assistant is first:
+            assert derived_image_metadata == (first_metadata,)
+            first_blob_ref = ref(blob)
+            events.append("hydrate first")
+        else:
+            assert assistant is second
+            assert derived_image_metadata == (second_metadata,)
+            second_blob_ref = ref(blob)
+            events.append("hydrate second")
+        return (blob,)
+
+    async def validate_fit(*, model, completion_prompt_files, **_kwargs):
+        assert len(completion_prompt_files) == 1
+        if model is first.completion_model:
+            assert first_blob_ref is not None
+            assert first_blob_ref() is completion_prompt_files[0]
+            events.append("validate first")
+        else:
+            assert model is second.completion_model
+            assert second_blob_ref is not None
+            assert second_blob_ref() is completion_prompt_files[0]
+            events.append("validate second")
+
+    effective_config = SimpleNamespace(
+        models_enforced=False,
+        available_models=[],
+        locked_model=None,
+        policy_default_model=first.completion_model,
+        mcp_enforced=False,
+        available_mcp_servers=[],
+        prompt_enforced=False,
+        enforced_prompt_text=None,
+        governance_skill_resolution=SkillRuntimeResolution(eligible=(), blocked=()),
+    )
+    service = _service()
+    service.repo.get_personal_defaults_page.return_value = SimpleNamespace(
+        items=[
+            SimpleNamespace(
+                assistant=first,
+                configured_mcp_servers=(),
+                has_knowledge=False,
+            ),
+            SimpleNamespace(
+                assistant=second,
+                configured_mcp_servers=(),
+                has_knowledge=False,
+            ),
+        ],
+        next_after=None,
+    )
+    service.repo.project_completion_file_metadata_for_validation.side_effect = None
+    service.repo.project_completion_file_metadata_for_validation.return_value = {
+        first.id: CompletionFileValidationProjection(
+            derived_image_metadata=(first_metadata,),
+            is_stable=True,
+        ),
+        second.id: CompletionFileValidationProjection(
+            derived_image_metadata=(second_metadata,),
+            is_stable=True,
+        ),
+    }
+    service.effective_config_service = AsyncMock()
+    service.effective_config_service.resolve_personal_default.return_value = (
+        effective_config
+    )
+    service.repo.hydrate_completion_files_for_validation = hydrate_completion_files
+    service._validate_skill_activation_fit = validate_fit
+
+    await service.assert_personal_default_governance_context_fit()
+
+    gc.collect()
+    assert second_blob_ref is not None
+    assert second_blob_ref() is None
+    assert events == [
+        "hydrate first",
+        "validate first",
+        "release first",
+        "hydrate second",
+        "validate second",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_governance_preflight_excludes_mcp_when_assistant_has_knowledge():
+    on_demand = _resolved_skill(
+        name="On demand",
+        position=0,
+        activation_mode=SkillActivationMode.ON_DEMAND,
+    )
+    assistant = _assistant_with_runtime_model()
+    effective_config = SimpleNamespace(
+        models_enforced=True,
+        available_models=[assistant.completion_model],
+        locked_model=None,
+        policy_default_model=assistant.completion_model,
+        mcp_enforced=False,
+        available_mcp_servers=[],
+        prompt_enforced=False,
+        enforced_prompt_text=None,
+        governance_skill_resolution=SkillRuntimeResolution(
+            eligible=(on_demand,),
+            blocked=(),
+        ),
+    )
+    service = _service()
+    service.repo.get_personal_defaults_page.return_value = SimpleNamespace(
+        items=[
+            SimpleNamespace(
+                assistant=assistant,
+                configured_mcp_servers=(MagicMock(),),
+                has_knowledge=True,
+            )
+        ],
+        next_after=None,
+    )
+    service.effective_config_service = AsyncMock()
+    service.effective_config_service.resolve_personal_default.return_value = (
+        effective_config
+    )
+    service._validate_skill_activation_fit = AsyncMock()
+
+    await service.assert_personal_default_governance_context_fit()
+
+    service.space_repo.project_assistants_mcp_servers.assert_not_awaited()
+    assert (
+        service._validate_skill_activation_fit.await_args_list[-1].kwargs[
+            "effective_mcp_servers"
+        ]
+        == []
+    )
+
+
+@pytest.mark.asyncio
+async def test_governance_preflight_validates_on_demand_against_the_current_unbounded_model():
+    on_demand = _resolved_skill(
+        name="On demand",
+        position=0,
+        activation_mode=SkillActivationMode.ON_DEMAND,
+    )
+    assistant = _assistant_with_runtime_model()
+    service = _service()
+    service.repo.get_personal_defaults_page.return_value = SimpleNamespace(
+        items=[
+            SimpleNamespace(
+                assistant=assistant,
+                configured_mcp_servers=(),
+                has_knowledge=False,
+            )
+        ],
+        next_after=None,
+    )
+    service.effective_config_service = AsyncMock()
+    service.effective_config_service.resolve_personal_default.return_value = (
+        SimpleNamespace(
+            models_enforced=False,
+            available_models=[],
+            locked_model=None,
+            policy_default_model=None,
+            mcp_enforced=False,
+            available_mcp_servers=[],
+            prompt_enforced=False,
+            enforced_prompt_text=None,
+            governance_skill_resolution=SkillRuntimeResolution(
+                eligible=(on_demand,),
+                blocked=(),
+            ),
+        )
+    )
+    service._validate_skill_activation_fit = AsyncMock()
+
+    await service.assert_personal_default_governance_context_fit()
+
+    service._validate_skill_activation_fit.assert_awaited_once()
+    assert (
+        service._validate_skill_activation_fit.await_args.kwargs["model"]
+        is assistant.completion_model
+    )
+
+
+@pytest.mark.parametrize(
+    (
+        "selective_activation_enabled",
+        "supports_tool_calling",
+        "measurement",
+        "expected_error",
+    ),
+    [
+        (
+            True,
+            False,
+            SimpleNamespace(
+                tokens=10,
+                limit=1_000,
+                source=TokenCountSource.LITELLM,
+            ),
+            None,
+        ),
+        (
+            True,
+            True,
+            SimpleNamespace(
+                tokens=1_001,
+                limit=1_000,
+                source=TokenCountSource.LITELLM,
+            ),
+            None,
+        ),
+        (
+            True,
+            True,
+            SimpleNamespace(
+                tokens=10,
+                limit=1_000,
+                source=TokenCountSource.FALLBACK_ESTIMATE,
+            ),
+            None,
+        ),
+        (
+            False,
+            True,
+            SimpleNamespace(
+                tokens=10,
+                limit=1_000,
+                source=TokenCountSource.LITELLM,
+            ),
+            "disabled by the organisation runtime policy",
+        ),
+    ],
+    ids=("no-tool-support", "catalogue-too-large", "estimated", "disabled"),
+)
+@pytest.mark.asyncio
+async def test_personal_chat_only_keeps_on_demand_configuration_for_safe_fallbacks(
+    selective_activation_enabled,
+    supports_tool_calling,
+    measurement,
+    expected_error,
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        "eneo.completion_models.domain.skill_activation.measure_skill_context",
+        lambda **_: measurement,
+    )
+    on_demand = _resolved_skill(
+        name="On demand",
+        position=0,
+        activation_mode=SkillActivationMode.ON_DEMAND,
+    )
+    assistant = _assistant_with_runtime_model()
+    assistant.is_default = True
+    assistant.completion_model.supports_tool_calling = supports_tool_calling
+    effective_config = SimpleNamespace(
+        models_enforced=False,
+        available_models=[],
+        locked_model=None,
+        policy_default_model=None,
+        mcp_enforced=False,
+        available_mcp_servers=[],
+        prompt_enforced=False,
+        enforced_prompt_text=None,
+        governance_skill_resolution=SkillRuntimeResolution(
+            eligible=(on_demand,),
+            blocked=(),
+        ),
+    )
+    space = MagicMock()
+    space.is_personal.return_value = True
+    service = _service()
+    service._resolve_effective_config = AsyncMock(return_value=effective_config)
+    service.skill_service.create_turn_plan.side_effect = (
+        lambda *, base_instructions, resolution: SkillTurnPlan.create(
+            base_instructions=base_instructions,
+            resolution=resolution,
+            policy=SkillRuntimePolicy(
+                selective_activation_enabled=selective_activation_enabled,
+                max_attached_skills=100,
+                context_share_percent=10,
+                max_activations_per_turn=3,
+            ),
+        )
+    )
+
+    if expected_error is not None:
+        with pytest.raises(BadRequestException, match=expected_error):
+            await service._validate_attachments_fit(
+                assistant,
+                space=space,
+                validate_all_on_demand_candidates=True,
+            )
+    else:
+        await service._validate_attachments_fit(
+            assistant,
+            space=space,
+            validate_all_on_demand_candidates=True,
+        )
+
+        service.completion_service.prepare_skill_activation_preflight.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_governance_preflight_keeps_on_demand_for_current_model_without_tool_calling():
+    on_demand = _resolved_skill(
+        name="On demand",
+        position=0,
+        activation_mode=SkillActivationMode.ON_DEMAND,
+    )
+    assistant = _assistant_with_runtime_model()
+    assistant.completion_model.supports_tool_calling = False
+    effective_config = SimpleNamespace(
+        models_enforced=False,
+        available_models=[],
+        locked_model=None,
+        policy_default_model=None,
+        mcp_enforced=False,
+        available_mcp_servers=[],
+        prompt_enforced=False,
+        enforced_prompt_text=None,
+        governance_skill_resolution=SkillRuntimeResolution(
+            eligible=(on_demand,),
+            blocked=(),
+        ),
+    )
+    service = _service()
+    service.repo.get_personal_defaults_page.return_value = SimpleNamespace(
+        items=[
+            SimpleNamespace(
+                assistant=assistant,
+                configured_mcp_servers=(),
+                has_knowledge=False,
+            )
+        ],
+        next_after=None,
+    )
+    service.effective_config_service = AsyncMock()
+    service.effective_config_service.resolve_personal_default.return_value = (
+        effective_config
+    )
+
+    await service.assert_personal_default_governance_context_fit()
+
+    service.completion_service.prepare_skill_activation_preflight.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_governance_preflight_validates_each_explicit_model_without_assistants():
+    on_demand = _resolved_skill(
+        name="On demand",
+        position=0,
+        activation_mode=SkillActivationMode.ON_DEMAND,
+    )
+    models = [
+        SimpleNamespace(
+            id=uuid4(),
+            max_input_tokens=16_000,
+            name=name,
+            vision=False,
+            supports_tool_calling=True,
+            get_model_route=lambda name=name: f"openai/{name}",
+        )
+        for name in ("first", "second")
+    ]
+    service = _service()
+    service.repo.get_personal_defaults_page.return_value = SimpleNamespace(
+        items=[], next_after=None
+    )
+    service.effective_config_service = AsyncMock()
+    service.effective_config_service.resolve_personal_default.return_value = (
+        SimpleNamespace(
+            models_enforced=True,
+            available_models=models,
+            locked_model=None,
+            policy_default_model=models[0],
+            mcp_enforced=False,
+            available_mcp_servers=[],
+            prompt_enforced=False,
+            enforced_prompt_text=None,
+            governance_skill_resolution=SkillRuntimeResolution(
+                eligible=(on_demand,),
+                blocked=(),
+            ),
+        )
+    )
+    service._validate_skill_activation_fit = AsyncMock()
+
+    await service.assert_personal_default_governance_context_fit()
+
+    assert [
+        call.kwargs["model"]
+        for call in service._validate_skill_activation_fit.await_args_list
+    ] == models
 
 
 # --- context fit: per-message ask-time guard (uploads have no save-time gate) ---

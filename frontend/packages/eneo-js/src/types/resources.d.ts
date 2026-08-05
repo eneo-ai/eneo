@@ -30,6 +30,9 @@ export type OrganizationSkillSummaryPagePublic =
   components["schemas"]["OrganizationSkillSummaryPagePublic"];
 export type SkillAdoptionProjectionPagePublic =
   components["schemas"]["SkillAdoptionProjectionPagePublic"];
+export type PersonalChatPinAdvancePublic = components["schemas"]["PersonalChatPinAdvancePublic"];
+export type AssistantFleetAdvancePublic = components["schemas"]["AssistantFleetAdvancePublic"];
+export type AppFleetAdvancePublic = components["schemas"]["AppFleetAdvancePublic"];
 export type PublishedSkillPublic = components["schemas"]["PublishedSkillPublic"];
 export type PublishedSkillSummaryPublic = components["schemas"]["PublishedSkillSummaryPublic"];
 export type PublishedSkillSummaryPagePublic =
@@ -63,6 +66,7 @@ export type EmbeddingModel = components["schemas"]["EmbeddingModelPublic"];
 export type TranscriptionModel = components["schemas"]["TranscriptionModelPublic"];
 export type SecurityClassification = components["schemas"]["SecurityClassificationPublic"];
 export type Job = components["schemas"]["JobPublic"];
+export type JobFailureCode = components["schemas"]["JobFailureCode"];
 export type JobStatus = components["schemas"]["Status"];
 // Backend's TenantPublic schema omits `id`, but the actual API response includes it.
 // Until the schema is fixed upstream we extend the type so consumers can use `tenant.id`.
@@ -82,9 +86,20 @@ export type UserGroup = components["schemas"]["UserGroupPublic"];
 export type User = components["schemas"]["UserAdminView"];
 export type UserSparse = components["schemas"]["UserSparse"];
 export type CurrentUser = components["schemas"]["UserPublic"];
+export type StorageKind = components["schemas"]["StorageKind"];
+export type ObjectContentReadinessCode = components["schemas"]["ObjectContentReadinessCode"];
+export type UploadLimitUseCase = components["schemas"]["UploadLimitUseCase"];
+export type ContentState = components["schemas"]["ContentState"];
+export type ContentMoveState = components["schemas"]["ContentMoveState"];
+export type ContentMoveFailureCode = components["schemas"]["ContentMoveFailureCode"];
 export type DeploymentPolicy = components["schemas"]["DeploymentPolicyPublic"];
 export type DeploymentPolicyUpdate = components["schemas"]["DeploymentPolicyUpdate"];
 export type ObjectContentInventory = components["schemas"]["ObjectContentInventoryPublic"];
+export type ObjectContentMoves = components["schemas"]["ObjectContentMovesPublic"];
+export type MoveQueueRequest = components["schemas"]["MoveQueueRequest"];
+export type MoveQueueResult = components["schemas"]["MoveQueuePublic"];
+export type MovePauseUpdate = components["schemas"]["DeploymentPolicyPauseUpdate"];
+export type MovePauseResult = components["schemas"]["MovePausePublic"];
 export type Role = components["schemas"]["RolePublic"];
 export type Permission = components["schemas"]["Permission"];
 export type ResourcePermission = components["schemas"]["ResourcePermission"];
@@ -151,14 +166,9 @@ export type Conversation = components["schemas"]["SessionPublic"] & {
 };
 export type ConversationSparse = components["schemas"]["SessionMetadataPublic"];
 export type McpToolReference = components["schemas"]["McpToolReferencePublic"];
-// num_tokens_* are populated by the backend on every persisted message and
-// streamed live via the SSE token_usage event, but are not part of the generated
-// Message schema.
-export type ConversationMessage = components["schemas"]["Message"] & {
-  num_tokens_question?: number;
-  num_tokens_answer?: number;
-};
+export type ConversationMessage = components["schemas"]["Message"];
 export type ConversationTools = components["schemas"]["UseTools"];
+export type ChatTurnDiagnostics = components["schemas"]["ChatTurnDiagnostics"];
 export type PreflightResponse = components["schemas"]["PreflightResponse"];
 export type GroupChat = components["schemas"]["GroupChatPublic"];
 export type GroupChatSparse = Omit<components["schemas"]["GroupChatSparse"], "user_id">;

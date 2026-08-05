@@ -162,12 +162,12 @@ def to_ask_conversation_response(
         public_model = CompletionModelPublic.from_domain(
             completion_model, show_pricing=show_pricing
         )
-    return AskChatResponse(  # type: ignore[call-arg]
-        created_at=created_at,  # type: ignore[call-arg]
-        updated_at=updated_at,  # type: ignore[call-arg]
+    return AskChatResponse(
+        created_at=created_at,
+        updated_at=updated_at,
         session_id=session.id,
-        id=question_id,  # type: ignore[call-arg]
-        completion_model=public_model,  # type: ignore[call-arg]
+        id=question_id,
+        completion_model=public_model,
         files=[FilePublic(**file.model_dump()) for file in files],
         generated_files=[],
         question=question,
@@ -318,12 +318,25 @@ def to_sse_response(chunk: Completion, session_id: "UUID") -> ServerSentEvent:
     elif chunk.response_type == ResponseType.TOKEN_USAGE:
         prompt = chunk.usage.prompt_tokens or 0 if chunk.usage else 0
         completion = chunk.usage.completion_tokens or 0 if chunk.usage else 0
+        context_prompt = (
+            chunk.usage.context_prompt_tokens
+            if chunk.usage and chunk.usage.context_prompt_tokens is not None
+            else prompt
+        )
+        context_completion = (
+            chunk.usage.context_completion_tokens
+            if chunk.usage and chunk.usage.context_completion_tokens is not None
+            else completion
+        )
         data = SSETokenUsage(
             session_id=session_id,
             usage=TokenUsageEvent(
                 prompt_tokens=prompt,
                 completion_tokens=completion,
                 turn_tokens=prompt + completion,
+                context_prompt_tokens=context_prompt,
+                context_completion_tokens=context_completion,
+                skill_context_tokens=chunk.skill_context_tokens or 0,
             ),
         )
 

@@ -10,7 +10,7 @@ from eneo.governance_policy.domain.governance_policy import (
     PolicyScope,
 )
 from eneo.roles.permissions import Permission
-from eneo.skills.domain.skill import SkillBindingReference
+from eneo.skills.domain.skill import SkillBindingIntent, SkillBindingReference
 
 
 def _admin(tenant_id):
@@ -115,14 +115,16 @@ async def test_update_policy_replaces_exact_organization_skill_bindings():
         SkillBindingReference(skill_id=uuid4(), skill_revision_id=uuid4()),
     ]
 
+    intents = [SkillBindingIntent(reference=reference) for reference in references]
+
     result = await service.update_policy(
         prompt_enforcement=(False, None),
-        skill_references=references,
+        skill_intents=intents,
     )
 
     assert result is policy
     skill_service.replace_governance_bindings.assert_awaited_once_with(
         policy_id=policy.id,
         organization_space_id=organization_space_id,
-        references=references,
+        intents=intents,
     )

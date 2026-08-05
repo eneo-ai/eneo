@@ -3,6 +3,7 @@
   import { invalidate } from "$app/navigation";
   import { resolve } from "$app/paths";
   import { Page } from "$lib/components/layout";
+  import { getErrorMessage } from "$lib/core/errors";
   import * as AlertDialog from "$lib/components/ui/alert-dialog/index.js";
   import { Badge } from "$lib/components/ui/badge/index.js";
   import { Button } from "$lib/components/ui/button/index.js";
@@ -64,11 +65,9 @@
       deleteTarget = null;
       await invalidate("space:skills");
     } catch (error) {
-      const failure = error as { status?: number; message?: string };
-      deleteError =
-        failure.status === 409
-          ? m.skills_library_delete_bound_error()
-          : (failure.message ?? m.skills_library_delete_error());
+      // Each delete conflict carries its own reason code, so the localized
+      // recovery instruction names the actual blocker.
+      deleteError = getErrorMessage(error);
     } finally {
       isDeleting = false;
     }

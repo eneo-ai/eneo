@@ -125,4 +125,6 @@ async def test_api_key_caller_cannot_mint_new_key(client, default_user_token):
         headers={"X-API-Key": secret},
     )
     assert spawn_response.status_code == 403, spawn_response.text
-    assert "session token" in spawn_response.json().get("detail", "").lower()
+    error = spawn_response.json()
+    assert error.get("code") == "session_auth_required"
+    assert "session token" in error.get("message", "").lower()

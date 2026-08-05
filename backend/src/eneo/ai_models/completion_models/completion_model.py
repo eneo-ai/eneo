@@ -29,11 +29,18 @@ if TYPE_CHECKING:
 
 
 class TokenUsage(BaseModel):
-    """Actual token usage as reported by the LLM provider."""
+    """Provider usage for one logical completion.
+
+    The base fields accumulate reported usage across every provider request made
+    by that completion. The context fields retain only the final provider request
+    and response, which is the snapshot relevant to model headroom.
+    """
 
     prompt_tokens: Optional[int] = None
     completion_tokens: Optional[int] = None
     reasoning_tokens: Optional[int] = None
+    context_prompt_tokens: Optional[int] = None
+    context_completion_tokens: Optional[int] = None
 
 
 class ResponseType(str, Enum):
@@ -141,6 +148,17 @@ class Completion:
     # Cumulative request-payload count when at least one provider round omitted
     # prompt usage. Provider-reported usage remains separate and authoritative.
     input_token_estimate: Optional[int] = None
+    # Final request only, for context-window headroom when the provider omits
+    # prompt usage.
+    context_input_token_estimate: Optional[int] = None
+    # Cumulative generated-output count when at least one provider round omitted
+    # completion usage. Provider-reported usage remains separate and authoritative.
+    output_token_estimate: Optional[int] = None
+    # Final response only, for context-window headroom when the provider omits
+    # completion usage.
+    context_output_token_estimate: Optional[int] = None
+    # LiteLLM-measured Skill-owned subset of the final provider prompt.
+    skill_context_tokens: Optional[int] = None
 
 
 class CompletionModelBase(BaseModel):

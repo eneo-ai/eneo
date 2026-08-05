@@ -27,6 +27,7 @@ from eneo.object_content.deployment_policy import (
     ConstrainingSource,
     DeploymentPolicy,
     DeploymentPolicyConflict,
+    DeploymentPolicyPauseUpdate,
     DeploymentPolicyRepository,
     DeploymentPolicyUpdate,
     ObjectStoreTargetNotSelectable,
@@ -137,6 +138,23 @@ def test_policy_update_is_full_typed_positive_replacement() -> None:
         )
 
 
+def test_move_pause_update_is_a_separate_typed_compare_and_swap() -> None:
+    update = DeploymentPolicyPauseUpdate(
+        expected_revision=3,
+        moves_paused=True,
+    )
+    assert update.moves_paused is True
+
+    with pytest.raises(ValidationError):
+        DeploymentPolicyPauseUpdate(expected_revision=0, moves_paused=True)
+    with pytest.raises(ValidationError):
+        DeploymentPolicyPauseUpdate(
+            expected_revision=3,
+            moves_paused=True,
+            new_write_storage_target=StorageKind.OBJECT_STORE,
+        )
+
+
 def test_policy_update_accepts_json_safe_maximum_and_rejects_next_value() -> None:
     maximum = 9_007_199_254_740_991
     accepted = DeploymentPolicyUpdate(
@@ -213,6 +231,7 @@ def test_policy_put_boundary_accepts_json_safe_maximum_and_rejects_next_value(
             "session_image_limit_bytes": maximum,
             "knowledge_file_limit_bytes": maximum,
             "transcription_audio_limit_bytes": maximum,
+            "moves_paused": stored.moves_paused,
             "updated_by_actor": stored.updated_by_actor,
             "created_at": stored.created_at,
             "updated_at": stored.updated_at,
@@ -338,7 +357,13 @@ def test_inventory_read_composes_existing_platform_authority_fences() -> None:
 
 @pytest.mark.parametrize(
     "endpoint",
-    [replace_deployment_policy, deployment_policy_router.get_object_content_inventory],
+    [
+        replace_deployment_policy,
+        deployment_policy_router.get_object_content_inventory,
+        deployment_policy_router.get_object_content_moves,
+        deployment_policy_router.queue_object_content_moves,
+        deployment_policy_router.set_object_content_moves_paused,
+    ],
 )
 def test_privileged_policy_routes_use_one_non_transactional_session(endpoint) -> None:
     route = next(
@@ -456,6 +481,7 @@ def test_policy_put_resolves_shared_container_once_before_readiness(
             "session_image_limit_bytes": policy.session_image_limit_bytes,
             "knowledge_file_limit_bytes": policy.knowledge_file_limit_bytes,
             "transcription_audio_limit_bytes": policy.transcription_audio_limit_bytes,
+            "moves_paused": policy.moves_paused,
             "updated_by_actor": policy.updated_by_actor,
             "created_at": policy.created_at,
             "updated_at": policy.updated_at,
@@ -677,6 +703,11 @@ def test_policy_router_is_registered_on_the_admin_surface() -> None:
 
     assert methods == {"get", "put"}
     assert set(app.openapi()["paths"]["/admin/object-content-inventory"]) == {"get"}
+    assert set(app.openapi()["paths"]["/admin/object-content-moves"]) == {
+        "get",
+        "post",
+    }
+    assert set(app.openapi()["paths"]["/admin/object-content-moves/pause"]) == {"put"}
 
 
 @pytest.mark.asyncio
@@ -689,6 +720,7 @@ async def test_policy_replace_uses_revision_compare_and_swap() -> None:
         session_image_limit_bytes=2,
         knowledge_file_limit_bytes=3,
         transcription_audio_limit_bytes=4,
+        moves_paused=False,
         updated_by_actor="platform_admin",
         updated_by_user_id=uuid4(),
         created_at=datetime.now(timezone.utc),
@@ -710,7 +742,41 @@ async def test_policy_replace_uses_revision_compare_and_swap() -> None:
         await repository.replace(replacement, actor_user_id=uuid4())
 
 
-def test_limit_projection_applies_inline_ceiling_only_to_session_content() -> None:
+@pytest.mark.asyncio
+async def test_move_pause_uses_the_policy_revision_compare_and_swap() -> None:
+    row = ObjectContentDeploymentPolicy(
+        id=1,
+        revision=5,
+        new_write_storage_target="postgres_inline",
+        session_file_limit_bytes=1,
+        session_image_limit_bytes=2,
+        knowledge_file_limit_bytes=3,
+        transcription_audio_limit_bytes=4,
+        moves_paused=True,
+        updated_by_actor="platform_admin",
+        updated_by_user_id=uuid4(),
+        created_at=datetime.now(timezone.utc),
+        updated_at=datetime.now(timezone.utc),
+    )
+    session = AsyncMock()
+    session.scalar.side_effect = [row, None]
+    repository = DeploymentPolicyRepository(session)
+    replacement = DeploymentPolicyPauseUpdate(
+        expected_revision=4,
+        moves_paused=True,
+    )
+
+    paused = await repository.set_moves_paused(
+        replacement,
+        actor_user_id=uuid4(),
+    )
+    assert paused.revision == 5
+    assert paused.moves_paused is True
+    with pytest.raises(DeploymentPolicyConflict):
+        await repository.set_moves_paused(replacement, actor_user_id=uuid4())
+
+
+def test_limit_projection_applies_inline_ceiling_to_all_new_content() -> None:
     policy = _policy(
         target=StorageKind.POSTGRES_INLINE,
         session_file=101,
@@ -738,14 +804,16 @@ def test_limit_projection_applies_inline_ceiling_only_to_session_content() -> No
     assert projections[1].constraining_source is ConstrainingSource.ADMIN_POLICY
     assert projections[2].effective_bytes == 100
     assert projections[2].operator_ceiling_bytes == 100
-    assert projections[3].effective_bytes == 103
-    assert projections[3].operator_ceiling_bytes is None
-    assert projections[3].storage_target is None
-    assert projections[4].effective_bytes == 104
-    assert projections[4].operator_ceiling_bytes is None
+    assert projections[3].effective_bytes == 100
+    assert projections[3].operator_ceiling_bytes == 100
+    assert projections[3].storage_target is StorageKind.POSTGRES_INLINE
+    assert projections[4].effective_bytes == 100
+    assert projections[4].operator_ceiling_bytes == 100
 
 
-def test_limit_projection_applies_portable_ceiling_to_object_store_sessions() -> None:
+def test_limit_projection_applies_portable_ceiling_to_all_object_store_uploads() -> (
+    None
+):
     projections = project_upload_limits(
         _policy(
             target=StorageKind.OBJECT_STORE,
@@ -758,23 +826,16 @@ def test_limit_projection_applies_portable_ceiling_to_object_store_sessions() ->
         object_store_maximum_bytes=100,
     )
 
-    assert [projection.effective_bytes for projection in projections[:3]] == [
-        100,
-        100,
-        100,
-    ]
-    assert all(
-        projection.operator_ceiling_bytes == 100 for projection in projections[:3]
-    )
+    assert [projection.effective_bytes for projection in projections] == [100] * 5
+    assert all(projection.operator_ceiling_bytes == 100 for projection in projections)
     assert all(
         projection.constraining_source is ConstrainingSource.OPERATOR_CEILING
-        for projection in projections[:3]
+        for projection in projections
     )
-    assert projections[0].storage_target is StorageKind.OBJECT_STORE
-    assert projections[3].effective_bytes == 103
-    assert projections[3].operator_ceiling_bytes is None
-    assert projections[3].constraining_source is ConstrainingSource.ADMIN_POLICY
-    assert projections[3].storage_target is None
+    assert all(
+        projection.storage_target is StorageKind.OBJECT_STORE
+        for projection in projections
+    )
 
 
 def test_object_store_projection_without_capability_keeps_admin_policy_limits() -> None:
@@ -790,21 +851,21 @@ def test_object_store_projection_without_capability_keeps_admin_policy_limits() 
         object_store_maximum_bytes=None,
     )
 
-    assert [projection.effective_bytes for projection in projections[:3]] == [
+    assert [projection.effective_bytes for projection in projections] == [
         101,
         102,
+        104,
+        103,
         104,
     ]
     assert all(
         projection.storage_target is StorageKind.OBJECT_STORE
-        for projection in projections[:3]
+        for projection in projections
     )
-    assert all(
-        projection.operator_ceiling_bytes is None for projection in projections[:3]
-    )
+    assert all(projection.operator_ceiling_bytes is None for projection in projections)
     assert all(
         projection.constraining_source is ConstrainingSource.ADMIN_POLICY
-        for projection in projections[:3]
+        for projection in projections
     )
 
 
@@ -824,6 +885,7 @@ async def test_object_store_admission_snapshot_uses_portable_ceiling() -> None:
         session_image_limit_bytes=policy.session_image_limit_bytes,
         knowledge_file_limit_bytes=policy.knowledge_file_limit_bytes,
         transcription_audio_limit_bytes=policy.transcription_audio_limit_bytes,
+        moves_paused=policy.moves_paused,
         updated_by_actor=policy.updated_by_actor.value,
         updated_by_user_id=policy.updated_by_user_id,
         created_at=policy.created_at,
@@ -836,11 +898,12 @@ async def test_object_store_admission_snapshot_uses_portable_ceiling() -> None:
         object_store_maximum_bytes=100,
     )
 
-    assert snapshot.session_storage_target is StorageKind.OBJECT_STORE
-    assert snapshot.session_operator_ceiling_bytes == 100
+    assert snapshot.new_write_storage_target is StorageKind.OBJECT_STORE
     assert snapshot.session_file_maximum_bytes == 100
     assert snapshot.session_image_maximum_bytes == 99
     assert snapshot.session_audio_maximum_bytes == 100
+    assert snapshot.knowledge_file_maximum_bytes == 100
+    assert snapshot.knowledge_audio_maximum_bytes == 100
 
 
 async def test_load_upload_admission_snapshot_reads_one_effective_revision() -> None:
@@ -859,6 +922,7 @@ async def test_load_upload_admission_snapshot_reads_one_effective_revision() -> 
         session_image_limit_bytes=policy.session_image_limit_bytes,
         knowledge_file_limit_bytes=policy.knowledge_file_limit_bytes,
         transcription_audio_limit_bytes=policy.transcription_audio_limit_bytes,
+        moves_paused=policy.moves_paused,
         updated_by_actor=policy.updated_by_actor.value,
         updated_by_user_id=policy.updated_by_user_id,
         created_at=policy.created_at,
@@ -873,13 +937,12 @@ async def test_load_upload_admission_snapshot_reads_one_effective_revision() -> 
 
     assert snapshot == UploadAdmissionSnapshot(
         policy_revision=1,
-        session_storage_target=StorageKind.POSTGRES_INLINE,
-        session_operator_ceiling_bytes=100,
+        new_write_storage_target=StorageKind.POSTGRES_INLINE,
         session_file_maximum_bytes=100,
         session_image_maximum_bytes=100,
         session_audio_maximum_bytes=100,
-        knowledge_file_maximum_bytes=103,
-        knowledge_audio_maximum_bytes=104,
+        knowledge_file_maximum_bytes=100,
+        knowledge_audio_maximum_bytes=100,
     )
     session.scalar.assert_awaited_once()
 
@@ -901,6 +964,7 @@ def _policy(
         session_image_limit_bytes=session_image,
         knowledge_file_limit_bytes=knowledge_file,
         transcription_audio_limit_bytes=transcription_audio,
+        moves_paused=False,
         updated_by_actor=PolicyActor.MIGRATION,
         updated_by_user_id=None,
         created_at=now,

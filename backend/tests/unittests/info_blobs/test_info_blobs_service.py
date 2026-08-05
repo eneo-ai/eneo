@@ -30,6 +30,8 @@ def setup():
         update_website_size_service=AsyncMock(),
         space_service=AsyncMock(),
         actor_manager=MagicMock(),
+        datastore=AsyncMock(),
+        object_content=AsyncMock(),
     )
 
     setup = Setup(repo=repo, service=service, group_service=group_service)

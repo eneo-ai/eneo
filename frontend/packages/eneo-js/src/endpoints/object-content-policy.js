@@ -28,6 +28,46 @@ export function initObjectContentPolicy(client) {
     },
 
     /**
+     * Get aggregate progress and typed failure reasons for explicit storage moves.
+     * Session-backed platform administrators only.
+     * @throws {EneoError}
+     * @returns {Promise<import('../types/resources').ObjectContentMoves>}
+     */
+    getMoves: async () => {
+      return await client.fetch("/api/v1/admin/object-content-moves", {
+        method: "get"
+      });
+    },
+
+    /**
+     * Queue one bounded page of eligible content for an explicit storage move.
+     * Session-backed platform administrators only.
+     * @param {import('../types/resources').MoveQueueRequest} request
+     * @throws {EneoError}
+     * @returns {Promise<import('../types/resources').MoveQueueResult>}
+     */
+    queueMoves: async (request) => {
+      return await client.fetch("/api/v1/admin/object-content-moves", {
+        method: "post",
+        requestBody: { "application/json": request }
+      });
+    },
+
+    /**
+     * Pause or resume new storage-move claims at an expected policy revision.
+     * Session-backed platform administrators only.
+     * @param {import('../types/resources').MovePauseUpdate} request
+     * @throws {EneoError}
+     * @returns {Promise<import('../types/resources').MovePauseResult>}
+     */
+    setMovesPaused: async (request) => {
+      return await client.fetch("/api/v1/admin/object-content-moves/pause", {
+        method: "put",
+        requestBody: { "application/json": request }
+      });
+    },
+
+    /**
      * Replace the deployment-wide object content storage policy.
      * Session-backed platform administrators only.
      * @param {import('../types/resources').DeploymentPolicyUpdate} policy

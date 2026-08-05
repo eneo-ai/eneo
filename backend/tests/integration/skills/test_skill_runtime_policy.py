@@ -30,6 +30,7 @@ async def test_runtime_policy_seeds_once_and_round_trips_per_tenant(
 
         first = await repo.get_or_seed_runtime_policy(tenant_id=admin_user.tenant_id)
         assert first == SKILL_RUNTIME_POLICY_DEFAULTS
+        assert first.selective_activation_enabled is True
 
         updated = SkillRuntimePolicy(
             selective_activation_enabled=True,

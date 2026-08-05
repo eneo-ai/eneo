@@ -149,7 +149,10 @@ async def require_session_auth(
     if getattr(request.state, "api_key", None) is not None:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="This endpoint requires a session token.",
+            detail={
+                "code": "session_auth_required",
+                "message": "This endpoint requires a session token.",
+            },
         )
 
 

@@ -465,6 +465,10 @@ LOGLEVEL=INFO
 # Output format. true = NDJSON (recommended for production), false = plain text
 JSON_LOGS=true
 
+# Optional per-turn diagnostics for trusted Assistant configurators and owners.
+# Set the same value in the frontend environment; both sides default to false.
+SHOW_CHAT_DEBUG_PANEL=false
+
 # OTel resource attributes. These appear in the `resource` block of every log line.
 # OTEL_SERVICE_NAME is the primary low-cardinality label most aggregators index on.
 OTEL_SERVICE_NAME=eneo

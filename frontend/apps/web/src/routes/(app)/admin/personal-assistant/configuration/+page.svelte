@@ -77,6 +77,9 @@
         initialCatalogPage={draft.skillCatalogPage}
         bindingSummaries={draft.skillBindingSummaries}
         summary={draft.skillsSummary}
+        skillsValid={draft.skillsValid}
+        selectiveActivationEnabled={draft.selectiveActivationEnabled}
+        badgeVariant={draft.badgeVariant}
         onListCatalog={(params) =>
           loadSkillBindingCatalogPage({
             eneo: data.eneo,

@@ -201,7 +201,7 @@ async def test_question_placeholder_persists_selected_skill_revision(
         id=TEST_UUID,
     )
 
-    result = await service.create_question_placeholder(
+    result, _created_at = await service.create_question_placeholder(
         question="Question",
         session=session,
         skill_provenance=(reference,),

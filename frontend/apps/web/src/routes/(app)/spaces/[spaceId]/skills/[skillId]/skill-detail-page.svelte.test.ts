@@ -216,7 +216,12 @@ describe("Skill detail page", () => {
     });
     await availability.click();
 
-    await expect.element(page.getByText("Temporary failure", { exact: true })).toBeVisible();
+    // A thrown Error is a bug or a network failure; its raw text is developer
+    // English. The user gets the localized message for what they were doing.
+    await expect.element(page.getByText(m.skills_library_status_error())).toBeVisible();
+    await expect
+      .element(page.getByText("Temporary failure", { exact: true }))
+      .not.toBeInTheDocument();
     await expect.element(availability).toBeChecked();
   });
 });
