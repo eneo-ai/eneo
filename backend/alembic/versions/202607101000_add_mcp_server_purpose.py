@@ -6,7 +6,7 @@ unique index guarantees at most one enabled web-search server per tenant;
 activation switches providers transactionally under that constraint.
 
 Revision ID: 202607101000
-Revises: 202607071000
+Revises: 202607061000
 Create Date: 2026-07-10
 
 """
@@ -17,7 +17,7 @@ from alembic import op
 
 # revision identifiers, used by Alembic.
 revision = "202607101000"
-down_revision = "202607071000"
+down_revision = "202607061000"
 branch_labels = None
 depends_on = None
 
