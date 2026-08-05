@@ -1,7 +1,7 @@
 """Add inline_file_text column to assistants.
 
 Revision ID: 202607262000
-Revises: 202607261700
+Revises: 202607311000
 Create Date: 2026-07-26
 """
 
