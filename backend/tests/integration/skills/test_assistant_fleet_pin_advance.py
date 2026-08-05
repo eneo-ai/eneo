@@ -1254,10 +1254,15 @@ async def test_discovery_scales_as_one_bounded_forward_index_walk(
             nonlocal discovery_queries, captured_statement
             if (
                 "FROM assistant_skill_bindings" in statement
-                and "ORDER BY assistant_skill_bindings.assistant_id" in statement
+                and "ORDER BY assistant_skill_bindings.skill_id, "
+                "assistant_skill_bindings.assistant_id"
+                in statement
             ):
                 discovery_queries += 1
-                if "assistant_skill_bindings.assistant_id >" in statement:
+                if (
+                    "(assistant_skill_bindings.skill_id, "
+                    "assistant_skill_bindings.assistant_id) >" in statement
+                ):
                     assert isinstance(parameters, tuple)
                     captured_statement = (statement, parameters)
 
@@ -1316,7 +1321,9 @@ async def test_discovery_scales_as_one_bounded_forward_index_walk(
         )
         assert binding_scan is not None
         assert binding_scan.get("Node Type") in {"Index Scan", "Index Only Scan"}
-        assert "assistant_id" in str(binding_scan.get("Index Cond", ""))
+        binding_index_condition = str(binding_scan.get("Index Cond", ""))
+        assert "skill_id" in binding_index_condition
+        assert "assistant_id" in binding_index_condition
         actual_rows = binding_scan.get("Actual Rows")
         actual_loops = binding_scan.get("Actual Loops")
         rows_filtered = binding_scan.get("Rows Removed by Filter", 0)
