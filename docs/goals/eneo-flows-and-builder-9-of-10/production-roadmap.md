@@ -444,6 +444,23 @@ external release gate (item 10); BM0.2 is external (item 10).
     flow with mutation-proven behavior tests. Deferred by honesty: the
     template-failure and edit-retention journeys return with executed-cohort
     and edit-session harness support respectively.
+    The full 122-case diagnostic at `027689ef5` (2026-08-05,
+    identity-verified, all fixtures live, single repetition): 121 live
+    journeys — 57 first-pass + 14 repaired plans (65→72 total, repairs
+    down), 19 Builder errors (25→19), 17 intended stops, 8 stalls, 12 clean
+    plans (9→12). Structural wins: `compose_topology_missing` 10→0 (B10(e)
+    eliminated its family), citations 4→1, fixture skips 4→1, preferred
+    questions 29→37, preferred-first rate 46%→54%. Fresh causal ranking:
+    leaf/schema retention ~34 (unchanged top owner; prose-leaf slice with
+    raw-response attribution first), question rubric 20
+    (first_question_relevance ×18 persists — adjudication needed),
+    repair exhaustion 15 (action_followup_requires_followup_fields ×8 —
+    candidate durable fix is compile-time canonical obligation completion
+    plus prompt contract, prevention not repair;
+    aggregate-to-JSON ×3 = the decided B9(e2) slice), stalls 8 (answer
+    closure; flagship docx_output_mode candidate rule: confirmed template
+    attachment resolves it). Strategy peer review of this ranking in
+    progress; next slices dispatch from its adjudication.
     Product decisions recorded 2026-08-05: compare/corpus-to-JSON is
     SUPPORTED (B9(e2) becomes an implementation slice) and document-report
     CITATIONS are SUPPORTED (carry citation identity through compose/render
