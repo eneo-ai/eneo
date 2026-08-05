@@ -12,7 +12,6 @@ function message(id: string | null, question = "Question"): ConversationMessage 
     references: [],
     files: [],
     generated_files: [],
-    web_search_references: [],
     mcp_tool_references: [],
     tool_calls: [],
     tools: { assistants: [] }

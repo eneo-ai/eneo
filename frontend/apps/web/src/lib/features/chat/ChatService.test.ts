@@ -242,8 +242,7 @@ describe("ChatService turn diagnostics", () => {
             files: [],
             generated_files: [],
             references: [],
-            tools: { assistants: [] },
-            web_search_references: []
+            tools: { assistants: [] }
           });
           callbacks.onToolCall({
             session_id: "session-1",

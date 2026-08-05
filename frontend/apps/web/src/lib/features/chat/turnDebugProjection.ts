@@ -79,13 +79,6 @@ export function projectTurnDebugDetails(
       uri: reference.metadata.url ?? null
     });
   }
-  for (const reference of message.web_search_references) {
-    knowledge.push({
-      order: knowledge.length + 1,
-      title: reference.title,
-      uri: reference.url
-    });
-  }
   for (const _reference of message.mcp_tool_references ?? []) {
     knowledge.push({
       order: knowledge.length + 1,
