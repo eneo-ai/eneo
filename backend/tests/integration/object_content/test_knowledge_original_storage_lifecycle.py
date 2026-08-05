@@ -49,6 +49,7 @@ from eneo.object_content.content import (
     StorageKind,
 )
 from eneo.object_content.move_repository import ObjectContentMoveRepository
+from eneo.object_content.object_store_provider import ObjectStoreProvider
 from eneo.object_content.reconciliation import ObjectContentReconciler
 from eneo.object_content.runtime import object_content_runtime
 from eneo.object_content.s3_object_store import (
@@ -302,8 +303,10 @@ async def test_knowledge_original_uses_generic_inventory_move_and_delete_lifecyc
         reconciler = ObjectContentReconciler(
             real_object_store.settings,
             sessionmanager,
-            object_store_settings=real_object_store.settings,
-            object_store=real_object_store.store,
+            object_store_provider=ObjectStoreProvider.fixed(
+                real_object_store.settings,
+                real_object_store.store,
+            ),
         )
         moved = await reconciler.run_once()
         assert moved.moves_processed == 1
@@ -829,8 +832,10 @@ async def test_remote_upload_becomes_reconcilable_orphan_when_final_transaction_
         reconciler = ObjectContentReconciler(
             real_object_store.settings,
             sessionmanager,
-            object_store_settings=real_object_store.settings,
-            object_store=real_object_store.store,
+            object_store_provider=ObjectStoreProvider.fixed(
+                real_object_store.settings,
+                real_object_store.store,
+            ),
         )
         first = await reconciler.run_once()
         assert first.orphan_objects_deleted == 0
