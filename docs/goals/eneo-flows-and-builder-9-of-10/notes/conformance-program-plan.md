@@ -93,19 +93,33 @@ Already landed (`98293ae39`): instability judged per build rather than from
 the union of both; compared state is `(outcome_class, expectation_verdict)`;
 failed checks counted by distinct case id; six comparator behavior tests.
 
+Also landed (`3990ee112`), with one correction to this plan's own wording:
+
+- **Comparability is gated on the identity that changes what a score
+  means** — both semantics versions and `requested_model_id`. This plan
+  previously said "gate on the full evaluator-identity hash". That is
+  wrong and the receipts prove it: `target_sha256` embeds the deployed app
+  version, so it and the whole-identity hash differ between *every* pair
+  of builds — the exact axis the tool exists to compare. Verified on the
+  9d4237a and 9216ec6 receipts, whose identity hashes differ while
+  harness, corpus, model, and both semantics versions match. Harness,
+  corpus, revision, and target hashes are **reported**, so an undeclared
+  instrument change stays visible; per-case contract changes are named as
+  rescored cases rather than blocking the other 121.
+- Failed checks are aggregated **across repetitions**, once per distinct
+  case, instead of read off one representative row.
+- Blockers now count the public `error_codes` contract as well as the
+  internal `failure_codes`. Counting only the internal one printed an
+  empty blocker ranking for a run in which 8 cases errored, because a
+  router-level refusal carries no internal detail.
+
 Remaining in this slice:
 
-- Gate comparability on the **full evaluator-identity hash** the harness
-  already computes, not on two semantic-version integers. Receipts carry
-  model, target, run context, and case-contract identity — use them.
-- Aggregate failed-check frequencies **across repetitions**, never from one
-  representative row.
 - Measure the real envelope: run one **frozen build** three times under
   identical identity and publish per-case state stability. Until that
   exists, no claim may cite a "noise floor".
 
-**Done when:** the comparator refuses identity-incompatible receipts, and a
-same-build repeated baseline is published.
+**Done when:** a same-build repeated baseline is published.
 
 ---
 
