@@ -1081,6 +1081,22 @@ self_correction_invalid_payload dead-ends, 4 singles. HARNESS FOLLOW-UP
 journeys should classify as their journey outcome (builder_error), not
 invalid_evidence.
 
+Water-leak verdict 2026-08-06 evening VI (STOP, do not tune further):
+the ownership fix did not change the outcome, and the full path is now
+verified correct end to end — tool schema exposes input_fields; the
+`Requested runtime input fields` block renders for that session's real
+planning state; the compiler preserves the three declared fields when
+given them (direct compile against the same state); the critic quotes
+the user's words. The model still declines on this ONE case of 122.
+That is model compliance, not a product defect, so further prompt
+wording changes would overfit the prompt to a single case. Deferred
+design if it recurs at corpus scale: extend the classifier's existing
+form_intake output to emit field NAMES, then materialize them into
+planning_state.input_fields so the server owns them — a real bounded
+slice, never prose parsing. Two neighbours replayed clean at the same
+head (preschool_incident, e_service_submission first-pass, no
+regression).
+
 Runtime-field ownership 2026-08-06 evening V: with the feedback path
 clear, the model still declared nothing, so the cause was upstream.
 VERIFIED against the failing session's persisted planning state: its
