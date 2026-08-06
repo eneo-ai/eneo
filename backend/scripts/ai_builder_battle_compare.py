@@ -132,6 +132,48 @@ def _repair_economics(row: dict[str, Any]) -> dict[str, Any] | None:
     return {"repair_token_cost": repair_cost, "attempt_failure_codes": failure_codes}
 
 
+def _conformance_direction(before_verdict: str, after_verdict: str) -> str:
+    """Direction of the primary quality metric: does the plan satisfy the case.
+
+    `not_evaluated` is not a midpoint between pass and fail — a case that
+    stops being evaluated has not improved or regressed, it has left the
+    measurement.
+    """
+
+    if before_verdict == after_verdict:
+        return "unchanged"
+    if "not_evaluated" in (before_verdict, after_verdict):
+        return "evaluation_changed"
+    if before_verdict == "fail" and after_verdict == "pass":
+        return "improved"
+    if before_verdict == "pass" and after_verdict == "fail":
+        return "regressed"
+    return "changed"
+
+
+def _mechanics_direction(
+    baseline: dict[str, Any] | None,
+    current: dict[str, Any] | None,
+    before: str,
+    after: str,
+) -> str:
+    """How the proposal was produced — repairs, stalls, errors.
+
+    Secondary to conformance: a plan can cost fewer repairs and still fail
+    the case, or cost more and satisfy it.
+    """
+
+    if baseline is None or current is None:
+        return "coverage_changed"
+    before_rank = _OUTCOME_RANK.get(before, -1)
+    after_rank = _OUTCOME_RANK.get(after, -1)
+    if after_rank > before_rank:
+        return "improved"
+    if after_rank < before_rank:
+        return "regressed"
+    return "changed" if before != after else "unchanged"
+
+
 def _case_delta(
     case_id: str,
     baseline: dict[str, Any] | None,
@@ -142,29 +184,36 @@ def _case_delta(
 ) -> dict[str, Any]:
     before = str((baseline or {}).get("outcome_class") or "absent")
     after = str((current or {}).get("outcome_class") or "absent")
-    before_rank = _OUTCOME_RANK.get(before, -1)
-    after_rank = _OUTCOME_RANK.get(after, -1)
-    if baseline is None or current is None:
-        direction = "coverage_changed"
-    elif after_rank > before_rank:
-        direction = "improved"
-    elif after_rank < before_rank:
-        direction = "regressed"
-    elif before != after:
-        direction = "changed"
-    else:
-        direction = "unchanged"
+    before_verdict = str((baseline or {}).get("expectation_verdict") or "absent")
+    after_verdict = str((current or {}).get("expectation_verdict") or "absent")
 
-    delta: dict[str, Any] = {
-        "case_id": case_id,
-        "direction": direction,
-        "outcome": f"{before} -> {after}",
-    }
     # Instability is a property of ONE build disagreeing with itself. Judging
     # it from the union of both builds would brand every real, consistent
     # A -> B change unstable.
     baseline_states = _observed_states(baseline_repetitions)
     current_states = _observed_states(current_repetitions)
+    unstable = len(baseline_states) > 1 or len(current_states) > 1
+
+    # Product direction is conformance. Reading it off `outcome_class`
+    # reported a case that stopped satisfying its rubric as "unchanged"
+    # whenever its mechanics held — the exact regression the no-regression
+    # rule exists to catch. Mechanics are still reported, separately.
+    if baseline is None or current is None:
+        direction = "coverage_changed"
+    elif unstable:
+        # A build that disagrees with itself cannot supply a direction; the
+        # modal row would promote one repetition to a verdict.
+        direction = "inconclusive"
+    else:
+        direction = _conformance_direction(before_verdict, after_verdict)
+
+    delta: dict[str, Any] = {
+        "case_id": case_id,
+        "direction": direction,
+        "conformance": f"{before_verdict} -> {after_verdict}",
+        "mechanics_direction": _mechanics_direction(baseline, current, before, after),
+        "outcome": f"{before} -> {after}",
+    }
     if len(baseline_states) > 1:
         delta["baseline_unstable"] = True
         delta["baseline_observed_states"] = sorted(baseline_states)
@@ -226,27 +275,38 @@ def _identity(summary: dict[str, Any]) -> dict[str, Any]:
 
 # Identity fields that change what a score *means*. Two receipts that differ
 # on any of these are different experiments, so comparing them is refused.
+# The instrument (`harness_sha256`) is gated too: a harness edit can change
+# how expectations are evaluated without touching either semantics version,
+# and reporting the hash would leave that to manual discipline. Declaring an
+# edit scoring-neutral is a deliberate act — `--allow-harness-change` — not
+# a default.
 #
 # Deliberately excluded, with evidence: `target_sha256` embeds the deployed
 # app version and so differs between every pair of builds — the exact axis
 # this tool exists to compare (verified on the 9d4237a/9216ec6 receipts).
-# The full `evaluator_identity.sha256` differs for the same reason.
-# `harness_sha256` and `cases_sha256` change on any harness or corpus edit,
-# including ones that do not touch scoring; the two semantics versions are
-# the author's explicit declaration that scoring meaning changed, and gating
-# on the raw hashes would make that declaration dead. Those fields are
-# reported instead, so a reader can audit an undeclared instrument change.
-# `case_contract_sha256_by_id` is compared per case, so editing one case's
-# expectations does not block comparing the other 121.
+# The full `evaluator_identity.sha256` differs for the same reason. The
+# environment half of the target is gated separately as `base_url`, which
+# the receipt carries in the clear. `cases_sha256` stays nonfatal only
+# because `case_contract_sha256_by_id` compares the corpus per case, so
+# editing one case's expectations does not block comparing the other 121.
 _IDENTITY_FIELDS: tuple[str, ...] = (
     "question_relevance_semantics_version",
     "outcome_classification_semantics_version",
     "requested_model_id",
+    "harness_sha256",
+)
+
+# Run-context fields that change what the builder was asked to do. Sample
+# size (`repetitions`) is deliberately absent: it changes confidence, not
+# behavior.
+_GATED_RUN_CONTEXT_FIELDS: tuple[str, ...] = (
+    "auto_confirm_requirements",
+    "confirm_message_sha256",
+    "ui_language",
 )
 
 # Differences here are expected and reported, never fatal.
 _REPORTED_IDENTITY_FIELDS: tuple[str, ...] = (
-    "harness_sha256",
     "cases_sha256",
     "source_revision",
     "target_sha256",
@@ -288,17 +348,48 @@ def _reported_identity_differences(
     }
 
 
+def _run_context(summary: dict[str, Any]) -> dict[str, Any]:
+    raw = _evaluator_identity(summary).get("run_context")
+    if not isinstance(raw, dict):
+        raw = summary.get("run_context")
+    return cast(dict[str, Any], raw) if isinstance(raw, dict) else {}
+
+
 def _incompatible_identity_fields(
     baseline_summary: dict[str, Any],
     current_summary: dict[str, Any],
+    *,
+    allow_harness_change: bool = False,
 ) -> list[str]:
+    """Fields that make two receipts incomparable, plus any that are absent.
+
+    A missing field must fail closed. Treating absence as a match let two
+    receipts that recorded no model, no harness, and no semantics version
+    compare as though they agreed on all three.
+    """
+
     baseline_marker = _identity_marker(baseline_summary)
     current_marker = _identity_marker(current_summary)
-    return [
-        field
-        for field in _IDENTITY_FIELDS
-        if baseline_marker[field] != current_marker[field]
-    ]
+    baseline_context = _run_context(baseline_summary)
+    current_context = _run_context(current_summary)
+    incompatible: list[str] = []
+    for field in _IDENTITY_FIELDS:
+        if field == "harness_sha256" and allow_harness_change:
+            continue
+        before, after = baseline_marker[field], current_marker[field]
+        if before is None or after is None:
+            incompatible.append(f"{field} (missing)")
+        elif before != after:
+            incompatible.append(field)
+    for field in _GATED_RUN_CONTEXT_FIELDS:
+        before, after = baseline_context.get(field), current_context.get(field)
+        if before is None or after is None:
+            incompatible.append(f"run_context.{field} (missing)")
+        elif before != after:
+            incompatible.append(f"run_context.{field}")
+    if baseline_summary.get("base_url") != current_summary.get("base_url"):
+        incompatible.append("base_url")
+    return incompatible
 
 
 def _case_contract_changes(
@@ -321,14 +412,22 @@ def _case_contract_changes(
 def compare(
     baseline_path: Path,
     current_path: Path,
+    *,
+    allow_harness_change: bool = False,
 ) -> dict[str, Any]:
     baseline_rows, baseline_summary = _load_rows(baseline_path)
     current_rows, current_summary = _load_rows(current_path)
-    incompatible = _incompatible_identity_fields(baseline_summary, current_summary)
+    incompatible = _incompatible_identity_fields(
+        baseline_summary,
+        current_summary,
+        allow_harness_change=allow_harness_change,
+    )
     if incompatible:
         raise SystemExit(
             "Refusing to compare receipts whose evaluator identity differs on "
             f"{', '.join(incompatible)}; they do not measure the same thing. "
+            "Pass --allow-harness-change only to declare a harness edit "
+            "scoring-neutral. "
             f"baseline={_identity_marker(baseline_summary)!r} "
             f"current={_identity_marker(current_summary)!r}"
         )
@@ -348,7 +447,18 @@ def compare(
         )
         for case_id in case_ids
     ]
-    directions = Counter(delta["direction"] for delta in deltas)
+    # A case whose expectations were edited moved because the question
+    # changed, not because the product did. Counting it as product movement
+    # is how a rubric correction gets reported as a win.
+    rescored = set(rescored_cases)
+    directions = Counter(
+        delta["direction"] for delta in deltas if delta["case_id"] not in rescored
+    )
+    mechanics_directions = Counter(
+        delta["mechanics_direction"]
+        for delta in deltas
+        if delta["case_id"] not in rescored
+    )
     # Failed checks and blockers count distinct cases, not observations, so
     # repetitions cannot inflate a cluster.
     remaining_blockers = Counter(
@@ -387,6 +497,7 @@ def compare(
         "rescored_cases": rescored_cases,
         "identity_differences": identity_differences,
         "direction_counts": dict(directions),
+        "mechanics_direction_counts": dict(mechanics_directions),
         "current_outcomes": dict(outcome_counts),
         "remaining_blockers_ranked": remaining_blockers.most_common(),
         "remaining_failed_checks_ranked": remaining_failed_checks.most_common(),
@@ -441,9 +552,17 @@ def _render_markdown(report: dict[str, Any], *, only_changed: bool) -> str:
         f"{current.get('app_version')}"
     )
     lines.append("")
-    lines.append(f"Direction counts: {report['direction_counts']}")
+    lines.append(f"Conformance direction (primary): {report['direction_counts']}")
+    lines.append(f"Mechanics direction: {report['mechanics_direction_counts']}")
     lines.append(f"Current outcomes: {report['current_outcomes']}")
     lines.append("")
+    unstable = cast(dict[str, list[str]], report["unstable_cases"])
+    if unstable["baseline"] or unstable["current"]:
+        lines.append("## Unstable cases (a build disagreed with itself; no direction)")
+        for build in ("baseline", "current"):
+            if unstable[build]:
+                lines.append(f"- {build}: {', '.join(unstable[build])}")
+        lines.append("")
     differences = cast(dict[str, Any], report["identity_differences"])
     if differences:
         lines.append(
@@ -472,12 +591,21 @@ def _render_markdown(report: dict[str, Any], *, only_changed: bool) -> str:
         lines.append("")
     lines.append("## Per-case transitions")
     for delta in report["cases"]:
-        if only_changed and delta["direction"] == "unchanged":
+        # An unstable case is never "unchanged" — suppressing it would hide
+        # the cases whose measurement cannot be trusted.
+        suppressed = delta["direction"] == "unchanged" and not (
+            delta.get("baseline_unstable") or delta.get("current_unstable")
+        )
+        if only_changed and suppressed:
             continue
         lines.append(
-            f"- **{delta['case_id']}** [{delta['direction']}] {delta['outcome']}"
+            f"- **{delta['case_id']}** [{delta['direction']}] "
+            f"conformance {delta['conformance']}; "
+            f"mechanics [{delta['mechanics_direction']}] {delta['outcome']}"
         )
         for key in (
+            "baseline_observed_states",
+            "current_observed_states",
             "failure_codes",
             "failed_checks",
             "questions",
@@ -497,10 +625,23 @@ def main() -> None:
     parser.add_argument(
         "--only-changed",
         action="store_true",
-        help="Omit unchanged cases from the per-case section.",
+        help="Omit unchanged, stable cases from the per-case section.",
+    )
+    parser.add_argument(
+        "--allow-harness-change",
+        action="store_true",
+        help=(
+            "Declare a harness edit scoring-neutral and compare anyway. "
+            "Only valid when the edit cannot change how expectations are "
+            "evaluated; otherwise bump the semantics version instead."
+        ),
     )
     args = parser.parse_args()
-    report = compare(args.baseline, args.current)
+    report = compare(
+        args.baseline,
+        args.current,
+        allow_harness_change=args.allow_harness_change,
+    )
     if args.format == "json":
         json.dump(report, sys.stdout, ensure_ascii=False, indent=2)
         sys.stdout.write("\n")
