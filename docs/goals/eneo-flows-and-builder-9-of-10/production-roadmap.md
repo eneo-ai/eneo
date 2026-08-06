@@ -1081,6 +1081,69 @@ self_correction_invalid_payload dead-ends, 4 singles. HARNESS FOLLOW-UP
 journeys should classify as their journey outcome (builder_error), not
 invalid_evidence.
 
+PEER REVIEW 2026-08-06 night (session flow-122-strategy, 3 passes,
+gpt-5.6-sol xhigh-equivalent; verdicts changes_required / MIN_SCORE
+6, 7, 7). It reframed the program, and I verified every load-bearing
+claim in source before accepting:
+
+1. THE HEADLINE METRIC WAS WRONG. outcome_class measures proposal
+   mechanics, not correctness; expectation_verdict is the real
+   conformance number. Computed across today's four runs: 42 / 41 / 42 /
+   44 of 122 pass their authored expectations, i.e. +2 across a day in
+   which first-pass moved +2 and hard failures halved. Of 66 first-pass
+   plans only 23 satisfy their rubric. Report the outcome x expectation
+   matrix from now on; never lead with first-pass alone.
+2. THE "4x architecture_materialization_failed FAMILY" DOES NOT EXIST.
+   All four carry internal failure_code
+   assembly_document_report_citations_unsupported — the deliberate
+   fail-closed refusal for the held citations slice. No assembly defect
+   remains among no-plan cases: 4 blocked feature + 1 flagship quality
+   loop. The slice I had queued was aimed at a phantom.
+3. THE PROMPT/PARSE CAUSAL CLAIM IS UNSUPPORTED. Planner temperature is
+   non-zero and the suite runs one repetition, so a 9 -> 12 parse delta
+   inside a multiply-changed window is noise-compatible. Prompt
+   causality now requires an alternating A/B over the parse-prone cohort
+   with >= 3 repetitions. (The redundant-bullet removal stands on
+   duplication grounds alone.)
+4. THE COMPARATOR IS UNSOUND FOR ATTRIBUTION: it keeps only the last
+   repetition per case and gates on evaluator-semantics integers while
+   receipts carry model, target, run context, and case-contract
+   identity. Fix before any further cross-run claim.
+5. THE HARNESS VALIDATES PLANS, NOT RUNNABLE FLOWS: 5 of 122 apply and
+   1 executes; the executor cannot submit form payloads, handle zero or
+   multiple upload steps, or resume a review. No attachment/template or
+   PDF quality claim until a representative journey executes.
+
+DOMINANT QUALITY CLUSTER (measured, night run): one check,
+expected_leaf_output_fields, fails in 43 unique cases and is the ONLY
+failing check in 28 of them. Split by compiled terminal type: json 15,
+text 14, pdf 13, docx 1. VERIFIED CAUSE for the non-JSON 28:
+`_clear_prose_output_schema_for_non_json_terminal`
+(planning_state_builder.py) discards the user's explicitly named output
+fields as typed evidence whenever the terminal is not structured JSON,
+while the rubric still requires those names as leaves anywhere in the
+plan. So the majority of the corpus's quality gap sits where the product
+deliberately drops user evidence, not where the model misbehaves.
+Cohort inversion supports it: vague 16/25 and
+single_missing_dimension 16/24 pass, while foundation 3/39, pdf 1/25,
+complete_everyday 3/17 and attachment_or_template 0/7 do not — the
+product is weakest on fully specified everyday journeys.
+
+ADOPTED NEXT PHASE (peer-agreed ordering, no code before attribution):
+(a) make the score trustworthy — publish the outcome x expectation
+matrix, delete the invalid transcript-leaf expectation, re-score saved
+bundles offline; (b) fix comparator identity + repetition retention;
+(c) build the leaf attribution table (expected aliases, cited planning
+evidence, result-contract role, template obligation, proposed vs
+compiled location, later typed consumer, earliest loss stage) and let it
+name the owner; (d) deepen ResultContract / PlanningState projection so
+explicit cross-step content obligations survive for PDF/DOCX terminals
+— never a second leaf store and never another prompt rule; (e) deepen
+the existing executor and establish six executed sentinels; (f) only
+then resume compiler/assembly slices. Decision rule for separating
+product defects from rubric defects is recorded in the peer artifact
+(representation authority, not prompt wording).
+
 REGRESSION CHECKPOINT at DEV-9d4237a67324 (diag122-9d4237a, measures
 the ~16 evening commits against the 69 baseline): plans IDENTICAL at 87,
 hard failures DOWN 9 -> 5 (four of the five remaining are the same
