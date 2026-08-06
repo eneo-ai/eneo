@@ -20,6 +20,9 @@ from eneo.flows.ai_builder.ai_builder_output_sections_signals import (
 from eneo.flows.ai_builder.ai_builder_plan_store import (
     store_plan_and_update_conversation,
 )
+from eneo.flows.ai_builder.ai_builder_proposal_capture import (
+    capture_quality_rejected_spec,
+)
 from eneo.flows.ai_builder.ai_builder_proposal_policy import (
     build_create_contextual_quality_feedback,
     format_contextual_quality_feedback,
@@ -240,6 +243,11 @@ class CompiledProposalFinalizer:
             request.tool_call_id,
             ",".join(warning.code for warning in compiled.validation.warnings) or "-",
             combined_quality_feedback[:1200],
+        )
+        capture_quality_rejected_spec(
+            compiled.content.spec.model_dump(mode="json"),
+            session_id=str(request.session_id),
+            failure_codes=sorted(quality_failure_codes),
         )
         return ToolProcessingResult(
             feedback=combined_quality_feedback,

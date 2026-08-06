@@ -1,9 +1,5 @@
 from __future__ import annotations
 
-import hashlib
-import json
-import os
-from pathlib import Path
 from typing import Any
 
 from eneo.flows.ai_builder.ai_builder_architecture_errors import (
@@ -34,6 +30,9 @@ from eneo.flows.ai_builder.ai_builder_plan_edit_context import (
     AIBuilderPlanEditContext,
     validate_scoped_plan_revision,
 )
+from eneo.flows.ai_builder.ai_builder_proposal_capture import (
+    capture_rejected_proposal_arguments,
+)
 from eneo.flows.ai_builder.ai_builder_proposal_intent import (
     CreateFlowIntent,
     ProposalIntentArgumentError,
@@ -57,67 +56,6 @@ from eneo.flows.flow_authoring_spec import FlowDraftSpecCore
 from eneo.main.logging import get_logger
 
 logger = get_logger(__name__)
-
-# Debug tap for evidence-first admission work: when this env var names a
-# directory, every propose_flow payload REJECTED at the parse boundary is
-# written there with its issues, so repair loops can be attributed against
-# the exact rejected shape. Off in normal operation.
-REJECTED_PROPOSAL_CAPTURE_DIR_ENV = "ENEO_AI_BUILDER_REJECTED_PROPOSAL_CAPTURE_DIR"
-
-
-def _capture_rejected_proposal_arguments(
-    arguments: dict[str, Any],
-    *,
-    session_id: str,
-    issues: list[str],
-) -> None:
-    capture_dir = os.environ.get(REJECTED_PROPOSAL_CAPTURE_DIR_ENV)
-    if not capture_dir:
-        return
-    try:
-        directory = Path(capture_dir)
-        directory.mkdir(parents=True, exist_ok=True)
-        payload = json.dumps(
-            {"session_id": session_id, "issues": issues, "arguments": arguments},
-            ensure_ascii=False,
-            default=str,
-        )
-        digest = hashlib.sha256(payload.encode("utf-8")).hexdigest()[:12]
-        (directory / f"rejected-proposal-{digest}.json").write_text(
-            payload,
-            encoding="utf-8",
-        )
-    except OSError:
-        logger.warning("Rejected proposal capture failed", exc_info=True)
-
-
-def capture_malformed_proposal_arguments(
-    raw_arguments: str,
-    *,
-    session_id: str,
-    error_message: str,
-) -> None:
-    """Capture tool arguments that failed raw JSON decoding.
-
-    Malformed-JSON repair responses are the one rejection class the
-    structured tap cannot see (there is no parsed dict yet), which left
-    the self-correction dead-end family unattributable. Same env gate,
-    text payload.
-    """
-
-    capture_dir = os.environ.get(REJECTED_PROPOSAL_CAPTURE_DIR_ENV)
-    if not capture_dir:
-        return
-    try:
-        directory = Path(capture_dir)
-        directory.mkdir(parents=True, exist_ok=True)
-        digest = hashlib.sha256(raw_arguments.encode("utf-8")).hexdigest()[:12]
-        (directory / f"malformed-proposal-{digest}.txt").write_text(
-            f"session_id: {session_id}\nerror: {error_message}\n---\n{raw_arguments}",
-            encoding="utf-8",
-        )
-    except OSError:
-        logger.warning("Malformed proposal capture failed", exc_info=True)
 
 
 PROPOSE_FLOW_CREATE_FORCED_TOOL_PROMPT = (
@@ -179,7 +117,7 @@ async def process_create_intent_arguments(
             tool_call_id,
             list(error.issues),
         )
-        _capture_rejected_proposal_arguments(
+        capture_rejected_proposal_arguments(
             arguments,
             session_id=str(turn.session_id),
             issues=list(error.issues),
@@ -198,7 +136,7 @@ async def process_create_intent_arguments(
                 tool_call_id,
                 failure_code,
             )
-            _capture_rejected_proposal_arguments(
+            capture_rejected_proposal_arguments(
                 arguments,
                 session_id=str(turn.session_id),
                 issues=[failure_code, error.detail],

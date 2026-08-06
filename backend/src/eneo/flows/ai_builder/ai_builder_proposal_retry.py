@@ -16,9 +16,6 @@ from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
     RuntimeToolCall,
     provider_safe_tool_call_id,
 )
-from eneo.flows.ai_builder.ai_builder_create_proposal import (
-    capture_malformed_proposal_arguments,
-)
 from eneo.flows.ai_builder.ai_builder_domain_models import TargetKind
 from eneo.flows.ai_builder.ai_builder_error_contract import (
     AIBuilderBadRequestException,
@@ -38,6 +35,9 @@ from eneo.flows.ai_builder.ai_builder_events import (
 )
 from eneo.flows.ai_builder.ai_builder_litellm_completion import (
     LLMCompletionToolCall,
+)
+from eneo.flows.ai_builder.ai_builder_proposal_capture import (
+    capture_malformed_proposal_arguments,
 )
 from eneo.flows.ai_builder.ai_builder_proposal_telemetry import (
     ProposalAttemptFailureKind,

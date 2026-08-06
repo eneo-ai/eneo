@@ -68,7 +68,7 @@ def build_plan_proposal_system_prompt(
         [
             "- In create mode, describe semantic flow intent in propose_flow; do not choose Flow mechanics.",
             "- Use input_fields only for secondary inmatningsfält/input variables the user fills in at runtime.",
-            "- Every input_field you declare must appear in uses_form_fields on the step that consumes it.",
+            "- Declare each confirmed runtime value as its own input_field AND list it in uses_form_fields on the step that consumes it; never silently drop requested runtime fields.",
             "- Do not add an input_field for the primary text, document, file, or audio material being processed; the backend supplies that from the committed architecture.",
             "- Runtime metadata policy is compiler-owned: do not invent input_fields from defaults. Declare secondary input_fields only when confirmed requirements, confirmed resolved slots, or the semantic workflow clearly needs runtime variables; if a resolved slot shows an explicit no-extra-fields decision, leave them empty.",
             "- For committed audio input, the backend inserts the first transcription/upload step; start propose_flow steps with the analysis, structuring, or synthesis work after transcription. Transcript review is compiler-owned and stays on that backend-inserted step.",
