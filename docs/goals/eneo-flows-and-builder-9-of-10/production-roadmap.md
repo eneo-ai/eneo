@@ -991,6 +991,18 @@ not composed this run), ZERO first_question_relevance failures; remaining
 failures are the real product families (prose-leaf schema x2,
 review-policy placement, authoring-spec contract, question selection).
 
+Slice C landed 2026-08-06: `4266fb519` C1 parser admission (shape
+notation belongs to the cited mention; structurally malformed deltas fail
+visibly as parse_failed — grounded in the raw capture, which proved the
+live model already strips []/{} itself while our boundary check rejected
+the bare name against notation-bearing source text) and `6d1df4619` C2
+evidence semantics (only declared_schema pins the terminal contract;
+prose names are binding hints enforced by the new
+prose_output_field_names_must_survive critic; user-named keys win verbatim
+through the localized-key lexicon and source-reader alias
+canonicalization). C1 live-verified: the Open ePlatform hard case's
+schema checks went green for the first time.
+
 Slice-C inputs found live 2026-08-06: (1) the ASCII-English schema-key
 lexicon conflicts with prose-requested Swedish keys (case
 simple_document_metadata_json dies in builder_error: the user asked for

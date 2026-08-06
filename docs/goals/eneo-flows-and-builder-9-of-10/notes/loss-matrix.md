@@ -9,10 +9,10 @@ survey, service, or second state model).
 
 | Transition | Rule | Owner | Failure code | Behavior test |
 |---|---|---|---|---|
-| classifier raw → parsed delta | TODO(C): admit cited `name[]`/`name{}` as typed ProseOutputFieldHint; malformed non-null delta → whole-attempt parse_failed | ai_builder_slot_classification_contract | parse_failed (existing) | TODO |
+| classifier raw → parsed delta | DONE(C1 `4266fb519`): shape notation belongs to the cited mention (boundary judged after trailing []/{}); structurally malformed present delta → whole-attempt parse_failed; citation-level refusal keeps refuse-fields semantics | ai_builder_slot_classification_contract | parse_failed (existing) | shape-notation + malformed-delta classifier tests |
 | parsed delta → SchemaEvidence | TODO(C): one evidence schema; `{}` unspecified, items for `[]`; unrepresentable literal → visible typed refusal | planning_state_builder | TODO | TODO |
-| evidence → terminal contract | TODO(C): ONLY source=declared_schema pins; prose = required-name hints; inferred = open hint | ai_builder_create_compiler (~890) | n/a (semantics) | TODO table test over 4 sources |
-| evidence → critic | prose hints checked as name+container survival, not exact schema | ai_builder_critic_invariants | action_followup exemption narrowed to declared_schema (DONE 8e720e359) | test_prose_name_evidence_does_not_exempt_the_followup_critic (DONE) |
+| evidence → terminal contract | DONE(C2 `6d1df4619`): only declared_schema pins; prose/inferred are hints; user-named keys exempt from the localized-key lexicon AND source-reader alias canonicalization (verbatim survival) | ai_builder_create_compiler + assembly/plan + source_reader_contracts | n/a (semantics) | declared-only pinning + user-named-keys e2e tests |
+| evidence → critic | DONE(C2): prose_output_field_names_must_survive enforces every user-named key in the outcome contract (folded, any depth) with repairable feedback; action_followup exemption narrowed to declared_schema (8e720e359) | ai_builder_critic_invariants | prose_output_field_names_must_survive | survival critic tests |
 
 ## 2. Proposal output_fields (model tool call → normalizer → planned step → compiled contract)
 
