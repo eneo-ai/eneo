@@ -1090,8 +1090,23 @@ admission reattaches them to the preceding step's output_fields),
 non-ASCII names ("åtgärder" folds to a valid identifier via the new leaf
 ai_builder_field_identity module — the folding primitive's canonical
 home, re-exported from ai_builder_result_contract), and shape
-rejections that now name the offending field. Verification replay of
-the four worst parse offenders in flight at DEV-bcae9d8bb53a.
+rejections that now name the offending field. VERIFIED live at
+DEV-bcae9d8bb53a on the four worst parse offenders: parse attempts
+8 -> 1 (interview_open_data_catalog 2->0 first-pass,
+easy_hr_job_application_summary 1->0 first-pass, easy_spreadsheet
+2->1 with repair cost halved 12.7k->6.5k). The fourth
+(medium_school_absence_followup_json) cleared its parse family but
+surfaced the NEXT one: self_correction_invalid_payload — two repair
+responses failing raw JSON decode with the same fingerprint, then
+terminal stop (failed-turn ladder: quality rich_workflow_* -> parse ->
+parse). `e30d9e412` closes both evidence gaps that processing exposed:
+error-terminated journeys now classify as their journey outcome
+(builder_error / provider_outcome_unknown) instead of masking as
+invalid_evidence — outcome classification gets its own semantics
+version, compare refuses across it — and the capture tap records raw
+malformed-JSON repair arguments at both parse sites (the one class the
+structured tap could not see). Dead-end capture replay in flight at
+DEV-e30d9e412005.
 
 Simplification slice 2026-08-06 (user-directed complexity audit):
 `6c20d0c00` folded identity as the single field-naming boundary
