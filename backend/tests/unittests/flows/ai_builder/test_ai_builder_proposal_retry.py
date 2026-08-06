@@ -596,8 +596,10 @@ async def test_run_forced_tool_retry_after_text_returns_feedback_for_malformed_j
 
     assert result.events is None
     assert result.feedback is not None
-    assert "steps.1.assumptions" in result.feedback
-    assert "extra_forbidden" in result.feedback
+    # Step-level assumptions now hoist to the root instead of erroring;
+    # the malformed item_fields shape remains the visible parse failure.
+    assert "steps.1.assumptions" not in result.feedback
+    assert "item_fields" in result.feedback
     assert result.failure_kind == "parse"
     call_proposal_completion.assert_not_awaited()
 

@@ -243,6 +243,11 @@ def compile_create_intent_to_spec(
         else set[str]()
     )
     known_field_order = [field.name for field in form_fields]
+    intent_with_admitted_form_refs = _intent_with_mention_placed_form_fields(
+        intent_with_admitted_form_refs,
+        field_order=known_field_order,
+        template_consumed_field_names=template_consumed_field_names,
+    )
     _raise_for_unplaced_create_form_fields(
         intent_with_admitted_form_refs,
         field_order=known_field_order,
@@ -496,6 +501,60 @@ def _template_fields_prepared_by_intent(
         and hint.variable_name not in intent_field_names
         and fold_result_field_name(hint.variable_name) in prepared_folded_names
     }
+
+
+def _intent_with_mention_placed_form_fields(
+    intent: CreateFlowIntent,
+    *,
+    field_order: list[str],
+    template_consumed_field_names: set[str] | None = None,
+) -> CreateFlowIntent:
+    """Place unreferenced form fields on the step whose instructions use them.
+
+    The dominant unplaced_form_fields shape (6 repair rounds, ~24k tokens
+    in the 2026-08-06 baseline) is a model that declares input_fields and
+    writes step instructions consuming them, but forgets uses_form_fields.
+    A folded mention in exactly the instructions text is deterministic
+    placement evidence; a field no step mentions still fails visibly.
+    """
+
+    referenced = {
+        field_name for step in intent.steps for field_name in step.uses_form_fields
+    }
+    consumed = template_consumed_field_names or set()
+    unplaced = [
+        name for name in field_order if name not in referenced and name not in consumed
+    ]
+    if not unplaced or not intent.steps:
+        return intent
+    folded_instructions = [
+        f"_{fold_result_field_name(step.instructions)}_" for step in intent.steps
+    ]
+    placements: dict[int, list[str]] = {}
+    for name in unplaced:
+        marker = f"_{fold_result_field_name(name)}_"
+        mentioning = [
+            index
+            for index, folded in enumerate(folded_instructions)
+            if marker in folded
+        ]
+        if mentioning:
+            placements.setdefault(mentioning[0], []).append(name)
+    if not placements:
+        return intent
+    steps = list(intent.steps)
+    for index, names in placements.items():
+        step = steps[index]
+        steps[index] = step.model_copy(
+            update={"uses_form_fields": [*step.uses_form_fields, *names]}
+        )
+    logger.info(
+        "ai_builder_create_intent_form_fields_placed_by_mention",
+        extra={
+            "placed_count": sum(len(names) for names in placements.values()),
+        },
+    )
+    return intent.model_copy(update={"steps": steps})
 
 
 def _raise_for_unplaced_create_form_fields(

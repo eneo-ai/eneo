@@ -266,3 +266,41 @@ def test_leading_field_draft_still_fails_visibly() -> None:
                 "steps": [_field("risks")],
             }
         )
+
+
+def test_stray_step_keys_on_fields_are_dropped_not_fatal() -> None:
+    # Live captures 2026-08-06 (flagship + hard_many_source): the model
+    # sprinkles step-level model_ref into field objects, which used to
+    # reject the whole output_fields list.
+    step = SemanticStepIntent.model_validate(
+        {
+            "name": "Läs handlingar",
+            "instructions": "Läs och strukturera varje handling.",
+            "output_type": "json",
+            "output_fields": [
+                _field("titel", model_ref="model.gpt-test"),
+            ],
+        }
+    )
+    assert [field.name for field in step.output_fields or []] == ["titel"]
+
+
+def test_step_level_assumptions_hoist_to_the_root() -> None:
+    intent = parse_create_flow_intent_arguments(
+        {
+            "flow_name": "Handlingsläsning",
+            "plan_rationale": "Strukturera underlaget.",
+            "assumptions": ["Root-antagande."],
+            "steps": [
+                {
+                    "name": "Läs handlingar",
+                    "instructions": "Läs och strukturera varje handling.",
+                    "assumptions": ["Stegets antagande hör hemma i roten."],
+                }
+            ],
+        }
+    )
+    assert intent.assumptions == [
+        "Root-antagande.",
+        "Stegets antagande hör hemma i roten.",
+    ]

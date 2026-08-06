@@ -372,11 +372,38 @@ def _normalize_create_intent_arguments(arguments: dict[str, Any]) -> dict[str, A
     }
     raw_steps = normalized.get("steps")
     if isinstance(raw_steps, list):
+        merged_steps = _steps_with_misplaced_field_drafts_reattached(
+            cast(list[Any], raw_steps)
+        )
+        hoisted_assumptions: list[str] = []
+        for raw_step in merged_steps:
+            if not isinstance(raw_step, dict):
+                continue
+            step_payload = cast(dict[str, Any], raw_step)
+            raw_assumptions = step_payload.pop("assumptions", None)
+            if isinstance(raw_assumptions, list):
+                hoisted_assumptions.extend(
+                    item
+                    for item in cast(list[Any], raw_assumptions)
+                    if isinstance(item, str)
+                )
+        if hoisted_assumptions:
+            # Assumptions are a root concern; a step-level list is the same
+            # content misplaced, so it hoists instead of failing the parse.
+            raw_root_assumptions = normalized.get("assumptions")
+            root_assumptions = (
+                [
+                    item
+                    for item in cast(list[Any], raw_root_assumptions)
+                    if isinstance(item, str)
+                ]
+                if isinstance(raw_root_assumptions, list)
+                else []
+            )
+            normalized["assumptions"] = [*root_assumptions, *hoisted_assumptions]
         normalized["steps"] = [
             _strip_backend_owned_semantic_step_keys(raw_step)
-            for raw_step in _steps_with_misplaced_field_drafts_reattached(
-                cast(list[Any], raw_steps)
-            )
+            for raw_step in merged_steps
         ]
     raw_input_fields = normalized.get("input_fields")
     if isinstance(raw_input_fields, list):

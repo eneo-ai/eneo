@@ -6675,3 +6675,75 @@ def test_aggregate_json_terminal_still_rejects() -> None:
         excinfo.value.log_context.get("failure_code")
         == "assembly_aggregate_requires_text_or_document_output"
     )
+
+
+def test_unreferenced_form_fields_place_on_the_mentioning_step() -> None:
+    # Baseline 2026-08-06: six repair rounds (~24k tokens) because the
+    # model declares input_fields, writes instructions that consume them,
+    # and forgets uses_form_fields. A folded instruction mention is
+    # deterministic placement evidence, so this compiles instead of
+    # rejecting with unplaced_form_fields.
+    intent = parse_create_flow_intent_arguments(
+        {
+            "flow_name": "Driftstörning",
+            "plan_rationale": "Strukturera och informera.",
+            "input_fields": [
+                {"name": "omrade", "label": "Område"},
+                {"name": "beraknad_klartid", "label": "Beräknad klartid"},
+            ],
+            "steps": [
+                {
+                    "name": "Analysera felrapporten",
+                    "instructions": "Analysera felrapporten.",
+                    "output_type": "json",
+                    "output_fields": [
+                        {
+                            "name": "analys",
+                            "field_type": "string",
+                            "description": "Strukturerad analys.",
+                        }
+                    ],
+                },
+                {
+                    "name": "Skriv invånarmeddelande",
+                    "instructions": (
+                        "Skriv ett meddelande som anger område och "
+                        "beräknad klartid för invånarna."
+                    ),
+                },
+            ],
+        }
+    )
+
+    compiled = compile_create_intent_to_spec(intent)
+
+    assert [field.name for field in compiled.form_fields or ()] == [
+        "omrade",
+        "beraknad_klartid",
+    ]
+    spec_text = compiled.model_dump_json()
+    assert "omrade" in spec_text
+    assert "beraknad_klartid" in spec_text
+
+
+def test_form_field_no_step_mentions_still_rejects() -> None:
+    intent = parse_create_flow_intent_arguments(
+        {
+            "flow_name": "Driftstörning",
+            "plan_rationale": "Strukturera och informera.",
+            "input_fields": [
+                {"name": "kontaktvag", "label": "Kontaktväg"},
+            ],
+            "steps": [
+                {
+                    "name": "Analysera",
+                    "instructions": "Analysera felrapporten.",
+                }
+            ],
+        }
+    )
+
+    with pytest.raises(AIBuilderArchitectureError) as exc_info:
+        compile_create_intent_to_spec(intent)
+
+    assert exc_info.value.log_context["failure_code"] == "unplaced_form_fields"
