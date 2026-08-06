@@ -389,9 +389,9 @@ configuration limit rather than a conflict, described in
 
 ## Inspect Skill activation
 
-Deployments can expose an opt-in **Debug** panel in Assistant and Personal Chat
-with `SHOW_CHAT_DEBUG_PANEL=true` in both backend and frontend configuration.
-Only owners and users with the Assistant debug permission see it. Select a
+Assistant and Personal Chat expose a **Debug** panel to users whose role carries
+the Assistant debug permission, which Owner and AI Configurator hold by default.
+Remove the permission from a role to hide the panel from it. Select a
 persisted turn to inspect which exact Skill revisions were available, entered
 the model context, were blocked, or were rejected, along with token
 measurement, activation rounds, and selection time.
