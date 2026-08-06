@@ -445,7 +445,7 @@ describe("admin storage settings page", () => {
       .toBeVisible();
   });
 
-  test("explains that the switch is refused while files are still being saved", async () => {
+  test("tells the administrator to redirect new files before switching", async () => {
     testUser.isPlatformAdmin = true;
     getPolicy.mockResolvedValue(policy());
     getObjectStoreConnection.mockReset().mockResolvedValue({
@@ -465,7 +465,7 @@ describe("admin storage settings page", () => {
         "RESPONSE",
         409,
         0,
-        { code: "object_store_destination_switch_blocked" },
+        { code: "object_store_new_writes_not_redirected" },
         { endpoint: "POST@/admin/object-store-connection/destination" }
       )
     );
@@ -480,7 +480,7 @@ describe("admin storage settings page", () => {
     await page.getByLabelText("storage_connection_secret_key").fill("new-secret-key");
     await page.getByRole("button", { name: "storage_switch_test_and_switch" }).click();
 
-    await expect.element(page.getByText("storage_switch_error_blocked_title")).toBeVisible();
+    await expect.element(page.getByText("storage_switch_error_new_writes_title")).toBeVisible();
   });
 
   test("reloads the existing connection after a setup conflict", async () => {

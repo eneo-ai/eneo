@@ -136,7 +136,15 @@ class ObjectStoreConnectionConflict(ObjectStoreConnectionError):
 
 
 class ObjectStoreDestinationSwitchBlocked(ObjectStoreConnectionError):
+    """Remote work is still in flight; the administrator waits and retries."""
+
     code = "object_store_destination_switch_blocked"
+
+
+class ObjectStoreNewWritesNotRedirected(ObjectStoreConnectionError):
+    """New writes still target object storage; the administrator must act."""
+
+    code = "object_store_new_writes_not_redirected"
 
 
 class ObjectStorePreviousDestinationMissing(ObjectStoreConnectionError):
@@ -702,7 +710,7 @@ class ObjectStoreConnectionService:
             )
         )
         if policy_target != "postgres_inline":
-            raise ObjectStoreDestinationSwitchBlocked(
+            raise ObjectStoreNewWritesNotRedirected(
                 "Select PostgreSQL for new writes before switching destination"
             )
         nonterminal_moves = await session.scalar(

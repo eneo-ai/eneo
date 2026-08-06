@@ -30,7 +30,7 @@ from eneo.object_content.content import StorageKind
 from eneo.object_content.object_store_connection import (
     ObjectStoreConnectionInput,
     ObjectStoreConnectionService,
-    ObjectStoreDestinationSwitchBlocked,
+    ObjectStoreNewWritesNotRedirected,
 )
 from eneo.object_content.s3_object_store import S3ObjectStore
 from eneo.object_content.store_binding import ensure_store_binding_ready
@@ -145,7 +145,12 @@ async def test_switch_requires_inline_new_writes(
     real_object_store: RealObjectStore,
     real_unpaired_object_store: RealObjectStore,
 ) -> None:
-    """While new writes still target object storage, the switch is refused."""
+    """New writes on object storage refuse the switch with an actionable code.
+
+    This is the administrator's most likely first attempt, and it is a
+    configuration they must change rather than transient work to wait out,
+    so it carries its own typed reason.
+    """
     service = _service(
         object_content_database, real_object_store, real_unpaired_object_store
     )
@@ -161,7 +166,7 @@ async def test_switch_requires_inline_new_writes(
     )
     await _select_object_store_writes(object_content_database)
 
-    with pytest.raises(ObjectStoreDestinationSwitchBlocked):
+    with pytest.raises(ObjectStoreNewWritesNotRedirected):
         await service.replace_destination(
             _connection_input(real_unpaired_object_store),
             actor_user_id=await _any_user_id(object_content_database),
