@@ -77,6 +77,7 @@ from eneo.flows.ai_builder.ai_builder_resource_catalog import (
 )
 from eneo.flows.ai_builder.ai_builder_session_turn import SessionTurnPreflight
 from eneo.flows.ai_builder.ai_builder_settings import AIBuilderBudgetPolicy
+from eneo.flows.ai_builder.planning_state import PlanningState
 from eneo.flows.assistant_authoring_snapshot import AssistantAuthoringSnapshots
 from eneo.flows.domain.flow import FlowPersistedJsonObject
 from eneo.flows.domain.mapped_execution_policy import FlowMappedExecutionPolicy
@@ -257,6 +258,12 @@ class AIBuilderService:
 
     async def get_session(self, session_id: UUID) -> BuilderSession:
         return await self.repo.get_session(
+            session_id=session_id,
+            tenant_id=self.user.tenant_id,
+        )
+
+    async def get_planning_state(self, session_id: UUID) -> PlanningState | None:
+        return await self.repo.load_planning_state(
             session_id=session_id,
             tenant_id=self.user.tenant_id,
         )

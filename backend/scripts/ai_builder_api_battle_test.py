@@ -1463,6 +1463,21 @@ def _run_suite(
         require_clean_source=release_gate.require_clean_source,
         config=config if is_release_run else None,
     )
+    missing_fixture_files = _verify_fixture_file_ids(
+        config=config,
+        cases=cases,
+        args=args,
+    )
+    if missing_fixture_files:
+        raise ValueError(
+            "Fixture file id(s) missing on the target backend; re-upload the "
+            "fixtures and refresh their env vars before running: "
+            + "; ".join(
+                f"{item['file_id']} ({', '.join(item['sources'])})"
+                for item in missing_fixture_files
+                if isinstance(item, Mapping) and isinstance(item.get("sources"), list)
+            )
+        )
     expected_observations = _expected_observations(cases, args.repetitions)
     run_context = _suite_run_context(args)
     evaluator_identity = _suite_evaluator_identity(
@@ -2222,6 +2237,16 @@ def _run_case(
         method="GET",
         path=(f"/flows/ai-builder/sessions/{session_id}/_diagnostics/classifier-slots"),
     )
+    proposal_telemetry_diagnostics = _optional_request_json(
+        config=config,
+        path=(
+            f"/flows/ai-builder/sessions/{session_id}/_diagnostics/proposal-telemetry"
+        ),
+    )
+    journey = _journey_with_proposal_economics(
+        journey,
+        diagnostics=proposal_telemetry_diagnostics,
+    )
     observation_input_identity = _observation_input_identity(
         case=case,
         attached_file_ids=file_ids,
@@ -2307,6 +2332,7 @@ def _run_case(
         "journey": journey,
         "failure_summary": failure_summary,
         "classifier_diagnostics": classifier_diagnostics,
+        "proposal_telemetry_diagnostics": proposal_telemetry_diagnostics,
         "applied_flow_evidence": applied_flow_evidence,
         "runtime_evidence": runtime_evidence,
         "runtime_metrics": _runtime_metrics_from_quality_report(quality_report),
@@ -2736,6 +2762,116 @@ def _requirements_confirmation_payload(
     if isinstance(version, str) and version:
         payload["requirements_version"] = version
     return payload
+
+
+def _optional_request_json(*, config: ApiConfig, path: str) -> JsonObject | None:
+    """Fetch a diagnostics endpoint that older backends may not serve yet."""
+
+    try:
+        return _request_json(config=config, method="GET", path=path)
+    except HTTPError as error:
+        if error.code in {404, 405}:
+            return None
+        raise
+
+
+def _journey_with_proposal_economics(
+    journey: JsonObject,
+    *,
+    diagnostics: JsonObject | None,
+) -> JsonObject:
+    """Attach per-attempt repair economics and the architecture snapshot.
+
+    The receipt is the improvement engine between runs: knowing WHICH
+    failure codes each repair burned tokens on turns outcome counts into
+    ranked engineering targets.
+    """
+
+    if not isinstance(diagnostics, Mapping):
+        return journey
+    enriched = dict(journey)
+    architecture = diagnostics.get("architecture")
+    if isinstance(architecture, Mapping):
+        enriched["architecture"] = dict(architecture)
+    raw_turns = diagnostics.get("proposal_turns")
+    turns = (
+        [dict(turn) for turn in raw_turns if isinstance(turn, Mapping)]
+        if (isinstance(raw_turns, list))
+        else []
+    )
+    attempt_ladder: list[JsonObject] = []
+    initial_token_cost = 0
+    repair_token_cost = 0
+    for turn in turns:
+        attempts = turn.get("attempts")
+        if not isinstance(attempts, list):
+            continue
+        for attempt in attempts:
+            if not isinstance(attempt, Mapping):
+                continue
+            kind = attempt.get("kind")
+            total_tokens = attempt.get("total_tokens")
+            tokens = (
+                total_tokens
+                if isinstance(total_tokens, int) and not isinstance(total_tokens, bool)
+                else 0
+            )
+            if kind == "repair":
+                repair_token_cost += tokens
+            else:
+                initial_token_cost += tokens
+            attempt_ladder.append(
+                {
+                    "message_id": turn.get("message_id"),
+                    "attempt": attempt.get("attempt"),
+                    "kind": kind,
+                    "failure_kind": attempt.get("failure_kind"),
+                    "failure_codes": _string_list(attempt.get("failure_codes")),
+                    "total_tokens": total_tokens,
+                }
+            )
+    plan_outcome = enriched.get("plan_outcome")
+    plan_outcome = dict(plan_outcome) if isinstance(plan_outcome, Mapping) else {}
+    plan_outcome["proposal_turns"] = turns
+    plan_outcome["attempt_failure_ladder"] = attempt_ladder
+    plan_outcome["initial_token_cost"] = initial_token_cost
+    plan_outcome["repair_token_cost"] = repair_token_cost
+    enriched["plan_outcome"] = plan_outcome
+    return enriched
+
+
+def _verify_fixture_file_ids(
+    *,
+    config: ApiConfig,
+    cases: list[BattleCase],
+    args: argparse.Namespace,
+) -> list[JsonObject]:
+    """Verify every referenced fixture file id exists before any case runs.
+
+    A missing fixture surfaces mid-journey as a misleading builder error
+    (an entire diagnostic day was once lost to that shape), so the suite
+    fails fast with the exact id and owning env var instead.
+    """
+
+    ids_to_sources: dict[str, set[str]] = {}
+    for case in cases:
+        if _missing_file_id_envs(case, args):
+            continue
+        for file_id in case.file_ids:
+            ids_to_sources.setdefault(file_id, set()).add(f"case:{case.case_id}")
+        for env_name in case.file_id_envs:
+            file_id = (os.environ.get(env_name) or "").strip()
+            if file_id:
+                ids_to_sources.setdefault(file_id, set()).add(env_name)
+    missing: list[JsonObject] = []
+    for file_id, sources in sorted(ids_to_sources.items()):
+        try:
+            _request_json(config=config, method="GET", path=f"/files/{file_id}/")
+        except HTTPError as error:
+            if error.code != 404:
+                raise
+            missing.append({"file_id": file_id, "sources": sorted(sources)})
+    return missing
 
 
 def _case_file_ids(case: BattleCase, args: argparse.Namespace) -> tuple[str, ...]:

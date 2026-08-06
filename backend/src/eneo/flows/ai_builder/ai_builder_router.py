@@ -22,9 +22,14 @@ from eneo.audit.domain.entity_types import EntityType
 from eneo.authentication.auth_dependencies import get_scope_filter
 from eneo.files.file_models import FilePublic
 from eneo.flows.ai_builder.ai_builder_api_models import (
+    AIBuilderArchitectureDiagnostic,
+    AIBuilderArchitectureTupleDiagnostic,
     AIBuilderClassifierDiagnostic,
     AIBuilderClassifierDiagnosticsResponse,
     AIBuilderConversationMessage,
+    AIBuilderProposalAttemptDiagnostic,
+    AIBuilderProposalTelemetryDiagnosticsResponse,
+    AIBuilderProposalTurnDiagnostic,
     AIBuilderTurnLifecycleResponse,
     ApplyPlanRequest,
     ApplyResultResponse,
@@ -104,6 +109,7 @@ from eneo.flows.ai_builder.ai_builder_tool_names import (
     ASK_STRUCTURED_QUESTION_TOOL_NAME,
     CONFIRM_REQUIREMENTS_TOOL_NAME,
 )
+from eneo.flows.ai_builder.planning_state import PlanningState
 from eneo.flows.flow_access_policy import (
     FlowAccessFilterMode,
     FlowApiAction,
@@ -420,6 +426,95 @@ def _classifier_diagnostic_runs(
             )
         )
     return runs
+
+
+def _proposal_turn_diagnostics(
+    conversation: list[ConversationMessage],
+) -> list[AIBuilderProposalTurnDiagnostic]:
+    turns: list[AIBuilderProposalTurnDiagnostic] = []
+    for message in conversation:
+        metadata = message.metadata
+        if not isinstance(metadata, Mapping):
+            continue
+        raw_telemetry = metadata.get("planner_telemetry")
+        if not isinstance(raw_telemetry, Mapping):
+            continue
+        telemetry = cast(Mapping[str, Any], raw_telemetry)
+        raw_attempts = telemetry.get("proposal_attempts")
+        if not isinstance(raw_attempts, list) or not raw_attempts:
+            continue
+        attempts: list[AIBuilderProposalAttemptDiagnostic] = []
+        for raw_attempt in cast(list[Any], raw_attempts):
+            if not isinstance(raw_attempt, Mapping):
+                continue
+            attempt_payload = cast(Mapping[str, Any], raw_attempt)
+            raw_codes = cast(Any, attempt_payload.get("failure_codes"))
+            try:
+                attempts.append(
+                    AIBuilderProposalAttemptDiagnostic.model_validate(
+                        {
+                            key: attempt_payload.get(key)
+                            for key in (
+                                "attempt",
+                                "kind",
+                                "elapsed_ms",
+                                "prompt_tokens",
+                                "completion_tokens",
+                                "total_tokens",
+                                "failure_kind",
+                            )
+                        }
+                        | {
+                            "failure_codes": [
+                                code
+                                for code in cast(list[Any], raw_codes or [])
+                                if isinstance(code, str)
+                            ]
+                        }
+                    )
+                )
+            except ValidationError:
+                continue
+        if not attempts:
+            continue
+        turns.append(
+            AIBuilderProposalTurnDiagnostic(
+                message_id=message.message_id,
+                repair_attempts=_optional_int(telemetry.get("repair_attempts")),
+                parse_repair_attempts=_optional_int(
+                    telemetry.get("parse_repair_attempts")
+                ),
+                total_tokens=_optional_int(telemetry.get("total_tokens")),
+                attempts=attempts,
+            )
+        )
+    return turns
+
+
+def _optional_int(value: object) -> int | None:
+    if isinstance(value, bool) or not isinstance(value, int):
+        return None
+    return value
+
+
+def _architecture_diagnostic(
+    planning_state: PlanningState | None,
+) -> AIBuilderArchitectureDiagnostic | None:
+    if planning_state is None or planning_state.architecture_commit is None:
+        return None
+    commit = planning_state.architecture_commit
+    return AIBuilderArchitectureDiagnostic(
+        aggregation_intent=commit.aggregation_intent,
+        chosen_patterns=list(commit.chosen_patterns),
+        tuples_chain=[
+            AIBuilderArchitectureTupleDiagnostic(
+                input_type=triple.input_type,
+                output_type=triple.output_type,
+                output_mode=triple.output_mode,
+            )
+            for triple in commit.tuples_chain
+        ],
+    )
 
 
 def _to_public_user_message(
@@ -1139,6 +1234,55 @@ async def get_session_classifier_diagnostics(
     return AIBuilderClassifierDiagnosticsResponse(
         session_id=session.id,
         classifier_runs=_classifier_diagnostic_runs(session.conversation),
+    )
+
+
+@router.get(
+    "/sessions/{session_id}/_diagnostics/proposal-telemetry",
+    response_model=AIBuilderProposalTelemetryDiagnosticsResponse,
+    description=(
+        "Return persisted per-attempt proposal telemetry and the committed "
+        "architecture snapshot for creator-only internal evaluation."
+    ),
+    responses={
+        200: {"description": "Persisted proposal telemetry diagnostics."},
+        403: _ai_builder_error_response(
+            description="Caller lacks space permission or API key scope for this session.",
+            message="API key space scope does not match requested AI builder resource.",
+            code=AIBuilderErrorCode.INSUFFICIENT_SCOPE,
+            details={"auth_layer": "api_key_scope"},
+        ),
+        404: _ai_builder_error_response(
+            description="AI Builder session not found.",
+            message="AI Builder session not found.",
+            code=AIBuilderErrorCode.NOT_FOUND,
+        ),
+    },
+    include_in_schema=False,
+)
+async def get_session_proposal_telemetry_diagnostics(
+    request: Request,
+    session_id: Annotated[
+        UUID,
+        Path(description="Identifier of the AI Builder session to inspect."),
+    ],
+    container: ContainerWithUserDep,
+) -> AIBuilderProposalTelemetryDiagnosticsResponse:
+    service = _get_ai_builder_service(container)
+    session: BuilderSession = await service.get_session(session_id)
+    await _authorize_ai_builder_request(
+        request,
+        container,
+        action=FlowApiAction.BUILDER_SESSION_READ,
+        space_id=session.space_id,
+        session=session,
+        require_creator=True,
+    )
+    planning_state = await service.get_planning_state(session_id)
+    return AIBuilderProposalTelemetryDiagnosticsResponse(
+        session_id=session.id,
+        architecture=_architecture_diagnostic(planning_state),
+        proposal_turns=_proposal_turn_diagnostics(session.conversation),
     )
 
 

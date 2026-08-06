@@ -91,6 +91,26 @@ def _authoring_tokens(row: dict[str, Any]) -> int | None:
     return value if isinstance(value, int) else None
 
 
+def _repair_economics(row: dict[str, Any]) -> dict[str, Any] | None:
+    journey = cast(dict[str, Any], row.get("journey") or {})
+    plan_outcome = cast(dict[str, Any], journey.get("plan_outcome") or {})
+    repair_cost = plan_outcome.get("repair_token_cost")
+    if not isinstance(repair_cost, int):
+        return None
+    ladder = cast(Any, plan_outcome.get("attempt_failure_ladder"))
+    failure_codes: list[str] = []
+    if isinstance(ladder, list):
+        for attempt in cast(list[Any], ladder):
+            if not isinstance(attempt, dict):
+                continue
+            codes = cast(Any, cast(dict[str, Any], attempt).get("failure_codes"))
+            if isinstance(codes, list):
+                failure_codes.extend(
+                    code for code in cast(list[Any], codes) if isinstance(code, str)
+                )
+    return {"repair_token_cost": repair_cost, "attempt_failure_codes": failure_codes}
+
+
 def _case_delta(
     case_id: str,
     baseline: dict[str, Any] | None,
@@ -144,6 +164,19 @@ def _case_delta(
                 "after": after_tokens,
                 "delta": after_tokens - before_tokens,
             }
+        before_repairs = _repair_economics(baseline)
+        after_repairs = _repair_economics(current)
+        if before_repairs is not None or after_repairs is not None:
+            repair_delta: dict[str, Any] = {
+                "before": before_repairs,
+                "after": after_repairs,
+            }
+            if before_repairs is not None and after_repairs is not None:
+                repair_delta["delta"] = (
+                    after_repairs["repair_token_cost"]
+                    - before_repairs["repair_token_cost"]
+                )
+            delta["repair_economics"] = repair_delta
     return delta
 
 
@@ -226,7 +259,13 @@ def _render_markdown(report: dict[str, Any], *, only_changed: bool) -> str:
         lines.append(
             f"- **{delta['case_id']}** [{delta['direction']}] {delta['outcome']}"
         )
-        for key in ("failure_codes", "failed_checks", "questions", "authoring_tokens"):
+        for key in (
+            "failure_codes",
+            "failed_checks",
+            "questions",
+            "authoring_tokens",
+            "repair_economics",
+        ):
             if key in delta:
                 lines.append(f"  - {key}: {json.dumps(delta[key], ensure_ascii=False)}")
     return "\n".join(lines)

@@ -255,6 +255,65 @@ class AIBuilderConversationMessage(BaseModel):
     requirements_confirmation: RequirementsConfirmationMetadata | None = None
 
 
+class AIBuilderProposalAttemptDiagnostic(BaseModel):
+    """Content-free accounting facts for one proposal provider attempt."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    attempt: int
+    kind: str
+    elapsed_ms: int | None = None
+    prompt_tokens: int | None = None
+    completion_tokens: int | None = None
+    total_tokens: int | None = None
+    failure_kind: str | None = None
+    failure_codes: list[str] = Field(default_factory=list)
+
+
+class AIBuilderProposalTurnDiagnostic(BaseModel):
+    """Per-committed-turn proposal attempt ladder for internal evaluation."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    message_id: str
+    repair_attempts: int | None = None
+    parse_repair_attempts: int | None = None
+    total_tokens: int | None = None
+    attempts: list[AIBuilderProposalAttemptDiagnostic] = Field(
+        default_factory=lambda: cast(list[AIBuilderProposalAttemptDiagnostic], [])
+    )
+
+
+class AIBuilderArchitectureTupleDiagnostic(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    input_type: str
+    output_type: str
+    output_mode: str
+
+
+class AIBuilderArchitectureDiagnostic(BaseModel):
+    """Structural committed-architecture snapshot for internal evaluation."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    aggregation_intent: str
+    chosen_patterns: list[str] = Field(default_factory=list)
+    tuples_chain: list[AIBuilderArchitectureTupleDiagnostic] = Field(
+        default_factory=lambda: cast(list[AIBuilderArchitectureTupleDiagnostic], [])
+    )
+
+
+class AIBuilderProposalTelemetryDiagnosticsResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    session_id: UUID
+    architecture: AIBuilderArchitectureDiagnostic | None = None
+    proposal_turns: list[AIBuilderProposalTurnDiagnostic] = Field(
+        default_factory=lambda: cast(list[AIBuilderProposalTurnDiagnostic], [])
+    )
+
+
 class AIBuilderClassifierDiagnostic(SlotClassificationMetadata):
     message_id: str
 

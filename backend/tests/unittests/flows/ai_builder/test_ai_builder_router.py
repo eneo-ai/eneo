@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+from datetime import datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 from uuid import UUID, uuid4
@@ -78,6 +79,7 @@ from eneo.flows.ai_builder.ai_builder_router import (
     get_session,
     get_session_classifier_diagnostics,
     get_session_models,
+    get_session_proposal_telemetry_diagnostics,
     list_session_plans,
     list_sessions,
     revise_plan,
@@ -94,6 +96,11 @@ from eneo.flows.ai_builder.ai_builder_slot_classification_contract import (
     SLOT_CLASSIFICATION_SCHEMA_VERSION,
 )
 from eneo.flows.ai_builder.ai_builder_telemetry_models import SessionTelemetrySummary
+from eneo.flows.ai_builder.planning_state import (
+    ArchitectureCommit,
+    PlanningState,
+    StepTriple,
+)
 from eneo.flows.flow_access_policy import FlowApiAction
 from eneo.main.exceptions import (
     BadRequestException,
@@ -1057,6 +1064,141 @@ class TestGetSessionEndpoint:
             ],
         }
         service.get_session_attachment_snapshot.assert_not_called()
+
+    @pytest.mark.anyio
+    async def test_proposal_telemetry_diagnostics_reads_persisted_metadata(self):
+        container = _make_container()
+        session = _make_session_domain(actor_user_id=container.user.return_value.id)
+        session.conversation = [
+            ConversationMessage(
+                message_id="assistant-1",
+                role="assistant",
+                content="Plan skapad.",
+                metadata={
+                    "planner_telemetry": {
+                        "repair_attempts": 2,
+                        "parse_repair_attempts": 0,
+                        "total_tokens": 24240,
+                        "proposal_attempts": [
+                            {
+                                "attempt": 1,
+                                "kind": "initial",
+                                "elapsed_ms": 1200,
+                                "total_tokens": 6135,
+                                "failure_kind": "parse",
+                                "failure_codes": [],
+                            },
+                            {
+                                "attempt": 2,
+                                "kind": "repair",
+                                "elapsed_ms": 1900,
+                                "total_tokens": 8088,
+                                "failure_kind": "validation",
+                                "failure_codes": ["flow_step_invalid"],
+                            },
+                            {
+                                "attempt": 3,
+                                "kind": "repair",
+                                "elapsed_ms": 2400,
+                                "total_tokens": 10017,
+                            },
+                        ],
+                    }
+                },
+            )
+        ]
+        service = container.ai_builder_service.return_value
+        service.get_session.return_value = session
+        planning_state = PlanningState.empty()
+        planning_state.architecture_commit = ArchitectureCommit(
+            tuples_chain=[
+                StepTriple(
+                    input_type="document",
+                    output_type="docx",
+                    output_mode="template_fill",
+                )
+            ],
+            chosen_patterns=["document_to_docx_template"],
+            aggregation_intent="compare",
+            committed_at=datetime(2026, 8, 6, tzinfo=timezone.utc),
+            architecture_hash="c" * 64,
+        )
+        service.get_planning_state.return_value = planning_state
+
+        result = await get_session_proposal_telemetry_diagnostics(
+            request=MagicMock(),
+            session_id=session.id,
+            container=container,
+        )
+
+        dumped = result.model_dump(mode="json")
+        assert dumped["architecture"] == {
+            "aggregation_intent": "compare",
+            "chosen_patterns": ["document_to_docx_template"],
+            "tuples_chain": [
+                {
+                    "input_type": "document",
+                    "output_type": "docx",
+                    "output_mode": "template_fill",
+                }
+            ],
+        }
+        assert dumped["proposal_turns"] == [
+            {
+                "message_id": "assistant-1",
+                "repair_attempts": 2,
+                "parse_repair_attempts": 0,
+                "total_tokens": 24240,
+                "attempts": [
+                    {
+                        "attempt": 1,
+                        "kind": "initial",
+                        "elapsed_ms": 1200,
+                        "prompt_tokens": None,
+                        "completion_tokens": None,
+                        "total_tokens": 6135,
+                        "failure_kind": "parse",
+                        "failure_codes": [],
+                    },
+                    {
+                        "attempt": 2,
+                        "kind": "repair",
+                        "elapsed_ms": 1900,
+                        "prompt_tokens": None,
+                        "completion_tokens": None,
+                        "total_tokens": 8088,
+                        "failure_kind": "validation",
+                        "failure_codes": ["flow_step_invalid"],
+                    },
+                    {
+                        "attempt": 3,
+                        "kind": "repair",
+                        "elapsed_ms": 2400,
+                        "prompt_tokens": None,
+                        "completion_tokens": None,
+                        "total_tokens": 10017,
+                        "failure_kind": None,
+                        "failure_codes": [],
+                    },
+                ],
+            }
+        ]
+
+    @pytest.mark.anyio
+    async def test_proposal_telemetry_diagnostics_reject_non_creator(self):
+        container = _make_container()
+        session = _make_session_domain(actor_user_id=uuid4())
+        service = container.ai_builder_service.return_value
+        service.get_session.return_value = session
+
+        with pytest.raises(UnauthorizedException) as exc_info:
+            await get_session_proposal_telemetry_diagnostics(
+                request=MagicMock(),
+                session_id=session.id,
+                container=container,
+            )
+
+        assert exc_info.value.code == "session_creator_required"
 
     @pytest.mark.anyio
     async def test_classifier_diagnostics_reject_non_creator(self):
