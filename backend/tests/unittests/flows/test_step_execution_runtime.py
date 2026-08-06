@@ -2605,3 +2605,129 @@ def test_effective_model_parameters_collects_model_metadata():
     assert params["model_name"] == "gpt-4.1"
     assert params["provider"] == "openai"
     assert params["temperature"] == 0.2
+
+
+@pytest.mark.xfail(
+    strict=True,
+    reason=(
+        "G acceptance contract (adopted solo program 2026-08-05): report "
+        "citations are not yet supported — inline <inref> tags are stripped "
+        "before persisted text reaches compose/render, so the published "
+        "document carries bare claims. The citation owner must turn "
+        "validated tags into stable visible markers plus a deterministic "
+        "reference entry BEFORE the stripping boundary; compose and render "
+        "stay deterministic and citation-unaware. Delete "
+        "assembly_document_report_citations_unsupported only when this test "
+        "passes."
+    ),
+)
+@pytest.mark.asyncio
+async def test_document_report_citation_survives_compose_render_and_public_artifact() -> (
+    None
+):
+    import io
+
+    from docx import Document as DocxDocument
+
+    from eneo.flows.runtime.document_rendering.service import (
+        default_document_render_service,
+    )
+
+    run = _run()
+    state = _state()
+    step = _step(
+        output_type="text",
+        output_config={"citation_mode": "inline_inref_sidecar"},
+    )
+    assistant = MagicMock()
+    assistant.completion_model_kwargs = MagicMock(name="model_kwargs")
+    assistant.get_response = AsyncMock(
+        return_value=SimpleNamespace(
+            total_token_count=4,
+            completion='Material claim <inref id="11111111"/>',
+            model=SimpleNamespace(name="gpt-5.4-nano", provider_type="openai"),
+            knowledge_trace=None,
+        )
+    )
+    prepared = PreparedStepExecution(
+        assistant=assistant,
+        step_input=StepInputValue(
+            text="source material",
+            source_text="source material",
+            input_source="flow_input",
+        ),
+        effective_prompt="Prompt",
+        input_payload_for_result={
+            "text": "source material",
+            "source_text": "source material",
+            "input_source": "flow_input",
+        },
+        contract_validation=None,
+        diagnostics=[],
+        llm_files=[],
+    )
+    rag_metadata = {
+        "status": "success",
+        "tracking": {
+            "retrieval_tracked": True,
+            "prompt_context_inclusion_tracked": True,
+            "citation_tracked": False,
+            "material_influence_tracked": False,
+        },
+        "prompt_context": {
+            "tracked": True,
+            "included_source_ids": ["11111111-1111-1111-1111-111111111111"],
+        },
+        "citation_sources": [
+            {
+                "id": "11111111-1111-1111-1111-111111111111",
+                "id_short": "11111111",
+                "title": "Källdokumentet",
+            }
+        ],
+        "passage_evidence_location": "attempt_provenance",
+    }
+    provider_call_counter = AsyncMock(return_value=("Material claim", []))
+    deps = StepExecutionRuntimeDeps(
+        variable_resolver=FlowVariableResolver(),
+        completion_service=object(),
+        load_assistant=AsyncMock(),
+        resolve_step_input=AsyncMock(),
+        retrieve_rag_chunks=AsyncMock(return_value=([], rag_metadata, [])),
+        process_typed_output=AsyncMock(return_value=_typed_output_result()),
+        apply_output_cap=provider_call_counter,
+    )
+
+    output = await complete_step_execution(
+        step=step,
+        run=run,
+        state=state,
+        prepared=prepared,
+        deps=deps,
+    )
+
+    # The producer's persisted text is what compose/render receive. The
+    # citation identity comes from the inherited/tracked source catalog —
+    # never prose scanning — so the visible marker and its reference entry
+    # must already be present here.
+    persisted_text = output.persisted_text
+    blob, _, _ = default_document_render_service().render_document(
+        persisted_text,
+        "docx",
+        step_order=5,
+    )
+    document_text = "\n".join(
+        paragraph.text for paragraph in DocxDocument(io.BytesIO(blob)).paragraphs
+    )
+
+    assert "Material claim [1]" in document_text
+    assert "[1]" in document_text.replace("Material claim [1]", "", 1)
+    assert "Källdokumentet" in document_text
+    assert output.citation_sidecar is not None
+    assert output.citation_sidecar["citation_compliance"] == "observed"
+    assert output.citation_sidecar["cited_source_ids"] == [
+        "11111111-1111-1111-1111-111111111111"
+    ]
+    # Compose and render are deterministic: the only provider-facing call
+    # in this chain was the producer itself.
+    assert assistant.get_response.await_count == 1
