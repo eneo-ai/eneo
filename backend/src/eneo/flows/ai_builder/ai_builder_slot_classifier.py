@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import time
 from collections.abc import Awaitable, Callable, Collection, Iterable, Mapping
 from dataclasses import replace
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
@@ -51,6 +53,41 @@ from eneo.main.logging import get_logger
 from eneo.tokens.token_utils import count_message_tokens, count_tokens
 
 logger = get_logger(__name__)
+
+# Debug tap for evidence-first parser work: when this env var names a
+# directory, every raw classifier completion is written there BEFORE the
+# parse boundary, so silent parser rejections can be attributed against the
+# exact provider payload. Off in normal operation.
+RAW_CLASSIFIER_CAPTURE_DIR_ENV = "ENEO_AI_BUILDER_RAW_CLASSIFIER_CAPTURE_DIR"
+
+
+def _capture_raw_classifier_response(
+    content: str,
+    *,
+    slot_names: Iterable[str],
+    model: str,
+) -> None:
+    capture_dir = os.environ.get(RAW_CLASSIFIER_CAPTURE_DIR_ENV)
+    if not capture_dir:
+        return
+    try:
+        directory = Path(capture_dir)
+        directory.mkdir(parents=True, exist_ok=True)
+        digest = hashlib.sha256(content.encode("utf-8")).hexdigest()[:12]
+        (directory / f"classifier-raw-{digest}.json").write_text(
+            json.dumps(
+                {
+                    "model": model,
+                    "slot_names": sorted(slot_names),
+                    "content": content,
+                },
+                ensure_ascii=False,
+            ),
+            encoding="utf-8",
+        )
+    except OSError:
+        logger.warning("Raw classifier capture failed", exc_info=True)
+
 
 if TYPE_CHECKING:
     from eneo.completion_models.infrastructure.completion_service import (
@@ -206,6 +243,11 @@ async def classify_slots(
     if not isinstance(content, str):
         return SlotClassificationAttempt(outcome="parse_failed")
 
+    _capture_raw_classifier_response(
+        content,
+        slot_names=slot_names,
+        model=litellm_model,
+    )
     result = slot_classification_contract.parse_slot_classification_response(
         content,
         allowed_slot_values=slot_values,

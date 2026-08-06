@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from datetime import datetime, timezone
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import UUID, uuid4
 
@@ -2763,3 +2764,33 @@ async def test_classify_slots_logs_tenant_context(
     assert log_calls
     assert log_calls[-1]["tenant_id"] == str(tenant_id)
     assert log_calls[-1]["model"] == "gpt-test"
+
+
+def test_raw_classifier_capture_is_off_by_default(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from eneo.flows.ai_builder import ai_builder_slot_classifier as classifier
+
+    monkeypatch.delenv(classifier.RAW_CLASSIFIER_CAPTURE_DIR_ENV, raising=False)
+    classifier._capture_raw_classifier_response(
+        '{"slots": []}', slot_names=("post_processing_goal",), model="m"
+    )
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_raw_classifier_capture_writes_pre_parse_content(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from eneo.flows.ai_builder import ai_builder_slot_classifier as classifier
+
+    monkeypatch.setenv(classifier.RAW_CLASSIFIER_CAPTURE_DIR_ENV, str(tmp_path))
+    raw = '{"slots": [], "output_schema_fields": ["fält[]"]}'
+    classifier._capture_raw_classifier_response(
+        raw, slot_names=("structured_io_contract",), model="openai/gpt"
+    )
+
+    files = list(tmp_path.iterdir())
+    assert len(files) == 1
+    payload = json.loads(files[0].read_text())
+    assert payload["content"] == raw
+    assert payload["slot_names"] == ["structured_io_contract"]
