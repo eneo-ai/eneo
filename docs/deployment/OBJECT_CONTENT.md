@@ -447,6 +447,52 @@ inline, confirm **Admin > Storage** reports no active object-store content or
 nonterminal moves, then allow those cleanup observations to finish before
 removing configuration.
 
+### Change the S3-compatible destination
+
+Changing hosting provider does not require staging content in PostgreSQL — and
+cannot, once any object exceeds the inline admission ceiling. Eneo does not
+copy buckets; the operator copies with their own tooling and Eneo performs the
+guarded switch. Object keys carry no endpoint or bucket, so a faithful copy is
+readable immediately.
+
+1. Create an empty private bucket and a bucket-scoped application identity on
+   the new service, add its origin to
+   `OBJECT_CONTENT_ADMIN_ALLOWED_ENDPOINT_ORIGINS`, restart backend and
+   worker, and back up the current bucket. Keep the old origin allowlisted
+   until the change is finished.
+2. Select `postgres_inline` for new writes in **Admin > Storage** and let
+   queued moves and in-flight uploads finish. New uploads above
+   `OBJECT_CONTENT_INLINE_MAXIMUM_BYTES` fail during this window.
+3. Copy only `v1/<OBJECT_CONTENT_DEPLOYMENT_ID>/` with `rclone copy
+   --checksum` (never `sync`, which deletes at the destination) and preserve
+   object metadata; Eneo enforces the stored media type on every read. Never
+   copy `v1/.eneo-bindings/`: that prefix holds the database-to-bucket marker
+   and Eneo manages it per destination.
+4. Compare both sides with `rclone check --checksum` until it reports no
+   differences.
+5. Use **Change destination** in **Admin > Storage**. Eneo probes the
+   candidate, refuses a bucket paired with another Eneo installation, and
+   commits one fenced transaction that swaps the destination, preserves the
+   deployment identity and every object key, archives the previous
+   destination, resets both remote inventory cursors, and raises the
+   connection revision. Work started against the previous destination cannot
+   commit afterwards. No restart is needed.
+6. Select object storage for new writes again, then let one complete
+   inventory cycle run and confirm no `backend_missing` content. Full and
+   range reads verify the canonical SHA-256, so an incomplete or corrupt copy
+   surfaces instead of returning wrong bytes.
+
+The previous destination stays archived until an administrator forgets it, and
+**Switch back** returns to it under the same preconditions. Eneo never deletes
+objects or buckets on either destination: decommission the retired bucket at
+the provider once the archived record is removed and the old origin is out of
+the allowlist.
+
+The switch is refused with a typed reason while new writes still target object
+storage, remote content is pending or delete-pending, storage moves are
+nonterminal, or an upload or cleanup lease is live. Retry after the worker has
+converged.
+
 The schema downgrade is available only before this feature has persisted a
 move intent or `storage_moved` audit event. Once either exists, downgrade stops
 without deleting the row, event, or feature schema. Restore the matching

@@ -6011,6 +6011,66 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/admin/object-store-connection/destination": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Replace Object Store Destination
+     * @description Switch the deployment to an S3-compatible destination the operator has already filled with a byte-for-byte copy of the content namespace. Refused while any write could still reach a destination. The previous destination is archived for switch-back; no bucket is ever deleted.
+     */
+    post: operations["replace_object_store_destination_api_v1_admin_object_store_connection_destination_post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/admin/object-store-connection/destination/switch-back": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Switch Back Object Store Destination
+     * @description Return to the archived previous destination using its stored credentials. Subject to the same write-quiescence preconditions as a forward switch.
+     */
+    post: operations["switch_back_object_store_destination_api_v1_admin_object_store_connection_destination_switch_back_post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/admin/object-store-connection/previous": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post?: never;
+    /**
+     * Forget Previous Object Store Destination
+     * @description Forget the archived previous destination. The bucket itself is operator-owned and is never touched; decommission it at the provider when it is no longer needed.
+     */
+    delete: operations["forget_previous_object_store_destination_api_v1_admin_object_store_connection_previous_delete"];
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/spaces/{space_id}/skills/": {
     parameters: {
       query?: never;
@@ -14397,6 +14457,7 @@ export interface components {
       addressing_style?: ("path" | "virtual") | null;
       /** Updated At */
       updated_at?: string | null;
+      previous_destination?: components["schemas"]["PreviousObjectStoreDestination"] | null;
     };
     /**
      * ObjectStoreConnectionSource
@@ -15810,6 +15871,25 @@ export interface components {
        * @default 0
        */
       skill_context_tokens?: number;
+    };
+    /** PreviousObjectStoreDestination */
+    PreviousObjectStoreDestination: {
+      /** Endpoint Url */
+      endpoint_url: string;
+      /** Region */
+      region: string;
+      /** Bucket */
+      bucket: string;
+      /**
+       * Addressing Style
+       * @enum {string}
+       */
+      addressing_style: "path" | "virtual";
+      /**
+       * Updated At
+       * Format: date-time
+       */
+      updated_at: string;
     };
     /** PrivacyPolicy */
     PrivacyPolicy: {
@@ -41158,6 +41238,185 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  replace_object_store_destination_api_v1_admin_object_store_connection_destination_post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["ObjectStoreConnectionInput"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ObjectStoreConnectionPublic"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  switch_back_object_store_destination_api_v1_admin_object_store_connection_destination_switch_back_post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ObjectStoreConnectionPublic"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  forget_previous_object_store_destination_api_v1_admin_object_store_connection_previous_delete: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Service Unavailable */

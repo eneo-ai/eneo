@@ -12,6 +12,9 @@ const replacePolicy = vi.hoisted(() => vi.fn());
 const getObjectStoreConnection = vi.hoisted(() => vi.fn());
 const createObjectStoreConnection = vi.hoisted(() => vi.fn());
 const rotateObjectStoreCredentials = vi.hoisted(() => vi.fn());
+const replaceObjectStoreDestination = vi.hoisted(() => vi.fn());
+const switchBackObjectStoreDestination = vi.hoisted(() => vi.fn());
+const forgetPreviousObjectStoreDestination = vi.hoisted(() => vi.fn());
 const testUser = vi.hoisted(() => ({ isPlatformAdmin: false }));
 
 vi.mock("$lib/core/AppContext.js", () => ({
@@ -35,7 +38,10 @@ vi.mock("$lib/core/Eneo", () => ({
     objectStoreConnection: {
       get: getObjectStoreConnection,
       create: createObjectStoreConnection,
-      rotateCredentials: rotateObjectStoreCredentials
+      rotateCredentials: rotateObjectStoreCredentials,
+      replaceDestination: replaceObjectStoreDestination,
+      switchBackDestination: switchBackObjectStoreDestination,
+      forgetPreviousDestination: forgetPreviousObjectStoreDestination
     }
   })
 }));
@@ -378,6 +384,103 @@ describe("admin storage settings page", () => {
     await expect
       .element(page.getByRole("radio", { name: /storage_target_postgres_inline/ }))
       .toBeChecked();
+  });
+
+  test("switches to a copied destination and offers switching back", async () => {
+    testUser.isPlatformAdmin = true;
+    getPolicy.mockResolvedValue(policy());
+    getObjectStoreConnection.mockReset().mockResolvedValue({
+      source: "admin",
+      configured: true,
+      credentials_can_be_managed: true,
+      revision: 1,
+      endpoint_url: "https://old.example.test",
+      region: "se-1",
+      bucket: "eneo-content",
+      addressing_style: "path",
+      updated_at: "2026-08-03T18:00:00Z"
+    });
+    replaceObjectStoreDestination.mockResolvedValue({
+      source: "admin",
+      configured: true,
+      credentials_can_be_managed: true,
+      revision: 2,
+      endpoint_url: "https://new.example.test",
+      region: "se-1",
+      bucket: "eneo-content-new",
+      addressing_style: "path",
+      updated_at: "2026-08-06T10:00:00Z",
+      previous_destination: {
+        endpoint_url: "https://old.example.test",
+        region: "se-1",
+        bucket: "eneo-content",
+        addressing_style: "path",
+        updated_at: "2026-08-03T18:00:00Z"
+      }
+    });
+
+    render(StoragePage);
+
+    await page.getByRole("button", { name: "storage_switch_action" }).click();
+    await expect.element(page.getByText("storage_switch_checklist_title")).toBeVisible();
+    await page.getByLabelText("storage_connection_endpoint").fill("https://new.example.test");
+    await page.getByLabelText("storage_connection_bucket").fill("eneo-content-new");
+    await page.getByLabelText("storage_connection_region").fill("se-1");
+    await page.getByLabelText("storage_connection_access_key").fill("new-access-key");
+    await page.getByLabelText("storage_connection_secret_key").fill("new-secret-key");
+    await page.getByRole("button", { name: "storage_switch_test_and_switch" }).click();
+
+    expect(replaceObjectStoreDestination).toHaveBeenCalledWith({
+      endpoint_url: "https://new.example.test",
+      region: "se-1",
+      bucket: "eneo-content-new",
+      access_key_id: "new-access-key",
+      secret_access_key: "new-secret-key",
+      addressing_style: "path"
+    });
+    await expect.element(page.getByText("storage_switch_done_title")).toBeVisible();
+    await expect.element(page.getByText("storage_switch_previous_title")).toBeVisible();
+    await expect
+      .element(page.getByRole("button", { name: "storage_switch_back_action" }))
+      .toBeVisible();
+  });
+
+  test("explains that the switch is refused while files are still being saved", async () => {
+    testUser.isPlatformAdmin = true;
+    getPolicy.mockResolvedValue(policy());
+    getObjectStoreConnection.mockReset().mockResolvedValue({
+      source: "admin",
+      configured: true,
+      credentials_can_be_managed: true,
+      revision: 1,
+      endpoint_url: "https://old.example.test",
+      region: "se-1",
+      bucket: "eneo-content",
+      addressing_style: "path",
+      updated_at: "2026-08-03T18:00:00Z"
+    });
+    replaceObjectStoreDestination.mockRejectedValue(
+      new EneoError(
+        "Files are still being saved",
+        "RESPONSE",
+        409,
+        0,
+        { code: "object_store_destination_switch_blocked" },
+        { endpoint: "POST@/admin/object-store-connection/destination" }
+      )
+    );
+
+    render(StoragePage);
+
+    await page.getByRole("button", { name: "storage_switch_action" }).click();
+    await page.getByLabelText("storage_connection_endpoint").fill("https://new.example.test");
+    await page.getByLabelText("storage_connection_bucket").fill("eneo-content-new");
+    await page.getByLabelText("storage_connection_region").fill("se-1");
+    await page.getByLabelText("storage_connection_access_key").fill("new-access-key");
+    await page.getByLabelText("storage_connection_secret_key").fill("new-secret-key");
+    await page.getByRole("button", { name: "storage_switch_test_and_switch" }).click();
+
+    await expect.element(page.getByText("storage_switch_error_blocked_title")).toBeVisible();
   });
 
   test("reloads the existing connection after a setup conflict", async () => {

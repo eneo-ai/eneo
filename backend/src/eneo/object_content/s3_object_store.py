@@ -327,12 +327,21 @@ class S3ObjectStore:
     async def prepare_binding_creation(
         self,
         binding_id: UUID,
+        *,
+        require_empty_namespace: bool = True,
     ) -> StoreBindingCreation | None:
-        """Finish read-only pairing checks before creation becomes ambiguous."""
+        """Finish read-only pairing checks before creation becomes ambiguous.
+
+        A destination switch admits a bucket the operator already filled with
+        this deployment's copied content; it passes
+        ``require_empty_namespace=False`` after its own foreign-marker check.
+        Every other caller keeps the empty-namespace precondition.
+        """
         if await self.verify_binding(binding_id):
             return None
 
-        await self._require_empty_content_namespace()
+        if require_empty_namespace:
+            await self._require_empty_content_namespace()
         expected = _BINDING_PREAMBLE + binding_id.bytes
         return StoreBindingCreation(
             binding_id=binding_id,

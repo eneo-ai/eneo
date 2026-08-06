@@ -17,7 +17,20 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from eneo.database.database import DatabaseSessionManager
-from eneo.database.tables.object_store_connection_table import ObjectStoreConnections
+from eneo.database.tables.object_content_policy_table import (
+    ObjectContentDeploymentPolicy,
+)
+from eneo.database.tables.object_content_table import (
+    ObjectContentMoves,
+    ObjectContentMultipartCandidates,
+    ObjectContentOrphanCandidates,
+    ObjectContents,
+)
+from eneo.database.tables.object_store_connection_table import (
+    ACTIVE_DESTINATION_SLOT,
+    TEMPORARY_DESTINATION_SLOT,
+    ObjectStoreConnections,
+)
 from eneo.object_content.configuration import (
     ObjectContentCoreSettings,
     ObjectContentSettings,
@@ -27,6 +40,9 @@ from eneo.object_content.content import (
     ObjectContentConfigurationError,
     ObjectContentUnavailableError,
     capture_content,
+)
+from eneo.object_content.reconciliation_repository import (
+    ObjectContentReconciliationRepository,
 )
 from eneo.object_content.s3_object_store import (
     ObjectStoreBindingError,
@@ -119,6 +135,14 @@ class ObjectStoreConnectionConflict(ObjectStoreConnectionError):
     code = "object_store_connection_revision_conflict"
 
 
+class ObjectStoreDestinationSwitchBlocked(ObjectStoreConnectionError):
+    code = "object_store_destination_switch_blocked"
+
+
+class ObjectStorePreviousDestinationMissing(ObjectStoreConnectionError):
+    code = "object_store_previous_destination_missing"
+
+
 class ObjectStoreConnectionInvalid(ObjectStoreConnectionError):
     code = "object_store_connection_invalid"
 
@@ -208,7 +232,17 @@ class ObjectStoreConnectionRepository:
 
     async def get(self) -> StoredObjectStoreConnection | None:
         row = await self._session.scalar(
-            select(ObjectStoreConnections).where(ObjectStoreConnections.id == 1)
+            select(ObjectStoreConnections).where(
+                ObjectStoreConnections.id == ACTIVE_DESTINATION_SLOT
+            )
+        )
+        return _stored(row) if row is not None else None
+
+    async def get_previous(self) -> StoredObjectStoreConnection | None:
+        row = await self._session.scalar(
+            select(ObjectStoreConnections).where(
+                ObjectStoreConnections.id == TEMPORARY_DESTINATION_SLOT
+            )
         )
         return _stored(row) if row is not None else None
 
@@ -458,6 +492,289 @@ class ObjectStoreConnectionService:
                 "Concurrent legacy object-store configuration did not match"
             )
         return stored
+
+    async def replace_destination(
+        self,
+        candidate: ObjectStoreConnectionInput,
+        *,
+        actor_user_id: UUID,
+    ) -> StoredObjectStoreConnection:
+        """Switch the deployment to a destination the operator already filled.
+
+        The operator copies the content namespace to the new bucket first
+        (see the migration guide); this operation owns the safety around
+        that copy: cheap preconditions proving no write can be in flight, a
+        probe of the new destination, marker admission that refuses a bucket
+        paired with another installation, and one fenced transaction that
+        archives the previous destination for switch-back. Nothing is
+        deleted anywhere; the switch is reversible while the previous
+        destination record is kept.
+        """
+        self._require_encryption()
+        async with self._transaction() as session:
+            stored = await ObjectStoreConnectionRepository(session).get()
+            binding = await StoreBindingRepository(session).snapshot()
+        if stored is None:
+            raise ObjectStoreConnectionNotConfigured(
+                "Object storage is not managed in Admin"
+            )
+        if (
+            candidate.endpoint_url == stored.endpoint_url
+            and candidate.bucket == stored.bucket
+        ):
+            raise ObjectStoreConnectionInvalid(
+                "The new destination is the same as the current one"
+            )
+        return await self._switch(
+            candidate,
+            actor_user_id=actor_user_id,
+            stored=stored,
+            binding=binding,
+            operator_supplied_endpoint=False,
+        )
+
+    async def switch_back(
+        self,
+        *,
+        actor_user_id: UUID,
+    ) -> StoredObjectStoreConnection:
+        """Return to the archived previous destination with its stored keys."""
+        self._require_encryption()
+        async with self._transaction() as session:
+            stored = await ObjectStoreConnectionRepository(session).get()
+            previous = await ObjectStoreConnectionRepository(session).get_previous()
+            binding = await StoreBindingRepository(session).snapshot()
+        if stored is None:
+            raise ObjectStoreConnectionNotConfigured(
+                "Object storage is not managed in Admin"
+            )
+        if previous is None:
+            raise ObjectStorePreviousDestinationMissing(
+                "There is no archived previous destination"
+            )
+        candidate = ObjectStoreConnectionInput(
+            endpoint_url=previous.endpoint_url,
+            region=previous.region,
+            bucket=previous.bucket,
+            access_key_id=SecretStr(
+                self._encryption.decrypt(previous.access_key_id_encrypted)
+            ),
+            secret_access_key=SecretStr(
+                self._encryption.decrypt(previous.secret_access_key_encrypted)
+            ),
+            addressing_style=previous.addressing_style,
+        )
+        return await self._switch(
+            candidate,
+            actor_user_id=actor_user_id,
+            stored=stored,
+            binding=binding,
+            operator_supplied_endpoint=(
+                previous.updated_by_actor is ObjectStoreConnectionActor.MIGRATION
+            ),
+        )
+
+    async def forget_previous_destination(self, *, actor_user_id: UUID) -> None:
+        """Drop the archived previous-destination record (bucket untouched)."""
+        del actor_user_id  # authorization happens at the router boundary
+        async with self._transaction(mutation=True) as session:
+            row = await session.scalar(
+                select(ObjectStoreConnections)
+                .where(ObjectStoreConnections.id == TEMPORARY_DESTINATION_SLOT)
+                .with_for_update()
+            )
+            if row is None:
+                raise ObjectStorePreviousDestinationMissing(
+                    "There is no archived previous destination"
+                )
+            await session.delete(row)
+
+    async def _switch(
+        self,
+        candidate: ObjectStoreConnectionInput,
+        *,
+        actor_user_id: UUID,
+        stored: StoredObjectStoreConnection,
+        binding: StoreBindingSnapshot,
+        operator_supplied_endpoint: bool,
+    ) -> StoredObjectStoreConnection:
+        if not binding.confirmed or binding.binding_id is None:
+            raise ObjectStoreDestinationSwitchBlocked(
+                "The current destination has no established storage binding"
+            )
+        # Fast feedback before any remote work; re-checked under lock below.
+        async with self._transaction() as session:
+            await self._require_switchable(session)
+
+        settings = self._settings(
+            candidate,
+            deployment_id=stored.deployment_id,
+            operator_supplied_endpoint=operator_supplied_endpoint,
+        )
+        await self._admit_switch_target(settings, binding_id=binding.binding_id)
+
+        access_key_id_encrypted = self._encryption.encrypt(
+            candidate.access_key_id.get_secret_value()
+        )
+        secret_access_key_encrypted = self._encryption.encrypt(
+            candidate.secret_access_key.get_secret_value()
+        )
+        async with self._transaction(mutation=True) as session:
+            active = await session.scalar(
+                select(ObjectStoreConnections)
+                .where(ObjectStoreConnections.id == ACTIVE_DESTINATION_SLOT)
+                .with_for_update()
+            )
+            if active is None or active.revision != stored.revision:
+                raise ObjectStoreConnectionConflict(
+                    "The object-store connection changed while it was being tested"
+                )
+            await self._require_switchable(session)
+
+            previous = await session.scalar(
+                select(ObjectStoreConnections)
+                .where(ObjectStoreConnections.id == TEMPORARY_DESTINATION_SLOT)
+                .with_for_update()
+            )
+            if previous is None:
+                previous = ObjectStoreConnections(
+                    id=TEMPORARY_DESTINATION_SLOT,
+                    revision=1,
+                )
+                session.add(previous)
+            else:
+                previous.revision = previous.revision + 1
+            previous.role = "retiring"
+            previous.endpoint_url = active.endpoint_url
+            previous.region = active.region
+            previous.bucket = active.bucket
+            previous.access_key_id_encrypted = active.access_key_id_encrypted
+            previous.secret_access_key_encrypted = active.secret_access_key_encrypted
+            previous.deployment_id = active.deployment_id
+            previous.addressing_style = active.addressing_style
+            previous.updated_by_actor = active.updated_by_actor
+            previous.updated_by_user_id = active.updated_by_user_id
+
+            active.endpoint_url = settings.endpoint_url
+            active.region = settings.region
+            active.bucket = settings.bucket
+            active.access_key_id_encrypted = access_key_id_encrypted
+            active.secret_access_key_encrypted = secret_access_key_encrypted
+            active.addressing_style = settings.addressing_style
+            active.revision = active.revision + 1
+            active.updated_by_actor = ObjectStoreConnectionActor.PLATFORM_ADMIN.value
+            active.updated_by_user_id = actor_user_id
+            active.updated_at = func.now()
+
+            # The old bucket's remote observations no longer describe the
+            # active destination: restart both inventory cycles and drop the
+            # cleanup candidates observed against it. The switch preconditions
+            # proved none of those rows holds a live lease.
+            await ObjectContentReconciliationRepository(
+                session
+            ).reset_remote_inventory()
+            await session.flush()
+            await session.refresh(active)
+            return _stored(active)
+
+    async def _require_switchable(self, session: AsyncSession) -> None:
+        """Refuse the switch while any write could still reach a destination."""
+        transient_remote = await session.scalar(
+            select(func.count())
+            .select_from(ObjectContents)
+            .where(
+                ObjectContents.storage_kind == "object_store",
+                ObjectContents.state.in_(("pending", "delete_pending")),
+            )
+        )
+        if transient_remote:
+            raise ObjectStoreDestinationSwitchBlocked(
+                "Remote content is still being written or deleted; let the "
+                "worker finish first"
+            )
+        policy_target = await session.scalar(
+            select(ObjectContentDeploymentPolicy.new_write_storage_target).where(
+                ObjectContentDeploymentPolicy.id == 1
+            )
+        )
+        if policy_target != "postgres_inline":
+            raise ObjectStoreDestinationSwitchBlocked(
+                "Select PostgreSQL for new writes before switching destination"
+            )
+        nonterminal_moves = await session.scalar(
+            select(func.count())
+            .select_from(ObjectContentMoves)
+            .where(ObjectContentMoves.state.in_(("pending", "target_verified")))
+        )
+        if nonterminal_moves:
+            raise ObjectStoreDestinationSwitchBlocked(
+                "Storage moves are still queued or running; wait for them or "
+                "let them fail out first"
+            )
+        now = await session.scalar(select(func.now()))
+        for table in (ObjectContentOrphanCandidates, ObjectContentMultipartCandidates):
+            live_leases = await session.scalar(
+                select(func.count())
+                .select_from(table)
+                .where(table.lease_owner.is_not(None), table.lease_until > now)
+            )
+            if live_leases:
+                raise ObjectStoreDestinationSwitchBlocked(
+                    "An upload or cleanup operation is still in flight; "
+                    "try again shortly"
+                )
+
+    async def _admit_switch_target(
+        self,
+        settings: ObjectContentSettings,
+        *,
+        binding_id: UUID,
+    ) -> None:
+        """Admit a bucket that already holds this deployment's copied bytes.
+
+        Unlike first-time creation, the content namespace is expected to be
+        non-empty. A marker naming another installation is refused; a
+        missing marker is created with the active binding identity so the
+        existing pairing verification keeps working unchanged.
+        """
+        probe_settings = self._probe_settings(settings)
+        store = self._store_factory(probe_settings)
+        try:
+            try:
+                marker_matches = await store.verify_binding(binding_id)
+            except ObjectStoreBindingError as error:
+                raise ObjectStoreProbeBindingMismatch(
+                    "Object storage is bound to another Eneo installation"
+                ) from error
+            except ObjectStoreUnavailableError as error:
+                self._raise_probe_error(error)
+                raise
+            if not marker_matches:
+                try:
+                    creation = await store.prepare_binding_creation(
+                        binding_id,
+                        require_empty_namespace=False,
+                    )
+                    if creation is not None:
+                        await store.create_binding(creation)
+                except ObjectStoreBindingError as error:
+                    raise ObjectStoreProbeBindingMismatch(
+                        "Object storage is bound to another Eneo installation"
+                    ) from error
+                except ObjectStoreUnavailableError as error:
+                    self._raise_probe_error(error)
+                    raise
+        finally:
+            await store.close()
+
+        await self._probe(
+            settings,
+            binding=StoreBindingSnapshot(
+                deployment_id=settings.deployment_id,
+                binding_id=binding_id,
+                confirmed=True,
+            ),
+        )
 
     @asynccontextmanager
     async def _transaction(

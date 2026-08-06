@@ -308,6 +308,60 @@ class ObjectContentRuntime:
         await self._publish_saved_object_store_connection(stored)
         return stored
 
+    async def replace_object_store_destination(
+        self,
+        candidate: ObjectStoreConnectionInput,
+        *,
+        actor_user_id: UUID,
+    ) -> StoredObjectStoreConnection:
+        connection_service = self._connection_service
+        if connection_service is None:
+            raise ObjectContentConfigurationError(
+                "Admin-managed object storage is unavailable in this runtime"
+            )
+        stored = await connection_service.replace_destination(
+            candidate,
+            actor_user_id=actor_user_id,
+        )
+        await self._publish_saved_object_store_connection(stored)
+        return stored
+
+    async def switch_back_object_store_destination(
+        self,
+        *,
+        actor_user_id: UUID,
+    ) -> StoredObjectStoreConnection:
+        connection_service = self._connection_service
+        if connection_service is None:
+            raise ObjectContentConfigurationError(
+                "Admin-managed object storage is unavailable in this runtime"
+            )
+        stored = await connection_service.switch_back(actor_user_id=actor_user_id)
+        await self._publish_saved_object_store_connection(stored)
+        return stored
+
+    async def forget_previous_object_store_destination(
+        self,
+        *,
+        actor_user_id: UUID,
+    ) -> None:
+        connection_service = self._connection_service
+        if connection_service is None:
+            raise ObjectContentConfigurationError(
+                "Admin-managed object storage is unavailable in this runtime"
+            )
+        await connection_service.forget_previous_destination(
+            actor_user_id=actor_user_id
+        )
+
+    async def previous_object_store_destination(
+        self,
+    ) -> StoredObjectStoreConnection | None:
+        connection_service = self._connection_service
+        if connection_service is None:
+            return None
+        return await connection_service.get_previous()
+
     async def _publish_saved_object_store_connection(
         self,
         stored: StoredObjectStoreConnection,

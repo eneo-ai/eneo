@@ -421,6 +421,78 @@ cannot be backfilled: earlier Eneo releases kept extracted or transcribed text,
 but removed the staged upload after processing. There are no original bytes to
 copy from PostgreSQL or reconstruct safely.
 
+### Move to another S3-compatible service
+
+Use this when you change hosting provider, move from a local SeaweedFS or MinIO
+installation to an external service, or move back. Eneo does not copy the
+bucket itself: your own tooling transfers the objects, and Eneo owns the safe
+switch around that copy. Object keys do not contain the endpoint or bucket
+name, so a faithful copy is readable immediately after the switch.
+
+Plan a short maintenance window. New files land in PostgreSQL while you work,
+so uploads larger than the operator's inline ceiling fail until you select
+object storage again.
+
+**1. Prepare the new bucket.** Create one empty private bucket and an
+application identity limited to it, exactly as for a first connection. Add the
+new endpoint origin to `OBJECT_CONTENT_ADMIN_ALLOWED_ENDPOINT_ORIGINS` and
+restart backend and worker. Keep the old origin in the list until you are
+finished. Take a backup of the current bucket before you begin.
+
+**2. Send new files to PostgreSQL.** In **Admin > Storage**, select PostgreSQL
+as the target for new writes, and wait until no moves are queued and storage
+health reports no work in progress. This is what makes the copy complete: no
+new object can appear on the old destination behind your back.
+
+**3. Copy the content namespace.** Copy only this deployment's content prefix.
+Never copy or overwrite the `v1/.eneo-bindings/` prefix — it holds the marker
+that pairs a bucket with one database, and Eneo manages it for you.
+
+```bash
+rclone copy \
+  old-store:eneo-object-content/v1/<deployment-id>/ \
+  new-store:eneo-object-content/v1/<deployment-id>/ \
+  --checksum --transfers 16 --progress
+```
+
+Find `<deployment-id>` in `OBJECT_CONTENT_DEPLOYMENT_ID`, or ask your operator.
+Use `copy`, never `sync`: `sync` deletes files at the destination that are
+missing from the source, and a mistaken direction would destroy production
+content. Preserve object metadata; Eneo verifies the media type of every
+object it reads.
+
+**4. Verify the copy.** Ask your tooling to compare both sides before you
+switch:
+
+```bash
+rclone check \
+  old-store:eneo-object-content/v1/<deployment-id>/ \
+  new-store:eneo-object-content/v1/<deployment-id>/ \
+  --checksum
+```
+
+Fix any difference and run the check again until it reports no errors.
+
+**5. Switch.** In **Admin > Storage**, select **Change destination**, enter the
+new endpoint, bucket, signing region, addressing style, and access keys, and
+confirm. Eneo tests the destination, refuses a bucket that belongs to another
+Eneo installation, and then switches in one step. The switch is refused while
+any write could still reach a destination — if that happens, wait a moment and
+try again. Backend and worker pick up the change without a restart.
+
+**6. Confirm and finish.** Select object storage for new writes again. Open a
+few existing files and let one reconciliation inventory cycle complete, then
+check that storage health reports no missing objects. Eneo verifies the
+SHA-256 of every file it reads, so a bad copy cannot pass unnoticed.
+
+The previous destination stays listed as **Previous destination** so you can
+select **Switch back** at any time; nothing on either bucket is deleted. When
+you are satisfied, select **Forget** to remove the record, remove the old
+origin from the allowlist, and decommission the old bucket at your provider.
+
+If something looks wrong at any point, switch back, correct the copy, and
+switch again.
+
 ### Backup rule
 
 - **Only inline rows:** PostgreSQL backup contains control and bytes.
@@ -585,6 +657,38 @@ text and vectors. Both remain necessary for RAG.
 Only after every remote item has been copied back, verified, and switched by a
 supported migration. Removing configuration while remote rows exist fails
 closed.
+
+### Can we change to another S3-compatible service later?
+
+Yes. You copy the bucket with your own tooling and Eneo performs the switch:
+see [Move to another S3-compatible
+service](#move-to-another-s3-compatible-service). Your endpoint, bucket, and
+provider are not a permanent decision.
+
+### Why does Eneo not copy the bucket for us?
+
+Because `rclone` and provider replication already do it faster and more
+reliably than a background worker inside Eneo, and copying is the part that
+carries no risk to your data as long as it is a copy and not a delete. Eneo
+owns the parts that are genuinely unsafe to do by hand: refusing a bucket that
+belongs to another installation, blocking the switch while a write is in
+flight, changing the destination atomically, and letting you switch back.
+
+### What happens if the copy was incomplete?
+
+Existing references keep working for every file that was copied. A missing file
+is reported by storage health after the next complete inventory, and reading it
+fails clearly instead of returning wrong bytes. Switch back to the previous
+destination, complete the copy, and switch again.
+
+### Can we move between PostgreSQL and object storage instead?
+
+Yes, in both directions, from **Admin > Storage** — see [Move existing
+content](#move-existing-content). This is a per-file verified move, not a
+destination change. Note that moving a file into PostgreSQL is refused when it
+is larger than the operator's inline ceiling, so a deployment with large files
+cannot use PostgreSQL as a staging area between two S3-compatible services.
+Copy the bucket and switch destination instead.
 
 ### Where are the deep technical and security details?
 

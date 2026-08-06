@@ -1336,6 +1336,27 @@ class ObjectContentReconciliationRepository:
             for storage_kind, state, count, size_bytes, oldest in grouped.all()
         )
 
+    async def reset_remote_inventory(self) -> None:
+        """Restart both inventory cycles and drop cleanup candidates.
+
+        Used by a destination switch: prior pages and candidates were
+        observed against the previous destination and must not complete a
+        cycle or drive deletions against the new one. The caller has proved
+        that no candidate row holds a live lease.
+        """
+        state = await self._state_for_update()
+        now = await self._database_now()
+        state.object_cycle_id = uuid4()
+        state.object_continuation_token = None
+        state.object_cycle_started_at = now
+        state.multipart_cycle_id = uuid4()
+        state.multipart_key_marker = None
+        state.multipart_upload_id_marker = None
+        state.multipart_cycle_started_at = now
+        await self._session.execute(delete(ObjectContentOrphanCandidates))
+        await self._session.execute(delete(ObjectContentMultipartCandidates))
+        await self._session.flush()
+
     async def _state_for_update(self) -> ObjectContentReconciliationState:
         state = (
             await self._session.scalars(

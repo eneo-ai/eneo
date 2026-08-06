@@ -60,6 +60,14 @@ _PLATFORM_ADMIN_DEPENDENCIES = [
 ]
 
 
+class PreviousObjectStoreDestination(BaseModel):
+    endpoint_url: str
+    region: str
+    bucket: str
+    addressing_style: Literal["path", "virtual"]
+    updated_at: datetime
+
+
 class ObjectStoreConnectionPublic(BaseModel):
     source: ObjectStoreConnectionSource
     configured: bool
@@ -70,6 +78,7 @@ class ObjectStoreConnectionPublic(BaseModel):
     bucket: str | None = None
     addressing_style: Literal["path", "virtual"] | None = None
     updated_at: datetime | None = None
+    previous_destination: PreviousObjectStoreDestination | None = None
 
 
 def _public_connection() -> ObjectStoreConnectionPublic:
@@ -98,10 +107,26 @@ def _public_connection() -> ObjectStoreConnectionPublic:
     )
 
 
+def _public_previous(
+    previous: StoredObjectStoreConnection | None,
+) -> PreviousObjectStoreDestination | None:
+    if previous is None:
+        return None
+    return PreviousObjectStoreDestination(
+        endpoint_url=previous.endpoint_url,
+        region=previous.region,
+        bucket=previous.bucket,
+        addressing_style=previous.addressing_style,
+        updated_at=previous.updated_at,
+    )
+
+
 def _public_stored_connection(
     stored: StoredObjectStoreConnection,
+    previous: StoredObjectStoreConnection | None = None,
 ) -> ObjectStoreConnectionPublic:
     return ObjectStoreConnectionPublic(
+        previous_destination=_public_previous(previous),
         source=ObjectStoreConnectionSource.ADMIN,
         configured=True,
         credentials_can_be_managed=(
@@ -128,7 +153,12 @@ def _public_stored_connection(
 )
 async def get_object_store_connection() -> ObjectStoreConnectionPublic:
     await object_content_runtime.refresh_object_store_configuration()
-    return _public_connection()
+    connection = _public_connection()
+    if connection.source is ObjectStoreConnectionSource.ADMIN:
+        connection.previous_destination = _public_previous(
+            await object_content_runtime.previous_object_store_destination()
+        )
+    return connection
 
 
 @router.post(
@@ -189,3 +219,98 @@ async def rotate_object_store_credentials(
         },
     )
     return _public_stored_connection(stored)
+
+
+@router.post(
+    "/object-store-connection/destination",
+    response_model=ObjectStoreConnectionPublic,
+    description=(
+        "Switch the deployment to an S3-compatible destination the operator "
+        "has already filled with a byte-for-byte copy of the content "
+        "namespace. Refused while any write could still reach a destination. "
+        "The previous destination is archived for switch-back; no bucket is "
+        "ever deleted."
+    ),
+    dependencies=_PLATFORM_ADMIN_DEPENDENCIES,
+    responses=responses.get_responses([400, 403, 409, 503]),
+)
+async def replace_object_store_destination(
+    candidate: ObjectStoreConnectionInput,
+    container: _ConnectionAdminContainer,
+) -> ObjectStoreConnectionPublic:
+    user = container.user()
+    stored = await object_content_runtime.replace_object_store_destination(
+        candidate,
+        actor_user_id=user.id,
+    )
+    logger.info(
+        "object_store.destination_switched",
+        extra={
+            "actor_user_id": str(user.id),
+            "actor": {"type": "platform_admin", "via": "session"},
+            "revision": stored.revision,
+        },
+    )
+    return _public_stored_connection(
+        stored,
+        await object_content_runtime.previous_object_store_destination(),
+    )
+
+
+@router.post(
+    "/object-store-connection/destination/switch-back",
+    response_model=ObjectStoreConnectionPublic,
+    description=(
+        "Return to the archived previous destination using its stored "
+        "credentials. Subject to the same write-quiescence preconditions as "
+        "a forward switch."
+    ),
+    dependencies=_PLATFORM_ADMIN_DEPENDENCIES,
+    responses=responses.get_responses([400, 403, 404, 409, 503]),
+)
+async def switch_back_object_store_destination(
+    container: _ConnectionAdminContainer,
+) -> ObjectStoreConnectionPublic:
+    user = container.user()
+    stored = await object_content_runtime.switch_back_object_store_destination(
+        actor_user_id=user.id,
+    )
+    logger.info(
+        "object_store.destination_switched_back",
+        extra={
+            "actor_user_id": str(user.id),
+            "actor": {"type": "platform_admin", "via": "session"},
+            "revision": stored.revision,
+        },
+    )
+    return _public_stored_connection(
+        stored,
+        await object_content_runtime.previous_object_store_destination(),
+    )
+
+
+@router.delete(
+    "/object-store-connection/previous",
+    status_code=204,
+    description=(
+        "Forget the archived previous destination. The bucket itself is "
+        "operator-owned and is never touched; decommission it at the "
+        "provider when it is no longer needed."
+    ),
+    dependencies=_PLATFORM_ADMIN_DEPENDENCIES,
+    responses=responses.get_responses([403, 404, 503]),
+)
+async def forget_previous_object_store_destination(
+    container: _ConnectionAdminContainer,
+) -> None:
+    user = container.user()
+    await object_content_runtime.forget_previous_object_store_destination(
+        actor_user_id=user.id,
+    )
+    logger.info(
+        "object_store.previous_destination_forgotten",
+        extra={
+            "actor_user_id": str(user.id),
+            "actor": {"type": "platform_admin", "via": "session"},
+        },
+    )

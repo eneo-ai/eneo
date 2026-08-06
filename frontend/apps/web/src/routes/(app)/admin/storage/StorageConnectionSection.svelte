@@ -9,6 +9,7 @@
   } from "@eneo/eneo-js";
   import {
     AlertCircle,
+    ArrowLeftRight,
     CheckCircle2,
     ChevronDown,
     HardDrive,
@@ -34,7 +35,8 @@
     selectable: boolean;
     readiness_code: ObjectContentReadinessCode;
   };
-  type DialogMode = "create" | "rotate";
+  type DialogMode = "create" | "rotate" | "switch";
+  type SuccessKind = DialogMode | "switch-back";
   type LoadStatus = "idle" | "loading" | "error";
 
   type Props = {
@@ -61,7 +63,8 @@
   let mutationOutcomeUnknown = $state(false);
   let connectionAlreadyConfigured = $state(false);
   let connectionRevisionConflict = $state(false);
-  let success = $state<DialogMode | null>(null);
+  let success = $state<SuccessKind | null>(null);
+  let switchInFlight = $state(false);
   let alertRef = $state<HTMLElement | null>(null);
 
   let endpointUrl = $state("");
@@ -92,6 +95,8 @@
       connection.credentials_can_be_managed === true &&
       connection.revision !== null
   );
+  const canSwitch = $derived(canRotate);
+  const previousDestination = $derived(connection?.previous_destination ?? null);
   const formValid = $derived(
     accessKeyId.trim().length > 0 &&
       secretAccessKey.length > 0 &&
@@ -166,6 +171,61 @@
     dialogOpen = true;
   }
 
+  function openSwitchDialog(): void {
+    dialogMode = "switch";
+    endpointUrl = "";
+    bucket = "";
+    region = "";
+    addressingStyle = "path";
+    resetSecrets();
+    resetSubmissionState();
+    mutationOutcomeUnknown = false;
+    connectionAlreadyConfigured = false;
+    connectionRevisionConflict = false;
+    advancedOpen = false;
+    dialogOpen = true;
+  }
+
+  async function switchBackDestination(): Promise<void> {
+    if (switchInFlight) return;
+    switchInFlight = true;
+    resetSubmissionState();
+    try {
+      connection = await eneo.objectStoreConnection.switchBackDestination();
+      success = "switch-back";
+      await onConnectionChanged?.();
+    } catch (error: unknown) {
+      if (hasStatus(error, 403)) {
+        onAuthorityRevoked?.();
+      } else {
+        success = null;
+        submissionCode =
+          error instanceof EneoError && typeof error.response?.code === "string"
+            ? error.response.code
+            : null;
+        submissionUnknown = submissionCode === null;
+        await loadConnection();
+      }
+    } finally {
+      switchInFlight = false;
+    }
+  }
+
+  async function forgetPreviousDestination(): Promise<void> {
+    if (switchInFlight) return;
+    switchInFlight = true;
+    resetSubmissionState();
+    try {
+      await eneo.objectStoreConnection.forgetPreviousDestination();
+      await loadConnection();
+    } catch (error: unknown) {
+      if (hasStatus(error, 403)) onAuthorityRevoked?.();
+      else await loadConnection();
+    } finally {
+      switchInFlight = false;
+    }
+  }
+
   function resetSubmissionState(): void {
     submissionCode = null;
     submissionUnknown = false;
@@ -193,6 +253,16 @@
           addressing_style: addressingStyle
         };
         connection = await eneo.objectStoreConnection.create(candidate);
+      } else if (dialogMode === "switch") {
+        const destination: ObjectStoreConnectionCreate = {
+          endpoint_url: endpointUrl.trim(),
+          bucket: bucket.trim(),
+          region: region.trim(),
+          access_key_id: accessKeyId.trim(),
+          secret_access_key: secretAccessKey,
+          addressing_style: addressingStyle
+        };
+        connection = await eneo.objectStoreConnection.replaceDestination(destination);
       } else {
         if (connection?.revision === null || connection?.revision === undefined) return;
         const credentials: ObjectStoreCredentialRotation = {
@@ -264,6 +334,8 @@
       return m.storage_connection_error_encryption_title();
     if (code === "object_store_connection_revision_conflict")
       return m.storage_connection_error_conflict_title();
+    if (code === "object_store_destination_switch_blocked")
+      return m.storage_switch_error_blocked_title();
     return m.storage_connection_error_unavailable_title();
   }
 
@@ -285,6 +357,8 @@
       return m.storage_connection_error_encryption_description();
     if (code === "object_store_connection_revision_conflict")
       return m.storage_connection_error_conflict_description();
+    if (code === "object_store_destination_switch_blocked")
+      return m.storage_switch_error_blocked_description();
     return m.storage_connection_error_unavailable_description();
   }
 
@@ -310,12 +384,20 @@
       <Alert.Title>
         {success === "create"
           ? m.storage_connection_created_title()
-          : m.storage_connection_rotated_title()}
+          : success === "switch"
+            ? m.storage_switch_done_title()
+            : success === "switch-back"
+              ? m.storage_switch_back_done_title()
+              : m.storage_connection_rotated_title()}
       </Alert.Title>
       <Alert.Description>
         {success === "create"
           ? m.storage_connection_created_description()
-          : m.storage_connection_rotated_description()}
+          : success === "switch"
+            ? m.storage_switch_done_description()
+            : success === "switch-back"
+              ? m.storage_switch_back_done_description()
+              : m.storage_connection_rotated_description()}
       </Alert.Description>
     </Alert.Root>
   {/if}
@@ -429,16 +511,53 @@
         <p class="text-secondary max-w-[68ch] text-sm leading-5">
           {m.storage_connection_rotation_description()}
         </p>
-        <Button
-          class="shrink-0"
-          variant="outline"
-          onclick={openRotationDialog}
-          disabled={!canRotate}
-        >
-          <KeyRound data-icon="inline-start" aria-hidden="true" />
-          {m.storage_connection_rotate_action()}
-        </Button>
+        <div class="flex shrink-0 flex-col gap-2 sm:flex-row">
+          <Button variant="outline" onclick={openRotationDialog} disabled={!canRotate}>
+            <KeyRound data-icon="inline-start" aria-hidden="true" />
+            {m.storage_connection_rotate_action()}
+          </Button>
+          <Button variant="outline" onclick={openSwitchDialog} disabled={!canSwitch}>
+            <ArrowLeftRight data-icon="inline-start" aria-hidden="true" />
+            {m.storage_switch_action()}
+          </Button>
+        </div>
       </div>
+
+      {#if previousDestination}
+        <div class="border-default rounded-md border p-4">
+          <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+            <div class="min-w-0">
+              <p class="text-sm font-medium">{m.storage_switch_previous_title()}</p>
+              <p class="text-secondary mt-1 truncate text-sm" title={previousDestination.bucket}>
+                {previousDestination.endpoint_url} · {previousDestination.bucket}
+              </p>
+              <p class="text-secondary mt-2 max-w-[68ch] text-sm leading-5">
+                {m.storage_switch_previous_description()}
+              </p>
+            </div>
+            <div class="flex shrink-0 flex-col gap-2 sm:flex-row">
+              <Button
+                variant="outline"
+                onclick={switchBackDestination}
+                disabled={!canSwitch || switchInFlight}
+                aria-busy={switchInFlight}
+              >
+                {#if switchInFlight}
+                  <Loader2 data-icon="inline-start" class="animate-spin" aria-hidden="true" />
+                {/if}
+                {m.storage_switch_back_action()}
+              </Button>
+              <Button
+                variant="ghost"
+                onclick={forgetPreviousDestination}
+                disabled={!canSwitch || switchInFlight}
+              >
+                {m.storage_switch_forget_action()}
+              </Button>
+            </div>
+          </div>
+        </div>
+      {/if}
     </div>
   {:else if connection?.source === "environment"}
     <Alert.Root>
@@ -480,12 +599,16 @@
       <Dialog.Title>
         {dialogMode === "create"
           ? m.storage_connection_dialog_create_title()
-          : m.storage_connection_dialog_rotate_title()}
+          : dialogMode === "switch"
+            ? m.storage_switch_dialog_title()
+            : m.storage_connection_dialog_rotate_title()}
       </Dialog.Title>
       <Dialog.Description>
         {dialogMode === "create"
           ? m.storage_connection_dialog_create_description()
-          : m.storage_connection_dialog_rotate_description()}
+          : dialogMode === "switch"
+            ? m.storage_switch_dialog_description()
+            : m.storage_connection_dialog_rotate_description()}
       </Dialog.Description>
     </Dialog.Header>
 
@@ -508,6 +631,20 @@
               <AlertCircle />
               <Alert.Title>{errorTitle(submissionCode)}</Alert.Title>
               <Alert.Description>{errorDescription(submissionCode)}</Alert.Description>
+            </Alert.Root>
+          {/if}
+
+          {#if dialogMode === "switch"}
+            <Alert.Root>
+              <AlertCircle />
+              <Alert.Title>{m.storage_switch_checklist_title()}</Alert.Title>
+              <Alert.Description>
+                <ul class="ml-4 list-disc space-y-1">
+                  <li>{m.storage_switch_checklist_copied()}</li>
+                  <li>{m.storage_switch_checklist_inline()}</li>
+                  <li>{m.storage_switch_checklist_reversible()}</li>
+                </ul>
+              </Alert.Description>
             </Alert.Root>
           {/if}
 
@@ -616,7 +753,7 @@
             </Field.Field>
           </Field.Group>
 
-          {#if dialogMode === "create"}
+          {#if dialogMode !== "rotate"}
             <Collapsible.Root bind:open={advancedOpen}>
               <Collapsible.Trigger
                 class="hover:bg-muted/50 focus-visible:ring-ring flex w-full items-center justify-between rounded-md py-2 text-sm font-medium focus-visible:ring-2 focus-visible:outline-none"
@@ -661,14 +798,16 @@
             <CheckCircle2 class="text-primary mt-0.5 size-4 shrink-0" aria-hidden="true" />
             <div class="min-w-0">
               <p class="text-primary font-medium">
-                {dialogMode === "create"
-                  ? m.storage_connection_probe_create_title()
-                  : m.storage_connection_probe_rotate_title()}
+                {dialogMode === "rotate"
+                  ? m.storage_connection_probe_rotate_title()
+                  : m.storage_connection_probe_create_title()}
               </p>
               <p class="mt-1 max-w-[65ch] leading-5">
-                {dialogMode === "create"
-                  ? m.storage_connection_probe_create_description()
-                  : m.storage_connection_probe_rotate_description()}
+                {dialogMode === "rotate"
+                  ? m.storage_connection_probe_rotate_description()
+                  : dialogMode === "switch"
+                    ? m.storage_switch_probe_description()
+                    : m.storage_connection_probe_create_description()}
               </p>
             </div>
           </div>
@@ -692,6 +831,8 @@
             {m.storage_connection_testing()}
           {:else if dialogMode === "create"}
             {m.storage_connection_test_and_save()}
+          {:else if dialogMode === "switch"}
+            {m.storage_switch_test_and_switch()}
           {:else}
             {m.storage_connection_test_and_rotate()}
           {/if}
