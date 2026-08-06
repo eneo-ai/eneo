@@ -1034,6 +1034,21 @@ still fall back to runtime form fields; prompt teaches the folded
 naming; the rejected-proposal capture tap now also records architecture
 rejections). Both self-validated (full flows suite + pyright + ruff).
 
+Template-fill frontier closure (same afternoon): `9f6766d4b` prepared-
+fields JSON terminal (the fixed topology accepts a chain ending in the
+JSON step that prepares placeholder content; the fill step derives its
+underlag channel and carries template-bound form fields as their real
+placement; prepared placeholders no longer spawn shadow runtime fields),
+`2f2e0eb32` rejection feedback describes both terminal shapes, and
+`ca6536df9` aggregation admission (the flagship session commits
+aggregation_intent=compare for cross-checked sources; the fixed chain's
+per-source reader makes any aggregation intent assemble to the same
+linear template topology). LIVE VERDICT at DEV-ca6536df9c85: the
+flagship advanced_sundsvall_tjansteskrivelse case converged for the
+FIRST TIME — plan_repaired (repaired_success, 2 repairs, zero failed
+checks). Failure ladder closed: template_attachment_unreadable →
+shape/unplaced rejections → compare rejection → green.
+
 Slice-C inputs found live 2026-08-06: (1) the ASCII-English schema-key
 lexicon conflicts with prose-requested Swedish keys (case
 simple_document_metadata_json dies in builder_error: the user asked for
