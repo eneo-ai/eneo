@@ -12,6 +12,9 @@ import { Callout, Steps, Tabs } from "nextra/components";
   writes in **Admin > Storage** without restarting backend or worker.
 - A policy change affects new writes only. Existing content never moves
   implicitly.
+- You can change to another S3-compatible service later: copy the bucket with
+  your own tooling, then switch destination in **Admin > Storage**. The previous
+  destination stays available so you can switch back.
 - Each payload has one byte authority. Eneo does not fall back, dual-write, or
   maintain vendor-specific product modes.
 
@@ -24,6 +27,7 @@ import { Callout, Steps, Tabs } from "nextra/components";
 | Connect MinIO or another compatible service       | [External endpoint](#set-up-your-choice)           |
 | Understand ownership and RAG                      | [How content flows](#how-content-flows)            |
 | Download a processed file or recover its original | [Download or recover](#download-or-recover-a-file) |
+| Move to another S3-compatible service             | [Change destination](#move-to-another-s3-compatible-service) |
 | Plan backup, recovery, and failure handling       | [Operate it safely](#operate-it-safely)            |
 | Review lifecycle and integrity implementation     | [Architecture](/docs/object-content-architecture)  |
 
@@ -423,44 +427,59 @@ copy from PostgreSQL or reconstruct safely.
 
 ### Move to another S3-compatible service
 
-Use this when you change hosting provider, move from a local SeaweedFS or MinIO
-installation to an external service, or move back. Eneo does not copy the
-bucket itself: your own tooling transfers the objects, and Eneo owns the safe
-switch around that copy. Object keys do not contain the endpoint or bucket
-name, so a faithful copy is readable immediately after the switch.
+Use this when you change hosting provider, move between a self-hosted store and
+an external service, or switch bucket. It works with any S3-compatible service:
+SeaweedFS, MinIO, or a hosted provider.
 
-Plan a short maintenance window. New files land in PostgreSQL while you work,
-so uploads larger than the operator's inline ceiling fail until you select
-object storage again.
+Eneo does not copy the bucket. Your own tooling transfers the objects, and Eneo
+performs the switch safely around that copy. Object keys contain no endpoint or
+bucket name, so a faithful copy is readable the moment you switch.
 
-**1. Prepare the new bucket.** Create one empty private bucket and an
-application identity limited to it, exactly as for a first connection. Add the
-new endpoint origin to `OBJECT_CONTENT_ADMIN_ALLOWED_ENDPOINT_ORIGINS` and
-restart backend and worker. Keep the old origin in the list until you are
-finished. Take a backup of the current bucket before you begin.
+<Callout type="info">
+  Plan a short maintenance window. New files go to PostgreSQL while you work, so
+  uploads larger than the operator's inline ceiling fail until you select object
+  storage again.
+</Callout>
 
-**2. Send new files to PostgreSQL.** In **Admin > Storage**, select PostgreSQL
-as the target for new writes, and wait until no moves are queued and storage
-health reports no work in progress. This is what makes the copy complete: no
-new object can appear on the old destination behind your back.
+The examples use `rclone` with two configured remotes, `old-store` and
+`new-store`. Any tool that copies S3 objects faithfully works the same way.
 
-**3. Find the content prefix.** Object keys live under
-`v1/<deployment-id-without-dashes>/`. Take `OBJECT_CONTENT_DEPLOYMENT_ID` and
-remove the dashes — for example `94e1a7e3-21a7-40b8-959b-d0ecdc8827e2` becomes
-`94e1a7e321a740b8959bd0ecdc8827e2`. Confirm the prefix is right before you copy
-anything:
+<Steps>
+
+### Prepare the new bucket
+
+Create one empty private bucket and an application identity limited to it, as
+for a first connection. Add the new endpoint's origin to
+`OBJECT_CONTENT_ADMIN_ALLOWED_ENDPOINT_ORIGINS` and restart backend and worker,
+keeping the old origin until you finish. Back up the current bucket.
+
+### Send new files to PostgreSQL
+
+In **Admin > Storage**, select PostgreSQL as the target for new writes and wait
+until no moves are queued. Nothing can then appear on the old destination while
+you copy.
+
+### Find the content prefix
+
+Object keys live under `v1/<deployment-id-without-dashes>/`. Take
+`OBJECT_CONTENT_DEPLOYMENT_ID` and remove the dashes:
+
+```text
+94e1a7e3-21a7-40b8-959b-d0ecdc8827e2   →   94e1a7e321a740b8959bd0ecdc8827e2
+```
+
+Confirm the prefix lists your objects before copying anything:
 
 ```bash
 rclone ls old-store:eneo-object-content/v1/94e1a7e321a740b8959bd0ecdc8827e2/ | head
 ```
 
-If that lists nothing, the prefix is wrong. Do not continue: a copy of an empty
-prefix succeeds, verifies clean, and leaves the new destination without your
-files.
+<Callout type="error">
+  If this lists nothing, the prefix is wrong — stop. Copying an empty prefix
+  succeeds, verifies clean, and leaves the new destination without your files.
+</Callout>
 
-**4. Copy the content namespace.** Copy only that prefix. Never copy or
-overwrite `v1/.eneo-bindings/` — it holds the marker that pairs a bucket with
-one database, and Eneo manages it per destination.
+### Copy the objects
 
 ```bash
 rclone copy \
@@ -469,48 +488,62 @@ rclone copy \
   --checksum --transfers 16 --progress
 ```
 
-Use `copy`, never `sync`: `sync` deletes files at the destination that are
-missing from the source, and a mistaken direction would destroy production
-content. Preserve object metadata; Eneo verifies the media type of every
-object it reads.
+Copy only that prefix, and preserve object metadata — Eneo verifies the media
+type of every object it reads. Never copy `v1/.eneo-bindings/`: it pairs a
+bucket with one database, and Eneo manages it per destination.
 
-**5. Verify the copy.** Compare both sides, and check the object count against
-what **Admin > Storage** reports for object storage — `rclone check` reports
-"0 differences" for two empty prefixes just as happily as for a complete copy:
+<Callout type="warning">
+  Use `copy`, never `sync`. `sync` deletes files at the destination that are
+  missing from the source, so a mistaken direction destroys production content.
+</Callout>
+
+### Verify the copy
 
 ```bash
 rclone check \
   old-store:eneo-object-content/v1/94e1a7e321a740b8959bd0ecdc8827e2/ \
   new-store:eneo-object-content/v1/94e1a7e321a740b8959bd0ecdc8827e2/ \
   --checksum
+
 rclone size new-store:eneo-object-content/v1/94e1a7e321a740b8959bd0ecdc8827e2/
 ```
 
-Fix any difference and run the check again until it reports no errors.
+Compare the object count with what **Admin > Storage** reports for object
+storage. A difference count alone is not enough: two empty prefixes also report
+no differences.
 
-**6. Switch.** In **Admin > Storage**, select **Change destination**, enter the
-new endpoint, bucket, signing region, addressing style, and access keys, and
-confirm. Eneo tests the destination, refuses a bucket that belongs to another
-Eneo installation, and then switches in one step. The switch is refused while
-any write could still reach a destination — if that happens, wait a moment and
-try again. Backend and worker pick up the change without a restart.
+### Switch
 
-**7. Confirm and finish.** Select object storage for new writes again. Open a
-few existing files and let one reconciliation inventory cycle complete, then
-check that storage health reports no missing objects. Eneo verifies the
-SHA-256 of every file it reads, so a bad copy cannot pass unnoticed.
+Select **Change destination**, enter the new endpoint, bucket, signing region,
+addressing style, and access keys, then confirm. Eneo tests the destination,
+refuses a bucket belonging to another Eneo installation, and switches in one
+step without a restart.
 
-The previous destination stays listed as **Previous destination** so you can
-select **Switch back** at any time; nothing on either bucket is deleted. When
-you are satisfied, select **Forget** to remove the record and decommission the
-old bucket at your provider. You may then drop the old origin from
-`OBJECT_CONTENT_ADMIN_ALLOWED_ENDPOINT_ORIGINS`, but keep the new one there
-permanently: Eneo re-checks the allowlist every time it builds a client for an
-administrator-managed destination, so removing the origin in use stops object
-storage from working.
+The switch is refused while any write could still reach a destination. If new
+files still target object storage, change that first; if an upload is in
+flight, wait a moment and retry.
 
-If something looks wrong at any point, switch back, correct the copy, and
-switch again.
+### Confirm and finish
+
+Select object storage for new writes again. Open a few existing files, let one
+reconciliation inventory cycle complete, and check that storage health reports
+no missing objects. Eneo verifies the SHA-256 of every file it reads, so a bad
+copy cannot pass unnoticed.
+
+</Steps>
+
+The previous destination stays listed so you can **Switch back** at any time;
+nothing is deleted on either bucket. When you are satisfied, select **Forget**
+and decommission the old bucket at your provider.
+
+<Callout type="warning">
+  Keep the active destination's origin in
+  `OBJECT_CONTENT_ADMIN_ALLOWED_ENDPOINT_ORIGINS` permanently. Eneo re-checks
+  the allowlist every time it builds a client, so removing the origin in use
+  stops object storage from working. You may drop the retired one.
+</Callout>
+
+If anything looks wrong, switch back, correct the copy, and switch again.
 
 ### Backup rule
 

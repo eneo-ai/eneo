@@ -4289,6 +4289,7 @@
   "storage_switch_checklist_copied": "Kopiera först nuvarande bucket till den nya – Eneo kopierar inte filerna, och det som saknas blir otillgängligt efter bytet.",
   "storage_switch_checklist_inline": "Välj PostgreSQL för nya filer innan du byter. Bytet nekas så länge filer fortfarande kan sparas i objektlagringen.",
   "storage_switch_checklist_reversible": "Nuvarande destination sparas så att du kan byta tillbaka. Ingenting raderas på någon av destinationerna.",
+  "storage_switch_guide_link": "Så kopierar du bucketen och byter – steg för steg",
   "storage_switch_test_and_switch": "Testa och byt",
   "storage_switch_probe_description": "Testet skriver, läser, verifierar och tar bort ett litet tillfälligt objekt, och nekar en bucket som hör till en annan Eneo-installation. Inga filer raderas.",
   "storage_switch_done_title": "Lagringsdestinationen är bytt",

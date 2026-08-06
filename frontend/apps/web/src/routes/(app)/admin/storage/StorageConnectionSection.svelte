@@ -12,6 +12,7 @@
     ArrowLeftRight,
     CheckCircle2,
     ChevronDown,
+    ExternalLink,
     HardDrive,
     KeyRound,
     Loader2,
@@ -648,6 +649,17 @@
                   <li>{m.storage_switch_checklist_inline()}</li>
                   <li>{m.storage_switch_checklist_reversible()}</li>
                 </ul>
+                <Button
+                  href="https://docs.eneo.ai/guides/object-content-storage#move-to-another-s3-compatible-service"
+                  target="_blank"
+                  rel="noreferrer"
+                  variant="link"
+                  size="sm"
+                  class="mt-2 h-auto w-fit px-0"
+                >
+                  {m.storage_switch_guide_link()}
+                  <ExternalLink data-icon="inline-end" aria-hidden="true" />
+                </Button>
               </Alert.Description>
             </Alert.Root>
           {/if}

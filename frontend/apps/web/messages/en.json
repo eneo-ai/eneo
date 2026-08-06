@@ -4289,6 +4289,7 @@
   "storage_switch_checklist_copied": "Copy the current bucket to the new one first — Eneo does not copy files, and anything missing will be unavailable after the switch.",
   "storage_switch_checklist_inline": "Select PostgreSQL for new files before you switch. The switch is refused while files can still be saved to object storage.",
   "storage_switch_checklist_reversible": "The current destination is kept, so you can switch back. Nothing is deleted at either destination.",
+  "storage_switch_guide_link": "How to copy the bucket and switch — step by step",
   "storage_switch_test_and_switch": "Test and switch",
   "storage_switch_probe_description": "The test writes, reads, verifies, and removes a small temporary object, and refuses a bucket that belongs to another Eneo installation. Files are never deleted.",
   "storage_switch_done_title": "Storage destination changed",
