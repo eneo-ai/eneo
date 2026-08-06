@@ -352,6 +352,18 @@ class S3ObjectStore:
         """Create a preflighted marker without replacing an existing marker."""
         await self._create_binding_at(self._binding_key, creation)
 
+    async def remove_binding(self, binding_id: UUID) -> None:
+        """Remove this database's marker after a rejected destination switch.
+
+        The marker is deleted only after verifying it names this binding, so
+        an absent or foreign marker is left untouched.
+        """
+        creation = StoreBindingCreation(
+            binding_id=binding_id,
+            body=_BINDING_PREAMBLE + binding_id.bytes,
+        )
+        await self._delete_binding_probe(self._binding_key, creation)
+
     async def probe_binding_creation(self) -> None:
         """Exercise conditional marker creation at this deployment's key."""
         creation = StoreBindingCreation(

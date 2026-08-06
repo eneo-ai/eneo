@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from collections.abc import AsyncGenerator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
@@ -25,6 +26,7 @@ from eneo.database.tables.object_content_table import (
     ObjectContentMultipartCandidates,
     ObjectContentOrphanCandidates,
     ObjectContents,
+    ObjectStoreObjects,
 )
 from eneo.database.tables.object_store_connection_table import (
     ACTIVE_DESTINATION_SLOT,
@@ -60,6 +62,8 @@ from eneo.object_content.store_binding import (
     ensure_store_binding_ready,
 )
 from eneo.settings.encryption_service import EncryptionService
+
+logger = logging.getLogger(__name__)
 
 _PROBE_BODY = b"eneo-object-store-connection-probe-v1\n"
 _PROBE_MEDIA_TYPE = "application/octet-stream"
@@ -153,10 +157,29 @@ class ObjectStoreDestinationSwitchBlocked(ObjectStoreConnectionError):
     code = "object_store_destination_switch_blocked"
 
 
+class ObjectStoreSwitchBackDiverged(ObjectStoreDestinationSwitchBlocked):
+    """Objects stored since the switch are absent from the archived bucket."""
+
+    code = "object_store_switch_back_diverged"
+
+
 class ObjectStoreNewWritesNotRedirected(ObjectStoreConnectionError):
     """New writes still target object storage; the administrator must act."""
 
     code = "object_store_new_writes_not_redirected"
+
+
+class ObjectStoreMovesNotPaused(ObjectStoreConnectionError):
+    """Storage moves are not paused; the administrator must pause them.
+
+    A paused move queue is what turns the switch preconditions from a
+    point-in-time observation into a guarantee over the whole copy window:
+    with new writes on PostgreSQL and moves paused, nothing can create a new
+    object on the active destination between the operator's copy and the
+    switch.
+    """
+
+    code = "object_store_moves_not_paused"
 
 
 class ObjectStorePreviousDestinationMissing(ObjectStoreConnectionError):
@@ -584,11 +607,18 @@ class ObjectStoreConnectionService:
             ),
             addressing_style=previous.addressing_style,
         )
+        # Fast feedback before any remote work; re-checked under lock in the
+        # final transaction.
+        async with self._transaction() as session:
+            await self._require_no_remote_keys_since(
+                session, archived_at=previous.updated_at
+            )
         return await self._switch(
             candidate,
             actor_user_id=actor_user_id,
             stored=stored,
             binding=binding,
+            require_previous_revision=previous.revision,
         )
 
     async def forget_previous_destination(self, *, actor_user_id: UUID) -> None:
@@ -613,6 +643,7 @@ class ObjectStoreConnectionService:
         actor_user_id: UUID,
         stored: StoredObjectStoreConnection,
         binding: StoreBindingSnapshot,
+        require_previous_revision: int | None = None,
     ) -> DestinationSwitch:
         if not binding.confirmed or binding.binding_id is None:
             raise ObjectStoreDestinationSwitchBlocked(
@@ -626,12 +657,45 @@ class ObjectStoreConnectionService:
             candidate,
             deployment_id=stored.deployment_id,
         )
-        await self._admit_switch_target(
+        fresh_marker = await self._admit_switch_target(
             settings,
             binding_id=binding.binding_id,
             expected_revision=stored.revision,
         )
 
+        try:
+            return await self._commit_switch(
+                candidate,
+                settings=settings,
+                actor_user_id=actor_user_id,
+                stored=stored,
+                require_previous_revision=require_previous_revision,
+            )
+        except (
+            ObjectStoreDestinationSwitchBlocked,
+            ObjectStoreMovesNotPaused,
+            ObjectStoreNewWritesNotRedirected,
+            ObjectStoreConnectionConflict,
+        ):
+            # The switch is definitively rejected, so the target must not stay
+            # paired to this installation. An ambiguous outcome
+            # (ObjectStoreConnectionMutationOutcomeUnknown) deliberately keeps
+            # the marker: the swap may have committed.
+            if fresh_marker:
+                await self._abandon_switch_claim(
+                    settings, binding_id=binding.binding_id
+                )
+            raise
+
+    async def _commit_switch(
+        self,
+        candidate: ObjectStoreConnectionInput,
+        *,
+        settings: ObjectContentSettings,
+        actor_user_id: UUID,
+        stored: StoredObjectStoreConnection,
+        require_previous_revision: int | None,
+    ) -> DestinationSwitch:
         access_key_id_encrypted = self._encryption.encrypt(
             candidate.access_key_id.get_secret_value()
         )
@@ -655,6 +719,17 @@ class ObjectStoreConnectionService:
                 .where(ObjectStoreConnections.id == TEMPORARY_DESTINATION_SLOT)
                 .with_for_update()
             )
+            if require_previous_revision is not None:
+                # Switch-back races forget_previous_destination: only the
+                # exact archived row it was asked to restore may be restored.
+                if previous is None or previous.revision != require_previous_revision:
+                    raise ObjectStoreConnectionConflict(
+                        "The archived destination was removed or changed "
+                        "while it was being tested"
+                    )
+                await self._require_no_remote_keys_since(
+                    session, archived_at=previous.updated_at
+                )
             if previous is None:
                 previous = ObjectStoreConnections()
                 previous.id = TEMPORARY_DESTINATION_SLOT
@@ -717,14 +792,23 @@ class ObjectStoreConnectionService:
                 "Remote content is still being written or deleted; let the "
                 "worker finish first"
             )
-        policy_target = await session.scalar(
-            select(ObjectContentDeploymentPolicy.new_write_storage_target).where(
-                ObjectContentDeploymentPolicy.id == 1
+        policy = (
+            await session.execute(
+                select(
+                    ObjectContentDeploymentPolicy.new_write_storage_target,
+                    ObjectContentDeploymentPolicy.moves_paused,
+                ).where(ObjectContentDeploymentPolicy.id == 1)
             )
-        )
-        if policy_target != "postgres_inline":
+        ).one_or_none()
+        if policy is None or policy[0] != "postgres_inline":
             raise ObjectStoreNewWritesNotRedirected(
                 "Select PostgreSQL for new writes before switching destination"
+            )
+        if not policy[1]:
+            raise ObjectStoreMovesNotPaused(
+                "Pause storage moves before switching destination; a paused "
+                "queue guarantees nothing is written to object storage while "
+                "the copy is made"
             )
         nonterminal_moves = await session.scalar(
             select(func.count())
@@ -733,8 +817,8 @@ class ObjectStoreConnectionService:
         )
         if nonterminal_moves:
             raise ObjectStoreDestinationSwitchBlocked(
-                "Storage moves are still queued or running; wait for them or "
-                "let them fail out first"
+                "Storage moves are still queued or running; let them finish "
+                "(resume them if paused) before switching"
             )
         now = await session.scalar(select(func.now()))
         for table in (ObjectContentOrphanCandidates, ObjectContentMultipartCandidates):
@@ -749,20 +833,74 @@ class ObjectStoreConnectionService:
                     "try again shortly"
                 )
 
+    async def _require_no_remote_keys_since(
+        self,
+        session: AsyncSession,
+        *,
+        archived_at: datetime,
+    ) -> None:
+        """Refuse switch-back once the bucket set has diverged.
+
+        Every durable remote key created after the destinations were swapped
+        exists only on the current destination, so the archived bucket cannot
+        serve it. Restoring a re-copied bucket goes through the normal
+        change-destination flow, which re-proves the copy.
+        """
+        new_keys = await session.scalar(
+            select(func.count())
+            .select_from(ObjectStoreObjects)
+            .where(ObjectStoreObjects.created_at > archived_at)
+        )
+        if new_keys:
+            raise ObjectStoreSwitchBackDiverged(
+                "Objects were stored after the destinations were switched; "
+                "copy the current bucket to the previous destination and use "
+                "the change-destination flow instead of switching back"
+            )
+
+    async def _abandon_switch_claim(
+        self,
+        settings: ObjectContentSettings,
+        *,
+        binding_id: UUID,
+    ) -> None:
+        """Best-effort unclaim of the target after a definite rejection.
+
+        A failure here is logged and swallowed: the marker plus the recorded
+        claim keep the state recoverable by retrying the same destination.
+        """
+        try:
+            store = self._store_factory(self._probe_settings(settings))
+            try:
+                await store.remove_binding(binding_id)
+            finally:
+                await store.close()
+            async with self._transaction(mutation=True) as session:
+                await StoreBindingRepository(session).clear_slot(
+                    slot=TEMPORARY_DESTINATION_SLOT
+                )
+        except Exception:
+            logger.warning(
+                "object_content.switch_claim_abandon_failed",
+                extra={"endpoint_url": settings.endpoint_url},
+                exc_info=True,
+            )
+
     async def _admit_switch_target(
         self,
         settings: ObjectContentSettings,
         *,
         binding_id: UUID,
         expected_revision: int,
-    ) -> None:
+    ) -> bool:
         """Admit a bucket that already holds this deployment's copied bytes.
 
         Unlike first-time creation, the content namespace is expected to be
         non-empty. A marker naming another installation is refused. For a
         bucket with no marker yet, every fallible check runs first and the
         permanent marker is written last, so a rejected switch never leaves
-        the target paired to this installation.
+        the target paired to this installation. Returns whether a fresh
+        marker was written, so a later rejection can remove it again.
         """
         probe_settings = self._probe_settings(settings)
         store = self._store_factory(probe_settings)
@@ -790,7 +928,7 @@ class ObjectStoreConnectionService:
                     confirmed=True,
                 ),
             )
-            return
+            return False
 
         # Unmarked target: prove readiness and a complete write/read/delete
         # round trip before claiming the bucket.
@@ -815,7 +953,17 @@ class ObjectStoreConnectionService:
                 binding_id=binding_id,
             )
 
-        await self._create_switch_marker(probe_settings, binding_id=binding_id)
+        try:
+            await self._create_switch_marker(probe_settings, binding_id=binding_id)
+        except ObjectStoreProbeBindingMismatch:
+            # Nothing was written, so the recorded claim has no counterpart.
+            # An unavailable outcome keeps the claim: the marker may exist.
+            async with self._transaction(mutation=True) as session:
+                await StoreBindingRepository(session).clear_slot(
+                    slot=TEMPORARY_DESTINATION_SLOT
+                )
+            raise
+        return True
 
     async def _create_switch_marker(
         self,

@@ -1353,6 +1353,12 @@ class ObjectContentReconciliationRepository:
         state.multipart_key_marker = None
         state.multipart_upload_id_marker = None
         state.multipart_cycle_started_at = now
+        # The completed-cycle facts also describe the previous destination:
+        # keeping them would let missing-marking consume the old bucket's
+        # cutoff, and report its completion time as current, before the new
+        # destination has finished a single cycle of its own.
+        state.last_completed_object_cycle_started_at = None
+        state.last_object_cycle_completed_at = None
         await self._session.execute(delete(ObjectContentOrphanCandidates))
         await self._session.execute(delete(ObjectContentMultipartCandidates))
         await self._session.flush()

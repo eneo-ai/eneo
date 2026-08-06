@@ -28,10 +28,13 @@ from eneo.object_content.configuration import (
 )
 from eneo.object_content.content import StorageKind
 from eneo.object_content.object_store_connection import (
+    ObjectStoreConnectionConflict,
     ObjectStoreConnectionError,
     ObjectStoreConnectionInput,
     ObjectStoreConnectionService,
+    ObjectStoreMovesNotPaused,
     ObjectStoreNewWritesNotRedirected,
+    ObjectStoreSwitchBackDiverged,
 )
 from eneo.object_content.s3_object_store import (
     ObjectStoreUnavailableError,
@@ -96,7 +99,7 @@ async def _restore_write_target(
         original = (
             await session.execute(
                 text(
-                    "SELECT new_write_storage_target, revision "
+                    "SELECT new_write_storage_target, moves_paused, revision "
                     "FROM object_content_deployment_policy WHERE id = 1"
                 )
             )
@@ -108,19 +111,22 @@ async def _restore_write_target(
         await session.execute(
             text(
                 "UPDATE object_content_deployment_policy "
-                "SET new_write_storage_target = :target, revision = :revision "
+                "SET new_write_storage_target = :target, "
+                "moves_paused = :paused, revision = :revision "
                 "WHERE id = 1"
             ),
-            {"target": original[0], "revision": original[1]},
+            {"target": original[0], "paused": original[1], "revision": original[2]},
         )
 
 
 async def _select_inline_writes(database: DatabaseSessionManager) -> None:
+    """Apply the documented switch preparation: redirect writes, pause moves."""
     async with database.session() as session, session.begin():
         await session.execute(
             text(
                 "UPDATE object_content_deployment_policy "
                 "SET new_write_storage_target = 'postgres_inline', "
+                "moves_paused = true, "
                 "revision = revision + 1 WHERE id = 1"
             )
         )
@@ -205,11 +211,36 @@ async def test_switch_serves_copied_content_and_switches_back(
         deployment_id=created.deployment_id,
     )
 
+    # Give the reconciler a completed-inventory fact from the old bucket, so
+    # the switch can prove it does not carry over to the new destination.
+    async with object_content_database.session() as session, session.begin():
+        await session.execute(
+            text(
+                "UPDATE object_content_reconciliation_state "
+                "SET last_completed_object_cycle_started_at = now(), "
+                "last_object_cycle_completed_at = now() WHERE id = 1"
+            )
+        )
+
     switch = await service.replace_destination(
         _connection_input(real_unpaired_object_store),
         actor_user_id=actor,
     )
     switched = switch.active
+
+    # The old bucket's completed-inventory facts do not describe the new
+    # destination: missing-marking and health wait for its own first cycle.
+    async with object_content_database.session() as session, session.begin():
+        cycle_facts = (
+            await session.execute(
+                text(
+                    "SELECT last_completed_object_cycle_started_at, "
+                    "last_object_cycle_completed_at "
+                    "FROM object_content_reconciliation_state WHERE id = 1"
+                )
+            )
+        ).one()
+    assert cycle_facts == (None, None)
     assert switched.bucket == real_unpaired_object_store.settings.bucket
     assert switched.revision == 2
     # The mutation carries both projections, so a caller never has to read the
@@ -443,18 +474,19 @@ async def _binding_id(database: DatabaseSessionManager):
     return snapshot.binding_id
 
 
-async def test_rejected_switch_records_its_claim_on_the_target(
+async def test_rejected_switch_unclaims_the_target(
     object_content_database: DatabaseSessionManager,
     real_object_store: RealObjectStore,
     real_unpaired_object_store: RealObjectStore,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A marker written for a switch is tracked, never an anonymous claim.
+    """A definitively rejected switch removes its own marker and claim.
 
     Writing the pairing marker is durable. If the swap afterwards loses a
-    revision race, the temporary binding slot still records which bucket this
-    installation touched, so a retry recognises its own marker instead of
-    leaving the bucket unusable by anyone.
+    revision race, the target bucket must not stay paired to this
+    installation: the marker is verified and removed again, and the temporary
+    binding slot is cleared, so a different bucket can be attempted next
+    without leaving this one unusable by anyone.
     """
     service = _service(object_content_database, real_object_store)
     actor = await _any_user_id(object_content_database)
@@ -467,6 +499,7 @@ async def test_rejected_switch_records_its_claim_on_the_target(
         real_object_store.store,
     )
     await _select_inline_writes(object_content_database)
+    binding_id = await _binding_id(object_content_database)
 
     original_create = S3ObjectStore.create_binding
 
@@ -483,22 +516,163 @@ async def test_rejected_switch_records_its_claim_on_the_target(
 
     monkeypatch.setattr(S3ObjectStore, "create_binding", rotate_after_marker)
 
-    with pytest.raises(ObjectStoreConnectionError):
+    with pytest.raises(ObjectStoreConnectionConflict):
         await service.replace_destination(
             _connection_input(real_unpaired_object_store),
             actor_user_id=actor,
         )
     monkeypatch.undo()
 
+    target = S3ObjectStore(
+        real_unpaired_object_store.settings.model_copy(
+            update={"deployment_id": created.deployment_id}
+        )
+    )
+    try:
+        assert not await target.verify_binding(binding_id)
+    finally:
+        await target.close()
+
     async with object_content_database.session() as session, session.begin():
         claim = (
             await session.execute(
-                text(
-                    "SELECT deployment_id, create_started_at IS NOT NULL "
-                    "FROM object_store_bindings WHERE slot = 2"
-                )
+                text("SELECT slot FROM object_store_bindings WHERE slot = 2")
             )
         ).one_or_none()
-    assert claim is not None, "the marker written for this switch must be tracked"
-    assert claim[0] == created.deployment_id
-    assert claim[1]
+    assert claim is None, "an unclaimed target must leave no switch claim behind"
+
+
+async def test_switch_requires_paused_moves(
+    object_content_database: DatabaseSessionManager,
+    real_object_store: RealObjectStore,
+    real_unpaired_object_store: RealObjectStore,
+) -> None:
+    """Running moves could write to the old bucket mid-copy, so pause first.
+
+    Redirecting new writes fences publications, but a queued inline-to-object
+    move would still create a new object on the active destination after the
+    operator's copy. The pause is what makes the preconditions hold for the
+    whole copy window rather than at one instant.
+    """
+    service = _service(object_content_database, real_object_store)
+    actor = await _any_user_id(object_content_database)
+    created = await service.create(
+        _connection_input(real_object_store), actor_user_id=actor
+    )
+    await ensure_store_binding_ready(
+        object_content_database,
+        service.settings_for(created),
+        real_object_store.store,
+    )
+    async with object_content_database.session() as session, session.begin():
+        await session.execute(
+            text(
+                "UPDATE object_content_deployment_policy "
+                "SET new_write_storage_target = 'postgres_inline', "
+                "moves_paused = false, revision = revision + 1 WHERE id = 1"
+            )
+        )
+
+    with pytest.raises(ObjectStoreMovesNotPaused):
+        await service.replace_destination(
+            _connection_input(real_unpaired_object_store),
+            actor_user_id=actor,
+        )
+
+
+async def test_switch_back_is_refused_after_remote_content_diverged(
+    object_content_database: DatabaseSessionManager,
+    real_object_store: RealObjectStore,
+    real_unpaired_object_store: RealObjectStore,
+) -> None:
+    """Objects stored after the switch make blind switch-back unsafe.
+
+    Every remote key created after the destinations were swapped exists only
+    on the current destination, so restoring the archived bucket would make
+    that content unreadable. The way back is a fresh reverse copy through the
+    normal change-destination flow.
+    """
+    service = _service(object_content_database, real_object_store)
+    actor = await _any_user_id(object_content_database)
+    created = await service.create(
+        _connection_input(real_object_store), actor_user_id=actor
+    )
+    await ensure_store_binding_ready(
+        object_content_database,
+        service.settings_for(created),
+        real_object_store.store,
+    )
+    await _select_inline_writes(object_content_database)
+
+    switch = await service.replace_destination(
+        _connection_input(real_unpaired_object_store),
+        actor_user_id=actor,
+    )
+
+    # Content becomes remote on the new destination after the cutover — the
+    # exact state a one-click switch-back can no longer serve.
+    new_settings = service.settings_for(switch.active)
+    new_store = S3ObjectStore(new_settings)
+    try:
+        await _seed_remote_content(
+            object_content_database, new_settings, new_store, b"post-switch-object"
+        )
+    finally:
+        await new_store.close()
+
+    with pytest.raises(ObjectStoreSwitchBackDiverged):
+        await service.switch_back(actor_user_id=actor)
+
+
+async def test_switch_back_loses_to_a_concurrent_remove(
+    object_content_database: DatabaseSessionManager,
+    real_object_store: RealObjectStore,
+    real_unpaired_object_store: RealObjectStore,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Remove and switch-back cannot both report success.
+
+    An operator who saw Remove succeed may decommission the endpoint, so a
+    switch-back that was in flight during the removal must fail with a typed
+    conflict instead of silently reactivating the removed destination.
+    """
+    service = _service(object_content_database, real_object_store)
+    actor = await _any_user_id(object_content_database)
+    created = await service.create(
+        _connection_input(real_object_store), actor_user_id=actor
+    )
+    await ensure_store_binding_ready(
+        object_content_database,
+        service.settings_for(created),
+        real_object_store.store,
+    )
+    await _select_inline_writes(object_content_database)
+
+    switch = await service.replace_destination(
+        _connection_input(real_unpaired_object_store),
+        actor_user_id=actor,
+    )
+
+    # The archived destination is removed while switch-back is still probing
+    # the old bucket, after it has already read the archived row.
+    original_probe = ObjectStoreConnectionService._probe
+
+    async def forget_during_probe(self, settings, *, binding):  # type: ignore[no-untyped-def]
+        await service.forget_previous_destination(actor_user_id=actor)
+        return await original_probe(self, settings, binding=binding)
+
+    monkeypatch.setattr(ObjectStoreConnectionService, "_probe", forget_during_probe)
+
+    with pytest.raises(ObjectStoreConnectionConflict):
+        await service.switch_back(actor_user_id=actor)
+    monkeypatch.undo()
+
+    # Only the removal succeeded: the active destination is unchanged and the
+    # archived slot stays gone.
+    async with object_content_database.session() as session, session.begin():
+        rows = (
+            await session.execute(
+                select(ObjectStoreConnections.id, ObjectStoreConnections.bucket)
+            )
+        ).all()
+    assert [(row[0], row[1]) for row in rows] == [(1, switch.active.bucket)]
