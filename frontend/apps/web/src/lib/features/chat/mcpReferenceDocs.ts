@@ -58,44 +58,75 @@ export function citedTextDocumentReferences<T extends McpRefLike>(refs: T[], ans
   return cited;
 }
 
+export type CitationMerge<T> = {
+  /** Id prefixes whose chip must not render. */
+  suppressed: Set<string>;
+  /**
+   * References each surviving chip took over, keyed by the surviving id
+   * prefix and in citation order. Their passages belong in that chip's
+   * snippet so nothing a suppressed chip would have shown is lost.
+   */
+  absorbedBy: Map<string, T[]>;
+};
+
 /**
- * Inline citations that would render a chip identical to the one beside them.
+ * Fold inline citations that would render a chip identical to their neighbour.
  *
  * Citation numbers are per document, so a model citing two passages of the
  * same document back to back ("...API:er. [1] [1]") produces two chips with
- * the same number and no added meaning. Runs are detected on the answer text —
- * consecutive inrefs separated by whitespace only — and within a run every
- * citation after the first of a given document is redundant. Citing the same
- * document again later in the answer is left alone: it marks a different
- * claim, and its chip stands on its own.
+ * the same number, indistinguishable to the reader. Runs are detected on the
+ * answer text — consecutive inrefs separated by whitespace only — and within a
+ * run every citation after the first of a given document folds into that
+ * first one. Citing the same document again later in the answer is left alone:
+ * it marks a different claim, and its chip stands on its own.
  *
- * An id is only reported when *every* one of its occurrences is redundant, so
- * a citation that also appears on its own somewhere still renders.
+ * A citation is only suppressed when *every* one of its occurrences is
+ * redundant, so one that also appears alone somewhere still renders — and is
+ * then not absorbed either, since its passage is already reachable.
  */
-export function redundantInrefIds<T extends McpRefLike>(refs: T[], answer: string): Set<string> {
+export function mergeAdjacentCitations<T extends McpRefLike>(
+  refs: T[],
+  answer: string
+): CitationMerge<T> {
   const textRefs = textDocumentReferences(refs);
+  const occurrences: { prefix: string; ref: T | undefined; lead: string | null }[] = [];
   const allOccurrencesRedundant = new Map<string, boolean>();
 
-  let documentsInRun = new Set<string>();
+  let leadOfDocumentInRun = new Map<string, string>();
   let previousEnd = -1;
   for (const match of answer.matchAll(INREF_PATTERN)) {
     const start = match.index ?? 0;
     const continuesRun = previousEnd > -1 && answer.slice(previousEnd, start).trim() === "";
-    if (!continuesRun) documentsInRun = new Set<string>();
+    if (!continuesRun) leadOfDocumentInRun = new Map<string, string>();
 
     const prefix = match[1];
     const ref = textRefs.find((candidate) => candidate.id.startsWith(prefix));
     // An unresolved id is never suppressed: better a stray chip than a
     // silently dropped citation.
     const key = ref ? canonicalDocKey(ref) : null;
-    const redundant = key !== null && documentsInRun.has(key);
-    if (key !== null) documentsInRun.add(key);
+    const lead = key !== null ? (leadOfDocumentInRun.get(key) ?? null) : null;
+    if (key !== null && lead === null) leadOfDocumentInRun.set(key, prefix);
 
-    allOccurrencesRedundant.set(prefix, (allOccurrencesRedundant.get(prefix) ?? true) && redundant);
+    occurrences.push({ prefix, ref, lead });
+    allOccurrencesRedundant.set(prefix, (allOccurrencesRedundant.get(prefix) ?? true) && !!lead);
     previousEnd = start + match[0].length;
   }
 
-  return new Set([...allOccurrencesRedundant].filter(([, always]) => always).map(([id]) => id));
+  const suppressed = new Set(
+    [...allOccurrencesRedundant].filter(([, always]) => always).map(([id]) => id)
+  );
+
+  // A lead is by definition the first citation of its document in its run, so
+  // it is never itself suppressed and is always a safe home for the passages.
+  const absorbedBy = new Map<string, T[]>();
+  const assigned = new Set<string>();
+  for (const { prefix, ref, lead } of occurrences) {
+    if (!lead || !ref || !suppressed.has(prefix) || assigned.has(prefix)) continue;
+    assigned.add(prefix);
+    absorbedBy.set(lead, [...(absorbedBy.get(lead) ?? []), ref]);
+  }
+
+  return { suppressed, absorbedBy };
 }
 
 export function canonicalDocKey(ref: McpRefLike): string {
