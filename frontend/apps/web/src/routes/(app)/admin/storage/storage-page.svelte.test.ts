@@ -21,7 +21,7 @@ vi.mock("$lib/core/AppContext.js", () => ({
   getAppContext: () => ({
     user: {
       is_platform_admin: testUser.isPlatformAdmin,
-      roles: testUser.isPlatformAdmin ? [{ permissions: ["admin"] }] : [],
+      roles: testUser.isPlatformAdmin ? [{ permissions: ["admin", "storage"] }] : [],
       predefined_roles: []
     }
   })

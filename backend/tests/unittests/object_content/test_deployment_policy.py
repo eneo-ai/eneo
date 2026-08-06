@@ -301,8 +301,8 @@ async def test_storage_authority_requires_current_active_eligibility() -> None:
     eligible = TEST_USER.model_copy(update={"is_platform_admin": True})
     await require_storage_administration(eligible)
 
-    # An administrator without the separate platform flag governs storage too:
-    # it is the same authority that already governs API keys and models.
+    # The separate platform flag is not what grants storage administration:
+    # the storage permission is, and the Owner role carries it by default.
     await require_storage_administration(
         TEST_USER.model_copy(update={"is_platform_admin": False})
     )

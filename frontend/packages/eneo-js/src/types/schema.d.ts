@@ -15685,6 +15685,7 @@ export interface components {
       | "integrations"
       | "shared_spaces"
       | "api_keys"
+      | "storage"
       | "assistant_debug";
     /** PermissionPublic */
     PermissionPublic: {

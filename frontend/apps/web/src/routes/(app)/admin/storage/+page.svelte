@@ -87,7 +87,7 @@
   let moveAlertRef = $state<HTMLElement | null>(null);
   let moveStatusAlertRef = $state<HTMLElement | null>(null);
 
-  const canAdministerStorage = $derived(hasPermission(user)("admin"));
+  const canAdministerStorage = $derived(hasPermission(user)("storage"));
   const canEdit = $derived(canAdministerStorage && !authorityRevoked);
   const policyMutationPending = $derived(saving || moveActionPending === "pause");
   const objectStoreCapability = $derived(
