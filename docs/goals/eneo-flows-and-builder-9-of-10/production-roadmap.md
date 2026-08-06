@@ -978,6 +978,19 @@ meanings not machine keys + one-field envelope unwrap; root cause of the
 live DOCX brace soup, run 4fc4b445). Loss-matrix checklist:
 `notes/loss-matrix.md`.
 
+Measurement layer landed 2026-08-06 morning: `f67cbc310` battle compare
+tool (per-case transitions, failure-code deltas, token deltas, ranked
+remaining blockers; refuses cross-semantics comparison); `69437d656` E1
+evaluator semantics v2 (state-aware 7-step first-question rule, cases v5,
+question_relevance_semantics_version 2 in hashed evaluator identity);
+`11a53b321` env-gated raw classifier capture tap at the parse boundary
+(ENEO_AI_BUILDER_RAW_CLASSIFIER_CAPTURE_DIR). First v2 smoke baseline at
+DEV-69437d65648b: 12 cases -> 4 first-pass, 2 repaired, 1 intended
+clarification, 1 stall, 1 invalid_evidence + 3 fixture skips (fixture envs
+not composed this run), ZERO first_question_relevance failures; remaining
+failures are the real product families (prose-leaf schema x2,
+review-policy placement, authoring-spec contract, question selection).
+
 Slice-C inputs found live 2026-08-06: (1) the ASCII-English schema-key
 lexicon conflicts with prose-requested Swedish keys (case
 simple_document_metadata_json dies in builder_error: the user asked for
