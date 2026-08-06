@@ -1081,6 +1081,21 @@ self_correction_invalid_payload dead-ends, 4 singles. HARNESS FOLLOW-UP
 journeys should classify as their journey outcome (builder_error), not
 invalid_evidence.
 
+Quality-capture payoff 2026-08-06 evening III: the armed tap
+attributed the water-leak loop on first replay — four byte-identical
+compiled specs, form_fields empty, because the bare "add relevant form
+fields" remediation never named the requested values. `80e2d0259`
+makes the remediation quote the classifier's slot evidence (the user's
+own wording) and state the concrete shape (one input_field per value,
+wired via uses_form_fields). Verification replay in flight at
+DEV-80e2d02594c9. Underlying single-owner question recorded for a
+fresh slice: the critic detects requested metadata from answer
+signals while the compiler materializes fields from
+planning_state.input_fields — prose-requested metadata never reaches
+input_fields, so the model is the only party who can satisfy the
+critic; materializing slot-evidenced fields into planning state would
+dissolve the family entirely.
+
 Placement verification + tap consolidation 2026-08-06 evening II:
 placement replay at DEV-0e8addefe584 flipped preschool_incident and
 permit_checklist to first-pass ZERO repairs (both were
