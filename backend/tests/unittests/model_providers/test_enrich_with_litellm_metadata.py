@@ -66,6 +66,38 @@ def test_enriches_via_provider_prefix_lookup() -> None:
     assert result["max_input_tokens"] == 128000
 
 
+def test_prefers_provider_prefixed_entry_over_bare() -> None:
+    """When both `{provider}/{name}` and bare `{name}` exist with different
+    values, the prefixed row must win — the same rule the `/model-defaults/`
+    endpoint applies (see test_model_defaults_lookup). This used to diverge:
+    a local candidate list here tried the bare key first.
+    """
+    fake = {
+        "gpt-4o": {
+            "litellm_provider": "openai",
+            "mode": "chat",
+            "max_input_tokens": 128000,
+            "input_cost_per_token": 0.000005,
+        },
+        "azure/gpt-4o": {
+            "litellm_provider": "azure",
+            "mode": "chat",
+            "max_input_tokens": 100000,
+            "input_cost_per_token": 0.000003,
+        },
+    }
+    with _patch_cost_map(fake):
+        azure = model_provider_service._enrich_with_litellm_metadata("gpt-4o", "azure")
+        openai = model_provider_service._enrich_with_litellm_metadata(
+            "gpt-4o", "openai"
+        )
+    assert azure is not None and openai is not None
+    assert azure["max_input_tokens"] == 100000
+    assert azure["input_cost_per_token"] == 0.000003
+    # No `openai/gpt-4o` entry in the map → the bare row is the right match.
+    assert openai["max_input_tokens"] == 128000
+
+
 def test_enriches_embedding_model() -> None:
     fake = {
         "text-embedding-3-large": {

@@ -3,10 +3,11 @@
 Single source of truth used by:
   - ``/api/v1/admin/model-providers/model-defaults/`` (interactive lookup).
   - ``20260501_backfill_model_costs.py`` (one-shot data migration).
+  - ``_enrich_with_litellm_metadata`` (live ``/v1/models`` listing enrichment).
 
-Both call paths need identical semantics so the wizard's "Lookup defaults"
-button and the bulk backfill don't disagree about which LiteLLM row a given
-``(name, provider_type)`` pair maps to.
+All call paths need identical semantics so the wizard's "Lookup defaults"
+button, the bulk backfill, and the auto-fetch model catalog don't disagree
+about which LiteLLM row a given ``(name, provider_type)`` pair maps to.
 
 Resolution order:
   1. If ``provider_type`` is known, prefer the prefixed entry
