@@ -13,11 +13,13 @@ def format_revision_feedback(title: str, issues: list[str]) -> str:
 
 
 # Raw critic remediations stay mechanics-oriented for edit/compiled contexts.
-# Create mode translates them here because propose_flow only accepts semantic create steps.
-CREATE_CRITIC_REMEDIATION: dict[str, str] = {
-    "runtime_metadata_requires_form_fields": (
-        "Beskriv vilka extra inmatningsfält användaren ska fylla i vid körning och vilka semantiska steg som behöver värdena."
-    ),
+# Create mode translates them here because propose_flow only accepts semantic
+# create steps. A None entry keeps the invariant's own rendered remediation —
+# the single owner of per-context wording (a live journey looped four
+# identical proposals because this table's static "describe the fields" text
+# shadowed the remediation that quotes the user's requested values).
+CREATE_CRITIC_REMEDIATION: dict[str, str | None] = {
+    "runtime_metadata_requires_form_fields": None,
     "sectioned_form_intake_requires_form_fields": (
         "Beskriv varje rubrik eller sektion som ett eget inmatningsfält och låt senare semantiska steg använda dessa värden för slutresultatet."
     ),
@@ -84,7 +86,10 @@ def format_create_critic_feedback(issues: tuple[CriticIssue, ...]) -> str | None
                 f"Create critic feedback requires semantic issues; received {issue.id}"
             )
         if issue.id in CREATE_CRITIC_REMEDIATION:
-            remediations.append(CREATE_CRITIC_REMEDIATION[issue.id])
+            translation = CREATE_CRITIC_REMEDIATION[issue.id]
+            remediations.append(
+                translation if translation is not None else issue.remediation
+            )
             continue
         raise ValueError(f"No create-mode critic remediation registered for {issue.id}")
 
