@@ -898,7 +898,7 @@ def test_cases_file_rejects_misspelled_classifier_expectation(tmp_path: Path) ->
     cases_path.write_text(
         json.dumps(
             {
-                "version": 4,
+                "version": 5,
                 "cases": [
                     {
                         "id": "bad-classifier-expectation",
@@ -929,7 +929,7 @@ def test_cases_file_rejects_unsupported_version(tmp_path: Path) -> None:
         encoding="utf-8",
     )
 
-    with raises(ValueError, match="version must be 4"):
+    with raises(ValueError, match="version must be 5"):
         _battle_harness()._read_cases_file(cases_path)
 
 
@@ -941,7 +941,7 @@ def test_cases_file_rejects_duplicate_case_ids_and_prompts(tmp_path: Path) -> No
     ]
     cases_path = tmp_path / "cases.json"
     cases_path.write_text(
-        json.dumps({"version": 4, "cases": duplicate_cases}), encoding="utf-8"
+        json.dumps({"version": 5, "cases": duplicate_cases}), encoding="utf-8"
     )
 
     with raises(ValueError, match="duplicate prompt"):
@@ -949,7 +949,7 @@ def test_cases_file_rejects_duplicate_case_ids_and_prompts(tmp_path: Path) -> No
 
     duplicate_cases[1] = {"id": "case-a", "prompt": "Build another report."}
     cases_path.write_text(
-        json.dumps({"version": 4, "cases": duplicate_cases}), encoding="utf-8"
+        json.dumps({"version": 5, "cases": duplicate_cases}), encoding="utf-8"
     )
 
     with raises(ValueError, match="duplicate case id"):
@@ -961,7 +961,7 @@ def test_cases_file_rejects_misspelled_evidence_posture_key(tmp_path: Path) -> N
     cases_path.write_text(
         json.dumps(
             {
-                "version": 4,
+                "version": 5,
                 "cases": [
                     {
                         "id": "bad-posture-key",
@@ -2057,7 +2057,7 @@ def test_release_receipt_version_defaults_to_v3_and_rejects_other_versions(
     cases_path.write_text(
         json.dumps(
             {
-                "version": 4,
+                "version": 5,
                 "release_gate": {
                     "artifact_schema_version": "ai-builder-live-release.unsupported",
                     "require_clean_source": False,
@@ -4236,7 +4236,7 @@ def test_release_expectation_typos_fail_closed(tmp_path: Path) -> None:
     cases_path.write_text(
         json.dumps(
             {
-                "version": 4,
+                "version": 5,
                 "cases": [
                     {
                         "id": "typo",
@@ -4817,7 +4817,7 @@ def test_case_loader_merges_synthetic_user_profile_with_case_overrides(
     cases_path.write_text(
         json.dumps(
             {
-                "version": 4,
+                "version": 5,
                 "synthetic_user_profiles": {
                     "document_report_owner": {
                         "description": "Owner building a report from documents.",
@@ -4886,7 +4886,7 @@ def test_case_loader_requires_answers_for_plan_required_question_paths(
     harness = _battle_harness()
     cases_path = tmp_path / "cases.json"
     payload = {
-        "version": 4,
+        "version": 5,
         "synthetic_user_profiles": {
             "document_owner": {
                 "description": "Owner who uploads source documents.",
@@ -5161,3 +5161,101 @@ def test_journey_summary_preserves_order_and_marks_reopened_questions() -> None:
         interaction_limit=6,
     )
     assert plan_with_error["outcome_class"] == "plan_with_error"
+
+
+def _verdict(
+    question_id: str,
+    *,
+    preferred: set[str] | None = None,
+    allowed: set[str] | None = None,
+    forbidden: set[str] | None = None,
+    commit_grade: set[str] | None = None,
+) -> tuple[bool, str]:
+    harness = _battle_harness()
+    return harness._first_question_relevance_verdict(
+        question_id,
+        preferred_ids=preferred or set(),
+        allowed_ids=allowed or set(),
+        forbidden_ids=forbidden or set(),
+        first_run_commit_grade_slots=commit_grade or set(),
+    )
+
+
+def test_first_question_asking_a_commit_grade_slot_is_stale() -> None:
+    passed, reason = _verdict(
+        "post_processing_goal",
+        preferred={"post_processing_goal"},
+        commit_grade={"post_processing_goal"},
+    )
+    assert passed is False
+    assert reason == "stale_commit_grade"
+
+
+def test_first_question_prefers_remaining_unresolved_preferred() -> None:
+    passed, reason = _verdict(
+        "terminal_output",
+        preferred={"post_processing_goal", "terminal_output"},
+        commit_grade={"post_processing_goal"},
+    )
+    assert passed is True
+    assert reason == "preferred"
+
+    passed, reason = _verdict(
+        "report_disposition",
+        preferred={"terminal_output"},
+        allowed={"report_disposition"},
+    )
+    assert passed is False
+    assert reason == "preferred_unresolved_remaining"
+
+
+def test_first_question_primary_input_exception_applies() -> None:
+    # The documented product exception: primary input may precede purpose
+    # when purpose was the fixture-preferred slot.
+    passed, reason = _verdict(
+        "primary_runtime_input",
+        preferred={"post_processing_goal"},
+        allowed={"primary_runtime_input"},
+    )
+    assert passed is True
+    assert reason == "primary_input_exception"
+
+
+def test_first_question_allowed_passes_when_no_preferred_remain() -> None:
+    passed, reason = _verdict(
+        "report_disposition",
+        preferred={"post_processing_goal"},
+        allowed={"report_disposition"},
+        commit_grade={"post_processing_goal"},
+    )
+    assert passed is True
+    assert reason == "allowed"
+
+
+def test_first_question_forbidden_and_unclassified_always_fail() -> None:
+    passed, reason = _verdict(
+        "terminal_output",
+        preferred={"post_processing_goal"},
+        forbidden={"terminal_output"},
+    )
+    assert passed is False
+    assert reason == "forbidden"
+
+    passed, reason = _verdict(
+        "mystery_question",
+        preferred={"post_processing_goal"},
+    )
+    assert passed is False
+    assert reason == "unclassified"
+
+
+def test_evaluator_identity_carries_relevance_semantics_version() -> None:
+    harness = _battle_harness()
+    assert harness.QUESTION_RELEVANCE_SEMANTICS_VERSION == 2
+    assert harness.SUPPORTED_CASES_FILE_VERSION == 5
+    identity = harness._suite_evaluator_identity(
+        release_identity={},
+        run_context={},
+        expected_observations=[],
+    )
+    assert identity["question_relevance_semantics_version"] == 2

@@ -1,5 +1,5 @@
 {
-  "version": 4,
+  "version": 5,
   "description": "A Flow AI Builder benchmark for Swedish municipal work. It combines release and architecture coverage with curated cases grounded in municipal services, including Sundsvall's Open ePlatform catalogue and a plan-authoring tjänsteskrivelse family. The cases balance deliberately vague first requests, controlled single-gap interviews, scripted question-to-plan continuations, complete everyday requests, technically explicit contracts, and applied human-review journeys. Expectations measure structured questioning, topology, input ownership, output fields, delivery format, and review placement without relying on prompt-specific golden prose. Run repeated samples to distinguish model variance from product regressions.",
   "synthetic_user_profiles": {
     "audio_source": {

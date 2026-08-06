@@ -31,7 +31,10 @@ JsonObject = dict[str, Any]
 DEFAULT_CASES_FILE = Path(__file__).with_name("ai_builder_api_battle_cases.json")
 DEFAULT_CONFIRM_MESSAGE = "Ja, det stämmer. Bygg planen."
 MAX_INTERACTIONS_PER_CASE = 6
-SUPPORTED_CASES_FILE_VERSION = 4
+SUPPORTED_CASES_FILE_VERSION = 5
+# Bump when the meaning of question-relevance checks changes; receipts
+# across different semantics versions must never be compared.
+QUESTION_RELEVANCE_SEMANTICS_VERSION = 2
 SUPPORTED_RECEIPT_ARTIFACT_VERSION = "ai-builder-live-release.v3"
 
 
@@ -1408,6 +1411,7 @@ def _suite_evaluator_identity(
         for observation in expected_observations
     }
     payload = {
+        "question_relevance_semantics_version": (QUESTION_RELEVANCE_SEMANTICS_VERSION),
         "source_revision": build.get("source_revision"),
         "harness_sha256": build.get("harness_sha256"),
         "cases_sha256": build.get("cases_sha256"),
@@ -5824,6 +5828,73 @@ def _classifier_file_coverage(
     return None
 
 
+def _first_run_commit_grade_slot_names(
+    runs: list[Mapping[str, object]],
+) -> set[str]:
+    """Slot names the FIRST classifier result already resolved commit-grade.
+
+    The first-question rule is state-aware: what the classifier resolved
+    from the opening message is already answered, so asking it again is
+    stale and it no longer counts as an unresolved preferred slot.
+    """
+
+    if not runs:
+        return set()
+    first_run = runs[0]
+    names: set[str] = set()
+    for claim in _mapping_list(first_run.get("slots")):
+        slot_name = _optional_string(claim, "slot_name")
+        if slot_name is None:
+            continue
+        summary = _classifier_claim_summary(first_run, claim)
+        if (
+            summary.get("value") != "unknown"
+            and summary.get("confidence") in {"high", "medium"}
+            and bool(_string_list(summary.get("evidence_quotes")))
+        ):
+            names.add(slot_name)
+    return names
+
+
+def _first_question_relevance_verdict(
+    question_id: str,
+    *,
+    preferred_ids: set[str],
+    allowed_ids: set[str],
+    forbidden_ids: set[str],
+    first_run_commit_grade_slots: set[str],
+) -> tuple[bool, str]:
+    """Semantics v2: judge the first question against resolved state.
+
+    1. Forbidden or unclassified targets always fail.
+    2. Asking a slot the first classifier result already resolved
+       commit-grade is stale and fails.
+    3. Commit-grade slots leave the preferred set; an unresolved
+       primary_runtime_input counts as preferred when purpose was
+       fixture-preferred (the documented primary-input exception).
+    4. While preferred unresolved slots remain the question must target
+       one of them; otherwise any fixture-allowed target passes.
+    """
+
+    if question_id in forbidden_ids:
+        return False, "forbidden"
+    if question_id not in preferred_ids | allowed_ids:
+        return False, "unclassified"
+    if question_id in first_run_commit_grade_slots:
+        return False, "stale_commit_grade"
+    remaining_preferred = preferred_ids - first_run_commit_grade_slots
+    if (
+        "post_processing_goal" in preferred_ids
+        and question_id == "primary_runtime_input"
+    ):
+        return True, "primary_input_exception"
+    if remaining_preferred:
+        if question_id in remaining_preferred:
+            return True, "preferred"
+        return False, "preferred_unresolved_remaining"
+    return True, "allowed"
+
+
 def _classifier_slot_is_commit_grade(
     runs: list[Mapping[str, object]],
     slot_name: str,
@@ -5953,13 +6024,32 @@ def _quality_report(
         relevance_counts = (
             relevance_counts if isinstance(relevance_counts, Mapping) else {}
         )
-        if preferred_question_ids:
+        if preferred_question_ids and question_event_ids:
+            first_run_commit_grade_slots = _first_run_commit_grade_slot_names(
+                _classifier_runs(classifier_diagnostics)
+            )
+            first_passed, first_reason = _first_question_relevance_verdict(
+                str(question_event_ids[0]),
+                preferred_ids=preferred_question_ids,
+                allowed_ids=set(
+                    _string_list(expected.get("allowed_question_event_ids"))
+                ),
+                forbidden_ids=set(
+                    _string_list(expected.get("forbidden_question_event_ids"))
+                ),
+                first_run_commit_grade_slots=first_run_commit_grade_slots,
+            )
             add_check(
                 "first_question_relevance",
-                not question_event_ids
-                or journey.get("first_question_relevance") == "preferred",
-                journey.get("first_question_relevance"),
-                "preferred",
+                first_passed,
+                {
+                    "question_id": question_event_ids[0],
+                    "reason": first_reason,
+                    "first_run_commit_grade_slots": sorted(
+                        first_run_commit_grade_slots
+                    ),
+                },
+                "state-aware preferred-first (semantics v2)",
             )
         add_check(
             "question_relevance_complete",

@@ -189,7 +189,7 @@ def test_case_loader_rejects_runtime_bindings_without_execution(
     invalid_path.write_text(
         json.dumps(
             {
-                "version": 4,
+                "version": 5,
                 "cases": [
                     {
                         "id": "plan-only-with-runtime-files",
