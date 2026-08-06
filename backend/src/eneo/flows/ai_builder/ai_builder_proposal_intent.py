@@ -435,12 +435,8 @@ def _steps_with_misplaced_field_drafts_reattached(
     merged: list[Any] = []
     moved = 0
     for raw_step in raw_steps:
-        is_field_draft = (
-            isinstance(raw_step, dict)
-            and "field_type" in raw_step
-            and "instructions" not in raw_step
-        )
-        if is_field_draft and merged and isinstance(merged[-1], dict):
+        drafts = _misplaced_field_drafts(raw_step)
+        if drafts and merged and isinstance(merged[-1], dict):
             target = cast(dict[str, Any], merged[-1])
             raw_fields = target.get("output_fields")
             fields = (
@@ -448,8 +444,8 @@ def _steps_with_misplaced_field_drafts_reattached(
                 if isinstance(raw_fields, list)
                 else []
             )
-            target["output_fields"] = [*fields, raw_step]
-            moved += 1
+            target["output_fields"] = [*fields, *drafts]
+            moved += len(drafts)
             continue
         merged.append(
             dict(cast(dict[str, Any], raw_step))
@@ -462,6 +458,32 @@ def _steps_with_misplaced_field_drafts_reattached(
             extra={"moved_count": moved},
         )
     return merged
+
+
+def _misplaced_field_drafts(raw_step: Any) -> list[Any]:
+    """Return field drafts a step slot holds, one draft or a nested list.
+
+    A semantic step never declares `field_type`; a structured field draft
+    always does. The model's nesting slips both ways — a single draft in
+    the steps array, or a whole list of them (five live rejections in the
+    2026-08-06 regression run, each costing a repair round).
+    """
+
+    if isinstance(raw_step, dict):
+        payload = cast(dict[str, Any], raw_step)
+        if "field_type" in payload and "instructions" not in payload:
+            return [payload]
+        return []
+    if isinstance(raw_step, list):
+        items = cast(list[Any], raw_step)
+        if items and all(
+            isinstance(item, dict)
+            and "field_type" in cast(dict[str, Any], item)
+            and "instructions" not in cast(dict[str, Any], item)
+            for item in items
+        ):
+            return list(items)
+    return []
 
 
 @cache

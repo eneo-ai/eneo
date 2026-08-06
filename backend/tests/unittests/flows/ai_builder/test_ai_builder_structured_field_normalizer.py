@@ -304,3 +304,48 @@ def test_step_level_assumptions_hoist_to_the_root() -> None:
         "Root-antagande.",
         "Stegets antagande hör hemma i roten.",
     ]
+
+
+def test_nested_field_draft_list_in_steps_reattaches() -> None:
+    # Regression run 2026-08-06: five rejections of "steps.N: Input should
+    # be a valid dictionary" — the model nests a whole LIST of field drafts
+    # in the steps array, not just a single draft.
+    intent = parse_create_flow_intent_arguments(
+        {
+            "flow_name": "Beslutsunderlag",
+            "plan_rationale": "Strukturera underlaget.",
+            "steps": [
+                {
+                    "name": "Strukturera underlag",
+                    "instructions": "Strukturera beslutsunderlaget.",
+                    "output_type": "json",
+                    "output_fields": [_field("decisions")],
+                },
+                [_field("open_questions"), _field("risks")],
+            ],
+        }
+    )
+
+    assert len(intent.steps) == 1
+    assert [field.name for field in intent.steps[0].output_fields or []] == [
+        "decisions",
+        "open_questions",
+        "risks",
+    ]
+
+
+def test_non_field_list_in_steps_still_fails_visibly() -> None:
+    with pytest.raises(ProposalIntentArgumentError):
+        parse_create_flow_intent_arguments(
+            {
+                "flow_name": "Beslutsunderlag",
+                "plan_rationale": "Strukturera underlaget.",
+                "steps": [
+                    {
+                        "name": "Strukturera",
+                        "instructions": "Strukturera underlaget.",
+                    },
+                    ["not a field draft"],
+                ],
+            }
+        )
