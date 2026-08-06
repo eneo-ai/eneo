@@ -349,10 +349,17 @@ def parse_slot_classification_response(
         raw_dict.get("form_intake"),
         classification_input=classification_input,
     )
-    output_schema_fields = _parse_output_schema_fields(
-        raw_dict.get("output_schema_fields"),
-        classification_input=classification_input,
-    )
+    try:
+        output_schema_fields = _parse_output_schema_fields(
+            raw_dict.get("output_schema_fields"),
+            classification_input=classification_input,
+        )
+    except _MalformedOutputSchemaFieldDelta:
+        # A structurally malformed present delta fails the attempt visibly
+        # (parse_failed retries); resolving without the fields was the
+        # silent schema loss the raw capture attributed. Citation-level
+        # refusals keep the established refuse-fields semantics.
+        return None
     example_output_constraints = _parse_example_output_constraints(
         raw_dict.get("example_output_constraints"),
         classification_input=classification_input,
@@ -403,34 +410,40 @@ def _slot_classification_top_level_contract_is_valid(
     return True
 
 
+class _MalformedOutputSchemaFieldDelta(Exception):
+    """A present output_schema_fields delta violated its structure."""
+
+
 def _parse_output_schema_fields(
     raw_value: object,
     *,
     classification_input: SlotClassificationInput,
 ) -> ClassifiedOutputSchemaFieldDelta | None:
-    if not isinstance(raw_value, dict):
+    if raw_value is None:
         return None
+    if not isinstance(raw_value, dict):
+        raise _MalformedOutputSchemaFieldDelta
     item = cast(dict[str, Any], raw_value)
     operation = item.get("operation")
     if operation not in {"update", "clear"}:
-        return None
+        raise _MalformedOutputSchemaFieldDelta
     raw_field_names = item.get("field_names")
     raw_removed_field_names = item.get("removed_field_names")
     if not isinstance(raw_field_names, list) or not isinstance(
         raw_removed_field_names, list
     ):
-        return None
+        raise _MalformedOutputSchemaFieldDelta
     raw_field_name_items = cast(list[object], raw_field_names)
     raw_removed_field_name_items = cast(list[object], raw_removed_field_names)
     if operation == "update" and not (
         raw_field_name_items or raw_removed_field_name_items
     ):
-        return None
+        raise _MalformedOutputSchemaFieldDelta
     if operation == "clear" and (raw_field_name_items or raw_removed_field_name_items):
-        return None
+        raise _MalformedOutputSchemaFieldDelta
     confidence = item.get("confidence")
     if confidence not in {"high", "medium", "low"}:
-        return None
+        raise _MalformedOutputSchemaFieldDelta
     evidence = _parse_classification_evidence(
         item.get("evidence", []),
         classification_input=classification_input,
@@ -665,6 +678,12 @@ def _valid_field_occurrence_kind(
     end_index: int,
 ) -> Literal["quoted", "unquoted"] | None:
     before = text[start_index - 1] if start_index > 0 else None
+    # A cited name may carry JSON shape notation in the source
+    # ("applicant_channels[]"): the notation belongs to the mention, not
+    # its boundary. The model names the bare field; judge the boundary
+    # after the notation.
+    if text[end_index : end_index + 2] in ("[]", "{}"):
+        end_index += 2
     after = text[end_index] if end_index < len(text) else None
     before_is_quote = before is not None and _is_quotation_mark(before)
     after_is_quote = after is not None and _is_quotation_mark(after)

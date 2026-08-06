@@ -2794,3 +2794,69 @@ def test_raw_classifier_capture_writes_pre_parse_content(
     payload = json.loads(files[0].read_text())
     assert payload["content"] == raw
     assert payload["slot_names"] == ["structured_io_contract"]
+
+
+def test_parser_accepts_names_cited_with_shape_notation_in_source() -> None:
+    # Live capture 2026-08-06: the model correctly strips []/{} shape
+    # notation from its field_names while the user's text carries it
+    # ("applicant_channels[]"). The bracket belongs to the cited mention,
+    # not its boundary — rejecting it silently collapsed the whole delta.
+    quote = (
+        "Utdata ska innehålla service_reference, applicant_channels[] "
+        "och submitted_fields{}."
+    )
+    result = parse_slot_classification_response(
+        json.dumps(
+            {
+                **_VALID_CLASSIFICATION_RESPONSE,
+                "output_schema_fields": {
+                    "operation": "update",
+                    "field_names": [
+                        "service_reference",
+                        "applicant_channels",
+                        "submitted_fields",
+                    ],
+                    "removed_field_names": [],
+                    "confidence": "high",
+                    "reason": "Fälten är uppräknade i texten.",
+                    "evidence": [_evidence(quote)],
+                },
+            }
+        ),
+        allowed_slot_values={},
+        classification_input=_classification_input(quote),
+    )
+
+    assert result is not None
+    assert result.output_schema_fields is not None
+    assert result.output_schema_fields.field_names == (
+        "service_reference",
+        "applicant_channels",
+        "submitted_fields",
+    )
+
+
+def test_parser_fails_the_attempt_for_a_malformed_present_delta() -> None:
+    # A present-but-unparseable delta must fail the whole attempt visibly
+    # (parse_failed retries) instead of resolving without the fields — the
+    # silent collapse is what made live schema loss unattributable.
+    quote = "Utdata ska innehålla service_reference."
+    result = parse_slot_classification_response(
+        json.dumps(
+            {
+                **_VALID_CLASSIFICATION_RESPONSE,
+                "output_schema_fields": {
+                    "operation": "update",
+                    "field_names": 42,
+                    "removed_field_names": [],
+                    "confidence": "high",
+                    "reason": "Trasig delta.",
+                    "evidence": [_evidence(quote)],
+                },
+            }
+        ),
+        allowed_slot_values={},
+        classification_input=_classification_input(quote),
+    )
+
+    assert result is None
