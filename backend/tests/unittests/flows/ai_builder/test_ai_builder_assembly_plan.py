@@ -437,7 +437,9 @@ def test_plan_rejects_incomplete_source_reader_contract() -> None:
         )
 
 
-def test_plan_rejects_localized_output_field_schema_keys() -> None:
+def test_plan_admits_localized_output_field_schema_keys() -> None:
+    # Identity is folded, wording is the author's: a Swedish key survives
+    # verbatim instead of being policed into an English lexicon.
     source_reader = _text_step(
         name="Extract facts",
         input_type=InputType.DOCUMENT,
@@ -445,8 +447,9 @@ def test_plan_rejects_localized_output_field_schema_keys() -> None:
         output_fields=(_field("sammanfattning"),),
     )
 
-    with pytest.raises(ValueError, match="ASCII English schema keys"):
-        _plan(steps=(source_reader,))
+    plan = _plan(steps=(source_reader,))
+
+    assert plan.steps[0].output_fields[0].name == "sammanfattning"
 
 
 def test_plan_rejects_future_previous_output_refs() -> None:

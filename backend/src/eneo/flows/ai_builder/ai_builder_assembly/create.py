@@ -282,7 +282,6 @@ def try_compile_create_intent_with_assembly(
     chain_steps: tuple[str, ...],
     aggregation_intent: AggregationIntent,
     terminal_output_schema: JsonObject | None,
-    user_named_output_keys: frozenset[str],
     source_reader_required_fields: tuple[SourceCaptureField, ...],
     result_contract_output_fields: tuple[StructuredFieldDraft, ...],
     result_contract_required_roles: tuple[ResultOutputFieldRole, ...],
@@ -306,7 +305,6 @@ def try_compile_create_intent_with_assembly(
             chain_steps=chain_steps,
             aggregation_intent=aggregation_intent,
             terminal_output_schema=terminal_output_schema,
-            user_named_output_keys=user_named_output_keys,
             source_reader_required_fields=source_reader_required_fields,
             result_contract_output_fields=result_contract_output_fields,
             result_contract_required_roles=result_contract_required_roles,
@@ -337,7 +335,6 @@ def _assemble_create_intent(
     chain_steps: tuple[str, ...],
     aggregation_intent: AggregationIntent,
     terminal_output_schema: JsonObject | None,
-    user_named_output_keys: frozenset[str],
     source_reader_required_fields: tuple[SourceCaptureField, ...],
     result_contract_output_fields: tuple[StructuredFieldDraft, ...],
     result_contract_required_roles: tuple[ResultOutputFieldRole, ...],
@@ -630,7 +627,6 @@ def _assemble_create_intent(
         completed_steps,
         terminal_output_schema=terminal_output_schema,
         required_fields=source_reader_required_fields,
-        user_named_output_keys=user_named_output_keys,
     )
     section_contracts = (
         requested_output_section_contracts(requested_output_sections)
@@ -670,7 +666,6 @@ def _assemble_create_intent(
         form_fields=admitted_form_fields,
         steps=completed_steps,
         terminal_output_schema=terminal_output_schema,
-        user_named_output_keys=user_named_output_keys,
         source_reader_required_fields=source_reader_required_fields,
         aggregation_intent=aggregation_intent,
         ui_language=ui_language,
@@ -1438,7 +1433,6 @@ def _complete_planned_source_reader_contracts(
     *,
     terminal_output_schema: JsonObject | None,
     required_fields: tuple[SourceCaptureField, ...],
-    user_named_output_keys: frozenset[str] = frozenset(),
 ) -> tuple[PlannedStep, ...]:
     source_reader_indexes = tuple(
         index
@@ -1500,7 +1494,6 @@ def _complete_planned_source_reader_contracts(
             planned_step.output_fields,
             required_fields=tuple(fields),
             runtime_input_execution_mode=(planned_step.runtime_input_execution_mode),
-            user_named_output_keys=user_named_output_keys,
         )
         if completed_fields == planned_step.output_fields:
             continue

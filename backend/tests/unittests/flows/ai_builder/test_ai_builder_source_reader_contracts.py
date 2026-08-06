@@ -50,7 +50,10 @@ def test_source_reader_completion_does_not_nest_existing_array_container() -> No
     ]
 
 
-def test_source_reader_completion_canonicalizes_source_item_fields() -> None:
+def test_source_reader_completion_preserves_names_and_dedupes_by_identity() -> None:
+    # Identity is folded, wording is the author's: names survive verbatim,
+    # duplicate identities collapse, and a required capture field is
+    # satisfied by any synonym instead of appended as a shadow.
     completed = complete_structured_source_reader_fields(
         (
             _field(
@@ -73,15 +76,13 @@ def test_source_reader_completion_canonicalizes_source_item_fields() -> None:
     assert [field.name for field in documents_field.item_fields or []] == [
         "source_label",
         "title",
-        "date_or_year",
-        "author_or_sender",
-        "summary",
+        "date",
+        "author",
+        "brief_summary",
     ]
 
 
-def test_source_reader_completion_canonicalizes_author_or_source_without_losing_identity() -> (
-    None
-):
+def test_source_reader_completion_accepts_declared_source_identity_field() -> None:
     completed = complete_structured_source_reader_fields(
         (
             _field(
@@ -98,12 +99,12 @@ def test_source_reader_completion_canonicalizes_author_or_source_without_losing_
 
     documents_field = completed[0]
     assert [field.name for field in documents_field.item_fields or []] == [
-        "source_label",
-        "author_or_sender",
+        "source",
+        "author_or_source",
     ]
 
 
-def test_source_reader_completion_canonicalizes_obligation_variants() -> None:
+def test_source_reader_completion_dedupes_obligation_variants_by_identity() -> None:
     completed = complete_structured_source_reader_fields(
         (
             _field(
@@ -124,9 +125,9 @@ def test_source_reader_completion_canonicalizes_obligation_variants() -> None:
     documents_field = completed[0]
     assert [field.name for field in documents_field.item_fields or []] == [
         "source_label",
-        "summary",
-        "requirements",
-        "confidentiality",
+        "topic_summary",
+        "key_requirements",
+        "sensitive_parts",
     ]
 
 
@@ -149,7 +150,7 @@ def test_source_reader_completion_materializes_bare_document_array_items() -> No
     assert structured_fields_have_document_items(completed)
 
 
-def test_source_reader_completion_canonicalizes_localized_document_array() -> None:
+def test_source_reader_completion_preserves_localized_document_array_items() -> None:
     completed = complete_structured_source_reader_fields(
         (
             _field(
@@ -170,10 +171,10 @@ def test_source_reader_completion_canonicalizes_localized_document_array() -> No
     assert documents_field.name == "documents"
     assert [field.name for field in documents_field.item_fields or []] == [
         "source_label",
-        "title",
-        "document_type",
-        "category",
-        "conclusions",
+        "titel",
+        "dokumenttyp",
+        "kategori",
+        "slutsatser",
     ]
     assert structured_fields_have_document_items(completed)
 

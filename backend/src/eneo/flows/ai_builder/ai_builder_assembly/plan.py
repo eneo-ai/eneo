@@ -56,7 +56,6 @@ UnderlagChannel = Literal[
     "field_refs",
     "fan_in",
 ]
-_LOCALIZED_SCHEMA_KEYS = frozenset({"sammanfattning"})
 
 
 @dataclass(frozen=True, slots=True)
@@ -127,7 +126,6 @@ class FlowAssemblyPlan:
     source_reader_required_fields: tuple[SourceCaptureField, ...]
     aggregation_intent: AggregationIntent
     ui_language: str | None
-    user_named_output_keys: frozenset[str] = frozenset()
     requested_output_section_contracts: tuple[RequestedOutputSectionContract, ...] = ()
     document_report_section_source: DocumentReportSectionSource | None = None
 
@@ -156,10 +154,6 @@ class FlowAssemblyPlan:
                 "FlowAssemblyPlan source_reader_required_fields require a "
                 "source-reader planned step."
             )
-        _validate_output_field_schema_keys(
-            self.steps,
-            user_named_output_keys=self.user_named_output_keys,
-        )
         _validate_source_reader_contracts_complete(
             steps=self.steps,
             terminal_output_schema=self.terminal_output_schema,
@@ -426,29 +420,6 @@ def _validate_source_reader_contracts_complete(
         )
 
 
-def _validate_output_field_schema_keys(
-    steps: tuple[PlannedStep, ...],
-    *,
-    user_named_output_keys: frozenset[str] = frozenset(),
-) -> None:
-    # A key the user explicitly named (prose or declared schema evidence)
-    # wins verbatim: the critic requires its survival, so the localized-key
-    # policy must not reject it.
-    invalid_paths = [
-        f"{step.name}.{field_path}"
-        for step in steps
-        for field_path, field_name in _structured_field_paths(step.output_fields)
-        if not _is_ascii_english_schema_key(field_name)
-        and field_name.casefold() not in user_named_output_keys
-    ]
-    if invalid_paths:
-        raise ValueError(
-            "FlowAssemblyPlan output field keys must be ASCII English schema "
-            "keys; put localized labels in descriptions instead: "
-            f"{', '.join(invalid_paths)}."
-        )
-
-
 def _structured_field_paths(
     fields: tuple[StructuredFieldDraft, ...] | list[StructuredFieldDraft],
     *,
@@ -466,10 +437,6 @@ def _structured_field_paths(
         if nested_fields:
             paths.extend(_structured_field_paths(nested_fields, parent_path=field_path))
     return tuple(paths)
-
-
-def _is_ascii_english_schema_key(field_name: str) -> bool:
-    return field_name.isascii() and field_name.casefold() not in _LOCALIZED_SCHEMA_KEYS
 
 
 def _validate_per_source_reader_contracts(steps: tuple[PlannedStep, ...]) -> None:

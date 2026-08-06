@@ -593,8 +593,8 @@ def test_plan_proposal_prompt_identifies_runtime_metadata_as_compiler_policy():
     assert "do not invent input_fields from defaults" in prompt
     assert "explicit no-extra-fields decision" in prompt
     assert "source-reading JSON output_fields" in prompt
-    assert "JSON output fields not fixed by schema evidence" in prompt
-    assert "ASCII English keys" in prompt
+    assert "folded from the user's own wording" in prompt
+    assert "keep key names the user asked for" in prompt
     assert "Do not leave user-named facts only in instructions" in prompt
     assert "generic facts/notes fields" in prompt
     assert "instead of introducing new source-derived facts only in prose" in prompt

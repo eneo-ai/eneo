@@ -208,12 +208,10 @@ def complete_structured_source_reader_fields(
     *,
     required_fields: tuple[SourceCaptureField, ...],
     runtime_input_execution_mode: RuntimeInputExecutionMode = "single_call",
-    user_named_output_keys: frozenset[str] = frozenset(),
 ) -> tuple[StructuredFieldDraft, ...]:
     completed = _add_missing_source_reader_fields(
         list(fields),
         required_fields=_dedupe_capture_fields(list(required_fields)),
-        user_named_output_keys=user_named_output_keys,
     )
     return tuple(
         _with_source_identity_contract(
@@ -293,12 +291,8 @@ def _add_missing_source_reader_fields(
     fields: list[StructuredFieldDraft],
     *,
     required_fields: tuple[SourceCaptureField, ...],
-    user_named_output_keys: frozenset[str] = frozenset(),
 ) -> list[StructuredFieldDraft]:
-    fields = _normalize_source_reader_fields(
-        fields,
-        user_named_output_keys=user_named_output_keys,
-    )
+    fields = _normalize_source_reader_fields(fields)
     missing_fields = [
         field
         for field in required_fields
@@ -321,7 +315,6 @@ def _add_missing_source_reader_fields(
                         }
                     )
                 ],
-                user_named_output_keys=user_named_output_keys,
             )
         if field.field_type == "object" and field.fields:
             return _normalize_source_reader_fields(
@@ -335,12 +328,10 @@ def _add_missing_source_reader_fields(
                         }
                     )
                 ],
-                user_named_output_keys=user_named_output_keys,
             )
 
     return _normalize_source_reader_fields(
         _append_structured_leaf_fields(fields, missing_fields=missing_fields),
-        user_named_output_keys=user_named_output_keys,
     )
 
 
@@ -348,7 +339,6 @@ def _normalize_source_reader_fields(
     fields: list[StructuredFieldDraft],
     *,
     parent_name: str | None = None,
-    user_named_output_keys: frozenset[str] = frozenset(),
 ) -> list[StructuredFieldDraft]:
     normalized_fields: list[StructuredFieldDraft] = []
     seen: set[str] = set()
@@ -358,10 +348,7 @@ def _normalize_source_reader_fields(
             parent_name=parent_name,
         ):
             continue
-        normalized_field = _normalize_source_reader_field(
-            field,
-            user_named_output_keys=user_named_output_keys,
-        )
+        normalized_field = _normalize_source_reader_field(field)
         key = _source_capture_field_key(normalized_field.name)
         if key in seen:
             continue
@@ -372,35 +359,28 @@ def _normalize_source_reader_fields(
 
 def _normalize_source_reader_field(
     field: StructuredFieldDraft,
-    *,
-    user_named_output_keys: frozenset[str] = frozenset(),
 ) -> StructuredFieldDraft:
-    # A key the user explicitly named wins verbatim; canonical aliasing is
-    # for model-invented names only.
-    field_name = (
-        field.name
-        if field.name.casefold() in user_named_output_keys
-        else _canonical_source_reader_field_name(field.name)
-    )
+    # Identity is folded, wording is the author's: the model's chosen field
+    # names survive verbatim, and required-capture satisfaction is decided
+    # by the symmetric canonical match in `_field_name_matches_required_leaf`.
+    # Only the per-source document container is renamed, because "documents"
+    # is a structural runtime contract, not a language preference.
     is_source_document_array = (
         field.field_type == "array"
         and _field_name_is_source_document_container(field.name)
     )
-    if is_source_document_array:
-        field_name = "documents"
+    field_name = "documents" if is_source_document_array else field.name
     updates: dict[str, object] = {"name": field_name}
     if field.field_type == "object" and field.fields:
         updates["fields"] = _normalize_source_reader_fields(
             field.fields,
             parent_name=field_name,
-            user_named_output_keys=user_named_output_keys,
         )
     if field.field_type == "array":
         item_fields = (
             _normalize_source_reader_fields(
                 field.item_fields,
                 parent_name=field_name,
-                user_named_output_keys=user_named_output_keys,
             )
             if field.item_fields
             else []
@@ -410,52 +390,6 @@ def _normalize_source_reader_field(
         if item_fields:
             updates["item_fields"] = item_fields
     return field.model_copy(update=updates)
-
-
-def _canonical_source_reader_field_name(field_name: str) -> str:
-    tokens = _source_reader_field_tokens(field_name)
-    if tokens == _DATE_TOKENS:
-        return "date_or_year"
-    if tokens == _AUTHOR_SOURCE_TOKENS or (
-        tokens and tokens <= _AUTHOR_OR_SENDER_TOKENS
-    ):
-        return "author_or_sender"
-    if tokens in _TITLE_TOKEN_SETS:
-        return "title"
-    if tokens in _DOCUMENT_TYPE_TOKEN_SETS:
-        return "document_type"
-    if tokens == _CATEGORY_TOKENS:
-        return "category"
-    if "conclusion" in tokens and tokens <= (
-        _CONCLUSION_TOKENS | _CONCLUSION_MODIFIER_TOKENS
-    ):
-        return "conclusions"
-    if tokens == _SUMMARY_TOKENS or (
-        "summary" in tokens and tokens <= (_SUMMARY_MODIFIER_TOKENS | _SUMMARY_TOKENS)
-    ):
-        return "summary"
-    if "requirement" in tokens and tokens <= (
-        _REQUIREMENT_TOKENS | _REQUIREMENT_MODIFIER_TOKENS
-    ):
-        return "requirements"
-    if "confidentiality" in tokens and tokens <= (
-        _CONFIDENTIALITY_TOKENS | _CONFIDENTIALITY_MODIFIER_TOKENS
-    ):
-        return "confidentiality"
-    if tokens in _SOURCE_IDENTITY_TOKENS:
-        return "source_label"
-    return field_name
-
-
-def _source_reader_field_tokens(field_name: str) -> frozenset[str]:
-    normalized = normalize_discovery_text(
-        field_name.replace("_", " ").replace("-", " ")
-    )
-    return frozenset(
-        _SOURCE_CAPTURE_FIELD_TOKEN_ALIASES.get(token, token)
-        for token in normalized.split()
-        if token and token != "or"
-    )
 
 
 def _is_self_nested_container_field(field_name: str, *, parent_name: str) -> bool:
@@ -471,11 +405,15 @@ def _is_self_nested_container_field(field_name: str, *, parent_name: str) -> boo
 def _ensure_source_label_field(
     fields: list[StructuredFieldDraft],
 ) -> list[StructuredFieldDraft]:
-    existing_source_labels = [field for field in fields if field.name == "source_label"]
+    existing_source_labels = [
+        field
+        for field in fields
+        if _source_capture_field_key(field.name) == "source_label"
+    ]
     if existing_source_labels:
         return [
             existing_source_labels[0],
-            *(field for field in fields if field.name != "source_label"),
+            *(field for field in fields if field not in existing_source_labels),
         ]
     return [
         StructuredFieldDraft(
@@ -640,6 +578,8 @@ def _source_capture_field_key(value: str) -> str:
         for token in normalized.split()
     )
     token_set = frozenset(tokens)
+    if token_set in _SOURCE_IDENTITY_TOKENS:
+        return "source_label"
     if token_set in _TITLE_TOKEN_SETS:
         return "title"
     if token_set in _DOCUMENT_TYPE_TOKEN_SETS:

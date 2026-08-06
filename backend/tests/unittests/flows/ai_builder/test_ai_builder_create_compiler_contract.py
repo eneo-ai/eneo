@@ -3872,19 +3872,17 @@ def test_document_reader_contract_canonicalizes_items_and_source_scope() -> None
         "source_label",
         "source_file_id",
         "title",
-        "date_or_year",
-        "author_or_sender",
+        "date",
+        "author",
         "summary",
     ]
-    assert "sammanfattning" not in item_properties
     assert "documents" not in item_properties
     reader_instructions = reader_step.assistant_spec.instructions
     assert "körs en gång per uppladdad källa" in reader_instructions
     assert "source_label" not in reader_instructions
     assert "source_file_id" not in reader_instructions
     assert (
-        "Allowed fields for items of documents: title, date_or_year, "
-        "author_or_sender, summary."
+        "Allowed fields for items of documents: title, date, author, summary."
     ) in reader_instructions
     assert (
         "Allowed fields for items of documents: source_label" not in reader_instructions
@@ -5522,8 +5520,8 @@ def test_single_source_text_report_materializes_missing_reader() -> None:
     assert reader_step.output_type == OutputType.JSON
     assert reader_step.output_contract is not None
     assert sorted(reader_step.output_contract["properties"]) == [
-        "summary",
-        "title",
+        "document_title",
+        "short_summary",
     ]
     assert writer_step.input_source == InputSource.PREVIOUS_STEP
     assert writer_step.output_type == OutputType.TEXT
@@ -6477,11 +6475,11 @@ def test_only_declared_schema_evidence_pins_the_terminal_contract() -> None:
     assert declared_context.terminal_output_schema == prose_schema
 
 
-def test_user_named_localized_keys_are_admitted_and_others_still_reject() -> None:
-    # The user asked for Swedish JSON keys in prose; the critic demands they
-    # survive, so the localized-key lexicon must not reject exactly those
-    # names (live builder_error, simple_document_metadata_json 2026-08-06).
-    # Localized keys the user never named keep failing closed.
+def test_localized_keys_are_admitted_without_a_lexicon() -> None:
+    # Identity is folded, wording is the author's: Swedish keys survive
+    # verbatim whether or not the user named them explicitly. The localized
+    # key lexicon and its user-named exemption threading are gone (live
+    # builder_error, simple_document_metadata_json 2026-08-06).
     state = PlanningState.empty()
     state.resolved_slots = {
         "primary_runtime_input": _slot("primary_runtime_input", "documents"),
@@ -6540,7 +6538,7 @@ def test_user_named_localized_keys_are_admitted_and_others_still_reject() -> Non
     contract_names = set(schema_leaf_property_names(compiled.steps[-1].output_contract))
     assert {"sammanfattning", "dokumenttyp"} <= contract_names
 
-    # A localized key the user never named keeps failing closed.
+    # A localized key the user never named survives just the same.
     state.output_schema_evidence = build_schema_evidence(
         json_schema={"type": "object", "properties": {"dokumenttyp": {}}},
         source="prose_field_names",
@@ -6549,11 +6547,12 @@ def test_user_named_localized_keys_are_admitted_and_others_still_reject() -> Non
     )
     unhinted_context = create_compile_context_from_planning_state(state)
     assert unhinted_context is not None
-    with pytest.raises(AIBuilderArchitectureError):
-        compile_create_intent_to_spec(
-            intent_with_fields(["dokumenttyp", "sammanfattning"]),
-            context=unhinted_context,
-        )
+    compiled = compile_create_intent_to_spec(
+        intent_with_fields(["dokumenttyp", "sammanfattning"]),
+        context=unhinted_context,
+    )
+    contract_names = set(schema_leaf_property_names(compiled.steps[-1].output_contract))
+    assert {"sammanfattning", "dokumenttyp"} <= contract_names
 
 
 def _compare_json_intent(*, with_fields: bool) -> object:
