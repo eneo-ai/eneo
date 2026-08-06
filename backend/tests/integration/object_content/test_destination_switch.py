@@ -32,6 +32,7 @@ from eneo.object_content.object_store_connection import (
     ObjectStoreConnectionError,
     ObjectStoreConnectionInput,
     ObjectStoreConnectionService,
+    ObjectStoreDestinationAlreadyBound,
     ObjectStoreDestinationCopyIncomplete,
     ObjectStoreMovesNotPaused,
     ObjectStoreNewWritesNotRedirected,
@@ -244,7 +245,9 @@ async def test_switch_serves_copied_content_and_switches_back(
         ).one()
     assert cycle_facts == (None, None)
     assert switched.bucket == real_unpaired_object_store.settings.bucket
-    assert switched.revision == 2
+    # A switch spends two generations: one retires the work running against
+    # the source before it is counted, one commits the swap.
+    assert switched.revision == 3
     # The mutation carries both projections, so a caller never has to read the
     # archived row again after the switch has already committed.
     assert switch.previous.bucket == real_object_store.settings.bucket
@@ -282,7 +285,7 @@ async def test_switch_serves_copied_content_and_switches_back(
     # Switch back to the archived destination, reusing its stored credentials.
     restored = await service.switch_back(actor_user_id=actor)
     assert restored.active.bucket == real_object_store.settings.bucket
-    assert restored.active.revision == 3
+    assert restored.active.revision == 5
     assert restored.previous.bucket == real_unpaired_object_store.settings.bucket
 
 
@@ -582,6 +585,127 @@ async def test_switch_refuses_a_target_missing_stored_objects(
             _connection_input(real_unpaired_object_store),
             actor_user_id=actor,
         )
+
+
+async def test_verification_cost_follows_stored_objects_not_the_target(
+    object_content_database: DatabaseSessionManager,
+    real_object_store: RealObjectStore,
+    real_unpaired_object_store: RealObjectStore,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A hostile or huge candidate cannot make Eneo hold its inventory.
+
+    The candidate is an endpoint an administrator names, so what it returns
+    is not this deployment's business: completeness is driven from the keys
+    Eneo stores, and asking about them is all the candidate can cost.
+    """
+    service = _service(object_content_database, real_object_store)
+    actor = await _any_user_id(object_content_database)
+    created = await service.create(
+        _connection_input(real_object_store), actor_user_id=actor
+    )
+    await ensure_store_binding_ready(
+        object_content_database,
+        service.settings_for(created),
+        real_object_store.store,
+    )
+    await _select_inline_writes(object_content_database)
+
+    source_settings = service.settings_for(created)
+    source_store = S3ObjectStore(source_settings)
+    payload = b"one-copied-object"
+    try:
+        object_key = await _seed_remote_content(
+            object_content_database, source_settings, source_store, payload
+        )
+    finally:
+        await source_store.close()
+    await _copy_object(
+        real_unpaired_object_store,
+        object_key,
+        payload,
+        deployment_id=created.deployment_id,
+    )
+
+    listings = 0
+    original_list = S3ObjectStore.list_object_page
+
+    async def count_listings(self, **kwargs):  # type: ignore[no-untyped-def]
+        nonlocal listings
+        listings += 1
+        return await original_list(self, **kwargs)
+
+    monkeypatch.setattr(S3ObjectStore, "list_object_page", count_listings)
+    switch = await service.replace_destination(
+        _connection_input(real_unpaired_object_store),
+        actor_user_id=actor,
+    )
+    monkeypatch.undo()
+
+    assert switch.active.bucket == real_unpaired_object_store.settings.bucket
+    assert listings == 0, "verification must not enumerate the candidate bucket"
+
+
+async def test_a_second_switch_cannot_overwrite_a_live_candidate(
+    object_content_database: DatabaseSessionManager,
+    real_object_store: RealObjectStore,
+    real_unpaired_object_store: RealObjectStore,
+    real_spare_object_store: RealObjectStore,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Two changes at once must not leave one bucket's marker unrecoverable.
+
+    The candidate record is the only trace of a bucket whose marker is about
+    to be written, so the second attempt is refused instead of replacing it.
+    """
+    service = _service(object_content_database, real_object_store)
+    actor = await _any_user_id(object_content_database)
+    created = await service.create(
+        _connection_input(real_object_store), actor_user_id=actor
+    )
+    await ensure_store_binding_ready(
+        object_content_database,
+        service.settings_for(created),
+        real_object_store.store,
+    )
+    await _select_inline_writes(object_content_database)
+
+    class SimulatedProcessLoss(BaseException):
+        pass
+
+    original_create = S3ObjectStore.create_binding
+
+    async def lose_process_after_marker(self, creation):  # type: ignore[no-untyped-def]
+        await original_create(self, creation)
+        raise SimulatedProcessLoss("the worker died before the swap committed")
+
+    monkeypatch.setattr(S3ObjectStore, "create_binding", lose_process_after_marker)
+    with pytest.raises(SimulatedProcessLoss):
+        await service.replace_destination(
+            _connection_input(real_unpaired_object_store),
+            actor_user_id=actor,
+        )
+    monkeypatch.undo()
+
+    # A second attempt whose own release could not reach the claimed bucket
+    # must not silently take the slot from it.
+    async def unreachable(self, binding_id):  # type: ignore[no-untyped-def]
+        raise ObjectStoreUnavailableError("injected release failure")
+
+    monkeypatch.setattr(S3ObjectStore, "remove_binding", unreachable)
+    with pytest.raises(ObjectStoreDestinationAlreadyBound):
+        await service.replace_destination(
+            _connection_input(real_spare_object_store),
+            actor_user_id=actor,
+        )
+    monkeypatch.undo()
+
+    async with object_content_database.session() as session, session.begin():
+        candidate = await session.get(
+            ObjectStoreConnections, TEMPORARY_DESTINATION_SLOT
+        )
+        assert candidate is not None
+        assert candidate.bucket == real_unpaired_object_store.settings.bucket
 
 
 async def test_switch_refuses_while_a_previous_destination_is_archived(

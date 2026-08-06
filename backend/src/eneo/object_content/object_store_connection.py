@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections.abc import AsyncGenerator, Awaitable, Callable
+from collections.abc import AsyncGenerator, Awaitable, Callable, Sequence
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import datetime
@@ -51,6 +51,7 @@ from eneo.object_content.s3_object_store import (
     ObjectStoreError,
     ObjectStoreFailureKind,
     ObjectStoreIntegrityError,
+    ObjectStoreNotFoundError,
     ObjectStoreProbeCleanupError,
     ObjectStoreUnavailableError,
     S3ObjectStore,
@@ -80,6 +81,7 @@ _SERVED_REMOTE_CONTENT = or_(
     ),
 )
 _VERIFICATION_PAGE_SIZE = 1000
+_VERIFICATION_CONCURRENCY = 16
 
 _PROBE_BODY = b"eneo-object-store-connection-probe-v1\n"
 _PROBE_MEDIA_TYPE = "application/octet-stream"
@@ -720,14 +722,20 @@ class ObjectStoreConnectionService:
         )
 
         try:
-            verified_since = await self._require_target_holds_every_object(settings)
+            # Freeze the source before counting it. Advancing the generation
+            # takes the same exclusive lock the write fence reads under, so
+            # remote work admitted earlier either commits before this point
+            # (and is therefore part of what gets verified) or fails its own
+            # generation check afterwards. Comparing timestamps could not
+            # order these: a transaction's now() predates its commit.
+            fenced = await self._advance_generation(expected_revision=stored.revision)
+            await self._require_target_holds_every_object(settings)
             return await self._commit_switch(
                 candidate,
                 settings=settings,
                 actor_user_id=actor_user_id,
-                stored=stored,
+                stored=fenced,
                 require_previous_revision=require_previous_revision,
-                verified_since=verified_since,
             )
         except (
             ObjectStoreDestinationSwitchBlocked,
@@ -756,7 +764,6 @@ class ObjectStoreConnectionService:
         actor_user_id: UUID,
         stored: StoredObjectStoreConnection,
         require_previous_revision: int | None,
-        verified_since: datetime,
     ) -> DestinationSwitch:
         access_key_id_encrypted = self._encryption.encrypt(
             candidate.access_key_id.get_secret_value()
@@ -775,17 +782,6 @@ class ObjectStoreConnectionService:
                     "The object-store connection changed while it was being tested"
                 )
             await self._require_switchable(session)
-            # Close the window between proving the copy complete and swapping:
-            # anything stored since is on the source only.
-            await self._require_no_remote_keys_since(
-                session,
-                archived_at=verified_since,
-                error=ObjectStoreDestinationCopyIncomplete,
-                detail=(
-                    "Objects were stored while the new destination was being "
-                    "verified; copy them across and try again"
-                ),
-            )
 
             previous = await session.scalar(
                 select(ObjectStoreConnections)
@@ -933,24 +929,50 @@ class ObjectStoreConnectionService:
         if new_keys:
             raise error(detail)
 
+    async def _advance_generation(
+        self,
+        *,
+        expected_revision: int,
+    ) -> StoredObjectStoreConnection:
+        """Retire the generation in-flight remote work is running under.
+
+        The exclusive lock this takes is the counterpart of the shared lock
+        every durable remote-intent transaction reads the revision under, so
+        after this commits no earlier work can still make itself durable.
+        """
+        async with self._transaction(mutation=True) as session:
+            row = await session.scalar(
+                select(ObjectStoreConnections)
+                .where(ObjectStoreConnections.id == ACTIVE_DESTINATION_SLOT)
+                .with_for_update()
+            )
+            if row is None or row.revision != expected_revision:
+                raise ObjectStoreConnectionConflict(
+                    "The object-store connection changed while it was being tested"
+                )
+            row.revision = row.revision + 1
+            await session.flush()
+            await session.refresh(row)
+            return _stored(row)
+
     async def _require_target_holds_every_object(
         self,
         settings: ObjectContentSettings,
-    ) -> datetime:
+    ) -> None:
         """Prove the candidate already holds every key this deployment serves.
 
         Eneo never sees the operator's copy, so timing rules cannot establish
         that the copy is current: quiescence can be interrupted and restored,
-        and a copy can predate work that followed it. Comparing the candidate's
-        own inventory against the keys the deployment must serve settles it
-        directly, and also catches the far more common accident of a copy that
-        silently covered nothing.
+        and a copy can predate work that followed it. Asking the candidate for
+        each key the deployment must serve settles it directly, and also
+        catches the far more common accident of a copy that silently covered
+        nothing.
 
-        Returns the instant the comparison started, so the committing
-        transaction can refuse anything stored after it.
+        The work is driven from the database side and paged, so both the
+        request count and the memory held are bounded by what this deployment
+        stores — never by what the candidate endpoint chooses to return.
         """
         async with self._transaction() as session:
-            verified_since = await session.scalar(select(func.now()))
             expected_total = await session.scalar(
                 select(func.count())
                 .select_from(ObjectStoreObjects)
@@ -959,58 +981,65 @@ class ObjectStoreConnectionService:
                 )
                 .where(_SERVED_REMOTE_CONTENT)
             )
-        assert verified_since is not None
         if not expected_total:
-            return verified_since
+            return
 
-        observed: set[str] = set()
+        missing = 0
+        last_key = ""
         store = self._store_factory(self._probe_settings(settings))
         try:
-            continuation_token: str | None = None
             while True:
-                page = await store.list_object_page(
-                    continuation_token=continuation_token
-                )
-                observed.update(remote.key for remote in page.objects)
-                continuation_token = page.next_token
-                if continuation_token is None:
+                async with self._transaction() as session:
+                    keys = (
+                        await session.scalars(
+                            select(ObjectStoreObjects.object_key)
+                            .join(
+                                ObjectContents,
+                                ObjectContents.id == ObjectStoreObjects.content_id,
+                            )
+                            .where(
+                                _SERVED_REMOTE_CONTENT,
+                                ObjectStoreObjects.object_key > last_key,
+                            )
+                            .order_by(ObjectStoreObjects.object_key)
+                            .limit(_VERIFICATION_PAGE_SIZE)
+                        )
+                    ).all()
+                if not keys:
                     break
+                missing += await self._count_absent(store, keys)
+                last_key = keys[-1]
         except ObjectStoreUnavailableError as error:
             self._raise_probe_error(error)
             raise
         finally:
             await store.close()
 
-        missing = 0
-        last_key = ""
-        while True:
-            async with self._transaction() as session:
-                keys = (
-                    await session.scalars(
-                        select(ObjectStoreObjects.object_key)
-                        .join(
-                            ObjectContents,
-                            ObjectContents.id == ObjectStoreObjects.content_id,
-                        )
-                        .where(
-                            _SERVED_REMOTE_CONTENT,
-                            ObjectStoreObjects.object_key > last_key,
-                        )
-                        .order_by(ObjectStoreObjects.object_key)
-                        .limit(_VERIFICATION_PAGE_SIZE)
-                    )
-                ).all()
-            if not keys:
-                break
-            missing += sum(1 for key in keys if key not in observed)
-            last_key = keys[-1]
-
         if missing:
             raise ObjectStoreDestinationCopyIncomplete(
                 f"The new destination is missing {missing} of {expected_total} "
                 "stored objects; complete the copy and try again"
             )
-        return verified_since
+
+    async def _count_absent(
+        self,
+        store: S3ObjectStore,
+        keys: Sequence[str],
+    ) -> int:
+        """Count how many of one page's keys the candidate does not hold."""
+        absent = 0
+        for start in range(0, len(keys), _VERIFICATION_CONCURRENCY):
+            batch = keys[start : start + _VERIFICATION_CONCURRENCY]
+            outcomes = await asyncio.gather(
+                *(store.head(key) for key in batch),
+                return_exceptions=True,
+            )
+            for outcome in outcomes:
+                if isinstance(outcome, ObjectStoreNotFoundError):
+                    absent += 1
+                elif isinstance(outcome, BaseException):
+                    raise outcome
+        return absent
 
     async def _release_stale_candidate(
         self,
@@ -1053,9 +1082,6 @@ class ObjectStoreConnectionService:
             await store.close()
 
         async with self._transaction(mutation=True) as session:
-            await StoreBindingRepository(session).clear_slot(
-                slot=TEMPORARY_DESTINATION_SLOT
-            )
             current = await session.scalar(
                 select(ObjectStoreConnections)
                 .where(
@@ -1064,8 +1090,15 @@ class ObjectStoreConnectionService:
                 )
                 .with_for_update()
             )
-            if current is not None:
-                await session.delete(current)
+            # Only retire the exact record whose marker was just removed: a
+            # concurrent attempt may have claimed the slot in the meantime,
+            # and deleting that would strand its bucket instead.
+            if current is None or current.revision != stale.revision:
+                return
+            await StoreBindingRepository(session).clear_slot(
+                slot=TEMPORARY_DESTINATION_SLOT
+            )
+            await session.delete(current)
 
     async def _record_candidate(
         self,
@@ -1074,7 +1107,13 @@ class ObjectStoreConnectionService:
         *,
         settings: ObjectContentSettings,
     ) -> None:
-        """Persist the destination being claimed, before its marker exists."""
+        """Persist the destination being claimed, before its marker exists.
+
+        The row lock serialises two administrators changing destination at
+        once: the first records its candidate, and the second is refused
+        rather than overwriting the only record of a bucket whose marker is
+        about to be written.
+        """
         row = await session.scalar(
             select(ObjectStoreConnections)
             .where(ObjectStoreConnections.id == TEMPORARY_DESTINATION_SLOT)
@@ -1086,6 +1125,14 @@ class ObjectStoreConnectionService:
             row.revision = 1
             session.add(row)
         else:
+            if row.role == "candidate" and (
+                row.endpoint_url != settings.endpoint_url
+                or row.bucket != settings.bucket
+            ):
+                raise ObjectStoreDestinationAlreadyBound(
+                    f"Another destination change is already claiming bucket "
+                    f"'{row.bucket}'; finish or release it first"
+                )
             row.revision = row.revision + 1
         row.role = "candidate"
         row.endpoint_url = settings.endpoint_url
