@@ -1081,6 +1081,21 @@ self_correction_invalid_payload dead-ends, 4 singles. HARNESS FOLLOW-UP
 journeys should classify as their journey outcome (builder_error), not
 invalid_evidence.
 
+Placement verification + tap consolidation 2026-08-06 evening II:
+placement replay at DEV-0e8addefe584 flipped preschool_incident and
+permit_checklist to first-pass ZERO repairs (both were
+unplaced_form_fields repairs at baseline); water_leak instead looped
+four attempts on runtime_metadata_requires_form_fields with NO
+evidence trail — quality rejections happen post-compilation, outside
+every capture. `a6d969000`: quality-rejected compiled specs now
+capture with their failure codes at create finalization; the tap's
+three shapes consolidate into one leaf ai_builder_proposal_capture
+module (duplicate-logic watch); the placement prompt bullet rewords to
+state the goal (declare AND wire runtime fields) after the
+obligation-only phrasing plausibly discouraged declaring at all.
+Water-leak replay with the armed quality capture in flight at
+DEV-a6d969000ee8.
+
 Critic-fix verification + misplacement admissions 2026-08-06 evening:
 critic regression replay at DEV-aeab9f058b4e recovered 3 of 4
 (document_analysis + public_records first-pass, data_subject_access
