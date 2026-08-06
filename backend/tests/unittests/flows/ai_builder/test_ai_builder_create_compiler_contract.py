@@ -3598,8 +3598,12 @@ def test_document_artifact_folds_terminal_helper_fields_into_body_writer() -> No
     body_step = compiled.steps[-2]
     renderer_step = compiled.steps[-1]
     assert body_step.output_type == OutputType.TEXT
-    assert "author_or_source" in body_step.assistant_spec.instructions
-    assert "conclusions" in body_step.assistant_spec.instructions
+    # The fold carries field MEANINGS, never machine keys — raw keys in a
+    # prose instruction invited JSON-envelope answers (live run 4fc4b445).
+    assert "Vem som skrev dokumentet" in body_step.assistant_spec.instructions
+    assert "author_or_source" not in body_step.assistant_spec.instructions
+    assert "aldrig som JSON" in body_step.assistant_spec.instructions
+    assert "Dokumentets slutsatser" in body_step.assistant_spec.instructions
     assert renderer_step.output_type == OutputType.PDF
     assert renderer_step.output_mode == OutputMode.RENDER_VERBATIM
     assert validate_spec(compiled).valid
@@ -5285,7 +5289,9 @@ def test_terminal_text_writer_fields_are_folded_into_instructions() -> None:
     writer_step = compiled.steps[-1]
     assert writer_step.output_type == OutputType.TEXT
     assert writer_step.output_contract is None
-    assert "short_summary" in writer_step.assistant_spec.instructions
+    assert "Kort sammanfattning" in writer_step.assistant_spec.instructions
+    assert "short_summary" not in writer_step.assistant_spec.instructions
+    assert "aldrig som JSON" in writer_step.assistant_spec.instructions
     assert validate_spec(compiled).valid
 
 
@@ -5339,8 +5345,9 @@ def test_single_source_text_report_materializes_missing_reader() -> None:
     ]
     assert writer_step.input_source == InputSource.PREVIOUS_STEP
     assert writer_step.output_type == OutputType.TEXT
-    assert "title" in writer_step.assistant_spec.instructions
-    assert "summary" in writer_step.assistant_spec.instructions
+    assert "Titel från dokumentet" in writer_step.assistant_spec.instructions
+    assert "aldrig som JSON" in writer_step.assistant_spec.instructions
+    assert "Kort sammanfattning" in writer_step.assistant_spec.instructions
     assert validate_spec(compiled).valid
 
 

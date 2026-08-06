@@ -228,14 +228,27 @@ def append_terminal_helper_output_fields(
     *,
     ui_language: str | None,
 ) -> str:
-    field_names = ", ".join(field.name for field in output_fields if field.name)
-    if not field_names:
+    # Naming raw field keys here invited JSON envelopes: a live writer
+    # answered `{"document_body": ...}` and the renderer printed the braces
+    # verbatim. Fold the fields' MEANING (descriptions), and demand prose.
+    field_meanings = "; ".join(
+        (field.description.strip() or field.name).rstrip(".")
+        for field in output_fields
+        if field.name
+    )
+    if not field_meanings:
         return instructions
     if ui_language == "en":
-        field_instruction = "Ensure the report body covers these fields: "
+        field_instruction = (
+            "Write the result as readable prose with headings — never as "
+            "JSON or named fields. The text must cover: "
+        )
     else:
-        field_instruction = "Säkerställ att rapporttexten täcker dessa fält: "
-    return f"{instructions}\n\n{field_instruction}{field_names}."
+        field_instruction = (
+            "Skriv resultatet som löpande läsbar text med rubriker — aldrig "
+            "som JSON eller namngivna fält. Texten ska täcka: "
+        )
+    return f"{instructions}\n\n{field_instruction}{field_meanings}."
 
 
 def lower_document_report_topology(

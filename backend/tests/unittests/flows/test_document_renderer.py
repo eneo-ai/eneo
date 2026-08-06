@@ -764,3 +764,33 @@ def test_render_pdf_font_fallback():
     )
     assert isinstance(blob, bytes)
     assert blob[:5] == b"%PDF-"
+
+
+def test_single_field_json_envelope_unwraps_to_formatted_document() -> None:
+    # Live incident 2026-08-05 (run 4fc4b445): the writer wrapped good
+    # markdown in {"document_body": ...}; rendering the envelope verbatim
+    # produced a document of braces and escapes. A one-field string
+    # envelope carries no information beyond its key — unwrap it.
+    envelope = (
+        '{\n  "document_body": "# Mötesdokument\\n\\n'
+        '## Sammanfattning\\nKort text.\\n\\n- Beslut 1\\n- Beslut 2"\n}'
+    )
+
+    blob, _, _ = _render_service.render_document(envelope, "docx", step_order=5)
+
+    document = Document(io.BytesIO(blob))
+    texts = [paragraph.text for paragraph in document.paragraphs]
+    assert "Mötesdokument" in texts[0]
+    assert not any("document_body" in text for text in texts)
+    assert not any(text.strip().startswith("{") for text in texts)
+
+
+def test_multi_field_json_text_renders_verbatim() -> None:
+    # A multi-key object cannot be unwrapped losslessly; rendering it
+    # verbatim is honest and stays diagnosable.
+    text = '{"first": "a", "second": "b"}'
+
+    blob, _, _ = _render_service.render_document(text, "docx", step_order=2)
+
+    document = Document(io.BytesIO(blob))
+    assert any("first" in paragraph.text for paragraph in document.paragraphs)

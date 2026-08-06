@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+import json
 import logging
 from collections.abc import Iterable, Sequence
-from typing import Any, NoReturn
+from typing import Any, NoReturn, cast
 
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.runtime.document_rendering.blocks import DocumentBlock
@@ -51,8 +52,12 @@ class DocumentRenderService:
         step_order: int,
     ) -> tuple[bytes, str, str]:
         ensure_source_within_limits(text, limits=self._limits)
+        source_text = _unwrap_single_field_text_envelope(
+            text,
+            step_order=step_order,
+        )
         return self.render_blocks(
-            parse_markdown_blocks(text.splitlines()),
+            parse_markdown_blocks(source_text.splitlines()),
             output_type,
             step_order=step_order,
         )
@@ -115,6 +120,38 @@ def default_document_render_service(
         ),
         limits=limits,
     )
+
+
+def _unwrap_single_field_text_envelope(text: str, *, step_order: int) -> str:
+    """Unwrap a one-field JSON string envelope around document text.
+
+    A text-output writer occasionally wraps its finished markdown in
+    ``{"document_body": "..."}``. The wrapper carries no information beyond
+    its key, but rendered verbatim it turns the whole document into braces
+    and escape sequences. Anything richer than exactly one string field is
+    left untouched — unwrapping it would lose structure.
+    """
+
+    stripped = text.strip()
+    if not (stripped.startswith("{") and stripped.endswith("}")):
+        return text
+    try:
+        parsed = json.loads(stripped)
+    except ValueError:
+        return text
+    if not isinstance(parsed, dict):
+        return text
+    envelope = cast(dict[str, Any], parsed)
+    if len(envelope) != 1:
+        return text
+    ((field_name, value),) = envelope.items()
+    if not isinstance(value, str) or not value.strip():
+        return text
+    logger.info(
+        "document_render_single_field_envelope_unwrapped",
+        extra={"step_order": step_order, "field_name": field_name},
+    )
+    return value
 
 
 def _raise_render_failed(
