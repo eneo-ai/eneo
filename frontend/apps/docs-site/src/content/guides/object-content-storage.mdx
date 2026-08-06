@@ -431,9 +431,9 @@ Use this when you change hosting provider, move between a self-hosted store and
 an external service, or switch bucket. It works with any S3-compatible service:
 SeaweedFS, MinIO, or a hosted provider.
 
-Eneo does not copy the bucket. Your own tooling transfers the objects, and Eneo
-performs the switch safely around that copy. Object keys contain no endpoint or
-bucket name, so a faithful copy is readable the moment you switch.
+Eneo does not copy the bucket: your own tooling transfers the objects, and Eneo
+performs the switch around that copy. Object keys contain no endpoint or bucket
+name, so a faithful copy is readable the moment you switch.
 
 <Callout type="info">
   Plan a short maintenance window. New files go to PostgreSQL while you work, so
@@ -453,13 +453,13 @@ for a first connection. Add the new endpoint's origin to
 `OBJECT_CONTENT_ADMIN_ALLOWED_ENDPOINT_ORIGINS` and restart backend and worker,
 keeping the old origin until you finish. Back up the current bucket.
 
-### Send new files to PostgreSQL
+### Stop new writes to object storage
 
 In **Admin > Storage**, select PostgreSQL as the target for new writes and wait
 until no moves are queued. Nothing can then appear on the old destination while
 you copy.
 
-### Find the content prefix
+### Copy and verify the objects
 
 Object keys live under `v1/<deployment-id-without-dashes>/`. Take
 `OBJECT_CONTENT_DEPLOYMENT_ID` and remove the dashes:
@@ -468,51 +468,41 @@ Object keys live under `v1/<deployment-id-without-dashes>/`. Take
 94e1a7e3-21a7-40b8-959b-d0ecdc8827e2   →   94e1a7e321a740b8959bd0ecdc8827e2
 ```
 
-Confirm the prefix lists your objects before copying anything:
+Confirm that prefix lists your objects, then copy and compare both sides:
 
 ```bash
-rclone ls old-store:eneo-object-content/v1/94e1a7e321a740b8959bd0ecdc8827e2/ | head
-```
+rclone ls old-store:eneo-object-content/v1/<prefix>/ | head
 
-<Callout type="error">
-  If this lists nothing, the prefix is wrong — stop. Copying an empty prefix
-  succeeds, verifies clean, and leaves the new destination without your files.
-</Callout>
-
-### Copy the objects
-
-```bash
 rclone copy \
-  old-store:eneo-object-content/v1/94e1a7e321a740b8959bd0ecdc8827e2/ \
-  new-store:eneo-object-content/v1/94e1a7e321a740b8959bd0ecdc8827e2/ \
+  old-store:eneo-object-content/v1/<prefix>/ \
+  new-store:eneo-object-content/v1/<prefix>/ \
   --checksum --transfers 16 --progress
+
+rclone check \
+  old-store:eneo-object-content/v1/<prefix>/ \
+  new-store:eneo-object-content/v1/<prefix>/ \
+  --checksum
 ```
 
-Copy only that prefix, and preserve object metadata — Eneo verifies the media
+Copy only that prefix and preserve object metadata — Eneo verifies the media
 type of every object it reads. Never copy `v1/.eneo-bindings/`: it pairs a
 bucket with one database, and Eneo manages it per destination.
+
+Compare the object count with what **Admin > Storage** reports for object
+storage. A clean difference count is not proof on its own: two empty prefixes
+also report no differences.
+
+<Callout type="error">
+  If the listing is empty, the prefix is wrong — stop. Copying an empty prefix
+  succeeds, verifies clean, and leaves the new destination without your files.
+</Callout>
 
 <Callout type="warning">
   Use `copy`, never `sync`. `sync` deletes files at the destination that are
   missing from the source, so a mistaken direction destroys production content.
 </Callout>
 
-### Verify the copy
-
-```bash
-rclone check \
-  old-store:eneo-object-content/v1/94e1a7e321a740b8959bd0ecdc8827e2/ \
-  new-store:eneo-object-content/v1/94e1a7e321a740b8959bd0ecdc8827e2/ \
-  --checksum
-
-rclone size new-store:eneo-object-content/v1/94e1a7e321a740b8959bd0ecdc8827e2/
-```
-
-Compare the object count with what **Admin > Storage** reports for object
-storage. A difference count alone is not enough: two empty prefixes also report
-no differences.
-
-### Switch
+### Switch destination
 
 Select **Change destination**, enter the new endpoint, bucket, signing region,
 addressing style, and access keys, then confirm. Eneo tests the destination,
