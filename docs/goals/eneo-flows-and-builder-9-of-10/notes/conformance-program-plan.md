@@ -90,36 +90,60 @@ Applies to every `expected_leaf_output_fields` case. Authority is
 `scripts/ai_builder_api_battle_test.py`.
 
 Already landed (`98293ae39`): instability judged per build rather than from
-the union of both; compared state is `(outcome_class, expectation_verdict)`;
-failed checks counted by distinct case id; six comparator behavior tests.
+the union of both; failed checks counted by distinct case id; the first
+comparator behavior tests. 31 comparator tests as of `b0de50244`.
 
-Also landed (`3990ee112`), with one correction to this plan's own wording:
+Also landed (`3990ee112`, `b0de50244`), with one correction to this plan's
+own wording:
 
+- **Product direction is conformance, not mechanics.** Direction was read
+  off `outcome_class`, so a case that stopped satisfying its rubric while
+  its mechanics held reported as `unchanged` — the exact regression the
+  no-regression rule exists to catch. Mechanics are reported beside
+  conformance and counted separately. On the 9d4237a → 9216ec6 pair this
+  inverts the reading: mechanics improved 17 / regressed 10, conformance
+  regressed 13 / improved 8.
+- **An unstable build gets no direction.** Promoting one repetition of a
+  self-disagreeing build to a verdict is what the modal row did. Unstable
+  cases render by default and survive `--only-changed`.
 - **Comparability is gated on the identity that changes what a score
-  means** — both semantics versions and `requested_model_id`. This plan
-  previously said "gate on the full evaluator-identity hash". That is
-  wrong and the receipts prove it: `target_sha256` embeds the deployed app
-  version, so it and the whole-identity hash differ between *every* pair
-  of builds — the exact axis the tool exists to compare. Verified on the
-  9d4237a and 9216ec6 receipts, whose identity hashes differ while
-  harness, corpus, model, and both semantics versions match. Harness,
-  corpus, revision, and target hashes are **reported**, so an undeclared
-  instrument change stays visible; per-case contract changes are named as
-  rescored cases rather than blocking the other 121.
+  means** — both semantics versions, `requested_model_id`,
+  `harness_sha256`, behavior-affecting `run_context` (language,
+  auto-confirm, confirmation-message identity), and `base_url`. Missing
+  fields fail closed. Declaring a harness edit scoring-neutral is the
+  deliberate `--allow-harness-change`, not the default.
+- This plan previously said "gate on the full evaluator-identity hash".
+  That is wrong and the receipts prove it: `target_sha256` embeds the
+  deployed app version, so it and the whole-identity hash differ between
+  *every* pair of builds — the exact axis the tool exists to compare.
+  Verified on the 9d4237a and 9216ec6 receipts. `cases_sha256`,
+  `source_revision`, and `target_sha256` are **reported**, not fatal.
+- Rescored cases are **excluded from direction counts**, not merely named.
+  Leaving them in is how a rubric correction gets reported as a product
+  win.
 - Failed checks are aggregated **across repetitions**, once per distinct
   case, instead of read off one representative row.
-- Blockers now count the public `error_codes` contract as well as the
-  internal `failure_codes`. Counting only the internal one printed an
-  empty blocker ranking for a run in which 8 cases errored, because a
-  router-level refusal carries no internal detail.
+- Blockers count the public `error_codes` contract as well as the internal
+  `failure_codes`. Counting only the internal one printed an empty blocker
+  ranking for a run in which 8 cases errored, because a router-level
+  refusal carries no internal detail.
 
-Remaining in this slice:
+Remaining in this slice — **pilot, then power**:
 
-- Measure the real envelope: run one **frozen build** three times under
-  identical identity and publish per-case state stability. Until that
-  exists, no claim may cite a "noise floor".
+1. **Pilot (in flight).** One frozen build, `--repetitions 3`, single
+   identity, all 122 cases. Three repetitions is *not* an envelope; it is
+   a pilot whose only job is to estimate each case's stability so the
+   repetition budget can be chosen.
+2. **Predeclare, from the pilot, before any candidate is measured:**
+   - the case-level estimator (proportion of repetitions reaching the
+     modal `(outcome_class, expectation_verdict)` state);
+   - the interval method and confidence level;
+   - the repetition budget implied by the MDE of `5 / cohort_size`;
+   - the non-inferiority margin for the no-regression rule.
+3. Only then may a claim cite a noise envelope.
 
-**Done when:** a same-build repeated baseline is published.
+**Done when:** the pilot is published *and* the four predeclared
+quantities are written down. A pilot alone does not close this slice.
 
 ---
 
@@ -172,9 +196,16 @@ names exactly one implementation owner.
 **Owner:** `scripts/ai_builder_api_battle_cases.json`.
 
 For every leaf classified rubric-defect or not-required, correct or remove
-that expectation with a one-line justification citing the product contract
-it contradicts. Then recompute conformance offline from the frozen packet —
-no new provider calls.
+that expectation. The justification citing the product contract it
+contradicts belongs in the **Slice 2 attribution artifact**, keyed by case
+id — not in the cases JSON, which owns expectations, not commentary. Then
+recompute conformance offline from the frozen packet — no new provider
+calls.
+
+Every case edited here must appear in the comparator's `rescored_cases`,
+which excludes it from product direction counts. If a corrected case does
+not show up there, the case-contract hash did not change and the edit did
+not take.
 
 **Guardrail:** never weaken an expectation because the model fails it. Only
 representation-authority arguments justify a change.
@@ -184,12 +215,18 @@ representation-authority arguments justify a change.
 ## Slice 4 — Minimal runtime proof for the seam Slice 5 will change
 
 **Owner:** `scripts/ai_builder_api_battle_test.py`
-(`_execute_and_collect_runtime_evidence`), or an equivalent runtime
-integration test.
+(`_execute_and_collect_runtime_evidence`). This is the *sole* owner — the
+earlier "or an equivalent runtime integration test" is withdrawn, because
+it let the choice of proof mechanism be invented at execution time.
 
 Establish **one** document → non-JSON journey that executes today and
 proves a structured producer's values reach document composition. Run it
 before and after Slice 5.
+
+**The sentinel case is `six_file_document_report_release_gate`** — the
+only case in the corpus carrying `expected_runtime_evidence`, six
+`reference_material` files, terminal `pdf`. Do not substitute another case
+without recording why.
 
 **Rationale:** Slice 5 changes cross-step runtime behavior, and compiled
 shape alone cannot prove that. Today 5 of 122 cases apply and 1 executes.
@@ -227,8 +264,11 @@ module.
 > terminal type or schema, or originate from inferred examples or uncited
 > prompt interpretation.
 
-If no supported producer→consumer seam exists, preserve the prose
-obligation or fail explicitly. Never synthesize topology.
+**When no supported producer→consumer seam exists** — one behavior, not a
+choice: retain the cited evidence *without materializing* it. Failing is
+reserved for the single case where an already-declared downstream typed
+consumer cannot be satisfied. Never synthesize topology, and never treat
+"no seam" as a reason to fail the build.
 
 Reuse the existing scalar materialization in
 `ai_builder_source_reader_contracts.py` and its limits rather than
@@ -253,9 +293,22 @@ payload submission; zero/one/multiple declared upload steps; one
 approve-and-resume review action; assertions on terminal status, delivery
 kind, and bounded artifact retrieval.
 
-Six sentinels: text+form→JSON; document→structured payload;
-multi-document→PDF report; audio→document; DOCX template fill; review
-checkpoint→resume→delivery.
+Six sentinels, named by case id so the shapes are not re-derived at
+execution time:
+
+| Journey | Case id |
+| --- | --- |
+| text + form → JSON | `advanced_explicit_e_service_submission` |
+| document → structured payload | `attachment_example_report_infers_disposition` |
+| multi-document → PDF report | `six_file_document_report_release_gate` |
+| audio → document | `medium_audio_to_protocol_pdf_with_metadata` |
+| DOCX template fill | `attachment_docx_template_placeholders_to_fields` |
+| review checkpoint → resume → delivery | `advanced_sundsvall_tjansteskrivelse_runtime_sources_docx` |
+
+Each sentinel must declare, before it is written: its fixture file ids,
+the payload source for form submission (the run contract, never a literal),
+the review action taken, and the terminal assertions. A sentinel that
+cannot state all four is not ready to be written.
 
 **Explicitly forbidden:** a second harness or a generic journey DSL.
 
