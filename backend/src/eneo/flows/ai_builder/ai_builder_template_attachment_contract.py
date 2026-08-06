@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from typing import cast
 
 from eneo.flows.ai_builder.ai_builder_architecture_errors import (
     AIBuilderArchitectureError,
@@ -8,6 +9,9 @@ from eneo.flows.ai_builder.ai_builder_architecture_errors import (
 )
 from eneo.flows.ai_builder.ai_builder_json_schema_paths import (
     missing_structured_output_path,
+)
+from eneo.flows.ai_builder.ai_builder_result_contract import (
+    fold_result_field_name,
 )
 from eneo.flows.domain.flow import clone_json_object
 from eneo.flows.domain.runtime_input import build_runtime_input_config
@@ -114,7 +118,10 @@ def apply_template_attachment_contract(
     unresolved: list[str] = []
     for placeholder in normalized_placeholders:
         field_name = template_placeholder_form_field_name(placeholder)
-        if field_name is not None:
+        if field_name is not None and _declared_form_field_name(
+            form_fields,
+            requested_name=field_name,
+        ):
             canonical_name = _require_template_form_field(
                 form_fields,
                 requested_name=field_name,
@@ -126,10 +133,27 @@ def apply_template_attachment_contract(
             placeholder=placeholder,
             spec=spec,
         )
-        if explicit_binding is None:
-            unresolved.append(placeholder)
+        if explicit_binding is not None:
+            bindings[placeholder] = explicit_binding
             continue
-        bindings[placeholder] = explicit_binding
+
+        prepared_binding = _folded_step_output_binding(
+            placeholder=placeholder,
+            spec=spec,
+        )
+        if prepared_binding is not None:
+            bindings[placeholder] = prepared_binding
+            continue
+
+        if field_name is not None:
+            canonical_name = _require_template_form_field(
+                form_fields,
+                requested_name=field_name,
+            )
+            bindings[placeholder] = form_field_reference_expression(canonical_name)
+            continue
+
+        unresolved.append(placeholder)
 
     if unresolved:
         raise _architecture_error(
@@ -200,6 +224,68 @@ def _require_transcription_input_when_referenced(
         update={"input_config": updated_input_config}
     )
     return spec.model_copy(update={"steps": [updated_root_step, *spec.steps[1:]]})
+
+
+def _declared_form_field_name(
+    fields: list[FormFieldSpec],
+    *,
+    requested_name: str,
+) -> bool:
+    requested_key = requested_name.casefold()
+    return any(field.name.casefold() == requested_key for field in fields)
+
+
+def _folded_step_output_binding(
+    *,
+    placeholder: str,
+    spec: FlowDraftSpecCore,
+) -> str | None:
+    """Bind a human-named placeholder to a prepared structured field.
+
+    Template authors name placeholders in natural Swedish ("Ärendet",
+    "förslag till beslut", "sections.ärendet.text") without knowing the
+    Flow's step topology. When a preceding step declares a string output
+    field whose folded name matches the folded placeholder, that prepared
+    value is the content the author asked for; the latest such step wins
+    because later preparation refines earlier output. Only fields declared
+    in a step's output contract are eligible, so the binding stays provable.
+    """
+
+    folded_placeholder = fold_result_field_name(placeholder)
+    if not folded_placeholder:
+        return None
+
+    for step in reversed(spec.steps[:-1]):
+        contract = step.output_contract
+        if not isinstance(contract, Mapping) or not step.plan_step_ref:
+            continue
+        properties = cast(object, contract.get("properties"))
+        if not isinstance(properties, Mapping):
+            continue
+        for property_name, property_schema in cast(
+            Mapping[object, object], properties
+        ).items():
+            if not isinstance(property_name, str):
+                continue
+            if not isinstance(property_schema, Mapping):
+                continue
+            if cast(Mapping[object, object], property_schema).get("type") != "string":
+                continue
+            if fold_result_field_name(property_name) != folded_placeholder:
+                continue
+            if (
+                missing_structured_output_path(dict(contract), property_name)
+                is not None
+            ):
+                continue
+            return (
+                "{{ "
+                + step.plan_step_ref
+                + ".output.structured."
+                + property_name
+                + " }}"
+            )
+    return None
 
 
 def _require_template_form_field(

@@ -243,6 +243,118 @@ def test_contract_rejects_bindings_template_runtime_cannot_prove(
     )
 
 
+def _prepared_fields_spec() -> FlowDraftSpecCore:
+    """A template flow whose preparation step declares Swedish content fields."""
+
+    spec = _template_spec()
+    extract = spec.steps[1].model_copy(
+        update={
+            "output_contract": {
+                "type": "object",
+                "properties": {
+                    "arendet": {"type": "string"},
+                    "sections_arendet_text": {"type": "string"},
+                    "diarienummer": {"type": "string"},
+                    "case_id": {"type": "string"},
+                    "metadata": {
+                        "type": "object",
+                        "properties": {"status": {"type": "string"}},
+                        "required": ["status"],
+                        "additionalProperties": False,
+                    },
+                },
+                "required": [
+                    "arendet",
+                    "sections_arendet_text",
+                    "diarienummer",
+                    "case_id",
+                    "metadata",
+                ],
+                "additionalProperties": False,
+            }
+        }
+    )
+    return spec.model_copy(update={"steps": [spec.steps[0], extract, spec.steps[2]]})
+
+
+def test_contract_binds_human_named_placeholders_to_prepared_fields() -> None:
+    contracted = apply_template_attachment_contract(
+        _prepared_fields_spec(),
+        selected_template_count=1,
+        placeholders=("Ärendet", "sections.ärendet.text", "diarienummer"),
+    )
+
+    assert contracted.steps[-1].output_config == {
+        "bindings": {
+            "Ärendet": "{{ step_b.output.structured.arendet }}",
+            "sections.ärendet.text": (
+                "{{ step_b.output.structured.sections_arendet_text }}"
+            ),
+            "diarienummer": "{{ step_b.output.structured.diarienummer }}",
+        }
+    }
+    field_names = {field.name for field in contracted.form_fields or ()}
+    assert "Ärendet" not in field_names
+    assert "diarienummer" not in field_names
+
+
+def test_contract_prefers_declared_form_field_over_prepared_field() -> None:
+    contracted = apply_template_attachment_contract(
+        _prepared_fields_spec(),
+        selected_template_count=1,
+        placeholders=("case_id",),
+    )
+
+    assert contracted.steps[-1].output_config == {
+        "bindings": {"case_id": "{{ flow_input.case_id }}"}
+    }
+
+
+def test_contract_prefers_latest_preparation_step_for_prepared_fields() -> None:
+    spec = _prepared_fields_spec()
+    refine = spec.steps[1].model_copy(
+        update={
+            "plan_step_ref": "step_refine",
+            "name": "Refine",
+            "output_contract": {
+                "type": "object",
+                "properties": {"arendet": {"type": "string"}},
+                "required": ["arendet"],
+                "additionalProperties": False,
+            },
+        }
+    )
+    spec = spec.model_copy(
+        update={"steps": [spec.steps[0], spec.steps[1], refine, spec.steps[2]]}
+    )
+
+    contracted = apply_template_attachment_contract(
+        spec,
+        selected_template_count=1,
+        placeholders=("ärendet",),
+    )
+
+    assert contracted.steps[-1].output_config == {
+        "bindings": {"ärendet": "{{ step_refine.output.structured.arendet }}"}
+    }
+
+
+def test_contract_ignores_non_string_prepared_fields() -> None:
+    contracted = apply_template_attachment_contract(
+        _prepared_fields_spec(),
+        selected_template_count=1,
+        placeholders=("metadata",),
+    )
+
+    # The object-typed prepared field is not bindable content, so the
+    # placeholder falls back to a required runtime form field.
+    assert contracted.steps[-1].output_config == {
+        "bindings": {"metadata": "{{ flow_input.metadata }}"}
+    }
+    fields = {field.name: field for field in contracted.form_fields or ()}
+    assert fields["metadata"].required is True
+
+
 @pytest.mark.parametrize("selected_template_count", [0, 2])
 def test_contract_requires_exactly_one_selected_template(
     selected_template_count: int,

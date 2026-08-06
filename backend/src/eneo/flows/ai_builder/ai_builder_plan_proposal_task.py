@@ -339,6 +339,13 @@ def _output_schema_evidence_block(planning_state: PlanningState) -> str | None:
                 "- Keep preparation output_fields FLAT: one string field per "
                 "placeholder (source references belong inside the text, not as "
                 "nested objects). Nesting deeper than three levels is rejected.",
+                "- Name each preparation field with the placeholder's ASCII "
+                "identifier form: lowercase, diacritics folded (å/ä→a, ö→o), "
+                'dots and spaces replaced with underscores ("sections.ärendet'
+                '.text" → sections_arendet_text). A placeholder whose folded '
+                "name matches a prepared string field is filled automatically; "
+                "placeholders without a match become required runtime form "
+                "fields the user must type in.",
             ]
         )
     terminal_output = planning_state.resolved_slots.get("terminal_output")

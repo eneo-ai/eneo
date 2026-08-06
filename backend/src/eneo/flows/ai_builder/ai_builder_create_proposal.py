@@ -169,6 +169,11 @@ async def process_create_intent_arguments(
                 tool_call_id,
                 failure_code,
             )
+            _capture_rejected_proposal_arguments(
+                arguments,
+                session_id=str(turn.session_id),
+                issues=[failure_code, error.detail],
+            )
             return ToolProcessingResult(
                 feedback=error.detail,
                 failure_kind="validation",
