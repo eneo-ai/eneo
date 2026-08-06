@@ -44,6 +44,28 @@ cd frontend && bun run dev                 # Terminal 2
 cd backend && uv run worker             # Terminal 3
 ```
 
+**Optional: local S3-compatible object storage**
+
+File uploads work out of the box through PostgreSQL. To develop against real
+object storage, start the bundled SeaweedFS service (from the host or a
+devcontainer terminal):
+
+```bash
+docker compose -f .devcontainer/docker-compose.yml --profile object-content up -d object-content
+```
+
+Then connect in **Admin > Storage** (the devcontainer already allows plain
+HTTP and generates a development `ENCRYPTION_KEY`; the values below are also
+printed on devcontainer start while the service is running):
+
+| Field | Value |
+|---|---|
+| Endpoint | `http://object-content:8333` |
+| Region | `local` |
+| Bucket | `eneo-object-content-dev` |
+| Access key | `eneo-dev-object-content` |
+| Secret key | `local-development-only-secret` |
+
 ### 2. Make Your First Contribution
 
 ```bash
