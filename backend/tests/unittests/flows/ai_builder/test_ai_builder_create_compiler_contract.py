@@ -2895,12 +2895,17 @@ def test_audio_artifact_overlay_still_rejects_conflicting_patterns(
     )
 
 
-def test_compiler_binds_human_named_placeholders_from_prepared_terminal() -> None:
+@pytest.mark.parametrize("aggregation_intent", ["linear", "aggregate", "compare"])
+def test_compiler_binds_human_named_placeholders_from_prepared_terminal(
+    aggregation_intent: str,
+) -> None:
     """The flagship shape: a JSON terminal prepares folded placeholder fields.
 
     Human-named placeholders bind to the prepared fields; metadata
     placeholders the flow does not prepare stay runtime form fields and
     need no semantic-step reference because the template consumes them.
+    Cross-checking several sources (aggregate/compare) is preparation
+    work inside the same fixed template topology.
     """
 
     intent = parse_create_flow_intent_arguments(
@@ -2954,6 +2959,7 @@ def test_compiler_binds_human_named_placeholders_from_prepared_terminal() -> Non
             TEMPLATE_FILL_DOCX_STEP,
         ),
         runtime_max_files=6,
+        aggregation_intent=cast(AggregationIntent, aggregation_intent),
         selected_template_count=1,
         selected_template_placeholders=(
             "diarienummer",
@@ -3286,14 +3292,13 @@ def test_docx_template_unsupported_shapes_keep_typed_failure_codes() -> None:
         ),
     )
 
-    with pytest.raises(AIBuilderArchitectureError) as nonlinear_exc:
-        compile_create_intent_to_spec(
-            intent,
-            context=replace(context, aggregation_intent="compare"),
-        )
-    assert nonlinear_exc.value.log_context["failure_code"] == (
-        "assembly_docx_template_shape_unsupported"
+    # Cross-checking sources is preparation work inside the fixed template
+    # topology, so aggregate/compare intents assemble like linear ones.
+    compare_compiled = compile_create_intent_to_spec(
+        intent,
+        context=replace(context, aggregation_intent="compare"),
     )
+    assert compare_compiled.steps[-1].output_mode == OutputMode.TEMPLATE_FILL
 
     compiled = compile_create_intent_to_spec(intent, context=context)
     step_after_fill = compiled.steps[-2].model_copy(

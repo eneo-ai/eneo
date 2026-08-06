@@ -1021,7 +1021,11 @@ def _assemble_docx_template_fill(
     field_provenance: dict[str, FlowInputFieldProvenance] | None,
     field_diagnostics: list[LintWarning] | None,
 ) -> FlowAssemblyPlan | CreateAssemblyRejection:
-    if runtime_input_type not in _FILE_INPUT_TYPES or aggregation_intent != "linear":
+    # Aggregate and compare intents describe the preparation work (reading
+    # several sources, cross-checking them); the fixed chain already reads
+    # every file through its per-source reader, so any aggregation intent
+    # assembles to the same linear template topology.
+    if runtime_input_type not in _FILE_INPUT_TYPES:
         return _reject("docx_template_shape_unsupported")
     form_field_names = {field.name for field in form_fields}
     reader_step = template_variable_reader_step(
