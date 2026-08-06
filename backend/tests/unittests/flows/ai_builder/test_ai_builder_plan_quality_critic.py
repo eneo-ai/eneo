@@ -5831,3 +5831,62 @@ class TestSourceReaderRequiredFieldsCaptured:
             issue.id == "source_reader_required_fields_must_be_captured"
             for issue in issues
         )
+
+
+class TestRuntimeMetadataRemediationNamesTheFields:
+    def test_remediation_quotes_the_slot_evidence(self) -> None:
+        from eneo.flows.ai_builder.ai_builder_critic_invariants import (
+            CriticContext,
+            _runtime_metadata_requires_form_fields_remediation,
+        )
+        from eneo.flows.ai_builder.ai_builder_framework_policy import (
+            OutputIntentResolution,
+        )
+        from eneo.flows.ai_builder.ai_builder_planner_pattern_signals import (
+            PlannerPatternSignals,
+        )
+        from eneo.flows.ai_builder.planning_state import ResolvedSlot
+
+        context = CriticContext(
+            spec=FlowDraftSpecCore(
+                flow_name="Driftstörning",
+                steps=[
+                    _step(
+                        "step_a",
+                        "Strukturera",
+                        "Strukturera felrapporten.",
+                        output_type=OutputType.JSON,
+                        output_contract={
+                            "type": "object",
+                            "properties": {"analys": {"type": "string"}},
+                            "required": ["analys"],
+                            "additionalProperties": False,
+                        },
+                    )
+                ],
+            ),
+            flow=None,
+            answer_signals={"runtime_metadata_fields": {"wants_input_fields"}},
+            text="",
+            requirements_text="",
+            signal_text="",
+            planner_patterns=PlannerPatternSignals(),
+            output_intent=OutputIntentResolution(terminal_output=None),
+            mixed_audio_doc_input=False,
+            requested_output_sections=RequestedOutputSections.empty(),
+            resolved_slots={
+                "runtime_metadata_fields": ResolvedSlot(
+                    name="runtime_metadata_fields",
+                    value="wants_input_fields",
+                    source="model",
+                    evidence=["quote:fyller i område, beräknad klartid och kontaktväg"],
+                    confidence="high",
+                    evidence_level="explicit",
+                )
+            },
+        )
+
+        remediation = _runtime_metadata_requires_form_fields_remediation(context)
+
+        assert "fyller i område, beräknad klartid och kontaktväg" in remediation
+        assert "input_field" in remediation

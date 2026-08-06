@@ -375,6 +375,36 @@ def _runtime_metadata_requires_form_fields_evidence(context: CriticContext) -> b
     )
 
 
+def _runtime_metadata_requires_form_fields_remediation(
+    context: CriticContext,
+) -> str:
+    # Naming the requested values is what makes this repairable: a live
+    # journey looped four identical proposals on the bare "add form
+    # fields" message (2026-08-06). The classifier already captured the
+    # user's own wording as slot evidence, so quote it.
+    slot = context.resolved_slots.get("runtime_metadata_fields")
+    quotes = (
+        [
+            item.removeprefix("quote:").strip()
+            for item in slot.evidence
+            if item.startswith("quote:")
+        ]
+        if slot is not None
+        else []
+    )
+    quoted_evidence = (
+        " Användarens ord: " + " / ".join(f'"{quote}"' for quote in quotes[:2])
+        if quotes
+        else ""
+    )
+    return (
+        "Användaren har bett om återanvändbara metadata vid körning men planen "
+        "saknar `form_fields`. Deklarera ETT input_field per efterfrågat värde "
+        "och referera dem via uses_form_fields i steget som använder dem."
+        + quoted_evidence
+    )
+
+
 _RUNTIME_METADATA_REQUIRES_FORM_FIELDS = CriticInvariant(
     id="runtime_metadata_requires_form_fields",
     kind="semantic",
@@ -383,10 +413,7 @@ _RUNTIME_METADATA_REQUIRES_FORM_FIELDS = CriticInvariant(
         "those values as `form_fields` instead of hiding them in prompt text."
     ),
     evidence=_runtime_metadata_requires_form_fields_evidence,
-    remediation=(
-        "Användaren har bett om återanvändbara metadata vid körning men planen saknar "
-        "`form_fields`. Lägg till relevanta formulärfält i stället för att gömma dessa värden i prompttext."
-    ),
+    remediation=_runtime_metadata_requires_form_fields_remediation,
 )
 
 
