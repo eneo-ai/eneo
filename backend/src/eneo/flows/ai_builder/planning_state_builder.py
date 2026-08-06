@@ -182,6 +182,7 @@ def build_planning_state_from_conversation(
     _replay_slot_classification_metadata(state, conversation, flow=flow)
     _clear_prose_output_schema_for_non_json_terminal(state)
     _reconcile_report_disposition_after_classifier_replay(state, conversation)
+    resolve_docx_mode_from_template_evidence(state)
     _reconcile_dependent_slot_relevance(state)
     return state
 
@@ -426,6 +427,9 @@ def carry_forward_persisted_planner_state(
             output_evidence=carried_evidence,
             example_inference=carried_inference,
         )
+    # Carried-forward template roles can complete the explicit-template
+    # picture only now, after persisted roles merged.
+    resolve_docx_mode_from_template_evidence(rebuilt)
 
 
 def _carryable_output_schema_evidence(
@@ -962,6 +966,7 @@ def _merged_model_file_roles(
                 "role": classified_role.role,
                 "source": "model",
                 "confidence": classified_role.confidence,
+                "evidence_level": classified_role.evidence_level,
                 "evidence": [
                     *existing_role.evidence,
                     f"model:file_role:{prompt_hash}",
@@ -1187,6 +1192,45 @@ def _model_slot_is_relevant(*, slot_name: str, state: PlanningState) -> bool:
         state=state,
         unresolved_values_are_relevant=True,
         require_commit_grade_primary_input=True,
+    )
+
+
+def resolve_docx_mode_from_template_evidence(state: PlanningState) -> None:
+    """Resolve template fill silently for one explicitly named template.
+
+    An explicit authored choice always wins. When exactly one attached file
+    carries an explicit, commit-grade, model-classified template role, the
+    user has already said what the template is for — asking again wastes
+    the question budget. Multiple templates, inferred roles, or missing
+    evidence keep the question path.
+    """
+
+    terminal_output = state.resolved_slots.get("terminal_output")
+    if terminal_output is None or terminal_output.value != "docx_document":
+        return
+    current = state.resolved_slots.get("docx_output_mode")
+    if current is not None and current.source != "policy_default":
+        return
+    explicit_templates = [
+        item
+        for item in state.file_roles
+        if item.role == "template"
+        and item.source == "model"
+        and item.evidence_level == "explicit"
+        and item.confidence in {"high", "medium"}
+        and any(entry.startswith("quote:") for entry in item.evidence)
+    ]
+    template_count = sum(item.role == "template" for item in state.file_roles)
+    if len(explicit_templates) != 1 or template_count != 1:
+        return
+    template = explicit_templates[0]
+    state.resolved_slots["docx_output_mode"] = ResolvedSlot(
+        name="docx_output_mode",
+        value="template_fill_docx",
+        source="model",
+        confidence=template.confidence,
+        evidence=[entry for entry in template.evidence if entry.startswith("quote:")],
+        evidence_level="explicit",
     )
 
 

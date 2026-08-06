@@ -91,6 +91,7 @@ from eneo.flows.ai_builder.planning_state_builder import (
     carry_forward_persisted_planner_state,
     llm_resolvable_slot_values_for_state,
     merge_llm_resolved_slots,
+    resolve_docx_mode_from_template_evidence,
 )
 from eneo.flows.domain.mapped_execution_policy import FlowMappedExecutionPolicy
 from eneo.flows.flow_review_policy import FlowStepReviewMode
@@ -4156,3 +4157,97 @@ def test_mapped_file_limit_stays_uncommitted_when_policy_is_unset() -> None:
     assert state.mapped_file_limit.accepted_value is None
     assert state.mapped_file_limit.proposed_value is None
     assert state.mapped_file_limit.diagnostic == "policy_unset"
+
+
+class TestDocxModeFromTemplateEvidence:
+    @staticmethod
+    def _template_role(
+        *,
+        evidence_level: str | None,
+        file_id: str = "00000000-0000-0000-0000-000000000801",
+    ) -> FileRoleEvidence:
+        return FileRoleEvidence(
+            file_id=file_id,
+            filename="mall.docx",
+            file_type="document",
+            mimetype=(
+                "application/vnd.openxmlformats-officedocument."
+                "wordprocessingml.document"
+            ),
+            has_readable_text=True,
+            coverage="fully_seen",
+            role="template",
+            source="model",
+            confidence="high",
+            evidence=["quote:user_message:m-1:använd mallen för svaret"],
+            evidence_level=evidence_level,
+        )
+
+    @staticmethod
+    def _docx_state() -> PlanningState:
+        state = _state()
+        state.resolved_slots["terminal_output"] = ResolvedSlot(
+            name="terminal_output",
+            value="docx_document",
+            source="structured_answer",
+            confidence="high",
+            evidence=["question_answer:terminal_output"],
+        )
+        state.resolved_slots["docx_output_mode"] = ResolvedSlot(
+            name="docx_output_mode",
+            value="generated_docx",
+            source="policy_default",
+            confidence="medium",
+            evidence=["policy_default:docx_output_mode=generated_docx"],
+        )
+        return state
+
+    def test_single_explicit_template_resolves_template_fill(self) -> None:
+        state = self._docx_state()
+        state.file_roles = [self._template_role(evidence_level="explicit")]
+
+        resolve_docx_mode_from_template_evidence(state)
+
+        slot = state.resolved_slots["docx_output_mode"]
+        assert slot.value == "template_fill_docx"
+        assert slot.source == "model"
+        assert slot.evidence_level == "explicit"
+
+    def test_inferred_template_keeps_the_question_path(self) -> None:
+        state = self._docx_state()
+        state.file_roles = [self._template_role(evidence_level="inferred")]
+
+        resolve_docx_mode_from_template_evidence(state)
+
+        assert state.resolved_slots["docx_output_mode"].source == "policy_default"
+
+    def test_multiple_templates_keep_the_question_path(self) -> None:
+        state = self._docx_state()
+        state.file_roles = [
+            self._template_role(evidence_level="explicit"),
+            self._template_role(
+                evidence_level="explicit",
+                file_id="00000000-0000-0000-0000-000000000802",
+            ),
+        ]
+
+        resolve_docx_mode_from_template_evidence(state)
+
+        assert state.resolved_slots["docx_output_mode"].source == "policy_default"
+
+    def test_explicit_authored_generated_choice_always_wins(self) -> None:
+        state = self._docx_state()
+        state.resolved_slots["docx_output_mode"] = ResolvedSlot(
+            name="docx_output_mode",
+            value="generated_docx",
+            source="structured_answer",
+            confidence="high",
+            evidence=["question_answer:docx_output_mode"],
+        )
+        state.file_roles = [self._template_role(evidence_level="explicit")]
+
+        resolve_docx_mode_from_template_evidence(state)
+
+        slot = state.resolved_slots["docx_output_mode"]
+        assert slot.value == "generated_docx"
+        assert slot.source == "structured_answer"

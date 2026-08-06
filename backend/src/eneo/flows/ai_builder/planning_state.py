@@ -55,7 +55,7 @@ from eneo.flows.flow_review_policy import FlowStepReviewMode
 from eneo.json_types import JsonObject
 
 PLANNER_CONTRACT_VERSION: int = 1
-BUILDER_SCHEMA_VERSION: int = 15
+BUILDER_SCHEMA_VERSION: int = 16
 # One state can retain two independently assigned 128-KiB schemas. The persisted
 # envelope leaves the other half for provenance, file roles, slots, and future
 # state growth without coupling the per-schema ceiling to the state ceiling.
@@ -367,9 +367,17 @@ class FileRoleEvidence(_PlanningModel):
     evidence: list[str] = Field(default_factory=list[str])
     candidate_roles: list[FileRole] = Field(default_factory=list[FileRole])
     template_placeholders: list[str] | None = None
+    # Only model-classified roles carry classifier explicitness; None on a
+    # model role means the projection predates this field and must be
+    # treated as inferred, never as explicit.
+    evidence_level: SlotEvidenceLevel | None = None
 
     @model_validator(mode="after")
     def _validate_role_evidence(self) -> FileRoleEvidence:
+        if self.source != "model" and self.evidence_level is not None:
+            raise ValueError(
+                "evidence_level is only valid for model-classified file roles"
+            )
         if not self.has_readable_text and self.coverage != "inventory_only":
             raise ValueError(
                 "non-readable file role evidence must have inventory_only coverage"
