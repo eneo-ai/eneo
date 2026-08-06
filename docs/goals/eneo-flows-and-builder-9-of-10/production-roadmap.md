@@ -1081,6 +1081,18 @@ self_correction_invalid_payload dead-ends, 4 singles. HARNESS FOLLOW-UP
 journeys should classify as their journey outcome (builder_error), not
 invalid_evidence.
 
+Parse-economics slice 2026-08-06 (top of the priced queue):
+`bcae9d8bb` admits the three dominant parse-failure families losslessly,
+each grounded in a captured payload from the checkpoint run: misplaced
+field drafts (12 of 14 rejections — the model's JSON nesting slips and
+whole field lists land in steps; a step never declares field_type, so
+admission reattaches them to the preceding step's output_fields),
+non-ASCII names ("åtgärder" folds to a valid identifier via the new leaf
+ai_builder_field_identity module — the folding primitive's canonical
+home, re-exported from ai_builder_result_contract), and shape
+rejections that now name the offending field. Verification replay of
+the four worst parse offenders in flight at DEV-bcae9d8bb53a.
+
 Simplification slice 2026-08-06 (user-directed complexity audit):
 `6c20d0c00` folded identity as the single field-naming boundary
 (net -126 lines). Four parallel Swedish/English bridging layers solved
