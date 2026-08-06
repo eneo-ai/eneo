@@ -98,6 +98,36 @@ def test_prefers_provider_prefixed_entry_over_bare() -> None:
     assert openai["max_input_tokens"] == 128000
 
 
+def test_prefers_gateway_metadata_for_nested_model_id() -> None:
+    """Gateway providers prefix model IDs that already contain an upstream
+    provider segment. The gateway-specific row must win without changing the
+    nested model ID returned to the caller.
+    """
+    fake = {
+        "deepseek/deepseek-chat": {
+            "litellm_provider": "deepseek",
+            "mode": "chat",
+            "max_input_tokens": 131072,
+            "input_cost_per_token": 0.00000028,
+        },
+        "openrouter/deepseek/deepseek-chat": {
+            "litellm_provider": "openrouter",
+            "mode": "chat",
+            "max_input_tokens": 65536,
+            "input_cost_per_token": 0.00000014,
+        },
+    }
+    with _patch_cost_map(fake):
+        result = model_provider_service._enrich_with_litellm_metadata(
+            "deepseek/deepseek-chat", "openrouter"
+        )
+
+    assert result is not None
+    assert result["name"] == "deepseek/deepseek-chat"
+    assert result["max_input_tokens"] == 65536
+    assert result["input_cost_per_token"] == 0.00000014
+
+
 def test_enriches_embedding_model() -> None:
     fake = {
         "text-embedding-3-large": {

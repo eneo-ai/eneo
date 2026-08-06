@@ -165,8 +165,9 @@ def _enrich_with_litellm_metadata(
     This function owns presentation policy only: which models are surfaced
     (filter substrings, mode mapping) and which fields are extracted per mode.
     Which ``model_cost`` row a ``(name, provider_type)`` pair maps to is
-    delegated to ``resolve_model_defaults`` so this path can never disagree
-    with the ``/model-defaults/`` endpoint or the cost backfill.
+    delegated to ``resolve_model_defaults`` so the runtime enrichment and
+    ``/model-defaults/`` paths agree structurally. The one-shot cost backfill
+    keeps an intentionally frozen copy of the same documented semantics.
 
     Returns None when the name matches a non-text filter substring or maps to
     a litellm mode we don't surface (image, tts, moderation, etc.).

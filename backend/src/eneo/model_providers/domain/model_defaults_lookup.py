@@ -1,13 +1,13 @@
 """Provider-aware resolver for LiteLLM's ``model_cost`` map.
 
-Single source of truth used by:
+Runtime single source of truth used by:
   - ``/api/v1/admin/model-providers/model-defaults/`` (interactive lookup).
-  - ``20260501_backfill_model_costs.py`` (one-shot data migration).
   - ``_enrich_with_litellm_metadata`` (live ``/v1/models`` listing enrichment).
 
-All call paths need identical semantics so the wizard's "Lookup defaults"
-button, the bulk backfill, and the auto-fetch model catalog don't disagree
-about which LiteLLM row a given ``(name, provider_type)`` pair maps to.
+The one-shot ``20260501_backfill_model_costs.py`` migration contains an
+intentionally frozen copy of these resolution semantics so it stays runnable
+without importing live application code. Runtime consumers therefore agree
+structurally; changes here must still be checked against that migration copy.
 
 Resolution order:
   1. If ``provider_type`` is known, prefer the prefixed entry
