@@ -466,12 +466,15 @@ readable immediately.
 4. Compare both sides with `rclone check --checksum` until it reports no
    differences.
 5. Use **Change destination** in **Admin > Storage**. Eneo probes the
-   candidate, refuses a bucket paired with another Eneo installation, and
-   commits one fenced transaction that swaps the destination, preserves the
+   candidate, refuses a bucket paired with another Eneo installation, compares
+   the candidate's inventory against every object the deployment still serves,
+   and commits one fenced transaction that swaps the destination, preserves the
    deployment identity and every object key, archives the previous
    destination, resets both remote inventory cursors, and raises the
    connection revision. Work started against the previous destination cannot
-   commit afterwards. No restart is needed.
+   commit afterwards. No restart is needed. An archived previous destination
+   from an earlier change must be removed first, since the switch reuses that
+   slot.
 6. Select object storage for new writes again and resume moves, then let one
    complete inventory cycle run and confirm no `backend_missing` content. Full
    and range reads verify the canonical SHA-256, so an incomplete or corrupt
@@ -487,8 +490,9 @@ the provider once the archived record is removed.
 
 The switch is refused with a typed reason while new writes still target object
 storage, storage moves are not paused, remote content is pending or
-delete-pending, storage moves are nonterminal, or an upload or cleanup lease is
-live. Retry after the worker has converged.
+delete-pending, storage moves are nonterminal, an upload or cleanup lease is
+live, or the candidate does not yet hold every object the deployment serves.
+Retry after the worker has converged or the copy is complete.
 
 The schema downgrade is available only before this feature has persisted a
 move intent or `storage_moved` audit event. Once either exists, downgrade stops

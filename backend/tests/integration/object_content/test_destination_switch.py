@@ -32,8 +32,10 @@ from eneo.object_content.object_store_connection import (
     ObjectStoreConnectionError,
     ObjectStoreConnectionInput,
     ObjectStoreConnectionService,
+    ObjectStoreDestinationCopyIncomplete,
     ObjectStoreMovesNotPaused,
     ObjectStoreNewWritesNotRedirected,
+    ObjectStorePreviousDestinationPresent,
     ObjectStoreSwitchBackDiverged,
 )
 from eneo.object_content.s3_object_store import (
@@ -540,6 +542,169 @@ async def test_rejected_switch_unclaims_the_target(
             )
         ).one_or_none()
     assert claim is None, "an unclaimed target must leave no switch claim behind"
+
+
+async def test_switch_refuses_a_target_missing_stored_objects(
+    object_content_database: DatabaseSessionManager,
+    real_object_store: RealObjectStore,
+    real_unpaired_object_store: RealObjectStore,
+) -> None:
+    """The candidate must already hold every object the deployment serves.
+
+    Eneo never sees the operator's copy, so it proves the result instead of
+    trusting timing. This is also the check that catches the copy that ran
+    against the wrong prefix and quietly moved nothing.
+    """
+    service = _service(object_content_database, real_object_store)
+    actor = await _any_user_id(object_content_database)
+    created = await service.create(
+        _connection_input(real_object_store), actor_user_id=actor
+    )
+    await ensure_store_binding_ready(
+        object_content_database,
+        service.settings_for(created),
+        real_object_store.store,
+    )
+    await _select_inline_writes(object_content_database)
+
+    # Content exists on the source and was never copied across.
+    source_settings = service.settings_for(created)
+    source_store = S3ObjectStore(source_settings)
+    try:
+        await _seed_remote_content(
+            object_content_database, source_settings, source_store, b"never-copied"
+        )
+    finally:
+        await source_store.close()
+
+    with pytest.raises(ObjectStoreDestinationCopyIncomplete):
+        await service.replace_destination(
+            _connection_input(real_unpaired_object_store),
+            actor_user_id=actor,
+        )
+
+
+async def test_switch_refuses_while_a_previous_destination_is_archived(
+    object_content_database: DatabaseSessionManager,
+    real_object_store: RealObjectStore,
+    real_unpaired_object_store: RealObjectStore,
+) -> None:
+    """Giving up the way back is a deliberate act, not a side effect.
+
+    The temporary slot records the destination being claimed, and a second
+    switch would overwrite the archived record that Switch back depends on.
+    """
+    service = _service(object_content_database, real_object_store)
+    actor = await _any_user_id(object_content_database)
+    created = await service.create(
+        _connection_input(real_object_store), actor_user_id=actor
+    )
+    await ensure_store_binding_ready(
+        object_content_database,
+        service.settings_for(created),
+        real_object_store.store,
+    )
+    await _select_inline_writes(object_content_database)
+    await service.replace_destination(
+        _connection_input(real_unpaired_object_store),
+        actor_user_id=actor,
+    )
+
+    with pytest.raises(ObjectStorePreviousDestinationPresent):
+        await service.replace_destination(
+            _connection_input(real_object_store),
+            actor_user_id=actor,
+        )
+
+    # Forgetting the archive releases the slot and the switch proceeds.
+    await service.forget_previous_destination(actor_user_id=actor)
+    restored = await service.replace_destination(
+        _connection_input(real_object_store),
+        actor_user_id=actor,
+    )
+    assert restored.active.bucket == real_object_store.settings.bucket
+
+
+async def test_interrupted_switch_keeps_the_claimed_destination_recoverable(
+    object_content_database: DatabaseSessionManager,
+    real_object_store: RealObjectStore,
+    real_unpaired_object_store: RealObjectStore,
+    real_spare_object_store: RealObjectStore,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A process loss after the marker leaves the touched bucket identified.
+
+    Without the candidate record, the only trace of the claimed bucket is a
+    marker no one can find, and the next switch to another destination would
+    strand it. The record lets that switch hand the bucket back first.
+    """
+    service = _service(object_content_database, real_object_store)
+    actor = await _any_user_id(object_content_database)
+    created = await service.create(
+        _connection_input(real_object_store), actor_user_id=actor
+    )
+    await ensure_store_binding_ready(
+        object_content_database,
+        service.settings_for(created),
+        real_object_store.store,
+    )
+    await _select_inline_writes(object_content_database)
+    binding_id = await _binding_id(object_content_database)
+
+    class SimulatedProcessLoss(BaseException):
+        pass
+
+    original_create = S3ObjectStore.create_binding
+
+    async def lose_process_after_marker(self, creation):  # type: ignore[no-untyped-def]
+        await original_create(self, creation)
+        raise SimulatedProcessLoss("the worker died before the swap committed")
+
+    monkeypatch.setattr(S3ObjectStore, "create_binding", lose_process_after_marker)
+    with pytest.raises(SimulatedProcessLoss):
+        await service.replace_destination(
+            _connection_input(real_unpaired_object_store),
+            actor_user_id=actor,
+        )
+    monkeypatch.undo()
+
+    # The claimed bucket is identified, and is not offered as a way back.
+    async with object_content_database.session() as session, session.begin():
+        candidate = await session.get(
+            ObjectStoreConnections, TEMPORARY_DESTINATION_SLOT
+        )
+        assert candidate is not None
+        assert candidate.role == "candidate"
+        assert candidate.bucket == real_unpaired_object_store.settings.bucket
+    assert await service.get_previous() is None
+
+    target = S3ObjectStore(
+        real_unpaired_object_store.settings.model_copy(
+            update={"deployment_id": created.deployment_id}
+        )
+    )
+    try:
+        assert await target.verify_binding(binding_id)
+    finally:
+        await target.close()
+
+    # Switching somewhere else hands the stranded bucket back first, so it
+    # does not stay paired to an installation that never adopted it.
+    switched = await service.replace_destination(
+        _connection_input(real_spare_object_store),
+        actor_user_id=actor,
+    )
+    assert switched.active.bucket == real_spare_object_store.settings.bucket
+
+    released = S3ObjectStore(
+        real_unpaired_object_store.settings.model_copy(
+            update={"deployment_id": created.deployment_id}
+        )
+    )
+    try:
+        assert not await released.verify_binding(binding_id)
+    finally:
+        await released.close()
 
 
 async def test_switch_requires_paused_moves(

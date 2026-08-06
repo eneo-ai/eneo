@@ -12,7 +12,7 @@ from urllib.parse import urlparse
 from uuid import UUID, uuid4
 
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, ValidationError
-from sqlalchemy import func, select, update
+from sqlalchemy import and_, func, or_, select, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -48,6 +48,7 @@ from eneo.object_content.reconciliation_repository import (
 )
 from eneo.object_content.s3_object_store import (
     ObjectStoreBindingError,
+    ObjectStoreError,
     ObjectStoreFailureKind,
     ObjectStoreIntegrityError,
     ObjectStoreProbeCleanupError,
@@ -64,6 +65,21 @@ from eneo.object_content.store_binding import (
 from eneo.settings.encryption_service import EncryptionService
 
 logger = logging.getLogger(__name__)
+
+#: Content whose object must exist on any destination Eneo activates. Content
+#: already recorded as missing on the source is excluded: its object is absent
+#: everywhere, so requiring it would block every future switch.
+_SERVED_REMOTE_CONTENT = or_(
+    ObjectContents.state == "available",
+    and_(
+        ObjectContents.state == "retained",
+        or_(
+            ObjectContents.failure_code.is_(None),
+            ObjectContents.failure_code != "backend_missing",
+        ),
+    ),
+)
+_VERIFICATION_PAGE_SIZE = 1000
 
 _PROBE_BODY = b"eneo-object-store-connection-probe-v1\n"
 _PROBE_MEDIA_TYPE = "application/octet-stream"
@@ -161,6 +177,24 @@ class ObjectStoreSwitchBackDiverged(ObjectStoreDestinationSwitchBlocked):
     """Objects stored since the switch are absent from the archived bucket."""
 
     code = "object_store_switch_back_diverged"
+
+
+class ObjectStoreDestinationCopyIncomplete(ObjectStoreConnectionError):
+    """The target does not hold every object this deployment must serve.
+
+    Eneo cannot observe the operator's copy, so it proves the result instead:
+    every durable key the deployment still serves must already exist on the
+    candidate. This is what makes the switch safe no matter when the copy ran
+    or what happened to the source in between.
+    """
+
+    code = "object_store_destination_copy_incomplete"
+
+
+class ObjectStorePreviousDestinationPresent(ObjectStoreConnectionError):
+    """An archived previous destination still occupies the temporary slot."""
+
+    code = "object_store_previous_destination_present"
 
 
 class ObjectStoreNewWritesNotRedirected(ObjectStoreConnectionError):
@@ -278,9 +312,12 @@ class ObjectStoreConnectionRepository:
         return _stored(row) if row is not None else None
 
     async def get_previous(self) -> StoredObjectStoreConnection | None:
+        # A candidate row belongs to a switch that is still being admitted, so
+        # only a retiring row is a destination anyone can return to.
         row = await self._session.scalar(
             select(ObjectStoreConnections).where(
-                ObjectStoreConnections.id == TEMPORARY_DESTINATION_SLOT
+                ObjectStoreConnections.id == TEMPORARY_DESTINATION_SLOT,
+                ObjectStoreConnections.role == "retiring",
             )
         )
         return _stored(row) if row is not None else None
@@ -569,6 +606,17 @@ class ObjectStoreConnectionService:
             raise ObjectStoreConnectionInvalid(
                 "The new destination is the same as the current one"
             )
+        # The temporary slot records the destination being claimed, so an
+        # archived previous destination must be released first. Switching
+        # would overwrite that record anyway; requiring the operator to
+        # forget it makes giving up the way back a deliberate act.
+        async with self._transaction() as session:
+            archived = await ObjectStoreConnectionRepository(session).get_previous()
+        if archived is not None:
+            raise ObjectStorePreviousDestinationPresent(
+                "Remove the archived previous destination before changing "
+                "destination again"
+            )
         return await self._switch(
             candidate,
             actor_user_id=actor_user_id,
@@ -627,7 +675,10 @@ class ObjectStoreConnectionService:
         async with self._transaction(mutation=True) as session:
             row = await session.scalar(
                 select(ObjectStoreConnections)
-                .where(ObjectStoreConnections.id == TEMPORARY_DESTINATION_SLOT)
+                .where(
+                    ObjectStoreConnections.id == TEMPORARY_DESTINATION_SLOT,
+                    ObjectStoreConnections.role == "retiring",
+                )
                 .with_for_update()
             )
             if row is None:
@@ -658,21 +709,29 @@ class ObjectStoreConnectionService:
             deployment_id=stored.deployment_id,
         )
         fresh_marker = await self._admit_switch_target(
+            candidate,
             settings,
             binding_id=binding.binding_id,
             expected_revision=stored.revision,
+            # Switch-back's target is already recorded in the temporary slot,
+            # so it needs no candidate record and must not overwrite the row
+            # it is restoring.
+            persist_candidate=require_previous_revision is None,
         )
 
         try:
+            verified_since = await self._require_target_holds_every_object(settings)
             return await self._commit_switch(
                 candidate,
                 settings=settings,
                 actor_user_id=actor_user_id,
                 stored=stored,
                 require_previous_revision=require_previous_revision,
+                verified_since=verified_since,
             )
         except (
             ObjectStoreDestinationSwitchBlocked,
+            ObjectStoreDestinationCopyIncomplete,
             ObjectStoreMovesNotPaused,
             ObjectStoreNewWritesNotRedirected,
             ObjectStoreConnectionConflict,
@@ -683,7 +742,9 @@ class ObjectStoreConnectionService:
             # the marker: the swap may have committed.
             if fresh_marker:
                 await self._abandon_switch_claim(
-                    settings, binding_id=binding.binding_id
+                    settings,
+                    binding_id=binding.binding_id,
+                    clear_candidate=require_previous_revision is None,
                 )
             raise
 
@@ -695,6 +756,7 @@ class ObjectStoreConnectionService:
         actor_user_id: UUID,
         stored: StoredObjectStoreConnection,
         require_previous_revision: int | None,
+        verified_since: datetime,
     ) -> DestinationSwitch:
         access_key_id_encrypted = self._encryption.encrypt(
             candidate.access_key_id.get_secret_value()
@@ -713,6 +775,17 @@ class ObjectStoreConnectionService:
                     "The object-store connection changed while it was being tested"
                 )
             await self._require_switchable(session)
+            # Close the window between proving the copy complete and swapping:
+            # anything stored since is on the source only.
+            await self._require_no_remote_keys_since(
+                session,
+                archived_at=verified_since,
+                error=ObjectStoreDestinationCopyIncomplete,
+                detail=(
+                    "Objects were stored while the new destination was being "
+                    "verified; copy them across and try again"
+                ),
+            )
 
             previous = await session.scalar(
                 select(ObjectStoreConnections)
@@ -838,13 +911,19 @@ class ObjectStoreConnectionService:
         session: AsyncSession,
         *,
         archived_at: datetime,
+        error: type[ObjectStoreConnectionError] = ObjectStoreSwitchBackDiverged,
+        detail: str = (
+            "Objects were stored after the destinations were switched; "
+            "copy the current bucket to the previous destination and use "
+            "the change-destination flow instead of switching back"
+        ),
     ) -> None:
-        """Refuse switch-back once the bucket set has diverged.
+        """Refuse once the destination's key set has moved on.
 
-        Every durable remote key created after the destinations were swapped
+        For switch-back, every durable remote key created after the swap
         exists only on the current destination, so the archived bucket cannot
-        serve it. Restoring a re-copied bucket goes through the normal
-        change-destination flow, which re-proves the copy.
+        serve it. The same query closes the window between verifying a
+        candidate copy and committing the swap.
         """
         new_keys = await session.scalar(
             select(func.count())
@@ -852,22 +931,188 @@ class ObjectStoreConnectionService:
             .where(ObjectStoreObjects.created_at > archived_at)
         )
         if new_keys:
-            raise ObjectStoreSwitchBackDiverged(
-                "Objects were stored after the destinations were switched; "
-                "copy the current bucket to the previous destination and use "
-                "the change-destination flow instead of switching back"
+            raise error(detail)
+
+    async def _require_target_holds_every_object(
+        self,
+        settings: ObjectContentSettings,
+    ) -> datetime:
+        """Prove the candidate already holds every key this deployment serves.
+
+        Eneo never sees the operator's copy, so timing rules cannot establish
+        that the copy is current: quiescence can be interrupted and restored,
+        and a copy can predate work that followed it. Comparing the candidate's
+        own inventory against the keys the deployment must serve settles it
+        directly, and also catches the far more common accident of a copy that
+        silently covered nothing.
+
+        Returns the instant the comparison started, so the committing
+        transaction can refuse anything stored after it.
+        """
+        async with self._transaction() as session:
+            verified_since = await session.scalar(select(func.now()))
+            expected_total = await session.scalar(
+                select(func.count())
+                .select_from(ObjectStoreObjects)
+                .join(
+                    ObjectContents, ObjectContents.id == ObjectStoreObjects.content_id
+                )
+                .where(_SERVED_REMOTE_CONTENT)
             )
+        assert verified_since is not None
+        if not expected_total:
+            return verified_since
+
+        observed: set[str] = set()
+        store = self._store_factory(self._probe_settings(settings))
+        try:
+            continuation_token: str | None = None
+            while True:
+                page = await store.list_object_page(
+                    continuation_token=continuation_token
+                )
+                observed.update(remote.key for remote in page.objects)
+                continuation_token = page.next_token
+                if continuation_token is None:
+                    break
+        except ObjectStoreUnavailableError as error:
+            self._raise_probe_error(error)
+            raise
+        finally:
+            await store.close()
+
+        missing = 0
+        last_key = ""
+        while True:
+            async with self._transaction() as session:
+                keys = (
+                    await session.scalars(
+                        select(ObjectStoreObjects.object_key)
+                        .join(
+                            ObjectContents,
+                            ObjectContents.id == ObjectStoreObjects.content_id,
+                        )
+                        .where(
+                            _SERVED_REMOTE_CONTENT,
+                            ObjectStoreObjects.object_key > last_key,
+                        )
+                        .order_by(ObjectStoreObjects.object_key)
+                        .limit(_VERIFICATION_PAGE_SIZE)
+                    )
+                ).all()
+            if not keys:
+                break
+            missing += sum(1 for key in keys if key not in observed)
+            last_key = keys[-1]
+
+        if missing:
+            raise ObjectStoreDestinationCopyIncomplete(
+                f"The new destination is missing {missing} of {expected_total} "
+                "stored objects; complete the copy and try again"
+            )
+        return verified_since
+
+    async def _release_stale_candidate(
+        self,
+        settings: ObjectContentSettings,
+        *,
+        binding_id: UUID,
+    ) -> None:
+        """Unclaim a bucket left behind by an interrupted switch.
+
+        A switch that lost its process after writing the marker leaves its
+        candidate recorded, so a later switch to a different destination can
+        return that bucket to the world instead of overwriting the only record
+        of it.
+        """
+        async with self._transaction() as session:
+            row = await session.scalar(
+                select(ObjectStoreConnections).where(
+                    ObjectStoreConnections.id == TEMPORARY_DESTINATION_SLOT,
+                    ObjectStoreConnections.role == "candidate",
+                )
+            )
+            stale = _stored(row) if row is not None else None
+        if stale is None or (
+            stale.endpoint_url == settings.endpoint_url
+            and stale.bucket == settings.bucket
+        ):
+            return
+
+        stale_settings = self.settings_for(stale)
+        store = self._store_factory(self._probe_settings(stale_settings))
+        try:
+            await store.remove_binding(binding_id)
+        except ObjectStoreError as error:
+            raise ObjectStoreDestinationAlreadyBound(
+                f"An interrupted destination change still claims bucket "
+                f"'{stale.bucket}'; make it reachable and try again, or "
+                "retry that destination to finish the change"
+            ) from error
+        finally:
+            await store.close()
+
+        async with self._transaction(mutation=True) as session:
+            await StoreBindingRepository(session).clear_slot(
+                slot=TEMPORARY_DESTINATION_SLOT
+            )
+            current = await session.scalar(
+                select(ObjectStoreConnections)
+                .where(
+                    ObjectStoreConnections.id == TEMPORARY_DESTINATION_SLOT,
+                    ObjectStoreConnections.role == "candidate",
+                )
+                .with_for_update()
+            )
+            if current is not None:
+                await session.delete(current)
+
+    async def _record_candidate(
+        self,
+        session: AsyncSession,
+        candidate: ObjectStoreConnectionInput,
+        *,
+        settings: ObjectContentSettings,
+    ) -> None:
+        """Persist the destination being claimed, before its marker exists."""
+        row = await session.scalar(
+            select(ObjectStoreConnections)
+            .where(ObjectStoreConnections.id == TEMPORARY_DESTINATION_SLOT)
+            .with_for_update()
+        )
+        if row is None:
+            row = ObjectStoreConnections()
+            row.id = TEMPORARY_DESTINATION_SLOT
+            row.revision = 1
+            session.add(row)
+        else:
+            row.revision = row.revision + 1
+        row.role = "candidate"
+        row.endpoint_url = settings.endpoint_url
+        row.region = settings.region
+        row.bucket = settings.bucket
+        row.access_key_id_encrypted = self._encryption.encrypt(
+            candidate.access_key_id.get_secret_value()
+        )
+        row.secret_access_key_encrypted = self._encryption.encrypt(
+            candidate.secret_access_key.get_secret_value()
+        )
+        row.deployment_id = settings.deployment_id
+        row.addressing_style = settings.addressing_style
+        row.updated_by_actor = ObjectStoreConnectionActor.PLATFORM_ADMIN.value
 
     async def _abandon_switch_claim(
         self,
         settings: ObjectContentSettings,
         *,
         binding_id: UUID,
+        clear_candidate: bool,
     ) -> None:
         """Best-effort unclaim of the target after a definite rejection.
 
-        A failure here is logged and swallowed: the marker plus the recorded
-        claim keep the state recoverable by retrying the same destination.
+        A failure here is logged and swallowed: the marker, the claim, and the
+        recorded candidate keep the state recoverable by retrying the same
+        destination.
         """
         try:
             store = self._store_factory(self._probe_settings(settings))
@@ -879,6 +1124,17 @@ class ObjectStoreConnectionService:
                 await StoreBindingRepository(session).clear_slot(
                     slot=TEMPORARY_DESTINATION_SLOT
                 )
+                if clear_candidate:
+                    row = await session.scalar(
+                        select(ObjectStoreConnections)
+                        .where(
+                            ObjectStoreConnections.id == TEMPORARY_DESTINATION_SLOT,
+                            ObjectStoreConnections.role == "candidate",
+                        )
+                        .with_for_update()
+                    )
+                    if row is not None:
+                        await session.delete(row)
         except Exception:
             logger.warning(
                 "object_content.switch_claim_abandon_failed",
@@ -888,10 +1144,12 @@ class ObjectStoreConnectionService:
 
     async def _admit_switch_target(
         self,
+        candidate: ObjectStoreConnectionInput,
         settings: ObjectContentSettings,
         *,
         binding_id: UUID,
         expected_revision: int,
+        persist_candidate: bool,
     ) -> bool:
         """Admit a bucket that already holds this deployment's copied bytes.
 
@@ -902,6 +1160,9 @@ class ObjectStoreConnectionService:
         the target paired to this installation. Returns whether a fresh
         marker was written, so a later rejection can remove it again.
         """
+        if persist_candidate:
+            await self._release_stale_candidate(settings, binding_id=binding_id)
+
         probe_settings = self._probe_settings(settings)
         store = self._store_factory(probe_settings)
         try:
@@ -936,7 +1197,9 @@ class ObjectStoreConnectionService:
 
         # Record the claim before the marker exists, revalidating the active
         # revision so a rotation that raced this switch cannot leave an
-        # untracked pairing behind.
+        # untracked pairing behind. The candidate connection is recorded in
+        # the same transaction, so a process loss after the marker is written
+        # still leaves the touched bucket identifiable and recoverable.
         async with self._transaction(mutation=True) as session:
             active_revision = await session.scalar(
                 select(ObjectStoreConnections.revision).where(
@@ -946,6 +1209,12 @@ class ObjectStoreConnectionService:
             if active_revision != expected_revision:
                 raise ObjectStoreConnectionConflict(
                     "The object-store connection changed while it was being tested"
+                )
+            if persist_candidate:
+                await self._record_candidate(
+                    session,
+                    candidate,
+                    settings=settings,
                 )
             await StoreBindingRepository(session).record_switch_claim(
                 slot=TEMPORARY_DESTINATION_SLOT,

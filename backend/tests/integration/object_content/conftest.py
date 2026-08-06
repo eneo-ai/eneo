@@ -1,6 +1,7 @@
 import json
 import os
 from collections.abc import AsyncGenerator, Callable, Generator
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from ipaddress import ip_address
@@ -211,6 +212,7 @@ async def _real_object_store_process(
 ) -> AsyncGenerator[RealObjectStore, None]:
     bucket = "eneo-object-content-test"
     unpaired_bucket = "eneo-object-content-unpaired-test"
+    spare_bucket = "eneo-object-content-spare-test"
     access_key = "object-content-test-key"
     secret_key = "object-content-test-secret"
     identity = {
@@ -219,16 +221,15 @@ async def _real_object_store_process(
                 "name": "object-content-tests",
                 "credentials": [{"accessKey": access_key, "secretKey": secret_key}],
                 "actions": [
-                    f"Read:{bucket}",
-                    f"Read:{bucket}/*",
-                    f"Write:{bucket}",
-                    f"Write:{bucket}/*",
-                    f"List:{bucket}",
-                    f"Read:{unpaired_bucket}",
-                    f"Read:{unpaired_bucket}/*",
-                    f"Write:{unpaired_bucket}",
-                    f"Write:{unpaired_bucket}/*",
-                    f"List:{unpaired_bucket}",
+                    action
+                    for owned in (bucket, unpaired_bucket, spare_bucket)
+                    for action in (
+                        f"Read:{owned}",
+                        f"Read:{owned}/*",
+                        f"Write:{owned}",
+                        f"Write:{owned}/*",
+                        f"List:{owned}",
+                    )
                 ],
             }
         ]
@@ -248,7 +249,7 @@ async def _real_object_store_process(
             )
             .with_command(
                 "mini -dir=/data "
-                "-bucket=eneo-object-content-test,eneo-object-content-unpaired-test "
+                f"-bucket={bucket},{unpaired_bucket},{spare_bucket} "
                 "-s3.config=/etc/seaweedfs/s3.json -s3.iam=false "
                 "-webdav=false -admin.ui=false -master.telemetry=false"
             )
@@ -314,16 +315,36 @@ async def real_object_store(
 async def real_unpaired_object_store(
     real_object_store: RealObjectStore,
 ) -> AsyncGenerator[RealObjectStore, None]:
-    settings = real_object_store.settings.model_copy(
-        update={"bucket": "eneo-object-content-unpaired-test"}
-    )
+    async with _sibling_bucket(
+        real_object_store, "eneo-object-content-unpaired-test"
+    ) as sibling:
+        yield sibling
+
+
+@pytest.fixture
+async def real_spare_object_store(
+    real_object_store: RealObjectStore,
+) -> AsyncGenerator[RealObjectStore, None]:
+    """A third destination, for flows that move between two candidates."""
+    async with _sibling_bucket(
+        real_object_store, "eneo-object-content-spare-test"
+    ) as sibling:
+        yield sibling
+
+
+@asynccontextmanager
+async def _sibling_bucket(
+    source: RealObjectStore,
+    bucket: str,
+) -> AsyncGenerator[RealObjectStore, None]:
+    settings = source.settings.model_copy(update={"bucket": bucket})
     store = S3ObjectStore(settings)
     await store.check_ready()
     try:
         yield RealObjectStore(
             settings=settings,
             store=store,
-            container=real_object_store.container,
+            container=source.container,
         )
     finally:
         await store.close()

@@ -356,6 +356,10 @@
       return m.storage_switch_error_new_writes_title();
     if (code === "object_store_moves_not_paused")
       return m.storage_switch_error_moves_not_paused_title();
+    if (code === "object_store_destination_copy_incomplete")
+      return m.storage_switch_error_copy_incomplete_title();
+    if (code === "object_store_previous_destination_present")
+      return m.storage_switch_error_previous_present_title();
     return m.storage_connection_error_unavailable_title();
   }
 
@@ -383,6 +387,10 @@
       return m.storage_switch_error_new_writes_description();
     if (code === "object_store_moves_not_paused")
       return m.storage_switch_error_moves_not_paused_description();
+    if (code === "object_store_destination_copy_incomplete")
+      return m.storage_switch_error_copy_incomplete_description();
+    if (code === "object_store_previous_destination_present")
+      return m.storage_switch_error_previous_present_description();
     return m.storage_connection_error_unavailable_description();
   }
 

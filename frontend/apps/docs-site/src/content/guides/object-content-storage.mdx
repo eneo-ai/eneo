@@ -501,12 +501,19 @@ also report no differences.
 
 Select **Change destination**, enter the new endpoint, bucket, signing region,
 addressing style, and access keys, then confirm. Eneo tests the destination,
-refuses a bucket belonging to another Eneo installation, and switches in one
-step without a restart.
+refuses a bucket belonging to another Eneo installation, **compares the new
+bucket against every file it is responsible for**, and switches in one step
+without a restart.
 
-The switch is refused while any write could still reach a destination. If new
-files still target object storage, change that first; if an upload is in
-flight, wait a moment and retry.
+That comparison is the real safety net: a copy that ran against the wrong
+prefix, or stopped early, is refused with the number of missing files rather
+than activated. The switch is also refused while any write could still reach a
+destination — if new files still target object storage or moves are not
+paused, change that first; if an upload is in flight, wait a moment and retry.
+
+If a previous destination is still archived from an earlier change, remove it
+first. Keeping it is the way back from *this* change, and a new change would
+overwrite it.
 
 ### Confirm and finish
 
@@ -709,12 +716,16 @@ flight, changing the destination atomically, and letting you switch back.
 
 ### What happens if the copy was incomplete?
 
-Existing references keep working for every file that was copied. A missing file
-is reported by storage health after the next complete inventory, and reading it
-fails clearly instead of returning wrong bytes. Switch back to the previous
-destination, complete the copy, and switch again. If files have already been
-stored in object storage since the switch, Eneo refuses the one-click switch
-back; copy the current bucket back first and use **Change destination**.
+Eneo refuses the switch and tells you how many files are missing, so an
+incomplete copy does not become the active destination. Complete the copy and
+try again.
+
+Should a file go missing later for another reason, storage health reports it
+after the next complete inventory, and reading it fails clearly instead of
+returning wrong bytes. Switch back to the previous destination, complete the
+copy, and switch again. If files have already been stored in object storage
+since the switch, Eneo refuses the one-click switch back; copy the current
+bucket back first and use **Change destination**.
 
 ### Can we move between PostgreSQL and object storage instead?
 
