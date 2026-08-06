@@ -28,7 +28,6 @@ from eneo.conversations.conversation_models import (
     PreflightResponse,
 )
 from eneo.database.database import AsyncSession
-from eneo.main.config import Settings, get_settings
 from eneo.main.container.container import Container
 from eneo.main.exceptions import NotFoundException, UnauthorizedException
 from eneo.main.logging import get_logger
@@ -381,13 +380,9 @@ async def chat(
 async def get_chat_turn_diagnostics(
     session_id: UUID,
     message_id: UUID,
-    settings: Annotated[Settings, Depends(get_settings)],
     container: Annotated[Container, Depends(get_container(with_user=True))],
 ) -> ChatTurnDiagnostics:
     """Return stored Skill decisions without loading chat or provider bodies."""
-    if not settings.show_chat_debug_panel:
-        raise NotFoundException("Chat diagnostics are not enabled.")
-
     user = container.user()
     partner = await container.session_repo().get_owned_chat_partner(
         session_id=session_id,
