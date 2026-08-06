@@ -1081,6 +1081,30 @@ self_correction_invalid_payload dead-ends, 4 singles. HARNESS FOLLOW-UP
 journeys should classify as their journey outcome (builder_error), not
 invalid_evidence.
 
+NOISE FLOOR MEASURED 2026-08-06 night — the most important number of the
+day. The confirmation run at DEV-9216ec6d4650 (diag122-9216ec6) scored
+first-pass 71 (best ever: 69 baseline, 66 night) while conformance FELL
+to 39 pass (from 42/44), and 36 of 122 cases changed outcome_class versus
+the baseline. Two runs of neighbouring builds disagree on ~30% of the
+corpus, so a single run cannot resolve the 2-5 case effects every slice
+today produced: the 16 "regressions" and the +2 first-pass are both
+inside the noise envelope. Every single-run conclusion drawn today,
+including my own regression attributions, is therefore unproven — the
+direction of the admission work is still supported by the mechanism
+evidence (captures naming the exact rejected shape), but the suite
+aggregates never had the resolution to confirm it.
+Consequence, adopted: no product claim from one run. Stochastic effects
+need >= 3 repetitions on a targeted cohort; the full suite is a
+checkpoint, not an experiment. `8222abf0c` makes the comparator honest
+about this — it keeps every repetition, compares the modal outcome, and
+marks a case `unstable` (listing every outcome observed) when repeated
+measurement of the same build disagrees with itself.
+`2c8031ad1` publishes conformance beside mechanics in the suite summary
+(verdict counts, conformance rate excluding not-evaluated rows, outcome x
+expectation matrix, failed checks ranked by unique cases blocked) and
+deletes the transcript-leaf expectation that contradicted the backend's
+own transcribe_only topology.
+
 PEER REVIEW 2026-08-06 night (session flow-122-strategy, 3 passes,
 gpt-5.6-sol xhigh-equivalent; verdicts changes_required / MIN_SCORE
 6, 7, 7). It reframed the program, and I verified every load-bearing
