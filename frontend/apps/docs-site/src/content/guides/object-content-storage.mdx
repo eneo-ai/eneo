@@ -502,8 +502,12 @@ SHA-256 of every file it reads, so a bad copy cannot pass unnoticed.
 
 The previous destination stays listed as **Previous destination** so you can
 select **Switch back** at any time; nothing on either bucket is deleted. When
-you are satisfied, select **Forget** to remove the record, remove the old
-origin from the allowlist, and decommission the old bucket at your provider.
+you are satisfied, select **Forget** to remove the record and decommission the
+old bucket at your provider. You may then drop the old origin from
+`OBJECT_CONTENT_ADMIN_ALLOWED_ENDPOINT_ORIGINS`, but keep the new one there
+permanently: Eneo re-checks the allowlist every time it builds a client for an
+administrator-managed destination, so removing the origin in use stops object
+storage from working.
 
 If something looks wrong at any point, switch back, correct the copy, and
 switch again.
