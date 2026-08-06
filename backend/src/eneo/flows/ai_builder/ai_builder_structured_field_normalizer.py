@@ -74,6 +74,12 @@ def _admit_structured_field_item(value: Any, *, path: str) -> dict[str, Any]:
                 for key, item_value in raw_item.items()
                 if key not in stray_keys
             }
+        if "field_type" not in raw_item:
+            # A field's own shape states its type: declared children make it
+            # an object, declared item_fields an array, and a leaf is a
+            # string. Inferring it loses nothing and spares a repair round
+            # (live capture 2026-08-06).
+            raw_item = {**raw_item, "field_type": _inferred_field_type(raw_item)}
         try:
             draft = StructuredFieldDraft.model_validate(raw_item)
         except ValidationError as error:
@@ -88,6 +94,14 @@ def _admit_structured_field_item(value: Any, *, path: str) -> dict[str, Any]:
         )
     _require_container_shape(draft, path=path)
     return draft.model_dump()
+
+
+def _inferred_field_type(raw_item: dict[str, Any]) -> str:
+    if raw_item.get("item_fields") is not None:
+        return "array"
+    if raw_item.get("fields") is not None:
+        return "object"
+    return "string"
 
 
 def _require_container_shape(draft: StructuredFieldDraft, *, path: str) -> None:

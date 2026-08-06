@@ -349,3 +349,44 @@ def test_non_field_list_in_steps_still_fails_visibly() -> None:
                 ],
             }
         )
+
+
+def test_missing_field_type_infers_from_the_declared_shape() -> None:
+    # Live capture 2026-08-06: the model omitted field_type on one field
+    # of a long list, which rejected the whole list. A field's own shape
+    # already states its type.
+    step = SemanticStepIntent.model_validate(
+        {
+            "name": "Strukturera",
+            "instructions": "Strukturera underlaget.",
+            "output_type": "json",
+            "output_fields": [
+                {"name": "titel", "description": "Dokumentets titel."},
+                {
+                    "name": "poster",
+                    "description": "Rader ur underlaget.",
+                    "item_fields": [
+                        {
+                            "name": "rad",
+                            "description": "En rad.",
+                            "field_type": "string",
+                        }
+                    ],
+                },
+                {
+                    "name": "metadata",
+                    "description": "Metadata om dokumentet.",
+                    "fields": [
+                        {
+                            "name": "datum",
+                            "description": "Datum.",
+                            "field_type": "string",
+                        }
+                    ],
+                },
+            ],
+        }
+    )
+
+    types = {field.name: field.field_type for field in step.output_fields or []}
+    assert types == {"titel": "string", "poster": "array", "metadata": "object"}
