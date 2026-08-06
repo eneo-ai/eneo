@@ -6405,6 +6405,3217 @@
       "attachments": [
         "tjansteskrivelse_template.docx"
       ]
+    },
+    {
+      "id": "docx_template_fill_delegationsbeslut_skolskjuts",
+      "complexity": "medium",
+      "domain": "municipality_school_transport",
+      "required": false,
+      "prompt": "Jag fattar delegationsbeslut om skolskjuts på barn- och utbildningsförvaltningen i Sundsvall och vill sluta klippa och klistra i vår beslutsbrevsmall, som ligger bifogad. Vid körning laddar jag upp ansökan och skolskjutsutredningen och fyller själv i diarienummer, beslutsdatum och handläggare. Beslutet, motiveringen, eventuella villkor för resan och överklagandehänvisningen ska flödet ta fram ur underlaget — de ska inte vara fält som jag skriver i. Håll det kort: läs underlaget, ta fram uppgifterna och fyll mallen. Inget extra steg som skriver om texten efteråt. Resultatet ska vara den ifyllda mallen som DOCX.",
+      "expected": {
+        "min_steps": 2,
+        "max_steps": 3,
+        "terminal_output_type": "docx",
+        "terminal_document_output_mode": "template_fill",
+        "min_json_steps": 1,
+        "max_post_json_text_cleanup_steps": 0,
+        "min_form_field_count": 3,
+        "expected_form_field_groups": [
+          [
+            "diarienummer",
+            "case_number",
+            "reference_number"
+          ],
+          [
+            "beslutsdatum",
+            "decision_date"
+          ],
+          [
+            "handlaggare",
+            "case_worker"
+          ]
+        ],
+        "forbidden_form_field_groups": [
+          [
+            "beslut",
+            "decision"
+          ],
+          [
+            "motivering",
+            "justification",
+            "reason"
+          ],
+          [
+            "villkor",
+            "conditions"
+          ],
+          [
+            "overklagandehanvisning",
+            "overklagande",
+            "appeal_instruction"
+          ]
+        ],
+        "expected_leaf_output_field_groups": [
+          [
+            "beslut",
+            "decision"
+          ],
+          [
+            "motivering",
+            "justification",
+            "reason"
+          ],
+          [
+            "villkor",
+            "conditions"
+          ],
+          [
+            "overklagandehanvisning",
+            "overklagande",
+            "appeal_instruction"
+          ]
+        ],
+        "forbidden_question_event_ids": [
+          "docx_output_mode"
+        ],
+        "max_all_previous_steps": 0,
+        "forbid_input_sources": [
+          "all_previous_steps"
+        ],
+        "forbid_primary_material_form_fields": true
+      },
+      "cohorts": [
+        "attachment_or_template",
+        "form_fields",
+        "complete_everyday"
+      ],
+      "attachments": [
+        "decision_letter_template.docx"
+      ]
+    },
+    {
+      "id": "docx_template_fill_prose_summary_template_resolves_mode",
+      "complexity": "medium",
+      "domain": "municipality_service_center",
+      "required": false,
+      "prompt": "På kontaktcenter i Sundsvall sammanställer vi svar till invånare som hört av sig flera gånger i samma ärende. Vår ärendemall ligger bifogad. Vid körning laddar jag upp de handlingar som hör till ärendet, och flödet ska skriva en sammanhållen text på ungefär en halv sida i löpande prosa — inga punktlistor och inga egna rubriker. Kundnamn och ärende-ID fyller jag i själv vid körning. Jag vill få tillbaka ett färdigt Word-dokument som går att skicka vidare utan efterarbete.",
+      "expected": {
+        "min_steps": 2,
+        "max_steps": 4,
+        "terminal_output_type": "docx",
+        "terminal_document_output_mode": "template_fill",
+        "min_form_field_count": 2,
+        "expected_form_field_groups": [
+          [
+            "kundnamn",
+            "customer_name",
+            "kund"
+          ],
+          [
+            "case_id",
+            "arende_id",
+            "arendenummer"
+          ]
+        ],
+        "expected_file_roles": [
+          {
+            "file_index": 0,
+            "role": "template",
+            "confidence_in": [
+              "high",
+              "medium"
+            ],
+            "required_source_kinds": [
+              "user_message"
+            ],
+            "evidence_contains": [
+              "ärendemall"
+            ]
+          }
+        ],
+        "forbidden_question_event_ids": [
+          "docx_output_mode"
+        ],
+        "max_all_previous_steps": 0,
+        "forbid_input_sources": [
+          "all_previous_steps"
+        ],
+        "forbid_primary_material_form_fields": true
+      },
+      "cohorts": [
+        "attachment_or_template",
+        "form_fields",
+        "persona_beginner"
+      ],
+      "attachments": [
+        "generic_case_template.docx"
+      ]
+    },
+    {
+      "id": "docx_template_fill_tjanstgoringsintyg_generated_docx",
+      "complexity": "medium",
+      "domain": "municipality_hr",
+      "required": false,
+      "prompt": "Jag arbetar med HR-administration i Timrå kommun och skriver tjänstgöringsintyg åt medarbetare som slutar. Vi har ingen intygsmall att koppla in, så flödet ska skapa dokumentet från grunden. Vid körning klistrar jag in ett utdrag ur personalsystemet och fyller i medarbetarens namn, anställningsnummer och vilket datum intyget utfärdas. Ur utdraget ska flödet plocka fram befattning, sysselsättningsgrad, anställningsform och anställningsperiod som strukturerad JSON tillsammans med de uppgifter som saknas i utdraget; saknade uppgifter ska stå kvar som saknade och aldrig fyllas i med gissningar. Därefter formuleras intygstexten, och sista steget ska rendera exakt den texten som DOCX utan att skriva om något.",
+      "expected": {
+        "min_steps": 3,
+        "max_steps": 4,
+        "terminal_output_type": "docx",
+        "terminal_document_output_mode": "render_verbatim",
+        "min_json_steps": 1,
+        "expected_primary_input_type": "text",
+        "min_form_field_count": 3,
+        "expected_form_field_groups": [
+          [
+            "anstallningsnummer",
+            "anstallningsnr",
+            "employment_number"
+          ],
+          [
+            "intygsdatum",
+            "utfardandedatum",
+            "issue_date"
+          ]
+        ],
+        "forbidden_form_field_groups": [
+          [
+            "befattning",
+            "position"
+          ],
+          [
+            "sysselsattningsgrad",
+            "tjanstgoringsgrad"
+          ],
+          [
+            "anstallningsform",
+            "employment_type"
+          ],
+          [
+            "anstallningsperiod",
+            "employment_period"
+          ]
+        ],
+        "expected_leaf_output_field_groups": [
+          [
+            "befattning",
+            "position"
+          ],
+          [
+            "sysselsattningsgrad",
+            "tjanstgoringsgrad"
+          ],
+          [
+            "anstallningsform",
+            "employment_type"
+          ],
+          [
+            "anstallningsperiod",
+            "employment_period"
+          ],
+          [
+            "saknade_uppgifter",
+            "missing_information"
+          ]
+        ],
+        "forbidden_question_event_ids": [
+          "docx_output_mode"
+        ],
+        "max_all_previous_steps": 0,
+        "forbid_input_sources": [
+          "all_previous_steps"
+        ],
+        "forbid_primary_material_form_fields": true
+      },
+      "cohorts": [
+        "form_fields",
+        "complete_everyday"
+      ]
+    },
+    {
+      "id": "docx_template_fill_remissvar_tjansteskrivelsemall",
+      "complexity": "hard",
+      "domain": "municipality_tjansteskrivelse",
+      "required": false,
+      "prompt": "Stadsbyggnadskontoret i Sundsvall svarar på remisser från Trafikverket och Länsstyrelsen Västernorrland, och yttrandet skrivs alltid i kommunens tjänsteskrivelsemall som jag bifogar. Vid körning laddar handläggaren upp remissen, tidigare yttranden i samma fråga och de tekniska underlag som finns. Underlagen är primärmaterial och ska aldrig bli formulärfält; det jag fyller i är diarienummer, handläggare, förvaltning, nämnd och beslutsdatum. Flödet ska hålla isär vad varje handling faktiskt säger och därefter skriva ärendet, bakgrund, bedömning, konsekvenser och förslag till beslut var för sig. Säger handlingarna emot varandra ska det synas i texten i stället för att jämkas ihop. Leverera den ifyllda mallen som DOCX.",
+      "expected": {
+        "min_steps": 2,
+        "max_steps": 5,
+        "terminal_output_type": "docx",
+        "terminal_document_output_mode": "template_fill",
+        "min_json_steps": 1,
+        "min_source_ref_steps": 1,
+        "expected_primary_input_type": "document",
+        "min_form_field_count": 5,
+        "expected_form_field_groups": [
+          [
+            "diarienummer",
+            "case_number",
+            "reference_number"
+          ],
+          [
+            "handlaggare",
+            "case_worker"
+          ],
+          [
+            "forvaltning",
+            "administration",
+            "department"
+          ],
+          [
+            "namnd",
+            "committee",
+            "board"
+          ],
+          [
+            "beslutsdatum",
+            "decision_date"
+          ]
+        ],
+        "expected_leaf_output_field_groups": [
+          [
+            "arendet",
+            "arende"
+          ],
+          [
+            "bakgrund"
+          ],
+          [
+            "bedomning"
+          ],
+          [
+            "konsekvenser"
+          ],
+          [
+            "forslag_till_beslut",
+            "beslutsforslag"
+          ]
+        ],
+        "forbidden_question_event_ids": [
+          "docx_output_mode",
+          "report_disposition"
+        ],
+        "max_all_previous_steps": 0,
+        "forbid_input_sources": [
+          "all_previous_steps"
+        ],
+        "forbid_primary_material_form_fields": true
+      },
+      "cohorts": [
+        "attachment_or_template",
+        "form_fields",
+        "persona_domain_expert"
+      ],
+      "attachments": [
+        "tjansteskrivelse_template.docx"
+      ]
+    },
+    {
+      "id": "docx_template_fill_varmepump_review_before_fill",
+      "complexity": "hard",
+      "domain": "municipality_environmental_health",
+      "required": false,
+      "prompt": "Jag handlägger anmälningar om värmepump i Ånge kommun och vi skickar beslutet i kommunens beslutsbrevsmall, som är bifogad. Vid körning laddar jag upp anmälan med bilagor och fyller i diarienummer, beslutsdatum och handläggare. Flödet ska ta fram beslutet, motiveringen och de villkor som ska gälla för installationen ur anmälan. Innan mallen fylls måste jag kunna granska och rätta de framtagna uppgifterna i ett eget granskningssteg — det är jag som svarar för innehållet i beslutet. Sista steget ska bara fylla mallen med det jag godkänt, inget omskrivningssteg däremellan.",
+      "expected": {
+        "min_steps": 2,
+        "max_steps": 4,
+        "terminal_output_type": "docx",
+        "terminal_document_output_mode": "template_fill",
+        "min_json_steps": 1,
+        "max_post_json_text_cleanup_steps": 0,
+        "min_form_field_count": 3,
+        "expected_form_field_groups": [
+          [
+            "diarienummer",
+            "case_number",
+            "reference_number"
+          ],
+          [
+            "beslutsdatum",
+            "decision_date"
+          ],
+          [
+            "handlaggare",
+            "case_worker"
+          ]
+        ],
+        "expected_review_policy": {
+          "mode": "edit",
+          "target_output_type": "json",
+          "target_field_groups": [
+            [
+              "beslut",
+              "decision"
+            ],
+            [
+              "motivering",
+              "justification",
+              "reason"
+            ],
+            [
+              "villkor",
+              "conditions"
+            ]
+          ],
+          "target_must_be_non_terminal": true
+        },
+        "forbidden_question_event_ids": [
+          "docx_output_mode"
+        ],
+        "max_all_previous_steps": 0,
+        "forbid_input_sources": [
+          "all_previous_steps"
+        ],
+        "forbid_primary_material_form_fields": true
+      },
+      "cohorts": [
+        "attachment_or_template",
+        "form_fields",
+        "human_review"
+      ],
+      "attachments": [
+        "decision_letter_template.docx"
+      ]
+    },
+    {
+      "id": "docx_template_fill_vague_mall_ifyllning_interview",
+      "complexity": "easy",
+      "domain": "municipality_culture",
+      "required": false,
+      "prompt": "Vi ska börja använda tjänsteskrivelsemallen mer konsekvent på kultur- och fritidsförvaltningen, och jag bifogar den. Handläggarna börjar från ett tomt dokument varje gång, vilket tar tid och blir spretigt. Kan ni hjälpa mig att sätta upp något som gör det lättare?",
+      "expected": {
+        "forbidden_question_event_ids": [
+          "docx_output_mode",
+          "pdf_generation_mode",
+          "comparison_scope",
+          "report_disposition",
+          "runtime_metadata_fields",
+          "mapped_file_limit"
+        ],
+        "preferred_question_event_ids": [
+          "post_processing_goal"
+        ],
+        "allowed_question_event_ids": [
+          "primary_runtime_input",
+          "document_material_scope",
+          "terminal_output"
+        ],
+        "max_question_event_count": 4,
+        "min_question_event_count": 1,
+        "max_reopened_question_count": 0,
+        "min_steps": 2,
+        "max_steps": 5,
+        "terminal_output_type": "docx",
+        "terminal_document_output_mode": "template_fill",
+        "min_json_steps": 1,
+        "max_all_previous_steps": 0,
+        "forbid_primary_material_form_fields": true
+      },
+      "cohorts": [
+        "attachment_or_template",
+        "vague",
+        "persona_beginner",
+        "prompt_vague"
+      ],
+      "synthetic_user_profile": "document_source",
+      "question_answer_overrides": {
+        "document_material_scope": {
+          "selected_option_id": "multiple_documents_case"
+        },
+        "post_processing_goal": {
+          "selected_option_id": "structure_key_information"
+        },
+        "terminal_output": {
+          "selected_option_id": "docx_document"
+        }
+      },
+      "attachments": [
+        "tjansteskrivelse_template.docx"
+      ]
+    },
+    {
+      "id": "text_terminal_etjanst_svar_med_granskning",
+      "complexity": "medium",
+      "domain": "municipality_e_services",
+      "required": false,
+      "prompt": "Jag är handläggare i kundcenter och svarar på ärenden som kommer in via e-tjänsten. Vid körning klistrar jag in medborgarens text tillsammans med mina egna noteringar. Först vill jag ha en sammanställning av vad medborgaren frågar om, vilka uppgifter vi redan kan svara på, vad som saknas och vilken enhet som äger frågan. Den sammanställningen ska jag läsa och godkänna precis som den är innan flödet går vidare; jag ska inte behöva ändra i den. Därefter skriver flödet svaret till medborgaren som vanlig text som jag klistrar in i e-tjänsten.",
+      "expected": {
+        "min_steps": 2,
+        "max_steps": 5,
+        "terminal_output_type": "text",
+        "min_json_steps": 1,
+        "min_source_ref_steps": 1,
+        "max_all_previous_steps": 0,
+        "forbid_primary_material_form_fields": true,
+        "expected_review_policy": {
+          "mode": "view",
+          "target_output_type": "json",
+          "target_field_groups": [
+            [
+              "fraga",
+              "fragestallning",
+              "arendefraga",
+              "medborgarens_fraga",
+              "question",
+              "request"
+            ],
+            [
+              "kan_besvaras",
+              "besvarade_uppgifter",
+              "tillgangliga_uppgifter",
+              "known_facts",
+              "available_information",
+              "answered_facts"
+            ],
+            [
+              "saknas",
+              "saknade_uppgifter",
+              "missing_information",
+              "missing_facts",
+              "open_questions"
+            ],
+            [
+              "enhet",
+              "ansvarig_enhet",
+              "owning_unit",
+              "unit",
+              "department",
+              "owner"
+            ]
+          ],
+          "target_must_be_non_terminal": true
+        },
+        "forbidden_question_event_ids": [
+          "pdf_generation_mode",
+          "docx_output_mode"
+        ]
+      },
+      "question_answer_overrides": {
+        "primary_runtime_input": {
+          "selected_option_id": "text"
+        },
+        "post_processing_goal": {
+          "selected_option_id": "extract_key_information"
+        },
+        "terminal_output": {
+          "selected_option_id": "structured_text"
+        },
+        "runtime_metadata_fields": {
+          "selected_option_id": "no_extra_metadata"
+        }
+      },
+      "cohorts": [
+        "foundation",
+        "human_review"
+      ]
+    },
+    {
+      "id": "text_terminal_intranatsnyhet_namndbeslut",
+      "complexity": "medium",
+      "domain": "municipality_meetings",
+      "required": false,
+      "prompt": "Jag arbetar med intern kommunikation i Sundsvalls kommun. Efter varje nämndsammanträde laddar jag upp protokollsutdraget och behöver en kort nyhet till intranätet på fem till sju meningar: vad nämnden beslutade, vad beslutet innebär för medarbetarna och var underlaget finns. Det bifogade utdraget från barn- och utbildningsnämnden är ett typiskt exempel på det jag laddar upp vid körning. Nyheten ska vara vanlig text, och beslut som inte står i protokollet får inte hittas på.",
+      "expected": {
+        "min_steps": 1,
+        "max_steps": 3,
+        "terminal_output_type": "text",
+        "max_all_previous_steps": 0,
+        "forbid_primary_material_form_fields": true,
+        "expected_file_roles": [
+          {
+            "file_index": 0,
+            "role": "runtime_input_sample",
+            "confidence_in": [
+              "high",
+              "medium"
+            ],
+            "evidence_level": "explicit",
+            "coverage_in": [
+              "fully_seen",
+              "excerpt_truncated"
+            ],
+            "required_source_kinds": [
+              "user_message"
+            ],
+            "evidence_contains": [
+              "typiskt exempel på det jag laddar upp"
+            ]
+          }
+        ],
+        "expected_classifier_slots": [
+          {
+            "slot_name": "terminal_output",
+            "value": "structured_text",
+            "confidence": "high",
+            "evidence_level": "explicit",
+            "required_source_kinds": [
+              "user_message"
+            ],
+            "evidence_contains": [
+              "vanlig text"
+            ]
+          }
+        ],
+        "forbidden_question_event_ids": [
+          "pdf_generation_mode",
+          "docx_output_mode",
+          "report_disposition"
+        ]
+      },
+      "attachments": [
+        "01_protokoll_bun_2026_02_25.pdf"
+      ],
+      "synthetic_user_profile": "document_source",
+      "question_answer_overrides": {
+        "document_material_scope": {
+          "selected_option_id": "single_document_case"
+        },
+        "post_processing_goal": {
+          "selected_option_id": "summarize_or_overview"
+        },
+        "terminal_output": {
+          "selected_option_id": "structured_text"
+        }
+      },
+      "cohorts": [
+        "foundation",
+        "attachment_or_template"
+      ]
+    },
+    {
+      "id": "text_terminal_kallelse_samverkansgrupp",
+      "complexity": "easy",
+      "domain": "municipality_hr",
+      "required": false,
+      "prompt": "Jag är sekreterare i förvaltningens samverkansgrupp. Inför varje möte klistrar jag in den råa ärendelistan från mina minnesanteckningar och fyller i mötesdatum, klockslag och lokal. Flödet ska skriva en färdig kallelsetext: en inledande mening, ärendena som punktlista i exakt den ordning jag skrev dem, uppgift om tid och plats samt en avslutande rad om att anmäla förhinder till mig. Texten ska gå att klistra in direkt i ett mejl.",
+      "expected": {
+        "min_steps": 1,
+        "max_steps": 3,
+        "terminal_output_type": "text",
+        "max_all_previous_steps": 0,
+        "min_form_field_count": 3,
+        "forbid_primary_material_form_fields": true,
+        "expected_form_field_groups": [
+          [
+            "motesdatum",
+            "datum",
+            "date",
+            "meeting_date"
+          ],
+          [
+            "klockslag",
+            "tid",
+            "starttid",
+            "time",
+            "meeting_time"
+          ],
+          [
+            "lokal",
+            "moteslokal",
+            "plats",
+            "location",
+            "room",
+            "venue"
+          ]
+        ],
+        "forbidden_question_event_ids": [
+          "pdf_generation_mode",
+          "docx_output_mode",
+          "report_disposition",
+          "comparison_scope"
+        ]
+      },
+      "question_answer_overrides": {
+        "primary_runtime_input": {
+          "selected_option_id": "text"
+        },
+        "post_processing_goal": {
+          "selected_option_id": "structure_key_information"
+        },
+        "terminal_output": {
+          "selected_option_id": "structured_text"
+        },
+        "runtime_metadata_fields": {
+          "selected_option_id": "basic_runtime_metadata"
+        }
+      },
+      "cohorts": [
+        "foundation",
+        "form_fields"
+      ]
+    },
+    {
+      "id": "text_terminal_apt_avvikelsesammanfattning",
+      "complexity": "medium",
+      "domain": "municipality_elderly_care",
+      "required": false,
+      "prompt": "Som enhetschef i hemtjänsten läser jag upp månadens avvikelser på arbetsplatsträffen. Vid körning klistrar jag in alla avvikelser för månaden på en gång. Flödet ska ge mig ett talmanus på ungefär en minut: vilka mönster som återkommer, en avvikelse vi behöver prata igenom, vad vi gör åt den och en påminnelse om att rapportera. Inga namn på brukare eller medarbetare får följa med. Jag vill bara ha talmanuset tillbaka som vanlig text, ingen mellanrapport och inga fillistor.",
+      "expected": {
+        "min_steps": 1,
+        "max_steps": 3,
+        "terminal_output_type": "text",
+        "max_all_previous_steps": 0,
+        "forbid_primary_material_form_fields": true,
+        "forbidden_form_field_groups": [
+          [
+            "avvikelser",
+            "avvikelsetext",
+            "avvikelserapport",
+            "manadens_avvikelser",
+            "deviations",
+            "deviation_text",
+            "deviation_report"
+          ]
+        ],
+        "expected_classifier_slots": [
+          {
+            "slot_name": "terminal_output",
+            "value": "structured_text",
+            "confidence": "high",
+            "evidence_level": "explicit",
+            "required_source_kinds": [
+              "user_message"
+            ],
+            "evidence_contains": [
+              "tillbaka som vanlig text"
+            ]
+          }
+        ],
+        "forbidden_question_event_ids": [
+          "pdf_generation_mode",
+          "docx_output_mode",
+          "report_disposition",
+          "comparison_scope"
+        ]
+      },
+      "question_answer_overrides": {
+        "primary_runtime_input": {
+          "selected_option_id": "text"
+        },
+        "post_processing_goal": {
+          "selected_option_id": "summarize_or_overview"
+        },
+        "terminal_output": {
+          "selected_option_id": "structured_text"
+        },
+        "runtime_metadata_fields": {
+          "selected_option_id": "no_extra_metadata"
+        }
+      },
+      "cohorts": [
+        "foundation"
+      ]
+    },
+    {
+      "id": "text_terminal_remissvarsutkast_exempel",
+      "complexity": "medium",
+      "domain": "municipality_governance",
+      "required": false,
+      "prompt": "Jag arbetar med remisser på kommunledningskontoret och skriver det första utkastet till svar när en remiss kommer från en annan förvaltning eller från Länsstyrelsen. Vid körning laddar jag upp remissen och de underlag från vår egen verksamhet som hör till ärendet. Det bifogade dokumentet är ett tidigare remissvar från vår förvaltning och visar den disposition och den sakliga ton som utkastet ska följa. Utkastet ska levereras som text i chatten så att jag kan arbeta vidare med det, och där underlag saknas ska utkastet skriva att frågan behöver kompletteras i stället för att gissa.",
+      "expected": {
+        "min_steps": 2,
+        "max_steps": 5,
+        "terminal_output_type": "text",
+        "min_source_ref_steps": 1,
+        "max_all_previous_steps": 0,
+        "forbid_primary_material_form_fields": true,
+        "expected_file_roles": [
+          {
+            "file_index": 0,
+            "role": "example_output",
+            "confidence_in": [
+              "high",
+              "medium"
+            ],
+            "evidence_level": "explicit",
+            "coverage_in": [
+              "fully_seen",
+              "excerpt_truncated"
+            ],
+            "required_source_kinds": [
+              "user_message"
+            ],
+            "evidence_contains": [
+              "tidigare remissvar från vår förvaltning"
+            ]
+          }
+        ],
+        "expected_classifier_slots": [
+          {
+            "slot_name": "terminal_output",
+            "value": "structured_text",
+            "confidence": "high",
+            "evidence_level": "explicit",
+            "required_source_kinds": [
+              "user_message"
+            ],
+            "evidence_contains": [
+              "text i chatten"
+            ]
+          }
+        ],
+        "forbidden_question_event_ids": [
+          "docx_output_mode",
+          "pdf_generation_mode"
+        ]
+      },
+      "attachments": [
+        "04_remissvar.docx"
+      ],
+      "synthetic_user_profile": "document_source",
+      "question_answer_overrides": {
+        "document_material_scope": {
+          "selected_option_id": "multiple_documents_case"
+        },
+        "post_processing_goal": {
+          "selected_option_id": "structure_key_information"
+        },
+        "terminal_output": {
+          "selected_option_id": "structured_text"
+        }
+      },
+      "cohorts": [
+        "foundation",
+        "attachment_or_template"
+      ]
+    },
+    {
+      "id": "attachment_pdf_report_remissvar_sammanstallning",
+      "complexity": "medium",
+      "domain": "municipality_preschool",
+      "required": false,
+      "prompt": "Jag är nämndsekreterare på barn- och utbildningsförvaltningen och ska sammanställa remissvaren i ärende BUN-2026-00037-1. De tre bifogade handlingarna är källmaterialet: det sammanställda remissvaret, tjänsteskrivelseunderlaget och nämndens protokollsutdrag. Flödet ska läsa varje handling för sig och registrera synligt källnamn, dokumenttyp, dokumentdatum och de synpunkter eller beslutspunkter som faktiskt står i handlingen. Datumuppgifterna ska stämmas av mot varandra. Anger remissammanställningen ett annat beslutsdatum än protokollet ska avvikelsen redovisas som en motstridighet med båda datumen och båda källorna; den får inte jämkas ihop eller väljas bort. Skriv sedan ett avsnitt per källa och en samlad bedömning, och rendera en PDF.",
+      "expected": {
+        "min_steps": 3,
+        "max_steps": 6,
+        "terminal_output_type": "pdf",
+        "terminal_document_output_mode": "render_verbatim",
+        "expected_primary_input_type": "document",
+        "min_json_steps": 1,
+        "min_source_ref_steps": 1,
+        "max_all_previous_steps": 0,
+        "max_post_json_text_cleanup_steps": 1,
+        "forbid_input_sources": [
+          "all_previous_steps"
+        ],
+        "forbid_primary_material_form_fields": true,
+        "forbid_generic_primary_reader_envelope": true,
+        "forbidden_question_event_ids": [
+          "report_disposition",
+          "docx_output_mode",
+          "mapped_file_limit"
+        ],
+        "expected_classifier_slots": [
+          {
+            "slot_name": "terminal_output",
+            "value": "pdf_document",
+            "confidence": "high",
+            "evidence_level": "explicit",
+            "required_source_kinds": [
+              "user_message"
+            ],
+            "evidence_contains": [
+              "rendera en PDF"
+            ]
+          },
+          {
+            "slot_name": "report_disposition",
+            "value": "both",
+            "confidence": "high",
+            "evidence_level": "explicit",
+            "required_source_kinds": [
+              "user_message"
+            ],
+            "evidence_contains": [
+              "ett avsnitt per källa"
+            ]
+          }
+        ],
+        "expected_file_roles": [
+          {
+            "file_index": 0,
+            "role": "reference_material",
+            "confidence_in": [
+              "high",
+              "medium"
+            ],
+            "coverage_in": [
+              "fully_seen",
+              "excerpt_truncated"
+            ],
+            "required_source_kinds": [
+              "user_message"
+            ]
+          },
+          {
+            "file_index": 1,
+            "role": "reference_material",
+            "confidence_in": [
+              "high",
+              "medium"
+            ],
+            "coverage_in": [
+              "fully_seen",
+              "excerpt_truncated"
+            ],
+            "required_source_kinds": [
+              "user_message"
+            ]
+          },
+          {
+            "file_index": 2,
+            "role": "reference_material",
+            "confidence_in": [
+              "high",
+              "medium"
+            ],
+            "coverage_in": [
+              "fully_seen",
+              "excerpt_truncated"
+            ],
+            "required_source_kinds": [
+              "user_message"
+            ]
+          }
+        ],
+        "expected_leaf_output_field_groups": [
+          [
+            "source_label",
+            "kallnamn",
+            "kalla"
+          ],
+          [
+            "dokumenttyp",
+            "document_type"
+          ],
+          [
+            "dokumentdatum",
+            "document_date",
+            "datum"
+          ],
+          [
+            "synpunkter",
+            "synpunkt",
+            "remissynpunkter",
+            "beslutspunkter",
+            "beslutspunkt",
+            "comments",
+            "decision_points"
+          ],
+          [
+            "motstridigheter",
+            "motstridighet",
+            "conflicts",
+            "avvikelser",
+            "discrepancies"
+          ]
+        ]
+      },
+      "cohorts": [
+        "attachment_or_template",
+        "pdf"
+      ],
+      "attachments": [
+        "04_remissvar.docx",
+        "02_tjansteskrivelse_underlag.docx",
+        "01_protokoll_bun_2026_02_25.pdf"
+      ],
+      "synthetic_user_profile": "document_source",
+      "question_answer_overrides": {
+        "terminal_output": {
+          "selected_option_id": "pdf_document"
+        },
+        "pdf_generation_mode": {
+          "selected_option_id": "generated_pdf"
+        },
+        "report_disposition": {
+          "selected_option_id": "both"
+        },
+        "document_material_scope": {
+          "selected_option_id": "multiple_documents_case"
+        },
+        "post_processing_goal": {
+          "selected_option_id": "summarize_or_overview"
+        },
+        "comparison_scope": {
+          "selected_option_id": "same_run_compare"
+        }
+      }
+    },
+    {
+      "id": "attachment_pdf_report_ekonomisk_konsekvens_lokalkalkyl",
+      "complexity": "medium",
+      "domain": "municipality_finance",
+      "required": false,
+      "prompt": "Ekonom på barn- och utbildningsförvaltningen här. Jag behöver ett flöde som tar fram en ekonomisk konsekvensrapport i ärende BUN-2026-00037-1. De två bifogade filerna är underlaget: lokalkalkylen och tjänsteskrivelseunderlaget. Kalkylfilen har en rad per kostnadspost med kolumnerna post, belopp, källa och status. Varje rad ska tas med som en egen post med belopp, källa och status oförändrade. En post saknar belopp och har finansieringskällan angiven som ej fastställd; den ska redovisas som en egen rad med tom beloppsuppgift och sin statustext. Den får aldrig sättas till noll, uppskattas eller tas bort. Summan ska räknas fram som en delsumma av enbart de poster som har ett belopp, med antalet ingående poster angivet, och beräkningen ska göras på de strukturerade posterna och inte i löptext. Rapporten ska bli en PDF där varje post och delsumman syns med etikett.",
+      "expected": {
+        "min_steps": 3,
+        "max_steps": 7,
+        "terminal_output_type": "pdf",
+        "terminal_document_output_mode": "render_verbatim",
+        "min_json_steps": 2,
+        "min_source_ref_steps": 1,
+        "max_all_previous_steps": 0,
+        "max_post_json_text_cleanup_steps": 1,
+        "forbid_input_sources": [
+          "all_previous_steps"
+        ],
+        "forbid_primary_material_form_fields": true,
+        "forbid_generic_primary_reader_envelope": true,
+        "forbidden_question_event_ids": [
+          "docx_output_mode",
+          "mapped_file_limit"
+        ],
+        "expected_classifier_slots": [
+          {
+            "slot_name": "terminal_output",
+            "value": "pdf_document",
+            "confidence": "high",
+            "evidence_level": "explicit",
+            "required_source_kinds": [
+              "user_message"
+            ],
+            "evidence_contains": [
+              "en PDF"
+            ]
+          }
+        ],
+        "expected_file_roles": [
+          {
+            "file_index": 0,
+            "role": "reference_material",
+            "confidence_in": [
+              "high",
+              "medium"
+            ],
+            "coverage_in": [
+              "fully_seen",
+              "excerpt_truncated"
+            ],
+            "required_source_kinds": [
+              "user_message"
+            ]
+          },
+          {
+            "file_index": 1,
+            "role": "reference_material",
+            "confidence_in": [
+              "high",
+              "medium"
+            ],
+            "coverage_in": [
+              "fully_seen",
+              "excerpt_truncated"
+            ],
+            "required_source_kinds": [
+              "user_message"
+            ]
+          }
+        ],
+        "expected_leaf_output_field_groups": [
+          [
+            "post",
+            "kostnadspost",
+            "budgetpost",
+            "line_item",
+            "cost_item",
+            "poster",
+            "kostnadsposter"
+          ],
+          [
+            "belopp",
+            "belopp_sek",
+            "amount",
+            "amount_sek"
+          ],
+          [
+            "status",
+            "poststatus",
+            "status_text"
+          ],
+          [
+            "kalla",
+            "finansieringskalla",
+            "funding_source"
+          ],
+          [
+            "delsumma",
+            "subtotal",
+            "summa",
+            "summa_sek",
+            "total",
+            "total_sek"
+          ],
+          [
+            "antal_poster",
+            "antal_ingaende_poster",
+            "post_count",
+            "included_post_count",
+            "included_items"
+          ]
+        ]
+      },
+      "cohorts": [
+        "attachment_or_template",
+        "pdf"
+      ],
+      "attachments": [
+        "05_lokalkalkyl.csv",
+        "02_tjansteskrivelse_underlag.docx"
+      ],
+      "synthetic_user_profile": "document_source",
+      "question_answer_overrides": {
+        "terminal_output": {
+          "selected_option_id": "pdf_document"
+        },
+        "pdf_generation_mode": {
+          "selected_option_id": "generated_pdf"
+        },
+        "report_disposition": {
+          "selected_option_id": "synthesized_overview"
+        },
+        "document_material_scope": {
+          "selected_option_id": "multiple_documents_case"
+        },
+        "post_processing_goal": {
+          "selected_option_id": "extract_key_information"
+        }
+      }
+    },
+    {
+      "id": "attachment_pdf_report_blandade_kallor_csv_radvis",
+      "complexity": "hard",
+      "domain": "municipality_records",
+      "required": false,
+      "prompt": "Inför nämndens uppföljning behöver jag en underlagsförteckning över handlingarna i ärende BUN-2026-00037-1. De fyra bifogade filerna är ärendets underlag: tre handlingar i löptext och en lokalkalkyl i csv-format. Vid körning fyller jag i diarienummer och uppföljningsdatum som formulärfält; handlingarna själva är primärmaterial och får inte bli formulärfält. Kalkylfilen ska läsas radvis, så att varje rad blir en egen post med kolumnvärdena post, belopp, källa och status bevarade var för sig. Den får inte sammanfattas till löpande text och rader får inte slås ihop. Textdokumenten ska i stället få varsitt avsnitt med dokumenttyp, dokumentdatum och de sakuppgifter som står i dem. Slutrapporten ska vara en PDF där tabellposterna och dokumentavsnitten hålls isär.",
+      "expected": {
+        "min_steps": 3,
+        "max_steps": 7,
+        "terminal_output_type": "pdf",
+        "terminal_document_output_mode": "render_verbatim",
+        "min_json_steps": 1,
+        "min_source_ref_steps": 1,
+        "max_all_previous_steps": 0,
+        "max_post_json_text_cleanup_steps": 1,
+        "forbid_input_sources": [
+          "all_previous_steps"
+        ],
+        "forbid_primary_material_form_fields": true,
+        "forbid_generic_primary_reader_envelope": true,
+        "min_form_field_count": 2,
+        "expected_form_field_groups": [
+          [
+            "diarienummer",
+            "case_number",
+            "reference_number"
+          ],
+          [
+            "uppfoljningsdatum",
+            "follow_up_date",
+            "uppfoljning_datum"
+          ]
+        ],
+        "forbidden_question_event_ids": [
+          "docx_output_mode",
+          "mapped_file_limit"
+        ],
+        "expected_classifier_slots": [
+          {
+            "slot_name": "terminal_output",
+            "value": "pdf_document",
+            "confidence": "high",
+            "evidence_level": "explicit",
+            "required_source_kinds": [
+              "user_message"
+            ],
+            "evidence_contains": [
+              "en PDF"
+            ]
+          }
+        ],
+        "expected_file_roles": [
+          {
+            "file_index": 0,
+            "role": "reference_material",
+            "confidence_in": [
+              "high",
+              "medium"
+            ],
+            "coverage_in": [
+              "fully_seen",
+              "excerpt_truncated"
+            ],
+            "required_source_kinds": [
+              "user_message"
+            ]
+          },
+          {
+            "file_index": 1,
+            "role": "reference_material",
+            "confidence_in": [
+              "high",
+              "medium"
+            ],
+            "coverage_in": [
+              "fully_seen",
+              "excerpt_truncated"
+            ],
+            "required_source_kinds": [
+              "user_message"
+            ]
+          },
+          {
+            "file_index": 2,
+            "role": "reference_material",
+            "confidence_in": [
+              "high",
+              "medium"
+            ],
+            "coverage_in": [
+              "fully_seen",
+              "excerpt_truncated"
+            ],
+            "required_source_kinds": [
+              "user_message"
+            ]
+          },
+          {
+            "file_index": 3,
+            "role": "reference_material",
+            "confidence_in": [
+              "high",
+              "medium"
+            ],
+            "coverage_in": [
+              "fully_seen",
+              "excerpt_truncated"
+            ],
+            "required_source_kinds": [
+              "user_message"
+            ]
+          }
+        ],
+        "expected_leaf_output_field_groups": [
+          [
+            "post",
+            "kostnadspost",
+            "line_item",
+            "poster",
+            "kostnadsposter"
+          ],
+          [
+            "belopp",
+            "belopp_sek",
+            "amount"
+          ],
+          [
+            "kalla",
+            "finansieringskalla",
+            "funding_source"
+          ],
+          [
+            "status",
+            "poststatus"
+          ],
+          [
+            "dokumenttyp",
+            "document_type"
+          ],
+          [
+            "dokumentdatum",
+            "document_date"
+          ],
+          [
+            "source_label",
+            "kallnamn"
+          ]
+        ]
+      },
+      "cohorts": [
+        "attachment_or_template",
+        "pdf",
+        "form_fields"
+      ],
+      "attachments": [
+        "05_lokalkalkyl.csv",
+        "02_tjansteskrivelse_underlag.docx",
+        "03_barnkonsekvensanalys.docx",
+        "04_remissvar.docx"
+      ],
+      "synthetic_user_profile": "document_source",
+      "question_answer_overrides": {
+        "terminal_output": {
+          "selected_option_id": "pdf_document"
+        },
+        "pdf_generation_mode": {
+          "selected_option_id": "generated_pdf"
+        },
+        "report_disposition": {
+          "selected_option_id": "both"
+        },
+        "document_material_scope": {
+          "selected_option_id": "multiple_documents_case"
+        },
+        "post_processing_goal": {
+          "selected_option_id": "structure_key_information"
+        }
+      }
+    },
+    {
+      "id": "attachment_pdf_report_degraderad_extraktion_synlig",
+      "complexity": "hard",
+      "domain": "municipality_archive",
+      "required": false,
+      "prompt": "Arkivarien har skickat över två protokollsutdrag i ärende BUN-2026-00037-1: arbetsutskottets tidigare beslut och nämndens beslut. Båda är bifogade och utgör underlaget. Det ena är inskannat och arkivstämplat, och texten kommer ut ojämnt ur filen — svenska tecken faller bort och stämpeln bryts upp i lösa bokstäver. Jag vill ha ett flöde som gör en beslutshistorik i PDF av de två utdragen. För varje utdrag ska flödet redovisa synligt källnamn, sammanträdesdatum, paragraf, beslutets lydelse som den faktiskt extraherats, och en bedömning av extraktionskvaliteten med de varningar filen ger. Försämrad text ska markeras synligt i rapporten och citeras som den står. Flödet får inte tyst rätta stavning, fylla i tecken som fallit bort eller gissa vad som stod. Besluten ska redovisas var för sig, och sist vill jag ha en samlad jämförelse av vad som ändrades mellan utskottets förslag och nämndens beslut.",
+      "expected": {
+        "min_steps": 3,
+        "max_steps": 6,
+        "terminal_output_type": "pdf",
+        "terminal_document_output_mode": "render_verbatim",
+        "expected_primary_input_type": "document",
+        "min_json_steps": 1,
+        "min_source_ref_steps": 1,
+        "max_all_previous_steps": 0,
+        "max_post_json_text_cleanup_steps": 1,
+        "forbid_input_sources": [
+          "all_previous_steps"
+        ],
+        "forbid_primary_material_form_fields": true,
+        "forbid_generic_primary_reader_envelope": true,
+        "forbidden_question_event_ids": [
+          "report_disposition",
+          "docx_output_mode",
+          "mapped_file_limit"
+        ],
+        "expected_classifier_slots": [
+          {
+            "slot_name": "terminal_output",
+            "value": "pdf_document",
+            "confidence": "high",
+            "evidence_level": "explicit",
+            "required_source_kinds": [
+              "user_message"
+            ],
+            "evidence_contains": [
+              "i PDF"
+            ]
+          },
+          {
+            "slot_name": "report_disposition",
+            "value": "both",
+            "confidence": "high",
+            "evidence_level": "explicit",
+            "required_source_kinds": [
+              "user_message"
+            ],
+            "evidence_contains": [
+              "var för sig"
+            ]
+          }
+        ],
+        "expected_file_roles": [
+          {
+            "file_index": 0,
+            "role": "reference_material",
+            "confidence_in": [
+              "high",
+              "medium"
+            ],
+            "coverage_in": [
+              "fully_seen",
+              "excerpt_truncated"
+            ],
+            "required_source_kinds": [
+              "user_message"
+            ]
+          },
+          {
+            "file_index": 1,
+            "role": "reference_material",
+            "confidence_in": [
+              "high",
+              "medium"
+            ],
+            "coverage_in": [
+              "fully_seen",
+              "excerpt_truncated"
+            ],
+            "required_source_kinds": [
+              "user_message"
+            ]
+          }
+        ],
+        "expected_leaf_output_field_groups": [
+          [
+            "source_label",
+            "kallnamn"
+          ],
+          [
+            "sammantradesdatum",
+            "meeting_date",
+            "document_date",
+            "datum"
+          ],
+          [
+            "paragraf",
+            "paragraph",
+            "paragraph_number"
+          ],
+          [
+            "beslut",
+            "beslutslydelse",
+            "decision",
+            "decision_text"
+          ],
+          [
+            "extraktionskvalitet",
+            "extraction_quality",
+            "textkvalitet",
+            "text_quality",
+            "text_quality_warnings",
+            "extraction_warnings",
+            "quality_warnings",
+            "degraded_extraction",
+            "degradation"
+          ]
+        ]
+      },
+      "cohorts": [
+        "attachment_or_template",
+        "pdf"
+      ],
+      "attachments": [
+        "06_tidigare_beslut.pdf",
+        "01_protokoll_bun_2026_02_25.pdf"
+      ],
+      "synthetic_user_profile": "document_source",
+      "question_answer_overrides": {
+        "terminal_output": {
+          "selected_option_id": "pdf_document"
+        },
+        "pdf_generation_mode": {
+          "selected_option_id": "generated_pdf"
+        },
+        "report_disposition": {
+          "selected_option_id": "both"
+        },
+        "document_material_scope": {
+          "selected_option_id": "multiple_documents_case"
+        },
+        "post_processing_goal": {
+          "selected_option_id": "extract_key_information"
+        }
+      }
+    },
+    {
+      "id": "attachment_pdf_report_exemplarform_kallgenomgang",
+      "complexity": "medium",
+      "domain": "municipality_reports",
+      "required": false,
+      "prompt": "Förvaltningen har redan en exempelrapport för källgenomgångar och jag vill att ett nytt flöde följer samma form. Den bifogade exempelrapporten visar formen: en rubrik per källa där dokumenttyp, datum, avsändare, relevanta fakta och osäkerheter redovisas, och sist en samlad bedömning som bara syntetiserar belagda uppgifter och visar motsägelser och luckor. De två andra bifogade handlingarna, ett protokollsutdrag och en barnkonsekvensanalys, är källmaterialet i ärende BUN-2026-00037-1. Flödet ska läsa varje källa, behålla den synliga källhänvisningen i källans eget avsnitt och lämna en PDF med samma disposition som exemplet. Ingenting får läggas till som inte står i källorna.",
+      "expected": {
+        "min_steps": 3,
+        "max_steps": 6,
+        "terminal_output_type": "pdf",
+        "terminal_document_output_mode": "render_verbatim",
+        "expected_primary_input_type": "document",
+        "min_json_steps": 1,
+        "min_source_ref_steps": 1,
+        "max_all_previous_steps": 0,
+        "max_post_json_text_cleanup_steps": 1,
+        "forbid_input_sources": [
+          "all_previous_steps"
+        ],
+        "forbid_primary_material_form_fields": true,
+        "forbidden_question_event_ids": [
+          "report_disposition",
+          "docx_output_mode",
+          "mapped_file_limit"
+        ],
+        "expected_classifier_slots": [
+          {
+            "slot_name": "terminal_output",
+            "value": "pdf_document",
+            "confidence": "high",
+            "evidence_level": "explicit",
+            "required_source_kinds": [
+              "user_message"
+            ],
+            "evidence_contains": [
+              "en PDF"
+            ]
+          },
+          {
+            "slot_name": "report_disposition",
+            "value": "both",
+            "confidence": "high",
+            "evidence_level": "explicit",
+            "required_source_kinds": [
+              "user_message"
+            ],
+            "evidence_contains": [
+              "en rubrik per källa"
+            ]
+          }
+        ],
+        "expected_file_roles": [
+          {
+            "file_index": 0,
+            "role": "example_output",
+            "confidence_in": [
+              "high",
+              "medium"
+            ],
+            "evidence_level": "explicit",
+            "coverage_in": [
+              "fully_seen",
+              "excerpt_truncated"
+            ],
+            "required_source_kinds": [
+              "user_message"
+            ],
+            "evidence_contains": [
+              "bifogade exempelrapporten"
+            ]
+          },
+          {
+            "file_index": 1,
+            "role": "reference_material",
+            "confidence_in": [
+              "high",
+              "medium"
+            ],
+            "coverage_in": [
+              "fully_seen",
+              "excerpt_truncated"
+            ],
+            "required_source_kinds": [
+              "user_message"
+            ]
+          },
+          {
+            "file_index": 2,
+            "role": "reference_material",
+            "confidence_in": [
+              "high",
+              "medium"
+            ],
+            "coverage_in": [
+              "fully_seen",
+              "excerpt_truncated"
+            ],
+            "required_source_kinds": [
+              "user_message"
+            ]
+          }
+        ],
+        "expected_leaf_output_field_groups": [
+          [
+            "dokumenttyp",
+            "document_type"
+          ],
+          [
+            "datum",
+            "date",
+            "document_date"
+          ],
+          [
+            "avsandare",
+            "sender",
+            "author",
+            "author_or_sender",
+            "upphovsman"
+          ],
+          [
+            "fakta",
+            "relevanta_fakta",
+            "facts",
+            "source_facts",
+            "key_facts"
+          ],
+          [
+            "osakerheter",
+            "osakerhet",
+            "uncertainties"
+          ],
+          [
+            "source_label",
+            "kallhanvisning",
+            "kallnamn"
+          ]
+        ]
+      },
+      "cohorts": [
+        "attachment_or_template",
+        "pdf"
+      ],
+      "attachments": [
+        "example_report.docx",
+        "01_protokoll_bun_2026_02_25.pdf",
+        "03_barnkonsekvensanalys.docx"
+      ],
+      "synthetic_user_profile": "document_source",
+      "question_answer_overrides": {
+        "terminal_output": {
+          "selected_option_id": "pdf_document"
+        },
+        "pdf_generation_mode": {
+          "selected_option_id": "generated_pdf"
+        },
+        "report_disposition": {
+          "selected_option_id": "both"
+        },
+        "document_material_scope": {
+          "selected_option_id": "multiple_documents_case"
+        },
+        "post_processing_goal": {
+          "selected_option_id": "summarize_or_overview"
+        }
+      }
+    },
+    {
+      "id": "attachment_pdf_report_granskat_beslutsunderlag",
+      "complexity": "hard",
+      "domain": "municipality_governance",
+      "required": false,
+      "prompt": "Bygg ett flöde som tar fram ett beslutsunderlag inför återrapporteringen till nämnden i ärende BUN-2026-00037-1. De tre bifogade handlingarna är underlaget: protokollsutdraget, tjänsteskrivelseunderlaget och barnkonsekvensanalysen. Först ska flödet läsa varje handling och samla en typad sammanställning med källhänvisningar per påstående, motstridigheter mellan handlingarna och saknad information som inte går att belägga. Den sammanställningen ska jag kunna granska och redigera innan något skrivs ut, och granskningen ska ligga på det strukturerade steget; det ska bara finnas ett granskningssteg i flödet. Först därefter ska texten komponeras från den granskade sammanställningen med riktade källreferenser, aldrig från alla tidigare steg, och rendera en PDF. Antaganden får inte fylla luckorna: det som saknas ska stå kvar som saknad information.",
+      "expected": {
+        "min_steps": 4,
+        "max_steps": 6,
+        "terminal_output_type": "pdf",
+        "terminal_document_output_mode": "render_verbatim",
+        "expected_primary_input_type": "document",
+        "min_json_steps": 2,
+        "min_source_ref_steps": 2,
+        "max_all_previous_steps": 0,
+        "max_post_json_text_cleanup_steps": 1,
+        "forbid_input_sources": [
+          "all_previous_steps"
+        ],
+        "forbid_primary_material_form_fields": true,
+        "forbid_generic_primary_reader_envelope": true,
+        "forbidden_question_event_ids": [
+          "docx_output_mode",
+          "mapped_file_limit"
+        ],
+        "expected_review_policy": {
+          "mode": "edit",
+          "target_output_type": "json",
+          "target_field_groups": [
+            [
+              "kallhanvisningar",
+              "kallhanvisning",
+              "kallreferenser",
+              "source_references"
+            ],
+            [
+              "motstridigheter",
+              "motstridighet",
+              "conflicts"
+            ],
+            [
+              "saknad_information",
+              "missing_information"
+            ]
+          ],
+          "target_must_be_non_terminal": true
+        },
+        "expected_classifier_slots": [
+          {
+            "slot_name": "terminal_output",
+            "value": "pdf_document",
+            "confidence": "high",
+            "evidence_level": "explicit",
+            "required_source_kinds": [
+              "user_message"
+            ],
+            "evidence_contains": [
+              "rendera en PDF"
+            ]
+          }
+        ],
+        "expected_file_roles": [
+          {
+            "file_index": 0,
+            "role": "reference_material",
+            "confidence_in": [
+              "high",
+              "medium"
+            ],
+            "coverage_in": [
+              "fully_seen",
+              "excerpt_truncated"
+            ],
+            "required_source_kinds": [
+              "user_message"
+            ]
+          },
+          {
+            "file_index": 1,
+            "role": "reference_material",
+            "confidence_in": [
+              "high",
+              "medium"
+            ],
+            "coverage_in": [
+              "fully_seen",
+              "excerpt_truncated"
+            ],
+            "required_source_kinds": [
+              "user_message"
+            ]
+          },
+          {
+            "file_index": 2,
+            "role": "reference_material",
+            "confidence_in": [
+              "high",
+              "medium"
+            ],
+            "coverage_in": [
+              "fully_seen",
+              "excerpt_truncated"
+            ],
+            "required_source_kinds": [
+              "user_message"
+            ]
+          }
+        ],
+        "expected_leaf_output_field_groups": [
+          [
+            "source_label",
+            "kallnamn"
+          ],
+          [
+            "kallhanvisningar",
+            "kallhanvisning",
+            "kallreferenser",
+            "source_references"
+          ],
+          [
+            "motstridigheter",
+            "motstridighet",
+            "conflicts"
+          ],
+          [
+            "saknad_information",
+            "missing_information"
+          ]
+        ]
+      },
+      "cohorts": [
+        "attachment_or_template",
+        "pdf",
+        "human_review"
+      ],
+      "attachments": [
+        "01_protokoll_bun_2026_02_25.pdf",
+        "02_tjansteskrivelse_underlag.docx",
+        "03_barnkonsekvensanalys.docx"
+      ],
+      "synthetic_user_profile": "document_source",
+      "question_answer_overrides": {
+        "terminal_output": {
+          "selected_option_id": "pdf_document"
+        },
+        "pdf_generation_mode": {
+          "selected_option_id": "generated_pdf"
+        },
+        "report_disposition": {
+          "selected_option_id": "both"
+        },
+        "document_material_scope": {
+          "selected_option_id": "multiple_documents_case"
+        },
+        "post_processing_goal": {
+          "selected_option_id": "decision_support"
+        }
+      }
+    },
+    {
+      "id": "attachment_json_protokollsutdrag_diariefor",
+      "complexity": "medium",
+      "domain": "municipality_records",
+      "prompt": "Jag arbetar med diarieföring på barn- och utbildningsförvaltningen i Sundsvall. Det bifogade protokollsutdraget är källmaterialet i ärendet, inte en mall och inte ett format jag vill härma. Bygg ett flöde som läser utdraget och lämnar JSON med diarienummer, paragraf, sammanträdesdatum, nämnd, ärenderubrik, beslutets att-satser som en lista, föredragande, de beslutsunderlag som räknas upp i utdraget samt osäkra uppgifter. Innehållet ska hämtas ur handlingen; jag ska inte fylla i det i ett formulär. Det som inte går att belägga i texten hamnar under osäkra uppgifter i stället för att gissas.",
+      "expected": {
+        "min_steps": 1,
+        "max_steps": 3,
+        "terminal_output_type": "json",
+        "min_json_steps": 1,
+        "max_all_previous_steps": 0,
+        "forbid_input_sources": [
+          "all_previous_steps"
+        ],
+        "forbid_primary_material_form_fields": true,
+        "forbid_generic_primary_reader_envelope": true,
+        "forbidden_question_event_ids": [
+          "pdf_generation_mode",
+          "docx_output_mode",
+          "report_disposition"
+        ],
+        "expected_classifier_slots": [
+          {
+            "slot_name": "terminal_output",
+            "value": "structured_json",
+            "confidence": "high",
+            "evidence_level": "explicit",
+            "required_source_kinds": [
+              "user_message"
+            ],
+            "evidence_contains": [
+              "lämnar JSON"
+            ]
+          }
+        ],
+        "expected_file_roles": [
+          {
+            "file_index": 0,
+            "role": "reference_material",
+            "confidence_in": [
+              "high",
+              "medium"
+            ],
+            "evidence_level": "explicit",
+            "coverage_in": [
+              "fully_seen",
+              "excerpt_truncated"
+            ],
+            "required_source_kinds": [
+              "user_message"
+            ],
+            "evidence_contains": [
+              "bifogade protokollsutdraget"
+            ]
+          }
+        ],
+        "expected_leaf_output_field_groups": [
+          [
+            "diarienummer",
+            "case_number",
+            "reference_number",
+            "arendenummer"
+          ],
+          [
+            "paragraf",
+            "paragrafnummer",
+            "paragraph",
+            "paragraph_number"
+          ],
+          [
+            "sammantradesdatum",
+            "meeting_date",
+            "sammantrade_datum"
+          ],
+          [
+            "namnd",
+            "committee",
+            "board"
+          ],
+          [
+            "arenderubrik",
+            "case_title",
+            "titel",
+            "title"
+          ],
+          [
+            "att_satser",
+            "beslutspunkter",
+            "decision_clauses",
+            "decision_points"
+          ],
+          [
+            "foredragande",
+            "presenter",
+            "rapporteur"
+          ],
+          [
+            "beslutsunderlag",
+            "decision_basis",
+            "supporting_documents"
+          ],
+          [
+            "osakra_uppgifter",
+            "osakerheter",
+            "uncertainties",
+            "uncertain_information"
+          ]
+        ]
+      },
+      "cohorts": [
+        "attachment_or_template",
+        "foundation",
+        "json"
+      ],
+      "attachments": [
+        "01_protokoll_bun_2026_02_25.pdf"
+      ],
+      "synthetic_user_profile": "document_source",
+      "question_answer_overrides": {
+        "terminal_output": {
+          "selected_option_id": "structured_json"
+        },
+        "post_processing_goal": {
+          "selected_option_id": "extract_key_information"
+        },
+        "document_material_scope": {
+          "selected_option_id": "single_document_case"
+        }
+      }
+    },
+    {
+      "id": "attachment_json_remissvar_per_avsandare",
+      "complexity": "medium",
+      "domain": "municipality_governance",
+      "prompt": "Jag samordnar remisser åt barn- och utbildningsnämnden. Vid varje körning laddar jag upp den sammanställda remissvarshandlingen, och den bifogade filen är ett exempel på hur en sådan sammanställning ser ut hos oss. Flödet ska returnera JSON där varje synpunkt är en egen post med avsändare, avsändartyp, ståndpunkt, motivering, angivet beslutsdatum och en källhänvisning till var i texten synpunkten står. Framgår inte avsändaren ska fältet sättas till 'ej angiven'; slå inte ihop flera avsändare till en post och hitta inte på namn. Lägg sist till uppgifter att kontrollera mot nämndens protokoll.",
+      "expected": {
+        "min_steps": 1,
+        "max_steps": 4,
+        "terminal_output_type": "json",
+        "min_json_steps": 1,
+        "max_all_previous_steps": 0,
+        "forbid_input_sources": [
+          "all_previous_steps"
+        ],
+        "forbid_primary_material_form_fields": true,
+        "expected_primary_input_type": "document",
+        "forbidden_question_event_ids": [
+          "docx_output_mode"
+        ],
+        "expected_classifier_slots": [
+          {
+            "slot_name": "terminal_output",
+            "value": "structured_json",
+            "confidence": "high",
+            "evidence_level": "explicit",
+            "required_source_kinds": [
+              "user_message"
+            ],
+            "evidence_contains": [
+              "returnera JSON"
+            ]
+          }
+        ],
+        "expected_file_roles": [
+          {
+            "file_index": 0,
+            "role": "runtime_input_sample",
+            "confidence_in": [
+              "high",
+              "medium"
+            ],
+            "evidence_level": "explicit",
+            "coverage_in": [
+              "fully_seen",
+              "excerpt_truncated"
+            ],
+            "required_source_kinds": [
+              "user_message"
+            ]
+          }
+        ],
+        "expected_leaf_output_field_groups": [
+          [
+            "avsandare",
+            "sender",
+            "respondent",
+            "remissinstans"
+          ],
+          [
+            "avsandartyp",
+            "sender_type",
+            "respondent_type"
+          ],
+          [
+            "standpunkt",
+            "position",
+            "stance",
+            "viewpoint"
+          ],
+          [
+            "motivering",
+            "reason",
+            "justification",
+            "rationale"
+          ],
+          [
+            "angivet_beslutsdatum",
+            "beslutsdatum",
+            "stated_decision_date",
+            "decision_date"
+          ],
+          [
+            "kallhanvisning",
+            "kallreferens",
+            "source_reference",
+            "source_references"
+          ],
+          [
+            "uppgifter_att_kontrollera",
+            "att_kontrollera",
+            "items_to_verify",
+            "verification_items"
+          ]
+        ]
+      },
+      "cohorts": [
+        "attachment_or_template",
+        "foundation",
+        "json"
+      ],
+      "attachments": [
+        "04_remissvar.docx"
+      ],
+      "synthetic_user_profile": "document_source",
+      "question_answer_overrides": {
+        "terminal_output": {
+          "selected_option_id": "structured_json"
+        },
+        "post_processing_goal": {
+          "selected_option_id": "structure_key_information"
+        },
+        "document_material_scope": {
+          "selected_option_id": "single_document_case"
+        }
+      }
+    },
+    {
+      "id": "attachment_json_lokalkalkyl_budgetposter_saknat_belopp",
+      "complexity": "medium",
+      "domain": "municipality_finance",
+      "prompt": "Ekonomiassistent på barn- och utbildningsförvaltningen här. Den bifogade lokalkalkylen hör till BUN-2026-00037-1 och ser likadan ut varje gång vi får in en. Jag vill ha ett flöde som returnerar JSON med budgetposter[] där varje post har post, belopp_sek, kalla och status, samt saknade_belopp[] på toppnivån. Belopp som saknas i kalkylen ska vara null och raden ska ändå finnas kvar; nolla inte, uppskatta inte och räkna inte fram ett belopp ur de andra raderna. Ta dessutom med summa_kanda_belopp för de belopp som faktiskt står i filen och summa_fullstandig som säger om summan täcker alla poster. Kontraktet ska kräva post, belopp_sek, kalla och status för varje budgetpost.",
+      "expected": {
+        "min_steps": 1,
+        "max_steps": 3,
+        "terminal_output_type": "json",
+        "min_json_steps": 1,
+        "max_all_previous_steps": 0,
+        "forbid_input_sources": [
+          "all_previous_steps"
+        ],
+        "forbid_primary_material_form_fields": true,
+        "forbidden_question_event_ids": [
+          "pdf_generation_mode",
+          "docx_output_mode"
+        ],
+        "expected_output_contract_schema": {
+          "type": "object",
+          "properties": {
+            "budgetposter": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "post": {},
+                  "belopp_sek": {},
+                  "kalla": {},
+                  "status": {}
+                },
+                "required": [
+                  "post",
+                  "belopp_sek",
+                  "kalla",
+                  "status"
+                ]
+              }
+            },
+            "saknade_belopp": {
+              "type": "array"
+            }
+          },
+          "required": [
+            "budgetposter",
+            "saknade_belopp"
+          ]
+        },
+        "expected_leaf_output_field_groups": [
+          [
+            "summa_kanda_belopp",
+            "summa_kanda",
+            "known_total",
+            "sum_known_amounts"
+          ],
+          [
+            "summa_fullstandig",
+            "summan_fullstandig",
+            "total_is_complete",
+            "sum_is_complete"
+          ]
+        ]
+      },
+      "cohorts": [
+        "attachment_or_template",
+        "json",
+        "technical_contract"
+      ],
+      "attachments": [
+        "05_lokalkalkyl.csv"
+      ],
+      "synthetic_user_profile": "document_source",
+      "question_answer_overrides": {
+        "terminal_output": {
+          "selected_option_id": "structured_json"
+        },
+        "post_processing_goal": {
+          "selected_option_id": "extract_key_information"
+        },
+        "document_material_scope": {
+          "selected_option_id": "single_document_case"
+        }
+      }
+    },
+    {
+      "id": "attachment_json_protokoll_remissvar_datumkonflikt",
+      "complexity": "hard",
+      "domain": "municipality_records",
+      "prompt": "De två bifogade handlingarna hör till samma ärende, BUN-2026-00037-1: nämndens protokollsutdrag och den sammanställda remissvarshandlingen. Läs källorna var för sig och svara med JSON som på toppnivån har kallor[], motstridiga_uppgifter[] och saknade_uppgifter[]. Under kallor[] ska varje källa ha kallnamn, dokumenttyp, dokumentdatum och sakuppgifter. Under motstridiga_uppgifter[] ska varje motstridighet ha uppgift och varden[], där varje värde har kallnamn och varde. Handlingarna anger olika beslutsdatum. Det ska redovisas som en motstridighet; välj inte tyst det ena datumet och jämka inte ihop dem.",
+      "expected": {
+        "min_steps": 2,
+        "max_steps": 4,
+        "terminal_output_type": "json",
+        "min_json_steps": 1,
+        "min_source_ref_steps": 1,
+        "max_all_previous_steps": 0,
+        "forbid_input_sources": [
+          "all_previous_steps"
+        ],
+        "forbid_primary_material_form_fields": true,
+        "forbid_generic_primary_reader_envelope": true,
+        "expected_primary_input_type": "document",
+        "forbidden_question_event_ids": [
+          "pdf_generation_mode",
+          "docx_output_mode"
+        ],
+        "expected_file_roles": [
+          {
+            "file_index": 0,
+            "role": "reference_material",
+            "confidence_in": [
+              "high",
+              "medium"
+            ],
+            "evidence_level": "explicit",
+            "coverage_in": [
+              "fully_seen",
+              "excerpt_truncated"
+            ],
+            "required_source_kinds": [
+              "user_message"
+            ]
+          },
+          {
+            "file_index": 1,
+            "role": "reference_material",
+            "confidence_in": [
+              "high",
+              "medium"
+            ],
+            "evidence_level": "explicit",
+            "coverage_in": [
+              "fully_seen",
+              "excerpt_truncated"
+            ],
+            "required_source_kinds": [
+              "user_message"
+            ]
+          }
+        ],
+        "expected_output_contract_schema": {
+          "type": "object",
+          "properties": {
+            "kallor": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "kallnamn": {},
+                  "dokumenttyp": {},
+                  "dokumentdatum": {},
+                  "sakuppgifter": {}
+                },
+                "required": [
+                  "kallnamn",
+                  "dokumenttyp",
+                  "dokumentdatum",
+                  "sakuppgifter"
+                ]
+              }
+            },
+            "motstridiga_uppgifter": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "uppgift": {},
+                  "varden": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "kallnamn": {},
+                        "varde": {}
+                      },
+                      "required": [
+                        "kallnamn",
+                        "varde"
+                      ]
+                    }
+                  }
+                },
+                "required": [
+                  "uppgift",
+                  "varden"
+                ]
+              }
+            },
+            "saknade_uppgifter": {
+              "type": "array"
+            }
+          },
+          "required": [
+            "kallor",
+            "motstridiga_uppgifter",
+            "saknade_uppgifter"
+          ]
+        }
+      },
+      "cohorts": [
+        "attachment_or_template",
+        "json",
+        "technical_contract"
+      ],
+      "attachments": [
+        "01_protokoll_bun_2026_02_25.pdf",
+        "04_remissvar.docx"
+      ],
+      "synthetic_user_profile": "document_source",
+      "question_answer_overrides": {
+        "terminal_output": {
+          "selected_option_id": "structured_json"
+        },
+        "post_processing_goal": {
+          "selected_option_id": "compare_or_validate"
+        },
+        "document_material_scope": {
+          "selected_option_id": "multiple_documents_case"
+        },
+        "comparison_scope": {
+          "selected_option_id": "same_run_compare"
+        },
+        "mapped_file_limit": {
+          "selected_option_id": "organization_limit"
+        }
+      }
+    },
+    {
+      "id": "attachment_json_degraderat_tidigare_beslut_kvalitet",
+      "complexity": "medium",
+      "domain": "municipality_archives",
+      "prompt": "Vi digitaliserar äldre protokollsutdrag och en del blir dåliga i inskanningen: svenska tecken faller bort och stämplar hamnar som lösa bokstäver på varsin rad. Den bifogade filen från arbetsutskottet är ett sådant utdrag. Flödet ska ge JSON med diarienummer, sammanträdesdatum, paragraf, beslut, motivering, extraktionskvalitet och textproblem som beskriver vad som ser trasigt ut i texten. Återge texten som den står; rätta inte stavning, återställ inte tecken som fattas och tolka inte lösa bokstäver som ord. Är ett fält oläsligt ska det synas i extraktionskvalitet och textproblem i stället för att fyllas i på känn.",
+      "expected": {
+        "min_steps": 1,
+        "max_steps": 3,
+        "terminal_output_type": "json",
+        "min_json_steps": 1,
+        "max_all_previous_steps": 0,
+        "forbid_input_sources": [
+          "all_previous_steps"
+        ],
+        "forbid_primary_material_form_fields": true,
+        "forbid_generic_primary_reader_envelope": true,
+        "forbidden_question_event_ids": [
+          "pdf_generation_mode",
+          "docx_output_mode"
+        ],
+        "expected_leaf_output_field_groups": [
+          [
+            "diarienummer",
+            "case_number",
+            "reference_number"
+          ],
+          [
+            "sammantradesdatum",
+            "meeting_date",
+            "datum",
+            "date"
+          ],
+          [
+            "paragraf",
+            "paragrafnummer",
+            "paragraph",
+            "paragraph_number"
+          ],
+          [
+            "beslut",
+            "beslutsmening",
+            "decision",
+            "decision_statement"
+          ],
+          [
+            "motivering",
+            "reason",
+            "justification",
+            "rationale"
+          ],
+          [
+            "extraktionskvalitet",
+            "extraction_quality",
+            "textkvalitet",
+            "text_quality"
+          ],
+          [
+            "textproblem",
+            "textfel",
+            "text_issues",
+            "extraction_issues"
+          ]
+        ]
+      },
+      "cohorts": [
+        "attachment_or_template",
+        "foundation",
+        "json"
+      ],
+      "attachments": [
+        "06_tidigare_beslut.pdf"
+      ],
+      "synthetic_user_profile": "document_source",
+      "question_answer_overrides": {
+        "terminal_output": {
+          "selected_option_id": "structured_json"
+        },
+        "post_processing_goal": {
+          "selected_option_id": "extract_key_information"
+        },
+        "document_material_scope": {
+          "selected_option_id": "single_document_case"
+        }
+      }
+    },
+    {
+      "id": "file_role_discrimination_example_output_text_terminal",
+      "complexity": "easy",
+      "domain": "municipality_environmental_health",
+      "required": false,
+      "prompt": "Efter varje tillsynsbesök klistrar jag in mina fältanteckningar direkt i chatten och vill få tillbaka en färdig genomgång som löpande text. Inga filer laddas upp vid körning, bara den inklistrade texten. Den bifogade rapporten är enbart ett formatexempel som visar hur en genomgång ser ut hos oss; den är alltså ingen källa och ingenting ur den får hamna i mina genomgångar.",
+      "expected": {
+        "min_steps": 1,
+        "max_steps": 3,
+        "terminal_output_type": "text",
+        "expected_primary_input_type": "text",
+        "max_all_previous_steps": 0,
+        "forbid_input_sources": [
+          "all_previous_steps"
+        ],
+        "forbid_primary_material_form_fields": true,
+        "forbidden_question_event_ids": [
+          "primary_runtime_input",
+          "terminal_output"
+        ],
+        "expected_classifier_slots": [
+          {
+            "slot_name": "primary_runtime_input",
+            "value": "text",
+            "confidence": "high",
+            "evidence_level": "explicit",
+            "required_source_kinds": [
+              "user_message"
+            ],
+            "evidence_contains": [
+              "klistrar jag in"
+            ]
+          },
+          {
+            "slot_name": "terminal_output",
+            "value": "structured_text",
+            "confidence": "high",
+            "evidence_level": "explicit",
+            "required_source_kinds": [
+              "user_message"
+            ],
+            "evidence_contains": [
+              "som löpande text"
+            ]
+          }
+        ],
+        "expected_file_roles": [
+          {
+            "file_index": 0,
+            "role": "example_output",
+            "confidence_in": [
+              "high",
+              "medium"
+            ],
+            "evidence_level": "explicit",
+            "coverage_in": [
+              "fully_seen",
+              "excerpt_truncated"
+            ],
+            "required_source_kinds": [
+              "user_message"
+            ],
+            "evidence_contains": [
+              "formatexempel"
+            ]
+          }
+        ]
+      },
+      "cohorts": [
+        "attachment_or_template",
+        "file_role_discrimination"
+      ],
+      "attachments": [
+        "example_report.docx"
+      ]
+    },
+    {
+      "id": "file_role_discrimination_reference_material_criteria",
+      "complexity": "medium",
+      "domain": "municipality_preschool",
+      "required": false,
+      "prompt": "Vi behöver ett flöde som granskar nya underlag om förskolestrukturen mot de bedömningspunkter som redan är beslutade. Den bifogade filen är ett referensdokument som håller kriterierna, alltså personaltäthet, barngruppsstorlek och mångfald av förskolor, och den ska styra bedömningsreglerna i flödet. Den ska varken fyllas i, renderas eller redovisas som en egen källa i resultatet. Vid körning laddar handläggaren upp ärendets handlingar; skapa inga formulärfält för deras innehåll. Resultatet ska vara JSON med kriterium, bedömning, belagd_källa och avvikelse för varje kriterium.",
+      "expected": {
+        "min_steps": 1,
+        "max_steps": 4,
+        "terminal_output_type": "json",
+        "expected_primary_input_type": "document",
+        "max_all_previous_steps": 0,
+        "forbid_input_sources": [
+          "all_previous_steps"
+        ],
+        "forbid_primary_material_form_fields": true,
+        "forbidden_question_event_ids": [
+          "terminal_output"
+        ],
+        "expected_leaf_output_field_groups": [
+          [
+            "kriterium",
+            "criterion"
+          ],
+          [
+            "bedomning",
+            "assessment"
+          ],
+          [
+            "belagd_kalla",
+            "evidence_source"
+          ],
+          [
+            "avvikelse",
+            "deviation"
+          ]
+        ],
+        "expected_classifier_slots": [
+          {
+            "slot_name": "terminal_output",
+            "value": "structured_json",
+            "confidence": "high",
+            "evidence_level": "explicit",
+            "required_source_kinds": [
+              "user_message"
+            ],
+            "evidence_contains": [
+              "Resultatet ska vara JSON"
+            ]
+          }
+        ],
+        "expected_file_roles": [
+          {
+            "file_index": 0,
+            "role": "reference_material",
+            "confidence_in": [
+              "high",
+              "medium"
+            ],
+            "evidence_level": "explicit",
+            "coverage_in": [
+              "fully_seen",
+              "excerpt_truncated"
+            ],
+            "required_source_kinds": [
+              "user_message"
+            ],
+            "evidence_contains": [
+              "referensdokument"
+            ]
+          }
+        ]
+      },
+      "cohorts": [
+        "attachment_or_template",
+        "file_role_discrimination",
+        "json"
+      ],
+      "attachments": [
+        "02_tjansteskrivelse_underlag.docx"
+      ]
+    },
+    {
+      "id": "file_role_discrimination_template_and_reference_split",
+      "complexity": "hard",
+      "domain": "municipality_tjansteskrivelse",
+      "required": false,
+      "prompt": "Två filer är bifogade och de har olika roller, så blanda inte ihop dem. Den första är förvaltningens tjänsteskrivelsemall och den enda fil som ska fyllas i. Den andra är en barnkonsekvensanalys som vi använder som referens för vilka konsekvenser bedömningen alltid måste väga in; den ska styra innehållet men aldrig fyllas i, renderas eller lämnas ut som resultat. Vid körning laddar handläggaren upp ärendets handlingar och fyller i diarienummer, handläggare, förvaltning, nämnd och beslutsdatum. Handlingarnas innehåll är primärmaterial och ska inte bli formulärfält. Slutresultatet är den ifyllda tjänsteskrivelsen som DOCX.",
+      "expected": {
+        "min_steps": 2,
+        "max_steps": 5,
+        "terminal_output_type": "docx",
+        "terminal_document_output_mode": "template_fill",
+        "expected_primary_input_type": "document",
+        "min_json_steps": 1,
+        "min_source_ref_steps": 1,
+        "min_form_field_count": 5,
+        "expected_form_field_groups": [
+          [
+            "diarienummer",
+            "case_number",
+            "reference_number"
+          ],
+          [
+            "handlaggare",
+            "case_worker"
+          ],
+          [
+            "forvaltning",
+            "administration"
+          ],
+          [
+            "namnd",
+            "committee"
+          ],
+          [
+            "beslutsdatum",
+            "decision_date"
+          ]
+        ],
+        "forbidden_question_event_ids": [
+          "docx_output_mode"
+        ],
+        "max_all_previous_steps": 0,
+        "forbid_input_sources": [
+          "all_previous_steps"
+        ],
+        "forbid_primary_material_form_fields": true,
+        "expected_classifier_slots": [
+          {
+            "slot_name": "terminal_output",
+            "value": "docx_document",
+            "confidence": "high",
+            "evidence_level": "explicit",
+            "required_source_kinds": [
+              "user_message"
+            ],
+            "evidence_contains": [
+              "tjänsteskrivelsen som DOCX"
+            ]
+          }
+        ],
+        "expected_file_roles": [
+          {
+            "file_index": 0,
+            "role": "template",
+            "confidence_in": [
+              "high",
+              "medium"
+            ],
+            "evidence_level": "explicit",
+            "coverage_in": [
+              "fully_seen",
+              "excerpt_truncated"
+            ],
+            "required_source_kinds": [
+              "user_message"
+            ],
+            "evidence_contains": [
+              "tjänsteskrivelsemall"
+            ]
+          },
+          {
+            "file_index": 1,
+            "role": "reference_material",
+            "confidence_in": [
+              "high",
+              "medium"
+            ],
+            "evidence_level": "explicit",
+            "coverage_in": [
+              "fully_seen",
+              "excerpt_truncated"
+            ],
+            "required_source_kinds": [
+              "user_message"
+            ],
+            "evidence_contains": [
+              "som referens"
+            ]
+          }
+        ]
+      },
+      "cohorts": [
+        "attachment_or_template",
+        "file_role_discrimination",
+        "form_fields"
+      ],
+      "attachments": [
+        "tjansteskrivelse_template.docx",
+        "03_barnkonsekvensanalys.docx"
+      ]
+    },
+    {
+      "id": "file_role_discrimination_exemplar_not_docx_template",
+      "complexity": "medium",
+      "domain": "municipality_archives",
+      "required": false,
+      "prompt": "Arkivet får in blandade handlingar i varje ärende och vi vill ha ett flöde som läser dem och skriver en färdig genomgång som Word-dokument. Den bifogade exempelrapporten visar bara formen på en färdig genomgång; den innehåller inga variabler och ska inte fyllas i. Bygg dokumentet från grunden med samma disposition: ett avsnitt per källa och därefter en samlad bedömning. Handlingarna laddas upp vid körning och deras innehåll ska inte bli formulärfält.",
+      "expected": {
+        "min_steps": 3,
+        "max_steps": 6,
+        "terminal_output_type": "docx",
+        "terminal_document_output_mode": "render_verbatim",
+        "expected_primary_input_type": "document",
+        "min_json_steps": 1,
+        "min_source_ref_steps": 1,
+        "max_all_previous_steps": 0,
+        "forbid_input_sources": [
+          "all_previous_steps"
+        ],
+        "forbid_primary_material_form_fields": true,
+        "forbidden_question_event_ids": [
+          "docx_output_mode",
+          "report_disposition"
+        ],
+        "expected_leaf_output_field_groups": [
+          [
+            "section_title",
+            "rubrik",
+            "title"
+          ],
+          [
+            "section_body",
+            "avsnitt",
+            "body",
+            "report_section"
+          ]
+        ],
+        "expected_classifier_slots": [
+          {
+            "slot_name": "terminal_output",
+            "value": "docx_document",
+            "confidence": "high",
+            "evidence_level": "explicit",
+            "required_source_kinds": [
+              "user_message"
+            ],
+            "evidence_contains": [
+              "som Word-dokument"
+            ]
+          },
+          {
+            "slot_name": "report_disposition",
+            "value": "both",
+            "confidence": "high",
+            "evidence_level": "explicit",
+            "required_source_kinds": [
+              "user_message"
+            ],
+            "evidence_contains": [
+              "ett avsnitt per källa"
+            ]
+          }
+        ],
+        "expected_file_roles": [
+          {
+            "file_index": 0,
+            "role": "example_output",
+            "confidence_in": [
+              "high",
+              "medium"
+            ],
+            "evidence_level": "explicit",
+            "coverage_in": [
+              "fully_seen",
+              "excerpt_truncated"
+            ],
+            "required_source_kinds": [
+              "user_message"
+            ],
+            "evidence_contains": [
+              "visar bara formen"
+            ]
+          }
+        ]
+      },
+      "cohorts": [
+        "attachment_or_template",
+        "file_role_discrimination"
+      ],
+      "attachments": [
+        "example_report.docx"
+      ]
+    },
+    {
+      "id": "file_role_discrimination_runtime_input_sample_protokoll",
+      "complexity": "medium",
+      "domain": "municipality_meetings",
+      "required": false,
+      "prompt": "Nämndsekretariatet vill ha ett flöde som plockar ut beslutspunkterna ur våra protokollsutdrag. Den bifogade PDF:en är bara ett exempel på hur de protokollsutdrag som handläggaren laddar upp vid körning brukar se ut: den ska inte kopplas till flödet, inte fyllas i och inte användas som facit eller regelkälla. Vid körning laddas ett eller flera protokollsutdrag upp och deras innehåll ska inte bli formulärfält. Ge tillbaka JSON med paragraf, diarienummer, beslutspunkter och protokollsanteckningar.",
+      "expected": {
+        "min_steps": 1,
+        "max_steps": 3,
+        "terminal_output_type": "json",
+        "expected_primary_input_type": "document",
+        "max_all_previous_steps": 0,
+        "forbid_input_sources": [
+          "all_previous_steps"
+        ],
+        "forbid_primary_material_form_fields": true,
+        "forbidden_question_event_ids": [
+          "primary_runtime_input",
+          "terminal_output"
+        ],
+        "expected_leaf_output_field_groups": [
+          [
+            "paragraf",
+            "paragraph",
+            "paragraf_nummer"
+          ],
+          [
+            "diarienummer",
+            "case_number",
+            "reference_number"
+          ],
+          [
+            "beslutspunkter",
+            "decision_points",
+            "decisions"
+          ],
+          [
+            "protokollsanteckningar",
+            "protokollsanteckning",
+            "minute_notes"
+          ]
+        ],
+        "expected_classifier_slots": [
+          {
+            "slot_name": "terminal_output",
+            "value": "structured_json",
+            "confidence": "high",
+            "evidence_level": "explicit",
+            "required_source_kinds": [
+              "user_message"
+            ],
+            "evidence_contains": [
+              "Ge tillbaka JSON"
+            ]
+          }
+        ],
+        "expected_file_roles": [
+          {
+            "file_index": 0,
+            "role": "runtime_input_sample",
+            "confidence_in": [
+              "high",
+              "medium"
+            ],
+            "evidence_level": "explicit",
+            "coverage_in": [
+              "fully_seen",
+              "excerpt_truncated"
+            ],
+            "required_source_kinds": [
+              "user_message"
+            ],
+            "evidence_contains": [
+              "protokollsutdrag som handläggaren laddar upp vid körning"
+            ]
+          }
+        ]
+      },
+      "cohorts": [
+        "attachment_or_template",
+        "file_role_discrimination",
+        "json"
+      ],
+      "attachments": [
+        "01_protokoll_bun_2026_02_25.pdf"
+      ]
+    },
+    {
+      "id": "declared_terminal_everyday_fardtjanst_json",
+      "complexity": "medium",
+      "domain": "municipality_special_transport",
+      "required": false,
+      "prompt": "Färdtjänsthandläggningen tar emot ansökan och läkarintyg som skannade PDF:er. Vid körning laddar jag upp samtliga handlingar i ärendet och vill ha tillbaka enbart JSON — inget dokument, ingen rapport och inga extra fält att fylla i. Strukturera sökt färdtjänstform, de svårigheter att resa med allmän kollektivtrafik som anges i underlaget, uppgivet ledsagarbehov, sökt giltighetstid, vilka intyg som faktiskt bifogats och vad som behöver kompletteras innan utredningen kan fortsätta. Ingenting ska jämföras mot tidigare ärenden. Flödet ska varken bedöma rätten till färdtjänst eller tolka medicinska uppgifter.",
+      "expected": {
+        "min_steps": 1,
+        "max_steps": 4,
+        "terminal_output_type": "json",
+        "expected_primary_input_type": "document",
+        "min_json_steps": 1,
+        "max_all_previous_steps": 0,
+        "forbid_primary_material_form_fields": true,
+        "expected_leaf_output_field_groups": [
+          [
+            "sokt_fardtjanstform",
+            "fardtjanstform",
+            "requested_service_type"
+          ],
+          [
+            "svarigheter",
+            "angivna_svarigheter",
+            "resesvarigheter",
+            "travel_difficulties"
+          ],
+          [
+            "ledsagarbehov",
+            "behov_av_ledsagare",
+            "companion_need",
+            "escort_need"
+          ],
+          [
+            "sokt_giltighetstid",
+            "giltighetstid",
+            "requested_validity_period"
+          ],
+          [
+            "bifogade_intyg",
+            "intyg",
+            "submitted_certificates",
+            "attachments_received"
+          ],
+          [
+            "kompletteringsbehov",
+            "komplettering",
+            "missing_information",
+            "information_gaps"
+          ]
+        ],
+        "forbidden_question_event_ids": [
+          "primary_runtime_input",
+          "terminal_output",
+          "post_processing_goal",
+          "runtime_metadata_fields",
+          "document_material_scope",
+          "report_disposition",
+          "pdf_generation_mode",
+          "docx_output_mode",
+          "comparison_scope"
+        ],
+        "allowed_question_event_ids": [
+          "mapped_file_limit"
+        ],
+        "max_question_event_count": 1
+      },
+      "cohorts": [
+        "complete_everyday",
+        "json"
+      ],
+      "synthetic_user_profile": "document_source",
+      "question_answer_overrides": {
+        "terminal_output": {
+          "selected_option_id": "structured_json"
+        },
+        "post_processing_goal": {
+          "selected_option_id": "extract_key_information"
+        },
+        "document_material_scope": {
+          "selected_option_id": "multiple_documents_case"
+        },
+        "comparison_scope": {
+          "selected_option_id": "no_direct_compare"
+        },
+        "mapped_file_limit": {
+          "selected_option_id": "organization_limit"
+        }
+      }
+    },
+    {
+      "id": "declared_terminal_everyday_bygglovsremiss_text",
+      "complexity": "medium",
+      "domain": "municipality_building_permits",
+      "required": false,
+      "prompt": "Vi skickar bygglovsremisser till miljökontoret, trafikavdelningen och MittSverige Vatten, och yttrandena som kommer tillbaka håller mycket olika kvalitet. Vid körning laddar jag upp alla inkomna remissvar i ett och samma bygglovsärende och fyller inte i några egna uppgifter. Jämför yttrandena mot varandra och ge mig löpande text som jag kan klistra in i tjänsteskrivelsen: ett stycke per remissinstans med instansens ståndpunkt och en hänvisning till vilket yttrande uppgiften kommer från, och därefter ett samlat stycke om var instanserna går isär. Allt som ska jämföras finns i samma uppladdning. Slutresultatet ska vara text — ingen PDF, ingen DOCX-mall och ingen JSON-fil. Skriv inget förslag till beslut.",
+      "expected": {
+        "min_steps": 2,
+        "max_steps": 5,
+        "terminal_output_type": "text",
+        "expected_primary_input_type": "document",
+        "min_json_steps": 1,
+        "min_source_ref_steps": 1,
+        "max_all_previous_steps": 1,
+        "forbid_primary_material_form_fields": true,
+        "expected_leaf_output_field_groups": [
+          [
+            "remissinstans",
+            "remissinstanser",
+            "consulted_body"
+          ],
+          [
+            "standpunkt",
+            "yttrande",
+            "position"
+          ],
+          [
+            "kallhanvisning",
+            "kalla",
+            "yttrandereferens",
+            "source_reference"
+          ],
+          [
+            "skiljaktigheter",
+            "avvikande_standpunkter",
+            "motstridigheter",
+            "disagreements"
+          ]
+        ],
+        "forbidden_question_event_ids": [
+          "primary_runtime_input",
+          "terminal_output",
+          "post_processing_goal",
+          "runtime_metadata_fields",
+          "document_material_scope",
+          "report_disposition",
+          "comparison_scope",
+          "pdf_generation_mode",
+          "docx_output_mode"
+        ],
+        "allowed_question_event_ids": [
+          "mapped_file_limit"
+        ],
+        "max_question_event_count": 1
+      },
+      "cohorts": [
+        "complete_everyday"
+      ],
+      "synthetic_user_profile": "document_source",
+      "question_answer_overrides": {
+        "terminal_output": {
+          "selected_option_id": "structured_text"
+        },
+        "post_processing_goal": {
+          "selected_option_id": "compare_or_validate"
+        },
+        "document_material_scope": {
+          "selected_option_id": "multiple_documents_case"
+        },
+        "report_disposition": {
+          "selected_option_id": "both"
+        },
+        "comparison_scope": {
+          "selected_option_id": "same_run_compare"
+        },
+        "mapped_file_limit": {
+          "selected_option_id": "organization_limit"
+        }
+      }
+    },
+    {
+      "id": "declared_terminal_everyday_livsmedelskontroll_pdf",
+      "complexity": "medium",
+      "domain": "municipality_food_safety",
+      "required": false,
+      "prompt": "Efter en oanmäld livsmedelskontroll har inspektören fältanteckningar, den ifyllda kontrollchecklistan och en bildförteckning. Vid körning laddar jag upp allt underlag från samma kontrolltillfälle och fyller inte i några egna uppgifter; ingen jämförelse ska göras mot tidigare kontroller. Strukturera först kontrollområde, iakttagelse, vilken bestämmelse iakttagelsen rör, bedömd avvikelse och angiven tid för rättelse som JSON. Rendera därefter en samlad kontrollrapport som PDF, skriven i ett sammanhang och inte som separata avsnitt per fil. Vi har ingen rapportmall, så PDF:en ska genereras ur den text flödet skriver. Rapporten får inte föreslå sanktionsavgift och inte påstå att ett krav är uppfyllt när underlaget saknar uppgift.",
+      "expected": {
+        "min_steps": 3,
+        "max_steps": 6,
+        "terminal_output_type": "pdf",
+        "terminal_document_output_mode": "render_verbatim",
+        "expected_primary_input_type": "document",
+        "min_json_steps": 1,
+        "min_source_ref_steps": 1,
+        "max_all_previous_steps": 0,
+        "max_post_json_text_cleanup_steps": 1,
+        "forbid_input_sources": [
+          "all_previous_steps"
+        ],
+        "forbid_primary_material_form_fields": true,
+        "expected_leaf_output_field_groups": [
+          [
+            "kontrollomrade",
+            "omrade",
+            "control_area"
+          ],
+          [
+            "iakttagelse",
+            "iakttagelser",
+            "observation"
+          ],
+          [
+            "bestammelse",
+            "lagrum",
+            "regulation",
+            "legal_reference"
+          ],
+          [
+            "avvikelse",
+            "avvikelser",
+            "deviation",
+            "non_conformity"
+          ],
+          [
+            "tid_for_rattelse",
+            "rattelsetid",
+            "atgardstid",
+            "correction_deadline"
+          ]
+        ],
+        "forbidden_question_event_ids": [
+          "primary_runtime_input",
+          "terminal_output",
+          "post_processing_goal",
+          "runtime_metadata_fields",
+          "document_material_scope",
+          "report_disposition",
+          "pdf_generation_mode",
+          "docx_output_mode",
+          "comparison_scope"
+        ],
+        "allowed_question_event_ids": [
+          "mapped_file_limit"
+        ],
+        "max_question_event_count": 1
+      },
+      "cohorts": [
+        "complete_everyday",
+        "pdf"
+      ],
+      "synthetic_user_profile": "document_source",
+      "question_answer_overrides": {
+        "terminal_output": {
+          "selected_option_id": "pdf_document"
+        },
+        "pdf_generation_mode": {
+          "selected_option_id": "generated_pdf"
+        },
+        "post_processing_goal": {
+          "selected_option_id": "structure_key_information"
+        },
+        "document_material_scope": {
+          "selected_option_id": "multiple_documents_case"
+        },
+        "report_disposition": {
+          "selected_option_id": "synthesized_overview"
+        },
+        "comparison_scope": {
+          "selected_option_id": "no_direct_compare"
+        },
+        "mapped_file_limit": {
+          "selected_option_id": "organization_limit"
+        }
+      }
+    },
+    {
+      "id": "declared_terminal_everyday_va_avbrott_json",
+      "complexity": "medium",
+      "domain": "municipality_water_and_sewage",
+      "required": false,
+      "prompt": "MittSverige Vatten skickar driftlägesdata till kommunens kanaler som JSON. Vid körning tar flödet emot den payloaden och ska svara med JSON enligt vårt driftmeddelandeschema: interruption_reference, water_service, affected_areas[], reported_start, estimated_restore, customer_impact, contact_channel, source_payload{} och data_gaps[]. Behåll okända fält från källan under source_payload, sätt null när ett värde saknas och hitta aldrig på en återställningstid. Ingen människa fyller i något vid körning och ingenting jämförs mot tidigare driftmeddelanden. Slutresultatet är enbart JSON; det här flödet renderar aldrig något dokument.",
+      "expected": {
+        "min_steps": 1,
+        "max_steps": 4,
+        "terminal_output_type": "json",
+        "expected_primary_input_type": "json",
+        "min_json_steps": 1,
+        "max_all_previous_steps": 0,
+        "forbid_primary_material_form_fields": true,
+        "expected_input_contract_schema": {
+          "type": "object"
+        },
+        "expected_output_contract_schema": {
+          "type": "object",
+          "properties": {
+            "interruption_reference": {},
+            "water_service": {},
+            "affected_areas": {
+              "type": "array"
+            },
+            "reported_start": {},
+            "estimated_restore": {},
+            "customer_impact": {},
+            "contact_channel": {},
+            "source_payload": {
+              "type": "object",
+              "additionalProperties": true
+            },
+            "data_gaps": {
+              "type": "array"
+            }
+          },
+          "required": [
+            "interruption_reference",
+            "water_service",
+            "affected_areas",
+            "reported_start",
+            "estimated_restore",
+            "customer_impact",
+            "contact_channel",
+            "source_payload",
+            "data_gaps"
+          ]
+        },
+        "forbidden_question_event_ids": [
+          "primary_runtime_input",
+          "terminal_output",
+          "structured_io_contract",
+          "post_processing_goal",
+          "runtime_metadata_fields",
+          "document_material_scope",
+          "report_disposition",
+          "pdf_generation_mode",
+          "docx_output_mode",
+          "comparison_scope"
+        ]
+      },
+      "cohorts": [
+        "complete_everyday",
+        "json",
+        "technical_contract"
+      ],
+      "synthetic_user_profile": "structured_json_source",
+      "question_answer_overrides": {
+        "terminal_output": {
+          "selected_option_id": "structured_json"
+        },
+        "structured_io_contract": {
+          "selected_option_id": "map_to_new_schema"
+        },
+        "post_processing_goal": {
+          "selected_option_id": "structure_key_information"
+        },
+        "comparison_scope": {
+          "selected_option_id": "no_direct_compare"
+        }
+      }
+    },
+    {
+      "id": "declared_terminal_everyday_kulturbidrag_docx",
+      "complexity": "medium",
+      "domain": "municipality_culture_and_leisure",
+      "required": false,
+      "prompt": "Kultur och fritid bereder föreningarnas ansökningar om verksamhetsbidrag inför nämnden. Vid körning laddar jag upp ansökan, verksamhetsberättelsen och den senaste årsredovisningen, och fyller själv i diarienummer och nämndens sammanträdesdatum. Ta fram sökande förening, sökt belopp, syftet med bidraget, redovisad verksamhet föregående år, egen finansiering och de frågor beredningen måste ställa innan förslag till beslut. Underlaget ska skrivas i ett sammanhang, inte som separata avsnitt per fil, och ingenting ska jämföras med tidigare års ansökningar. Leverera ett DOCX-underlag som genereras ur texten — vi har ingen bidragsmall att fylla i och det ska inte bli en PDF. Ansökningshandlingarna är primärmaterial och laddas upp vid körning; skapa inga formulärfält för deras innehåll. Flödet får varken föreslå belopp eller avstyrka ansökan.",
+      "expected": {
+        "min_steps": 3,
+        "max_steps": 6,
+        "terminal_output_type": "docx",
+        "terminal_document_output_mode": "render_verbatim",
+        "expected_primary_input_type": "document",
+        "min_json_steps": 1,
+        "min_source_ref_steps": 1,
+        "max_all_previous_steps": 0,
+        "max_post_json_text_cleanup_steps": 1,
+        "forbid_input_sources": [
+          "all_previous_steps"
+        ],
+        "forbid_primary_material_form_fields": true,
+        "min_form_field_count": 2,
+        "expected_form_field_groups": [
+          [
+            "diarienummer",
+            "case_number",
+            "reference_number"
+          ],
+          [
+            "sammantradesdatum",
+            "namndens_sammantradesdatum",
+            "meeting_date"
+          ]
+        ],
+        "forbidden_question_event_ids": [
+          "primary_runtime_input",
+          "terminal_output",
+          "docx_output_mode",
+          "pdf_generation_mode",
+          "runtime_metadata_fields",
+          "document_material_scope",
+          "report_disposition",
+          "post_processing_goal",
+          "comparison_scope"
+        ],
+        "allowed_question_event_ids": [
+          "mapped_file_limit"
+        ],
+        "max_question_event_count": 1
+      },
+      "cohorts": [
+        "complete_everyday",
+        "form_fields"
+      ],
+      "question_answer_overrides": {
+        "primary_runtime_input": {
+          "selected_option_id": "documents"
+        },
+        "runtime_metadata_fields": {
+          "selected_option_id": "basic_runtime_metadata"
+        },
+        "terminal_output": {
+          "selected_option_id": "docx_document"
+        },
+        "docx_output_mode": {
+          "selected_option_id": "generated_docx"
+        },
+        "document_material_scope": {
+          "selected_option_id": "multiple_documents_case"
+        },
+        "report_disposition": {
+          "selected_option_id": "synthesized_overview"
+        },
+        "post_processing_goal": {
+          "selected_option_id": "structure_key_information"
+        },
+        "comparison_scope": {
+          "selected_option_id": "no_direct_compare"
+        },
+        "mapped_file_limit": {
+          "selected_option_id": "organization_limit"
+        }
+      }
+    },
+    {
+      "id": "declared_terminal_everyday_enskilt_avlopp_text",
+      "complexity": "easy",
+      "domain": "municipality_environmental_health",
+      "required": false,
+      "prompt": "Vid tillsyn av enskilda avlopp skriver vi fältanteckningarna direkt i mobilen. Vid körning klistrar jag in anteckningarna från ett besök och vill ha tillbaka en kort löptext som jag själv bearbetar innan den diarieförs: vad som observerades vid anläggningen, vilka brister som noterades, vad fastighetsägaren uppgav på plats och vilka kontroller som återstår. Inga extra fält ska fyllas i, fastighetsbeteckningen står i anteckningarna, och ingen jämförelse ska göras mot tidigare tillsynsbesök. Ingen PDF, ingen DOCX och ingen JSON-fil som slutresultat, bara text. Skriv inte att anläggningen är förbjuden och föreslå inget föreläggande.",
+      "expected": {
+        "min_steps": 1,
+        "max_steps": 3,
+        "terminal_output_type": "text",
+        "expected_primary_input_type": "text",
+        "max_all_previous_steps": 0,
+        "forbid_primary_material_form_fields": true,
+        "forbidden_question_event_ids": [
+          "primary_runtime_input",
+          "terminal_output",
+          "post_processing_goal",
+          "runtime_metadata_fields",
+          "document_material_scope",
+          "report_disposition",
+          "pdf_generation_mode",
+          "docx_output_mode",
+          "comparison_scope"
+        ]
+      },
+      "cohorts": [
+        "complete_everyday"
+      ],
+      "question_answer_overrides": {
+        "primary_runtime_input": {
+          "selected_option_id": "text"
+        },
+        "runtime_metadata_fields": {
+          "selected_option_id": "no_extra_metadata"
+        },
+        "terminal_output": {
+          "selected_option_id": "structured_text"
+        },
+        "post_processing_goal": {
+          "selected_option_id": "summarize_or_overview"
+        },
+        "document_material_scope": {
+          "selected_option_id": "single_document_case"
+        },
+        "comparison_scope": {
+          "selected_option_id": "no_direct_compare"
+        }
+      }
     }
   ]
 }

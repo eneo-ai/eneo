@@ -187,7 +187,7 @@ def test_interview_case_evaluator_rejects_pdf_metadata_first_question() -> None:
         GENERATOR_PATH.with_name("ai_builder_api_battle_test.py"),
     )
     cases = harness._read_cases_file(CASES_PATH)
-    assert len(cases) == 122
+    assert len(cases) >= 122
     family = {
         case.case_id: case for case in cases if "tjansteskrivelse_v1" in case.cohorts
     }
