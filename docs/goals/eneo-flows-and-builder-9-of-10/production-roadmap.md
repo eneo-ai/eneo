@@ -1081,6 +1081,21 @@ self_correction_invalid_payload dead-ends, 4 singles. HARNESS FOLLOW-UP
 journeys should classify as their journey outcome (builder_error), not
 invalid_evidence.
 
+Runtime-field ownership 2026-08-06 evening V: with the feedback path
+clear, the model still declared nothing, so the cause was upstream.
+VERIFIED against the failing session's persisted planning state: its
+input_fields list is empty, so no `Server-owned runtime input fields`
+block rendered, while the design rule flatly called runtime metadata
+compiler-owned — the compiler materializes runtime fields only from
+planning state, so a metadata request arriving in prose had NO owner
+while the critic demanded it. `9d4237a67` states ownership by state
+(server-owned fields listed and not to be redeclared; otherwise the
+requested fields are the model's) and adds a short block naming the
+request with the user's own words so the first attempt can satisfy the
+critic. Quote extraction is now one shared helper. Three-case
+verification (water_leak + two form-field cases) in flight at
+DEV-9d4237a67324.
+
 Feedback-path shadowing 2026-08-06 evening IV: two more layers stood
 between the quoted remediation and the model, each found by pushing the
 fix to a live replay instead of trusting unit tests. `d30a75620`: the
