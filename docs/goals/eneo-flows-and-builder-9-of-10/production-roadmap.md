@@ -1081,6 +1081,28 @@ self_correction_invalid_payload dead-ends, 4 singles. HARNESS FOLLOW-UP
 journeys should classify as their journey outcome (builder_error), not
 invalid_evidence.
 
+NEW-BASELINE 122 at DEV-e30d9e412005 (diag122-e30d9e4, outcome
+classification semantics v2 — compare refuses against older v1
+receipts by design; this run is the baseline): first-pass 69
+(57 -> 64 -> 68 -> 69), plans 87, clarification-intended 17, repaired
+18, honest error rows 9 builder_error + 2 provider blips. Parse slice
+confirmed at corpus scale: parse repair attempts 14 -> 9, token cost
+halved (77k -> 37k). New failure ranking: parse x9 (37.5k) >
+unplaced_form_fields x6 (23.7k) > assembly_plan_invariant_failed x5
+(30.9k). The run CAUGHT A REGRESSION from the folded-identity slice:
+four cases (medium_document_analysis_pdf, hard_many_source_documents,
+interview_open_public_records, interview_open_data_subject_access)
+died on source_reader_required_fields_must_be_captured — the critic
+was a second, unconverted implementation of the satisfaction question
+(exact set difference vs canonical matching). `aeab9f058` makes the
+shared predicate public (source_capture_field_satisfied), converts the
+critic to it, and closes three gaps in the canonical key the old
+rewriting had papered over ('or' folding, date branch, author/sender
+subset, sammanfattning alias). Four-case verification replay in
+flight at DEV-aeab9f058b4e. Remaining honest-error tail after the fix:
+3 self_correction_quality_failure, 2 provider blips, 2 deliberate
+citations refusals (G hold).
+
 Parse-economics slice 2026-08-06 (top of the priced queue):
 `bcae9d8bb` admits the three dominant parse-failure families losslessly,
 each grounded in a captured payload from the checkpoint run: misplaced
