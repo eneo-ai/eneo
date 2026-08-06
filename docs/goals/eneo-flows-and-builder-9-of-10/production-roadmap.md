@@ -1063,6 +1063,24 @@ id against the backend (fail-fast with id + owning env var — the class
 of confusion that cost a diagnostic day). Additive fields only; no
 evaluator-semantics change, cross-run comparison unaffected.
 
+122 CHECKPOINT at DEV-e4bd037a9bcb (diag122-e4bd037, evaluator
+semantics v2, comparable to the morning run): first-pass 64->68, plans
+86, clarification-intended 16, repaired 18. FLAGSHIP tjansteskrivelse
+plan_first_pass with ZERO repairs (was: never completed). The Swedish
+key case simple_document_metadata_json also first-pass. Transitions:
+23 improved / 21 regressed / 78 unchanged; regressions are mostly
+first-pass->repaired variance plus the invalid_evidence masking below.
+FIRST repair-economics ranking (new receipts): parse x14 (~77k attempt
+tokens) >> assembly_plan_invariant_failed x5 (24k) >>
+unplaced_form_fields x4 (15k) >> prose_survival x2. Parse-failure
+economics is the top engineering target. The 13 invalid_evidence rows
+are error-terminated turns the evidence layer masks: 2 provider blips,
+4 deliberate citations refusals (slice G hold), 3
+self_correction_invalid_payload dead-ends, 4 singles. HARNESS FOLLOW-UP
+(scoring-semantics change, needs version bump): error-terminated
+journeys should classify as their journey outcome (builder_error), not
+invalid_evidence.
+
 Simplification slice 2026-08-06 (user-directed complexity audit):
 `6c20d0c00` folded identity as the single field-naming boundary
 (net -126 lines). Four parallel Swedish/English bridging layers solved
