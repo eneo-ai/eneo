@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+import hashlib
+import json
+import os
+from pathlib import Path
 from typing import Any
 
 from eneo.flows.ai_builder.ai_builder_architecture_errors import (
@@ -53,6 +57,40 @@ from eneo.flows.flow_authoring_spec import FlowDraftSpecCore
 from eneo.main.logging import get_logger
 
 logger = get_logger(__name__)
+
+# Debug tap for evidence-first admission work: when this env var names a
+# directory, every propose_flow payload REJECTED at the parse boundary is
+# written there with its issues, so repair loops can be attributed against
+# the exact rejected shape. Off in normal operation.
+REJECTED_PROPOSAL_CAPTURE_DIR_ENV = "ENEO_AI_BUILDER_REJECTED_PROPOSAL_CAPTURE_DIR"
+
+
+def _capture_rejected_proposal_arguments(
+    arguments: dict[str, Any],
+    *,
+    session_id: str,
+    issues: list[str],
+) -> None:
+    capture_dir = os.environ.get(REJECTED_PROPOSAL_CAPTURE_DIR_ENV)
+    if not capture_dir:
+        return
+    try:
+        directory = Path(capture_dir)
+        directory.mkdir(parents=True, exist_ok=True)
+        payload = json.dumps(
+            {"session_id": session_id, "issues": issues, "arguments": arguments},
+            ensure_ascii=False,
+            default=str,
+        )
+        digest = hashlib.sha256(payload.encode("utf-8")).hexdigest()[:12]
+        (directory / f"rejected-proposal-{digest}.json").write_text(
+            payload,
+            encoding="utf-8",
+        )
+    except OSError:
+        logger.warning("Rejected proposal capture failed", exc_info=True)
+
+
 PROPOSE_FLOW_CREATE_FORCED_TOOL_PROMPT = (
     "Your previous reply was prose only. "
     "Now call propose_flow with one complete semantic flow intent. "
@@ -111,6 +149,11 @@ async def process_create_intent_arguments(
             turn.session_id,
             tool_call_id,
             list(error.issues),
+        )
+        _capture_rejected_proposal_arguments(
+            arguments,
+            session_id=str(turn.session_id),
+            issues=list(error.issues),
         )
         return ToolProcessingResult(
             feedback=f"Invalid propose_flow arguments: {error}",
