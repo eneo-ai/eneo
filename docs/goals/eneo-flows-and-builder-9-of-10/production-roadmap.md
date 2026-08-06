@@ -1063,6 +1063,26 @@ id against the backend (fail-fast with id + owning env var — the class
 of confusion that cost a diagnostic day). Additive fields only; no
 evaluator-semantics change, cross-run comparison unaffected.
 
+Simplification slice 2026-08-06 (user-directed complexity audit):
+`6c20d0c00` folded identity as the single field-naming boundary
+(net -126 lines). Four parallel Swedish/English bridging layers solved
+one problem: localized-key lexicon (rejected), source-reader
+canonicalizer (rewrote model names to English), folded matching
+(decided identity), and user_named_output_keys threading (protected
+user wording from the first two). Deleted the lexicon + plan validator,
+converted the source reader to keep declared names verbatim (the
+symmetric canonical match already decided required-capture satisfaction
+— the rewrite was redundant), removed the exemption threading end to
+end, retaught the prompt (folded naming from the user's wording, no
+English-key preference). Resolves the Slice-C key-language input below
+by dissolving the policy instead of refining it. Structural
+documents-container rename kept (runtime contract). Audit verdicts on
+the other flagged parts: runtime variable aliases are Swedish-canonical
+by design (English entries are reserved-key guards — keep); prompt-rule
+sprawl is a measured-trim candidate AFTER the checkpoint baseline.
+DEPLOY HELD until the in-flight 122 checkpoint at DEV-e4bd037a9bcb
+completes, so the run compares against a stable head.
+
 Slice-C inputs found live 2026-08-06: (1) the ASCII-English schema-key
 lexicon conflicts with prose-requested Swedish keys (case
 simple_document_metadata_json dies in builder_error: the user asked for
