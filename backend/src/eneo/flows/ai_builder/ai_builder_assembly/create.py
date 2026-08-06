@@ -172,12 +172,14 @@ _REJECTION_FEEDBACK: dict[CreateAssemblyRejectionReason, str] = {
     ),
     "audio_requires_linear": "Audio create flows must be linear.",
     "docx_template_form_fields_mismatch": (
-        "DOCX template-fill flows must reference every template field exactly once "
-        "in the content-writing semantic step."
+        "A DOCX template-fill semantic step may only reference declared "
+        "runtime form fields."
     ),
     "docx_template_shape_unsupported": (
-        "DOCX template-fill flows require a linear chain of JSON or text semantic "
-        "steps ending in one text-writing step for the template variables."
+        "DOCX template-fill flows require a linear chain of JSON or text "
+        "semantic steps. End with either a JSON step whose string "
+        "output_fields carry the folded placeholder names, or a text-writing "
+        "step for the template variables."
     ),
     "document_report_compose_topology_missing": (
         DOCUMENT_REPORT_COMPOSE_TOPOLOGY_MISSING_FEEDBACK
