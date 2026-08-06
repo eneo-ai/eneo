@@ -362,6 +362,11 @@ class ObjectStoreConnectionService:
         async with self._transaction() as session:
             return await ObjectStoreConnectionRepository(session).get()
 
+    async def get_previous(self) -> StoredObjectStoreConnection | None:
+        """Return the archived previous destination, if a switch kept one."""
+        async with self._transaction() as session:
+            return await ObjectStoreConnectionRepository(session).get_previous()
+
     async def create(
         self,
         candidate: ObjectStoreConnectionInput,
@@ -637,10 +642,9 @@ class ObjectStoreConnectionService:
                 .with_for_update()
             )
             if previous is None:
-                previous = ObjectStoreConnections(
-                    id=TEMPORARY_DESTINATION_SLOT,
-                    revision=1,
-                )
+                previous = ObjectStoreConnections()
+                previous.id = TEMPORARY_DESTINATION_SLOT
+                previous.revision = 1
                 session.add(previous)
             else:
                 previous.revision = previous.revision + 1

@@ -223,6 +223,12 @@ async def test_switch_serves_copied_content_and_switches_back(
         assert previous.role == "retiring"
         assert previous.bucket == real_object_store.settings.bucket
 
+    # The admin surface reads the archived destination through the service,
+    # so that path must work as soon as a switch has happened.
+    archived = await service.get_previous()
+    assert archived is not None
+    assert archived.bucket == real_object_store.settings.bucket
+
     # The copied object is readable and digest-verified through the new
     # destination's own client.
     new_store = S3ObjectStore(service.settings_for(switched))
