@@ -74,6 +74,11 @@ A platform administrator chooses the destination, as they do for AI provider and
 MCP server endpoints. Restrict which hosts the backend may reach with your normal
 network controls if your deployment requires that boundary.
 
+Earlier releases required operators to approve endpoint origins through
+`OBJECT_CONTENT_ADMIN_ALLOWED_ENDPOINT_ORIGINS`. That setting is gone. A leftover
+value is ignored rather than rejected, so remove it from your deployment
+configuration whenever convenient.
+
 Existing operator-managed connections supplied through `OBJECT_CONTENT_*`
 remain supported as trusted deployment input. When encrypted persistence is
 available, Eneo adopts that connection without changing its destination;
