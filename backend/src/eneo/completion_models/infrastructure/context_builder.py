@@ -1,3 +1,4 @@
+import json
 import logging
 from collections import defaultdict
 from dataclasses import dataclass
@@ -103,9 +104,12 @@ def _turn_tokens(
     ) + _image_files_tokens(images, model_name)
 
 
-MIN_PERCENTAGE_KNOWLEDGE = (
-    0.8  # Strive towards a minimum of 80% of the context as knowledge
-)
+# Share of the context window reserved for knowledge chunks in inject mode
+# (history is capped to the remainder). Inject mode is the legacy path and the
+# fallback for models without tool calling; tool mode retrieves on demand and
+# enforces the same share as an aggregate admission cap on tool results
+# (see _ToolResultBudget in the tenant model adapter).
+MIN_PERCENTAGE_KNOWLEDGE = 0.5
 
 
 class _InfoBlobChunkLike(Protocol):
@@ -144,6 +148,44 @@ def build_files_string(files: list[File], model_name: str = "") -> str:
     )
 
 
+def build_file_references_string(
+    files: list[File], file_reference_urls: dict[UUID, str]
+) -> str:
+    """Surface signed download URLs for attached files to the model.
+
+    Lets the model pass a URL to whichever MCP tool accepts a URL input so the
+    tool can fetch the original file. Only files present in
+    ``file_reference_urls`` (those with a durably stored original) get an
+    entry; the rest keep relying on the inlined text from
+    ``build_files_string``.
+    """
+    entries = [
+        json.dumps(
+            {
+                "filename": file.name,
+                "mimetype": file.mimetype,
+                "size_bytes": file.size,
+                "url": file_reference_urls[file.id],
+            }
+        )
+        for file in files
+        if file.id in file_reference_urls
+    ]
+    if not entries:
+        return ""
+
+    references = "\n".join(entries)
+    return (
+        "Each attached file below also has a download URL. Pass the URL to a "
+        "tool that accepts a URL input when the tool needs the original file; "
+        "the file's raw bytes are NOT in this prompt. Prefer a tool suited to "
+        "the file and the task; when no more specific tool fits and a "
+        "read_file tool is available, use it to read the file's text "
+        "content.\n\n"
+        f"{references}"
+    )
+
+
 @dataclass
 class ChunkGrouping:
     id: UUID
@@ -160,6 +202,7 @@ class _Prompt:
         super().__init__()
         self.prompt: str | None = None
         self.knowledge: str | None = None
+        self.knowledge_catalog: str | None = None
         self.web_search_result: str | None = None
         self.attachments: str | None = None
         self._knowledge_tokens: int = 0
@@ -184,6 +227,9 @@ class _Prompt:
 
         if self.knowledge:
             components.append(self.knowledge)
+
+        if self.knowledge_catalog:
+            components.append(self.knowledge_catalog)
 
         if self.web_search_result:
             components.append(self.web_search_result)
@@ -378,6 +424,9 @@ class _Prompt:
             information_chunks=web_search_results
         )
 
+    def add_knowledge_catalog(self, catalog: str) -> None:
+        self.knowledge_catalog = catalog or None
+
     def add_knowledge(
         self, chunks: Sequence[_InfoBlobChunkLike], max_tokens: int
     ) -> None:
@@ -426,14 +475,31 @@ class ContextBuilder:
         files: list[File] | None = None,
         transcription_inputs: list[str] | None = None,
         model_name: str = "",
+        file_reference_urls: dict[UUID, str] | None = None,
+        inline_file_text: bool = True,
     ) -> str:
         if files is None:
             files = []
         if transcription_inputs is None:
             transcription_inputs = []
-        if files:
-            files_string = build_files_string(files, model_name=model_name)
+        # When the assistant has inlining disabled, files whose original is
+        # reachable via a signed URL are represented by that URL only (skips the
+        # extracted text — e.g. a large CSV that would blow the context window).
+        # Files without a URL are always inlined so the model still sees them.
+        text_files = files
+        if not inline_file_text and file_reference_urls:
+            text_files = [f for f in files if f.id not in file_reference_urls]
+        if text_files:
+            files_string = build_files_string(text_files, model_name=model_name)
             input_str = f"{files_string}\n\n{input_str}"
+
+        # Append fetchable signed URLs (minted fresh per request, so history
+        # turns get working URLs too). The model keeps any inlined text above
+        # and additionally gets a reference it can hand to a URL-accepting tool.
+        if file_reference_urls:
+            references_string = build_file_references_string(files, file_reference_urls)
+            if references_string:
+                input_str = f"{references_string}\n\n{input_str}"
 
         if transcription_inputs:
             # For now, transcription is only available for apps,
@@ -457,6 +523,8 @@ class ContextBuilder:
         min_len: int = 3,
         model_name: str = "",
         vision: bool = True,
+        file_reference_urls: dict[UUID, str] | None = None,
+        inline_file_text: bool = True,
     ) -> tuple[list[Message], int]:
         if session is None:
             return [], 0
@@ -465,10 +533,15 @@ class ContextBuilder:
         total_tokens = 0
 
         for message in reversed(session.questions):
+            # History replays each turn's files through the same inline-vs-URL
+            # rules as the current turn: URL-only files must not have their
+            # text re-inlined on follow-ups.
             question = self._build_input(
                 message.question,
                 self._get_files_by_type(message.files, FileType.TEXT),
                 model_name=model_name,
+                file_reference_urls=file_reference_urls,
+                inline_file_text=inline_file_text,
             )
             answer = message.answer
             # History can contain images (e.g. after a model switch) — never
@@ -527,6 +600,9 @@ class ContextBuilder:
         mcp_tools: list[FunctionDefinition] | None = None,
         extra_tool_dicts: list[dict[str, Any]] | None = None,
         vision: bool = True,
+        file_reference_urls: dict[UUID, str] | None = None,
+        inline_file_text: bool = True,
+        knowledge_catalog: str = "",
     ) -> Context:
         if files is None:
             files = []
@@ -550,6 +626,8 @@ class ContextBuilder:
             files=self._get_files_by_type(files, FileType.TEXT),
             transcription_inputs=transcription_inputs,
             model_name=model_name,
+            file_reference_urls=file_reference_urls,
+            inline_file_text=inline_file_text,
         )
         # Attachment images (prompt_files) travel with every request, the same
         # way attachment text does — they ride on the current user message.
@@ -594,6 +672,9 @@ class ContextBuilder:
         )
         # Add web search results first so references prompt appears before knowledge
         _prompt.add_web_search_result(web_search_results=web_search_results)
+        # Tool-mode knowledge: a token-cheap catalog of searchable sources; the
+        # content itself stays behind the knowledge-MCP search tool.
+        _prompt.add_knowledge_catalog(knowledge_catalog)
         tokens_used += _prompt.num_tokens
 
         # Create the messages. When knowledge chunks are present, reserve 80%
@@ -611,6 +692,8 @@ class ContextBuilder:
             min_len=3,
             model_name=model_name,
             vision=vision,
+            file_reference_urls=file_reference_urls,
+            inline_file_text=inline_file_text,
         )
         tokens_used += tokens_used_messages
 

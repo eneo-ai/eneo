@@ -51,6 +51,7 @@ class _FileContentSelection:
     text_reference: FileContentReferenceRecord | None
     blob_reference: FileContentReferenceRecord | None
     transcription_reference: FileContentReferenceRecord | None
+    original_available: bool
 
     @property
     def readable_references(self) -> tuple[FileContentReferenceRecord, ...]:
@@ -150,6 +151,11 @@ class FileContentLoader:
                 text_reference=text_reference,
                 blob_reference=blob_reference,
                 transcription_reference=transcription_reference,
+                original_available=self._first_reference(
+                    file_references,
+                    FileContentVariant.ORIGINAL,
+                )
+                is not None,
             )
             selections[file.id] = selection
         return unique_metadata, selections
@@ -210,6 +216,7 @@ class FileContentLoader:
                 user_id=file.user_id,
                 tenant_id=file.tenant_id,
                 parent_file_id=file.parent_file_id,
+                original_available=selection.original_available,
             )
         return hydrated
 

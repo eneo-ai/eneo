@@ -1,20 +1,27 @@
 """Integration tests for SyncLogRepository with database operations."""
 
-import pytest
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 from uuid import UUID, uuid4
 
+import pytest
+from sqlalchemy import text
+
 from eneo.database.tables.ai_models_table import EmbeddingModels
 from eneo.database.tables.integration_table import (
     Integration as IntegrationDB,
+)
+from eneo.database.tables.integration_table import (
     IntegrationKnowledge as IntegrationKnowledgeDB,
+)
+from eneo.database.tables.integration_table import (
     TenantIntegration as TenantIntegrationDB,
+)
+from eneo.database.tables.integration_table import (
     UserIntegration as UserIntegrationDB,
 )
 from eneo.database.tables.spaces_table import Spaces
 from eneo.integration.domain.entities.sync_log import SyncLog
-from sqlalchemy import text
 
 
 async def create_integration_knowledge_record(

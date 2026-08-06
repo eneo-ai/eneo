@@ -81,6 +81,9 @@ from eneo.modules.module_router import router as module_router
 from eneo.object_content.deployment_policy_router import (
     router as object_content_deployment_policy_router,
 )
+from eneo.object_content.object_store_connection_router import (
+    router as object_store_connection_router,
+)
 from eneo.prompt_library.presentation.prompt_library_router import (
     router as prompt_library_router,
 )
@@ -515,6 +518,12 @@ router.include_router(
     object_content_deployment_policy_router,
     prefix="/admin",
     tags=["admin", "object-content-policy"],
+    dependencies=TENANT_ADMIN_API_KEY_GUARDS,
+)
+router.include_router(
+    object_store_connection_router,
+    prefix="/admin",
+    tags=["admin", "object-store-connection"],
     dependencies=TENANT_ADMIN_API_KEY_GUARDS,
 )
 router.include_router(

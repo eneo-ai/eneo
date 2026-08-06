@@ -39,7 +39,9 @@ async def test_valid_bearer_token_accepted(client, scim_auth_headers):
     scim_auth_headers stores the SHA-256 hash of the test token in the test
     tenant's scim_token_hash column, then passes the raw token in the header.
     """
-    response = await client.get("/scim/v2/ServiceProviderConfig", headers=scim_auth_headers)
+    response = await client.get(
+        "/scim/v2/ServiceProviderConfig", headers=scim_auth_headers
+    )
     assert response.status_code == 200
 
 

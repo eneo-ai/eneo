@@ -63,7 +63,9 @@ class TestDeleteRoleAdminProtection:
 
     async def test_delete_admin_role_allowed_when_other_admins_exist(self):
         user_repo = AsyncMock()
-        user_repo.count_users_with_admin_permission.return_value = 2  # other admins exist
+        user_repo.count_users_with_admin_permission.return_value = (
+            2  # other admins exist
+        )
 
         service = _make_service(user_repo=user_repo)
         admin_role = _make_admin_role()
@@ -97,7 +99,9 @@ class TestUpdateRoleAdminProtection:
         admin_role = _make_admin_role()
         service.repo.get_role.return_value = admin_role
 
-        update = RoleUpdateRequest(permissions=[Permission.ASSISTANTS])  # removing admin
+        update = RoleUpdateRequest(
+            permissions=[Permission.ASSISTANTS]
+        )  # removing admin
 
         with pytest.raises(BadRequestException, match="only source of admin access"):
             await service.update_role(update, admin_role.id)
@@ -110,7 +114,9 @@ class TestUpdateRoleAdminProtection:
         admin_role = _make_admin_role()
         service.repo.get_role.return_value = admin_role
 
-        updated_role = admin_role.model_copy(update={"permissions": [Permission.ASSISTANTS]})
+        updated_role = admin_role.model_copy(
+            update={"permissions": [Permission.ASSISTANTS]}
+        )
         service.repo.update_role.return_value = updated_role
 
         update = RoleUpdateRequest(permissions=[Permission.ASSISTANTS])

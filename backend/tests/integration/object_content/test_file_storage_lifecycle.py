@@ -39,6 +39,7 @@ from eneo.object_content.content_service import (
 )
 from eneo.object_content.deployment_policy import UploadAdmissionSnapshot
 from eneo.object_content.lease import OperationCheckpoint
+from eneo.object_content.object_store_provider import ObjectStoreProvider
 from eneo.object_content.s3_object_store import (
     MultipartStarted,
     ObjectHead,
@@ -85,8 +86,10 @@ class _ControlledObjectContentService(ObjectContentService):
         super().__init__(
             real_object_store.settings,
             database,
-            object_store_settings=real_object_store.settings,
-            object_store=real_object_store.store,
+            object_store_provider=ObjectStoreProvider.fixed(
+                real_object_store.settings,
+                real_object_store.store,
+            ),
         )
         self._pause_before_publication = pause_before_publication
         self._cancel_after_publication = cancel_after_publication
@@ -94,15 +97,26 @@ class _ControlledObjectContentService(ObjectContentService):
         self.object_keys: tuple[str, ...] = ()
         self.paused = asyncio.Event()
 
-    async def ensure_target_ready(self, storage_kind: StorageKind) -> None:
+    async def ensure_target_ready(
+        self,
+        storage_kind: StorageKind,
+        *,
+        object_store_revision: int | None = None,
+    ) -> None:
+        del object_store_revision
         assert storage_kind is StorageKind.OBJECT_STORE
 
     @asynccontextmanager
     async def upload_for_publication(
         self,
         contents: Sequence[CapturedContent],
+        *,
+        object_store_revision: int | None = None,
     ) -> AsyncGenerator[VerifiedObjectPublication]:
-        async with super().upload_for_publication(contents) as publication:
+        async with super().upload_for_publication(
+            contents,
+            object_store_revision=object_store_revision,
+        ) as publication:
             self.store_calls = len(publication.uploads)
             self.object_keys = tuple(
                 upload.object_key for upload in publication.uploads

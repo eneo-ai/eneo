@@ -113,7 +113,8 @@ class TaskService:
         if self.upload_admission is None:
             raise RuntimeError("Upload admission snapshot is required")
         await self.object_content.ensure_target_ready(
-            self.upload_admission.new_write_storage_target
+            self.upload_admission.new_write_storage_target,
+            object_store_revision=self.upload_admission.object_store_revision,
         )
 
         job_id = uuid4()

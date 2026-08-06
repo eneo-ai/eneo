@@ -914,6 +914,21 @@ class UserService:
         # (e.g. SpaceAssembler) can reflect effective permissions accurately.
         user.active_api_key = resolved.key
 
+        # A route can compose multiple authentication dependencies. They all share
+        # one Request, but each dependency may own a separate database session. Do
+        # request-level side effects only on the first successful resolution of a
+        # key; otherwise a later session can wait on the first session's uncommitted
+        # last_used_at row lock and deadlock the request. Authorization checks below
+        # still run on every pass because sibling dependencies may add stricter
+        # route guards to request.state between resolutions.
+        authenticated_request_key = (
+            getattr(request.state, "api_key", None) if request is not None else None
+        )
+        is_repeated_request_authentication = (
+            isinstance(authenticated_request_key, ApiKeyV2InDB)
+            and authenticated_request_key.id == resolved.key.id
+        )
+
         policy_service = ApiKeyPolicyService(
             space_service=self.space_service,
             user=None,
@@ -930,7 +945,10 @@ class UserService:
                 origin=origin,
                 client_ip=client_ip,
             )
-            if self.api_key_rate_limiter is not None:
+            if (
+                self.api_key_rate_limiter is not None
+                and not is_repeated_request_authentication
+            ):
                 await self.api_key_rate_limiter.enforce(resolved.key)
         except ApiKeyValidationError as exc:
             await self._log_api_key_auth_failed(
@@ -941,13 +959,14 @@ class UserService:
             )
             raise
 
-        settings = get_settings()
-        await self.api_key_v2_repo.update_last_used_at(
-            key_id=resolved.key.id,
-            tenant_id=resolved.key.tenant_id,
-            last_used_at=datetime.now(timezone.utc),
-            min_interval_seconds=settings.api_key_last_used_min_interval_seconds,
-        )
+        if not is_repeated_request_authentication:
+            settings = get_settings()
+            await self.api_key_v2_repo.update_last_used_at(
+                key_id=resolved.key.id,
+                tenant_id=resolved.key.tenant_id,
+                last_used_at=datetime.now(timezone.utc),
+                min_interval_seconds=settings.api_key_last_used_min_interval_seconds,
+            )
 
         if request is None:
             raise ApiKeyValidationError(
@@ -1070,26 +1089,27 @@ class UserService:
                 )
                 raise
 
-        await self._maybe_log_api_key_used(
-            user,
-            resolved.key,
-            request=request,
-        )
+        if not is_repeated_request_authentication:
+            await self._maybe_log_api_key_used(
+                user,
+                resolved.key,
+                request=request,
+            )
 
-        logger.info(
-            "API key authenticated",
-            extra={
-                "tenant_id": str(resolved.key.tenant_id),
-                "user_id": str(user.id),
-                "api_key_id": str(resolved.key.id),
-                "scope_type": resolved.key.scope_type,
-                "scope_id": str(resolved.key.scope_id)
-                if resolved.key.scope_id
-                else None,
-                "permission": resolved.key.permission,
-                "key_type": resolved.key.key_type,
-            },
-        )
+            logger.info(
+                "API key authenticated",
+                extra={
+                    "tenant_id": str(resolved.key.tenant_id),
+                    "user_id": str(user.id),
+                    "api_key_id": str(resolved.key.id),
+                    "scope_type": resolved.key.scope_type,
+                    "scope_id": str(resolved.key.scope_id)
+                    if resolved.key.scope_id
+                    else None,
+                    "permission": resolved.key.permission,
+                    "key_type": resolved.key.key_type,
+                },
+            )
 
         return user, resolved.key
 

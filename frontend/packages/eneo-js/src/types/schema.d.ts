@@ -5967,6 +5967,50 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/admin/object-store-connection": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get Object Store Connection
+     * @description Get the deployment-wide S3-compatible destination without returning credentials or internal object identifiers. Platform administrators only.
+     */
+    get: operations["get_object_store_connection_api_v1_admin_object_store_connection_get"];
+    put?: never;
+    /**
+     * Create Object Store Connection
+     * @description Test and save the first deployment-wide S3-compatible destination. This does not select it for new writes or move existing content.
+     */
+    post: operations["create_object_store_connection_api_v1_admin_object_store_connection_post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/admin/object-store-connection/credentials": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    /**
+     * Rotate Object Store Credentials
+     * @description Test and replace credentials for the configured destination without changing its endpoint, bucket, signing region, or addressing style.
+     */
+    put: operations["rotate_object_store_credentials_api_v1_admin_object_store_connection_credentials_put"];
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/spaces/{space_id}/skills/": {
     parameters: {
       query?: never;
@@ -8135,6 +8179,7 @@ export interface components {
       | "file_uploaded"
       | "file_deleted"
       | "file_original_download_link_created"
+      | "file_signed_url_minted"
       | "website_created"
       | "website_updated"
       | "website_deleted"
@@ -9581,6 +9626,13 @@ export interface components {
        * @description Whether insights are enabled for this assistant. If enabled, users with appropriate permissions can see all sessions for this assistant.
        */
       insight_enabled: boolean;
+      /**
+       * Inline File Text
+       * @description Whether attached file text is inlined into the prompt (True) or the file is surfaced to the model as a signed URL only (False).
+       */
+      inline_file_text: boolean;
+      /** @description How attached knowledge reaches the model: 'tool' (searchable MCP tool, called on demand) or 'inject' (retrieved and packed into the prompt on every turn). */
+      knowledge_mode: components["schemas"]["KnowledgeMode"];
       /**
        * Data Retention Days
        * @description Number of days to retain data for this assistant
@@ -11486,6 +11538,13 @@ export interface components {
        */
       insight_enabled?: boolean;
       /**
+       * Inline File Text
+       * @default true
+       */
+      inline_file_text?: boolean;
+      /** @default tool */
+      knowledge_mode?: components["schemas"]["KnowledgeMode"];
+      /**
        * Data Retention Days
        * @description Number of days to retain data for this assistant
        */
@@ -12383,6 +12442,11 @@ export interface components {
       transcription?: string | null;
       /** Token Count */
       token_count?: number | null;
+      /**
+       * Has Download Reference
+       * @default false
+       */
+      has_download_reference?: boolean;
     };
     /** FileRestrictions */
     FileRestrictions: {
@@ -13154,6 +13218,16 @@ export interface components {
       websites: components["schemas"]["PaginatedPermissions_WebsitePublic_"];
       integration_knowledge_list: components["schemas"]["PaginatedPermissions_IntegrationKnowledgePublic_"];
     };
+    /**
+     * KnowledgeMode
+     * @description How attached knowledge reaches the model.
+     *
+     *     TOOL exposes knowledge as a searchable MCP tool the model calls on demand;
+     *     INJECT retrieves on every turn and packs chunks into the prompt (legacy
+     *     behavior, also the runtime fallback for models without tool calling).
+     * @enum {string}
+     */
+    KnowledgeMode: "tool" | "inject";
     /** Limit */
     Limit: {
       /** Max Files */
@@ -14426,6 +14500,71 @@ export interface components {
       | "configuration_required"
       | "database_unavailable"
       | "store_degraded";
+    /** ObjectStoreConnectionInput */
+    ObjectStoreConnectionInput: {
+      /** Endpoint Url */
+      endpoint_url: string;
+      /** Region */
+      region: string;
+      /** Bucket */
+      bucket: string;
+      /**
+       * Access Key Id
+       * Format: password
+       */
+      access_key_id: string;
+      /**
+       * Secret Access Key
+       * Format: password
+       */
+      secret_access_key: string;
+      /**
+       * Addressing Style
+       * @default path
+       * @enum {string}
+       */
+      addressing_style?: "path" | "virtual";
+    };
+    /** ObjectStoreConnectionPublic */
+    ObjectStoreConnectionPublic: {
+      source: components["schemas"]["ObjectStoreConnectionSource"];
+      /** Configured */
+      configured: boolean;
+      /** Credentials Can Be Managed */
+      credentials_can_be_managed: boolean;
+      /** Revision */
+      revision?: number | null;
+      /** Endpoint Url */
+      endpoint_url?: string | null;
+      /** Region */
+      region?: string | null;
+      /** Bucket */
+      bucket?: string | null;
+      /** Addressing Style */
+      addressing_style?: ("path" | "virtual") | null;
+      /** Updated At */
+      updated_at?: string | null;
+    };
+    /**
+     * ObjectStoreConnectionSource
+     * @enum {string}
+     */
+    ObjectStoreConnectionSource: "unconfigured" | "environment" | "admin";
+    /** ObjectStoreCredentialRotation */
+    ObjectStoreCredentialRotation: {
+      /** Expected Revision */
+      expected_revision: number;
+      /**
+       * Access Key Id
+       * Format: password
+       */
+      access_key_id: string;
+      /**
+       * Secret Access Key
+       * Format: password
+       */
+      secret_access_key: string;
+    };
     /** OpenIdConnectLogin */
     OpenIdConnectLogin: {
       /** Code */
@@ -15374,6 +15513,13 @@ export interface components {
        * @description Whether insights are enabled for this assistant. If enabled, users with appropriate permissions can see all sessions for this assistant.
        */
       insight_enabled?: boolean | null;
+      /**
+       * Inline File Text
+       * @description Whether to inline attached file text into the prompt. When False, a file whose original is available via signed URL is surfaced as that URL only (e.g. to avoid large files blowing the context window).
+       */
+      inline_file_text?: boolean | null;
+      /** @description How attached knowledge reaches the model: 'tool' exposes it as a searchable MCP tool the model calls on demand; 'inject' retrieves on every turn and packs results into the prompt. */
+      knowledge_mode?: components["schemas"]["KnowledgeMode"] | null;
       /** Data Retention Days */
       data_retention_days?: number | null;
       /**
@@ -16885,6 +17031,11 @@ export interface components {
        * @default true
        */
       api_key_expiry_notifications?: boolean;
+      /**
+       * File References Enabled
+       * @default false
+       */
+      file_references_enabled?: boolean;
     };
     /**
      * SharePointSubscriptionPublic
@@ -25047,6 +25198,11 @@ export interface operations {
                 transcription?: string | null;
                 /** Token Count */
                 token_count?: number | null;
+                /**
+                 * Has Download Reference
+                 * @default false
+                 */
+                has_download_reference?: boolean;
               };
               /** InfoBlobAskAssistantPublic */
               InfoBlobAskAssistantPublic: {
@@ -25470,6 +25626,11 @@ export interface operations {
                 transcription?: string | null;
                 /** Token Count */
                 token_count?: number | null;
+                /**
+                 * Has Download Reference
+                 * @default false
+                 */
+                has_download_reference?: boolean;
               };
               /** InfoBlobAskAssistantPublic */
               InfoBlobAskAssistantPublic: {
@@ -26624,6 +26785,11 @@ export interface operations {
                     transcription?: string | null;
                     /** Token Count */
                     token_count?: number | null;
+                    /**
+                     * Has Download Reference
+                     * @default false
+                     */
+                    has_download_reference?: boolean;
                   };
                 };
               }
@@ -26777,6 +26943,11 @@ export interface operations {
                     transcription?: string | null;
                     /** Token Count */
                     token_count?: number | null;
+                    /**
+                     * Has Download Reference
+                     * @default false
+                     */
+                    has_download_reference?: boolean;
                   };
                   /** InfoBlobAskAssistantPublic */
                   InfoBlobAskAssistantPublic: {
@@ -40967,6 +41138,182 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  get_object_store_connection_api_v1_admin_object_store_connection_get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ObjectStoreConnectionPublic"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  create_object_store_connection_api_v1_admin_object_store_connection_post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["ObjectStoreConnectionInput"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ObjectStoreConnectionPublic"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  rotate_object_store_credentials_api_v1_admin_object_store_connection_credentials_put: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["ObjectStoreCredentialRotation"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ObjectStoreConnectionPublic"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
     };

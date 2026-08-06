@@ -41,6 +41,7 @@ from eneo.object_content.content import (
 )
 from eneo.object_content.content_repository import ObjectContentRepository
 from eneo.object_content.content_service import ObjectContentService
+from eneo.object_content.object_store_provider import ObjectStoreProvider
 from eneo.object_content.reconciliation import ObjectContentReconciler
 from eneo.object_content.reconciliation_repository import (
     ObjectContentReconciliationRepository,
@@ -293,8 +294,7 @@ def _reconciler(
     return ObjectContentReconciler(
         settings,
         database,
-        object_store_settings=settings,
-        object_store=store,
+        object_store_provider=ObjectStoreProvider.fixed(settings, store),
     )
 
 
@@ -1024,8 +1024,10 @@ async def test_publication_reservation_stays_live_until_adoption(
     content_service = ObjectContentService(
         settings,
         object_content_database,
-        object_store_settings=settings,
-        object_store=real_object_store.store,
+        object_store_provider=ObjectStoreProvider.fixed(
+            settings,
+            real_object_store.store,
+        ),
     )
     object_key: str | None = None
 
@@ -1145,8 +1147,10 @@ async def test_publication_renewal_failure_blocks_adoption_and_leaves_bounded_or
     content_service = ObjectContentService(
         settings,
         object_content_database,
-        object_store_settings=settings,
-        object_store=real_object_store.store,
+        object_store_provider=ObjectStoreProvider.fixed(
+            settings,
+            real_object_store.store,
+        ),
     )
     object_key: str | None = None
 
