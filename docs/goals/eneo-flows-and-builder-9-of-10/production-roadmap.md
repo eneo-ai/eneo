@@ -1049,6 +1049,20 @@ FIRST TIME — plan_repaired (repaired_success, 2 repairs, zero failed
 checks). Failure ladder closed: template_attachment_unreadable →
 shape/unplaced rejections → compare rejection → green.
 
+Measurement layer II 2026-08-06 afternoon: `e4bd037a9` per-attempt
+repair economics in receipts. Standing finding: the product persists
+per-attempt proposal telemetry (failure kind/codes, tokens) on
+SUCCESSFUL turns in assistant metadata — the earlier "repair-driver
+retention gap" was stale; only exposure was missing. New creator-only
+`_diagnostics/proposal-telemetry` endpoint projects the attempt ladder
+plus the committed-architecture snapshot; the harness records both in
+every receipt (plan_outcome.attempt_failure_ladder +
+initial/repair_token_cost, journey.architecture), the compare tool
+reports repair-cost deltas, and the suite preflights every fixture file
+id against the backend (fail-fast with id + owning env var — the class
+of confusion that cost a diagnostic day). Additive fields only; no
+evaluator-semantics change, cross-run comparison unaffected.
+
 Slice-C inputs found live 2026-08-06: (1) the ASCII-English schema-key
 lexicon conflicts with prose-requested Swedish keys (case
 simple_document_metadata_json dies in builder_error: the user asked for
