@@ -325,8 +325,6 @@
     if (code === "object_store_probe_tls_failed") return m.storage_connection_error_tls_title();
     if (code === "object_store_plain_http_not_permitted")
       return m.storage_connection_error_http_title();
-    if (code === "object_store_endpoint_not_permitted")
-      return m.storage_connection_error_endpoint_not_permitted_title();
     if (code === "object_store_probe_binding_mismatch")
       return m.storage_connection_error_binding_title();
     if (code === "object_store_probe_integrity_failed")
@@ -350,8 +348,6 @@
       return m.storage_connection_error_tls_description();
     if (code === "object_store_plain_http_not_permitted")
       return m.storage_connection_error_http_description();
-    if (code === "object_store_endpoint_not_permitted")
-      return m.storage_connection_error_endpoint_not_permitted_description();
     if (code === "object_store_probe_binding_mismatch")
       return m.storage_connection_error_binding_description();
     if (code === "object_store_probe_integrity_failed")

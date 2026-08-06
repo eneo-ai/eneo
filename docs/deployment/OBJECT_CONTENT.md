@@ -8,7 +8,7 @@ offline reference shipped beside the Compose templates.
 
 - Eneo runs normally without S3-compatible storage. PostgreSQL inline is the
   complete ready-to-use default.
-- Platform admins connect one approved S3-compatible destination and choose the
+- Platform admins connect an S3-compatible destination and choose the
   deployment-wide target for eligible new File and Icon writes in **Admin >
   Storage**. These changes need no backend or worker restart.
 - PostgreSQL owns identity, SHA-256, size/type, references, access, retention,
@@ -34,8 +34,8 @@ silently after a failure.
 
 | Owner          | Responsibility                                                                                                                        |
 | -------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
-| Platform admin | Connect one operator-approved destination, rotate its access keys, and set the new-write target and business upload limits in **Admin > Storage** |
-| Operator       | Run PostgreSQL and any optional compatible endpoint; approve outbound endpoint origins and own TLS, certificates, capacity, backups, and process safety tuning |
+| Platform admin | Connect an S3-compatible destination, change or roll back that destination, rotate its access keys, and set the new-write target and business upload limits in **Admin > Storage** |
+| Operator       | Run PostgreSQL and any optional compatible endpoint; own TLS, certificates, capacity, backups, network reachability, and process safety tuning |
 
 Tenant admins can review policy, effective limits, and capability status.
 Deployment-wide content inventory spans tenants, so only platform admins can
@@ -64,30 +64,21 @@ a separate migration workflow.
 
 ## Choose the endpoint
 
-For a new installation, the operator first sets Eneo's root encryption key and
-an exact allowlist of S3 endpoint origins. A platform admin can then enter the
-endpoint, bucket, signing region, and access keys in **Admin > Storage**. Eneo
-tests the destination before encrypting and saving the credentials. Saving the
-connection does not select it for new writes or move existing content.
+For a new installation, the operator sets Eneo's root encryption key. A platform
+admin can then enter the endpoint, bucket, signing region, and access keys in
+**Admin > Storage**. Eneo tests the destination before encrypting and saving the
+credentials. Saving the connection does not select it for new writes or move
+existing content.
 
-```dotenv
-OBJECT_CONTENT_ADMIN_ALLOWED_ENDPOINT_ORIGINS=["https://objects.example.se"]
-```
-
-The allowlist is an outbound network boundary, not administrator policy. An
-administrator who can store credentials must not also be able to make the
-backend contact an arbitrary network address. Values are exact HTTP(S) origins:
-scheme, host, and optional port, without a bucket name or path. Changing the
-allowlist requires a backend and worker restart; rotating access keys and
-changing storage policy do not. Do not remove an origin used by a saved admin
-connection: the backend then refuses to start until the origin is restored.
+A platform administrator chooses the destination, as they do for AI provider and
+MCP server endpoints. Restrict which hosts the backend may reach with your normal
+network controls if your deployment requires that boundary.
 
 Existing operator-managed connections supplied through `OBJECT_CONTENT_*`
 remain supported as trusted deployment input. When encrypted persistence is
 available, Eneo adopts that connection without changing its destination;
 otherwise it remains read-only in the admin interface. Do not configure the
-same destination through both paths. Add the adopted endpoint's origin to the
-allowlist before rotating its access keys in Admin.
+same destination through both paths.
 
 The optional `object-content` Compose profile starts an Eneo-built SeaweedFS
 4.40 service on the private `object_content_net`. The image is built from upstream commit
@@ -456,10 +447,7 @@ guarded switch. Object keys carry no endpoint or bucket, so a faithful copy is
 readable immediately.
 
 1. Create an empty private bucket and a bucket-scoped application identity on
-   the new service, add its origin to
-   `OBJECT_CONTENT_ADMIN_ALLOWED_ENDPOINT_ORIGINS`, restart backend and
-   worker, and back up the current bucket. Keep the old origin allowlisted
-   until the change is finished.
+   the new service, and back up the current bucket.
 2. Select `postgres_inline` for new writes in **Admin > Storage** and let
    queued moves and in-flight uploads finish. New uploads above
    `OBJECT_CONTENT_INLINE_MAXIMUM_BYTES` fail during this window.

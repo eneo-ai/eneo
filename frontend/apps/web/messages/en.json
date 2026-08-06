@@ -4338,8 +4338,6 @@
   "storage_connection_error_tls_description": "Check the endpoint certificate and its trusted certificate authority. Credentials were not saved.",
   "storage_connection_error_http_title": "This Eneo installation requires HTTPS",
   "storage_connection_error_http_description": "Use an HTTPS endpoint. Plain HTTP can only be enabled by operations for a trusted private network.",
-  "storage_connection_error_endpoint_not_permitted_title": "This endpoint is not approved for outbound traffic",
-  "storage_connection_error_endpoint_not_permitted_description": "Eneo may only contact storage endpoints your operator has approved. Ask operations to add the endpoint's origin (scheme, host, and any port — no bucket or path) to OBJECT_CONTENT_ADMIN_ALLOWED_ENDPOINT_ORIGINS and restart the backend and worker. This boundary is separate from storage administration so a compromised admin session cannot make Eneo contact an internal address.",
   "storage_connection_error_binding_title": "The destination belongs to another Eneo installation",
   "storage_connection_error_binding_description": "Choose an empty bucket or a destination already paired with this installation.",
   "storage_connection_error_integrity_title": "The service did not preserve the test object",

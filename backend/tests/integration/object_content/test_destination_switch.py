@@ -43,7 +43,6 @@ pytestmark = pytest.mark.asyncio
 def _service(
     database: DatabaseSessionManager,
     source: RealObjectStore,
-    target: RealObjectStore,
 ) -> ObjectStoreConnectionService:
     settings = source.settings
     core = ObjectContentCoreSettings.model_validate(
@@ -56,12 +55,6 @@ def _service(
         {
             name: getattr(settings, name)
             for name in ObjectStoreOperatorSettings.model_fields
-        }
-        | {
-            "admin_allowed_endpoint_origins": (
-                settings.endpoint_url,
-                target.settings.endpoint_url,
-            )
         }
     )
     return ObjectStoreConnectionService(
@@ -151,9 +144,7 @@ async def test_switch_requires_inline_new_writes(
     configuration they must change rather than transient work to wait out,
     so it carries its own typed reason.
     """
-    service = _service(
-        object_content_database, real_object_store, real_unpaired_object_store
-    )
+    service = _service(object_content_database, real_object_store)
     stored = await service.create(
         _connection_input(real_object_store),
         actor_user_id=await _any_user_id(object_content_database),
@@ -179,9 +170,7 @@ async def test_switch_serves_copied_content_and_switches_back(
     real_unpaired_object_store: RealObjectStore,
 ) -> None:
     """A copied bucket becomes active atomically and remains reversible."""
-    service = _service(
-        object_content_database, real_object_store, real_unpaired_object_store
-    )
+    service = _service(object_content_database, real_object_store)
     actor = await _any_user_id(object_content_database)
     created = await service.create(
         _connection_input(real_object_store), actor_user_id=actor

@@ -332,22 +332,18 @@ Create a non-admin application identity with bucket-scoped permissions for:
 MinIO policy files use `arn:aws:s3` syntax locally; those strings do not connect
 Eneo or MinIO to AWS.
 
-Allow Eneo to contact the exact external endpoint. Keep this operator-owned
-network boundary in the deployment environment; a platform admin cannot extend
-it from the application:
+Set the root encryption key in the deployment environment so Eneo can store
+credentials encrypted:
 
 ```dotenv
 ENCRYPTION_KEY=<44-character Fernet key>
-OBJECT_CONTENT_ADMIN_ALLOWED_ENDPOINT_ORIGINS=["https://minio.storage.example.eu:9000"]
 ```
 
-Restart backend and worker after changing these deployment values. Then open
-**Admin > Storage**, add the endpoint, signing region, bucket, and application
-access keys, and let Eneo test and save the encrypted connection. Adding the
-connection does not select it for new writes or move existing content. Keep
-path-based bucket addressing unless the endpoint has wildcard DNS and TLS for
-bucket subdomains. Do not remove an origin used by a saved admin connection:
-the backend then refuses to start until the origin is restored.
+Then open **Admin > Storage**, add the endpoint, signing region, bucket, and
+application access keys, and let Eneo test and save the encrypted connection.
+Adding the connection does not select it for new writes or move existing
+content. Keep path-based bucket addressing unless the endpoint has wildcard DNS
+and TLS for bucket subdomains.
 
 Mount a private CA read-only into both backend and worker and set
 `OBJECT_CONTENT_CA_BUNDLE` when required. Existing operator-managed
@@ -449,9 +445,7 @@ The examples use `rclone` with two configured remotes, `old-store` and
 ### Prepare the new bucket
 
 Create one empty private bucket and an application identity limited to it, as
-for a first connection. Add the new endpoint's origin to
-`OBJECT_CONTENT_ADMIN_ALLOWED_ENDPOINT_ORIGINS` and restart backend and worker,
-keeping the old origin until you finish. Back up the current bucket.
+for a first connection, and back up the current bucket.
 
 ### Stop new writes to object storage
 
@@ -525,13 +519,6 @@ copy cannot pass unnoticed.
 The previous destination stays listed so you can **Switch back** at any time;
 nothing is deleted on either bucket. When you are satisfied, select **Forget**
 and decommission the old bucket at your provider.
-
-<Callout type="warning">
-  Keep the active destination's origin in
-  `OBJECT_CONTENT_ADMIN_ALLOWED_ENDPOINT_ORIGINS` permanently. Eneo re-checks
-  the allowlist every time it builds a client, so removing the origin in use
-  stops object storage from working. You may drop the retired one.
-</Callout>
 
 If anything looks wrong, switch back, correct the copy, and switch again.
 

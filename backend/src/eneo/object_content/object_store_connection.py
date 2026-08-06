@@ -159,10 +159,6 @@ class ObjectStorePlainHttpNotPermitted(ObjectStoreConnectionInvalid):
     code = "object_store_plain_http_not_permitted"
 
 
-class ObjectStoreEndpointNotPermitted(ObjectStoreConnectionInvalid):
-    code = "object_store_endpoint_not_permitted"
-
-
 class ObjectStoreCredentialEncryptionUnavailable(ObjectStoreConnectionError):
     code = "object_store_credential_encryption_unavailable"
 
@@ -543,7 +539,6 @@ class ObjectStoreConnectionService:
             actor_user_id=actor_user_id,
             stored=stored,
             binding=binding,
-            operator_supplied_endpoint=False,
         )
 
     async def switch_back(
@@ -582,9 +577,6 @@ class ObjectStoreConnectionService:
             actor_user_id=actor_user_id,
             stored=stored,
             binding=binding,
-            operator_supplied_endpoint=(
-                previous.updated_by_actor is ObjectStoreConnectionActor.MIGRATION
-            ),
         )
 
     async def forget_previous_destination(self, *, actor_user_id: UUID) -> None:
@@ -609,7 +601,6 @@ class ObjectStoreConnectionService:
         actor_user_id: UUID,
         stored: StoredObjectStoreConnection,
         binding: StoreBindingSnapshot,
-        operator_supplied_endpoint: bool,
     ) -> StoredObjectStoreConnection:
         if not binding.confirmed or binding.binding_id is None:
             raise ObjectStoreDestinationSwitchBlocked(
@@ -622,7 +613,6 @@ class ObjectStoreConnectionService:
         settings = self._settings(
             candidate,
             deployment_id=stored.deployment_id,
-            operator_supplied_endpoint=operator_supplied_endpoint,
         )
         await self._admit_switch_target(settings, binding_id=binding.binding_id)
 
@@ -842,9 +832,6 @@ class ObjectStoreConnectionService:
                 addressing_style=stored.addressing_style,
             ),
             deployment_id=stored.deployment_id,
-            operator_supplied_endpoint=(
-                stored.updated_by_actor is ObjectStoreConnectionActor.MIGRATION
-            ),
         )
 
     async def _require_unbound_destination(self, session: AsyncSession) -> None:
@@ -859,17 +846,7 @@ class ObjectStoreConnectionService:
         candidate: ObjectStoreConnectionInput,
         *,
         deployment_id: UUID,
-        operator_supplied_endpoint: bool = False,
     ) -> ObjectContentSettings:
-        if (
-            not operator_supplied_endpoint
-            and not self._operator_settings.permits_admin_endpoint(
-                candidate.endpoint_url
-            )
-        ):
-            raise ObjectStoreEndpointNotPermitted(
-                "The object-store endpoint is not permitted by deployment policy"
-            )
         if (
             urlparse(candidate.endpoint_url).scheme == "http"
             and not self._operator_settings.allow_insecure_http

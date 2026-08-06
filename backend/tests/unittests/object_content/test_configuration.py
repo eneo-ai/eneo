@@ -58,24 +58,6 @@ def test_operator_guardrails_do_not_trigger_legacy_connection_loading(
     assert load_object_store_operator_settings().connect_timeout_seconds == 7
 
 
-def test_admin_endpoint_allowlist_normalizes_exact_origins(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    _clear_object_content_environment(monkeypatch)
-    monkeypatch.setenv(
-        "OBJECT_CONTENT_ADMIN_ALLOWED_ENDPOINT_ORIGINS",
-        '["HTTPS://Objects.Example.test:443/"]',
-    )
-
-    settings = load_object_store_operator_settings()
-
-    assert settings.admin_allowed_endpoint_origins == (
-        "https://objects.example.test:443",
-    )
-    assert settings.permits_admin_endpoint("https://objects.example.test")
-    assert not settings.permits_admin_endpoint("https://other.example.test")
-
-
 def test_partial_object_content_environment_fails_closed(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

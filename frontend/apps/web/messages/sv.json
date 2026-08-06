@@ -4338,8 +4338,6 @@
   "storage_connection_error_tls_description": "Kontrollera endpointens certifikat och att certifikatutfärdaren är betrodd. Inga uppgifter sparades.",
   "storage_connection_error_http_title": "Den här Eneo-installationen kräver HTTPS",
   "storage_connection_error_http_description": "Använd en endpoint med HTTPS. Driften kan endast tillåta HTTP i ett betrott privat nätverk.",
-  "storage_connection_error_endpoint_not_permitted_title": "Den här endpointen är inte godkänd för utgående trafik",
-  "storage_connection_error_endpoint_not_permitted_description": "Eneo får bara kontakta lagringsendpoints som driften har godkänt. Be driften lägga till endpointens origin (protokoll, värdnamn och eventuell port – utan bucket eller sökväg) i OBJECT_CONTENT_ADMIN_ALLOWED_ENDPOINT_ORIGINS och starta om backend och worker. Gränsen ligger utanför lagringsadministrationen så att en kapad administratörssession inte kan få Eneo att kontakta en intern adress.",
   "storage_connection_error_binding_title": "Destinationen tillhör en annan Eneo-installation",
   "storage_connection_error_binding_description": "Välj en tom bucket eller en destination som redan är kopplad till den här installationen.",
   "storage_connection_error_integrity_title": "Tjänsten bevarade inte testobjektet",
