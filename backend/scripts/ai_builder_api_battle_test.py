@@ -3122,9 +3122,11 @@ def _planner_model_evidence_from_interactions(
             missing_indices.append(interaction_index)
             continue
         interaction_models: list[str] = []
+        usage_event_count = 0
         for event in events:
             if not isinstance(event, Mapping) or event.get("event") != "usage":
                 continue
+            usage_event_count += 1
             data = event.get("data")
             model = (
                 _optional_string(data, "last_model")
@@ -3133,6 +3135,12 @@ def _planner_model_evidence_from_interactions(
             )
             if model is not None and model not in interaction_models:
                 interaction_models.append(model)
+        if usage_event_count == 0:
+            # Server-resolved turns (auto-resolved slots, confirmations)
+            # legitimately make zero planner calls: identity-neutral, not
+            # identity-missing. A bundle observing no planner model at all
+            # still fails closed downstream.
+            continue
         if len(interaction_models) != 1:
             missing_indices.append(interaction_index)
             continue

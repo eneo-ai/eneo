@@ -2815,16 +2815,25 @@ def test_live_provenance_captures_source_build_model_prompt_and_usage(
                     }
                 ]
             },
+            # A planner-less interaction (server-resolved turn) is
+            # identity-neutral under the auto-resolution semantics.
             {"events": []},
+            # Ambiguous usage stays a hard identity failure.
+            {
+                "events": [
+                    {"event": "usage", "data": {"last_model": "openai/gpt-test"}},
+                    {"event": "usage", "data": {"last_model": "openai/other"}},
+                ]
+            },
         ],
     )
-    assert missing_interaction_model["model"]["planner_interaction_count"] == 2
+    assert missing_interaction_model["model"]["planner_interaction_count"] == 3
     assert missing_interaction_model["model"]["planner_observations"] == [
         {"interaction_index": 1, "model_id": "openai/gpt-test"}
     ]
     assert missing_interaction_model["model"][
         "missing_planner_interaction_indices"
-    ] == [2]
+    ] == [3]
     assert missing_interaction_model["model"]["observed_matches_resolved"] is False
 
     missing_model = {**provenance, "model": {"observed_ids": [], "sha256": "0" * 64}}
@@ -5259,3 +5268,30 @@ def test_evaluator_identity_carries_relevance_semantics_version() -> None:
         expected_observations=[],
     )
     assert identity["question_relevance_semantics_version"] == 2
+
+
+def test_planner_evidence_skips_planner_less_interactions() -> None:
+    # Auto-resolved turns (limit/DOCX/purpose defaults) legitimately make
+    # zero planner calls: no usage event means identity-neutral, not
+    # identity-missing. Ambiguous usage stays a failure, and a bundle with
+    # no observed planner at all still fails closed downstream.
+    harness = _battle_harness()
+    interactions = [
+        {"events": [{"event": "usage", "data": {"last_model": "openai/gpt"}}]},
+        {"events": [{"event": "question", "data": {"question_id": "x"}}]},
+        {
+            "events": [
+                {"event": "usage", "data": {"last_model": "openai/gpt"}},
+                {"event": "usage", "data": {"last_model": "openai/other"}},
+            ]
+        },
+    ]
+
+    observed, observations, missing, count = (
+        harness._planner_model_evidence_from_interactions(interactions)
+    )
+
+    assert observed == ["openai/gpt"]
+    assert [o["interaction_index"] for o in observations] == [1]
+    assert missing == [3]
+    assert count == 3
