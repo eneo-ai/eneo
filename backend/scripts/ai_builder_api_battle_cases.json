@@ -1102,7 +1102,12 @@
       "cohorts": [
         "foundation",
         "json"
-      ]
+      ],
+      "question_answer_overrides": {
+        "terminal_output": {
+          "selected_option_id": "structured_text"
+        }
+      }
     },
     {
       "id": "complex_meeting_audio_policy_pdf",
@@ -1565,7 +1570,12 @@
       "cohorts": [
         "foundation",
         "json"
-      ]
+      ],
+      "question_answer_overrides": {
+        "terminal_output": {
+          "selected_option_id": "structured_text"
+        }
+      }
     },
     {
       "id": "hard_crisis_situation_report_multi_unit",
@@ -1683,7 +1693,12 @@
       },
       "cohorts": [
         "foundation"
-      ]
+      ],
+      "question_answer_overrides": {
+        "terminal_output": {
+          "selected_option_id": "structured_text"
+        }
+      }
     },
     {
       "id": "hard_archive_retention_classification",
@@ -1733,7 +1748,12 @@
       "cohorts": [
         "foundation",
         "json"
-      ]
+      ],
+      "question_answer_overrides": {
+        "terminal_output": {
+          "selected_option_id": "structured_json"
+        }
+      }
     },
     {
       "id": "hard_budget_variance_management_report",
@@ -2122,7 +2142,12 @@
         "human_review",
         "pdf",
         "smoke_v3"
-      ]
+      ],
+      "question_answer_overrides": {
+        "terminal_output": {
+          "selected_option_id": "pdf_document"
+        }
+      }
     },
     {
       "id": "six_file_document_report_release_gate",
@@ -5686,7 +5711,15 @@
         "audio",
         "json",
         "technical_contract"
-      ]
+      ],
+      "question_answer_overrides": {
+        "runtime_metadata_fields": {
+          "selected_option_id": "no_extra_metadata"
+        },
+        "terminal_output": {
+          "selected_option_id": "structured_json"
+        }
+      }
     },
     {
       "id": "advanced_explicit_change_log_analysis",
@@ -6399,7 +6432,12 @@
         "prompt_contract",
         "technical_contract",
         "tjansteskrivelse_v1"
-      ]
+      ],
+      "question_answer_overrides": {
+        "docx_output_mode": {
+          "selected_option_id": "template_fill_docx"
+        }
+      }
     }
   ]
 }
