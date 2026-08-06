@@ -38,6 +38,7 @@ from eneo.flows.ai_builder.ai_builder_proposal_intent import (
 from eneo.flows.ai_builder.ai_builder_result_contract import (
     ResultOutputFieldRole,
     derive_result_contract,
+    fold_result_field_name,
 )
 from eneo.flows.ai_builder.ai_builder_runtime_input_fields import (
     NO_EXTRA_RUNTIME_METADATA,
@@ -223,6 +224,25 @@ def compile_create_intent_to_spec(
         intent_with_admitted_form_refs = _intent_without_review_modes(
             intent_with_admitted_form_refs
         )
+    prepared_template_field_names = _template_fields_prepared_by_intent(
+        intent=intent_with_admitted_form_refs,
+        context=context,
+    )
+    if prepared_template_field_names:
+        # A placeholder the flow prepares itself must not also demand a
+        # runtime form field: the template contract binds it to the prepared
+        # step output, and a leftover required field would shadow that
+        # content with an empty runtime prompt.
+        form_fields = [
+            field
+            for field in form_fields
+            if field.name not in prepared_template_field_names
+        ]
+    template_consumed_field_names = (
+        {hint.variable_name for hint in context.template_placeholder_field_hints}
+        if context is not None
+        else set[str]()
+    )
     known_field_order = [field.name for field in form_fields]
     _raise_for_unplaced_create_form_fields(
         intent_with_admitted_form_refs,
@@ -232,6 +252,7 @@ def compile_create_intent_to_spec(
             if context is not None
             else False
         ),
+        template_consumed_field_names=template_consumed_field_names,
     )
 
     final_output_mode = context.final_output_mode if context is not None else None
@@ -446,11 +467,47 @@ def _apply_flow_input_schema(
     return spec.model_copy(update={"steps": compiled_steps})
 
 
+def _template_fields_prepared_by_intent(
+    *,
+    intent: CreateFlowIntent,
+    context: CreateCompileContext | None,
+) -> set[str]:
+    """Template-derived field names the proposed steps already prepare.
+
+    A bare template placeholder normally becomes a required runtime form
+    field, but when a semantic step declares a string output field whose
+    folded name matches the placeholder, the template contract binds the
+    placeholder to that prepared value instead. User-confirmed runtime
+    fields and intent-declared input fields keep their runtime ownership.
+    """
+
+    if context is None or not context.template_placeholder_field_hints:
+        return set()
+    runtime_hint_names = {
+        hint.variable_name for hint in context.runtime_input_field_hints
+    }
+    intent_field_names = {field.variable_name for field in intent.input_fields}
+    prepared_folded_names = {
+        fold_result_field_name(field.name)
+        for step in intent.steps
+        for field in step.output_fields or ()
+        if field.field_type == "string"
+    }
+    return {
+        hint.variable_name
+        for hint in context.template_placeholder_field_hints
+        if hint.variable_name not in runtime_hint_names
+        and hint.variable_name not in intent_field_names
+        and fold_result_field_name(hint.variable_name) in prepared_folded_names
+    }
+
+
 def _raise_for_unplaced_create_form_fields(
     intent: CreateFlowIntent,
     *,
     field_order: list[str],
     confirmed_runtime_field_contract_closed: bool,
+    template_consumed_field_names: set[str] | None = None,
 ) -> None:
     placed_field_order = list(
         dict.fromkeys(
@@ -484,8 +541,14 @@ def _raise_for_unplaced_create_form_fields(
             },
         )
     placed_field_names = set(placed_field_order)
+    # Template-derived fields are consumed by the template-fill bindings
+    # themselves; the placeholder is their placement.
+    consumed_field_names = template_consumed_field_names or set()
     unplaced_field_names = [
-        field_name for field_name in field_order if field_name not in placed_field_names
+        field_name
+        for field_name in field_order
+        if field_name not in placed_field_names
+        and field_name not in consumed_field_names
     ]
     if not unplaced_field_names:
         return

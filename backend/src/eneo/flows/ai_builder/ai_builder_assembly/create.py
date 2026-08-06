@@ -1039,26 +1039,40 @@ def _assemble_docx_template_fill(
                 step_index=step_index,
             )
         if is_terminal_semantic_step:
-            if semantic_step.output_fields or semantic_step.output_type not in {
-                None,
-                OutputType.TEXT,
-            }:
-                return _reject(
-                    "docx_template_shape_unsupported",
-                    step_index=step_index,
+            if semantic_step.output_fields:
+                # Prepared-fields terminal: the template contract binds each
+                # placeholder to a declared string field by folded name, so
+                # the chain may end in the JSON step that prepares them.
+                if semantic_step.output_type not in {None, OutputType.JSON}:
+                    return _reject(
+                        "docx_template_shape_unsupported",
+                        step_index=step_index,
+                    )
+                step_output_type = OutputType.JSON
+                step_input_type = _linear_step_input_type(
+                    input_source=InputSource.PREVIOUS_STEP,
+                    runtime_input_type=runtime_input_type,
+                    previous_output_type=previous_step.output_type,
+                    output_type=step_output_type,
                 )
-            if set(semantic_step.uses_form_fields) != form_field_names:
-                return _reject(
-                    "docx_template_form_fields_mismatch",
-                    step_index=step_index,
+            else:
+                if semantic_step.output_type not in {None, OutputType.TEXT}:
+                    return _reject(
+                        "docx_template_shape_unsupported",
+                        step_index=step_index,
+                    )
+                if not set(semantic_step.uses_form_fields) <= form_field_names:
+                    return _reject(
+                        "docx_template_form_fields_mismatch",
+                        step_index=step_index,
+                    )
+                step_output_type = OutputType.TEXT
+                step_input_type = (
+                    InputType.TEXT
+                    if semantic_step.uses_form_fields
+                    or previous_step.output_type == OutputType.TEXT
+                    else InputType.JSON
                 )
-            step_output_type = OutputType.TEXT
-            step_input_type = (
-                InputType.TEXT
-                if semantic_step.uses_form_fields
-                or previous_step.output_type == OutputType.TEXT
-                else InputType.JSON
-            )
         else:
             if semantic_step.uses_form_fields:
                 return _reject(
@@ -1114,6 +1128,26 @@ def _assemble_docx_template_fill(
         previous_step = planned_step
 
     fixed_template_fill_step = template_fill_step(ui_language=ui_language)
+    # Form fields no semantic step references are consumed by the template
+    # itself: the fill step carries them so their placement stays explicit.
+    referenced_field_names = {
+        field_name
+        for semantic_step in intent.steps
+        for field_name in semantic_step.uses_form_fields
+    }
+    template_bound_field_names = tuple(
+        field.name for field in form_fields if field.name not in referenced_field_names
+    )
+    fixed_template_fill_step = replace(
+        fixed_template_fill_step,
+        form_field_refs=template_bound_field_names,
+        underlag_channel=derive_underlag_channel(
+            input_source=fixed_template_fill_step.input_source,
+            input_type=fixed_template_fill_step.input_type,
+            previous_step=previous_step,
+            previous_field_refs=(),
+        ),
+    )
     planned_steps = (reader_step, *semantic_steps, fixed_template_fill_step)
     completed_steps = _apply_per_source_reader_execution(
         planned_steps,

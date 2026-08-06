@@ -2895,6 +2895,167 @@ def test_audio_artifact_overlay_still_rejects_conflicting_patterns(
     )
 
 
+def test_compiler_binds_human_named_placeholders_from_prepared_terminal() -> None:
+    """The flagship shape: a JSON terminal prepares folded placeholder fields.
+
+    Human-named placeholders bind to the prepared fields; metadata
+    placeholders the flow does not prepare stay runtime form fields and
+    need no semantic-step reference because the template consumes them.
+    """
+
+    intent = parse_create_flow_intent_arguments(
+        {
+            "flow_name": "Tjänsteskrivelse från underlag",
+            "flow_description": "Fill the municipal template from sources.",
+            "plan_rationale": "Extract, structure, and fill the template.",
+            "steps": [
+                {
+                    "name": "Extrahera underlag",
+                    "instructions": "Extract source-grounded facts.",
+                    "output_type": "json",
+                    "output_fields": [
+                        {
+                            "name": "sources",
+                            "field_type": "string",
+                            "description": "Source-grounded findings.",
+                        }
+                    ],
+                },
+                {
+                    "name": "Förbered malltexter",
+                    "instructions": "Write the final template section texts.",
+                    "output_type": "json",
+                    "output_fields": [
+                        {
+                            "name": "sections_arendet_text",
+                            "field_type": "string",
+                            "description": "Final text for the Ärendet section.",
+                        },
+                        {
+                            "name": "sections_bakgrund_text",
+                            "field_type": "string",
+                            "description": "Final text for the Bakgrund section.",
+                        },
+                    ],
+                },
+            ],
+        }
+    )
+
+    context = CreateCompileContext(
+        runtime_input_type=InputType.DOCUMENT,
+        final_output_type=OutputType.DOCX,
+        final_output_mode=OutputMode.TEMPLATE_FILL,
+        pattern_ids=("document_to_docx_template",),
+        pattern_chain_steps=(
+            FLOW_INPUT_DOCUMENT_UPLOAD,
+            EXTRACT_TEMPLATE_VARIABLES_STEP,
+            PREPARE_TEMPLATE_CONTENT_STEP,
+            TEMPLATE_FILL_DOCX_STEP,
+        ),
+        runtime_max_files=6,
+        selected_template_count=1,
+        selected_template_placeholders=(
+            "diarienummer",
+            "sections.ärendet.text",
+            "sections.bakgrund.text",
+        ),
+        template_placeholder_field_hints=(
+            RuntimeInputFieldHint(
+                variable_name="diarienummer",
+                label="diarienummer",
+                required=True,
+                provenance="template_derived",
+            ),
+        ),
+    )
+    compiled = compile_create_intent_to_spec(intent, context=context)
+
+    assert len(compiled.steps) == 4
+    prepare_step = compiled.steps[2]
+    template_step = compiled.steps[3]
+    assert prepare_step.output_type == OutputType.JSON
+    assert template_step.output_mode == OutputMode.TEMPLATE_FILL
+    assert template_step.output_config == {
+        "bindings": {
+            "diarienummer": "{{ flow_input.diarienummer }}",
+            "sections.ärendet.text": (
+                "{{ "
+                + str(prepare_step.plan_step_ref)
+                + ".output.structured.sections_arendet_text }}"
+            ),
+            "sections.bakgrund.text": (
+                "{{ "
+                + str(prepare_step.plan_step_ref)
+                + ".output.structured.sections_bakgrund_text }}"
+            ),
+        }
+    }
+    # The metadata placeholder stays a required runtime form field even
+    # though no semantic step references it: the template is its consumer.
+    assert [field.name for field in compiled.form_fields or ()] == ["diarienummer"]
+
+
+def test_compiler_drops_template_form_field_when_flow_prepares_it() -> None:
+    intent = parse_create_flow_intent_arguments(
+        {
+            "flow_name": "Tjänsteskrivelse från underlag",
+            "flow_description": "Fill the municipal template from sources.",
+            "plan_rationale": "Extract the metadata and fill the template.",
+            "steps": [
+                {
+                    "name": "Förbered malltexter",
+                    "instructions": "Extract metadata and section texts.",
+                    "output_type": "json",
+                    "output_fields": [
+                        {
+                            "name": "diarienummer",
+                            "field_type": "string",
+                            "description": "The case number from the sources.",
+                        }
+                    ],
+                },
+            ],
+        }
+    )
+
+    context = CreateCompileContext(
+        runtime_input_type=InputType.DOCUMENT,
+        final_output_type=OutputType.DOCX,
+        final_output_mode=OutputMode.TEMPLATE_FILL,
+        pattern_ids=("document_to_docx_template",),
+        pattern_chain_steps=(
+            FLOW_INPUT_DOCUMENT_UPLOAD,
+            EXTRACT_TEMPLATE_VARIABLES_STEP,
+            PREPARE_TEMPLATE_CONTENT_STEP,
+            TEMPLATE_FILL_DOCX_STEP,
+        ),
+        selected_template_count=1,
+        selected_template_placeholders=("diarienummer",),
+        template_placeholder_field_hints=(
+            RuntimeInputFieldHint(
+                variable_name="diarienummer",
+                label="diarienummer",
+                required=True,
+                provenance="template_derived",
+            ),
+        ),
+    )
+    compiled = compile_create_intent_to_spec(intent, context=context)
+
+    prepare_step = compiled.steps[1]
+    assert compiled.steps[-1].output_config == {
+        "bindings": {
+            "diarienummer": (
+                "{{ "
+                + str(prepare_step.plan_step_ref)
+                + ".output.structured.diarienummer }}"
+            ),
+        }
+    }
+    assert not compiled.form_fields
+
+
 def test_compiler_admits_three_semantic_steps_before_fixed_template_fill() -> None:
     intent = parse_create_flow_intent_arguments(
         {
