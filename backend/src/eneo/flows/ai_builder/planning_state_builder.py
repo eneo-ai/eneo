@@ -207,9 +207,13 @@ def _mapped_file_limit(
     if proposed is None:
         return MappedFileLimit(diagnostic="policy_unset")
     if latest_answer is None:
+        # The shipped ceiling IS the answer — defaults exist to avoid
+        # questions. Discovery asks only when an authored answer failed
+        # (error diagnostics below); an unprompted default never blocks.
         return MappedFileLimit(
             proposed_value=proposed,
-            diagnostic="confirmation_required",
+            accepted_value=proposed,
+            provenance="policy_default",
         )
     custom = latest_answer.custom_value
     if custom is not None:
@@ -239,6 +243,17 @@ def _mapped_file_limit(
         latest_answer.selected_option_id == "organization_limit"
         or latest_answer.selected_value == "organization_limit"
     ):
+        return MappedFileLimit(
+            proposed_value=proposed,
+            accepted_value=proposed,
+            provenance="policy_default",
+        )
+    if (
+        latest_answer.selected_option_id is None
+        and latest_answer.selected_value is None
+    ):
+        # An answer carrying neither a selection nor a custom value is no
+        # answer — the default applies as if never asked.
         return MappedFileLimit(
             proposed_value=proposed,
             accepted_value=proposed,

@@ -4047,10 +4047,15 @@ def test_deployment_default_reaches_the_mapped_proposal(
     )
 
     assert state.mapped_file_limit.proposed_value == 99
-    assert state.mapped_file_limit.diagnostic == "confirmation_required"
+    assert state.mapped_file_limit.accepted_value == 99
+    assert state.mapped_file_limit.provenance == "policy_default"
+    assert state.mapped_file_limit.diagnostic is None
 
 
-def test_mapped_file_limit_requires_explicit_policy_confirmation() -> None:
+def test_mapped_file_limit_auto_accepts_the_policy_default_silently() -> None:
+    # The shipped default IS the answer: defaults exist to avoid questions.
+    # Asking every document flow to confirm the organization ceiling wasted a
+    # turn and stalled journeys; authored answers below the ceiling still win.
     state = build_planning_state_from_conversation(
         _mapped_file_limit_conversation(),
         mapped_execution_policy=FlowMappedExecutionPolicy(
@@ -4060,9 +4065,10 @@ def test_mapped_file_limit_requires_explicit_policy_confirmation() -> None:
 
     # Policy ceiling 8 proposes 7 items: one call stays reserved for the
     # runtime native-JSON fallback attempt.
-    assert state.mapped_file_limit.accepted_value is None
     assert state.mapped_file_limit.proposed_value == 7
-    assert state.mapped_file_limit.diagnostic == "confirmation_required"
+    assert state.mapped_file_limit.accepted_value == 7
+    assert state.mapped_file_limit.provenance == "policy_default"
+    assert state.mapped_file_limit.diagnostic is None
 
 
 def test_mapped_file_limit_accepts_organization_limit_with_provenance() -> None:
@@ -4091,7 +4097,7 @@ def test_mapped_file_limit_accepts_lower_custom_value_as_authored() -> None:
     assert state.mapped_file_limit.diagnostic is None
 
 
-def test_mapped_file_limit_free_text_response_stays_unresolved() -> None:
+def test_mapped_file_limit_free_text_response_falls_back_to_the_default() -> None:
     conversation = _mapped_file_limit_conversation()[:-1]
     conversation.append(
         ConversationMessage(
@@ -4108,11 +4114,11 @@ def test_mapped_file_limit_free_text_response_stays_unresolved() -> None:
         ),
     )
 
-    # Policy ceiling 8 proposes 7 items: one call stays reserved for the
-    # runtime native-JSON fallback attempt.
-    assert state.mapped_file_limit.accepted_value is None
+    # An out-of-band free-text reply is not a structured answer; the shipped
+    # default applies rather than blocking the journey on a re-ask.
     assert state.mapped_file_limit.proposed_value == 7
-    assert state.mapped_file_limit.diagnostic == "confirmation_required"
+    assert state.mapped_file_limit.accepted_value == 7
+    assert state.mapped_file_limit.provenance == "policy_default"
 
 
 @pytest.mark.parametrize(

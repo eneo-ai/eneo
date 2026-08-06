@@ -200,7 +200,9 @@ def _resolved_state() -> PlanningState:
 
 
 @pytest.mark.asyncio
-async def test_discovery_analyzes_carried_commit_before_mapped_limit_gate() -> None:
+async def test_carried_commit_auto_accepts_the_mapped_limit_and_asks_real_gaps() -> (
+    None
+):
     persisted = PlanningState.empty()
     persisted.resolved_slots = {
         "primary_runtime_input": _slot("primary_runtime_input", "documents"),
@@ -266,7 +268,11 @@ async def test_discovery_analyzes_carried_commit_before_mapped_limit_gate() -> N
     )
 
     assert result.planning_state.architecture_commit == persisted.architecture_commit
-    assert "mapped_file_limit" in result.discovery_analysis.selected_question_ids
+    # The shipped ceiling resolves silently; discovery spends the question
+    # budget on a genuinely unresolved slot instead.
+    assert "mapped_file_limit" not in result.discovery_analysis.selected_question_ids
+    assert result.planning_state.mapped_file_limit.accepted_value == 7
+    assert result.planning_state.mapped_file_limit.provenance == "policy_default"
 
 
 def test_classifier_schema_direction_preserves_shape_and_assignment_evidence() -> None:
