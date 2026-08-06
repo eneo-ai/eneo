@@ -148,26 +148,33 @@ class ObjectContentReconciler:
                 ),
             )
 
-        content_processed = len(work)
-        remote_work_available = True
-        try:
-            await asyncio.gather(
-                *(
-                    self._process_content(
-                        item,
-                        lease_owner,
-                        store_lease=store_lease,
-                        lease_started_at=content_lease_started_at,
-                    )
-                    for item in work
+        # Await every item's outcome: a sibling can commit its transition
+        # before a rotation advances the generation, and that work is durable
+        # whatever happens to the rest of the batch.
+        outcomes = await asyncio.gather(
+            *(
+                self._process_content(
+                    item,
+                    lease_owner,
+                    store_lease=store_lease,
+                    lease_started_at=content_lease_started_at,
                 )
-            )
-        except ObjectContentUnavailableError:
-            # A rotation or destination switch advanced the store generation.
-            # Refused transitions are not durable, so report none processed;
-            # the leases expire and the next run converges them.
-            content_processed = 0
-            remote_work_available = False
+                for item in work
+            ),
+            return_exceptions=True,
+        )
+        content_processed = sum(
+            1 for outcome in outcomes if not isinstance(outcome, BaseException)
+        )
+        remote_work_available = True
+        for outcome in outcomes:
+            if isinstance(outcome, ObjectContentUnavailableError):
+                # The store generation changed mid-batch. Items refused by the
+                # fence keep their lease and converge on the next run; later
+                # remote phases are skipped under the stale lease.
+                remote_work_available = False
+            elif isinstance(outcome, BaseException):
+                raise outcome
 
         object_cycle_completed = False
         missing_objects = 0

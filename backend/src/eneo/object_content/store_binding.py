@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from datetime import timedelta
 from uuid import UUID, uuid4
 
-from sqlalchemy import exists, func, select
+from sqlalchemy import delete, exists, func, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -201,6 +201,46 @@ class StoreBindingRepository:
             claim_id=claim_id if owns_claim else None,
             creation_started=row.create_started_at is not None,
         )
+
+    async def record_switch_claim(
+        self,
+        *,
+        slot: int,
+        deployment_id: UUID,
+        binding_id: UUID,
+    ) -> None:
+        """Record that a destination switch is about to claim a bucket.
+
+        Writing the pairing marker is a durable remote effect. Recording the
+        intent first means a switch that fails afterwards leaves a tracked
+        claim: a retry recognises its own marker, and the temporary slot shows
+        an operator which bucket was touched.
+        """
+        await self._session.execute(
+            insert(ObjectStoreBindings)
+            .values(
+                slot=slot,
+                deployment_id=deployment_id,
+                binding_id=binding_id,
+                create_started_at=func.now(),
+            )
+            .on_conflict_do_update(
+                index_elements=[ObjectStoreBindings.slot],
+                set_={
+                    "deployment_id": deployment_id,
+                    "binding_id": binding_id,
+                    "create_started_at": func.now(),
+                },
+            )
+        )
+        await self._session.flush()
+
+    async def clear_slot(self, *, slot: int) -> None:
+        """Drop a temporary binding record once its switch has settled."""
+        await self._session.execute(
+            delete(ObjectStoreBindings).where(ObjectStoreBindings.slot == slot)
+        )
+        await self._session.flush()
 
     async def mark_creation_started(
         self,

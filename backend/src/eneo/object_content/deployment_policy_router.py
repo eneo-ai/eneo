@@ -6,8 +6,8 @@ from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from eneo.authentication.auth_dependencies import (
-    require_platform_admin,
     require_session_auth,
+    require_storage_administration,
     require_user_identity,
 )
 from eneo.main.container.container import Container
@@ -70,7 +70,7 @@ async def _require_policy_user_identity(
 async def _require_policy_platform_admin(
     container: _PolicyAdminContainer,
 ) -> None:
-    await require_platform_admin(container.user())
+    await require_storage_administration(container.user())
 
 
 class CapabilityPublic(BaseModel):

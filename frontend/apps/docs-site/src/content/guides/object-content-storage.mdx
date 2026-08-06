@@ -7,7 +7,7 @@ import { Callout, Steps, Tabs } from "nextra/components";
 - PostgreSQL inline is the complete ready-to-use default. Compatible object
   storage is optional.
 - Operators configure storage infrastructure, outbound endpoint approval, and
-  safety bounds. Platform admins connect an approved destination and choose one
+  safety bounds. Administrators connect a destination and choose one
   deployment-wide target for eligible new File, Icon, and knowledge original
   writes in **Admin > Storage** without restarting backend or worker.
 - A policy change affects new writes only. Existing content never moves
@@ -78,7 +78,7 @@ knowledge-storage quota until the document family is deleted; that count
 includes each retained version's exact original.
 
 Enabling an endpoint makes the optional byte plane available; it does not move
-existing content or change producer placement by itself. A platform admin must
+existing content or change producer placement by itself. An administrator must
 select it after Eneo reports it compatible and ready.
 
 ## Download or recover a File
@@ -169,12 +169,12 @@ mean “more services.”
 
 | Owner          | Responsibility                                                                                                                        |
 | -------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
-| Platform admin | Connect one approved destination, rotate its access keys, and set the new-write target and business upload limits in **Admin > Storage** |
+| Administrator  | Connect a destination, change or roll back it, rotate its access keys, and set the new-write target and business upload limits in **Admin > Storage** |
 | Operator       | Run PostgreSQL and any optional compatible endpoint; approve outbound endpoint origins and own TLS, certificates, capacity, backups, and process safety tuning |
 
 Tenant admins can review policy, effective limits, and capability status.
-Deployment-wide content inventory spans tenants, so only platform admins can
-view it.
+Deployment-wide content inventory spans tenants and is part of that same
+administrative view.
 
 `OBJECT_CONTENT_INLINE_MAXIMUM_BYTES` remains an operator-owned ceiling for
 safe PostgreSQL rows, WAL, backups, and process memory. It is not a business
@@ -299,7 +299,7 @@ curl -fsS https://eneo.example.eu/api/readyz \
   | jq -e '.detail.object_content.code == "ready"'
 ```
 
-After readiness reports `ready`, a platform admin can select **Object store**
+After readiness reports `ready`, an administrator can select **Object store**
 in **Admin > Storage**. Selection fails clearly if the endpoint is unavailable
 or incompatible. No backend or worker restart is required for the policy
 change.
@@ -362,7 +362,7 @@ curl -fsS https://eneo.example.eu/api/readyz \
   | jq -e '.detail.object_content.code == "ready"'
 ```
 
-After the connection reports **Ready**, a platform admin can select **Object
+After the connection reports **Ready**, an administrator can select **Object
 storage** in **Admin > Storage**. Connection tests and policy changes fail
 clearly if the endpoint is unavailable or incompatible. Neither action needs a
 backend or worker restart.
@@ -387,7 +387,7 @@ entire object; a range verifies only the chunks that cover that response.
 ### Move existing content
 
 PostgreSQL inline remains the complete default; compatible object storage is
-optional. When the endpoint reports **Ready**, a platform administrator can
+optional. When the endpoint reports **Ready**, an administrator can
 open **Admin > Storage** and move existing content in either direction:
 
 1. Choose the destination and a page of 1–100 items.
@@ -657,7 +657,7 @@ content item live either inline or in the configured endpoint.
 
 ### Will enabling the endpoint move existing files?
 
-No. A platform administrator must queue bounded, verified moves from **Admin >
+No. An administrator must queue bounded, verified moves from **Admin >
 Storage**. Changing the target for new writes never starts a fleet migration.
 
 ### Why can I not delete an uploaded File?

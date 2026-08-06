@@ -9,7 +9,7 @@ move completion, or inventory recording fails typed instead.
 from collections.abc import AsyncGenerator
 from datetime import UTC, datetime
 from hashlib import sha256
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 from sqlalchemy import func, select, text
@@ -31,6 +31,7 @@ from eneo.object_content.content import (
     StorageKind,
     capture_content,
 )
+from eneo.object_content.content_repository import ObjectContentRepository
 from eneo.object_content.content_service import ObjectContentService
 from eneo.object_content.object_store_provider import ObjectStoreProvider
 from eneo.object_content.reconciliation import ObjectContentReconciler
@@ -310,3 +311,138 @@ async def test_generation_change_preserves_already_committed_inventory(
         assert row is not None
         assert row.state == ContentState.FAILED.value
         assert row.failure_code == "backend_missing"
+
+
+async def test_sibling_content_transition_survives_a_mid_batch_rotation(
+    object_content_database: DatabaseSessionManager,
+    real_object_store: RealObjectStore,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """One item's committed promotion is not hidden by a sibling's fence.
+
+    Content items are processed concurrently and each commits in its own
+    transaction. A rotation can land between two of them, and the run must
+    still report the transition that is already durable.
+    """
+    settings = real_object_store.settings
+    first = await _seed_pending(
+        object_content_database, real_object_store, b"first-item"
+    )
+    second = await _seed_pending(
+        object_content_database, real_object_store, b"second-item"
+    )
+
+    reconciler = ObjectContentReconciler(
+        ObjectContentCoreSettings(_env_file=None),
+        object_content_database,
+        object_store_provider=ObjectStoreProvider.fixed(
+            settings, real_object_store.store
+        ),
+    )
+
+    original_promote = ObjectContentRepository.promote_available
+    promoted: list[UUID] = []
+
+    async def promote_then_rotate(self, *, content_id, lease_owner):  # type: ignore[no-untyped-def]
+        if promoted:
+            # The second item reaches its fence after the rotation.
+            await _advance_connection_revision(object_content_database, revision=1)
+        result = await original_promote(
+            self, content_id=content_id, lease_owner=lease_owner
+        )
+        promoted.append(content_id)
+        return result
+
+    monkeypatch.setattr(
+        ObjectContentRepository, "promote_available", promote_then_rotate
+    )
+
+    result = await reconciler.run_once()
+    monkeypatch.undo()
+
+    async with object_content_database.session() as session, session.begin():
+        states = {
+            row[0]: row[1]
+            for row in (
+                await session.execute(
+                    select(ObjectContents.id, ObjectContents.state).where(
+                        ObjectContents.id.in_((first, second))
+                    )
+                )
+            ).all()
+        }
+    durable = sum(
+        1 for state in states.values() if state == ContentState.AVAILABLE.value
+    )
+    assert durable >= 1, "at least one item committed before the rotation"
+    assert result.content_processed >= durable, (
+        "a committed transition must not be hidden by a sibling's fence"
+    )
+
+
+async def _seed_pending(
+    database: DatabaseSessionManager,
+    store: RealObjectStore,
+    payload: bytes,
+):
+    digest = sha256(payload).digest()
+    async with database.session() as session, session.begin():
+        tenant_id = (await session.scalars(select(Tenants.id))).one()
+        user_id = (await session.scalars(select(Users.id))).one()
+        token = uuid4().hex
+        owner = Files(
+            name=f"{token}.txt",
+            mimetype="application/octet-stream",
+            file_type="text",
+            tenant_id=tenant_id,
+            user_id=user_id,
+            parent_file_id=None,
+        )
+        object_key = new_object_key(store.settings)
+        content = ObjectContents(
+            tenant_id=tenant_id,
+            created_by_user_id=user_id,
+            storage_kind=StorageKind.OBJECT_STORE.value,
+            state=ContentState.PENDING.value,
+            access_class="private_resource",
+            sha256=digest,
+            size_bytes=len(payload),
+            declared_media_type="application/octet-stream",
+            verified_media_type="application/octet-stream",
+            idempotency_key=token,
+            request_fingerprint=digest,
+        )
+        session.add_all([owner, content])
+        await session.flush()
+        descriptor = ObjectStoreObjects()
+        descriptor.content_id = content.id
+        descriptor.storage_kind = StorageKind.OBJECT_STORE.value
+        descriptor.object_key = object_key
+        descriptor.verification_chunk_size_bytes = len(payload)
+        descriptor.verification_chunk_sha256 = digest
+        session.add(descriptor)
+        session.add(
+            FileContentReferences(
+                file_id=owner.id, content_id=content.id, variant="original", ordinal=0
+            )
+        )
+        await session.flush()
+        content_id = content.id
+    async with capture_content(
+        _chunks(payload),
+        declared_media_type="application/octet-stream",
+        verified_media_type="application/octet-stream",
+        maximum_size_bytes=len(payload),
+        spool_memory_bytes=store.settings.spool_memory_bytes,
+        multipart_part_bytes=store.settings.multipart_part_bytes,
+    ) as captured:
+        await store.store.upload(object_key, captured)
+    async with database.session() as session, session.begin():
+        await session.execute(
+            text(
+                "UPDATE object_contents SET updated_at = now() - interval '10 seconds' "
+                "WHERE id = :cid"
+            ),
+            {"cid": str(content_id)},
+        )
+    return content_id

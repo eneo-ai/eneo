@@ -31,6 +31,7 @@ from eneo.object_content.object_store_connection import (
     ObjectStoreConnectionError,
     ObjectStoreConnectionInput,
     ObjectStoreConnectionService,
+    ObjectStoreEndpointNotRoutable,
     ObjectStoreNewWritesNotRedirected,
 )
 from eneo.object_content.s3_object_store import (
@@ -441,3 +442,104 @@ async def _binding_id(database: DatabaseSessionManager):
         snapshot = await StoreBindingRepository(session).snapshot()
     assert snapshot.binding_id is not None
     return snapshot.binding_id
+
+
+@pytest.mark.parametrize(
+    "endpoint",
+    ["https://127.0.0.1:9000", "https://10.0.0.5", "http://169.254.169.254"],
+)
+async def test_non_routable_destination_is_refused_before_any_store_client(
+    object_content_database: DatabaseSessionManager,
+    real_object_store: RealObjectStore,
+    endpoint: str,
+) -> None:
+    """An endpoint aimed inside the deployment network is refused on input.
+
+    The backend, not the browser, makes these requests, so a loopback or
+    private address points its reach at services the administrator cannot see.
+    """
+    factory_calls = 0
+
+    def counting_factory(settings) -> S3ObjectStore:  # type: ignore[no-untyped-def]
+        nonlocal factory_calls
+        factory_calls += 1
+        raise AssertionError("no store client may be built for a refused endpoint")
+
+    service = _service(object_content_database, real_object_store)
+    service._store_factory = counting_factory  # type: ignore[attr-defined]
+    actor = await _any_user_id(object_content_database)
+
+    with pytest.raises(ObjectStoreEndpointNotRoutable):
+        await service.create(
+            ObjectStoreConnectionInput(
+                endpoint_url=endpoint,
+                region="us-east-1",
+                bucket="eneo-object-content",
+                access_key_id=SecretStr("key"),
+                secret_access_key=SecretStr("secret"),
+                addressing_style="path",
+            ),
+            actor_user_id=actor,
+        )
+    assert factory_calls == 0
+
+
+async def test_rejected_switch_records_its_claim_on_the_target(
+    object_content_database: DatabaseSessionManager,
+    real_object_store: RealObjectStore,
+    real_unpaired_object_store: RealObjectStore,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A marker written for a switch is tracked, never an anonymous claim.
+
+    Writing the pairing marker is durable. If the swap afterwards loses a
+    revision race, the temporary binding slot still records which bucket this
+    installation touched, so a retry recognises its own marker instead of
+    leaving the bucket unusable by anyone.
+    """
+    service = _service(object_content_database, real_object_store)
+    actor = await _any_user_id(object_content_database)
+    created = await service.create(
+        _connection_input(real_object_store), actor_user_id=actor
+    )
+    await ensure_store_binding_ready(
+        object_content_database,
+        service.settings_for(created),
+        real_object_store.store,
+    )
+    await _select_inline_writes(object_content_database)
+
+    original_create = S3ObjectStore.create_binding
+
+    async def rotate_after_marker(self, creation):  # type: ignore[no-untyped-def]
+        await original_create(self, creation)
+        # A credential rotation lands between the marker and the swap.
+        async with object_content_database.session() as session, session.begin():
+            await session.execute(
+                text(
+                    "UPDATE object_store_connections SET revision = revision + 1 "
+                    "WHERE id = 1"
+                )
+            )
+
+    monkeypatch.setattr(S3ObjectStore, "create_binding", rotate_after_marker)
+
+    with pytest.raises(ObjectStoreConnectionError):
+        await service.replace_destination(
+            _connection_input(real_unpaired_object_store),
+            actor_user_id=actor,
+        )
+    monkeypatch.undo()
+
+    async with object_content_database.session() as session, session.begin():
+        claim = (
+            await session.execute(
+                text(
+                    "SELECT deployment_id, create_started_at IS NOT NULL "
+                    "FROM object_store_bindings WHERE slot = 2"
+                )
+            )
+        ).one_or_none()
+    assert claim is not None, "the marker written for this switch must be tracked"
+    assert claim[0] == created.deployment_id
+    assert claim[1]

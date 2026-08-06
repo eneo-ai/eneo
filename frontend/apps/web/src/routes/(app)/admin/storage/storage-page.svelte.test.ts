@@ -20,7 +20,9 @@ const testUser = vi.hoisted(() => ({ isPlatformAdmin: false }));
 vi.mock("$lib/core/AppContext.js", () => ({
   getAppContext: () => ({
     user: {
-      is_platform_admin: testUser.isPlatformAdmin
+      is_platform_admin: testUser.isPlatformAdmin,
+      roles: testUser.isPlatformAdmin ? [{ permissions: ["admin"] }] : [],
+      predefined_roles: []
     }
   })
 }));

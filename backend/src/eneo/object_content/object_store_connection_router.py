@@ -5,8 +5,8 @@ from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel
 
 from eneo.authentication.auth_dependencies import (
-    require_platform_admin,
     require_session_auth,
+    require_storage_administration,
     require_user_identity,
 )
 from eneo.main.container.container import Container
@@ -50,7 +50,7 @@ async def _require_connection_user_identity(
 async def _require_connection_platform_admin(
     container: _ConnectionAdminContainer,
 ) -> None:
-    await require_platform_admin(container.user())
+    await require_storage_administration(container.user())
 
 
 _PLATFORM_ADMIN_DEPENDENCIES = [

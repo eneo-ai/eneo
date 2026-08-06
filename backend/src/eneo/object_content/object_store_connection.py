@@ -35,6 +35,7 @@ from eneo.object_content.configuration import (
     ObjectContentCoreSettings,
     ObjectContentSettings,
     ObjectStoreOperatorSettings,
+    reject_non_routable_endpoint,
 )
 from eneo.object_content.content import (
     ObjectContentConfigurationError,
@@ -171,6 +172,10 @@ class ObjectStorePlainHttpNotPermitted(ObjectStoreConnectionInvalid):
     code = "object_store_plain_http_not_permitted"
 
 
+class ObjectStoreEndpointNotRoutable(ObjectStoreConnectionInvalid):
+    code = "object_store_endpoint_not_routable"
+
+
 class ObjectStoreCredentialEncryptionUnavailable(ObjectStoreConnectionError):
     code = "object_store_credential_encryption_unavailable"
 
@@ -253,6 +258,21 @@ class ObjectStoreConnectionRepository:
             )
         )
         return _stored(row) if row is not None else None
+
+    @staticmethod
+    def _require_routable_endpoint(candidate: ObjectStoreConnectionInput) -> None:
+        """Refuse an administrator endpoint aimed inside the deployment network.
+
+        The backend makes these requests, so an endpoint naming a loopback or
+        private address points its reach at services the administrator cannot
+        see and did not intend to contact.
+        """
+        try:
+            reject_non_routable_endpoint(candidate.endpoint_url)
+        except ValueError as error:
+            raise ObjectStoreEndpointNotRoutable(
+                "The object-store endpoint must name a routable address"
+            ) from error
 
     async def get_previous(self) -> StoredObjectStoreConnection | None:
         row = await self._session.scalar(
@@ -378,6 +398,21 @@ class ObjectStoreConnectionService:
         async with self._transaction() as session:
             return await ObjectStoreConnectionRepository(session).get()
 
+    @staticmethod
+    def _require_routable_endpoint(candidate: ObjectStoreConnectionInput) -> None:
+        """Refuse an administrator endpoint aimed inside the deployment network.
+
+        The backend makes these requests, so an endpoint naming a loopback or
+        private address points its reach at services the administrator cannot
+        see and did not intend to contact.
+        """
+        try:
+            reject_non_routable_endpoint(candidate.endpoint_url)
+        except ValueError as error:
+            raise ObjectStoreEndpointNotRoutable(
+                "The object-store endpoint must name a routable address"
+            ) from error
+
     async def get_previous(self) -> StoredObjectStoreConnection | None:
         """Return the archived previous destination, if a switch kept one."""
         async with self._transaction() as session:
@@ -390,6 +425,7 @@ class ObjectStoreConnectionService:
         actor_user_id: UUID,
     ) -> StoredObjectStoreConnection:
         self._require_encryption()
+        self._require_routable_endpoint(candidate)
         async with self._transaction() as session:
             if await ObjectStoreConnectionRepository(session).get() is not None:
                 raise ObjectStoreConnectionAlreadyConfigured(
@@ -618,6 +654,7 @@ class ObjectStoreConnectionService:
             raise ObjectStoreDestinationSwitchBlocked(
                 "The current destination has no established storage binding"
             )
+        self._require_routable_endpoint(candidate)
         # Fast feedback before any remote work; re-checked under lock below.
         async with self._transaction() as session:
             await self._require_switchable(session)
@@ -626,7 +663,11 @@ class ObjectStoreConnectionService:
             candidate,
             deployment_id=stored.deployment_id,
         )
-        await self._admit_switch_target(settings, binding_id=binding.binding_id)
+        await self._admit_switch_target(
+            settings,
+            binding_id=binding.binding_id,
+            expected_revision=stored.revision,
+        )
 
         access_key_id_encrypted = self._encryption.encrypt(
             candidate.access_key_id.get_secret_value()
@@ -684,6 +725,9 @@ class ObjectStoreConnectionService:
             # active destination: restart both inventory cycles and drop the
             # cleanup candidates observed against it. The switch preconditions
             # proved none of those rows holds a live lease.
+            await StoreBindingRepository(session).clear_slot(
+                slot=TEMPORARY_DESTINATION_SLOT
+            )
             await ObjectContentReconciliationRepository(
                 session
             ).reset_remote_inventory()
@@ -747,6 +791,7 @@ class ObjectStoreConnectionService:
         settings: ObjectContentSettings,
         *,
         binding_id: UUID,
+        expected_revision: int,
     ) -> None:
         """Admit a bucket that already holds this deployment's copied bytes.
 
@@ -787,6 +832,26 @@ class ObjectStoreConnectionService:
         # Unmarked target: prove readiness and a complete write/read/delete
         # round trip before claiming the bucket.
         await self._probe(settings, binding=None)
+
+        # Record the claim before the marker exists, revalidating the active
+        # revision so a rotation that raced this switch cannot leave an
+        # untracked pairing behind.
+        async with self._transaction(mutation=True) as session:
+            active_revision = await session.scalar(
+                select(ObjectStoreConnections.revision).where(
+                    ObjectStoreConnections.id == ACTIVE_DESTINATION_SLOT
+                )
+            )
+            if active_revision != expected_revision:
+                raise ObjectStoreConnectionConflict(
+                    "The object-store connection changed while it was being tested"
+                )
+            await StoreBindingRepository(session).record_switch_claim(
+                slot=TEMPORARY_DESTINATION_SLOT,
+                deployment_id=settings.deployment_id,
+                binding_id=binding_id,
+            )
+
         await self._create_switch_marker(probe_settings, binding_id=binding_id)
 
     async def _create_switch_marker(

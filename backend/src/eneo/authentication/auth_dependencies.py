@@ -185,20 +185,24 @@ async def require_user_identity(
         )
 
 
-async def require_platform_admin(
+async def require_storage_administration(
     user: Annotated[UserInDB, Depends(get_current_active_user)],
 ) -> None:
-    """Require the deployment authority on a currently eligible real user."""
+    """Require an eligible administrator for deployment-wide storage.
+
+    Administrators already govern API keys, models, and other deployment
+    settings, so storage administration uses the same authority rather than a
+    separate platform flag.
+    """
     if (
         user.state is not UserState.ACTIVE
         or user.deleted_at is not None
         or user.tenant.state is not TenantState.ACTIVE
         or Permission.ADMIN not in user.permissions
-        or not user.is_platform_admin
     ):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Active tenant admin platform authority is required.",
+            detail="Active administrator authority is required.",
         )
 
 

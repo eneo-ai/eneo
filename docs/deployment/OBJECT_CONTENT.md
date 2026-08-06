@@ -8,7 +8,7 @@ offline reference shipped beside the Compose templates.
 
 - Eneo runs normally without S3-compatible storage. PostgreSQL inline is the
   complete ready-to-use default.
-- Platform admins connect an S3-compatible destination and choose the
+- Administrators connect an S3-compatible destination and choose the
   deployment-wide target for eligible new File and Icon writes in **Admin >
   Storage**. These changes need no backend or worker restart.
 - PostgreSQL owns identity, SHA-256, size/type, references, access, retention,
@@ -34,12 +34,12 @@ silently after a failure.
 
 | Owner          | Responsibility                                                                                                                        |
 | -------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
-| Platform admin | Connect an S3-compatible destination, change or roll back that destination, rotate its access keys, and set the new-write target and business upload limits in **Admin > Storage** |
+| Administrator  | Connect an S3-compatible destination, change or roll back that destination, rotate its access keys, and set the new-write target and business upload limits in **Admin > Storage** |
 | Operator       | Run PostgreSQL and any optional compatible endpoint; own TLS, certificates, capacity, backups, network reachability, and process safety tuning |
 
-Tenant admins can review policy, effective limits, and capability status.
-Deployment-wide content inventory spans tenants, so only platform admins can
-view it.
+Storage administration uses the same administrator authority as API keys and
+models. Deployment-wide content inventory spans tenants, so it is part of that
+same administrative view.
 
 Persisted business limits accept whole-byte values from 1 through
 9,007,199,254,740,991 so PostgreSQL and browser clients can round-trip the same
@@ -70,7 +70,7 @@ admin can then enter the endpoint, bucket, signing region, and access keys in
 credentials. Saving the connection does not select it for new writes or move
 existing content.
 
-A platform administrator chooses the destination, as they do for AI provider and
+An administrator chooses the destination, as they do for AI provider and
 MCP server endpoints. Restrict which hosts the backend may reach with your normal
 network controls if your deployment requires that boundary.
 
@@ -221,7 +221,7 @@ curl -fsS https://eneo.example.eu/api/readyz \
   | jq -e '.detail.object_content.code == "ready"'
 ```
 
-After readiness reports `ready`, a platform admin can select **Object store**
+After readiness reports `ready`, an administrator can select **Object store**
 in **Admin > Storage**. Selection fails clearly if the endpoint is unavailable
 or incompatible. The policy update takes effect without restarting backend or
 worker.
@@ -260,7 +260,7 @@ The backend and worker receive the same variables through Compose pass-through;
 the optional service receives the matching credentials. There is deliberately
 no usable mutable-tag default.
 
-When readiness reports `ready`, a platform admin can select **Object store** in
+When readiness reports `ready`, an administrator can select **Object store** in
 **Admin > Storage**. The same deployment-wide policy applies to bundled and
 external endpoints; there is no provider or vendor product branch.
 
@@ -412,7 +412,7 @@ the scheduling/registration adapter, not S3 or lifecycle logic.
 
 PostgreSQL inline remains a complete deployment without an object-store
 service or configuration. When compatible object storage is configured and
-ready, a platform administrator can use **Admin > Storage** to queue an explicit
+ready, an administrator can use **Admin > Storage** to queue an explicit
 move in either direction. Selecting the default target for new writes never
 moves existing content.
 

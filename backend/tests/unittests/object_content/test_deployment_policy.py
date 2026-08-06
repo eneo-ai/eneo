@@ -16,7 +16,7 @@ from pydantic import ValidationError
 
 import eneo.object_content.deployment_policy_router as deployment_policy_router
 from eneo.authentication.auth_dependencies import (
-    require_platform_admin,
+    require_storage_administration,
 )
 from eneo.database.database import get_session, get_session_with_transaction
 from eneo.database.tables.object_content_policy_table import (
@@ -297,12 +297,17 @@ def test_tenant_user_write_schema_cannot_escalate_platform_authority() -> None:
 
 
 @pytest.mark.asyncio
-async def test_platform_authority_requires_current_active_eligibility() -> None:
+async def test_storage_authority_requires_current_active_eligibility() -> None:
     eligible = TEST_USER.model_copy(update={"is_platform_admin": True})
-    await require_platform_admin(eligible)
+    await require_storage_administration(eligible)
+
+    # An administrator without the separate platform flag governs storage too:
+    # it is the same authority that already governs API keys and models.
+    await require_storage_administration(
+        TEST_USER.model_copy(update={"is_platform_admin": False})
+    )
 
     ineligible = (
-        TEST_USER.model_copy(update={"is_platform_admin": False}),
         eligible.model_copy(update={"state": UserState.INACTIVE}),
         eligible.model_copy(update={"state": UserState.INVITED}),
         eligible.model_copy(update={"state": UserState.DELETED, "deleted_at": None}),
@@ -318,7 +323,7 @@ async def test_platform_authority_requires_current_active_eligibility() -> None:
     )
     for user in ineligible:
         with pytest.raises(HTTPException) as error:
-            await require_platform_admin(user)
+            await require_storage_administration(user)
         assert error.value.status_code == 403
 
 
