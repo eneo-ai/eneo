@@ -18,11 +18,19 @@ Note: modules are not network-isolated *from each other* — the authorization b
 
 Modules have **no login of their own and no IdP configuration**. Eneo is the single OIDC client in the installation, and module login rides on the user's Eneo session:
 
-1. An unauthenticated user on the module domain is redirected to Eneo.
-2. Eneo authenticates the user as usual (existing session, or your IdP), verifies that the user may use the module, and redirects back with a one-time, short-lived ticket.
-3. The module's server side exchanges the ticket with the backend over the internal network and establishes its own session cookie.
+1. An unauthenticated user on the module domain is redirected to Eneo, together with a `state` value the module generated for this login attempt.
+2. Eneo authenticates the user as usual (existing session, or your IdP), verifies that the user may use the module, and redirects back with a one-time, short-lived ticket. The module's `state` is echoed unchanged on the callback.
+3. The module's server side verifies `state`, exchanges the ticket with the backend over the internal network, and establishes its own session cookie.
 
-For operators this means: no extra client registration in your IdP per module, and users already signed in to Eneo reach modules without seeing a login screen. Each module's catalog entry states the minimum Eneo version that supports this handoff.
+For operators this means: no extra client registration in your IdP per module, and users already signed in to Eneo reach modules without seeing a login screen. Each module's catalog entry states the minimum Eneo version that supports this handoff. The ticket exchange uses Redis `GETDEL`, so the installation must run Redis 6.2 or newer — the bundled compose stack ships `redis:7`.
+
+### Module callback requirements
+
+Eneo protects the ticket itself: it is single-use, expires after ~30 seconds, and can only be exchanged with the module's registered service key. Protecting the callback against **login CSRF** (an attacker handing a victim's browser a callback URL carrying the attacker's ticket) is the module's job. A module implementing the handoff **must**:
+
+- Generate an unpredictable `state` value before redirecting to Eneo, bind it to the browser session (for example an HttpOnly cookie), and send it along in the login redirect. On the callback, reject the request unless `state` matches the pending login, and accept each value exactly once.
+- Exchange the ticket immediately on the callback and then redirect, so `ticket` and `state` never remain in the address bar or browser history (`history.replaceState` if the callback renders a page).
+- Serve the callback with a strict `Referrer-Policy`, load no third-party resources on it, and keep query strings out of access logs.
 
 ## Enabling a module
 

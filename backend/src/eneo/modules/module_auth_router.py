@@ -26,7 +26,10 @@ _Container = Annotated[Container, Depends(get_container(with_user=True))]
     description=(
         "Issue a one-time, short-lived login ticket for a module. "
         "Requires a session token; the frontend redirects the browser to "
-        "`redirect_target`, where the module exchanges the ticket server-side."
+        "`redirect_target`, where the module exchanges the ticket server-side. "
+        "A module-supplied `state` value is echoed on `redirect_target` so the "
+        "module can bind the callback to the browser session that initiated "
+        "the login (login-CSRF protection)."
     ),
     responses=responses.get_responses([400, 401, 403, 404]),
     dependencies=[Depends(require_session_auth)],
@@ -42,6 +45,7 @@ async def issue_module_ticket(
         user=user,
         module_id=payload.module_id,
         redirect_uri=payload.redirect_uri,
+        state=payload.state,
     )
 
 

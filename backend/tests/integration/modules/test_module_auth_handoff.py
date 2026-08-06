@@ -114,11 +114,15 @@ async def test_partial_config_patch_preserves_key_and_full_handoff_succeeds(
         json={
             "module_id": str(enabled_module.id),
             "redirect_uri": UPDATED_REDIRECT_URI,
+            "state": "module-csrf-binding-123",
         },
         headers={"Authorization": f"Bearer {admin_token}"},
     )
     assert ticket_response.status_code == 201, ticket_response.text
     ticket = ticket_response.json()["ticket"]
+    redirect_target = ticket_response.json()["redirect_target"]
+    assert redirect_target.startswith(UPDATED_REDIRECT_URI + "?ticket=")
+    assert redirect_target.endswith("&state=module-csrf-binding-123")
 
     exchange = await client.post(
         "/api/v1/module-auth/token/",

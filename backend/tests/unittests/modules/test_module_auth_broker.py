@@ -1,4 +1,5 @@
 from unittest.mock import AsyncMock, MagicMock
+from urllib.parse import quote_plus
 from uuid import uuid4
 
 import pytest
@@ -20,6 +21,7 @@ from eneo.main.exceptions import (
 from eneo.modules.module import ModuleClientConfig, ModuleInDB, ModuleTenantClientConfig
 from eneo.modules.module_auth import (
     ModuleAuthBroker,
+    ModuleTicketRequest,
     module_audience,
 )
 
@@ -123,11 +125,12 @@ def make_broker(module=None, config=None, user=None, redis=None):
     return broker
 
 
-async def issue(broker, user=None, redirect_uri=REDIRECT_URI):
+async def issue(broker, user=None, redirect_uri=REDIRECT_URI, state=None):
     return await broker.issue_ticket(
         user=user if user is not None else make_user(),
         module_id=MODULE_ID,
         redirect_uri=redirect_uri,
+        state=state,
     )
 
 
@@ -183,6 +186,22 @@ class TestIssueTicket:
 
         with pytest.raises(UnauthorizedException):
             await issue(broker)
+
+    async def test_state_is_echoed_urlencoded_on_redirect_target(self):
+        broker = make_broker()
+        state = "abc/+&käll=1"
+
+        result = await issue(broker, state=state)
+
+        assert result.redirect_target.startswith(REDIRECT_URI + "?ticket=")
+        assert result.redirect_target.endswith(f"&state={quote_plus(state)}")
+
+    async def test_redirect_target_carries_no_state_when_not_supplied(self):
+        broker = make_broker()
+
+        result = await issue(broker)
+
+        assert "state=" not in result.redirect_target
 
 
 class TestExchangeTicket:
@@ -327,6 +346,20 @@ class TestModuleClientConfig:
 
     def test_empty_update_has_no_values(self):
         assert ModuleClientConfig().update_values() == {}
+
+
+class TestModuleTicketRequest:
+    def test_state_defaults_to_none(self):
+        request = ModuleTicketRequest(module_id=MODULE_ID, redirect_uri=REDIRECT_URI)
+
+        assert request.state is None
+
+    @pytest.mark.parametrize("state", ["", "s" * 513])
+    def test_empty_or_oversized_state_rejected(self, state):
+        with pytest.raises(ValidationError):
+            ModuleTicketRequest(
+                module_id=MODULE_ID, redirect_uri=REDIRECT_URI, state=state
+            )
 
 
 class TestModuleServiceKeyRegistration:
