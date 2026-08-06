@@ -13,9 +13,24 @@ const getObjectStoreConnection = vi.hoisted(() => vi.fn());
 const createObjectStoreConnection = vi.hoisted(() => vi.fn());
 const rotateObjectStoreCredentials = vi.hoisted(() => vi.fn());
 const testUser = vi.hoisted(() => ({ isPlatformAdmin: false }));
-const invalidate = vi.hoisted(() => vi.fn());
+const invalidate = vi.hoisted(() => vi.fn(async () => {}));
 
-vi.mock("$app/navigation", () => ({ invalidate }));
+// Every export is listed: other modules in the component graph import
+// `replaceState` and friends, and a partial factory breaks their named imports.
+vi.mock("$app/navigation", () => ({
+  afterNavigate: vi.fn(),
+  beforeNavigate: vi.fn(),
+  disableScrollHandling: vi.fn(),
+  goto: vi.fn(),
+  invalidate,
+  invalidateAll: vi.fn(),
+  onNavigate: vi.fn(),
+  preloadCode: vi.fn(),
+  preloadData: vi.fn(),
+  pushState: vi.fn(),
+  refreshAll: vi.fn(),
+  replaceState: vi.fn()
+}));
 
 vi.mock("$lib/core/AppContext.js", () => ({
   getAppContext: () => ({
@@ -200,7 +215,7 @@ describe("admin storage settings page", () => {
     });
     createObjectStoreConnection.mockReset();
     rotateObjectStoreCredentials.mockReset();
-    invalidate.mockReset();
+    invalidate.mockClear();
   });
 
   test("shows a loading state before rendering the sanitized deployment policy", async () => {
