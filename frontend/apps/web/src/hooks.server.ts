@@ -3,7 +3,8 @@ import { DASHBOARD_URL } from "$lib/core/constants";
 import { detectMobile } from "$lib/core/detectMobile";
 import { getFeatureFlags } from "$lib/core/flags.server";
 import { authenticateUser, clearFrontendCookies } from "$lib/features/auth/auth.server";
-import { EneoError, type EneoErrorCode } from "@eneo/eneo-js";
+import { ENEO_RESPONSE_HEADERS } from "@eneo/eneo-js";
+import { toAppError } from "$lib/core/errors";
 import { redirect, type Handle, type HandleFetch, type HandleServerError } from "@sveltejs/kit";
 import {
   getEnvironmentConfig,
@@ -67,35 +68,35 @@ const paraglideHandle: Handle = ({ event, resolve }) =>
     });
   });
 
-const headerFilterHandle: Handle = async ({ event, resolve }) => {
+export const headerFilterHandle: Handle = async ({ event, resolve }) => {
   const response = await resolve(event, {
-    preload: () => false
+    preload: () => false,
+    // Responses fetched inside a load function have their headers stripped
+    // unless listed here. The Eneo client reads the trace id and error code off
+    // failed responses (see ENEO_RESPONSE_HEADERS); without this, every API
+    // failure during SSR turns into a "Failed to get response header" error
+    // that hides the real one.
+    filterSerializedResponseHeaders: (name) => ENEO_RESPONSE_HEADERS.includes(name)
   });
   return response;
 };
 
 export const handle = sequence(paraglideHandle, authHandle, headerFilterHandle);
 
-export const handleError: HandleServerError = async ({ error, status, message }) => {
-  let code: EneoErrorCode = 0;
-  let traceId: string | undefined;
-  if (error instanceof EneoError) {
-    status = error.status;
-    message = error.getReadableMessage();
-    code = error.code;
-    traceId = error.getTraceId();
-  }
+export const handleError: HandleServerError = async ({ error, event, status, message }) => {
+  const appError = toAppError(error, { status, message });
 
-  if (dev) {
-    console.error("server error", { status, code, traceId, error });
-  }
-
-  return {
-    status,
-    message,
-    code,
-    traceId
+  // SvelteKit stops logging errors itself once this hook exists, so without
+  // this a production 500 leaves nothing behind on the server. Log what ties
+  // the failure to the backend — never the request payload or response body.
+  const report = {
+    route: event.route.id ?? event.url.pathname,
+    ...appError,
+    stack: error instanceof Error ? error.stack : undefined
   };
+  console.error("server error", dev ? { ...report, error } : report);
+
+  return appError;
 };
 
 export const handleFetch: HandleFetch = async ({ request, fetch }) => {
