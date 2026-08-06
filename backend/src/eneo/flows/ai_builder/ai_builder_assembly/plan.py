@@ -127,6 +127,7 @@ class FlowAssemblyPlan:
     source_reader_required_fields: tuple[SourceCaptureField, ...]
     aggregation_intent: AggregationIntent
     ui_language: str | None
+    user_named_output_keys: frozenset[str] = frozenset()
     requested_output_section_contracts: tuple[RequestedOutputSectionContract, ...] = ()
     document_report_section_source: DocumentReportSectionSource | None = None
 
@@ -155,7 +156,10 @@ class FlowAssemblyPlan:
                 "FlowAssemblyPlan source_reader_required_fields require a "
                 "source-reader planned step."
             )
-        _validate_output_field_schema_keys(self.steps)
+        _validate_output_field_schema_keys(
+            self.steps,
+            user_named_output_keys=self.user_named_output_keys,
+        )
         _validate_source_reader_contracts_complete(
             steps=self.steps,
             terminal_output_schema=self.terminal_output_schema,
@@ -422,12 +426,20 @@ def _validate_source_reader_contracts_complete(
         )
 
 
-def _validate_output_field_schema_keys(steps: tuple[PlannedStep, ...]) -> None:
+def _validate_output_field_schema_keys(
+    steps: tuple[PlannedStep, ...],
+    *,
+    user_named_output_keys: frozenset[str] = frozenset(),
+) -> None:
+    # A key the user explicitly named (prose or declared schema evidence)
+    # wins verbatim: the critic requires its survival, so the localized-key
+    # policy must not reject it.
     invalid_paths = [
         f"{step.name}.{field_path}"
         for step in steps
         for field_path, field_name in _structured_field_paths(step.output_fields)
         if not _is_ascii_english_schema_key(field_name)
+        and field_name.casefold() not in user_named_output_keys
     ]
     if invalid_paths:
         raise ValueError(

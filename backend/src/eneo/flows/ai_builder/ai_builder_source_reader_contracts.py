@@ -208,10 +208,12 @@ def complete_structured_source_reader_fields(
     *,
     required_fields: tuple[SourceCaptureField, ...],
     runtime_input_execution_mode: RuntimeInputExecutionMode = "single_call",
+    user_named_output_keys: frozenset[str] = frozenset(),
 ) -> tuple[StructuredFieldDraft, ...]:
     completed = _add_missing_source_reader_fields(
         list(fields),
         required_fields=_dedupe_capture_fields(list(required_fields)),
+        user_named_output_keys=user_named_output_keys,
     )
     return tuple(
         _with_source_identity_contract(
@@ -291,8 +293,12 @@ def _add_missing_source_reader_fields(
     fields: list[StructuredFieldDraft],
     *,
     required_fields: tuple[SourceCaptureField, ...],
+    user_named_output_keys: frozenset[str] = frozenset(),
 ) -> list[StructuredFieldDraft]:
-    fields = _normalize_source_reader_fields(fields)
+    fields = _normalize_source_reader_fields(
+        fields,
+        user_named_output_keys=user_named_output_keys,
+    )
     missing_fields = [
         field
         for field in required_fields
@@ -314,7 +320,8 @@ def _add_missing_source_reader_fields(
                             )
                         }
                     )
-                ]
+                ],
+                user_named_output_keys=user_named_output_keys,
             )
         if field.field_type == "object" and field.fields:
             return _normalize_source_reader_fields(
@@ -327,11 +334,13 @@ def _add_missing_source_reader_fields(
                             )
                         }
                     )
-                ]
+                ],
+                user_named_output_keys=user_named_output_keys,
             )
 
     return _normalize_source_reader_fields(
-        _append_structured_leaf_fields(fields, missing_fields=missing_fields)
+        _append_structured_leaf_fields(fields, missing_fields=missing_fields),
+        user_named_output_keys=user_named_output_keys,
     )
 
 
@@ -339,6 +348,7 @@ def _normalize_source_reader_fields(
     fields: list[StructuredFieldDraft],
     *,
     parent_name: str | None = None,
+    user_named_output_keys: frozenset[str] = frozenset(),
 ) -> list[StructuredFieldDraft]:
     normalized_fields: list[StructuredFieldDraft] = []
     seen: set[str] = set()
@@ -348,7 +358,10 @@ def _normalize_source_reader_fields(
             parent_name=parent_name,
         ):
             continue
-        normalized_field = _normalize_source_reader_field(field)
+        normalized_field = _normalize_source_reader_field(
+            field,
+            user_named_output_keys=user_named_output_keys,
+        )
         key = _source_capture_field_key(normalized_field.name)
         if key in seen:
             continue
@@ -359,8 +372,16 @@ def _normalize_source_reader_fields(
 
 def _normalize_source_reader_field(
     field: StructuredFieldDraft,
+    *,
+    user_named_output_keys: frozenset[str] = frozenset(),
 ) -> StructuredFieldDraft:
-    field_name = _canonical_source_reader_field_name(field.name)
+    # A key the user explicitly named wins verbatim; canonical aliasing is
+    # for model-invented names only.
+    field_name = (
+        field.name
+        if field.name.casefold() in user_named_output_keys
+        else _canonical_source_reader_field_name(field.name)
+    )
     is_source_document_array = (
         field.field_type == "array"
         and _field_name_is_source_document_container(field.name)
@@ -372,12 +393,14 @@ def _normalize_source_reader_field(
         updates["fields"] = _normalize_source_reader_fields(
             field.fields,
             parent_name=field_name,
+            user_named_output_keys=user_named_output_keys,
         )
     if field.field_type == "array":
         item_fields = (
             _normalize_source_reader_fields(
                 field.item_fields,
                 parent_name=field_name,
+                user_named_output_keys=user_named_output_keys,
             )
             if field.item_fields
             else []

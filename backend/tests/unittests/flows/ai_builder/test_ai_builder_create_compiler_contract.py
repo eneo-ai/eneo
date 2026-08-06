@@ -469,7 +469,7 @@ def test_compiler_applies_distinct_input_and_output_schema_evidence() -> None:
     assert validation.valid, validation.errors
 
 
-def test_related_document_package_compiles_to_declared_json_contract() -> None:
+def test_related_document_package_keeps_prose_names_as_hints() -> None:
     output_schema: JsonObject = {
         "type": "object",
         "properties": {
@@ -509,6 +509,20 @@ def test_related_document_package_compiles_to_declared_json_contract() -> None:
                         "Read the application package and return the requested fields."
                     ),
                     "output_type": "json",
+                    "output_fields": [
+                        {
+                            "name": "candidate_name",
+                            "field_type": "string",
+                            "description": "Kandidatens namn.",
+                            "required": True,
+                        },
+                        {
+                            "name": "qualification_summary",
+                            "field_type": "string",
+                            "description": "Sammanfattning av meriter.",
+                            "required": True,
+                        },
+                    ],
                 }
             ],
         }
@@ -517,13 +531,16 @@ def test_related_document_package_compiles_to_declared_json_contract() -> None:
     context = create_compile_context_from_planning_state(state)
     assert context is not None
     assert context.aggregation_intent == "linear"
+    # Prose names are hints: the proposal owns types; nothing is pinned.
+    assert context.terminal_output_schema is None
 
     compiled = compile_create_intent_to_spec(intent, context=context)
 
     assert len(compiled.steps) == 1
     assert compiled.steps[0].input_source is InputSource.FLOW_INPUT
     assert compiled.steps[0].input_type is InputType.DOCUMENT
-    assert compiled.steps[0].output_contract == output_schema
+    contract_names = set(schema_leaf_property_names(compiled.steps[0].output_contract))
+    assert {"candidate_name", "qualification_summary"} <= contract_names
     assert validate_spec(compiled).valid
 
 
@@ -648,9 +665,8 @@ def test_compile_context_binds_inferred_example_as_an_open_json_shape() -> None:
     context = create_compile_context_from_planning_state(state)
 
     assert context is not None
-    assert context.terminal_output_schema == schema
-    assert "required" not in context.terminal_output_schema
-    assert "additionalProperties" not in context.terminal_output_schema
+    # Inferred examples are open hints; the proposal owns the contract.
+    assert context.terminal_output_schema is None
 
 
 def test_compile_context_keeps_input_schema_out_of_docx_terminal() -> None:
@@ -6245,3 +6261,130 @@ def test_secondary_open_questions_alone_does_not_insert_extraction_step() -> Non
     assert all(step.output_type != OutputType.JSON for step in compiled.steps)
     assert all("Uppföljningspunkter" != step.name for step in compiled.steps)
     assert validate_spec(compiled).valid
+
+
+def test_only_declared_schema_evidence_pins_the_terminal_contract() -> None:
+    # Prose field names and inferred examples are hints, not user-owned
+    # contracts: pinning them verbatim overwrote the model's typed fields
+    # with a flat name-only schema and forced repair loops (raw capture
+    # 2026-08-06). Only a declared schema carries pinning authority.
+    prose_schema = cast(
+        JsonObject,
+        {
+            "type": "object",
+            "properties": {"service_reference": {}, "applicant_channels": {}},
+        },
+    )
+    state = PlanningState.empty()
+    state.resolved_slots = {
+        "primary_runtime_input": _slot("primary_runtime_input", "documents"),
+        "terminal_output": _slot("terminal_output", "structured_json"),
+        "post_processing_goal": _slot(
+            "post_processing_goal", "extract_key_information"
+        ),
+        "document_material_scope": _slot(
+            "document_material_scope", "single_document_case"
+        ),
+        "runtime_metadata_fields": _slot(
+            "runtime_metadata_fields", "no_extra_metadata"
+        ),
+    }
+    _commit_architecture(state)
+    state.output_schema_evidence = build_schema_evidence(
+        json_schema=prose_schema,
+        source="prose_field_names",
+        confidence="high",
+        evidence=["user_message:prose"],
+    )
+    prose_context = create_compile_context_from_planning_state(state)
+    assert prose_context is not None
+    assert prose_context.terminal_output_schema is None
+
+    state.output_schema_evidence = build_schema_evidence(
+        json_schema=prose_schema,
+        source="declared_schema",
+        confidence="high",
+        evidence=["user_message:declared"],
+    )
+    declared_context = create_compile_context_from_planning_state(state)
+    assert declared_context is not None
+    assert declared_context.terminal_output_schema == prose_schema
+
+
+def test_user_named_localized_keys_are_admitted_and_others_still_reject() -> None:
+    # The user asked for Swedish JSON keys in prose; the critic demands they
+    # survive, so the localized-key lexicon must not reject exactly those
+    # names (live builder_error, simple_document_metadata_json 2026-08-06).
+    # Localized keys the user never named keep failing closed.
+    state = PlanningState.empty()
+    state.resolved_slots = {
+        "primary_runtime_input": _slot("primary_runtime_input", "documents"),
+        "terminal_output": _slot("terminal_output", "structured_json"),
+        "post_processing_goal": _slot(
+            "post_processing_goal", "extract_key_information"
+        ),
+        "document_material_scope": _slot(
+            "document_material_scope", "single_document_case"
+        ),
+        "runtime_metadata_fields": _slot(
+            "runtime_metadata_fields", "no_extra_metadata"
+        ),
+    }
+    _commit_architecture(state)
+    state.output_schema_evidence = build_schema_evidence(
+        json_schema={
+            "type": "object",
+            "properties": {"sammanfattning": {}, "dokumenttyp": {}},
+        },
+        source="prose_field_names",
+        confidence="high",
+        evidence=["user_message:prose"],
+    )
+    context = create_compile_context_from_planning_state(state)
+    assert context is not None
+
+    def intent_with_fields(names: list[str]) -> object:
+        return parse_create_flow_intent_arguments(
+            {
+                "flow_name": "Metadata",
+                "plan_rationale": "Extrahera fälten.",
+                "steps": [
+                    {
+                        "name": "Extrahera",
+                        "instructions": "Extrahera dokumentets fält.",
+                        "output_type": "json",
+                        "output_fields": [
+                            {
+                                "name": name,
+                                "field_type": "string",
+                                "description": f"{name} ur dokumentet.",
+                                "required": True,
+                            }
+                            for name in names
+                        ],
+                    }
+                ],
+            }
+        )
+
+    compiled = compile_create_intent_to_spec(
+        intent_with_fields(["sammanfattning", "dokumenttyp"]),
+        context=context,
+    )
+    contract_names = set(schema_leaf_property_names(compiled.steps[-1].output_contract))
+    assert {"sammanfattning", "dokumenttyp"} <= contract_names
+
+    # A localized key the user never named keeps failing closed.
+    state.output_schema_evidence = build_schema_evidence(
+        json_schema={"type": "object", "properties": {"dokumenttyp": {}}},
+        source="prose_field_names",
+        confidence="high",
+        evidence=["user_message:prose"],
+    )
+    unhinted_context = create_compile_context_from_planning_state(state)
+    assert unhinted_context is not None
+    with pytest.raises(AIBuilderArchitectureError):
+        compile_create_intent_to_spec(
+            intent_with_fields(["dokumenttyp", "sammanfattning"]),
+            context=unhinted_context,
+        )

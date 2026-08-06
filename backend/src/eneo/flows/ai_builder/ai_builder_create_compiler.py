@@ -104,6 +104,7 @@ class CreateCompileContext:
     aggregation_intent: AggregationIntent = "linear"
     flow_input_schema: JsonObject | None = None
     terminal_output_schema: JsonObject | None = None
+    user_named_output_keys: frozenset[str] = frozenset()
     source_reader_required_fields: tuple[SourceCaptureField, ...] = ()
     result_contract_output_fields: tuple[StructuredFieldDraft, ...] = ()
     result_contract_required_roles: tuple[ResultOutputFieldRole, ...] = ()
@@ -273,6 +274,9 @@ def compile_create_intent_to_spec(
         chain_steps=chain_steps,
         aggregation_intent=aggregation_intent,
         terminal_output_schema=context.terminal_output_schema if context else None,
+        user_named_output_keys=(
+            context.user_named_output_keys if context is not None else frozenset()
+        ),
         source_reader_required_fields=source_reader_required_fields,
         result_contract_output_fields=(
             context.result_contract_output_fields if context is not None else ()
@@ -619,6 +623,9 @@ def create_compile_context_from_planning_state(
             planning_state,
             final_output_type=final_output_type,
         ),
+        user_named_output_keys=_user_named_output_keys_from_planning_state(
+            planning_state
+        ),
         source_reader_required_fields=_source_reader_required_fields_from_planning_state(
             planning_state,
             ui_language=ui_language,
@@ -887,6 +894,28 @@ def _runtime_input_type_from_architecture(
     return runtime_input_type
 
 
+def _user_named_output_keys_from_planning_state(
+    state: PlanningState,
+) -> frozenset[str]:
+    """Top-level output keys the user named directly (prose or declared).
+
+    The localized-key policy steers models toward English keys, but a key
+    the user explicitly named wins verbatim — the critic requires its
+    survival, so validation must not reject it.
+    """
+
+    evidence = state.output_schema_evidence
+    if evidence is None or evidence.source not in {
+        "declared_schema",
+        "prose_field_names",
+    }:
+        return frozenset()
+    properties = evidence.json_schema.get("properties")
+    if not isinstance(properties, dict):
+        return frozenset()
+    return frozenset(str(name).casefold() for name in properties)
+
+
 def _terminal_output_schema_from_planning_state(
     state: PlanningState,
     *,
@@ -895,7 +924,11 @@ def _terminal_output_schema_from_planning_state(
     evidence = state.output_schema_evidence
     if evidence is None:
         return None
-    if evidence.source == "template_placeholders":
+    if evidence.source != "declared_schema":
+        # Prose field names and inferred examples are hints: the proposal
+        # owns types and nesting, and the critic enforces name survival.
+        # Pinning them verbatim overwrote the model's typed fields with a
+        # flat name-only schema and forced repair loops.
         return None
     if final_output_type != OutputType.JSON:
         return None

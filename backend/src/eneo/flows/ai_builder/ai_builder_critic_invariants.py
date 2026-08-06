@@ -61,6 +61,7 @@ from eneo.flows.ai_builder.ai_builder_planner_pattern_signals import (
 )
 from eneo.flows.ai_builder.ai_builder_result_contract import (
     ResultContract,
+    fold_result_field_name,
     resolve_result_output_field_roles,
 )
 from eneo.flows.ai_builder.planning_state import (
@@ -808,6 +809,69 @@ def _action_followup_requires_followup_fields_evidence(
     return (
         not set(context.result_contract.required_output_field_roles) <= declared_roles
     )
+
+
+def _missing_prose_output_field_names(context: CriticContext) -> tuple[str, ...]:
+    evidence = context.output_schema_evidence
+    if evidence is None or evidence.source != "prose_field_names":
+        return ()
+    raw_properties = evidence.json_schema.get("properties")
+    if not isinstance(raw_properties, dict):
+        return ()
+    hinted_names = tuple(
+        str(name)
+        for name in cast(dict[str, object], raw_properties)
+        if str(name).strip()
+    )
+    if not hinted_names:
+        return ()
+    outcome_contract = next(
+        (
+            step.output_contract
+            for step in reversed(context.spec.steps)
+            if step.output_contract is not None
+        ),
+        None,
+    )
+    if outcome_contract is None:
+        return hinted_names
+    declared = {
+        fold_result_field_name(name)
+        for name in schema_property_names_at_any_depth(outcome_contract)
+    }
+    return tuple(
+        name for name in hinted_names if fold_result_field_name(name) not in declared
+    )
+
+
+def _prose_output_field_names_must_survive_evidence(
+    context: CriticContext,
+) -> bool:
+    return bool(_missing_prose_output_field_names(context))
+
+
+def _prose_output_field_names_remediation(context: CriticContext) -> str:
+    missing = ", ".join(
+        f"`{name}`" for name in _missing_prose_output_field_names(context)
+    )
+    return (
+        "Användaren namngav utdatafält som saknas i planens strukturerade "
+        f"kontrakt: {missing}. Behåll varje användarnamngivet fält som nyckel "
+        "(valfri typ och nästling); ta inte bort eller döp om dem."
+    )
+
+
+_PROSE_OUTPUT_FIELD_NAMES_MUST_SURVIVE = CriticInvariant(
+    id="prose_output_field_names_must_survive",
+    kind="semantic",
+    description=(
+        "Field names the user explicitly requested must survive as keys in "
+        "the outcome contract; prose evidence no longer pins the schema, so "
+        "survival is the enforced contract."
+    ),
+    evidence=_prose_output_field_names_must_survive_evidence,
+    remediation=_prose_output_field_names_remediation,
+)
 
 
 _ACTION_FOLLOWUP_REQUIRES_FOLLOWUP_FIELDS = CriticInvariant(
@@ -1741,6 +1805,7 @@ CRITIC_INVARIANTS: tuple[CriticInvariant, ...] = (
     _STANDALONE_AUDIO_REQUIRES_TRANSCRIPTION_STEP,
     _SOURCE_READER_REQUIRED_FIELDS_MUST_BE_CAPTURED,
     _ACTION_FOLLOWUP_REQUIRES_FOLLOWUP_FIELDS,
+    _PROSE_OUTPUT_FIELD_NAMES_MUST_SURVIVE,
     _FIELD_REUSE_REQUIRES_INPUT_BINDINGS,
     _MULTI_DOCUMENT_COMPARE_REQUIRES_EXPLICIT_FAN_IN,
     _SIMPLE_TEXT_TRANSFORM_MUST_REMAIN_SINGLE_STEP,

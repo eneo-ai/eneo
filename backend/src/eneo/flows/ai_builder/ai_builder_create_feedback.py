@@ -39,6 +39,9 @@ CREATE_CRITIC_REMEDIATION: dict[str, str] = {
     "action_followup_requires_followup_fields": (
         "Beskriv ett semantiskt uppföljningsresultat som håller isär beslut, åtgärder eller nästa steg, ansvariga, deadlines och öppna frågor."
     ),
+    "prose_output_field_names_must_survive": (
+        "Behåll varje utdatafält som användaren namngav som nyckel i det strukturerade kontraktet; ta inte bort eller döp om dem."
+    ),
     "field_reuse_requires_input_bindings": (
         "Beskriv vilka namngivna fält från den strukturerade extraktionen som nästa semantiska steg ska återanvända."
     ),
