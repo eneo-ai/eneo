@@ -253,13 +253,28 @@ def ensure_structured_field_depth(
     fields: list[StructuredFieldDraft],
     *,
     depth: int = 1,
+    parent_path: str = "",
 ) -> None:
-    if depth > MAX_STRUCTURED_FIELD_DEPTH:
-        raise ValueError(
-            f"Structured field nesting depth cannot exceed {MAX_STRUCTURED_FIELD_DEPTH}."
-        )
+    # Naming the offending branch is what makes the rejection repairable:
+    # a bare depth message sent a live repair loop through five attempts
+    # because the model could not find which branch to flatten.
     for field in fields:
+        field_path = f"{parent_path}.{field.name}" if parent_path else field.name
+        if depth > MAX_STRUCTURED_FIELD_DEPTH:
+            raise ValueError(
+                f"{field_path}: structured field nesting depth cannot exceed "
+                f"{MAX_STRUCTURED_FIELD_DEPTH}; flatten this branch or move "
+                "its details into the description."
+            )
         if field.fields:
-            ensure_structured_field_depth(field.fields, depth=depth + 1)
+            ensure_structured_field_depth(
+                field.fields,
+                depth=depth + 1,
+                parent_path=field_path,
+            )
         if field.item_fields:
-            ensure_structured_field_depth(field.item_fields, depth=depth + 1)
+            ensure_structured_field_depth(
+                field.item_fields,
+                depth=depth + 1,
+                parent_path=field_path,
+            )

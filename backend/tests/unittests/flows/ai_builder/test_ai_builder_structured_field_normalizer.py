@@ -136,3 +136,38 @@ def test_container_shape_rules_are_enforced() -> None:
         normalize_structured_field_list(
             [_field("skalar", item_fields=[_field("barn")])]
         )
+
+
+def test_depth_rejection_names_the_offending_branch() -> None:
+    # Flagship capture 2026-08-06: a five-attempt repair loop because the
+    # depth error said only 'steps.1' — the model could not find which
+    # branch to flatten. The error must name the exact path.
+    nested = _field(
+        "sections",
+        field_type="object",
+        fields=[
+            _field(
+                "arendet",
+                field_type="object",
+                fields=[
+                    _field(
+                        "underavsnitt",
+                        field_type="object",
+                        fields=[_field("text")],
+                    )
+                ],
+            )
+        ],
+    )
+    with pytest.raises(PydanticValidationError) as excinfo:
+        SemanticStepIntent.model_validate(
+            {
+                "name": "Förbered innehåll",
+                "instructions": "Förbered tjänsteskrivelsens avsnitt.",
+                "output_type": "json",
+                "output_fields": [nested],
+            }
+        )
+    message = str(excinfo.value)
+    assert "sections.arendet.underavsnitt" in message
+    assert "cannot exceed" in message
