@@ -16,7 +16,10 @@ from eneo.server.protocol import responses
 
 router = APIRouter()
 
-_Container = Annotated[Container, Depends(get_container(with_user=True))]
+_AuthContainer = Annotated[
+    Container,
+    Depends(get_container(with_user=True, transaction_scope="function")),
+]
 
 
 @router.post(
@@ -36,7 +39,7 @@ _Container = Annotated[Container, Depends(get_container(with_user=True))]
 )
 async def issue_module_ticket(
     payload: ModuleTicketRequest,
-    container: _Container,
+    container: _AuthContainer,
 ) -> ModuleTicketResponse:
     broker = container.module_auth_broker()
     user = container.user()
@@ -62,7 +65,7 @@ async def issue_module_ticket(
 async def exchange_module_ticket(
     payload: ModuleTokenRequest,
     request: Request,
-    container: _Container,
+    container: _AuthContainer,
 ) -> ModuleTokenResponse:
     api_key = getattr(request.state, "api_key", None)
     if api_key is None:

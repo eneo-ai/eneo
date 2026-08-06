@@ -1,8 +1,15 @@
+import asyncio
+import contextlib
+from collections.abc import AsyncIterator
 from datetime import datetime, timedelta, timezone
 from urllib.parse import parse_qs, urlparse
 from uuid import uuid4
 
 import pytest
+from fastapi import FastAPI
+from httpx import ASGITransport, AsyncClient, Response
+from sqlalchemy.ext.asyncio import AsyncSession
+from starlette.types import Message, Receive, Scope, Send
 
 from eneo.authentication.auth_models import (
     ApiKeyHashVersion,
@@ -12,6 +19,7 @@ from eneo.authentication.auth_models import (
     ApiKeyState,
     ApiKeyType,
 )
+from eneo.database.database import get_session_with_transaction
 from eneo.main.models import ModelId
 from eneo.modules.module import ModuleBase
 from eneo.tenants.tenant import TenantBase
@@ -20,6 +28,72 @@ pytestmark = pytest.mark.integration
 
 REDIRECT_URI = "https://module.example.com/auth/callback"
 UPDATED_REDIRECT_URI = "https://module.example.com/login/callback"
+
+
+async def _request_at_transaction_boundary(
+    app: FastAPI,
+    *,
+    method: str,
+    path: str,
+    payload: dict[str, object],
+    headers: dict[str, str],
+) -> Response:
+    """Run a real route while holding transaction teardown at the ASGI edge."""
+    response_started = asyncio.Event()
+    teardown_started = asyncio.Event()
+    release_teardown = asyncio.Event()
+
+    async def blocked_transaction_teardown() -> AsyncIterator[AsyncSession]:
+        async for session in get_session_with_transaction():
+            try:
+                yield session
+            finally:
+                teardown_started.set()
+                await release_teardown.wait()
+
+    async def record_response_start(
+        scope: Scope,
+        receive: Receive,
+        send: Send,
+    ) -> None:
+        async def recording_send(message: Message) -> None:
+            if message["type"] == "http.response.start":
+                response_started.set()
+            await send(message)
+
+        await app(scope, receive, recording_send)
+
+    assert get_session_with_transaction not in app.dependency_overrides
+    app.dependency_overrides[get_session_with_transaction] = (
+        blocked_transaction_teardown
+    )
+    request_task: asyncio.Task[Response] | None = None
+    try:
+        async with AsyncClient(
+            transport=ASGITransport(app=record_response_start),
+            base_url="http://test.local",
+        ) as boundary_client:
+            request_task = asyncio.create_task(
+                boundary_client.request(
+                    method,
+                    path,
+                    json=payload,
+                    headers=headers,
+                )
+            )
+            try:
+                await asyncio.wait_for(teardown_started.wait(), timeout=10)
+                assert not response_started.is_set()
+            finally:
+                release_teardown.set()
+
+            return await asyncio.wait_for(request_task, timeout=10)
+    finally:
+        release_teardown.set()
+        if request_task is not None and not request_task.done():
+            with contextlib.suppress(Exception):
+                await request_task
+        app.dependency_overrides.pop(get_session_with_transaction, None)
 
 
 @pytest.fixture
@@ -74,6 +148,7 @@ def client_config_path(*, tenant_id, module_id) -> str:
 
 @pytest.mark.asyncio
 async def test_partial_config_patch_preserves_key_and_full_handoff_succeeds(
+    app,
     client,
     admin_token,
     admin_user,
@@ -102,17 +177,23 @@ async def test_partial_config_patch_preserves_key_and_full_handoff_succeeds(
     )
     assert initial.status_code == 200, initial.text
 
-    partial = await client.patch(
-        config_path,
-        json={"redirect_uris": [UPDATED_REDIRECT_URI]},
+    partial = await _request_at_transaction_boundary(
+        app,
+        method="PATCH",
+        path=config_path,
+        payload={"redirect_uris": [UPDATED_REDIRECT_URI]},
         headers=sysadmin_headers,
     )
     assert partial.status_code == 200, partial.text
     assert partial.json()["service_key_id"] == service_key_id
 
-    ticket_response = await client.post(
-        "/api/v1/module-auth/tickets/",
-        json={
+    # This is a new HTTP request and therefore a separate database session. It
+    # must observe the PATCH commit immediately, before any response is exposed.
+    ticket_response = await _request_at_transaction_boundary(
+        app,
+        method="POST",
+        path="/api/v1/module-auth/tickets/",
+        payload={
             "module_id": str(enabled_module.id),
             "redirect_uri": UPDATED_REDIRECT_URI,
             "state": "module-csrf-binding-123",
@@ -129,9 +210,11 @@ async def test_partial_config_patch_preserves_key_and_full_handoff_succeeds(
     assert redirect_target.endswith("&state=module-csrf-binding-123")
     ticket = parse_qs(urlparse(redirect_target).query)["ticket"][0]
 
-    exchange = await client.post(
-        "/api/v1/module-auth/token/",
-        json={"ticket": ticket},
+    exchange = await _request_at_transaction_boundary(
+        app,
+        method="POST",
+        path="/api/v1/module-auth/token/",
+        payload={"ticket": ticket},
         headers={"X-API-Key": service_key["secret"]},
     )
     assert exchange.status_code == 200, exchange.text
