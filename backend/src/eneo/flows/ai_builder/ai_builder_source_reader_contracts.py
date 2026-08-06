@@ -77,6 +77,7 @@ _SOURCE_CAPTURE_FIELD_TOKEN_ALIASES = {
     "requirements": "requirement",
     "rule": "rule",
     "rules": "rule",
+    "sammanfattning": "summary",
     "secret": "confidentiality",
     "secrecy": "confidentiality",
     "sekretess": "confidentiality",
@@ -285,6 +286,18 @@ def add_runtime_source_file_id_field(
 
 def source_reader_leaf_field_name(field_path: str) -> str:
     return _leaf_field_name(field_path)
+
+
+def source_capture_field_satisfied(field_name: str, required_name: str) -> bool:
+    """Decide whether a declared field satisfies a required capture field.
+
+    The single satisfaction predicate for every consumer (completion,
+    critics): symmetric canonical matching, so the model's verbatim
+    wording ("sammanfattning") satisfies the canonical requirement
+    ("summary") without any rewrite.
+    """
+
+    return _field_name_matches_required_leaf(field_name, required_name)
 
 
 def _add_missing_source_reader_fields(
@@ -576,6 +589,7 @@ def _source_capture_field_key(value: str) -> str:
     tokens = tuple(
         _SOURCE_CAPTURE_FIELD_TOKEN_ALIASES.get(token, token)
         for token in normalized.split()
+        if token != "or"
     )
     token_set = frozenset(tokens)
     if token_set in _SOURCE_IDENTITY_TOKENS:
@@ -584,7 +598,11 @@ def _source_capture_field_key(value: str) -> str:
         return "title"
     if token_set in _DOCUMENT_TYPE_TOKEN_SETS:
         return "document_type"
-    if token_set == _AUTHOR_SOURCE_TOKENS:
+    if token_set == _DATE_TOKENS:
+        return "date_or_year"
+    if token_set == _AUTHOR_SOURCE_TOKENS or (
+        token_set and token_set <= _AUTHOR_OR_SENDER_TOKENS
+    ):
         return "author_or_sender"
     if token_set == _CATEGORY_TOKENS:
         return "category"

@@ -5748,3 +5748,86 @@ def test_prose_named_fields_must_survive_into_the_outcome_contract() -> None:
         )
     )
     assert "prose_output_field_names_must_survive" not in {issue.id for issue in issues}
+
+
+class TestSourceReaderRequiredFieldsCaptured:
+    """Required-capture satisfaction uses the shared canonical match."""
+
+    def _context(
+        self,
+        spec: FlowDraftSpecCore,
+        *,
+        required: frozenset[str],
+    ) -> "CriticContext":
+        from eneo.flows.ai_builder.ai_builder_critic_invariants import (
+            CriticContext,
+        )
+        from eneo.flows.ai_builder.ai_builder_framework_policy import (
+            OutputIntentResolution,
+        )
+        from eneo.flows.ai_builder.ai_builder_planner_pattern_signals import (
+            PlannerPatternSignals,
+        )
+
+        return CriticContext(
+            spec=spec,
+            flow=None,
+            answer_signals={},
+            text="",
+            requirements_text="",
+            signal_text="",
+            planner_patterns=PlannerPatternSignals(),
+            output_intent=OutputIntentResolution(terminal_output=None),
+            mixed_audio_doc_input=False,
+            requested_output_sections=RequestedOutputSections.empty(),
+            source_reader_required_field_names=required,
+        )
+
+    def _reader_spec(self, *leaf_names: str) -> FlowDraftSpecCore:
+        return FlowDraftSpecCore(
+            flow_name="Källäsare",
+            steps=[
+                _step(
+                    "step_a",
+                    "Läs källor",
+                    "Läs och strukturera källorna.",
+                    input_type=InputType.DOCUMENT,
+                    output_type=OutputType.JSON,
+                    output_contract={
+                        "type": "object",
+                        "properties": {name: {"type": "string"} for name in leaf_names},
+                        "required": list(leaf_names),
+                        "additionalProperties": False,
+                    },
+                )
+            ],
+        )
+
+    def test_verbatim_swedish_names_satisfy_canonical_requirements(self) -> None:
+        # Regression 2026-08-06: after names stopped being rewritten to
+        # canonical English, this invariant compared exact names and fired
+        # on four live cases whose readers declared Swedish wording.
+        issues = evaluate_critic_invariants(
+            self._context(
+                self._reader_spec("sammanfattning", "titel", "datum"),
+                required=frozenset({"summary", "title", "date_or_year"}),
+            )
+        )
+
+        assert not any(
+            issue.id == "source_reader_required_fields_must_be_captured"
+            for issue in issues
+        )
+
+    def test_truly_missing_required_field_still_fires(self) -> None:
+        issues = evaluate_critic_invariants(
+            self._context(
+                self._reader_spec("sammanfattning"),
+                required=frozenset({"summary", "date_or_year"}),
+            )
+        )
+
+        assert any(
+            issue.id == "source_reader_required_fields_must_be_captured"
+            for issue in issues
+        )

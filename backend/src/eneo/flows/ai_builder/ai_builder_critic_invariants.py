@@ -64,6 +64,9 @@ from eneo.flows.ai_builder.ai_builder_result_contract import (
     fold_result_field_name,
     resolve_result_output_field_roles,
 )
+from eneo.flows.ai_builder.ai_builder_source_reader_contracts import (
+    source_capture_field_satisfied,
+)
 from eneo.flows.ai_builder.planning_state import (
     AggregationIntent,
     CheckpointIntent,
@@ -727,7 +730,19 @@ def _missing_source_reader_required_field_names(
     captured_names: set[str] = set()
     for contract in source_reader_contracts:
         captured_names.update(schema_leaf_property_names(contract))
-    return tuple(sorted(required_names - captured_names))
+    # Satisfaction is the shared symmetric canonical match, not exact
+    # equality: the reader keeps the model's verbatim wording, so
+    # "sammanfattning" must satisfy the canonical "summary" requirement.
+    return tuple(
+        sorted(
+            required_name
+            for required_name in required_names
+            if not any(
+                source_capture_field_satisfied(captured_name, required_name)
+                for captured_name in captured_names
+            )
+        )
+    )
 
 
 def _source_reader_required_fields_remediation(context: CriticContext) -> str:
