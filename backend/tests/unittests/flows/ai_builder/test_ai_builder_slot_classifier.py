@@ -2860,3 +2860,23 @@ def test_parser_fails_the_attempt_for_a_malformed_present_delta() -> None:
     )
 
     assert result is None
+
+
+def test_quoted_text_from_planning_reference_strips_compound_source_ids() -> None:
+    # Live 2026-08-06: a critic remediation quoted "user_message:<uuid>:..."
+    # back to the user because the encoding had no decoder beside it.
+    from eneo.flows.ai_builder.ai_builder_slot_classification_contract import (
+        ClassifiedEvidence,
+        quoted_text_from_planning_reference,
+    )
+
+    reference = ClassifiedEvidence(
+        source_id="user_message:019fd7c0-8030-7712-b7b6-f2e3cc2ad814",
+        quote="fyller i område, beräknad klartid och kontaktväg",
+    ).planning_reference()
+
+    assert (
+        quoted_text_from_planning_reference(reference)
+        == "fyller i område, beräknad klartid och kontaktväg"
+    )
+    assert quoted_text_from_planning_reference("model:slot:abc123") is None

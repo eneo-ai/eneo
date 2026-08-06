@@ -5879,7 +5879,9 @@ class TestRuntimeMetadataRemediationNamesTheFields:
                     name="runtime_metadata_fields",
                     value="wants_input_fields",
                     source="model",
-                    evidence=["quote:fyller i område, beräknad klartid och kontaktväg"],
+                    evidence=[
+                        "quote:user_message:msg-1:fyller i område, beräknad klartid och kontaktväg"
+                    ],
                     confidence="high",
                     evidence_level="explicit",
                 )
@@ -5888,5 +5890,6 @@ class TestRuntimeMetadataRemediationNamesTheFields:
 
         remediation = _runtime_metadata_requires_form_fields_remediation(context)
 
-        assert "fyller i område, beräknad klartid och kontaktväg" in remediation
+        assert '"fyller i område, beräknad klartid och kontaktväg"' in remediation
+        assert "user_message:" not in remediation
         assert "input_field" in remediation

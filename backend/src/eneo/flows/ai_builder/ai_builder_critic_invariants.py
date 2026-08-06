@@ -64,6 +64,9 @@ from eneo.flows.ai_builder.ai_builder_result_contract import (
     fold_result_field_name,
     resolve_result_output_field_roles,
 )
+from eneo.flows.ai_builder.ai_builder_slot_classification_contract import (
+    quoted_text_from_planning_reference,
+)
 from eneo.flows.ai_builder.ai_builder_source_reader_contracts import (
     source_capture_field_satisfied,
 )
@@ -385,9 +388,10 @@ def _runtime_metadata_requires_form_fields_remediation(
     slot = context.resolved_slots.get("runtime_metadata_fields")
     quotes = (
         [
-            item.removeprefix("quote:").strip()
+            text
             for item in slot.evidence
-            if item.startswith("quote:")
+            for text in [quoted_text_from_planning_reference(item)]
+            if text is not None
         ]
         if slot is not None
         else []

@@ -93,6 +93,32 @@ class ClassifiedEvidence:
         return f"quote:{self.source_id}:{self.quote}"
 
 
+def quoted_text_from_planning_reference(reference: str) -> str | None:
+    """Return the user's words from a persisted evidence reference.
+
+    The decoder lives beside `ClassifiedEvidence.planning_reference` so the
+    encoding has one owner: source ids carry their own colons, so a naive
+    prefix strip leaks internal ids into user-facing remediation text
+    (observed live 2026-08-06).
+    """
+
+    if not reference.startswith("quote:"):
+        return None
+    body = reference.removeprefix("quote:")
+    source_id, separator, quote = body.partition(":")
+    if source_id in _COMPOUND_EVIDENCE_SOURCE_KINDS:
+        _, _, remainder = quote.partition(":")
+        quote = remainder or quote
+    text = quote.strip() if separator else ""
+    return text or None
+
+
+# Source kinds whose ids embed a second colon (`user_message:<message_id>`).
+_COMPOUND_EVIDENCE_SOURCE_KINDS = frozenset(
+    {"user_message", "assistant_message", "answer", "attachment", "file"}
+)
+
+
 @dataclass(frozen=True, slots=True)
 class ClassifiedSchemaDirection:
     candidate_fingerprints: tuple[str, ...]
