@@ -4613,6 +4613,30 @@ def test_suite_conformance_summary_separates_mechanics_from_rubric() -> None:
     }
 
 
+def test_suite_conformance_counts_repetitions_of_one_case_once() -> None:
+    # "unique cases" must mean cases: with repetitions the previous counter
+    # incremented once per observation, inflating every cluster by the
+    # repetition factor.
+    harness = _battle_harness()
+
+    summary = harness._suite_conformance_summary(
+        [
+            {
+                "case_id": "case-a",
+                "repetition": index,
+                "outcome_class": "plan_first_pass",
+                "expectation_verdict": "fail",
+                "failed_checks": [{"name": "expected_leaf_output_fields"}],
+            }
+            for index in range(1, 4)
+        ]
+    )
+
+    assert summary["failed_checks_by_unique_cases"] == {
+        "expected_leaf_output_fields": 1
+    }
+
+
 def test_event_summary_extracts_failure_detail() -> None:
     harness = _battle_harness()
 

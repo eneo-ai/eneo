@@ -145,20 +145,17 @@ def _case_delta(
         "direction": direction,
         "outcome": f"{before} -> {after}",
     }
-    observed = {
-        outcome
-        for rows in (baseline_repetitions or [], current_repetitions or [])
-        for row in rows
-        for outcome in [row.get("outcome_class")]
-        if isinstance(outcome, str)
-    }
-    if len(observed) > 1 and (
-        len(baseline_repetitions or []) > 1 or len(current_repetitions or []) > 1
-    ):
-        # The same build produced different outcomes for this case, so its
-        # transition is variance until repeated measurement says otherwise.
-        delta["unstable"] = True
-        delta["observed_outcomes"] = sorted(observed)
+    # Instability is a property of ONE build disagreeing with itself. Judging
+    # it from the union of both builds would brand every real, consistent
+    # A -> B change unstable.
+    baseline_states = _observed_states(baseline_repetitions)
+    current_states = _observed_states(current_repetitions)
+    if len(baseline_states) > 1:
+        delta["baseline_unstable"] = True
+        delta["baseline_observed_states"] = sorted(baseline_states)
+    if len(current_states) > 1:
+        delta["current_unstable"] = True
+        delta["current_observed_states"] = sorted(current_states)
     if baseline is not None and current is not None:
         before_codes = _failure_codes(baseline)
         after_codes = _failure_codes(current)
@@ -260,7 +257,18 @@ def compare(
         for case_rows in current_rows.values()
         for row in case_rows
     )
-    unstable = [delta["case_id"] for delta in deltas if delta.get("unstable") is True]
+    unstable = {
+        "baseline": [
+            delta["case_id"]
+            for delta in deltas
+            if delta.get("baseline_unstable") is True
+        ],
+        "current": [
+            delta["case_id"]
+            for delta in deltas
+            if delta.get("current_unstable") is True
+        ],
+    }
     return {
         "baseline": _identity(baseline_summary),
         "current": _identity(current_summary),
@@ -269,6 +277,20 @@ def compare(
         "remaining_blockers_ranked": remaining_blockers.most_common(),
         "unstable_cases": unstable,
         "cases": deltas,
+    }
+
+
+def _observed_states(rows: list[dict[str, Any]] | None) -> set[str]:
+    """Distinct (mechanics, conformance) states one build produced for a case.
+
+    Outcome alone hides the state that matters: two repetitions can both be
+    `plan_first_pass` while one satisfies the case and the other does not.
+    """
+
+    return {
+        f"{row.get('outcome_class') or 'unknown'}/"
+        f"{row.get('expectation_verdict') or 'unknown'}"
+        for row in rows or []
     }
 
 
