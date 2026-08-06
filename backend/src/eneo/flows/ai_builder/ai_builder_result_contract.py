@@ -8,10 +8,12 @@ resolved user outcome so richer clarification changes plan quality.
 from __future__ import annotations
 
 import re
-import unicodedata
 from dataclasses import dataclass
 from typing import Literal
 
+from eneo.flows.ai_builder.ai_builder_field_identity import (
+    fold_result_field_name as fold_result_field_name,
+)
 from eneo.flows.ai_builder.planning_state import PlanningState
 
 ResultObligation = Literal[
@@ -283,24 +285,6 @@ def derive_result_contract(planning_state: PlanningState) -> ResultContract | No
         result_policies=result_policies,
         required_output_fields=required_output_fields,
     )
-
-
-_FIELD_NAME_SEPARATOR_RE = re.compile(r"[^0-9a-z]+")
-
-
-def fold_result_field_name(name: str) -> str:
-    """Fold a schema field name for role matching.
-
-    Case, diacritics, and separator style must not decide whether a role is
-    recognized: proposals name fields in natural Swedish ("åtgärder",
-    "öppna frågor") while the accepted vocabulary is stored ASCII-folded.
-    """
-
-    decomposed = unicodedata.normalize("NFKD", name)
-    stripped = "".join(
-        character for character in decomposed if not unicodedata.combining(character)
-    )
-    return _FIELD_NAME_SEPARATOR_RE.sub("_", stripped.casefold()).strip("_")
 
 
 def _requirement_accepts_folded_names(

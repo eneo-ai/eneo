@@ -374,7 +374,9 @@ def _normalize_create_intent_arguments(arguments: dict[str, Any]) -> dict[str, A
     if isinstance(raw_steps, list):
         normalized["steps"] = [
             _strip_backend_owned_semantic_step_keys(raw_step)
-            for raw_step in cast(list[Any], raw_steps)
+            for raw_step in _steps_with_misplaced_field_drafts_reattached(
+                cast(list[Any], raw_steps)
+            )
         ]
     raw_input_fields = normalized.get("input_fields")
     if isinstance(raw_input_fields, list):
@@ -387,6 +389,52 @@ def _normalize_create_intent_arguments(arguments: dict[str, Any]) -> dict[str, A
             for field in cast(list[Any], raw_input_fields)
         ]
     return normalized
+
+
+def _steps_with_misplaced_field_drafts_reattached(
+    raw_steps: list[Any],
+) -> list[Any]:
+    """Reattach structured field drafts the model emitted as steps.
+
+    A semantic step never declares `field_type`; a structured field draft
+    always does. When the model's JSON nesting slips, a whole field list
+    lands in `steps` directly after its producing step — the dominant
+    parse-failure family in the 2026-08-06 checkpoint (12 of 14 parse
+    rejections, each costing a full repair round). Field-shaped entries
+    are appended to the preceding step's output_fields; one with no
+    preceding step stays put and fails visibly.
+    """
+
+    merged: list[Any] = []
+    moved = 0
+    for raw_step in raw_steps:
+        is_field_draft = (
+            isinstance(raw_step, dict)
+            and "field_type" in raw_step
+            and "instructions" not in raw_step
+        )
+        if is_field_draft and merged and isinstance(merged[-1], dict):
+            target = cast(dict[str, Any], merged[-1])
+            raw_fields = target.get("output_fields")
+            fields = (
+                list(cast(list[Any], raw_fields))
+                if isinstance(raw_fields, list)
+                else []
+            )
+            target["output_fields"] = [*fields, raw_step]
+            moved += 1
+            continue
+        merged.append(
+            dict(cast(dict[str, Any], raw_step))
+            if isinstance(raw_step, dict)
+            else raw_step
+        )
+    if moved:
+        logger.info(
+            "ai_builder_create_intent_misplaced_field_drafts_reattached",
+            extra={"moved_count": moved},
+        )
+    return merged
 
 
 @cache

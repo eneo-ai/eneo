@@ -4471,6 +4471,31 @@ def test_single_call_custom_section_array_guidance_uses_selected_field(
 
 
 def test_create_intent_rejects_fields_outside_structured_contract() -> None:
+    # Separator styles fold to a valid identifier instead of rejecting.
+    folded = parse_create_flow_intent_arguments(
+        {
+            "flow_name": "Folded field name",
+            "plan_rationale": "Exercise the typed structured-field boundary.",
+            "steps": [
+                {
+                    "name": "Extract risks",
+                    "instructions": "Extract the risks.",
+                    "output_type": "json",
+                    "output_fields": [
+                        {
+                            "name": "risk-level",
+                            "field_type": "string",
+                            "description": "Risk level.",
+                        }
+                    ],
+                }
+            ],
+        }
+    )
+    assert [field.name for field in folded.steps[0].output_fields or []] == [
+        "risk_level"
+    ]
+
     with pytest.raises(
         ProposalIntentArgumentError,
         match="structured field names must be ASCII identifiers",
@@ -4486,7 +4511,7 @@ def test_create_intent_rejects_fields_outside_structured_contract() -> None:
                         "output_type": "json",
                         "output_fields": [
                             {
-                                "name": "risk-level",
+                                "name": "123",
                                 "field_type": "string",
                                 "description": "Risk level.",
                             }

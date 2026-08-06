@@ -6,6 +6,7 @@ from typing import Any, Literal, cast
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from eneo.flows.ai_builder.ai_builder_field_identity import fold_result_field_name
 from eneo.flows.domain.flow import RuntimeInputExecutionMode
 from eneo.flows.flow_authoring_spec import (
     InputSource,
@@ -106,6 +107,12 @@ class StructuredFieldDraft(BaseModel):
     def _validate_name(cls, value: str) -> str:
         normalized = value.strip()
         if not re.fullmatch(STRUCTURED_FIELD_NAME_PATTERN, normalized):
+            # Identity is folded, wording is the author's: a Swedish name
+            # like "åtgärder" folds to a valid identifier instead of
+            # costing a repair round.
+            folded = fold_result_field_name(normalized)
+            if re.fullmatch(STRUCTURED_FIELD_NAME_PATTERN, folded):
+                return folded
             raise ValueError(
                 "structured field names must be ASCII identifiers beginning "
                 "with a letter or underscore"
@@ -126,14 +133,25 @@ class StructuredFieldDraft(BaseModel):
 
     @model_validator(mode="after")
     def _validate_shape(self) -> "StructuredFieldDraft":
+        # Naming the offending field is what makes the rejection repairable
+        # in one round; a bare shape message leaves the model guessing.
         if self.field_type == "object" and not self.fields:
-            raise ValueError("Object fields must declare nested fields.")
+            raise ValueError(
+                f"Object field {self.name!r} must declare nested fields, "
+                "or use field_type string with the details in its description."
+            )
         if self.field_type != "object" and self.fields is not None:
-            raise ValueError("Only object fields may declare nested fields.")
+            raise ValueError(
+                f"Only object fields may declare nested fields ({self.name!r})."
+            )
         if self.field_type == "array" and self.fields is not None:
-            raise ValueError("Array fields must use item_fields, not fields.")
+            raise ValueError(
+                f"Array field {self.name!r} must use item_fields, not fields."
+            )
         if self.field_type != "array" and self.item_fields is not None:
-            raise ValueError("Only array fields may declare item_fields.")
+            raise ValueError(
+                f"Only array fields may declare item_fields ({self.name!r})."
+            )
         return self
 
 

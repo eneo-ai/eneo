@@ -3,7 +3,11 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError as PydanticValidationError
 
-from eneo.flows.ai_builder.ai_builder_proposal_intent import SemanticStepIntent
+from eneo.flows.ai_builder.ai_builder_proposal_intent import (
+    ProposalIntentArgumentError,
+    SemanticStepIntent,
+    parse_create_flow_intent_arguments,
+)
 from eneo.flows.ai_builder.ai_builder_structured_field_normalizer import (
     StructuredFieldAdmissionError,
     normalize_structured_field_list,
@@ -171,3 +175,94 @@ def test_depth_rejection_names_the_offending_branch() -> None:
     message = str(excinfo.value)
     assert "sections.arendet.underavsnitt" in message
     assert "cannot exceed" in message
+
+
+def test_non_ascii_field_names_fold_instead_of_rejecting() -> None:
+    # Identity is folded, wording is the author's: "åtgärder" folds to a
+    # valid identifier instead of costing a repair round (2026-08-06
+    # checkpoint: two parse rejections for exactly this).
+    step = SemanticStepIntent.model_validate(
+        {
+            "name": "Strukturera åtgärder",
+            "instructions": "Lista åtgärder ur underlaget.",
+            "output_type": "json",
+            "output_fields": [
+                _field("åtgärder"),
+                _field("öppna frågor"),
+            ],
+        }
+    )
+    assert [field.name for field in step.output_fields or []] == [
+        "atgarder",
+        "oppna_fragor",
+    ]
+
+
+def test_unfoldable_field_names_still_reject() -> None:
+    with pytest.raises(PydanticValidationError, match="ASCII identifiers"):
+        SemanticStepIntent.model_validate(
+            {
+                "name": "Strukturera",
+                "instructions": "Strukturera underlaget.",
+                "output_type": "json",
+                "output_fields": [_field("123")],
+            }
+        )
+
+
+def test_object_shape_rejection_names_the_field() -> None:
+    with pytest.raises(PydanticValidationError, match="tom_grupp"):
+        SemanticStepIntent.model_validate(
+            {
+                "name": "Strukturera",
+                "instructions": "Strukturera underlaget.",
+                "output_type": "json",
+                "output_fields": [_field("tom_grupp", field_type="object")],
+            }
+        )
+
+
+def test_misplaced_field_drafts_reattach_to_the_preceding_step() -> None:
+    # Dominant parse-failure family of the 2026-08-06 checkpoint (12 of
+    # 14 rejections): the model's JSON nesting slips and a whole field
+    # list lands in `steps` after its producing step. A step never has
+    # field_type, so the shape is unambiguous and admission reattaches
+    # the drafts instead of burning a repair round.
+    intent = parse_create_flow_intent_arguments(
+        {
+            "flow_name": "Beslutsunderlag",
+            "plan_rationale": "Strukturera underlaget.",
+            "steps": [
+                {
+                    "name": "Strukturera underlag",
+                    "instructions": "Strukturera beslutsunderlaget.",
+                    "output_type": "json",
+                    "output_fields": [_field("decisions")],
+                },
+                _field(
+                    "open_questions",
+                    item_fields=[_field("question")],
+                    field_type="array",
+                ),
+                _field("risks"),
+            ],
+        }
+    )
+
+    assert len(intent.steps) == 1
+    assert [field.name for field in intent.steps[0].output_fields or []] == [
+        "decisions",
+        "open_questions",
+        "risks",
+    ]
+
+
+def test_leading_field_draft_still_fails_visibly() -> None:
+    with pytest.raises(ProposalIntentArgumentError, match="instructions"):
+        parse_create_flow_intent_arguments(
+            {
+                "flow_name": "Beslutsunderlag",
+                "plan_rationale": "Strukturera underlaget.",
+                "steps": [_field("risks")],
+            }
+        )
