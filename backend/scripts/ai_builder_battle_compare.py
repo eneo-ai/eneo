@@ -12,10 +12,11 @@ Usage:
     ai_builder_battle_compare.py BASELINE_SUMMARY CURRENT_SUMMARY
         [--format markdown|json] [--only-changed]
 
-Receipts carry their own identity (app_version, evaluator_identity); the
-report refuses to compare receipts whose evaluator semantics differ,
-because relevance rates across semantic versions do not mean the same
-thing.
+Receipts carry their own identity (app_version, evaluator_identity). The
+report refuses to compare receipts that measure different things — a
+different scoring semantics version or a different model — and reports,
+without refusing, the identity fields that are expected to differ between
+two builds.
 """
 
 from __future__ import annotations
@@ -70,9 +71,23 @@ def _load_rows(path: Path) -> tuple[dict[str, list[dict[str, Any]]], dict[str, A
 
 
 def _failure_codes(row: dict[str, Any]) -> tuple[str, ...]:
+    """Every code that names why a case did not succeed.
+
+    Receipts carry two disjoint vocabularies: `error_codes` is the public API
+    error contract, `failure_codes` the internal failure observability nested
+    inside it. Counting only the internal one printed an empty blocker
+    ranking for a run in which 8 cases errored, because a router-level
+    refusal carries no internal detail (verified on the 9216ec6 receipt).
+    """
+
     failure_summary = cast(dict[str, Any], row.get("failure_summary") or {})
-    codes = cast(list[str], failure_summary.get("failure_codes") or [])
-    return tuple(sorted(codes))
+    codes = [
+        code
+        for key in ("failure_codes", "error_codes")
+        for code in cast(list[Any], failure_summary.get(key) or [])
+        if isinstance(code, str) and code
+    ]
+    return tuple(sorted(set(codes)))
 
 
 def _failed_check_names(row: dict[str, Any]) -> tuple[str, ...]:
@@ -209,14 +224,97 @@ def _identity(summary: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _semantics_marker(summary: dict[str, Any]) -> Any:
+# Identity fields that change what a score *means*. Two receipts that differ
+# on any of these are different experiments, so comparing them is refused.
+#
+# Deliberately excluded, with evidence: `target_sha256` embeds the deployed
+# app version and so differs between every pair of builds — the exact axis
+# this tool exists to compare (verified on the 9d4237a/9216ec6 receipts).
+# The full `evaluator_identity.sha256` differs for the same reason.
+# `harness_sha256` and `cases_sha256` change on any harness or corpus edit,
+# including ones that do not touch scoring; the two semantics versions are
+# the author's explicit declaration that scoring meaning changed, and gating
+# on the raw hashes would make that declaration dead. Those fields are
+# reported instead, so a reader can audit an undeclared instrument change.
+# `case_contract_sha256_by_id` is compared per case, so editing one case's
+# expectations does not block comparing the other 121.
+_IDENTITY_FIELDS: tuple[str, ...] = (
+    "question_relevance_semantics_version",
+    "outcome_classification_semantics_version",
+    "requested_model_id",
+)
+
+# Differences here are expected and reported, never fatal.
+_REPORTED_IDENTITY_FIELDS: tuple[str, ...] = (
+    "harness_sha256",
+    "cases_sha256",
+    "source_revision",
+    "target_sha256",
+)
+
+
+def _evaluator_identity(summary: dict[str, Any]) -> dict[str, Any]:
     identity = summary.get("evaluator_identity")
-    if not isinstance(identity, dict):
-        return (1, 1)
-    typed_identity = cast(dict[str, Any], identity)
-    return (
-        typed_identity.get("question_relevance_semantics_version", 1),
-        typed_identity.get("outcome_classification_semantics_version", 1),
+    return cast(dict[str, Any], identity) if isinstance(identity, dict) else {}
+
+
+def _identity_marker(summary: dict[str, Any]) -> dict[str, Any]:
+    """Comparability key drawn from the receipt's own evaluator identity."""
+
+    typed_identity = _evaluator_identity(summary)
+    return {field: typed_identity.get(field) for field in _IDENTITY_FIELDS}
+
+
+def _reported_identity_differences(
+    baseline_summary: dict[str, Any],
+    current_summary: dict[str, Any],
+) -> dict[str, dict[str, Any]]:
+    """Identity fields that differ without making receipts incomparable.
+
+    An undeclared harness or corpus change is the one thing a reader must be
+    able to see: it means the instrument moved while its declared semantics
+    claimed it had not.
+    """
+
+    baseline_identity = _evaluator_identity(baseline_summary)
+    current_identity = _evaluator_identity(current_summary)
+    return {
+        field: {
+            "baseline": baseline_identity.get(field),
+            "current": current_identity.get(field),
+        }
+        for field in _REPORTED_IDENTITY_FIELDS
+        if baseline_identity.get(field) != current_identity.get(field)
+    }
+
+
+def _incompatible_identity_fields(
+    baseline_summary: dict[str, Any],
+    current_summary: dict[str, Any],
+) -> list[str]:
+    baseline_marker = _identity_marker(baseline_summary)
+    current_marker = _identity_marker(current_summary)
+    return [
+        field
+        for field in _IDENTITY_FIELDS
+        if baseline_marker[field] != current_marker[field]
+    ]
+
+
+def _case_contract_changes(
+    baseline_summary: dict[str, Any],
+    current_summary: dict[str, Any],
+) -> list[str]:
+    def contracts(summary: dict[str, Any]) -> dict[str, Any]:
+        raw = _evaluator_identity(summary).get("case_contract_sha256_by_id")
+        return cast(dict[str, Any], raw) if isinstance(raw, dict) else {}
+
+    baseline_contracts = contracts(baseline_summary)
+    current_contracts = contracts(current_summary)
+    return sorted(
+        case_id
+        for case_id in set(baseline_contracts) & set(current_contracts)
+        if baseline_contracts[case_id] != current_contracts[case_id]
     )
 
 
@@ -226,13 +324,18 @@ def compare(
 ) -> dict[str, Any]:
     baseline_rows, baseline_summary = _load_rows(baseline_path)
     current_rows, current_summary = _load_rows(current_path)
-    if _semantics_marker(baseline_summary) != _semantics_marker(current_summary):
+    incompatible = _incompatible_identity_fields(baseline_summary, current_summary)
+    if incompatible:
         raise SystemExit(
-            "Refusing to compare receipts with different evaluator semantics "
-            f"({_semantics_marker(baseline_summary)!r} vs "
-            f"{_semantics_marker(current_summary)!r}); relevance rates do not "
-            "mean the same thing across semantic versions."
+            "Refusing to compare receipts whose evaluator identity differs on "
+            f"{', '.join(incompatible)}; they do not measure the same thing. "
+            f"baseline={_identity_marker(baseline_summary)!r} "
+            f"current={_identity_marker(current_summary)!r}"
         )
+    rescored_cases = _case_contract_changes(baseline_summary, current_summary)
+    identity_differences = _reported_identity_differences(
+        baseline_summary, current_summary
+    )
 
     case_ids = sorted(set(baseline_rows) | set(current_rows))
     deltas = [
@@ -246,11 +349,20 @@ def compare(
         for case_id in case_ids
     ]
     directions = Counter(delta["direction"] for delta in deltas)
+    # Failed checks and blockers count distinct cases, not observations, so
+    # repetitions cannot inflate a cluster.
     remaining_blockers = Counter(
         code
         for case_rows in current_rows.values()
-        for row in case_rows
-        for code in _failure_codes(row)
+        for code in {code for row in case_rows for code in _failure_codes(row)}
+    )
+    # A check a case fails in any repetition counts once for that case. Reading
+    # it off the representative row instead would hide every check that only
+    # some repetitions fail.
+    remaining_failed_checks = Counter(
+        name
+        for case_rows in current_rows.values()
+        for name in {name for row in case_rows for name in _failed_check_names(row)}
     )
     outcome_counts = Counter(
         row.get("outcome_class") or "unknown"
@@ -272,9 +384,12 @@ def compare(
     return {
         "baseline": _identity(baseline_summary),
         "current": _identity(current_summary),
+        "rescored_cases": rescored_cases,
+        "identity_differences": identity_differences,
         "direction_counts": dict(directions),
         "current_outcomes": dict(outcome_counts),
         "remaining_blockers_ranked": remaining_blockers.most_common(),
+        "remaining_failed_checks_ranked": remaining_failed_checks.most_common(),
         "unstable_cases": unstable,
         "cases": deltas,
     }
@@ -329,10 +444,32 @@ def _render_markdown(report: dict[str, Any], *, only_changed: bool) -> str:
     lines.append(f"Direction counts: {report['direction_counts']}")
     lines.append(f"Current outcomes: {report['current_outcomes']}")
     lines.append("")
-    lines.append("## Remaining blockers (ranked)")
-    for code, count in report["remaining_blockers_ranked"]:
-        lines.append(f"- {count}x {code}")
-    lines.append("")
+    differences = cast(dict[str, Any], report["identity_differences"])
+    if differences:
+        lines.append(
+            "Identity differences (expected between builds; an undeclared "
+            f"harness or corpus change would show here): {sorted(differences)}"
+        )
+        lines.append("")
+    rescored = cast(list[str], report["rescored_cases"])
+    if rescored:
+        lines.append(
+            f"Rescored cases (expectations edited, delta is not product "
+            f"movement): {', '.join(rescored)}"
+        )
+        lines.append("")
+    for heading, key in (
+        ("Remaining blockers", "remaining_blockers_ranked"),
+        ("Remaining failed checks", "remaining_failed_checks_ranked"),
+    ):
+        lines.append(f"## {heading} (ranked, by distinct case)")
+        ranked = cast(list[tuple[str, int]], report[key])
+        # An empty section rendered as nothing reads as "none found" whether
+        # or not anything was counted; say it.
+        lines.extend(f"- {count}x {name}" for name, count in ranked)
+        if not ranked:
+            lines.append("- (none)")
+        lines.append("")
     lines.append("## Per-case transitions")
     for delta in report["cases"]:
         if only_changed and delta["direction"] == "unchanged":
