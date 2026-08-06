@@ -6388,3 +6388,100 @@ def test_user_named_localized_keys_are_admitted_and_others_still_reject() -> Non
             intent_with_fields(["dokumenttyp", "sammanfattning"]),
             context=unhinted_context,
         )
+
+
+def _compare_json_intent(*, with_fields: bool) -> object:
+    def _fields(name: str) -> list[dict[str, object]]:
+        if not with_fields:
+            return []
+        return [
+            {
+                "name": name,
+                "field_type": "string",
+                "description": f"{name} från jämförelsen.",
+                "required": True,
+            }
+        ]
+
+    return parse_create_flow_intent_arguments(
+        {
+            "flow_name": "Jämförelse till JSON",
+            "plan_rationale": "Jämför källorna och leverera maskinläsbart resultat.",
+            "steps": [
+                {
+                    "name": "Läs källor",
+                    "instructions": "Läs varje källa och extrahera jämförelsegrunden.",
+                    "output_type": "json",
+                    "output_fields": _fields("comparison_basis"),
+                },
+                {
+                    "name": "Analysera skillnader",
+                    "instructions": "Analysera skillnaderna mellan källorna.",
+                    "output_type": "json",
+                    "output_fields": _fields("deviations"),
+                },
+                {
+                    "name": "Sammanställ resultat",
+                    "instructions": "Sammanställ jämförelsen som strukturerat resultat.",
+                    "output_type": "json",
+                },
+            ],
+        }
+    )
+
+
+def test_compare_json_terminal_compiles_with_typed_fan_in() -> None:
+    # DECIDED product direction (B9(e2)): compare flows may deliver JSON.
+    # The terminal consumes every retained producer through explicit
+    # structured refs — the ALL_PREVIOUS_STEPS fallback is impossible here.
+    compiled = compile_create_intent_to_spec(
+        _compare_json_intent(with_fields=True),
+        context=CreateCompileContext(
+            runtime_input_type=InputType.DOCUMENT,
+            final_output_type=OutputType.JSON,
+            aggregation_intent="compare",
+            ui_language="sv",
+        ),
+    )
+
+    terminal = compiled.steps[-1]
+    assert terminal.output_type == OutputType.JSON
+    assert terminal.input_source == InputSource.PREVIOUS_STEP
+    refs = (terminal.input_bindings or {}).get("source_refs") or []
+    assert {ref["step_ref"] for ref in refs} == {"step_a", "step_b"}
+    assert all(ref["output"] == "structured" for ref in refs)
+    assert validate_spec(compiled).valid
+
+
+def test_compare_json_without_structured_producers_rejects_typed() -> None:
+    with pytest.raises(AIBuilderArchitectureError) as excinfo:
+        compile_create_intent_to_spec(
+            _compare_json_intent(with_fields=False),
+            context=CreateCompileContext(
+                runtime_input_type=InputType.DOCUMENT,
+                final_output_type=OutputType.JSON,
+                aggregation_intent="compare",
+                ui_language="sv",
+            ),
+        )
+    assert (
+        excinfo.value.log_context.get("failure_code")
+        == "assembly_compare_json_requires_structured_producers"
+    )
+
+
+def test_aggregate_json_terminal_still_rejects() -> None:
+    with pytest.raises(AIBuilderArchitectureError) as excinfo:
+        compile_create_intent_to_spec(
+            _compare_json_intent(with_fields=True),
+            context=CreateCompileContext(
+                runtime_input_type=InputType.DOCUMENT,
+                final_output_type=OutputType.JSON,
+                aggregation_intent="aggregate",
+                ui_language="sv",
+            ),
+        )
+    assert (
+        excinfo.value.log_context.get("failure_code")
+        == "assembly_aggregate_requires_text_or_document_output"
+    )

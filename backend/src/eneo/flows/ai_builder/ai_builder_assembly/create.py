@@ -133,6 +133,7 @@ _SUPPORTED_STRUCTURAL_PATTERN_IDS = frozenset(
 CreateAssemblyRejectionReason = Literal[
     "aggregate_requires_text_or_document_output",
     "all_previous_step_cannot_use_explicit_refs",
+    "compare_json_requires_structured_producers",
     "audio_requires_linear",
     "docx_template_form_fields_mismatch",
     "docx_template_shape_unsupported",
@@ -163,6 +164,11 @@ _REJECTION_FEEDBACK: dict[CreateAssemblyRejectionReason, str] = {
     "all_previous_step_cannot_use_explicit_refs": (
         "The fan-in step must combine prior outputs as a whole. Remove explicit "
         "form-field or previous-output refs from that semantic step."
+    ),
+    "compare_json_requires_structured_producers": (
+        "A compare flow delivering JSON needs every earlier semantic step to "
+        "declare structured output_fields so the terminal can consume them "
+        "through typed references."
     ),
     "audio_requires_linear": "Audio create flows must be linear.",
     "docx_template_form_fields_mismatch": (
@@ -374,9 +380,12 @@ def _assemble_create_intent(
         document_artifact_requested or final_output_type != OutputType.JSON
     ):
         return _reject("terminal_schema_requires_json_terminal")
-    if aggregation_intent != "linear" and (
+    if aggregation_intent == "aggregate" and (
         terminal_output_schema is not None or final_output_type == OutputType.JSON
     ):
+        # DECIDED product direction (B9(e2)): compare flows may deliver
+        # JSON through typed structured fan-in; aggregate stays text or
+        # document.
         return _reject("aggregate_requires_text_or_document_output")
     if template_fill_requested:
         return _assemble_docx_template_fill(
@@ -492,6 +501,19 @@ def _assemble_create_intent(
             aggregation_intent=aggregation_intent,
             is_terminal_semantic_step=is_terminal_semantic_step,
         )
+        if (
+            is_terminal_semantic_step
+            and aggregation_intent == "compare"
+            and step_output_type == OutputType.JSON
+            and len(planned_steps) >= 2
+            and not aggregate_terminal_previous_refs
+        ):
+            # Silent fan-in would hide which producer failed to declare its
+            # contract; a compare JSON terminal must consume typed refs.
+            return _reject(
+                "compare_json_requires_structured_producers",
+                step_index=index + 1,
+            )
         input_source = _linear_step_input_source(
             step_index=index,
             semantic_step_count=len(semantic_steps),
