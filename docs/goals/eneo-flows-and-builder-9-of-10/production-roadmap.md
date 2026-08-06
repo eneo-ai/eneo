@@ -970,8 +970,22 @@ returns. Execution order and binding decisions:
 **Ungated commits awaiting batch peer review** (self-validated: full flows
 suite + pyright + ruff): `8e720e359` A-closeout (prompt roles +
 declared-schema-only critic exemption + runtime input-resolution proof);
-slice B strict output_fields admission (lossless-or-rejected, this series).
-Loss-matrix checklist: `notes/loss-matrix.md`.
+`ba4d96767` slice B strict output_fields admission (live-verified, zero
+admission rejections); `6718cde34` mapped_file_limit auto-resolve (user
+decision 2026-08-05; live-verified: the question is gone from all five
+previously stalled journeys); `dd63b6693` document prose guard (fold
+meanings not machine keys + one-field envelope unwrap; root cause of the
+live DOCX brace soup, run 4fc4b445). Loss-matrix checklist:
+`notes/loss-matrix.md`.
+
+Slice-C inputs found live 2026-08-06: (1) the ASCII-English schema-key
+lexicon conflicts with prose-requested Swedish keys (case
+simple_document_metadata_json dies in builder_error: the user asked for
+dokumenttyp/titel/... keys, the lexicon flags only some folded-Swedish
+words, and the invalid-plan repair budget is 1 attempt) — the prose-hints
+evidence semantics must decide key language ownership; (2) remaining
+smoke stalls are corpus answer-closure (post_processing_goal), not
+product questions.
 
 9. **G citations**: write ONLY the red end-to-end test
    (test_document_report_citation_survives_compose_render_and_public_artifact
