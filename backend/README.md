@@ -19,62 +19,76 @@ Useful variants:
 ./scripts/run_pyright_in_devcontainer.sh src/eneo/files/file_router.py
 ```
 
-## Per-branch database snapshots
+## Per-branch databases
 
-Switching git branches when a feature branch has applied Alembic migrations normally forces a manual downgrade or a wipe. Two helper scripts at the repo root turn this into a `git stash`-like workflow against the devcontainer Postgres.
+Switching git branches when a feature branch has applied Alembic migrations
+normally forces a manual downgrade or a wipe. Instead, every branch owns its own
+database in the devcontainer Postgres, named `eneo_<sanitized-branch>`.
 
-The active database (`backend/.env`'s `POSTGRES_DB`, typically `postgres`) is never renamed. Instead, branch state lives in side databases named `eneo_<sanitized-branch>`, plus a baseline `eneo_develop`.
+A branch's database is created once, by cloning the database of the branch it was
+created from. After that, switching branches only repoints `backend/.env`'s
+`POSTGRES_DB`. Nothing is copied on a switch, so there is no save step and no way
+to lose a branch's data by forgetting one: switch away and back and it is exactly
+as you left it.
 
-### Scripts
-
-- `./scripts/dev-db-init.sh` — bring the active DB to the right state for the current branch. Restores `eneo_<branch>` if a snapshot exists, otherwise clones from `eneo_develop`. Runs `alembic upgrade head` at the end. On first run it offers to bootstrap `eneo_develop` from the current active DB.
-- `./scripts/dev-db-commit.sh` — save the current active DB as `eneo_<branch>`. Overwrites any prior snapshot for that branch. Run before switching away if you want to come back to this exact state.
-
-Both scripts kick the backend's Postgres connection during the clone/drop; restart the backend (and worker, if running) afterwards. The exact restart command is printed by `dev-db-init.sh`.
-
-### Typical loop
-
-```bash
-git checkout new-feature
-./scripts/dev-db-init.sh         # clones from eneo_develop (first time on this branch)
-# ...work, add a migration, mutate data...
-./scripts/dev-db-commit.sh       # snapshot before switching away
-
-git checkout other-feature
-./scripts/dev-db-init.sh         # restores eneo_other_feature (or clones develop if none yet)
-```
-
-### One-off: bootstrap `eneo_develop` when you're already on a feature branch
-
-If the branch has migrations beyond `develop` and you want to seed the baseline without losing work:
+### Commands
 
 ```bash
-# 1. Save current branch state
-./scripts/dev-db-commit.sh
-
-# 2. Find develop's alembic head by reading the down_revision of the branch's
-#    first new migration:
-git diff develop...HEAD --name-only -- alembic/versions/ | head -1
-# then: grep down_revision <that-file>
-
-# 3. Still on the branch (so alembic sees branch migrations), downgrade active to develop's head
-docker exec -u vscode eneo_devcontainer-eneo-1 bash -i -c \
-  "cd /workspace/backend && uv run alembic downgrade <develop-head-rev>"
-
-# 4. Switch git, then bootstrap
-git checkout develop
-./scripts/dev-db-init.sh         # answer 'y' to the bootstrap prompt
+./scripts/dev-db.sh switch     # create if needed, repoint .env, alembic upgrade head
+./scripts/dev-db.sh status     # branch, database, size, base, alembic revision
+./scripts/dev-db.sh prune      # list databases whose branch is gone (--yes to drop)
+./scripts/dev-db.sh fork NAME  # scratch copy before something destructive
 ```
 
-The branch snapshot from step 1 is untouched by step 3, so `git checkout <branch> && ./scripts/dev-db-init.sh` restores it later.
+Also available as `task db`, `task db:status`, and `task db:prune`.
+
+`switch` kicks the backend's Postgres connection, so restart the backend (and the
+worker, if running) afterwards. The exact command is printed. Everything is
+discovered from the running compose project, so no container names are hardcoded.
+
+### Which branch does a new one clone from?
+
+First match wins:
+
+1. `--base <branch>`
+2. `git config branch.<name>.eneoDbBase`
+3. the branch this one was created from, per its git reflog
+4. the nearest ancestor branch that already has a database
+5. `develop`
+
+The result is recorded in `git config` so it stays stable, and you can inspect or
+change it:
+
+```bash
+git config branch.$(git branch --show-current).eneoDbBase
+```
+
+Rules 3 and 4 are skipped when the candidate has no database yet, since there
+would be nothing to clone. If a stacked branch should start from its parent's
+schema rather than `develop`, check the parent out and run `switch` there first.
 
 ### Inspecting state
 
 ```bash
-docker exec -i eneo_devcontainer-db-1 psql -U postgres -c "\l" | grep eneo_
-docker exec -i eneo_devcontainer-db-1 psql -U postgres -d eneo_<branch> \
-  -c "select version_num from alembic_version;"
+./scripts/dev-db.sh status
 ```
+
+For raw SQL, the container is discovered the same way the script does it:
+
+```bash
+DB=$(docker ps --filter label=com.docker.compose.service=db --format '{{.Names}}' | head -1)
+docker exec -i "$DB" psql -U postgres -c "\\l" | grep eneo_
+```
+
+### What is not isolated per branch
+
+Only Postgres is. Redis is shared, so ARQ jobs queued on one branch run against
+whichever database is active when the worker picks them up. Object storage is
+shared too, though the `object-content` compose service is off by default.
+
+Branch names are sanitized by lowercasing and dropping every character outside
+`[a-z0-9_]`, with `/` mapped to `_`. Hyphens are deleted rather than mapped, so
+`feat/foo-bar` and `feat/foobar` would collide on one database.
 
 ## Environment variables
 

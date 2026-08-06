@@ -23,6 +23,25 @@ tasks:
       - uv run alembic upgrade head
     dir: ./backend
 
+  # --- Per-branch databases -------------------------------------------------
+  # Each branch owns a database cloned from the branch it was created from.
+  # See backend/README.md; ./scripts/dev-db.sh --help for the full surface.
+
+  db:
+    desc: "Point backend/.env at the current branch's database"
+    cmds:
+      - ./scripts/dev-db.sh switch {{.CLI_ARGS}}
+
+  db:status:
+    desc: "Show which database the current branch is wired to"
+    cmds:
+      - ./scripts/dev-db.sh status
+
+  db:prune:
+    desc: "List (or with --yes, drop) databases whose branch is gone"
+    cmds:
+      - ./scripts/dev-db.sh prune {{.CLI_ARGS}}
+
   # --- Quality gates (enforced) ---------------------------------------------
   # `task check` is the single aggregated, deterministic pass/fail signal:
   # ruff + format on the backend, svelte-check + eslint on the frontend.
