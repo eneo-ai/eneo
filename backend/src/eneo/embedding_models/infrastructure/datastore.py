@@ -153,6 +153,7 @@ class Datastore:
         integration_knowledge_list: Optional[list[IntegrationKnowledge]] = None,
         num_chunks: Optional[int] = 30,
         autocut_cutoff: Optional[int] = None,
+        min_score: Optional[float] = None,
     ) -> list[InfoBlobChunkInDBWithScore]:
         group_ids = [group.id for group in (collections or [])]
         website_ids = [website.id for website in (websites or [])]
@@ -178,6 +179,15 @@ class Datastore:
             f"Time to get results: Embed step: {step_1 - start},"
             f" Search step: {end - step_1}, Total: {end - start}"
         )
+
+        # Vector search returns nearest neighbors unconditionally; a relevance
+        # floor lets callers drop chunks that merely happen to be the least
+        # distant (e.g. retrieval triggered by an off-topic message). Score
+        # scales are embedding-model-dependent, so there is no global default.
+        if min_score is not None:
+            semantic_results = [
+                res for res in semantic_results if res.score >= min_score
+            ]
 
         scores = [res.score for res in semantic_results]
 

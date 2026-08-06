@@ -9568,6 +9568,8 @@ export interface components {
        * @description Whether attached file text is inlined into the prompt (True) or the file is surfaced to the model as a signed URL only (False).
        */
       inline_file_text: boolean;
+      /** @description How attached knowledge reaches the model: 'tool' (searchable MCP tool, called on demand) or 'inject' (retrieved and packed into the prompt on every turn). */
+      knowledge_mode: components["schemas"]["KnowledgeMode"];
       /**
        * Data Retention Days
        * @description Number of days to retain data for this assistant
@@ -11477,6 +11479,8 @@ export interface components {
        * @default true
        */
       inline_file_text?: boolean;
+      /** @default tool */
+      knowledge_mode?: components["schemas"]["KnowledgeMode"];
       /**
        * Data Retention Days
        * @description Number of days to retain data for this assistant
@@ -12375,6 +12379,11 @@ export interface components {
       transcription?: string | null;
       /** Token Count */
       token_count?: number | null;
+      /**
+       * Has Download Reference
+       * @default false
+       */
+      has_download_reference?: boolean;
     };
     /** FileRestrictions */
     FileRestrictions: {
@@ -13146,6 +13155,16 @@ export interface components {
       websites: components["schemas"]["PaginatedPermissions_WebsitePublic_"];
       integration_knowledge_list: components["schemas"]["PaginatedPermissions_IntegrationKnowledgePublic_"];
     };
+    /**
+     * KnowledgeMode
+     * @description How attached knowledge reaches the model.
+     *
+     *     TOOL exposes knowledge as a searchable MCP tool the model calls on demand;
+     *     INJECT retrieves on every turn and packs chunks into the prompt (legacy
+     *     behavior, also the runtime fallback for models without tool calling).
+     * @enum {string}
+     */
+    KnowledgeMode: "tool" | "inject";
     /** Limit */
     Limit: {
       /** Max Files */
@@ -15352,6 +15371,8 @@ export interface components {
        * @description Whether to inline attached file text into the prompt. When False, a file whose original is available via signed URL is surfaced as that URL only (e.g. to avoid large files blowing the context window).
        */
       inline_file_text?: boolean | null;
+      /** @description How attached knowledge reaches the model: 'tool' exposes it as a searchable MCP tool the model calls on demand; 'inject' retrieves on every turn and packs results into the prompt. */
+      knowledge_mode?: components["schemas"]["KnowledgeMode"] | null;
       /** Data Retention Days */
       data_retention_days?: number | null;
       /**
@@ -25030,6 +25051,11 @@ export interface operations {
                 transcription?: string | null;
                 /** Token Count */
                 token_count?: number | null;
+                /**
+                 * Has Download Reference
+                 * @default false
+                 */
+                has_download_reference?: boolean;
               };
               /** InfoBlobAskAssistantPublic */
               InfoBlobAskAssistantPublic: {
@@ -25453,6 +25479,11 @@ export interface operations {
                 transcription?: string | null;
                 /** Token Count */
                 token_count?: number | null;
+                /**
+                 * Has Download Reference
+                 * @default false
+                 */
+                has_download_reference?: boolean;
               };
               /** InfoBlobAskAssistantPublic */
               InfoBlobAskAssistantPublic: {
@@ -26607,6 +26638,11 @@ export interface operations {
                     transcription?: string | null;
                     /** Token Count */
                     token_count?: number | null;
+                    /**
+                     * Has Download Reference
+                     * @default false
+                     */
+                    has_download_reference?: boolean;
                   };
                 };
               }
@@ -26760,6 +26796,11 @@ export interface operations {
                     transcription?: string | null;
                     /** Token Count */
                     token_count?: number | null;
+                    /**
+                     * Has Download Reference
+                     * @default false
+                     */
+                    has_download_reference?: boolean;
                   };
                   /** InfoBlobAskAssistantPublic */
                   InfoBlobAskAssistantPublic: {

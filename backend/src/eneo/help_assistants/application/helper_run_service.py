@@ -207,11 +207,7 @@ class HelperRunService:
             # assistant's stored ``logging_enabled`` / ``insight_enabled``.
             extended_logging=False,
             model_kwargs=helper_assistant.completion_model_kwargs,
-            mcp_servers=(
-                []
-                if helper_assistant.has_knowledge()
-                else list(helper_assistant.mcp_servers)
-            ),
+            mcp_servers=list(helper_assistant.mcp_servers),
         )
 
         if stream:
@@ -308,11 +304,7 @@ class HelperRunService:
             # PRD §6 + Critical test #3: same hard-coded gate as run().
             extended_logging=False,
             model_kwargs=helper_assistant.completion_model_kwargs,
-            mcp_servers=(
-                []
-                if helper_assistant.has_knowledge()
-                else list(helper_assistant.mcp_servers)
-            ),
+            mcp_servers=list(helper_assistant.mcp_servers),
         )
 
         if stream:

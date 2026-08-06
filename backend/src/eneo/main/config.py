@@ -434,6 +434,17 @@ class Settings(BaseSettings):
     # at the Eneo backend's /api/v1 and be reachable from the tool's network.
     file_reference_base_url: Optional[str] = None
 
+    # Base URL Eneo uses to reach its OWN loopback MCP servers (mounted under
+    # /internal-mcp) during a completion. Must be reachable from within the
+    # backend process/container. Dev default is the local server.
+    internal_mcp_base_url: str = "http://localhost:8123"
+
+    # Relevance floor (cosine similarity, -1..1) for inject-mode knowledge
+    # retrieval: chunks scoring below it are dropped instead of injected.
+    # Off by default because useful values depend on the embedding model in
+    # use; set per deployment where that model is known.
+    inject_knowledge_min_score: Optional[float] = Field(default=None, ge=-1.0, le=1.0)
+
     # Dev
     testing: bool = False
     dev: bool = False

@@ -30,7 +30,10 @@ from eneo.info_blobs.info_blob import (
     InfoBlobInDBNoText,
     InfoBlobUpdate,
 )
-from eneo.main.exceptions import InfoBlobPublicationConflictError
+from eneo.main.exceptions import (
+    InfoBlobPublicationConflictError,
+    NotFoundException,
+)
 from eneo.object_content.content import ContentState
 
 
@@ -542,6 +545,8 @@ class InfoBlobRepository:
 
     async def get(self, id: UUID) -> InfoBlobInDB:
         record = await self.delegate.get(id)
+        if record is None:
+            raise NotFoundException()
         return InfoBlobInDB.model_validate(record)
 
     async def get_by_title_and_group(

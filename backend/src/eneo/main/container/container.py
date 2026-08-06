@@ -1272,6 +1272,7 @@ class Container(containers.DeclarativeContainer):
         icon_repo=icon_repo,
         org_space_assistant_role_repo=org_space_assistant_role_repo,
         help_assistant_assignment_history_repo=help_assistant_assignment_history_repo,
+        auth_service=auth_service,
         api_key_scope_revoker=api_key_scope_revoker,
         effective_config_service=effective_config_service,
         skill_service=skill_service,

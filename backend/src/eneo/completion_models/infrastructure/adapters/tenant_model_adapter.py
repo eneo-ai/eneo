@@ -42,6 +42,9 @@ from eneo.completion_models.infrastructure.adapters.base_adapter import (
     CompletionModelAdapter,
     ProviderInput,
 )
+from eneo.completion_models.infrastructure.context_builder import (
+    MIN_PERCENTAGE_KNOWLEDGE,
+)
 from eneo.completion_models.infrastructure.message_payload import (
     build_content,
     build_turn_messages,
@@ -49,6 +52,7 @@ from eneo.completion_models.infrastructure.message_payload import (
 from eneo.completion_models.infrastructure.static_prompts import (
     MCP_TOOL_REFERENCES_INSTRUCTION,
 )
+from eneo.internal_mcp.constants import INTERNAL_MCP_SERVER_NAMES
 from eneo.logging.logging import LoggingDetails
 from eneo.main.exceptions import APIKeyNotConfiguredException, OpenAIException
 from eneo.main.logging import get_logger
@@ -346,6 +350,47 @@ def _tool_metadata_arguments(tool: ToolCallMetadata) -> dict[str, Any] | None:
     return cast(dict[str, Any] | None, cast(Any, tool).arguments)
 
 
+TOOL_RESULT_BUDGET_NOTICE = (
+    "Tool-result budget for this turn is exhausted; this result was withheld. "
+    "Stop calling tools and answer now using the information already gathered."
+)
+
+
+class _ToolResultBudget:
+    """Aggregate cap on tool-result text fed back to the model in one turn.
+
+    Inject mode reserves at most ``MIN_PERCENTAGE_KNOWLEDGE`` of the context
+    window for retrieved knowledge; in tool mode the model steers retrieval
+    itself, so the same share is enforced here as an admission cap instead.
+    Per-call limits (proxy output truncation, the round cap) bound one call;
+    this bounds the turn, so a tool-happy model degrades to an explicit
+    notice instead of a provider-side context overflow failing the turn.
+    """
+
+    def __init__(self, *, token_limit: int, litellm_model: str) -> None:
+        self._remaining = int(token_limit * MIN_PERCENTAGE_KNOWLEDGE)
+        self._litellm_model = litellm_model
+        self._exhausted_logged = False
+
+    def admit(self, llm_text: str) -> str:
+        """Return ``llm_text`` while budget remains, the withhold notice after.
+
+        The result that crosses the line is admitted in full (a single result
+        is already bounded by the proxy's output truncation); only results
+        after exhaustion are withheld.
+        """
+        if self._remaining <= 0:
+            if not self._exhausted_logged:
+                logger.warning(
+                    "[MCP] Tool-result budget exhausted; withholding further "
+                    "tool results this turn"
+                )
+                self._exhausted_logged = True
+            return TOOL_RESULT_BUDGET_NOTICE
+        self._remaining -= count_tokens(llm_text, self._litellm_model)
+        return llm_text
+
+
 if TYPE_CHECKING:
     from eneo.ai_models.completion_models.completion_model import (
         CompletionModel,
@@ -565,11 +610,12 @@ class TenantModelAdapter(CompletionModelAdapter):
         if details:
             reasoning_tokens = getattr(details, "reasoning_tokens", None)
 
+        prompt_tokens = getattr(usage, "prompt_tokens", None)
         return TokenUsage(
-            prompt_tokens=getattr(usage, "prompt_tokens", None),
+            prompt_tokens=prompt_tokens,
             completion_tokens=getattr(usage, "completion_tokens", None),
             reasoning_tokens=reasoning_tokens,
-            context_prompt_tokens=getattr(usage, "prompt_tokens", None),
+            context_prompt_tokens=prompt_tokens,
             context_completion_tokens=getattr(usage, "completion_tokens", None),
         )
 
@@ -1013,6 +1059,10 @@ class TenantModelAdapter(CompletionModelAdapter):
                 tool_round = 0
                 seen_prefixes: set[str] = set()
                 captured_refs: list[McpToolReference] = []
+                result_budget = _ToolResultBudget(
+                    token_limit=self.model.token_limit,
+                    litellm_model=self.litellm_model,
+                )
                 activation_available = (
                     skill_runtime is not None
                     and skill_runtime.tool_definition is not None
@@ -1116,7 +1166,7 @@ class TenantModelAdapter(CompletionModelAdapter):
                             {
                                 "role": "tool",
                                 "tool_call_id": call.call_id,
-                                "content": llm_text,
+                                "content": result_budget.admit(llm_text),
                             }
                         )
                     response = cast(
@@ -1606,6 +1656,10 @@ class TenantModelAdapter(CompletionModelAdapter):
 
                 max_rounds = self.MAX_TOOL_ROUNDS
                 tool_round = 0
+                result_budget = _ToolResultBudget(
+                    token_limit=self.model.token_limit,
+                    litellm_model=self.litellm_model,
+                )
 
                 while result.has_tool_calls and tool_round < max_rounds:
                     tool_round += 1
@@ -1754,16 +1808,33 @@ class TenantModelAdapter(CompletionModelAdapter):
                             )
 
                     # Approval flow
-                    decision_map: dict[str, tuple[bool, str | None]] = {}
+                    approval_metadata = [
+                        tm
+                        for tm in tool_metadata
+                        if tm.server_name not in INTERNAL_MCP_SERVER_NAMES
+                    ]
+                    # Eneo's internal knowledge/files tools are read-only core
+                    # capabilities. Approval controls apply only to external MCP
+                    # servers, even when both kinds are called in one round.
+                    decision_map: dict[str, tuple[bool, str | None]] = {
+                        tm.tool_call_id: (True, None)
+                        for tm in tool_metadata
+                        if tm.tool_call_id is not None
+                        and tm.server_name in INTERNAL_MCP_SERVER_NAMES
+                    }
                     timed_out = False
-                    if require_tool_approval and approval_manager:
+                    if require_tool_approval and approval_manager and approval_metadata:
                         if approval_context is None:
                             raise OpenAIException(
                                 "Missing approval context for tool approval flow"
                             )
 
                         approval_id = str(uuid.uuid4())
-                        tool_call_ids = [tc["id"] for tc in tool_calls if tc["id"]]
+                        tool_call_ids = [
+                            tm.tool_call_id
+                            for tm in approval_metadata
+                            if tm.tool_call_id is not None
+                        ]
                         if pending_approval_ids is not None:
                             pending_approval_ids.add(approval_id)
 
@@ -1778,7 +1849,7 @@ class TenantModelAdapter(CompletionModelAdapter):
 
                         yield Completion(
                             response_type=ResponseType.TOOL_APPROVAL_REQUIRED,
-                            tool_calls_metadata=tool_metadata,
+                            tool_calls_metadata=approval_metadata,
                             approval_id=approval_id,
                         )
 
@@ -1788,10 +1859,12 @@ class TenantModelAdapter(CompletionModelAdapter):
                         if pending_approval_ids is not None:
                             pending_approval_ids.discard(approval_id)
                         timed_out = wait_result.timed_out
-                        decision_map = {
-                            d.tool_call_id: (d.approved, d.reason)
-                            for d in wait_result.decisions
-                        }
+                        decision_map.update(
+                            {
+                                d.tool_call_id: (d.approved, d.reason)
+                                for d in wait_result.decisions
+                            }
+                        )
 
                         if timed_out:
                             yield Completion(
@@ -1808,7 +1881,7 @@ class TenantModelAdapter(CompletionModelAdapter):
                                         result_status="timeout_denied",
                                         mcp_tool_name=tm.mcp_tool_name,
                                     )
-                                    for tm in tool_metadata
+                                    for tm in approval_metadata
                                 ],
                             )
 
@@ -1930,7 +2003,7 @@ class TenantModelAdapter(CompletionModelAdapter):
                                 {
                                     "role": "tool",
                                     "tool_call_id": tc["id"],
-                                    "content": llm_text,
+                                    "content": result_budget.admit(llm_text),
                                 }
                             )
                             tool_info = mcp_proxy.get_tool_info(tc["function"]["name"])

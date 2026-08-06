@@ -3,6 +3,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
 from eneo.database.database import sessionmanager
+from eneo.internal_mcp import internal_mcp_lifespan
 from eneo.jobs.job_manager import job_manager
 from eneo.main.aiohttp_client import aiohttp_client
 from eneo.main.config import get_settings
@@ -24,7 +25,14 @@ from eneo.settings.encryption_service import EncryptionService
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await startup()
-    yield
+    # The loopback internal-MCP servers are mounted sub-apps; Starlette does
+    # not run a mounted app's lifespan, so the parent must drive their session
+    # managers. Skip in OpenAPI-only mode (no startup deps, no requests served).
+    if get_settings().openapi_only_mode:
+        yield
+    else:
+        async with internal_mcp_lifespan():
+            yield
     await shutdown()
 
 

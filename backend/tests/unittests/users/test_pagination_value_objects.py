@@ -16,8 +16,8 @@ These tests validate:
 import pytest
 
 from eneo.users.user import (
-    PaginationParams,
     PaginatedResult,
+    PaginationParams,
     SearchFilters,
     SortField,
     SortOptions,

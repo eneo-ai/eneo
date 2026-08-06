@@ -10,12 +10,12 @@ from eneo.audit.domain.action_types import ActionType
 from eneo.audit.domain.actor_types import ActorType
 from eneo.audit.domain.audit_log import AuditLog
 from eneo.audit.domain.constants import (
+    DEFAULT_RETENTION_DAYS,
     MAX_DESCRIPTION_LENGTH,
     MAX_ERROR_MESSAGE_LENGTH,
+    MAX_RETENTION_DAYS,
     MAX_USER_AGENT_LENGTH,
     MIN_RETENTION_DAYS,
-    MAX_RETENTION_DAYS,
-    DEFAULT_RETENTION_DAYS,
 )
 from eneo.audit.domain.entity_types import EntityType
 from eneo.audit.domain.outcome import Outcome

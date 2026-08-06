@@ -128,6 +128,11 @@ class FilePublic(InDB):
     size: int
     transcription: Optional[str] = None
     token_count: Optional[int] = None  # Token count for the file's content
+    # Public capability signal only; never expose storage internals. The chat
+    # composer uses this to show the built-in files tool only when a
+    # conversation attachment can actually be represented by a signed URL
+    # (a TEXT file whose exact original is durably stored).
+    has_download_reference: bool = False
 
 
 class AcceptedFileType(BaseModel):

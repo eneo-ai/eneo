@@ -1,6 +1,6 @@
 """Unit tests for FileNamePipeline filename truncation logic."""
 
-from eneo.crawler.pipelines import _truncate_filename, MAX_FILENAME_BYTES
+from eneo.crawler.pipelines import MAX_FILENAME_BYTES, _truncate_filename
 
 
 class TestTruncateFilename:

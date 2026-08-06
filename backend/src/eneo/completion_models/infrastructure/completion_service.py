@@ -444,6 +444,7 @@ class CompletionService:
         require_tool_approval: bool = False,
         skill_runtime: SkillActivationRuntime | None = None,
         inline_file_text: bool = True,
+        knowledge_catalog: str = "",
     ) -> CompletionModelResponse:
         if files is None:
             files = []
@@ -544,6 +545,7 @@ class CompletionService:
                     and skill_runtime.tool_definition is not None
                     else None
                 ),
+                knowledge_catalog=knowledge_catalog,
                 vision=model.vision,
                 extra_tool_dicts=(
                     mcp_proxy.get_tools_for_llm()

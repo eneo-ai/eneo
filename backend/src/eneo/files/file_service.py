@@ -817,6 +817,14 @@ class FileService:
                 FilePublic(
                     **info.model_dump(),
                     transcription=transcription,
+                    has_download_reference=(
+                        file.file_type is FileType.TEXT
+                        and self._first_reference(
+                            file_references,
+                            FileContentVariant.ORIGINAL,
+                        )
+                        is not None
+                    ),
                 )
             )
         return projected

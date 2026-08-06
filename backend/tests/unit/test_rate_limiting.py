@@ -1,16 +1,16 @@
 """Unit tests for rate limiting infrastructure."""
 
-import pytest
 from unittest.mock import AsyncMock
 from uuid import uuid4
 
+import pytest
 import redis.exceptions
 
 from eneo.audit.infrastructure.rate_limiting import (
     RATE_LIMIT_SCRIPT,
     RateLimitConfig,
-    RateLimitResult,
     RateLimitExceededError,
+    RateLimitResult,
     RateLimitServiceUnavailableError,
     build_rate_limit_key,
     check_rate_limit,
