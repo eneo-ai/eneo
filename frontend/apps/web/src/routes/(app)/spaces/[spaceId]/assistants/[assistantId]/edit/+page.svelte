@@ -31,7 +31,6 @@
   import ApiKeysSettingsSection from "$lib/features/api-keys/ApiKeysSettingsSection.svelte";
   import SkillBindingsEditor from "$lib/features/skills/SkillBindingsEditor.svelte";
   import { Badge } from "$lib/components/ui/badge/index.js";
-  import { hasPermission } from "$lib/core/hasPermission.js";
   import { resolve } from "$app/paths";
   import {
     loadSkillBindingCatalogPage,
@@ -54,7 +53,9 @@
   // connected store file text is always inlined, so the toggle is locked and
   // says why, with a link on to the setup page for those who can act on it.
   const objectStorageMissing = $derived(!data.settings.object_store_configured);
-  const canConfigureStorage = $derived(hasPermission(data.user)("admin"));
+  // Only platform admins can connect a store — the storage page disables every
+  // control for anyone else — so nobody else is pointed at it.
+  const canConfigureStorage = $derived(data.user.is_platform_admin === true);
 
   const {
     state: { currentSpace },

@@ -13,6 +13,9 @@ const getObjectStoreConnection = vi.hoisted(() => vi.fn());
 const createObjectStoreConnection = vi.hoisted(() => vi.fn());
 const rotateObjectStoreCredentials = vi.hoisted(() => vi.fn());
 const testUser = vi.hoisted(() => ({ isPlatformAdmin: false }));
+const invalidate = vi.hoisted(() => vi.fn());
+
+vi.mock("$app/navigation", () => ({ invalidate }));
 
 vi.mock("$lib/core/AppContext.js", () => ({
   getAppContext: () => ({
@@ -197,6 +200,7 @@ describe("admin storage settings page", () => {
     });
     createObjectStoreConnection.mockReset();
     rotateObjectStoreCredentials.mockReset();
+    invalidate.mockReset();
   });
 
   test("shows a loading state before rendering the sanitized deployment policy", async () => {
@@ -378,6 +382,9 @@ describe("admin storage settings page", () => {
     await expect
       .element(page.getByRole("radio", { name: /storage_target_postgres_inline/ }))
       .toBeChecked();
+    // Connecting a store flips a capability other pages read from the root
+    // layout's settings, so that data has to be reloaded too.
+    expect(invalidate).toHaveBeenCalledWith("global:state");
   });
 
   test("reloads the existing connection after a setup conflict", async () => {

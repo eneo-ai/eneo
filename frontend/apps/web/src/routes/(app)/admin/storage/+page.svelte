@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
+  import { invalidate } from "$app/navigation";
   import {
     DEPLOYMENT_POLICY_CONFLICT_ERROR_CODE,
     EneoError,
@@ -591,7 +592,14 @@
             capability={objectStoreCapability}
             {canEdit}
             {readinessLabel}
-            onConnectionChanged={() => loadPolicy(dirty)}
+            onConnectionChanged={async () => {
+              await loadPolicy(dirty);
+              // Connecting or removing a store flips a capability the rest of
+              // the app reads from the root layout's settings (e.g. whether an
+              // assistant may switch off inlined file text). Without this it
+              // stays stale for the whole client-side session.
+              await invalidate("global:state");
+            }}
             onAuthorityRevoked={() => (authorityRevoked = true)}
           />
 
