@@ -444,43 +444,58 @@ as the target for new writes, and wait until no moves are queued and storage
 health reports no work in progress. This is what makes the copy complete: no
 new object can appear on the old destination behind your back.
 
-**3. Copy the content namespace.** Copy only this deployment's content prefix.
-Never copy or overwrite the `v1/.eneo-bindings/` prefix — it holds the marker
-that pairs a bucket with one database, and Eneo manages it for you.
+**3. Find the content prefix.** Object keys live under
+`v1/<deployment-id-without-dashes>/`. Take `OBJECT_CONTENT_DEPLOYMENT_ID` and
+remove the dashes — for example `94e1a7e3-21a7-40b8-959b-d0ecdc8827e2` becomes
+`94e1a7e321a740b8959bd0ecdc8827e2`. Confirm the prefix is right before you copy
+anything:
+
+```bash
+rclone ls old-store:eneo-object-content/v1/94e1a7e321a740b8959bd0ecdc8827e2/ | head
+```
+
+If that lists nothing, the prefix is wrong. Do not continue: a copy of an empty
+prefix succeeds, verifies clean, and leaves the new destination without your
+files.
+
+**4. Copy the content namespace.** Copy only that prefix. Never copy or
+overwrite `v1/.eneo-bindings/` — it holds the marker that pairs a bucket with
+one database, and Eneo manages it per destination.
 
 ```bash
 rclone copy \
-  old-store:eneo-object-content/v1/<deployment-id>/ \
-  new-store:eneo-object-content/v1/<deployment-id>/ \
+  old-store:eneo-object-content/v1/94e1a7e321a740b8959bd0ecdc8827e2/ \
+  new-store:eneo-object-content/v1/94e1a7e321a740b8959bd0ecdc8827e2/ \
   --checksum --transfers 16 --progress
 ```
 
-Find `<deployment-id>` in `OBJECT_CONTENT_DEPLOYMENT_ID`, or ask your operator.
 Use `copy`, never `sync`: `sync` deletes files at the destination that are
 missing from the source, and a mistaken direction would destroy production
 content. Preserve object metadata; Eneo verifies the media type of every
 object it reads.
 
-**4. Verify the copy.** Ask your tooling to compare both sides before you
-switch:
+**5. Verify the copy.** Compare both sides, and check the object count against
+what **Admin > Storage** reports for object storage — `rclone check` reports
+"0 differences" for two empty prefixes just as happily as for a complete copy:
 
 ```bash
 rclone check \
-  old-store:eneo-object-content/v1/<deployment-id>/ \
-  new-store:eneo-object-content/v1/<deployment-id>/ \
+  old-store:eneo-object-content/v1/94e1a7e321a740b8959bd0ecdc8827e2/ \
+  new-store:eneo-object-content/v1/94e1a7e321a740b8959bd0ecdc8827e2/ \
   --checksum
+rclone size new-store:eneo-object-content/v1/94e1a7e321a740b8959bd0ecdc8827e2/
 ```
 
 Fix any difference and run the check again until it reports no errors.
 
-**5. Switch.** In **Admin > Storage**, select **Change destination**, enter the
+**6. Switch.** In **Admin > Storage**, select **Change destination**, enter the
 new endpoint, bucket, signing region, addressing style, and access keys, and
 confirm. Eneo tests the destination, refuses a bucket that belongs to another
 Eneo installation, and then switches in one step. The switch is refused while
 any write could still reach a destination — if that happens, wait a moment and
 try again. Backend and worker pick up the change without a restart.
 
-**6. Confirm and finish.** Select object storage for new writes again. Open a
+**7. Confirm and finish.** Select object storage for new writes again. Open a
 few existing files and let one reconciliation inventory cycle complete, then
 check that storage health reports no missing objects. Eneo verifies the
 SHA-256 of every file it reads, so a bad copy cannot pass unnoticed.
