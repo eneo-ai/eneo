@@ -35,7 +35,6 @@ from eneo.object_content.configuration import (
     ObjectContentCoreSettings,
     ObjectContentSettings,
     ObjectStoreOperatorSettings,
-    reject_non_routable_endpoint,
 )
 from eneo.object_content.content import (
     ObjectContentConfigurationError,
@@ -172,10 +171,6 @@ class ObjectStorePlainHttpNotPermitted(ObjectStoreConnectionInvalid):
     code = "object_store_plain_http_not_permitted"
 
 
-class ObjectStoreEndpointNotRoutable(ObjectStoreConnectionInvalid):
-    code = "object_store_endpoint_not_routable"
-
-
 class ObjectStoreCredentialEncryptionUnavailable(ObjectStoreConnectionError):
     code = "object_store_credential_encryption_unavailable"
 
@@ -258,21 +253,6 @@ class ObjectStoreConnectionRepository:
             )
         )
         return _stored(row) if row is not None else None
-
-    @staticmethod
-    def _require_routable_endpoint(candidate: ObjectStoreConnectionInput) -> None:
-        """Refuse an administrator endpoint aimed inside the deployment network.
-
-        The backend makes these requests, so an endpoint naming a loopback or
-        private address points its reach at services the administrator cannot
-        see and did not intend to contact.
-        """
-        try:
-            reject_non_routable_endpoint(candidate.endpoint_url)
-        except ValueError as error:
-            raise ObjectStoreEndpointNotRoutable(
-                "The object-store endpoint must name a routable address"
-            ) from error
 
     async def get_previous(self) -> StoredObjectStoreConnection | None:
         row = await self._session.scalar(
@@ -398,21 +378,6 @@ class ObjectStoreConnectionService:
         async with self._transaction() as session:
             return await ObjectStoreConnectionRepository(session).get()
 
-    @staticmethod
-    def _require_routable_endpoint(candidate: ObjectStoreConnectionInput) -> None:
-        """Refuse an administrator endpoint aimed inside the deployment network.
-
-        The backend makes these requests, so an endpoint naming a loopback or
-        private address points its reach at services the administrator cannot
-        see and did not intend to contact.
-        """
-        try:
-            reject_non_routable_endpoint(candidate.endpoint_url)
-        except ValueError as error:
-            raise ObjectStoreEndpointNotRoutable(
-                "The object-store endpoint must name a routable address"
-            ) from error
-
     async def get_previous(self) -> StoredObjectStoreConnection | None:
         """Return the archived previous destination, if a switch kept one."""
         async with self._transaction() as session:
@@ -425,7 +390,6 @@ class ObjectStoreConnectionService:
         actor_user_id: UUID,
     ) -> StoredObjectStoreConnection:
         self._require_encryption()
-        self._require_routable_endpoint(candidate)
         async with self._transaction() as session:
             if await ObjectStoreConnectionRepository(session).get() is not None:
                 raise ObjectStoreConnectionAlreadyConfigured(
@@ -654,7 +618,6 @@ class ObjectStoreConnectionService:
             raise ObjectStoreDestinationSwitchBlocked(
                 "The current destination has no established storage binding"
             )
-        self._require_routable_endpoint(candidate)
         # Fast feedback before any remote work; re-checked under lock below.
         async with self._transaction() as session:
             await self._require_switchable(session)

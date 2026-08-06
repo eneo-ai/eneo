@@ -1,6 +1,5 @@
 import os
 from collections.abc import Callable
-from ipaddress import ip_address
 from pathlib import Path
 from typing import Literal, Self, cast
 from urllib.parse import urlparse
@@ -20,36 +19,6 @@ _MAXIMUM_MULTIPART_PART_BYTES = 5 * 1024 * _MEBIBYTE
 _MAXIMUM_MULTIPART_PARTS = 10_000
 _MAXIMUM_S3_OBJECT_BYTES = 5 * 1024 * 1024 * _MEBIBYTE
 _MAXIMUM_S3_PAGE_SIZE = 1_000
-
-
-def reject_non_routable_endpoint(value: str) -> None:
-    """Refuse a storage endpoint that names a non-routable address.
-
-    A platform administrator chooses the destination, but the request is made
-    by the backend from inside the deployment network. Refusing loopback,
-    private, link-local, and reserved addresses keeps that reach pointed at
-    real storage services rather than at neighbours the backend can see and
-    the administrator cannot.
-
-    A hostname that resolves to such an address at connect time is not
-    covered; this is an input boundary, not a network control.
-    """
-    hostname = urlparse(value).hostname
-    if not hostname:
-        raise ValueError("endpoint must name a host")
-    try:
-        address = ip_address(hostname.strip("[]"))
-    except ValueError:
-        return
-    if (
-        address.is_loopback
-        or address.is_private
-        or address.is_link_local
-        or address.is_reserved
-        or address.is_multicast
-        or address.is_unspecified
-    ):
-        raise ValueError("endpoint must not name a non-routable address")
 
 
 class ObjectContentCoreSettings(BaseSettings):

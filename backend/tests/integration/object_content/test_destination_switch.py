@@ -31,7 +31,6 @@ from eneo.object_content.object_store_connection import (
     ObjectStoreConnectionError,
     ObjectStoreConnectionInput,
     ObjectStoreConnectionService,
-    ObjectStoreEndpointNotRoutable,
     ObjectStoreNewWritesNotRedirected,
 )
 from eneo.object_content.s3_object_store import (
@@ -442,46 +441,6 @@ async def _binding_id(database: DatabaseSessionManager):
         snapshot = await StoreBindingRepository(session).snapshot()
     assert snapshot.binding_id is not None
     return snapshot.binding_id
-
-
-@pytest.mark.parametrize(
-    "endpoint",
-    ["https://127.0.0.1:9000", "https://10.0.0.5", "http://169.254.169.254"],
-)
-async def test_non_routable_destination_is_refused_before_any_store_client(
-    object_content_database: DatabaseSessionManager,
-    real_object_store: RealObjectStore,
-    endpoint: str,
-) -> None:
-    """An endpoint aimed inside the deployment network is refused on input.
-
-    The backend, not the browser, makes these requests, so a loopback or
-    private address points its reach at services the administrator cannot see.
-    """
-    factory_calls = 0
-
-    def counting_factory(settings) -> S3ObjectStore:  # type: ignore[no-untyped-def]
-        nonlocal factory_calls
-        factory_calls += 1
-        raise AssertionError("no store client may be built for a refused endpoint")
-
-    service = _service(object_content_database, real_object_store)
-    service._store_factory = counting_factory  # type: ignore[attr-defined]
-    actor = await _any_user_id(object_content_database)
-
-    with pytest.raises(ObjectStoreEndpointNotRoutable):
-        await service.create(
-            ObjectStoreConnectionInput(
-                endpoint_url=endpoint,
-                region="us-east-1",
-                bucket="eneo-object-content",
-                access_key_id=SecretStr("key"),
-                secret_access_key=SecretStr("secret"),
-                addressing_style="path",
-            ),
-            actor_user_id=actor,
-        )
-    assert factory_calls == 0
 
 
 async def test_rejected_switch_records_its_claim_on_the_target(

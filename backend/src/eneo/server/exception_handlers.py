@@ -36,7 +36,6 @@ from eneo.object_content.object_store_connection import (
     ObjectStoreCredentialEncryptionUnavailable,
     ObjectStoreDestinationAlreadyBound,
     ObjectStoreDestinationSwitchBlocked,
-    ObjectStoreEndpointNotRoutable,
     ObjectStoreNewWritesNotRedirected,
     ObjectStorePlainHttpNotPermitted,
     ObjectStorePreviousDestinationMissing,
@@ -180,7 +179,6 @@ DOMAIN_EXCEPTION_MAP: dict[type[Exception], tuple[int, str | None, ErrorCodes]] 
     ObjectStorePreviousDestinationMissing: (404, None, ErrorCodes.NOT_FOUND),
     ObjectStoreConnectionConflict: (409, None, ErrorCodes.BAD_REQUEST),
     ObjectStoreConnectionInvalid: (400, None, ErrorCodes.BAD_REQUEST),
-    ObjectStoreEndpointNotRoutable: (400, None, ErrorCodes.BAD_REQUEST),
     ObjectStorePlainHttpNotPermitted: (400, None, ErrorCodes.BAD_REQUEST),
     ObjectStoreCredentialEncryptionUnavailable: (
         503,
