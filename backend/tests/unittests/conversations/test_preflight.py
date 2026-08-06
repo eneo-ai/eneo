@@ -182,8 +182,10 @@ async def test_preflight_excludes_url_only_file_text_when_inline_disabled(monkey
         attachment_context_reserve_tokens=0,
     )
     monkeypatch.setattr(conversation_service_mod, "get_settings", lambda: settings)
-    # The URL-only predicate reads settings through the shared helper module.
+    # The URL-only predicate reads settings through the shared helper module,
+    # and only engages while the deployment has an object store connected.
     monkeypatch.setattr(file_reference_mod, "get_settings", lambda: settings)
+    monkeypatch.setattr(file_reference_mod, "object_store_configured", lambda: True)
 
     text_file = MagicMock()
     text_file.file_type = FileType.TEXT
