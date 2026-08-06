@@ -35,5 +35,5 @@ survey, service, or second state model).
 
 | Transition | Rule | Owner | Failure code | Behavior test |
 |---|---|---|---|---|
-| classifier role → FileRoleEvidence | TODO(F): carry evidence_level (required for source=model, forbidden otherwise); schema version bump | planning_state(_builder) | validation error | TODO |
-| evidence → docx_output_mode discovery | TODO(F): explicit authored choice wins; structural placeholders resolve; else auto-resolve only for exactly-one explicit commit-grade user-owned template role; otherwise ask | ai_builder_discovery_issue_rules | n/a | TODO 5-case distinct-behavior test |
+| classifier role → FileRoleEvidence | DONE(F `fdbfee433`): evidence_level carried through projection (schema v16; None on model roles = pre-v16 = inferred, never explicit; forbidden for non-model sources) | planning_state(_builder) | validation error | FileRoleEvidence + projection tests |
+| evidence → docx_output_mode discovery | DONE(F): resolve_docx_mode_from_template_evidence — authored wins; exactly-one explicit commit-grade cited template resolves template_fill silently (user quotes as evidence); inferred/multiple/unquoted keep asking; runs at build + after persisted-role carry | planning_state_builder | n/a | 4-case distinct-behavior tests |

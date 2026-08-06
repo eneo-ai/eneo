@@ -1003,6 +1003,19 @@ through the localized-key lexicon and source-reader alias
 canonicalization). C1 live-verified: the Open ePlatform hard case's
 schema checks went green for the first time.
 
+Program completion 2026-08-06 late morning: `460cafabd` D compare->JSON
+(aggregate-only rejection; typed structured fan-in; silent ALL_PREVIOUS
+fallback impossible — compare_json_requires_structured_producers);
+`838bcefac` E2 unevidenced-purpose ordering (a goal classified without
+cited user-owned evidence counts as unresolved, fixing the four
+terminal-before-purpose defects); `fdbfee433` F DOCX explicitness (schema
+v16 evidence_level + silent template-fill resolution for exactly one
+explicitly named template); `22e3cf98d` G red acceptance contract
+(strict-xfail end-to-end citation survival test; refusal stays; no solo
+implementation). Remaining outside the ungated series: corpus
+answer-closure, H matrix verification, and the batch peer review when
+quota returns. 122-case checkpoint at DEV-460cafabddc2 in flight.
+
 Slice-C inputs found live 2026-08-06: (1) the ASCII-English schema-key
 lexicon conflicts with prose-requested Swedish keys (case
 simple_document_metadata_json dies in builder_error: the user asked for
