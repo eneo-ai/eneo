@@ -1081,6 +1081,23 @@ self_correction_invalid_payload dead-ends, 4 singles. HARNESS FOLLOW-UP
 journeys should classify as their journey outcome (builder_error), not
 invalid_evidence.
 
+REGRESSION CHECKPOINT at DEV-9d4237a67324 (diag122-9d4237a, measures
+the ~16 evening commits against the 69 baseline): plans IDENTICAL at 87,
+hard failures DOWN 9 -> 5 (four of the five remaining are the same
+architecture_materialization family), but first-pass 69 -> 66 because
+parse rejections rose 9 -> 12 and pushed three cases first-pass ->
+repaired. 19 real transitions (provider blips excluded: 4 this run vs 2
+baseline). Attribution from captures: five rejections of "steps.N: Input
+should be a valid dictionary" — the model nests a whole LIST of field
+drafts in the steps array, a shape the reattachment handled only one
+draft at a time. `c248266da` covers both shapes and removes the
+placement prompt bullet added earlier today (the ownership rule and the
+requested-fields block already carry it; every added sentence is paid on
+every proposal). Four-case verification in flight at DEV-c248266da468.
+Standing lesson recorded: prompt additions are not free — this run is
+direct evidence that added instructions raise proposal complexity and
+parse-failure rate.
+
 Water-leak verdict 2026-08-06 evening VI (STOP, do not tune further):
 the ownership fix did not change the outcome, and the full path is now
 verified correct end to end — tool schema exposes input_fields; the
