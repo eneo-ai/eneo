@@ -1081,6 +1081,22 @@ self_correction_invalid_payload dead-ends, 4 singles. HARNESS FOLLOW-UP
 journeys should classify as their journey outcome (builder_error), not
 invalid_evidence.
 
+Critic-fix verification + misplacement admissions 2026-08-06 evening:
+critic regression replay at DEV-aeab9f058b4e recovered 3 of 4
+(document_analysis + public_records first-pass, data_subject_access
+repaired); the fourth (hard_many_source) hit the stochastic
+self-correction dead-end again, and its capture attributed a NEW parse
+shape precisely: output_fields[].model_ref + step-level assumptions
+(same shapes as the flagship's earlier capture). `0e8addefe` lands
+three more grounded admissions: unplaced form fields place onto the
+step whose folded instructions mention them (6 repair rounds ~24k in
+the baseline; unmentioned fields still fail visibly; prompt states the
+obligation), stray step keys (model_ref/knowledge_refs) drop from
+field objects, and step-level assumptions hoist to root. Placement
+verification replay in flight at DEV-0e8addefe584 on
+easy_preschool_incident / water_leak_citizen_notice /
+permit_checklist_validation.
+
 NEW-BASELINE 122 at DEV-e30d9e412005 (diag122-e30d9e4, outcome
 classification semantics v2 — compare refuses against older v1
 receipts by design; this run is the baseline): first-pass 69
