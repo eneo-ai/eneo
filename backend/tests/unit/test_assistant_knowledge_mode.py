@@ -228,6 +228,21 @@ class TestKnowledgeCatalog:
         assert f"{prefix}__search_knowledge" in catalog
         assert f"{prefix}__read_source" in catalog
         assert f"{prefix}__list_knowledge_sources" in catalog
+        assert f"{prefix}__describe_source" in catalog
+
+    def test_catalog_routes_source_summaries_away_from_search(self):
+        # "Summarize what this source covers" has no content query to embed,
+        # so search-first must yield to the query-less overview tool.
+        catalog = _assistant().build_knowledge_catalog()
+
+        assert "call knowledge__describe_source" in catalog
+        assert "a semantic query cannot describe a corpus" in catalog
+        assert "what a source covers (rule 3)" in catalog
+
+    def test_catalog_documents_narrowing_a_search(self):
+        catalog = _assistant().build_knowledge_catalog()
+
+        assert "pass a source_id or a document_id as 'within'" in catalog
 
 
 class TestKnowledgeServerCollisionDefense:
