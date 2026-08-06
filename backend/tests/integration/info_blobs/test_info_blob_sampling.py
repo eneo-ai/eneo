@@ -134,6 +134,24 @@ async def test_sample_evenly_spreads_multiple_chunks_per_document(
         assert [excerpt.chunk_no for excerpt in excerpts] == [1, 3]
 
 
+async def test_sample_evenly_never_repeats_a_chunk_in_a_short_document(
+    db_container,
+) -> None:
+    # Bands collapse onto the same row when a document has fewer chunks than
+    # requested passages; each chunk must still come back at most once.
+    async with db_container() as container:
+        collection, model, _space = await _seed_collection(container, name="Sampling")
+        blob = await _seed_document(
+            container, collection, model, title="Tiny", chunk_count=2
+        )
+
+        excerpts = await container.info_blob_chunk_repo().sample_evenly(
+            info_blob_ids=[blob.id], per_document=4
+        )
+
+        assert [excerpt.chunk_no for excerpt in excerpts] == [0, 1]
+
+
 async def test_sample_evenly_ignores_superseded_versions(db_container) -> None:
     async with db_container() as container:
         collection, model, _space = await _seed_collection(container, name="Sampling")

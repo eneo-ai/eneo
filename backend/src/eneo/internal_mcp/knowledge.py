@@ -59,6 +59,7 @@ DESCRIPTION_SOURCES_CAP = 10
 OVERVIEW_TITLE_FETCH = 400
 OVERVIEW_TITLE_BUDGET_RATIO = 0.55
 OVERVIEW_SAMPLE_DOCUMENTS = 12
+OVERVIEW_MAX_CHUNKS_PER_DOC = 4
 OVERVIEW_EXCERPT_CHARS = 700
 
 # Returned whenever a document id names nothing the assistant can reach. Missing
@@ -409,6 +410,23 @@ def _fit_titles(
     return kept, lines
 
 
+def _excerpts_per_document(document_count: int) -> int:
+    """How many passages to take from each sampled document.
+
+    The excerpt allowance is a budget for the source as a whole, not a
+    per-document quota. A source with one document should spend it on several
+    passages from that document rather than leave most of it unused, which
+    otherwise leaves the model characterising a whole document from whatever
+    single passage sits at its midpoint.
+    """
+    if document_count < 1:
+        return 0
+    return max(
+        1,
+        min(OVERVIEW_SAMPLE_DOCUMENTS // document_count, OVERVIEW_MAX_CHUNKS_PER_DOC),
+    )
+
+
 def _sample_targets(
     listings: Sequence[InfoBlobListing], count: int
 ) -> list[InfoBlobListing]:
@@ -506,14 +524,18 @@ def _overview_content(
     ]
 
     if excerpts:
+        # Counted by document, not by excerpt: a source with few documents gets
+        # several passages from each, and "sampled from 4 documents" would then
+        # overstate the coverage if it counted passages.
+        sampled_documents = len({excerpt.info_blob_id for excerpt in excerpts})
         content.append(
             TextContent(
                 type="text",
                 text=(
-                    f"Excerpts sampled from {len(excerpts)} of these documents "
-                    "follow. They are a small sample, not the whole source: base "
-                    "any statement about what this source covers on the full "
-                    "title list above."
+                    f"{len(excerpts)} excerpt(s) sampled from {sampled_documents} "
+                    "of these documents follow. They are a small sample, not the "
+                    "whole source: base any statement about what this source "
+                    "covers on the full title list above."
                 ),
             )
         )
@@ -778,7 +800,8 @@ async def describe_source(
         targets = _sample_targets(kept, OVERVIEW_SAMPLE_DOCUMENTS)
         excerpts = (
             await container.info_blob_chunk_repo().sample_evenly(
-                info_blob_ids=[listing.id for listing in targets]
+                info_blob_ids=[listing.id for listing in targets],
+                per_document=_excerpts_per_document(len(targets)),
             )
             if targets
             else []

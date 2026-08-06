@@ -20,12 +20,14 @@ from eneo.internal_mcp.knowledge import (
     KNOWLEDGE_SERVER_NAME,
     MAX_RESULTS_CEILING,
     NOT_FOUND_MESSAGE,
+    OVERVIEW_MAX_CHUNKS_PER_DOC,
     OVERVIEW_SAMPLE_DOCUMENTS,
     SCOPE_NOT_FOUND_MESSAGE,
     _blob_in_scope,
     _clamp_max_results,
     _diversify,
     _document_page_content,
+    _excerpts_per_document,
     _fit_titles,
     _matching_sources,
     _overview_content,
@@ -624,6 +626,26 @@ class TestSampleTargets:
         assert _sample_targets([], 12) == []
 
 
+class TestExcerptsPerDocument:
+    def test_few_documents_get_several_passages_each(self):
+        assert _excerpts_per_document(1) == OVERVIEW_MAX_CHUNKS_PER_DOC
+        assert _excerpts_per_document(3) == OVERVIEW_MAX_CHUNKS_PER_DOC
+        assert _excerpts_per_document(4) == 3
+        assert _excerpts_per_document(6) == 2
+
+    def test_a_full_sample_takes_one_passage_each(self):
+        assert _excerpts_per_document(OVERVIEW_SAMPLE_DOCUMENTS) == 1
+        assert _excerpts_per_document(400) == 1
+
+    def test_total_excerpts_never_exceed_the_document_budget(self):
+        # _sample_targets caps the document count, so that is the whole domain.
+        for count in range(1, OVERVIEW_SAMPLE_DOCUMENTS + 1):
+            assert count * _excerpts_per_document(count) <= OVERVIEW_SAMPLE_DOCUMENTS
+
+    def test_nothing_to_sample_needs_no_passages(self):
+        assert _excerpts_per_document(0) == 0
+
+
 class TestOverviewContent:
     def _scope(self):
         return _source_scopes(
@@ -648,6 +670,22 @@ class TestOverviewContent:
         assert f"document_id: {blob_id}" in content[0].text
         assert "small sample, not the whole source" in content[1].text
         assert str(content[2].resource.uri) == (f"eneo://info-blob/{blob_id}#chunk-4")
+
+    def test_caveat_counts_documents_rather_than_passages(self):
+        blob_id = uuid4()
+        content = _overview_content(
+            scope=self._scope(),
+            total=1,
+            offset=0,
+            title_lines=["- Waste policy"],
+            excerpts=[
+                self._excerpt(blob_id, chunk_no=2),
+                self._excerpt(blob_id, chunk_no=6),
+            ],
+            excerpt_titles={blob_id: "Waste policy"},
+        )
+
+        assert "2 excerpt(s) sampled from 1 of these documents" in content[1].text
 
     def test_excerpts_are_citable_resources(self):
         blob_id = uuid4()
