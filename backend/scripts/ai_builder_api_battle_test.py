@@ -4440,6 +4440,54 @@ def _suite_outcome_summary(results: list[JsonObject]) -> JsonObject:
             cohort: dict(sorted(cohort_counts.items()))
             for cohort, cohort_counts in sorted(by_cohort.items())
         },
+        "conformance": _suite_conformance_summary(results),
+    }
+
+
+def _suite_conformance_summary(results: list[JsonObject]) -> JsonObject:
+    """Cross-tab proposal mechanics against authored-rubric conformance.
+
+    `outcome_class` says whether a plan was produced and how many repairs it
+    cost; it says nothing about whether the plan satisfies the case. Reading
+    first-pass as a quality score overstated the product for a full day of
+    work (2026-08-06), so the summary now publishes both together, plus the
+    failed checks ranked by how many unique cases they block.
+    """
+
+    matrix: dict[str, dict[str, int]] = {}
+    failed_check_cases: dict[str, int] = {}
+    verdicts: dict[str, int] = {}
+    for result in results:
+        outcome_class = result.get("outcome_class")
+        if not isinstance(outcome_class, str) or not outcome_class:
+            outcome_class = "unclassified"
+        verdict = result.get("expectation_verdict")
+        if not isinstance(verdict, str) or not verdict:
+            verdict = "unknown"
+        verdicts[verdict] = verdicts.get(verdict, 0) + 1
+        row = matrix.setdefault(outcome_class, {})
+        row[verdict] = row.get(verdict, 0) + 1
+        seen: set[str] = set()
+        for check in result.get("failed_checks") or []:
+            if not isinstance(check, Mapping):
+                continue
+            name = check.get("name")
+            if isinstance(name, str) and name and name not in seen:
+                seen.add(name)
+                failed_check_cases[name] = failed_check_cases.get(name, 0) + 1
+    evaluated = verdicts.get("pass", 0) + verdicts.get("fail", 0)
+    return {
+        "expectation_verdict_counts": dict(sorted(verdicts.items())),
+        "conformance_rate": (
+            round(verdicts.get("pass", 0) / evaluated, 4) if evaluated else None
+        ),
+        "outcome_by_expectation": {
+            outcome: dict(sorted(row.items()))
+            for outcome, row in sorted(matrix.items())
+        },
+        "failed_checks_by_unique_cases": dict(
+            sorted(failed_check_cases.items(), key=lambda item: (-item[1], item[0]))
+        ),
     }
 
 

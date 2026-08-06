@@ -4552,18 +4552,64 @@ def test_suite_outcome_summary_counts_classes_by_cohort() -> None:
         ]
     )
 
-    assert summary == {
-        "counts": {
+    assert summary["counts"] == {
+        "clarification_stop_intended": 2,
+        "stalled_unanswered_question": 1,
+    }
+    assert summary["by_cohort"] == {
+        "municipal": {
             "clarification_stop_intended": 2,
             "stalled_unanswered_question": 1,
         },
-        "by_cohort": {
-            "municipal": {
-                "clarification_stop_intended": 2,
-                "stalled_unanswered_question": 1,
+        "single_missing_dimension": {"clarification_stop_intended": 1},
+    }
+
+
+def test_suite_conformance_summary_separates_mechanics_from_rubric() -> None:
+    # A plan produced without repair is not a plan that satisfies the case.
+    # Reading first-pass as a quality score overstated the product for a full
+    # day, so the summary publishes both axes plus per-check unique cases.
+    harness = _battle_harness()
+
+    summary = harness._suite_conformance_summary(
+        [
+            {"outcome_class": "plan_first_pass", "expectation_verdict": "pass"},
+            {
+                "outcome_class": "plan_first_pass",
+                "expectation_verdict": "fail",
+                "failed_checks": [
+                    {"name": "expected_leaf_output_fields"},
+                    {"name": "expected_leaf_output_fields"},
+                    {"name": "min_source_ref_steps"},
+                ],
             },
-            "single_missing_dimension": {"clarification_stop_intended": 1},
-        },
+            {
+                "outcome_class": "plan_repaired",
+                "expectation_verdict": "fail",
+                "failed_checks": [{"name": "expected_leaf_output_fields"}],
+            },
+            {
+                "outcome_class": "builder_error",
+                "expectation_verdict": "not_evaluated",
+            },
+        ]
+    )
+
+    assert summary["expectation_verdict_counts"] == {
+        "fail": 2,
+        "not_evaluated": 1,
+        "pass": 1,
+    }
+    # not_evaluated rows are excluded from the rate, not counted as failures.
+    assert summary["conformance_rate"] == 0.3333
+    assert summary["outcome_by_expectation"]["plan_first_pass"] == {
+        "fail": 1,
+        "pass": 1,
+    }
+    # A check repeated inside one case counts that case once.
+    assert summary["failed_checks_by_unique_cases"] == {
+        "expected_leaf_output_fields": 2,
+        "min_source_ref_steps": 1,
     }
 
 

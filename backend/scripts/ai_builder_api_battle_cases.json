@@ -1394,10 +1394,6 @@
         "forbid_primary_material_form_fields": true,
         "expected_leaf_output_field_groups": [
           [
-            "transkription",
-            "transcript"
-          ],
-          [
             "beslutsalternativ",
             "decision_options",
             "options"
