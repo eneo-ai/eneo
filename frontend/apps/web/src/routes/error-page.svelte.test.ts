@@ -110,6 +110,19 @@ describe("error page", () => {
     expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(375);
   });
 
+  test("tells the user to select the reference id when the clipboard refuses", async () => {
+    // A denied clipboard write must not leave a rejected promise behind: this
+    // is the error page, and a second error here has nowhere to go.
+    state.writeText.mockRejectedValue(new Error("Write permission denied."));
+    showError({ status: 404, message: "Space not found", code: 0, traceId: TRACE_ID });
+
+    await page.getByRole("button", { name: "copy_error_reference_id" }).click();
+
+    await expect.element(page.getByRole("status")).toHaveTextContent("copy_failed_select_manually");
+    // The id stays on screen so it can be selected by hand.
+    await expect.element(page.getByText(TRACE_ID)).toBeVisible();
+  });
+
   test("leaves the reference id out when the failure carries no trace id", async () => {
     showError({ status: 500, message: "Upstream server error", code: 0 });
 

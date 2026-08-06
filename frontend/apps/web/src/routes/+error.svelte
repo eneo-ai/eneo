@@ -25,15 +25,21 @@
   const heading = $derived(m.error_status_message({ status: appError.status, message }));
   const redirectTo = $derived(recoveryRoute(appError));
 
-  let copied = $state(false);
-  let resetCopied: ReturnType<typeof setTimeout> | undefined;
+  let copyState = $state<"idle" | "copied" | "failed">("idle");
+  let resetCopyState: ReturnType<typeof setTimeout> | undefined;
 
   async function copyReferenceId(referenceId: string) {
-    if (!navigator.clipboard) return;
-    await navigator.clipboard.writeText(referenceId);
-    copied = true;
-    clearTimeout(resetCopied);
-    resetCopied = setTimeout(() => (copied = false), 2000);
+    try {
+      await navigator.clipboard.writeText(referenceId);
+      copyState = "copied";
+    } catch {
+      // No Clipboard API, an insecure context, or a denied write. The id is
+      // selectable either way, so say that rather than fail silently — and
+      // never let this escape as a second error on the error page.
+      copyState = "failed";
+    }
+    clearTimeout(resetCopyState);
+    resetCopyState = setTimeout(() => (copyState = "idle"), 4000);
   }
 
   // Effects never run on the server, so the redirect stays a client concern
@@ -45,7 +51,7 @@
     }
   });
 
-  $effect(() => () => clearTimeout(resetCopied));
+  $effect(() => () => clearTimeout(resetCopyState));
 </script>
 
 <svelte:head>
@@ -101,18 +107,28 @@
               variant="ghost"
               size="lg"
               class="min-h-12 gap-1.5 px-3"
-              aria-label={copied ? m.copied_to_clipboard() : m.copy_error_reference_id()}
+              aria-label={copyState === "copied"
+                ? m.copied_to_clipboard()
+                : m.copy_error_reference_id()}
               onclick={() => copyReferenceId(referenceId)}
             >
-              {#if copied}
+              {#if copyState === "copied"}
                 <Check aria-hidden="true" />
               {:else}
                 <Copy aria-hidden="true" />
               {/if}
-              {copied ? m.copied() : m.copy()}
+              {copyState === "copied" ? m.copied() : m.copy()}
             </Button>
           </div>
-          <span class="sr-only" role="status">{copied ? m.copied_to_clipboard() : ""}</span>
+          <!-- One status region for both outcomes. Success is already visible
+               on the button, so only the failure needs to be seen as well. -->
+          <p role="status" class={copyState === "failed" ? "text-muted text-sm" : "sr-only"}>
+            {#if copyState === "copied"}
+              {m.copied_to_clipboard()}
+            {:else if copyState === "failed"}
+              {m.copy_failed_select_manually()}
+            {/if}
+          </p>
         </div>
       {/if}
     </div>

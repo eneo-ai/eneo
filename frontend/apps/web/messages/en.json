@@ -3838,6 +3838,7 @@
   "error_try_again": "Try again",
   "error_reference_id": "Reference ID for support:",
   "copy_error_reference_id": "Copy reference ID to clipboard",
+  "copy_failed_select_manually": "Copying failed. Select the reference ID to copy it manually.",
   "model_context_tokens": "{tokens} context",
   "model_vector_dimensions": "{size}d",
   "model_capabilities_label": "Model capabilities",
