@@ -25,6 +25,7 @@ from eneo.database.tables.object_content_table import (
     ObjectContents,
     ObjectStoreObjects,
 )
+from eneo.database.tables.object_store_binding_table import ObjectStoreBindings
 from eneo.database.tables.tenant_table import Tenants
 from eneo.database.tables.users_table import Users
 from eneo.object_content.content import (
@@ -38,9 +39,6 @@ from eneo.object_content.content import (
 )
 from eneo.object_content.content_service import ObjectContentService
 from eneo.object_content.object_store_provider import ObjectStoreProvider
-from eneo.object_content.reconciliation_repository import (
-    ObjectContentReconciliationRepository,
-)
 from eneo.object_content.runtime import (
     ObjectContentReadinessCode,
     ObjectContentRuntime,
@@ -50,6 +48,7 @@ from eneo.object_content.s3_object_store import (
     S3ObjectStore,
     new_object_key,
 )
+from eneo.object_content.store_binding import StoreBindingRepository
 from tests.integration.object_content.conftest import (
     POSTGRES_13_IMAGE,
     RealObjectStore,
@@ -136,17 +135,17 @@ async def test_binding_preflight_outage_does_not_persist_ambiguous_creation(
             await service.check_object_store_ready()
 
         async with object_content_database.session() as session, session.begin():
-            state = await session.get(ObjectContentReconciliationState, 1)
-            assert state is not None
-            assert state.store_binding_create_started_at is None
-            state.store_binding_claim_until = datetime.now(UTC) - timedelta(seconds=1)
+            binding_row = await session.get(ObjectStoreBindings, 1)
+            assert binding_row is not None
+            assert binding_row.create_started_at is None
+            binding_row.claim_until = datetime.now(UTC) - timedelta(seconds=1)
 
         await service.check_object_store_ready()
 
         async with object_content_database.session() as session, session.begin():
-            state = await session.get(ObjectContentReconciliationState, 1)
-            assert state is not None
-            assert state.store_binding_confirmed_at is not None
+            binding_row = await session.get(ObjectStoreBindings, 1)
+            assert binding_row is not None
+            assert binding_row.confirmed_at is not None
     finally:
         await store.close()
         client.delete_object(Bucket=settings.bucket, Key=marker_key)
@@ -520,9 +519,11 @@ async def test_concurrent_processes_cannot_pair_one_database_with_two_stores(
         async with object_content_database.session() as session, session.begin():
             state = await session.get(ObjectContentReconciliationState, 1)
             assert state is not None
-            assert state.store_deployment_id == settings.deployment_id
-            assert state.store_binding_id is not None
-            assert state.store_binding_confirmed_at is not None
+            binding_row = await session.get(ObjectStoreBindings, 1)
+            assert binding_row is not None
+            assert binding_row.deployment_id == settings.deployment_id
+            assert binding_row.binding_id is not None
+            assert binding_row.confirmed_at is not None
             content = await session.get(ObjectContents, prepared.id)
             assert content is not None
             assert content.state == ContentState.AVAILABLE.value
@@ -559,9 +560,7 @@ async def test_binding_establishment_recovers_both_crash_windows(
         await _clear_deployment_namespace(real_object_store, client)
         async with object_content_database.session() as session, session.begin():
             claim_id = uuid4()
-            binding = await ObjectContentReconciliationRepository(
-                session
-            ).get_or_initialize_store_binding(
+            binding = await StoreBindingRepository(session).get_or_initialize(
                 settings.deployment_id,
                 claim_id=claim_id,
                 claim_seconds=settings.binding_claim_seconds,
@@ -571,9 +570,7 @@ async def test_binding_establishment_recovers_both_crash_windows(
 
         if marker_written_before_restart:
             async with object_content_database.session() as session, session.begin():
-                await ObjectContentReconciliationRepository(
-                    session
-                ).mark_store_binding_creation_started(
+                await StoreBindingRepository(session).mark_creation_started(
                     deployment_id=binding.deployment_id,
                     binding_id=binding.binding_id,
                     claim_id=claim_id,
@@ -587,9 +584,9 @@ async def test_binding_establishment_recovers_both_crash_windows(
         async with object_content_database.session() as session, session.begin():
             await session.execute(
                 text(
-                    "UPDATE object_content_reconciliation_state "
-                    "SET store_binding_claim_until = now() - interval '1 second' "
-                    "WHERE id = 1"
+                    "UPDATE object_store_bindings "
+                    "SET claim_until = now() - interval '1 second' "
+                    "WHERE slot = 1"
                 )
             )
 
@@ -597,10 +594,10 @@ async def test_binding_establishment_recovers_both_crash_windows(
         await runtime.validate_configuration()
 
         async with object_content_database.session() as session, session.begin():
-            state = await session.get(ObjectContentReconciliationState, 1)
-            assert state is not None
-            assert state.store_binding_id == binding.binding_id
-            assert state.store_binding_confirmed_at is not None
+            binding_row = await session.get(ObjectStoreBindings, 1)
+            assert binding_row is not None
+            assert binding_row.binding_id == binding.binding_id
+            assert binding_row.confirmed_at is not None
     finally:
         await runtime.stop()
         client.delete_object(Bucket=settings.bucket, Key=marker_key)
@@ -626,26 +623,22 @@ async def test_ambiguous_binding_creation_never_creates_a_marker_in_another_stor
         )
         claim_id = uuid4()
         async with object_content_database.session() as session, session.begin():
-            binding = await ObjectContentReconciliationRepository(
-                session
-            ).get_or_initialize_store_binding(
+            binding = await StoreBindingRepository(session).get_or_initialize(
                 settings.deployment_id,
                 claim_id=claim_id,
                 claim_seconds=settings.binding_claim_seconds,
             )
         async with object_content_database.session() as session, session.begin():
-            await ObjectContentReconciliationRepository(
-                session
-            ).mark_store_binding_creation_started(
+            await StoreBindingRepository(session).mark_creation_started(
                 deployment_id=binding.deployment_id,
                 binding_id=binding.binding_id,
                 claim_id=claim_id,
             )
             await session.execute(
                 text(
-                    "UPDATE object_content_reconciliation_state "
-                    "SET store_binding_claim_until = now() - interval '1 second' "
-                    "WHERE id = 1"
+                    "UPDATE object_store_bindings "
+                    "SET claim_until = now() - interval '1 second' "
+                    "WHERE slot = 1"
                 )
             )
 
@@ -690,11 +683,9 @@ async def test_confirmed_binding_read_does_not_wait_for_bootstrap_lock(
     async with object_content_database.session() as session, session.begin():
         await session.execute(
             text(
-                "UPDATE object_content_reconciliation_state "
-                "SET store_deployment_id = :deployment_id, "
-                "store_binding_id = :binding_id, "
-                "store_binding_confirmed_at = now() "
-                "WHERE id = 1"
+                "INSERT INTO object_store_bindings "
+                "(slot, deployment_id, binding_id, confirmed_at) "
+                "VALUES (1, :deployment_id, :binding_id, now())"
             ),
             {"deployment_id": deployment_id, "binding_id": binding_id},
         )
@@ -702,17 +693,14 @@ async def test_confirmed_binding_read_does_not_wait_for_bootstrap_lock(
     async with object_content_database.session() as locked_session:
         async with locked_session.begin():
             await locked_session.execute(
-                text(
-                    "SELECT id FROM object_content_reconciliation_state "
-                    "WHERE id = 1 FOR UPDATE"
-                )
+                text("SELECT slot FROM object_store_bindings WHERE slot = 1 FOR UPDATE")
             )
             async with object_content_database.session() as read_session:
                 async with read_session.begin():
                     await read_session.execute(text("SET LOCAL lock_timeout = '100ms'"))
-                    binding = await ObjectContentReconciliationRepository(
+                    binding = await StoreBindingRepository(
                         read_session
-                    ).get_or_initialize_store_binding(
+                    ).get_or_initialize(
                         deployment_id,
                         claim_id=uuid4(),
                         claim_seconds=30,

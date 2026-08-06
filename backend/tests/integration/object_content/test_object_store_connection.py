@@ -6,9 +6,7 @@ from cryptography.fernet import Fernet
 from sqlalchemy import select
 
 from eneo.database.database import DatabaseSessionManager
-from eneo.database.tables.object_content_table import (
-    ObjectContentReconciliationState,
-)
+from eneo.database.tables.object_store_binding_table import ObjectStoreBindings
 from eneo.database.tables.object_store_connection_table import ObjectStoreConnections
 from eneo.database.tables.users_table import Users
 from eneo.object_content.configuration import (
@@ -186,11 +184,11 @@ async def test_rotation_racing_initial_binding_cannot_remove_the_durable_marker(
     await readiness
 
     async with object_content_database.session() as session, session.begin():
-        state = await session.get(ObjectContentReconciliationState, 1)
-        assert state is not None
-        assert state.store_binding_id is not None
-        assert state.store_binding_confirmed_at is not None
-        assert await readiness_store.verify_binding(state.store_binding_id)
+        binding_row = await session.get(ObjectStoreBindings, 1)
+        assert binding_row is not None
+        assert binding_row.binding_id is not None
+        assert binding_row.confirmed_at is not None
+        assert await readiness_store.verify_binding(binding_row.binding_id)
     await readiness_store.close()
 
 
@@ -201,11 +199,13 @@ async def test_existing_store_binding_refuses_a_new_destination_before_remote_io
     real_object_store: RealObjectStore,
 ) -> None:
     async with object_content_database.session() as session, session.begin():
-        state = await session.get(ObjectContentReconciliationState, 1)
-        assert state is not None
-        state.store_deployment_id = real_object_store.settings.deployment_id
-        state.store_binding_id = real_object_store.settings.deployment_id
-        state.store_binding_confirmed_at = datetime.now(UTC)
+        binding_row = ObjectStoreBindings(
+            slot=1,
+            deployment_id=real_object_store.settings.deployment_id,
+            binding_id=real_object_store.settings.deployment_id,
+            confirmed_at=datetime.now(UTC),
+        )
+        session.add(binding_row)
 
     factory_calls = 0
 

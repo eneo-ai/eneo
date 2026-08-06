@@ -28,10 +28,6 @@ from eneo.object_content.content import (
     ObjectContentUnavailableError,
     capture_content,
 )
-from eneo.object_content.reconciliation_repository import (
-    ObjectContentReconciliationRepository,
-    StoreBindingSnapshot,
-)
 from eneo.object_content.s3_object_store import (
     ObjectStoreBindingError,
     ObjectStoreFailureKind,
@@ -42,7 +38,11 @@ from eneo.object_content.s3_object_store import (
     classify_object_store_failure,
     new_object_key,
 )
-from eneo.object_content.store_binding import ensure_store_binding_ready
+from eneo.object_content.store_binding import (
+    StoreBindingRepository,
+    StoreBindingSnapshot,
+    ensure_store_binding_ready,
+)
 from eneo.settings.encryption_service import EncryptionService
 
 _PROBE_BODY = b"eneo-object-store-connection-probe-v1\n"
@@ -383,9 +383,7 @@ class ObjectStoreConnectionService:
                 raise ObjectStoreConnectionNotConfigured(
                     "Object storage is not managed in Admin"
                 )
-            binding = await ObjectContentReconciliationRepository(
-                session
-            ).store_binding_snapshot()
+            binding = await StoreBindingRepository(session).snapshot()
         if stored.revision != replacement.expected_revision:
             raise ObjectStoreConnectionConflict(
                 "The object-store connection changed before rotation"
@@ -414,9 +412,7 @@ class ObjectStoreConnectionService:
             finally:
                 await store.close()
             async with self._transaction() as session:
-                binding = await ObjectContentReconciliationRepository(
-                    session
-                ).store_binding_snapshot()
+                binding = await StoreBindingRepository(session).snapshot()
         await self._probe(settings, binding=binding)
 
         async with self._transaction(mutation=True) as session:
@@ -438,9 +434,7 @@ class ObjectStoreConnectionService:
         if not self._encryption.is_active():
             return None
         async with self._transaction() as session:
-            binding = await ObjectContentReconciliationRepository(
-                session
-            ).store_binding_snapshot()
+            binding = await StoreBindingRepository(session).snapshot()
             if (
                 binding.deployment_id is not None
                 and binding.deployment_id != settings.deployment_id
@@ -525,9 +519,7 @@ class ObjectStoreConnectionService:
         )
 
     async def _require_unbound_destination(self, session: AsyncSession) -> None:
-        binding = await ObjectContentReconciliationRepository(
-            session
-        ).store_binding_snapshot()
+        binding = await StoreBindingRepository(session).snapshot()
         if binding.binding_id is not None:
             raise ObjectStoreDestinationAlreadyBound(
                 "This installation is already bound to an object-store destination"

@@ -13,6 +13,7 @@ from eneo.object_content.content import (
     ContentState,
     ObjectContentBusyError,
     ObjectContentStateError,
+    ObjectContentUnavailableError,
 )
 from eneo.object_content.content_repository import ObjectContentRepository
 from eneo.object_content.content_service import retry_delay_seconds
@@ -34,6 +35,7 @@ from eneo.object_content.s3_object_store import (
     ObjectStoreNotFoundError,
     ObjectStoreUnavailableError,
 )
+from eneo.object_content.store_binding import require_store_generation
 
 
 @dataclass(frozen=True, slots=True)
@@ -117,11 +119,30 @@ class ObjectContentReconciler:
             )
 
         async with provider.acquire(refresh=False) as store_lease:
-            return await self._run_remote_once(
-                lifecycle_advanced=lifecycle_advanced,
-                inline_deleted=inline_deleted,
-                store_lease=store_lease,
-            )
+            try:
+                return await self._run_remote_once(
+                    lifecycle_advanced=lifecycle_advanced,
+                    inline_deleted=inline_deleted,
+                    store_lease=store_lease,
+                )
+            except ObjectContentUnavailableError:
+                # A concurrent rotation or destination cutover advanced the
+                # store generation mid-run. Every fenced transaction under the
+                # stale lease was refused before becoming durable; the leased
+                # items expire and the next run converges them under the new
+                # generation.
+                return ReconciliationResult(
+                    lifecycle_advanced=lifecycle_advanced,
+                    inline_deleted=inline_deleted,
+                    content_processed=0,
+                    moves_processed=0,
+                    references_audited=0,
+                    reference_drifts=0,
+                    missing_objects=0,
+                    object_cycle_completed=False,
+                    multipart_aborted=0,
+                    orphan_objects_deleted=0,
+                )
 
     async def _run_remote_once(
         self,
@@ -131,7 +152,6 @@ class ObjectContentReconciler:
         store_lease: ObjectStoreLease,
     ) -> ReconciliationResult:
         settings = store_lease.settings
-        store = store_lease.store
 
         lease_owner = token_hex(16)
         content_lease_started_at = monotonic()
@@ -193,8 +213,7 @@ class ObjectContentReconciler:
         moves_processed = await ObjectContentMoveExecutor(
             self._core_settings,
             self._database,
-            object_store_settings=settings,
-            object_store=store,
+            store_lease=store_lease,
         ).run_once()
         return ReconciliationResult(
             lifecycle_advanced=lifecycle_advanced,
@@ -280,13 +299,20 @@ class ObjectContentReconciler:
             )
         except ObjectStoreNotFoundError:
             async with self._database.session() as session, session.begin():
+                await require_store_generation(
+                    session,
+                    slot=store_lease.slot,
+                    revision=store_lease.revision,
+                )
                 await ObjectContentRepository(session).record_pending_missing(
                     content_id=work.content_id,
                     lease_owner=lease_owner,
                 )
             return
         except ObjectStoreIntegrityError:
-            await self._record_integrity_failure(work.content_id, lease_owner)
+            await self._record_integrity_failure(
+                work.content_id, lease_owner, store_lease=store_lease
+            )
             return
         except ObjectStoreUnavailableError:
             await self._record_retry(work, lease_owner)
@@ -297,10 +323,17 @@ class ObjectContentReconciler:
             return
 
         if digest != work.sha256:
-            await self._record_integrity_failure(work.content_id, lease_owner)
+            await self._record_integrity_failure(
+                work.content_id, lease_owner, store_lease=store_lease
+            )
             return
         try:
             async with self._database.session() as session, session.begin():
+                await require_store_generation(
+                    session,
+                    slot=store_lease.slot,
+                    revision=store_lease.revision,
+                )
                 await ObjectContentRepository(session).promote_available(
                     content_id=work.content_id,
                     lease_owner=lease_owner,
@@ -346,6 +379,11 @@ class ObjectContentReconciler:
             return
         try:
             async with self._database.session() as session, session.begin():
+                await require_store_generation(
+                    session,
+                    slot=store_lease.slot,
+                    revision=store_lease.revision,
+                )
                 await ObjectContentRepository(session).mark_tombstoned(
                     content_id=work.content_id,
                     lease_owner=lease_owner,
@@ -360,8 +398,15 @@ class ObjectContentReconciler:
         self,
         content_id: UUID,
         lease_owner: str,
+        *,
+        store_lease: ObjectStoreLease,
     ) -> None:
         async with self._database.session() as session, session.begin():
+            await require_store_generation(
+                session,
+                slot=store_lease.slot,
+                revision=store_lease.revision,
+            )
             await ObjectContentRepository(session).record_integrity_failure(
                 content_id=content_id,
                 lease_owner=lease_owner,
@@ -401,6 +446,11 @@ class ObjectContentReconciler:
             continuation_token=cursor.continuation_token
         )
         async with self._database.session() as session, session.begin():
+            await require_store_generation(
+                session,
+                slot=store_lease.slot,
+                revision=store_lease.revision,
+            )
             return await ObjectContentReconciliationRepository(
                 session
             ).record_object_page(
@@ -425,6 +475,11 @@ class ObjectContentReconciler:
             upload_id_marker=cursor.upload_id_marker,
         )
         async with self._database.session() as session, session.begin():
+            await require_store_generation(
+                session,
+                slot=store_lease.slot,
+                revision=store_lease.revision,
+            )
             await ObjectContentReconciliationRepository(session).record_multipart_page(
                 cursor=cursor,
                 uploads=page.uploads,
@@ -467,6 +522,11 @@ class ObjectContentReconciler:
         store = store_lease.store
         lease_started_at = monotonic()
         async with self._database.session() as session, session.begin():
+            await require_store_generation(
+                session,
+                slot=store_lease.slot,
+                revision=store_lease.revision,
+            )
             confirmed = await ObjectContentReconciliationRepository(
                 session
             ).confirm_multipart_abort_lease(
@@ -511,6 +571,11 @@ class ObjectContentReconciler:
         except (ObjectContentBusyError, ObjectContentStateError):
             return 0
         async with self._database.session() as session, session.begin():
+            await require_store_generation(
+                session,
+                slot=store_lease.slot,
+                revision=store_lease.revision,
+            )
             try:
                 await ObjectContentReconciliationRepository(
                     session
@@ -565,6 +630,11 @@ class ObjectContentReconciler:
         settings = store_lease.settings
         store = store_lease.store
         async with self._database.session() as session, session.begin():
+            await require_store_generation(
+                session,
+                slot=store_lease.slot,
+                revision=store_lease.revision,
+            )
             confirmed = await ObjectContentReconciliationRepository(
                 session
             ).confirm_orphan_delete_lease(
@@ -607,6 +677,11 @@ class ObjectContentReconciler:
         except (ObjectContentBusyError, ObjectContentStateError):
             return 0
         async with self._database.session() as session, session.begin():
+            await require_store_generation(
+                session,
+                slot=store_lease.slot,
+                revision=store_lease.revision,
+            )
             await ObjectContentReconciliationRepository(session).complete_orphan_delete(
                 object_key=lease.object_key,
                 lease_owner=lease_owner,

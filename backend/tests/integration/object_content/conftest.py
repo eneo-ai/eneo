@@ -191,6 +191,7 @@ async def object_content_database(
             text(
                 "TRUNCATE TABLE "
                 "object_store_connections, "
+                "object_store_bindings, "
                 "object_contents, "
                 "object_content_orphan_candidates, "
                 "object_content_multipart_candidates, "
