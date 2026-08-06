@@ -1,5 +1,5 @@
 {
-  "version": 5,
+  "version": 6,
   "description": "A Flow AI Builder benchmark for Swedish municipal work. It combines release and architecture coverage with curated cases grounded in municipal services, including Sundsvall's Open ePlatform catalogue and a plan-authoring tjänsteskrivelse family. The cases balance deliberately vague first requests, controlled single-gap interviews, scripted question-to-plan continuations, complete everyday requests, technically explicit contracts, and applied human-review journeys. Expectations measure structured questioning, topology, input ownership, output fields, delivery format, and review placement without relying on prompt-specific golden prose. Run repeated samples to distinguish model variance from product regressions.",
   "synthetic_user_profiles": {
     "audio_source": {
@@ -41,8 +41,7 @@
     "require_clean_source": true,
     "thresholds": {
       "max_required_case_errors": 0,
-      "max_required_quality_failures": 0,
-      "max_required_skips": 0
+      "max_required_quality_failures": 0
     }
   },
   "cases": [
@@ -619,12 +618,6 @@
       "complexity": "medium",
       "domain": "municipality_templates",
       "prompt": "Jag vill bygga ett flöde som fyller i kommunens beslutsbrevsmall. Vid körning laddar jag upp ärendeunderlag och fyller i handläggare, beslutsdatum och diarienummer. Flödet ska hämta rätt motivering, beslut, eventuella villkor och överklagandehänvisning från underlaget och returnera en ifylld DOCX.",
-      "file_id_envs": [
-        "ENEO_AI_BUILDER_DECISION_LETTER_TEMPLATE_FILE_ID"
-      ],
-      "attachment_evidence_sha256_envs": [
-        "ENEO_AI_BUILDER_DECISION_LETTER_TEMPLATE_EVIDENCE_SHA256"
-      ],
       "expected": {
         "min_steps": 2,
         "max_steps": 5,
@@ -680,6 +673,9 @@
         "attachment_or_template",
         "form_fields",
         "foundation"
+      ],
+      "attachments": [
+        "decision_letter_template.docx"
       ]
     },
     {
@@ -1900,12 +1896,6 @@
         "file_role"
       ],
       "prompt": "Jag vill bygga ett flöde där jag laddar upp flera dokument och får en PDF-rapport som följer formen i den bifogade exempelrapporten. Flödet ska läsa varje källa, skriva källavsnitt och skapa en samlad rapport med samma övergripande struktur som exemplet.",
-      "file_id_envs": [
-        "ENEO_AI_BUILDER_EXAMPLE_REPORT_FILE_ID"
-      ],
-      "attachment_evidence_sha256_envs": [
-        "ENEO_AI_BUILDER_EXAMPLE_REPORT_EVIDENCE_SHA256"
-      ],
       "expected": {
         "min_steps": 3,
         "max_steps": 7,
@@ -1987,6 +1977,9 @@
         "foundation",
         "pdf",
         "smoke_v3"
+      ],
+      "attachments": [
+        "example_report.docx"
       ]
     },
     {
@@ -1994,12 +1987,6 @@
       "complexity": "medium",
       "domain": "municipality_templates",
       "prompt": "Jag vill bygga ett flöde som fyller i den bifogade DOCX-mallen. Vid körning ska jag ladda upp underlag och fylla i mallens variabler, till exempel kundnamn och case_id. Flödet ska läsa underlaget, skriva mallinnehållet och returnera en ifylld DOCX.",
-      "file_id_envs": [
-        "ENEO_AI_BUILDER_DOCX_TEMPLATE_FILE_ID"
-      ],
-      "attachment_evidence_sha256_envs": [
-        "ENEO_AI_BUILDER_DOCX_TEMPLATE_EVIDENCE_SHA256"
-      ],
       "expected": {
         "min_steps": 2,
         "max_steps": 4,
@@ -2067,6 +2054,9 @@
         "form_fields",
         "foundation",
         "smoke_v3"
+      ],
+      "attachments": [
+        "generic_case_template.docx"
       ]
     },
     {
@@ -2156,38 +2146,6 @@
       "apply_plan": true,
       "execute_flow": true,
       "prompt": "Bygg ett flöde för exakt de sex bifogade källdokumenten. Läs varje källa uttömmande och skapa exakt en documents-post per källfil. För varje källa ska titel, år, kategori, typ, författare, slutsatser, sammanfattning, synligt källnamn och eventuell försämrad extraktionskvalitet bevaras. Skapa sedan en samlad översikt, komponera rapporten deterministiskt direkt från documents-posterna och rendera en PDF. Slut-PDF:en ska visa alla fält med tydliga etiketter. Saknade eller försämrade uppgifter ska visas som 'framgår ej' tillsammans med synlig degraderingsinformation; de får inte döljas eller gissas.",
-      "file_id_envs": [
-        "ENEO_AI_BUILDER_DOCUMENT_REPORT_FILE_ID_1",
-        "ENEO_AI_BUILDER_DOCUMENT_REPORT_FILE_ID_2",
-        "ENEO_AI_BUILDER_DOCUMENT_REPORT_FILE_ID_3",
-        "ENEO_AI_BUILDER_DOCUMENT_REPORT_FILE_ID_4",
-        "ENEO_AI_BUILDER_DOCUMENT_REPORT_FILE_ID_5",
-        "ENEO_AI_BUILDER_DOCUMENT_REPORT_FILE_ID_6"
-      ],
-      "attachment_evidence_sha256_envs": [
-        "ENEO_AI_BUILDER_DOCUMENT_REPORT_EVIDENCE_SHA256_1",
-        "ENEO_AI_BUILDER_DOCUMENT_REPORT_EVIDENCE_SHA256_2",
-        "ENEO_AI_BUILDER_DOCUMENT_REPORT_EVIDENCE_SHA256_3",
-        "ENEO_AI_BUILDER_DOCUMENT_REPORT_EVIDENCE_SHA256_4",
-        "ENEO_AI_BUILDER_DOCUMENT_REPORT_EVIDENCE_SHA256_5",
-        "ENEO_AI_BUILDER_DOCUMENT_REPORT_EVIDENCE_SHA256_6"
-      ],
-      "runtime_file_path_envs": [
-        "ENEO_AI_BUILDER_DOCUMENT_REPORT_PATH_1",
-        "ENEO_AI_BUILDER_DOCUMENT_REPORT_PATH_2",
-        "ENEO_AI_BUILDER_DOCUMENT_REPORT_PATH_3",
-        "ENEO_AI_BUILDER_DOCUMENT_REPORT_PATH_4",
-        "ENEO_AI_BUILDER_DOCUMENT_REPORT_PATH_5",
-        "ENEO_AI_BUILDER_DOCUMENT_REPORT_PATH_6"
-      ],
-      "runtime_file_sha256_envs": [
-        "ENEO_AI_BUILDER_DOCUMENT_REPORT_FILE_SHA256_1",
-        "ENEO_AI_BUILDER_DOCUMENT_REPORT_FILE_SHA256_2",
-        "ENEO_AI_BUILDER_DOCUMENT_REPORT_FILE_SHA256_3",
-        "ENEO_AI_BUILDER_DOCUMENT_REPORT_FILE_SHA256_4",
-        "ENEO_AI_BUILDER_DOCUMENT_REPORT_FILE_SHA256_5",
-        "ENEO_AI_BUILDER_DOCUMENT_REPORT_FILE_SHA256_6"
-      ],
       "expected": {
         "min_steps": 4,
         "max_steps": 4,
@@ -2410,6 +2368,22 @@
         "foundation",
         "pdf",
         "smoke_v3"
+      ],
+      "attachments": [
+        "01_protokoll_bun_2026_02_25.pdf",
+        "02_tjansteskrivelse_underlag.docx",
+        "03_barnkonsekvensanalys.docx",
+        "04_remissvar.docx",
+        "05_lokalkalkyl.csv",
+        "06_tidigare_beslut.pdf"
+      ],
+      "runtime_files": [
+        "01_protokoll_bun_2026_02_25.pdf",
+        "02_tjansteskrivelse_underlag.docx",
+        "03_barnkonsekvensanalys.docx",
+        "04_remissvar.docx",
+        "05_lokalkalkyl.csv",
+        "06_tidigare_beslut.pdf"
       ]
     },
     {
@@ -6147,12 +6121,6 @@
       "domain": "municipality_tjansteskrivelse",
       "apply_plan": true,
       "prompt": "Bygg ett flöde för Sundsvalls kommuns tjänsteskrivelser. Den bifogade DOCX-filen är den enda mallen och ska kopplas vid byggtid. Vid körning laddar handläggaren upp ärendets källdokument och fyller i diarienummer, handläggare, förvaltning, nämnd och beslutsdatum. Källdokumenten är primärmaterial; skapa inga formulärfält för deras innehåll. Planera en uttömmande extraktion till sources[] med source_file_id, source_label, document_type, document_date, relevant_facts[], prior_decisions[] och uncertainties[]. Planera därefter typad JSON med sections där ärendet, bakgrund, bedömning, konsekvenser och förslag_till_beslut var och en innehåller text och source_references[], samt conflicts[] och missing_information[]. Saknade eller motstridiga uppgifter ska vara synliga och får aldrig lösas genom antaganden. Handläggaren ska få redigera detta icke-terminala JSON-resultat. Efter granskningen ska exakt ett terminalt deterministiskt steg fylla den bifogade DOCX-mallen; skapa inget separat skriv- eller städsteg och använd endast riktade källreferenser, aldrig all_previous_steps.",
-      "file_id_envs": [
-        "ENEO_AI_BUILDER_TJANSTESKRIVELSE_TEMPLATE_FILE_ID"
-      ],
-      "attachment_evidence_sha256_envs": [
-        "ENEO_AI_BUILDER_TJANSTESKRIVELSE_TEMPLATE_EVIDENCE_SHA256"
-      ],
       "expected": {
         "min_steps": 3,
         "max_steps": 4,
@@ -6433,7 +6401,10 @@
         "docx_output_mode": {
           "selected_option_id": "template_fill_docx"
         }
-      }
+      },
+      "attachments": [
+        "tjansteskrivelse_template.docx"
+      ]
     }
   ]
 }

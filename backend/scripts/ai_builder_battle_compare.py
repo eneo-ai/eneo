@@ -41,7 +41,6 @@ _OUTCOME_RANK: dict[str, int] = {
     "builder_error": 1,
     "execution_failure": 1,
     "invalid_evidence": 0,
-    "fixture_skip": 0,
 }
 
 
@@ -298,10 +297,15 @@ _IDENTITY_FIELDS: tuple[str, ...] = (
 
 # Run-context fields that change what the builder was asked to do. Sample
 # size (`repetitions`) is deliberately absent: it changes confidence, not
-# behavior.
+# behavior. `max_concurrency` is present for the opposite reason — parallel
+# sessions share provider capacity, and provider_outcome_unknown already
+# accounts for 3-5 cases per pass. Until someone measures whether that rate
+# moves with load, receipts taken at different concurrency are different
+# experiments.
 _GATED_RUN_CONTEXT_FIELDS: tuple[str, ...] = (
     "auto_confirm_requirements",
     "confirm_message_sha256",
+    "max_concurrency",
     "ui_language",
 )
 
@@ -414,6 +418,7 @@ def compare(
     current_path: Path,
     *,
     allow_harness_change: bool = False,
+    noise_margin: int | None = None,
 ) -> dict[str, Any]:
     baseline_rows, baseline_summary = _load_rows(baseline_path)
     current_rows, current_summary = _load_rows(current_path)
@@ -438,24 +443,28 @@ def compare(
 
     case_ids = sorted(set(baseline_rows) | set(current_rows))
     deltas = [
-        _case_delta(
-            case_id,
-            _representative_row(baseline_rows.get(case_id)),
-            _representative_row(current_rows.get(case_id)),
-            baseline_repetitions=baseline_rows.get(case_id) or [],
-            current_repetitions=current_rows.get(case_id) or [],
-        )
+        {
+            **_case_delta(
+                case_id,
+                _representative_row(baseline_rows.get(case_id)),
+                _representative_row(current_rows.get(case_id)),
+                baseline_repetitions=baseline_rows.get(case_id) or [],
+                current_repetitions=current_rows.get(case_id) or [],
+            ),
+            "cohorts": _cohorts(current_rows.get(case_id))
+            or _cohorts(baseline_rows.get(case_id)),
+        }
         for case_id in case_ids
     ]
     # A case whose expectations were edited moved because the question
     # changed, not because the product did. Counting it as product movement
     # is how a rubric correction gets reported as a win.
     rescored = set(rescored_cases)
-    directions = Counter(
-        delta["direction"] for delta in deltas if delta["case_id"] not in rescored
+    directions: Counter[str] = Counter(
+        str(delta["direction"]) for delta in deltas if delta["case_id"] not in rescored
     )
-    mechanics_directions = Counter(
-        delta["mechanics_direction"]
+    mechanics_directions: Counter[str] = Counter(
+        str(delta["mechanics_direction"])
         for delta in deltas
         if delta["case_id"] not in rescored
     )
@@ -491,12 +500,28 @@ def compare(
             if delta.get("current_unstable") is True
         ],
     }
+    # The no-regression rule needs names. A count tells a reader something got
+    # worse; only the list tells them what to go and look at.
+    conformance_regressions = [
+        delta["case_id"] for delta in deltas if delta["direction"] == "regressed"
+    ]
+    conformance_improvements = [
+        delta["case_id"] for delta in deltas if delta["direction"] == "improved"
+    ]
     return {
         "baseline": _identity(baseline_summary),
         "current": _identity(current_summary),
         "rescored_cases": rescored_cases,
         "identity_differences": identity_differences,
+        "verdict": _verdict(dict(directions), noise_margin=noise_margin),
+        "evidence": _evidence_strength(baseline_summary, current_summary),
         "direction_counts": dict(directions),
+        "direction_counts_by_cohort": _cohort_directions(deltas, rescored),
+        "conformance_regressed_cases": conformance_regressions,
+        "conformance_improved_cases": conformance_improvements,
+        "attachment_evidence_changes": _attachment_evidence_changes(
+            baseline_rows, current_rows
+        ),
         "mechanics_direction_counts": dict(mechanics_directions),
         "current_outcomes": dict(outcome_counts),
         "remaining_blockers_ranked": remaining_blockers.most_common(),
@@ -504,6 +529,153 @@ def compare(
         "unstable_cases": unstable,
         "cases": deltas,
     }
+
+
+def _cohorts(rows: list[dict[str, Any]] | None) -> tuple[str, ...]:
+    for row in rows or []:
+        cohorts = row.get("cohorts")
+        if isinstance(cohorts, list):
+            return tuple(
+                cohort for cohort in cast(list[Any], cohorts) if isinstance(cohort, str)
+            )
+    return ()
+
+
+def _cohort_directions(
+    deltas: list[dict[str, Any]],
+    rescored: set[str],
+) -> dict[str, dict[str, int]]:
+    """Conformance direction per cohort.
+
+    A change usually targets one mechanism. Judging it on all 122 cases buries
+    a real cohort move under the rest of the corpus, and judging it on the
+    targeted cohort alone hides collateral damage — so report every cohort and
+    let the reader use the untargeted ones as negative controls.
+    """
+
+    by_cohort: dict[str, Counter[str]] = {}
+    for delta in deltas:
+        if delta["case_id"] in rescored:
+            continue
+        for cohort in cast(tuple[str, ...], delta.get("cohorts") or ()):
+            by_cohort.setdefault(cohort, Counter())[delta["direction"]] += 1
+    return {
+        cohort: dict(sorted(counts.items()))
+        for cohort, counts in sorted(by_cohort.items())
+    }
+
+
+def _verdict(
+    directions: dict[str, int],
+    *,
+    noise_margin: int | None,
+) -> dict[str, Any]:
+    """Answer the only question a baseline exists to answer.
+
+    The margin is an input, never a default. Choosing it from the result is
+    how a noise-sized move becomes a claimed win, so an undeclared margin
+    yields no verdict at all — the counts still print, and the reader still
+    sees exactly which cases moved.
+    """
+
+    improved = directions.get("improved", 0)
+    regressed = directions.get("regressed", 0)
+    net = improved - regressed
+    if noise_margin is None:
+        answer = "margin_not_declared"
+    elif net > noise_margin:
+        answer = "improved"
+    elif -net > noise_margin:
+        answer = "regressed"
+    else:
+        answer = "no_measurable_change"
+    return {
+        "answer": answer,
+        "net_conformance_delta": net,
+        "improved": improved,
+        "regressed": regressed,
+        "noise_margin": noise_margin,
+    }
+
+
+def _evidence_strength(
+    baseline_summary: dict[str, Any],
+    current_summary: dict[str, Any],
+) -> dict[str, Any]:
+    """How much weight the per-case directions can carry.
+
+    One repetition per build cannot distinguish a real change from proposal
+    variance; the instability gate stays silent because a single observation
+    never disagrees with itself. Saying so is the difference between a
+    baseline and a coin flip that looks like one.
+    """
+
+    baseline_reps = _run_context(baseline_summary).get("repetitions")
+    current_reps = _run_context(current_summary).get("repetitions")
+    repeated = (
+        isinstance(baseline_reps, int)
+        and isinstance(current_reps, int)
+        and baseline_reps > 1
+        and current_reps > 1
+    )
+    return {
+        "baseline_repetitions": baseline_reps,
+        "current_repetitions": current_reps,
+        "kind": "repeated" if repeated else "single_observation",
+        "note": (
+            "Both builds repeated; per-case instability is measured."
+            if repeated
+            else (
+                "At least one build ran a single repetition, so no case-level "
+                "state is confirmed stable and every direction below is one "
+                "observation against one observation."
+            )
+        ),
+    }
+
+
+def _attachment_evidence_changes(
+    baseline_rows: dict[str, list[dict[str, Any]]],
+    current_rows: dict[str, list[dict[str, Any]]],
+) -> list[dict[str, Any]]:
+    """Fixtures whose extracted text changed between the two builds.
+
+    Fixture bytes are pinned in git and verified before upload, so a moved
+    digest here means the product now reads the same document differently —
+    a finding, not a fixture problem, and one a hand-captured constant used to
+    turn into a stale-looking failure instead.
+    """
+
+    def digests(rows: dict[str, list[dict[str, Any]]]) -> dict[str, set[str]]:
+        found: dict[str, set[str]] = {}
+        for case_rows in rows.values():
+            for row in case_rows:
+                identity = row.get("observation_input_identity")
+                if not isinstance(identity, dict):
+                    continue
+                typed = cast(dict[str, Any], identity)
+                fixtures = cast(list[Any], typed.get("attachment_fixtures") or [])
+                observed = cast(
+                    list[Any], typed.get("attachment_evidence_sha256s") or []
+                )
+                for fixture, digest in zip(fixtures, observed, strict=False):
+                    if isinstance(fixture, dict) and isinstance(digest, str):
+                        name = cast(dict[str, Any], fixture).get("name")
+                        if isinstance(name, str):
+                            found.setdefault(name, set()).add(digest)
+        return found
+
+    baseline_digests = digests(baseline_rows)
+    current_digests = digests(current_rows)
+    return [
+        {
+            "fixture": name,
+            "baseline": sorted(baseline_digests[name]),
+            "current": sorted(current_digests[name]),
+        }
+        for name in sorted(set(baseline_digests) & set(current_digests))
+        if baseline_digests[name] != current_digests[name]
+    ]
 
 
 def _observed_states(rows: list[dict[str, Any]] | None) -> set[str]:
@@ -552,10 +724,49 @@ def _render_markdown(report: dict[str, Any], *, only_changed: bool) -> str:
         f"{current.get('app_version')}"
     )
     lines.append("")
+    verdict = cast(dict[str, Any], report["verdict"])
+    evidence = cast(dict[str, Any], report["evidence"])
+    lines.append(
+        f"## Did this change help? **{verdict['answer']}** "
+        f"(net conformance {verdict['net_conformance_delta']:+d}: "
+        f"{verdict['improved']} improved, {verdict['regressed']} regressed; "
+        f"declared margin {verdict['noise_margin']})"
+    )
+    if verdict["answer"] == "margin_not_declared":
+        lines.append(
+            "  No verdict: pass --noise-margin with a margin chosen *before* "
+            "this run. Choosing it now is how a noise-sized move becomes a "
+            "claimed win."
+        )
+    lines.append(f"Evidence: {evidence['kind']} — {evidence['note']}")
+    lines.append("")
     lines.append(f"Conformance direction (primary): {report['direction_counts']}")
     lines.append(f"Mechanics direction: {report['mechanics_direction_counts']}")
     lines.append(f"Current outcomes: {report['current_outcomes']}")
     lines.append("")
+    regressed = cast(list[str], report["conformance_regressed_cases"])
+    if regressed:
+        lines.append("## Conformance regressions (the no-regression rule)")
+        lines.extend(f"- {case_id}" for case_id in regressed)
+        lines.append("")
+    by_cohort = cast(dict[str, dict[str, int]], report["direction_counts_by_cohort"])
+    if by_cohort:
+        lines.append("## Conformance direction by cohort")
+        for cohort, counts in by_cohort.items():
+            net = counts.get("improved", 0) - counts.get("regressed", 0)
+            lines.append(f"- {cohort}: {net:+d} net; {counts}")
+        lines.append("")
+    fixture_changes = cast(list[dict[str, Any]], report["attachment_evidence_changes"])
+    if fixture_changes:
+        lines.append(
+            "## Fixture extraction changed (same git-pinned bytes, different "
+            "extracted text — a product change, not a fixture problem)"
+        )
+        for change in fixture_changes:
+            lines.append(
+                f"- {change['fixture']}: {change['baseline']} -> {change['current']}"
+            )
+        lines.append("")
     unstable = cast(dict[str, list[str]], report["unstable_cases"])
     if unstable["baseline"] or unstable["current"]:
         lines.append("## Unstable cases (a build disagreed with itself; no direction)")
@@ -636,11 +847,23 @@ def main() -> None:
             "evaluated; otherwise bump the semantics version instead."
         ),
     )
+    parser.add_argument(
+        "--noise-margin",
+        type=int,
+        default=None,
+        help=(
+            "Net conformance movement, in cases, that this pair of runs cannot "
+            "distinguish from noise. Required for a verdict, and it must be "
+            "declared before the runs — a margin chosen after seeing the "
+            "result is not a margin."
+        ),
+    )
     args = parser.parse_args()
     report = compare(
         args.baseline,
         args.current,
         allow_harness_change=args.allow_harness_change,
+        noise_margin=args.noise_margin,
     )
     if args.format == "json":
         json.dump(report, sys.stdout, ensure_ascii=False, indent=2)

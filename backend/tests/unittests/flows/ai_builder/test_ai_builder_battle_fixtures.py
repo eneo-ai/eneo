@@ -10,12 +10,13 @@ from pathlib import Path
 from types import ModuleType
 from typing import Any
 
-from pytest import CaptureFixture, MonkeyPatch, raises
+from pytest import MonkeyPatch, raises
 
 BACKEND_ROOT = Path(__file__).resolve().parents[4]
 CASES_PATH = BACKEND_ROOT / "scripts" / "ai_builder_api_battle_cases.json"
 GENERATOR_PATH = BACKEND_ROOT / "scripts" / "generate_battle_fixtures.py"
 FIXTURE_DIR = BACKEND_ROOT / "scripts" / "fixtures" / "ai_builder_battle"
+MANIFEST_PATH = FIXTURE_DIR / "manifest.json"
 PROTOCOL_NAME = "01_protokoll_bun_2026_02_25.pdf"
 TJNSTESKRIVELSE_CASE_IDS = {
     "interview_open_tjansteskrivelse",
@@ -47,135 +48,37 @@ def test_generator_is_deterministic_and_portable_with_pinned_protocol(
 ) -> None:
     generator = _load_module("generate_battle_fixtures_portable", GENERATOR_PATH)
     fixture_dir = tmp_path / "fixtures"
-    env_path = fixture_dir / "battle_fixtures.env"
+    manifest_path = fixture_dir / "manifest.json"
     source_path = tmp_path / "protocol-source.pdf"
     shutil.copyfile(FIXTURE_DIR / PROTOCOL_NAME, source_path)
     monkeypatch.setattr(generator, "FIXTURE_DIR", fixture_dir)
-    monkeypatch.setattr(generator, "ENV_PATH", env_path)
+    monkeypatch.setattr(generator, "MANIFEST_PATH", manifest_path)
 
     expected_protocol_sha256 = hashlib.sha256(source_path.read_bytes()).hexdigest()
     assert generator.AUTHENTIC_PROTOCOL_SHA256 == expected_protocol_sha256
 
     first_content_hashes = generator._write_fixtures(source_path=source_path)
-    generator._write_env_file(first_content_hashes, captured_evidence=None)
+    generator._write_manifest(first_content_hashes)
     first_hashes = _fixture_hashes(fixture_dir)
 
     second_content_hashes = generator._write_fixtures()
-    generator._write_env_file(second_content_hashes, captured_evidence=None)
-    second_hashes = _fixture_hashes(fixture_dir)
+    generator._write_manifest(second_content_hashes)
 
-    assert second_hashes == first_hashes
-    assert "/Users/" not in env_path.read_text(encoding="utf-8")
+    assert second_content_hashes == first_content_hashes
+    assert _fixture_hashes(fixture_dir) == first_hashes
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    assert manifest["version"] == generator.MANIFEST_VERSION
+    assert manifest["fixtures"] == first_content_hashes
+    # The manifest ships with the repository, so it may carry content hashes
+    # only: a path or file id from the generating machine is what stops a fresh
+    # checkout from running the corpus.
+    assert "/Users/" not in manifest_path.read_text(encoding="utf-8")
 
-
-def test_capture_mode_rejects_fixture_manifest_drift_without_regenerating(
-    tmp_path: Path,
-    monkeypatch: MonkeyPatch,
-) -> None:
-    generator = _load_module("generate_battle_fixtures_capture", GENERATOR_PATH)
-    fixture_dir = tmp_path / "fixtures"
-    shutil.copytree(FIXTURE_DIR, fixture_dir)
-    drifted_path = fixture_dir / "02_tjansteskrivelse_underlag.docx"
-    drifted_path.write_bytes(drifted_path.read_bytes() + b"drift")
-    drifted_bytes = drifted_path.read_bytes()
-    bundle_path = tmp_path / "bundle.json"
-    bundle_path.write_text(
-        json.dumps(
-            {
-                "classifier_diagnostics": {
-                    "classifier_runs": [
-                        {
-                            "source_inventory": [
-                                {
-                                    "kind": "uploaded_file",
-                                    "file_id": "fixture-upload-1",
-                                    "source_sha256": "a" * 64,
-                                }
-                            ]
-                        }
-                    ]
-                }
-            }
-        ),
-        encoding="utf-8",
-    )
-    monkeypatch.setattr(generator, "FIXTURE_DIR", fixture_dir)
-    monkeypatch.setattr(generator, "ENV_PATH", fixture_dir / "battle_fixtures.env")
-    monkeypatch.setenv(
-        "ENEO_AI_BUILDER_DECISION_LETTER_TEMPLATE_FILE_ID",
-        "fixture-upload-1",
-    )
-    monkeypatch.setattr(
-        sys,
-        "argv",
-        [
-            str(GENERATOR_PATH),
-            "--capture-evidence-from",
-            str(bundle_path),
-        ],
-    )
-
-    with raises(ValueError, match="fixture manifest drift.*02_tjansteskrivelse"):
-        generator.main()
-
-    assert drifted_path.read_bytes() == drifted_bytes
-
-
-def test_capture_mode_reports_only_populated_fixture_bindings(
-    tmp_path: Path,
-    monkeypatch: MonkeyPatch,
-    capsys: CaptureFixture[str],
-) -> None:
-    generator = _load_module("generate_battle_fixtures_capture_count", GENERATOR_PATH)
-    fixture_dir = tmp_path / "fixtures"
-    shutil.copytree(FIXTURE_DIR, fixture_dir)
-    for binding in generator.ATTACHMENT_BINDINGS:
-        monkeypatch.delenv(binding.file_id_env, raising=False)
-    monkeypatch.setenv(
-        "ENEO_AI_BUILDER_DECISION_LETTER_TEMPLATE_FILE_ID",
-        "fixture-upload-1",
-    )
-    bundle_path = tmp_path / "bundle.json"
-    bundle_path.write_text(
-        json.dumps(
-            {
-                "classifier_diagnostics": {
-                    "classifier_runs": [
-                        {
-                            "source_inventory": [
-                                {
-                                    "kind": "uploaded_file",
-                                    "file_id": "fixture-upload-1",
-                                    "source_sha256": "a" * 64,
-                                },
-                                {
-                                    "kind": "uploaded_file",
-                                    "file_id": "unrelated-upload",
-                                    "source_sha256": "b" * 64,
-                                },
-                            ]
-                        }
-                    ]
-                }
-            }
-        ),
-        encoding="utf-8",
-    )
-    monkeypatch.setattr(generator, "FIXTURE_DIR", fixture_dir)
-    monkeypatch.setattr(generator, "ENV_PATH", fixture_dir / "battle_fixtures.env")
-    monkeypatch.setattr(
-        sys,
-        "argv",
-        [
-            str(GENERATOR_PATH),
-            "--capture-evidence-from",
-            str(bundle_path),
-        ],
-    )
-
-    assert generator.main() == 0
-
-    assert "captured_attachment_count=1" in capsys.readouterr().out
+    tampered_source = tmp_path / "tampered-protocol-source.pdf"
+    tampered_source.write_bytes(source_path.read_bytes() + b"tampered")
+    with raises(ValueError, match="Authentic protocol SHA-256 mismatch"):
+        generator._write_fixtures(source_path=tampered_source)
+    assert _fixture_hashes(fixture_dir) == first_hashes
 
 
 def test_case_loader_rejects_runtime_bindings_without_execution(
@@ -189,13 +92,12 @@ def test_case_loader_rejects_runtime_bindings_without_execution(
     invalid_path.write_text(
         json.dumps(
             {
-                "version": 5,
+                "version": harness.SUPPORTED_CASES_FILE_VERSION,
                 "cases": [
                     {
                         "id": "plan-only-with-runtime-files",
                         "prompt": "Build a plan-only flow.",
-                        "runtime_file_path_envs": ["RUNTIME_PATH"],
-                        "runtime_file_sha256_envs": ["RUNTIME_SHA256"],
+                        "runtime_files": [PROTOCOL_NAME],
                     }
                 ],
             }
@@ -204,9 +106,32 @@ def test_case_loader_rejects_runtime_bindings_without_execution(
     )
     with raises(
         ValueError,
-        match="cannot declare runtime file bindings without execute_flow=true",
+        match="cannot declare runtime_files without execute_flow=true",
     ):
         harness._read_cases_file(invalid_path)
+
+
+def test_battle_cases_and_fixture_manifest_cannot_drift_apart() -> None:
+    manifest = json.loads(MANIFEST_PATH.read_text(encoding="utf-8"))
+    pinned = manifest["fixtures"]
+    assert isinstance(pinned, dict)
+    assert pinned
+
+    payload = json.loads(CASES_PATH.read_text(encoding="utf-8"))
+    referenced = {
+        name
+        for case in payload["cases"]
+        for key in ("attachments", "runtime_files")
+        for name in case.get(key, ())
+    }
+    assert referenced
+    assert referenced <= set(pinned)
+
+    # A fixture name only means something if the bytes behind it are still the
+    # pinned ones; otherwise a case measures a different document than the
+    # receipt claims it did.
+    on_disk = _fixture_hashes(FIXTURE_DIR)
+    assert {name: on_disk.get(name) for name in pinned} == pinned
 
 
 def _question_observation(

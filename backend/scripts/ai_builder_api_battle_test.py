@@ -19,6 +19,7 @@ import sys
 import time
 import unicodedata
 from collections.abc import Iterator, Mapping
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -29,16 +30,23 @@ from uuid import uuid4
 
 JsonObject = dict[str, Any]
 DEFAULT_CASES_FILE = Path(__file__).with_name("ai_builder_api_battle_cases.json")
+FIXTURE_DIR = Path(__file__).with_name("fixtures") / "ai_builder_battle"
+FIXTURE_MANIFEST_FILE = FIXTURE_DIR / "manifest.json"
+SUPPORTED_FIXTURE_MANIFEST_VERSION = 1
 DEFAULT_CONFIRM_MESSAGE = "Ja, det stämmer. Bygg planen."
 MAX_INTERACTIONS_PER_CASE = 6
-SUPPORTED_CASES_FILE_VERSION = 5
+SUPPORTED_CASES_FILE_VERSION = 6
 # Bump when the meaning of question-relevance checks changes; receipts
 # across different semantics versions must never be compared.
 QUESTION_RELEVANCE_SEMANTICS_VERSION = 2
 # v2: error-terminated journeys classify as their journey outcome
 # (builder_error / provider_outcome_unknown) instead of being masked as
 # invalid_evidence — a failed turn has no provenance to validate.
-OUTCOME_CLASSIFICATION_SEMANTICS_VERSION = 2
+# v3: `fixture_skip` is gone. Fixtures are provisioned from git-pinned bytes,
+# so a case can no longer silently drop out of the corpus because someone did
+# not export an environment variable — the flagship runtime sentinel skipped
+# itself that way through six full suite runs.
+OUTCOME_CLASSIFICATION_SEMANTICS_VERSION = 3
 SUPPORTED_RECEIPT_ARTIFACT_VERSION = "ai-builder-live-release.v3"
 
 
@@ -93,10 +101,8 @@ class BattleCase:
     release_dimensions: tuple[str, ...] = ()
     expected: JsonObject | None = None
     file_ids: tuple[str, ...] = ()
-    file_id_envs: tuple[str, ...] = ()
-    attachment_evidence_sha256_envs: tuple[str, ...] = ()
-    runtime_file_path_envs: tuple[str, ...] = ()
-    runtime_file_sha256_envs: tuple[str, ...] = ()
+    attachments: tuple[str, ...] = ()
+    runtime_files: tuple[str, ...] = ()
     synthetic_user_profile: str | None = None
     cohorts: tuple[str, ...] = ()
     configured_question_answers: JsonObject | None = None
@@ -125,14 +131,14 @@ def _case_contract_payload(case: BattleCase) -> JsonObject:
         "execute_flow": case.execute_flow,
         "release_dimensions": list(case.release_dimensions),
         "expected": case.expected or {},
+        # Fixtures are hashed by content, not named by environment variable: a
+        # case that attaches different bytes is asking a different question and
+        # must be rescored. Under the old env-var binding the blob behind a
+        # name could change with no movement in this hash at all.
         "attachment_fixture": {
             "direct_file_slot_count": len(case.file_ids),
-            "file_id_envs": list(case.file_id_envs),
-            "attachment_evidence_sha256_envs": list(
-                case.attachment_evidence_sha256_envs
-            ),
-            "runtime_file_path_envs": list(case.runtime_file_path_envs),
-            "runtime_file_sha256_envs": list(case.runtime_file_sha256_envs),
+            "attachments": _fixture_contract(case.attachments),
+            "runtime_files": _fixture_contract(case.runtime_files),
         },
         "synthetic_user_profile": case.synthetic_user_profile,
         "cohorts": list(case.cohorts),
@@ -170,16 +176,8 @@ def _observed_case_contract_payload(case: Mapping[str, object]) -> JsonObject:
         "expected": dict(expected) if isinstance(expected, Mapping) else None,
         "attachment_fixture": {
             "direct_file_slot_count": case.get("direct_file_slot_count"),
-            "file_id_envs": string_list_or_none(case.get("file_id_envs")),
-            "attachment_evidence_sha256_envs": string_list_or_none(
-                case.get("attachment_evidence_sha256_envs")
-            ),
-            "runtime_file_path_envs": string_list_or_none(
-                case.get("runtime_file_path_envs")
-            ),
-            "runtime_file_sha256_envs": string_list_or_none(
-                case.get("runtime_file_sha256_envs")
-            ),
+            "attachments": _fixture_contract_or_none(case.get("attachments")),
+            "runtime_files": _fixture_contract_or_none(case.get("runtime_files")),
         },
         "synthetic_user_profile": case.get("synthetic_user_profile"),
         "cohorts": string_list_or_none(case.get("cohorts")),
@@ -194,11 +192,122 @@ def _observed_case_contract_payload(case: Mapping[str, object]) -> JsonObject:
     }
 
 
+def _fixture_manifest(path: Path = FIXTURE_MANIFEST_FILE) -> dict[str, str]:
+    """Fixture name -> pinned content SHA-256, read from the git-tracked corpus.
+
+    This is the only place that decides what a fixture name means. Cases name
+    fixtures; the harness verifies these bytes and uploads them itself, so a
+    fresh checkout can run the suite with no hand-provisioned file ids.
+    """
+
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(payload, Mapping):
+        raise ValueError(f"{path} must contain a top-level JSON object.")
+    version = payload.get("version")
+    if version != SUPPORTED_FIXTURE_MANIFEST_VERSION:
+        raise ValueError(
+            f"{path} version must be {SUPPORTED_FIXTURE_MANIFEST_VERSION}; "
+            f"got {version!r}."
+        )
+    fixtures = payload.get("fixtures")
+    if not isinstance(fixtures, Mapping) or not fixtures:
+        raise ValueError(f"{path} must contain a non-empty 'fixtures' object.")
+    manifest: dict[str, str] = {}
+    for name, sha256 in fixtures.items():
+        if not isinstance(name, str) or not name.strip():
+            raise ValueError(f"{path} fixture names must be non-empty strings.")
+        if not _is_sha256(sha256):
+            raise ValueError(f"{path} fixture {name} needs a SHA-256 content hash.")
+        manifest[name] = sha256
+    return manifest
+
+
+def _fixture_contract(names: tuple[str, ...]) -> list[JsonObject]:
+    manifest = _fixture_manifest()
+    return [{"name": name, "content_sha256": manifest[name]} for name in names]
+
+
+def _fixture_contract_or_none(value: object) -> list[JsonObject] | None:
+    if not isinstance(value, list):
+        return None
+    entries: list[JsonObject] = []
+    for item in value:
+        if not isinstance(item, Mapping) or set(item) != {"name", "content_sha256"}:
+            return None
+        entries.append({"name": item["name"], "content_sha256": item["content_sha256"]})
+    return entries
+
+
+def _verified_fixture_path(name: str, manifest: Mapping[str, str]) -> Path:
+    """Resolve a fixture to bytes that still match the manifest.
+
+    Verifying before upload is what makes the corpus portable: the question a
+    case asks is pinned to content, so a corrupted or edited fixture stops the
+    run instead of silently changing what was measured.
+    """
+
+    expected = manifest.get(name)
+    if expected is None:
+        raise ValueError(f"Unknown battle fixture: {name}")
+    path = FIXTURE_DIR / name
+    if not path.is_file():
+        raise ValueError(f"Battle fixture is missing from the repository: {path}")
+    actual = hashlib.sha256(path.read_bytes()).hexdigest()
+    if actual != expected:
+        raise ValueError(
+            f"Battle fixture {name} does not match its manifest hash: "
+            f"expected {expected}, got {actual}. Regenerate with "
+            "scripts/generate_battle_fixtures.py."
+        )
+    return path
+
+
+def _provision_fixtures(
+    *,
+    config: ApiConfig,
+    cases: list[BattleCase],
+) -> JsonObject:
+    """Upload every fixture the selected cases need, once, before any case runs.
+
+    A missing fixture used to surface mid-journey as a misleading builder error
+    (an entire diagnostic day was once lost to that shape) or, worse, as a
+    silent skip. Both failure modes are gone: provisioning happens up front and
+    a failure stops the suite.
+    """
+
+    manifest = _fixture_manifest()
+    needed = sorted(
+        {name for case in cases for name in (*case.attachments, *case.runtime_files)}
+    )
+    provisioned: JsonObject = {}
+    for name in needed:
+        path = _verified_fixture_path(name, manifest)
+        uploaded = _upload_file(config=config, source_path=path)
+        provisioned[name] = {
+            "file_id": _required_string(uploaded, "id"),
+            "content_sha256": manifest[name],
+            "path": str(path.relative_to(FIXTURE_DIR.parents[1])),
+        }
+    return provisioned
+
+
+def _fixture_file_ids(
+    names: tuple[str, ...],
+    provisioned: Mapping[str, object],
+) -> tuple[str, ...]:
+    resolved: list[str] = []
+    for name in names:
+        entry = provisioned.get(name)
+        if not isinstance(entry, Mapping):
+            raise ValueError(f"Fixture {name} was never provisioned for this run.")
+        resolved.append(_required_string(entry, "file_id"))
+    return tuple(resolved)
+
+
 @dataclass(frozen=True, slots=True)
 class ReleaseThresholds:
     max_required_case_errors: int
     max_required_quality_failures: int
-    max_required_skips: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -260,21 +369,6 @@ def main() -> int:
             )
         case = cases[0]
         cases_path = _cases_path_from_args(args)
-        if missing_envs := _missing_file_id_envs(case, args):
-            skipped = _skipped_case_bundle(
-                case=case,
-                repetition=None,
-                missing_envs=missing_envs,
-                cases_path=cases_path,
-            )
-            skipped_path = _write_bundle(
-                output_dir,
-                skipped,
-                suffix=f"{case.case_id}-skipped",
-            )
-            print(f"case skipped: {skipped['skip_reason']}")
-            print(f"skipped bundle: {skipped_path}")
-            return 1 if case.required else 0
         bundle = _run_case(
             case=case,
             config=config,
@@ -282,6 +376,7 @@ def main() -> int:
             existing_session_id=args.session_id,
             artifact_output_dir=output_dir,
             cases_path=cases_path,
+            provisioned_fixtures=_provision_fixtures(config=config, cases=[case]),
         )
         bundle_path = _write_bundle(output_dir, bundle, suffix=case.case_id)
         _print_summary(bundle["plan_summary"], bundle_path)
@@ -393,6 +488,19 @@ def _parse_args() -> argparse.Namespace:
         help=(
             "Run each selected suite case this many times. Use this to measure "
             "plan-rate / repair-failure-rate for stochastic builder behavior."
+        ),
+    )
+    parser.add_argument(
+        "--concurrency",
+        type=int,
+        default=1,
+        help=(
+            "Run this many suite observations at once. Observations are "
+            "independent sessions and provider-latency bound, so this is the "
+            "only lever that changes wall-clock cost. Recorded in run_context "
+            "and gated by the comparator: receipts taken at different "
+            "concurrency are not compared until the effect on provider error "
+            "rate is measured. Default: %(default)s."
         ),
     )
     parser.add_argument("--model-id", default=None, help="Optional model UUID.")
@@ -589,10 +697,8 @@ _CASE_KEYS = frozenset(
         "release_dimensions",
         "expected",
         "file_ids",
-        "file_id_envs",
-        "attachment_evidence_sha256_envs",
-        "runtime_file_path_envs",
-        "runtime_file_sha256_envs",
+        "attachments",
+        "runtime_files",
         "synthetic_user_profile",
         "question_answer_overrides",
         "cohorts",
@@ -688,6 +794,7 @@ def _read_cases_file(path: Path) -> list[BattleCase]:
     if not isinstance(raw_cases, list):
         raise ValueError(f"{path} must contain a top-level 'cases' list.")
     profiles = _synthetic_user_profiles(path, payload)
+    manifest = _fixture_manifest()
 
     cases: list[BattleCase] = []
     seen_case_ids: set[str] = set()
@@ -718,61 +825,20 @@ def _read_cases_file(path: Path) -> list[BattleCase]:
             isinstance(file_id, str) for file_id in file_ids
         ):
             raise ValueError(f"{path} case {case_id}.file_ids must be a string list.")
-        file_id_envs = raw_case.get("file_id_envs")
-        if file_id_envs is None:
-            file_id_envs = []
-        if not isinstance(file_id_envs, list) or not all(
-            isinstance(env_name, str) for env_name in file_id_envs
-        ):
-            raise ValueError(
-                f"{path} case {case_id}.file_id_envs must be a string list."
-            )
-        attachment_evidence_sha256_envs = raw_case.get(
-            "attachment_evidence_sha256_envs"
+        attachments = _case_fixture_names(
+            raw_case.get("attachments"),
+            manifest=manifest,
+            owner=f"{path} case {case_id}.attachments",
         )
-        if attachment_evidence_sha256_envs is None:
-            attachment_evidence_sha256_envs = []
-        if not isinstance(attachment_evidence_sha256_envs, list) or not all(
-            isinstance(env_name, str) for env_name in attachment_evidence_sha256_envs
-        ):
+        runtime_files = _case_fixture_names(
+            raw_case.get("runtime_files"),
+            manifest=manifest,
+            owner=f"{path} case {case_id}.runtime_files",
+        )
+        if raw_case.get("execute_flow") is not True and runtime_files:
             raise ValueError(
-                f"{path} case {case_id}.attachment_evidence_sha256_envs must be "
-                "a string list."
-            )
-        if len(attachment_evidence_sha256_envs) != len(file_id_envs):
-            raise ValueError(
-                f"{path} case {case_id}.attachment_evidence_sha256_envs must have "
-                "one entry per file_id_envs entry."
-            )
-        runtime_file_path_envs = raw_case.get("runtime_file_path_envs")
-        if runtime_file_path_envs is None:
-            runtime_file_path_envs = []
-        if not isinstance(runtime_file_path_envs, list) or not all(
-            isinstance(env_name, str) for env_name in runtime_file_path_envs
-        ):
-            raise ValueError(
-                f"{path} case {case_id}.runtime_file_path_envs must be a string list."
-            )
-        runtime_file_sha256_envs = raw_case.get("runtime_file_sha256_envs")
-        if runtime_file_sha256_envs is None:
-            runtime_file_sha256_envs = []
-        if not isinstance(runtime_file_sha256_envs, list) or not all(
-            isinstance(env_name, str) for env_name in runtime_file_sha256_envs
-        ):
-            raise ValueError(
-                f"{path} case {case_id}.runtime_file_sha256_envs must be a string list."
-            )
-        if len(runtime_file_sha256_envs) != len(runtime_file_path_envs):
-            raise ValueError(
-                f"{path} case {case_id}.runtime_file_sha256_envs must have one "
-                "entry per runtime_file_path_envs entry."
-            )
-        if raw_case.get("execute_flow") is not True and (
-            runtime_file_path_envs or runtime_file_sha256_envs
-        ):
-            raise ValueError(
-                f"{path} case {case_id} cannot declare runtime file bindings "
-                "without execute_flow=true."
+                f"{path} case {case_id} cannot declare runtime_files without "
+                "execute_flow=true."
             )
         release_dimensions = raw_case.get("release_dimensions")
         if release_dimensions is None:
@@ -857,10 +923,8 @@ def _read_cases_file(path: Path) -> list[BattleCase]:
             release_dimensions=tuple(release_dimensions),
             expected=dict(expected) if isinstance(expected, Mapping) else None,
             file_ids=tuple(file_ids),
-            file_id_envs=tuple(file_id_envs),
-            attachment_evidence_sha256_envs=tuple(attachment_evidence_sha256_envs),
-            runtime_file_path_envs=tuple(runtime_file_path_envs),
-            runtime_file_sha256_envs=tuple(runtime_file_sha256_envs),
+            attachments=attachments,
+            runtime_files=runtime_files,
             synthetic_user_profile=(
                 profile_name if isinstance(profile_name, str) else None
             ),
@@ -872,12 +936,38 @@ def _read_cases_file(path: Path) -> list[BattleCase]:
             raise ValueError(
                 f"{path} case {case_id} cannot execute without apply_plan=true."
             )
-        if case.execute_flow and not case.runtime_file_path_envs:
-            raise ValueError(
-                f"{path} case {case_id} must declare runtime_file_path_envs."
-            )
+        if case.execute_flow and not case.runtime_files:
+            raise ValueError(f"{path} case {case_id} must declare runtime_files.")
         cases.append(case)
     return cases
+
+
+def _case_fixture_names(
+    value: object,
+    *,
+    manifest: Mapping[str, str],
+    owner: str,
+) -> tuple[str, ...]:
+    """Validate declared fixture names against the manifest, offline.
+
+    A broken fixture reference now fails when the corpus is read — in the unit
+    suite, in a second — instead of 40 minutes into a live run.
+    """
+
+    if value is None:
+        return ()
+    if not isinstance(value, list) or not all(
+        isinstance(name, str) and name.strip() for name in value
+    ):
+        raise ValueError(f"{owner} must be a list of fixture names.")
+    names = tuple(str(name) for name in value)
+    unknown = [name for name in names if name not in manifest]
+    if unknown:
+        raise ValueError(
+            f"{owner} names unknown fixture(s): {', '.join(sorted(set(unknown)))}. "
+            f"Known fixtures: {', '.join(sorted(manifest))}."
+        )
+    return names
 
 
 def _synthetic_user_profiles(
@@ -997,7 +1087,6 @@ def _read_release_gate(path: Path, *, cases: list[BattleCase]) -> ReleaseGate:
     expected_threshold_keys = {
         "max_required_case_errors",
         "max_required_quality_failures",
-        "max_required_skips",
     }
     if not isinstance(raw_thresholds, Mapping) or set(raw_thresholds) != (
         expected_threshold_keys
@@ -1382,6 +1471,13 @@ def _expected_observations(
     ]
 
 
+def _max_concurrency(args: argparse.Namespace) -> int:
+    value = getattr(args, "concurrency", 1)
+    if not isinstance(value, int) or isinstance(value, bool) or value < 1:
+        raise ValueError("--concurrency must be a positive integer.")
+    return value
+
+
 def _suite_run_context(args: argparse.Namespace) -> JsonObject:
     confirm_message = getattr(args, "confirm_message", DEFAULT_CONFIRM_MESSAGE)
     return {
@@ -1395,6 +1491,12 @@ def _suite_run_context(args: argparse.Namespace) -> JsonObject:
             str(confirm_message).encode("utf-8")
         ).hexdigest(),
         "repetitions": args.repetitions,
+        # Concurrency is recorded and gated, not merely reported: parallel
+        # sessions share provider capacity, and provider_outcome_unknown is
+        # already 3-5 cases per pass. Whether that rate moves with load is an
+        # open question, so receipts taken under different concurrency are not
+        # assumed comparable until someone measures it.
+        "max_concurrency": _max_concurrency(args),
     }
 
 
@@ -1446,7 +1548,6 @@ def _run_suite(
         thresholds=ReleaseThresholds(
             max_required_case_errors=0,
             max_required_quality_failures=0,
-            max_required_skips=0,
         ),
     )
     is_release_run = release_gate_supplied and bool(release_gate.required_case_ids)
@@ -1470,21 +1571,7 @@ def _run_suite(
         require_clean_source=release_gate.require_clean_source,
         config=config if is_release_run else None,
     )
-    missing_fixture_files = _verify_fixture_file_ids(
-        config=config,
-        cases=cases,
-        args=args,
-    )
-    if missing_fixture_files:
-        raise ValueError(
-            "Fixture file id(s) missing on the target backend; re-upload the "
-            "fixtures and refresh their env vars before running: "
-            + "; ".join(
-                f"{item['file_id']} ({', '.join(item['sources'])})"
-                for item in missing_fixture_files
-                if isinstance(item, Mapping) and isinstance(item.get("sources"), list)
-            )
-        )
+    provisioned_fixtures = _provision_fixtures(config=config, cases=cases)
     expected_observations = _expected_observations(cases, args.repetitions)
     run_context = _suite_run_context(args)
     evaluator_identity = _suite_evaluator_identity(
@@ -1514,7 +1601,6 @@ def _run_suite(
                 "max_required_quality_failures": (
                     release_gate.thresholds.max_required_quality_failures
                 ),
-                "max_required_skips": release_gate.thresholds.max_required_skips,
             },
             "selected_cases": [
                 {
@@ -1529,158 +1615,132 @@ def _run_suite(
             ],
         },
     )
-    results: list[JsonObject] = []
-    case_error_count = 0
-    quality_failure_run_count = 0
-    evidence_failure_run_count = 0
-    required_case_error_count = 0
-    required_quality_failure_run_count = 0
-    required_evidence_failure_run_count = 0
-    skipped_run_count = 0
-    required_skipped_run_count = 0
     total_runs = len(cases) * args.repetitions
+    max_concurrency = _max_concurrency(args)
+    observations = [
+        (repetition, case_index, case)
+        for repetition in range(1, args.repetitions + 1)
+        for case_index, case in enumerate(cases, start=1)
+    ]
 
-    run_index = 0
-    for repetition in range(1, args.repetitions + 1):
-        for case_index, case in enumerate(cases, start=1):
-            run_index += 1
-            repetition_suffix = f"-r{repetition:02d}" if args.repetitions > 1 else ""
-            print(
-                "\n=== "
-                f"run {run_index}/{total_runs}; "
-                f"case {case_index}/{len(cases)}: "
-                f"{case.case_id} ({case.complexity}) "
-                f"repetition {repetition}/{args.repetitions} ==="
+    def run_observation(
+        item: tuple[int, int, BattleCase],
+    ) -> JsonObject:
+        repetition, case_index, case = item
+        repetition_suffix = f"-r{repetition:02d}" if args.repetitions > 1 else ""
+        label = (
+            f"case {case_index}/{len(cases)}: {case.case_id} ({case.complexity}) "
+            f"repetition {repetition}/{args.repetitions}"
+        )
+        try:
+            bundle = _run_case(
+                case=case,
+                config=config,
+                args=args,
+                existing_session_id=None,
+                artifact_output_dir=suite_dir,
+                cases_path=cases_path,
+                provisioned_fixtures=provisioned_fixtures,
             )
-            if missing_envs := _missing_file_id_envs(case, args):
-                skipped_run_count += 1
-                if case.required:
-                    required_skipped_run_count += 1
-                skipped = _skipped_case_bundle(
+            bundle["case_identity"] = _case_identity(case)
+            bundle["case_contract"] = _case_contract_payload(case)
+            bundle["case_contract_sha256"] = _case_contract_sha256(case)
+            bundle["artifact_schema_version"] = release_gate.artifact_schema_version
+            bundle["repetition"] = repetition
+            if case.required:
+                provenance = bundle.get("live_execution_provenance")
+                quality_report = bundle.get("quality_report")
+                checks = (
+                    quality_report.get("checks")
+                    if isinstance(quality_report, Mapping)
+                    else None
+                )
+                if not isinstance(provenance, Mapping) or not isinstance(checks, list):
+                    raise ValueError(
+                        f"required case {case.case_id} has no evaluable evidence."
+                    )
+                bundle["release_identity_checks"] = _required_case_identity_checks(
                     case=case,
-                    repetition=repetition,
-                    missing_envs=missing_envs,
-                    cases_path=cases_path,
-                )
-                skipped["artifact_schema_version"] = (
-                    release_gate.artifact_schema_version
-                )
-                skipped["case_contract"] = _case_contract_payload(case)
-                skipped["case_contract_sha256"] = _case_contract_sha256(case)
-                if case.required:
-                    skipped["release_identity"] = release_identity
-                skipped_path = _write_bundle(
-                    suite_dir,
-                    skipped,
-                    suffix=f"{case.case_id}{repetition_suffix}-skipped",
-                )
-                print(f"case skipped: {skipped['skip_reason']}")
-                results.append(_suite_result(skipped, skipped_path))
-                continue
-            try:
-                bundle = _run_case(
-                    case=case,
-                    config=config,
-                    args=args,
-                    existing_session_id=None,
-                    artifact_output_dir=suite_dir,
-                    cases_path=cases_path,
-                )
-                bundle["case_identity"] = _case_identity(case)
-                bundle["case_contract"] = _case_contract_payload(case)
-                bundle["case_contract_sha256"] = _case_contract_sha256(case)
-                bundle["artifact_schema_version"] = release_gate.artifact_schema_version
-                bundle["repetition"] = repetition
-                if case.required:
-                    provenance = bundle.get("live_execution_provenance")
-                    quality_report = bundle.get("quality_report")
-                    checks = (
-                        quality_report.get("checks")
-                        if isinstance(quality_report, Mapping)
+                    release_identity=release_identity,
+                    provenance=provenance,
+                    observation_input_identity=(
+                        bundle.get("observation_input_identity")
+                        if isinstance(bundle.get("observation_input_identity"), Mapping)
                         else None
-                    )
-                    if not isinstance(provenance, Mapping) or not isinstance(
-                        checks, list
-                    ):
-                        raise ValueError(
-                            f"required case {case.case_id} has no evaluable evidence."
-                        )
-                    bundle["release_identity_checks"] = _required_case_identity_checks(
-                        case=case,
-                        release_identity=release_identity,
-                        provenance=provenance,
-                        observation_input_identity=(
-                            bundle.get("observation_input_identity")
-                            if isinstance(
-                                bundle.get("observation_input_identity"), Mapping
-                            )
-                            else None
-                        ),
-                    )
-                    bundle["release_identity"] = release_identity
-                bundle_path = _write_bundle(
-                    suite_dir,
-                    bundle,
-                    suffix=f"{case.case_id}{repetition_suffix}",
+                    ),
                 )
-                _print_summary(bundle["plan_summary"], bundle_path)
-                result = _suite_result(bundle, bundle_path)
-                results.append(result)
-                if result.get("evidence_valid") is False:
-                    evidence_failure_run_count += 1
-                    if case.required:
-                        required_evidence_failure_run_count += 1
-                    evidence_names = _failed_check_names(
-                        {"failed_checks": result.get("evidence_failed_checks")}
-                    )
-                    print(
-                        "case evidence checks failed: "
-                        + ", ".join(evidence_names or ["<unknown>"]),
-                        file=sys.stderr,
-                    )
-                if (_int_value(result.get("failed_expectation_check_count")) or 0) > 0:
-                    quality_failure_run_count += 1
-                    if case.required:
-                        required_quality_failure_run_count += 1
-                    failed_names = _failed_check_names(result)
-                    print(
-                        "case quality checks failed: "
-                        + ", ".join(failed_names or ["<unknown>"]),
-                        file=sys.stderr,
-                    )
-                if (_int_value(result.get("identity_failed_check_count")) or 0) > 0:
-                    identity_names = _failed_check_names(
-                        {"failed_checks": result.get("identity_failed_checks")}
-                    )
-                    print(
-                        "case identity checks failed: "
-                        + ", ".join(identity_names or ["<unknown>"]),
-                        file=sys.stderr,
-                    )
-            except (HTTPError, URLError, TimeoutError, ValueError) as error:
-                case_error_count += 1
-                if case.required:
-                    required_case_error_count += 1
-                failure = {
-                    "artifact_schema_version": release_gate.artifact_schema_version,
-                    "artifact_mode": "live_execution_failure",
-                    "created_at": time.strftime("%Y%m%dT%H%M%S"),
-                    "app_version": LOCAL_APP_VERSION,
-                    "case_identity": _case_identity(case),
-                    "case_contract": _case_contract_payload(case),
-                    "case_contract_sha256": _case_contract_sha256(case),
-                    "repetition": repetition,
-                    **_failure_error_fields(error),
-                    "release_identity": release_identity,
-                }
-                failure_path = _write_bundle(
-                    suite_dir,
-                    failure,
-                    suffix=f"{case.case_id}{repetition_suffix}-failure",
-                )
-                print(f"case failed: {error}", file=sys.stderr)
-                print(f"failure bundle: {failure_path}", file=sys.stderr)
-                results.append(_suite_result(failure, failure_path))
+                bundle["release_identity"] = release_identity
+            bundle_path = _write_bundle(
+                suite_dir,
+                bundle,
+                suffix=f"{case.case_id}{repetition_suffix}",
+            )
+            result = _suite_result(bundle, bundle_path)
+            _print_observation(label=label, result=result, bundle_path=bundle_path)
+            return result
+        except (HTTPError, URLError, TimeoutError, ValueError) as error:
+            failure = {
+                "artifact_schema_version": release_gate.artifact_schema_version,
+                "artifact_mode": "live_execution_failure",
+                "created_at": time.strftime("%Y%m%dT%H%M%S"),
+                "app_version": LOCAL_APP_VERSION,
+                "case_identity": _case_identity(case),
+                "case_contract": _case_contract_payload(case),
+                "case_contract_sha256": _case_contract_sha256(case),
+                "repetition": repetition,
+                **_failure_error_fields(error),
+                "release_identity": release_identity,
+            }
+            failure_path = _write_bundle(
+                suite_dir,
+                failure,
+                suffix=f"{case.case_id}{repetition_suffix}-failure",
+            )
+            print(f"\n=== {label} ===\ncase failed: {error}", file=sys.stderr)
+            print(f"failure bundle: {failure_path}", file=sys.stderr)
+            return _suite_result(failure, failure_path)
+
+    print(f"\nrunning {total_runs} observation(s) with concurrency {max_concurrency}")
+    if max_concurrency == 1:
+        results = [run_observation(item) for item in observations]
+    else:
+        # Cases are independent sessions and provider-latency bound: the
+        # median observation spent 21 of its 23 seconds waiting. Order is
+        # restored from the submitted order so the receipt does not depend on
+        # which observation happened to finish first.
+        with ThreadPoolExecutor(max_workers=max_concurrency) as executor:
+            results = list(executor.map(run_observation, observations))
+
+    case_error_count = sum(
+        1
+        for result in results
+        if result.get("observation_status") == "execution_failure"
+    )
+    required_case_error_count = sum(
+        1
+        for result in results
+        if result.get("observation_status") == "execution_failure"
+        and result.get("required") is True
+    )
+    evidence_failure_run_count = sum(
+        1 for result in results if result.get("evidence_valid") is False
+    )
+    required_evidence_failure_run_count = sum(
+        1
+        for result in results
+        if result.get("evidence_valid") is False and result.get("required") is True
+    )
+    quality_failure_run_count = sum(
+        1
+        for result in results
+        if (_int_value(result.get("failed_expectation_check_count")) or 0) > 0
+    )
+    required_quality_failure_run_count = sum(
+        1
+        for result in results
+        if (_int_value(result.get("failed_expectation_check_count")) or 0) > 0
+        and result.get("required") is True
+    )
 
     try:
         release_identity_recheck = _release_run_identity(
@@ -1728,7 +1788,6 @@ def _run_suite(
         release_gate.thresholds,
         required_case_error_count=required_case_error_count,
         required_quality_failure_run_count=required_quality_failure_run_count,
-        required_skipped_run_count=required_skipped_run_count,
     )
     receipt_integrity = _suite_receipt_integrity(
         expected_observations=expected_observations,
@@ -1784,8 +1843,6 @@ def _run_suite(
         "required_expectation_failed_observation_count": (
             required_quality_failure_run_count
         ),
-        "fixture_skipped_observation_count": skipped_run_count,
-        "required_fixture_skipped_observation_count": required_skipped_run_count,
         "identity_failed_check_count": identity_failure_count,
         "observation_identity_failed_check_count": (observation_identity_failure_count),
         "suite_identity_failed_check_count": suite_identity_failure_count,
@@ -2079,7 +2136,6 @@ def _evaluate_release_thresholds(
     *,
     required_case_error_count: int,
     required_quality_failure_run_count: int,
-    required_skipped_run_count: int,
 ) -> list[JsonObject]:
     return [
         {
@@ -2097,12 +2153,6 @@ def _evaluate_release_thresholds(
             "actual": required_quality_failure_run_count,
             "threshold": thresholds.max_required_quality_failures,
         },
-        {
-            "name": "max_required_skips",
-            "passed": required_skipped_run_count <= thresholds.max_required_skips,
-            "actual": required_skipped_run_count,
-            "threshold": thresholds.max_required_skips,
-        },
     ]
 
 
@@ -2114,6 +2164,7 @@ def _run_case(
     existing_session_id: str | None,
     artifact_output_dir: Path,
     cases_path: Path | None = DEFAULT_CASES_FILE,
+    provisioned_fixtures: Mapping[str, object] | None = None,
 ) -> JsonObject:
     started_at = time.strftime("%Y%m%dT%H%M%S")
     if existing_session_id:
@@ -2139,10 +2190,10 @@ def _run_case(
         path=f"/flows/ai-builder/sessions/{session_id}/models",
     )
 
-    file_ids = _case_file_ids(case, args)
-    runtime_file_paths = (
-        _case_runtime_file_paths(case) if case.runtime_file_path_envs else ()
+    file_ids = tuple(getattr(args, "file_ids", None) or ()) or _case_file_ids(
+        case, provisioned_fixtures or {}
     )
+    runtime_file_paths = _case_runtime_file_paths(case)
     interactions: list[JsonObject] = []
     first = _send_and_fetch(
         config=config,
@@ -2317,12 +2368,8 @@ def _run_case(
             "expected": case.expected or {},
             "file_ids": list(file_ids),
             "direct_file_slot_count": len(case.file_ids),
-            "file_id_envs": list(case.file_id_envs),
-            "attachment_evidence_sha256_envs": list(
-                case.attachment_evidence_sha256_envs
-            ),
-            "runtime_file_path_envs": list(case.runtime_file_path_envs),
-            "runtime_file_sha256_envs": list(case.runtime_file_sha256_envs),
+            "attachments": _fixture_contract(case.attachments),
+            "runtime_files": _fixture_contract(case.runtime_files),
             "synthetic_user_profile": case.synthetic_user_profile,
             "cohorts": list(case.cohorts),
             "configured_question_answers": case.configured_question_answers or {},
@@ -2460,11 +2507,30 @@ def _execute_and_collect_runtime_evidence(
     return evidence
 
 
+def _upload_file(*, config: ApiConfig, source_path: Path) -> JsonObject:
+    """Upload a fixture into the space and return its file record."""
+
+    return _post_multipart_file(config=config, path="/files/", source_path=source_path)
+
+
 def _upload_runtime_file(
     *,
     config: ApiConfig,
     flow_id: str,
     step_id: str,
+    source_path: Path,
+) -> JsonObject:
+    return _post_multipart_file(
+        config=config,
+        path=f"/flows/{flow_id}/steps/{step_id}/runtime-files/",
+        source_path=source_path,
+    )
+
+
+def _post_multipart_file(
+    *,
+    config: ApiConfig,
+    path: str,
     source_path: Path,
 ) -> JsonObject:
     content = source_path.read_bytes()
@@ -2485,7 +2551,7 @@ def _upload_runtime_file(
     ).encode("utf-8")
     body = prefix + content + f"\r\n--{boundary}--\r\n".encode("utf-8")
     request = Request(
-        f"{config.base_url}/flows/{flow_id}/steps/{step_id}/runtime-files/",
+        f"{config.base_url}{path}",
         data=body,
         headers={
             "Accept": "application/json",
@@ -2497,7 +2563,7 @@ def _upload_runtime_file(
     with urlopen(request, timeout=config.timeout_seconds) as response:
         parsed = json.loads(response.read().decode("utf-8"))
     if not isinstance(parsed, dict):
-        raise ValueError(f"Runtime upload for {source_path.name} returned no object.")
+        raise ValueError(f"Upload of {source_path.name} returned no object.")
     return parsed
 
 
@@ -2847,92 +2913,16 @@ def _journey_with_proposal_economics(
     return enriched
 
 
-def _verify_fixture_file_ids(
-    *,
-    config: ApiConfig,
-    cases: list[BattleCase],
-    args: argparse.Namespace,
-) -> list[JsonObject]:
-    """Verify every referenced fixture file id exists before any case runs.
-
-    A missing fixture surfaces mid-journey as a misleading builder error
-    (an entire diagnostic day was once lost to that shape), so the suite
-    fails fast with the exact id and owning env var instead.
-    """
-
-    ids_to_sources: dict[str, set[str]] = {}
-    for case in cases:
-        if _missing_file_id_envs(case, args):
-            continue
-        for file_id in case.file_ids:
-            ids_to_sources.setdefault(file_id, set()).add(f"case:{case.case_id}")
-        for env_name in case.file_id_envs:
-            file_id = (os.environ.get(env_name) or "").strip()
-            if file_id:
-                ids_to_sources.setdefault(file_id, set()).add(env_name)
-    missing: list[JsonObject] = []
-    for file_id, sources in sorted(ids_to_sources.items()):
-        try:
-            _request_json(config=config, method="GET", path=f"/files/{file_id}/")
-        except HTTPError as error:
-            if error.code != 404:
-                raise
-            missing.append({"file_id": file_id, "sources": sorted(sources)})
-    return missing
-
-
-def _case_file_ids(case: BattleCase, args: argparse.Namespace) -> tuple[str, ...]:
-    cli_file_ids = tuple(getattr(args, "file_ids", None) or ())
-    if cli_file_ids:
-        return cli_file_ids
-    missing_envs = _missing_file_id_envs(case, args)
-    if missing_envs:
-        raise ValueError(
-            f"case {case.case_id} requires file id env var(s): "
-            + ", ".join(missing_envs)
-        )
-    return (*case.file_ids, *_file_ids_from_envs(case.file_id_envs))
-
-
-def _missing_file_id_envs(
+def _case_file_ids(
     case: BattleCase,
-    args: argparse.Namespace,
+    provisioned_fixtures: Mapping[str, object],
 ) -> tuple[str, ...]:
-    attachment_envs = (
-        ()
-        if tuple(getattr(args, "file_ids", None) or ())
-        else (*case.file_id_envs, *case.attachment_evidence_sha256_envs)
-    )
-    return tuple(
-        env_name
-        for env_name in (
-            *attachment_envs,
-            *case.runtime_file_path_envs,
-            *case.runtime_file_sha256_envs,
-        )
-        if not os.getenv(env_name, "").strip()
-    )
-
-
-def _file_ids_from_envs(env_names: tuple[str, ...]) -> tuple[str, ...]:
-    return tuple(
-        os.environ[env_name].strip()
-        for env_name in env_names
-        if os.getenv(env_name, "").strip()
-    )
+    return (*case.file_ids, *_fixture_file_ids(case.attachments, provisioned_fixtures))
 
 
 def _case_runtime_file_paths(case: BattleCase) -> tuple[Path, ...]:
-    paths = tuple(
-        Path(os.environ[env_name].strip()) for env_name in case.runtime_file_path_envs
-    )
-    invalid_paths = [str(path) for path in paths if not path.is_file()]
-    if invalid_paths:
-        raise ValueError(
-            f"case {case.case_id} runtime source path(s) are not readable files: "
-            + ", ".join(invalid_paths)
-        )
-    return paths
+    manifest = _fixture_manifest()
+    return tuple(_verified_fixture_path(name, manifest) for name in case.runtime_files)
 
 
 def _attachment_evidence_sha256s(
@@ -2967,16 +2957,11 @@ def _observation_input_identity(
     classifier_diagnostics: Mapping[str, object] | None,
     runtime_evidence: Mapping[str, object] | None,
 ) -> JsonObject:
-    declared_attachment_evidence_sha256s = [
-        os.getenv(env_name, "").strip()
-        for env_name in case.attachment_evidence_sha256_envs
-    ]
-    declared_evidence_contract_complete = len(
-        declared_attachment_evidence_sha256s
-    ) == len(attached_file_ids) and all(
-        _is_sha256(value) for value in declared_attachment_evidence_sha256s
-    )
-
+    # What the attached bytes were is settled offline, by the manifest hash the
+    # harness verified before uploading. The extracted-text digest below is an
+    # observation of what the server made of those bytes: recorded per run and
+    # compared across runs by the comparator, never pinned to a constant some
+    # operator captured by hand months ago.
     observed_attachment_evidence_sha256s = _attachment_evidence_sha256s(
         attached_file_ids=attached_file_ids,
         classifier_diagnostics=classifier_diagnostics,
@@ -2984,36 +2969,20 @@ def _observation_input_identity(
     attachment_evidence_complete = all(
         _is_sha256(value) for value in observed_attachment_evidence_sha256s
     )
-    declared_runtime_sha256s = [
-        os.getenv(env_name, "").strip() for env_name in case.runtime_file_sha256_envs
-    ]
+    manifest = _fixture_manifest()
+    declared_runtime_sha256s = [manifest[name] for name in case.runtime_files]
     runtime_sha256s, runtime_evidence_status = _runtime_lineage_sha256s(
         runtime_evidence,
         expected_count=len(declared_runtime_sha256s),
     )
-    runtime_contract_complete = len(declared_runtime_sha256s) == len(
-        runtime_sha256s
-    ) and all(_is_sha256(value) for value in declared_runtime_sha256s)
 
     mismatches: list[str] = []
-    if attached_file_ids and not declared_evidence_contract_complete:
-        mismatches.append("attachment_evidence_digest_contract")
     if attached_file_ids and not attachment_evidence_complete:
         mismatches.append("attachment_evidence")
-    if (
-        declared_evidence_contract_complete
-        and attachment_evidence_complete
-        and observed_attachment_evidence_sha256s != declared_attachment_evidence_sha256s
-    ):
-        mismatches.append("attachment_evidence_content")
-    if declared_runtime_sha256s and not runtime_contract_complete:
-        mismatches.append("runtime_digest_contract")
     if declared_runtime_sha256s and runtime_evidence_status != "complete":
         mismatches.append("runtime_evidence")
-    if (
-        runtime_contract_complete
-        and runtime_evidence_status == "complete"
-        and runtime_sha256s != declared_runtime_sha256s
+    if runtime_evidence_status == "complete" and runtime_sha256s != (
+        declared_runtime_sha256s
     ):
         mismatches.append("runtime_content")
 
@@ -3026,7 +2995,7 @@ def _observation_input_identity(
     ) and all(_is_sha256(value) for value in runtime_sha256s)
     return {
         **fingerprint_payload,
-        "declared_attachment_evidence_sha256s": (declared_attachment_evidence_sha256s),
+        "attachment_fixtures": _fixture_contract(case.attachments),
         "declared_runtime_sha256s": declared_runtime_sha256s,
         "runtime_evidence_status": runtime_evidence_status,
         "verified": not mismatches and fingerprint_complete,
@@ -3132,41 +3101,6 @@ def _runtime_lineage_sha256s(
     if set(checksum_by_ordinal) != expected_ordinals:
         return [None] * expected_count, "incomplete"
     return [checksum_by_ordinal[index] for index in range(expected_count)], "complete"
-
-
-def _skipped_case_bundle(
-    *,
-    case: BattleCase,
-    repetition: int | None,
-    missing_envs: tuple[str, ...],
-    cases_path: Path | None = DEFAULT_CASES_FILE,
-) -> JsonObject:
-    return {
-        "artifact_mode": "live_execution",
-        "case_identity": _case_identity(case),
-        "live_execution_provenance": _live_execution_provenance(
-            case=case,
-            cases_path=cases_path,
-            latest_session=None,
-            classifier_diagnostics=None,
-            requested_model_id=None,
-        ),
-        "created_at": time.strftime("%Y%m%dT%H%M%S"),
-        "app_version": LOCAL_APP_VERSION,
-        "case": {
-            "id": case.case_id,
-            "complexity": case.complexity,
-            "domain": case.domain,
-            "required": case.required,
-            "file_id_envs": list(case.file_id_envs),
-            "runtime_file_path_envs": list(case.runtime_file_path_envs),
-        },
-        "repetition": repetition,
-        "skipped": True,
-        "skip_reason": (
-            "Missing file-id environment variable(s): " + ", ".join(missing_envs)
-        ),
-    }
 
 
 def _write_bundle(output_dir: Path, bundle: JsonObject, *, suffix: str) -> Path:
@@ -3754,14 +3688,14 @@ def _observation_evidence_report(bundle: Mapping[str, object]) -> JsonObject:
         attachment_fixture if isinstance(attachment_fixture, Mapping) else {}
     )
     file_ids = case.get("file_ids")
-    file_id_envs = attachment_fixture.get("file_id_envs")
+    declared_attachments = attachment_fixture.get("attachments")
     direct_file_slot_count = attachment_fixture.get("direct_file_slot_count")
     resolved_attachment_count_complete = (
         isinstance(file_ids, list)
-        and isinstance(file_id_envs, list)
+        and isinstance(declared_attachments, list)
         and isinstance(direct_file_slot_count, int)
         and not isinstance(direct_file_slot_count, bool)
-        and len(file_ids) == direct_file_slot_count + len(file_id_envs)
+        and len(file_ids) == direct_file_slot_count + len(declared_attachments)
     )
     case_contract_complete = (
         case_contract_complete and resolved_attachment_count_complete
@@ -3877,17 +3811,18 @@ def _observation_evidence_report(bundle: Mapping[str, object]) -> JsonObject:
     )
     attachment_sha256s = observation_input.get("attachment_evidence_sha256s")
     runtime_sha256s = observation_input.get("runtime_source_sha256s")
-    declared_attachment_sha256s = observation_input.get(
-        "declared_attachment_evidence_sha256s"
-    )
     declared_runtime_sha256s = observation_input.get("declared_runtime_sha256s")
     attached_file_ids = tuple(_string_list(case.get("file_ids")))
-    expected_attachment_digest_count = len(
-        _string_list(attachment_fixture.get("attachment_evidence_sha256_envs"))
+    # The receipt carries the fixture contract it ran against, so this recompute
+    # stays offline even when the repository has since moved on: the digests
+    # come from the bundle, not from whatever manifest is on disk today.
+    declared_attachments = _fixture_contract_or_none(
+        attachment_fixture.get("attachments")
     )
-    expected_runtime_digest_count = len(
-        _string_list(attachment_fixture.get("runtime_file_sha256_envs"))
+    expected_runtime_fixtures = _fixture_contract_or_none(
+        attachment_fixture.get("runtime_files")
     )
+    expected_runtime_digest_count = len(expected_runtime_fixtures or [])
     recomputed_attachment_sha256s = _attachment_evidence_sha256s(
         attached_file_ids=attached_file_ids,
         classifier_diagnostics=classifier_diagnostics,
@@ -3897,43 +3832,23 @@ def _observation_evidence_report(bundle: Mapping[str, object]) -> JsonObject:
         runtime_evidence if isinstance(runtime_evidence, Mapping) else None,
         expected_count=expected_runtime_digest_count,
     )
+    expected_declared_runtime_sha256s = [
+        entry["content_sha256"] for entry in expected_runtime_fixtures or []
+    ]
     fingerprint_payload = {
         "attachment_evidence_sha256s": recomputed_attachment_sha256s,
         "runtime_source_sha256s": recomputed_runtime_sha256s,
     }
     expected_mismatches: list[str] = []
-    attachment_contract_complete = (
-        expected_attachment_digest_count == len(attached_file_ids)
-        and isinstance(declared_attachment_sha256s, list)
-        and len(declared_attachment_sha256s) == expected_attachment_digest_count
-        and all(_is_sha256(value) for value in declared_attachment_sha256s)
-    )
     attachment_evidence_complete = all(
         _is_sha256(value) for value in recomputed_attachment_sha256s
     )
-    if attached_file_ids and not attachment_contract_complete:
-        expected_mismatches.append("attachment_evidence_digest_contract")
     if attached_file_ids and not attachment_evidence_complete:
         expected_mismatches.append("attachment_evidence")
-    if (
-        attachment_contract_complete
-        and attachment_evidence_complete
-        and recomputed_attachment_sha256s != declared_attachment_sha256s
-    ):
-        expected_mismatches.append("attachment_evidence_content")
-    runtime_contract_complete = (
-        isinstance(declared_runtime_sha256s, list)
-        and len(declared_runtime_sha256s) == expected_runtime_digest_count
-        and all(_is_sha256(value) for value in declared_runtime_sha256s)
-    )
-    if expected_runtime_digest_count and not runtime_contract_complete:
-        expected_mismatches.append("runtime_digest_contract")
-    if expected_runtime_digest_count and recomputed_runtime_status != "complete":
+    if expected_declared_runtime_sha256s and recomputed_runtime_status != "complete":
         expected_mismatches.append("runtime_evidence")
-    if (
-        runtime_contract_complete
-        and recomputed_runtime_status == "complete"
-        and recomputed_runtime_sha256s != declared_runtime_sha256s
+    if recomputed_runtime_status == "complete" and recomputed_runtime_sha256s != (
+        expected_declared_runtime_sha256s
     ):
         expected_mismatches.append("runtime_content")
     fingerprint_complete = all(
@@ -3942,8 +3857,9 @@ def _observation_evidence_report(bundle: Mapping[str, object]) -> JsonObject:
     input_complete = (
         isinstance(attachment_sha256s, list)
         and isinstance(runtime_sha256s, list)
-        and isinstance(declared_attachment_sha256s, list)
-        and isinstance(declared_runtime_sha256s, list)
+        and declared_attachments is not None
+        and observation_input.get("attachment_fixtures") == declared_attachments
+        and declared_runtime_sha256s == expected_declared_runtime_sha256s
         and all(_is_sha256(value) for value in attachment_sha256s)
         and all(_is_sha256(value) for value in runtime_sha256s)
         and attachment_sha256s == recomputed_attachment_sha256s
@@ -4251,10 +4167,7 @@ def _suite_result(bundle: JsonObject, bundle_path: Path) -> JsonObject:
         for check in identity_checks
         if isinstance(check, Mapping) and check.get("passed") is not True
     ]
-    completed_live_execution = (
-        bundle.get("artifact_mode") == "live_execution"
-        and bundle.get("skipped") is not True
-    )
+    completed_live_execution = bundle.get("artifact_mode") == "live_execution"
     evidence_report = (
         _observation_evidence_report(bundle) if completed_live_execution else {}
     )
@@ -4265,11 +4178,7 @@ def _suite_result(bundle: JsonObject, bundle_path: Path) -> JsonObject:
     evidence_failed_checks = (
         evidence_failed_checks if isinstance(evidence_failed_checks, list) else []
     )
-    if bundle.get("skipped") is True:
-        outcome_class = "fixture_skip"
-        observation_status = "fixture_skip"
-        expectation_verdict = "not_evaluated"
-    elif bundle.get("artifact_mode") == "live_execution_failure":
+    if bundle.get("artifact_mode") == "live_execution_failure":
         outcome_class = "execution_failure"
         observation_status = "execution_failure"
         expectation_verdict = "not_evaluated"
@@ -4326,10 +4235,6 @@ def _suite_result(bundle: JsonObject, bundle_path: Path) -> JsonObject:
             if isinstance(bundle.get("client_turn_id"), str)
             else None
         ),
-        "skipped": bundle.get("skipped") is True,
-        "skip_reason": bundle.get("skip_reason")
-        if isinstance(bundle.get("skip_reason"), str)
-        else None,
         "step_count": bundle.get("plan_summary", {}).get("step_count")
         if isinstance(bundle.get("plan_summary"), Mapping)
         else None,
@@ -4367,8 +4272,6 @@ def _failed_check_names(result: Mapping[str, Any]) -> list[str]:
 def _suite_reliability_summary(results: list[JsonObject]) -> JsonObject:
     grouped: dict[str, list[JsonObject]] = {}
     for result in results:
-        if result.get("observation_status") == "fixture_skip":
-            continue
         case_id = result.get("case_id")
         if isinstance(case_id, str):
             grouped.setdefault(case_id, []).append(result)
@@ -4824,7 +4727,7 @@ def _validated_reanalysis_bundle(path: Path, value: object) -> JsonObject:
         raise ValueError(
             f"{path} is not a {SUPPORTED_RECEIPT_ARTIFACT_VERSION} artifact."
         )
-    if value.get("artifact_mode") != "live_execution" or value.get("skipped") is True:
+    if value.get("artifact_mode") != "live_execution":
         raise ValueError(
             f"{path} is not a completed live-execution observation bundle."
         )
@@ -7897,6 +7800,40 @@ def _required_string(payload: Mapping[str, Any], key: str) -> str:
 def _optional_string(payload: Mapping[str, Any], key: str) -> str | None:
     value = payload.get(key)
     return value if isinstance(value, str) and value else None
+
+
+def _print_observation(
+    *,
+    label: str,
+    result: Mapping[str, object],
+    bundle_path: Path,
+) -> None:
+    """Report one finished observation as a single block.
+
+    Concurrent observations interleave, so per-line progress printing would
+    shred the log. One block per observation stays readable at any concurrency
+    and reports the primary metric — conformance — beside the mechanics.
+    """
+
+    print(
+        f"\n=== {label} ===\n"
+        f"outcome={result.get('outcome_class')} "
+        f"conformance={result.get('expectation_verdict')} "
+        f"steps={result.get('step_count')}\n"
+        f"saved bundle {bundle_path}"
+    )
+    # Failures stay on stderr, where every other failure in this script goes.
+    failures = [
+        f"{label_text}: {', '.join(names)}"
+        for label_text, key in (
+            ("case quality checks failed", "failed_checks"),
+            ("case evidence checks failed", "evidence_failed_checks"),
+            ("case identity checks failed", "identity_failed_checks"),
+        )
+        if (names := _failed_check_names({"failed_checks": result.get(key)}))
+    ]
+    if failures:
+        print("\n".join(failures), file=sys.stderr)
 
 
 def _print_summary(summary: object, bundle_path: Path) -> None:

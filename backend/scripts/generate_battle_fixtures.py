@@ -5,27 +5,16 @@ The script never calls a live API. Run it from the backend virtual environment:
 
     PYTHONPATH=src .venv/bin/python scripts/generate_battle_fixtures.py
 
-It writes fixture files and ``battle_fixtures.env`` below
-``scripts/fixtures/ai_builder_battle``. The env file contains content hashes and
-runtime paths, but intentionally leaves upload file IDs and attachment-evidence
-hashes empty. Upload each attachment through the normal operator workflow, then
-run its case once with repeated ``--file-id`` arguments. That CLI override lets
-the harness produce a bundle before the permanent env values exist.
+It writes the fixture files and ``manifest.json`` below
+``scripts/fixtures/ai_builder_battle``. The manifest pins each fixture's content
+SHA-256; a battle case attaches a fixture by name and the harness uploads it
+itself, so a fresh environment can run the suite without hand-provisioned file
+IDs. Nothing here is environment-specific and nothing needs post-upload capture.
 
-The checked-in ``01_protokoll_bun_2026_02_25.pdf`` is the canonical authentic §17 protokollsutdrag (three pages) from the
-source and its SHA-256 is pinned below. ``--source`` may initialize or replace
-that file only when the supplied bytes match the pinned hash.
-
-Export the resulting file IDs under the names in ``battle_fixtures.env`` and
-capture the UUID-bound tamper evidence without another API call:
-
-    PYTHONPATH=src .venv/bin/python scripts/generate_battle_fixtures.py \
-      --capture-evidence-from .codex/artifacts/ai-builder-api-battle-tests/*.json
-
-Capture mode reads only existing fixtures and local bundles. It refuses fixture
-or manifest drift, matches classifier evidence to the exported file IDs, and
-rewrites only the env file with captured evidence hashes. Source the completed
-env file before running the full suite.
+The checked-in ``01_protokoll_bun_2026_02_25.pdf`` is the canonical authentic
+§17 protokollsutdrag (three pages) from the source and its SHA-256 is pinned
+below. ``--source`` may initialize or replace that file only when the supplied
+bytes match the pinned hash.
 """
 
 from __future__ import annotations
@@ -34,13 +23,9 @@ import argparse
 import hashlib
 import io
 import json
-import os
-import re
-import shlex
 import shutil
 import zipfile
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
@@ -49,30 +34,13 @@ from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.shared import Cm, Pt
 
 FIXTURE_DIR = Path(__file__).with_name("fixtures") / "ai_builder_battle"
-ENV_PATH = FIXTURE_DIR / "battle_fixtures.env"
+MANIFEST_PATH = FIXTURE_DIR / "manifest.json"
+MANIFEST_VERSION = 1
 AUTHENTIC_PROTOCOL_SHA256 = (
     "cdab0e4471ca518fa5c7334a185a0c77da1c5743a49468e54d3ff094f824c6d8"
 )
 FIXED_TIMESTAMP = datetime(2026, 1, 1, 0, 0, 0)
 FIXED_ZIP_TIMESTAMP = (2026, 1, 1, 0, 0, 0)
-SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}$")
-CONTENT_MANIFEST_PATTERN = re.compile(
-    r"^# content_sha256 (?P<name>\S+) (?P<sha256>[0-9a-f]{64})$"
-)
-
-
-@dataclass(frozen=True, slots=True)
-class AttachmentBinding:
-    fixture_name: str
-    file_id_env: str
-    evidence_sha256_env: str
-
-
-@dataclass(frozen=True, slots=True)
-class RuntimeBinding:
-    fixture_name: str
-    path_env: str
-    sha256_env: str
 
 
 MATTER_FIXTURE_NAMES = (
@@ -90,46 +58,6 @@ GENERATED_FIXTURE_NAMES = (
     "example_report.docx",
     "generic_case_template.docx",
     "tjansteskrivelse_template.docx",
-)
-
-ATTACHMENT_BINDINGS = (
-    AttachmentBinding(
-        "decision_letter_template.docx",
-        "ENEO_AI_BUILDER_DECISION_LETTER_TEMPLATE_FILE_ID",
-        "ENEO_AI_BUILDER_DECISION_LETTER_TEMPLATE_EVIDENCE_SHA256",
-    ),
-    AttachmentBinding(
-        "example_report.docx",
-        "ENEO_AI_BUILDER_EXAMPLE_REPORT_FILE_ID",
-        "ENEO_AI_BUILDER_EXAMPLE_REPORT_EVIDENCE_SHA256",
-    ),
-    AttachmentBinding(
-        "generic_case_template.docx",
-        "ENEO_AI_BUILDER_DOCX_TEMPLATE_FILE_ID",
-        "ENEO_AI_BUILDER_DOCX_TEMPLATE_EVIDENCE_SHA256",
-    ),
-    AttachmentBinding(
-        "tjansteskrivelse_template.docx",
-        "ENEO_AI_BUILDER_TJANSTESKRIVELSE_TEMPLATE_FILE_ID",
-        "ENEO_AI_BUILDER_TJANSTESKRIVELSE_TEMPLATE_EVIDENCE_SHA256",
-    ),
-    *tuple(
-        AttachmentBinding(
-            fixture_name,
-            f"ENEO_AI_BUILDER_DOCUMENT_REPORT_FILE_ID_{index}",
-            f"ENEO_AI_BUILDER_DOCUMENT_REPORT_EVIDENCE_SHA256_{index}",
-        )
-        for index, fixture_name in enumerate(MATTER_FIXTURE_NAMES, start=1)
-    ),
-)
-
-RUNTIME_BINDINGS = tuple(
-    RuntimeBinding(
-        fixture_name,
-        f"ENEO_AI_BUILDER_DOCUMENT_REPORT_PATH_{index}",
-        f"ENEO_AI_BUILDER_DOCUMENT_REPORT_FILE_SHA256_{index}",
-    )
-    for index, fixture_name in enumerate(MATTER_FIXTURE_NAMES, start=1)
 )
 
 
@@ -490,136 +418,36 @@ def _write_fixtures(*, source_path: Path | None = None) -> dict[str, str]:
     }
 
 
-def _verified_existing_fixture_hashes() -> dict[str, str]:
-    if not ENV_PATH.is_file():
-        raise FileNotFoundError(f"Fixture manifest is missing: {ENV_PATH}")
-    manifest: dict[str, str] = {}
-    for line in ENV_PATH.read_text(encoding="utf-8").splitlines():
-        match = CONTENT_MANIFEST_PATTERN.fullmatch(line)
-        if match is not None:
-            manifest[match.group("name")] = match.group("sha256")
-    if set(manifest) != set(GENERATED_FIXTURE_NAMES):
-        raise ValueError("fixture manifest drift: fixture inventory does not match")
+def _write_manifest(content_sha256s: Mapping[str, str]) -> None:
+    """Pin every fixture's bytes so a case can name one and mean exactly it.
 
-    actual: dict[str, str] = {}
-    drifted: list[str] = []
-    for fixture_name, expected_sha256 in sorted(manifest.items()):
-        path = FIXTURE_DIR / fixture_name
-        if not path.is_file():
-            drifted.append(f"{fixture_name} (missing)")
-            continue
-        actual_sha256 = _sha256(path)
-        actual[fixture_name] = actual_sha256
-        if actual_sha256 != expected_sha256:
-            drifted.append(fixture_name)
-    if drifted:
-        raise ValueError("fixture manifest drift: " + ", ".join(drifted))
-    return actual
+    File IDs are deliberately absent: they are per-environment and per-upload,
+    and hand-carrying them is what let the flagship runtime sentinel skip
+    itself for six full suite runs. The harness uploads these bytes and derives
+    the IDs it needs.
+    """
 
-
-def _captured_evidence_sha256s(bundle_paths: Sequence[Path]) -> dict[str, str]:
-    values_by_file_id: dict[str, set[str]] = {}
-    for bundle_path in bundle_paths:
-        payload = json.loads(bundle_path.read_text(encoding="utf-8"))
-        if not isinstance(payload, Mapping):
-            raise ValueError(f"Battle bundle must be an object: {bundle_path}")
-        diagnostics = payload.get("classifier_diagnostics")
-        if not isinstance(diagnostics, Mapping):
-            continue
-        runs = diagnostics.get("classifier_runs")
-        if not isinstance(runs, list):
-            continue
-        for run in runs:
-            if not isinstance(run, Mapping):
-                continue
-            inventory = run.get("source_inventory")
-            if not isinstance(inventory, list):
-                continue
-            for source in inventory:
-                if not isinstance(source, Mapping) or source.get("kind") != (
-                    "uploaded_file"
-                ):
-                    continue
-                file_id = source.get("file_id")
-                sha256 = source.get("source_sha256")
-                if (
-                    isinstance(file_id, str)
-                    and isinstance(sha256, str)
-                    and (SHA256_PATTERN.fullmatch(sha256) is not None)
-                ):
-                    values_by_file_id.setdefault(file_id, set()).add(sha256)
-    conflicts = {
-        file_id: values
-        for file_id, values in values_by_file_id.items()
-        if len(values) != 1
-    }
-    if conflicts:
-        raise ValueError(
-            "Bundles contain multiple admitted evidence hashes for file IDs: "
-            + ", ".join(sorted(conflicts))
+    MANIFEST_PATH.write_text(
+        json.dumps(
+            {
+                "version": MANIFEST_VERSION,
+                "description": (
+                    "Deterministic AI Builder battle fixtures. Regenerate with "
+                    "backend/scripts/generate_battle_fixtures.py."
+                ),
+                "fixtures": dict(sorted(content_sha256s.items())),
+            },
+            ensure_ascii=False,
+            indent=2,
         )
-    return {
-        file_id: next(iter(values)) for file_id, values in values_by_file_id.items()
-    }
-
-
-def _write_env_file(
-    content_sha256s: Mapping[str, str],
-    *,
-    captured_evidence: Mapping[str, str] | None,
-) -> int:
-    lines = [
-        "# Generated by backend/scripts/generate_battle_fixtures.py.",
-        "# Attachment file IDs and evidence hashes stay empty until post-upload capture.",
-        "",
-    ]
-    for fixture_name, sha256 in sorted(content_sha256s.items()):
-        lines.append(f"# content_sha256 {fixture_name} {sha256}")
-    lines.append("")
-
-    populated = 0
-    for binding in ATTACHMENT_BINDINGS:
-        file_id = (
-            os.getenv(binding.file_id_env, "").strip() if captured_evidence else ""
-        )
-        evidence_sha256 = ""
-        if file_id:
-            evidence_sha256 = (captured_evidence or {}).get(file_id, "")
-            if not evidence_sha256:
-                raise ValueError(
-                    f"No captured evidence hash found for {binding.file_id_env}={file_id}"
-                )
-            populated += 1
-        lines.append(f"# attachment {binding.fixture_name}")
-        lines.append(f"export {binding.file_id_env}={shlex.quote(file_id)}")
-        lines.append(
-            f"export {binding.evidence_sha256_env}={shlex.quote(evidence_sha256)}"
-        )
-        lines.append("")
-    if captured_evidence is not None and populated == 0:
-        raise ValueError(
-            "Capture mode requires at least one exported attachment file-ID env var."
-        )
-
-    for binding in RUNTIME_BINDINGS:
-        path = Path("scripts/fixtures/ai_builder_battle") / binding.fixture_name
-        lines.append(f"export {binding.path_env}={shlex.quote(str(path))}")
-        lines.append(
-            f"export {binding.sha256_env}={content_sha256s[binding.fixture_name]}"
-        )
-    ENV_PATH.write_text("\n".join(lines) + "\n", encoding="utf-8", newline="\n")
-    return populated
+        + "\n",
+        encoding="utf-8",
+        newline="\n",
+    )
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument(
-        "--capture-evidence-from",
-        nargs="+",
-        type=Path,
-        metavar="BUNDLE",
-        help="Read UUID-bound attachment evidence hashes from local battle bundles.",
-    )
     parser.add_argument(
         "--source",
         type=Path,
@@ -630,25 +458,13 @@ def main() -> int:
     )
     args = parser.parse_args()
 
-    if args.capture_evidence_from:
-        if args.source is not None:
-            parser.error("--source cannot be combined with --capture-evidence-from")
-        content_sha256s = _verified_existing_fixture_hashes()
-        captured = _captured_evidence_sha256s(args.capture_evidence_from)
-    else:
-        content_sha256s = _write_fixtures(source_path=args.source)
-        captured = None
-    populated_attachment_count = _write_env_file(
-        content_sha256s,
-        captured_evidence=captured,
-    )
+    content_sha256s = _write_fixtures(source_path=args.source)
+    _write_manifest(content_sha256s)
 
     print(f"fixture_directory={FIXTURE_DIR.resolve()}")
     for fixture_name, sha256 in sorted(content_sha256s.items()):
         print(f"{sha256}  {fixture_name}")
-    print(f"env_file={ENV_PATH.resolve()}")
-    if captured is not None:
-        print(f"captured_attachment_count={populated_attachment_count}")
+    print(f"manifest={MANIFEST_PATH.resolve()}")
     return 0
 
 

@@ -1,0 +1,16 @@
+{
+  "version": 1,
+  "description": "Deterministic AI Builder battle fixtures. Regenerate with backend/scripts/generate_battle_fixtures.py.",
+  "fixtures": {
+    "01_protokoll_bun_2026_02_25.pdf": "cdab0e4471ca518fa5c7334a185a0c77da1c5743a49468e54d3ff094f824c6d8",
+    "02_tjansteskrivelse_underlag.docx": "db74a7a14171cf2beba13f970944a72d2d54b5ff2f33798bc0d304c0f3e015f1",
+    "03_barnkonsekvensanalys.docx": "8e5ba49d23ef6d5a09eca4bf07b7acc47df3f725b1df448d696337dd6a4a2eda",
+    "04_remissvar.docx": "536f1e180bd314d79d0be91265a8f3ed16a2d2648baa5c476eecd1a015f6761c",
+    "05_lokalkalkyl.csv": "384e0372fd261556693f1a6d7b661f8898e98df69411adff007472a8199df638",
+    "06_tidigare_beslut.pdf": "2e128ad58246060bfe768cd9bf1f53aad9681e79fd9b198309d29f0e7604c21b",
+    "decision_letter_template.docx": "9f220c4386475f49d211c035ca2aa5b557b6a5e37ee284b306a41d71222aa1a2",
+    "example_report.docx": "86f778d6c7253c9ac386471fab84e12361e22c46d20b4ffd8f75e71619561c7a",
+    "generic_case_template.docx": "634408c1132de4d2abcf336af66ad84748dd1a2ce5e3144a74a22e7b5c564327",
+    "tjansteskrivelse_template.docx": "2e751e84a6f291a6c26c727cd2ecf270e2806ad3c0ef93edf1e9fd1a86d71f07"
+  }
+}

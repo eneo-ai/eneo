@@ -735,7 +735,7 @@ def _empty_observation_input_identity(harness: ModuleType) -> dict[str, object]:
     }
     return {
         **payload,
-        "declared_attachment_evidence_sha256s": [],
+        "attachment_fixtures": [],
         "declared_runtime_sha256s": [],
         "runtime_evidence_status": "not_required",
         "verified": True,
@@ -776,10 +776,8 @@ def _complete_reanalysis_bundle(
             "expected": dict(expected),
             "file_ids": [],
             "direct_file_slot_count": 0,
-            "file_id_envs": [],
-            "attachment_evidence_sha256_envs": [],
-            "runtime_file_path_envs": [],
-            "runtime_file_sha256_envs": [],
+            "attachments": [],
+            "runtime_files": [],
             "synthetic_user_profile": None,
             "cohorts": [],
             "configured_question_answers": {},
@@ -865,12 +863,8 @@ def _complete_live_case_bundle(
                 "expected": case.expected or {},
                 "file_ids": list(case.file_ids),
                 "direct_file_slot_count": len(case.file_ids),
-                "file_id_envs": list(case.file_id_envs),
-                "attachment_evidence_sha256_envs": list(
-                    case.attachment_evidence_sha256_envs
-                ),
-                "runtime_file_path_envs": list(case.runtime_file_path_envs),
-                "runtime_file_sha256_envs": list(case.runtime_file_sha256_envs),
+                "attachments": harness._fixture_contract(case.attachments),
+                "runtime_files": harness._fixture_contract(case.runtime_files),
                 "synthetic_user_profile": case.synthetic_user_profile,
                 "cohorts": list(case.cohorts),
                 "configured_question_answers": (case.configured_question_answers or {}),
@@ -898,7 +892,7 @@ def test_cases_file_rejects_misspelled_classifier_expectation(tmp_path: Path) ->
     cases_path.write_text(
         json.dumps(
             {
-                "version": 5,
+                "version": 6,
                 "cases": [
                     {
                         "id": "bad-classifier-expectation",
@@ -929,7 +923,7 @@ def test_cases_file_rejects_unsupported_version(tmp_path: Path) -> None:
         encoding="utf-8",
     )
 
-    with raises(ValueError, match="version must be 5"):
+    with raises(ValueError, match="version must be 6"):
         _battle_harness()._read_cases_file(cases_path)
 
 
@@ -941,7 +935,7 @@ def test_cases_file_rejects_duplicate_case_ids_and_prompts(tmp_path: Path) -> No
     ]
     cases_path = tmp_path / "cases.json"
     cases_path.write_text(
-        json.dumps({"version": 5, "cases": duplicate_cases}), encoding="utf-8"
+        json.dumps({"version": 6, "cases": duplicate_cases}), encoding="utf-8"
     )
 
     with raises(ValueError, match="duplicate prompt"):
@@ -949,7 +943,7 @@ def test_cases_file_rejects_duplicate_case_ids_and_prompts(tmp_path: Path) -> No
 
     duplicate_cases[1] = {"id": "case-a", "prompt": "Build another report."}
     cases_path.write_text(
-        json.dumps({"version": 5, "cases": duplicate_cases}), encoding="utf-8"
+        json.dumps({"version": 6, "cases": duplicate_cases}), encoding="utf-8"
     )
 
     with raises(ValueError, match="duplicate case id"):
@@ -961,7 +955,7 @@ def test_cases_file_rejects_misspelled_evidence_posture_key(tmp_path: Path) -> N
     cases_path.write_text(
         json.dumps(
             {
-                "version": 5,
+                "version": 6,
                 "cases": [
                     {
                         "id": "bad-posture-key",
@@ -1556,76 +1550,84 @@ def test_context_balance_pdf_case_sets_cleanup_cap() -> None:
     assert pdf_case.expected["max_post_json_text_cleanup_steps"] == 1
 
 
-def test_attachment_case_file_ids_can_resolve_from_environment(
-    monkeypatch: MonkeyPatch,
-) -> None:
+def test_case_fixtures_resolve_from_provisioning_not_environment() -> None:
+    """A case names a fixture; the harness owns turning that into a file id.
+
+    Under the previous binding a case named an environment variable, so a case
+    ran only where someone had exported the right value and the corpus was not
+    portable at all.
+    """
+
     harness = _battle_harness()
     case = harness.BattleCase(
         case_id="attachment_docx_template_placeholders_to_fields",
         prompt="Build a DOCX flow.",
-        file_id_envs=("ENEO_AI_BUILDER_DOCX_TEMPLATE_FILE_ID",),
+        attachments=("generic_case_template.docx",),
     )
-    args = type("Args", (), {"file_ids": None})()
+    provisioned = {
+        "generic_case_template.docx": {
+            "file_id": "file-template-1",
+            "content_sha256": "0" * 64,
+            "path": "scripts/fixtures/ai_builder_battle/generic_case_template.docx",
+        }
+    }
 
-    assert harness._missing_file_id_envs(case, args) == (
-        "ENEO_AI_BUILDER_DOCX_TEMPLATE_FILE_ID",
-    )
-    skipped = harness._skipped_case_bundle(
-        case=case,
-        repetition=None,
-        missing_envs=("ENEO_AI_BUILDER_DOCX_TEMPLATE_FILE_ID",),
-    )
-    assert skipped["skipped"] is True
-    assert skipped["case"]["id"] == "attachment_docx_template_placeholders_to_fields"
-    assert "ENEO_AI_BUILDER_DOCX_TEMPLATE_FILE_ID" in skipped["skip_reason"]
+    assert harness._case_file_ids(case, provisioned) == ("file-template-1",)
 
-    monkeypatch.setenv(
-        "ENEO_AI_BUILDER_DOCX_TEMPLATE_FILE_ID",
-        "file-template-1",
-    )
-
-    assert harness._missing_file_id_envs(case, args) == ()
-    assert harness._case_file_ids(case, args) == ("file-template-1",)
-
-    cli_args = type("Args", (), {"file_ids": ["file-cli-1"]})()
-    assert harness._missing_file_id_envs(case, cli_args) == ()
-    assert harness._case_file_ids(case, cli_args) == ("file-cli-1",)
+    with raises(ValueError, match="was never provisioned"):
+        harness._case_file_ids(case, {})
 
 
-def test_required_case_skip_fails_suite(
-    tmp_path: Path,
-    monkeypatch: MonkeyPatch,
-) -> None:
+def test_unknown_fixture_name_fails_when_the_corpus_is_read(tmp_path: Path) -> None:
+    """A broken fixture reference costs a second, not forty minutes.
+
+    The old binding could only discover a missing fixture live, mid-suite, and
+    then skipped the case rather than stopping — which is how the flagship
+    runtime sentinel dropped out of six consecutive passes unnoticed.
+    """
+
     harness = _battle_harness()
-    missing_env = "ENEO_AI_BUILDER_REQUIRED_TEST_FILE_ID"
-    monkeypatch.delenv(missing_env, raising=False)
-
-    exit_code = harness._run_suite(
-        cases=[
-            harness.BattleCase(
-                case_id="required-file-role",
-                prompt="Build from the attached source.",
-                required=True,
-                file_id_envs=(missing_env,),
-            )
-        ],
-        config=harness.ApiConfig(
-            base_url="http://localhost:8123/api/v1",
-            api_key="test-key",
-            timeout_seconds=1,
+    cases_path = tmp_path / "cases.json"
+    cases_path.write_text(
+        json.dumps(
+            {
+                "version": harness.SUPPORTED_CASES_FILE_VERSION,
+                "cases": [
+                    {
+                        "id": "bad-fixture",
+                        "prompt": "Bygg ett flöde från den bifogade mallen.",
+                        "attachments": ["no_such_template.docx"],
+                        "expected": {},
+                    }
+                ],
+            }
         ),
-        args=type("Args", (), {"repetitions": 1, "space_id": "space-1"})(),
-        output_dir=tmp_path,
+        encoding="utf-8",
     )
 
-    assert exit_code == 1
-    summary_path = next(
-        tmp_path.glob("ai-builder-api-battle-suite-*/suite-summary.json")
-    )
-    summary = json.loads(summary_path.read_text())
-    assert summary["fixture_skipped_observation_count"] == 1
-    assert summary["required_fixture_skipped_observation_count"] == 1
-    assert summary["sentinel_verdict"] is None
+    with raises(ValueError, match="names unknown fixture"):
+        harness._read_cases_file(cases_path)
+
+
+def test_fixture_whose_bytes_drifted_stops_the_run(tmp_path: Path) -> None:
+    """Content, not a name, is what a case attaches.
+
+    Verifying before upload is what makes the question a case asks portable:
+    edited or corrupted fixture bytes stop the suite instead of quietly
+    changing what was measured.
+    """
+
+    harness = _battle_harness()
+    manifest = harness._fixture_manifest()
+    name = "05_lokalkalkyl.csv"
+
+    assert harness._verified_fixture_path(name, manifest).is_file()
+
+    with raises(ValueError, match="does not match its manifest hash"):
+        harness._verified_fixture_path(name, {**manifest, name: "0" * 64})
+
+    with raises(ValueError, match="Unknown battle fixture"):
+        harness._verified_fixture_path("no_such_fixture.docx", manifest)
 
 
 def test_live_bundle_is_immutable_and_owner_only(tmp_path: Path) -> None:
@@ -1733,10 +1735,10 @@ def test_evidence_report_recomputes_attachment_identity_from_classifier() -> Non
     case = harness.BattleCase(
         case_id="attachment-identity",
         prompt="Build from the attachment.",
-        file_ids=("file-1",),
-        attachment_evidence_sha256_envs=("FIXTURE_EVIDENCE_SHA256",),
+        attachments=("generic_case_template.docx",),
     )
     bundle = _complete_live_case_bundle(harness, case)
+    bundle["case"]["file_ids"] = ["file-1"]
     bundle["classifier_diagnostics"]["classifier_runs"][0]["source_inventory"] = [
         {
             "source_id": "uploaded_file:file-1",
@@ -1819,7 +1821,6 @@ def test_reanalysis_rejects_incomplete_or_non_live_evidence(tmp_path: Path) -> N
     invalid_bundles = [
         {**valid_bundle, "artifact_schema_version": "ai-builder-live-release.v2"},
         {**valid_bundle, "artifact_mode": "live_execution_failure"},
-        {**valid_bundle, "skipped": True},
         {**valid_bundle, "interactions": []},
         {**valid_bundle, "live_execution_provenance": None},
     ]
@@ -1912,7 +1913,6 @@ def test_release_thresholds_are_predeclared_and_compared(
         thresholds=harness.ReleaseThresholds(
             max_required_case_errors=0,
             max_required_quality_failures=0,
-            max_required_skips=0,
         ),
     )
     case = harness.BattleCase(
@@ -1971,7 +1971,6 @@ def test_release_thresholds_are_predeclared_and_compared(
     assert manifest["thresholds"] == {
         "max_required_case_errors": 0,
         "max_required_quality_failures": 0,
-        "max_required_skips": 0,
     }
     summary = json.loads((suite_dir / "suite-summary.json").read_text())
     assert all(check["passed"] for check in summary["sentinel_threshold_checks"])
@@ -2013,7 +2012,6 @@ def test_release_gate_requires_explicit_model_before_execution(
         thresholds=harness.ReleaseThresholds(
             max_required_case_errors=0,
             max_required_quality_failures=0,
-            max_required_skips=0,
         ),
     )
     executed = False
@@ -2049,7 +2047,6 @@ def test_release_gate_requires_explicit_model_before_execution(
         gate.thresholds,
         required_case_error_count=0,
         required_quality_failure_run_count=1,
-        required_skipped_run_count=0,
     )
     assert (
         next(
@@ -2068,7 +2065,6 @@ def test_release_receipt_version_defaults_to_v3_and_rejects_other_versions(
     thresholds = harness.ReleaseThresholds(
         max_required_case_errors=0,
         max_required_quality_failures=0,
-        max_required_skips=0,
     )
 
     gate = harness.ReleaseGate(
@@ -2083,14 +2079,13 @@ def test_release_receipt_version_defaults_to_v3_and_rejects_other_versions(
     cases_path.write_text(
         json.dumps(
             {
-                "version": 5,
+                "version": 6,
                 "release_gate": {
                     "artifact_schema_version": "ai-builder-live-release.unsupported",
                     "require_clean_source": False,
                     "thresholds": {
                         "max_required_case_errors": 0,
                         "max_required_quality_failures": 0,
-                        "max_required_skips": 0,
                     },
                 },
                 "cases": [
@@ -2125,13 +2120,6 @@ def test_suite_receipts_preserve_canonical_case_identity_for_every_outcome(
             cohorts=("foundation", "json"),
         ),
         harness.BattleCase(
-            case_id="skipped-case",
-            prompt="Build the skipped case.",
-            complexity="easy",
-            domain="municipality_documents",
-            cohorts=("attachments",),
-        ),
-        harness.BattleCase(
             case_id="failed-case",
             prompt="Build the failed case.",
             complexity="hard",
@@ -2145,13 +2133,7 @@ def test_suite_receipts_preserve_canonical_case_identity_for_every_outcome(
         prompt=cases[0].prompt,
     )
     monkeypatch.setattr(harness, "_release_run_identity", lambda **_: release_identity)
-    monkeypatch.setattr(
-        harness,
-        "_missing_file_id_envs",
-        lambda case, _args: ("MISSING_FILE_ID",)
-        if case.case_id == "skipped-case"
-        else (),
-    )
+    monkeypatch.setattr(harness, "_provision_fixtures", lambda **_: {})
 
     def run_case(*, case: object, **_: object) -> dict[str, object]:
         assert isinstance(case, harness.BattleCase)
@@ -2210,10 +2192,6 @@ def test_suite_receipts_preserve_canonical_case_identity_for_every_outcome(
     assert results_by_case_id["success-case"]["observation_status"] == "completed"
     assert results_by_case_id["success-case"]["expectation_verdict"] == "pass"
     assert results_by_case_id["success-case"]["error"] is None
-    assert results_by_case_id["skipped-case"]["skipped"] is True
-    assert results_by_case_id["skipped-case"]["observation_status"] == "fixture_skip"
-    assert results_by_case_id["skipped-case"]["expectation_verdict"] == "not_evaluated"
-    assert results_by_case_id["skipped-case"]["error"] is None
     assert (
         results_by_case_id["failed-case"]["artifact_mode"] == "live_execution_failure"
     )
@@ -2232,7 +2210,6 @@ def test_suite_receipts_preserve_canonical_case_identity_for_every_outcome(
         assert "bundle_path" not in result
     assert summary["outcome_class_summary"]["counts"] == {
         "execution_failure": 1,
-        "fixture_skip": 1,
         "unclassified": 1,
     }
     assert summary["receipt_integrity"]["status"] == "complete"
@@ -2242,9 +2219,8 @@ def test_suite_receipts_preserve_canonical_case_identity_for_every_outcome(
         "status_counts": {
             "completed": 1,
             "execution_failure": 1,
-            "fixture_skip": 1,
         },
-        "verdict_counts": {"not_evaluated": 2, "pass": 1},
+        "verdict_counts": {"not_evaluated": 1, "pass": 1},
     }
 
 
@@ -2259,8 +2235,7 @@ def test_case_contract_identity_covers_rubric_answers_fixtures_and_lifecycle() -
             "configured_question_answers": {
                 "terminal_output": {"selected_option_id": "structured_json"}
             },
-            "file_id_envs": ("ENEO_TEST_SOURCE_FILE_ID",),
-            "attachment_evidence_sha256_envs": ("ENEO_TEST_EVIDENCE_SHA256",),
+            "attachments": ("generic_case_template.docx",),
         }
         values.update(changes)
         return harness._case_contract_sha256(harness.BattleCase(**values))
@@ -2277,11 +2252,11 @@ def test_case_contract_identity_covers_rubric_answers_fixtures_and_lifecycle() -
         )
         != baseline
     )
-    assert contract_hash(file_id_envs=("ENEO_OTHER_FIXTURE_FILE_ID",)) != baseline
-    assert (
-        contract_hash(attachment_evidence_sha256_envs=("ENEO_OTHER_FIXTURE_SHA256",))
-        != baseline
-    )
+    # Attaching different bytes asks a different question, so the contract
+    # hash must move. The env-var binding could not see this at all: the blob
+    # behind a name could be replaced with the hash unchanged.
+    assert contract_hash(attachments=("decision_letter_template.docx",)) != baseline
+    assert contract_hash(attachments=()) != baseline
     assert contract_hash(apply_plan=True) != baseline
 
 
@@ -2417,7 +2392,6 @@ def test_suite_identity_rechecks_a_to_b_before_green_summary(
         thresholds=harness.ReleaseThresholds(
             max_required_case_errors=0,
             max_required_quality_failures=0,
-            max_required_skips=0,
         ),
     )
 
@@ -2519,7 +2493,6 @@ def test_final_identity_probe_failure_still_writes_failed_summary(
         thresholds=harness.ReleaseThresholds(
             max_required_case_errors=0,
             max_required_quality_failures=0,
-            max_required_skips=0,
         ),
     )
 
@@ -2587,7 +2560,6 @@ def test_required_identity_drift_does_not_become_builder_expectation_failure(
         thresholds=harness.ReleaseThresholds(
             max_required_case_errors=0,
             max_required_quality_failures=0,
-            max_required_skips=0,
         ),
     )
 
@@ -2634,7 +2606,6 @@ def test_release_gate_rejects_dirty_source_before_creating_output(
         thresholds=harness.ReleaseThresholds(
             max_required_case_errors=0,
             max_required_quality_failures=0,
-            max_required_skips=0,
         ),
         require_clean_source=True,
     )
@@ -3011,24 +2982,18 @@ def test_release_identity_binds_target_version_and_observed_model(
     assert checks["suite_requested_model_identity"]["passed"] is False
 
 
-def test_observation_input_identity_verifies_evidence_text_and_runtime_file_bytes(
-    tmp_path: Path,
-    monkeypatch: MonkeyPatch,
-) -> None:
+def test_observation_input_identity_verifies_evidence_text_and_runtime_file_bytes() -> (
+    None
+):
     harness = _battle_harness()
-    runtime_path = tmp_path / "source.pdf"
-    runtime_path.write_bytes(b"municipal fixture bytes")
-    runtime_sha256 = hashlib.sha256(runtime_path.read_bytes()).hexdigest()
+    runtime_fixture = "05_lokalkalkyl.csv"
+    runtime_sha256 = harness._fixture_manifest()[runtime_fixture]
     extracted_evidence_sha256 = "a" * 64
-    monkeypatch.setenv("FIXTURE_EVIDENCE_SHA256", extracted_evidence_sha256)
-    monkeypatch.setenv("FIXTURE_FILE_SHA256", runtime_sha256)
     case = harness.BattleCase(
         case_id="fixture-identity",
         prompt="Build it.",
-        file_id_envs=("FIXTURE_FILE_ID",),
-        attachment_evidence_sha256_envs=("FIXTURE_EVIDENCE_SHA256",),
-        runtime_file_path_envs=("FIXTURE_PATH",),
-        runtime_file_sha256_envs=("FIXTURE_FILE_SHA256",),
+        attachments=("generic_case_template.docx",),
+        runtime_files=(runtime_fixture,),
     )
     diagnostics = {
         "classifier_runs": [
@@ -3073,7 +3038,7 @@ def test_observation_input_identity_verifies_evidence_text_and_runtime_file_byte
                                 "input_file_ordinal": 0,
                                 "file_id": "runtime-file-1",
                                 "checksum": runtime_sha256,
-                                "byte_size": len(runtime_path.read_bytes()),
+                                "byte_size": 359,
                             },
                             "selection": {"encoding": "bound_file"},
                         }
@@ -3092,24 +3057,35 @@ def test_observation_input_identity_verifies_evidence_text_and_runtime_file_byte
     assert identity["verified"] is True
     assert len(identity["sha256"]) == 64
 
-    runtime_path.write_bytes(b"changed after upload")
-    stable_consumed_identity = harness._observation_input_identity(
+    # The runtime digest is owed by the manifest, so a lineage checksum that
+    # does not match the git-pinned bytes is content drift, not a stale
+    # hand-captured constant.
+    runtime_edge = runtime_evidence["step_attempts"][0]["resolved_input_lineage"][
+        "edges"
+    ][0]
+    runtime_edge["source"]["checksum"] = "b" * 64
+    drifted = harness._observation_input_identity(
         case=case,
         attached_file_ids=("file-1",),
         classifier_diagnostics=diagnostics,
         runtime_evidence=runtime_evidence,
     )
-    assert stable_consumed_identity == identity
+    assert drifted["verified"] is False
+    assert drifted["mismatches"] == ["runtime_content"]
+    runtime_edge["source"]["checksum"] = runtime_sha256
 
-    diagnostics["classifier_runs"][0]["source_inventory"][0]["source_sha256"] = "0" * 64
-    mismatch = harness._observation_input_identity(
+    # An attachment that produced no well-formed extraction digest is an
+    # unevaluable observation; which digest it produced is reported, never
+    # pinned to a constant captured months ago.
+    diagnostics["classifier_runs"][0]["source_inventory"][0]["source_sha256"] = "nope"
+    missing_evidence = harness._observation_input_identity(
         case=case,
         attached_file_ids=("file-1",),
         classifier_diagnostics=diagnostics,
         runtime_evidence=runtime_evidence,
     )
-    assert mismatch["verified"] is False
-    assert mismatch["mismatches"] == ["attachment_evidence_content"]
+    assert missing_evidence["verified"] is False
+    assert missing_evidence["mismatches"] == ["attachment_evidence"]
 
     diagnostics["classifier_runs"][0]["source_inventory"][0]["source_sha256"] = (
         extracted_evidence_sha256
@@ -4043,7 +4019,6 @@ def test_release_inventory_owns_required_dimensions_and_named_cases() -> None:
     assert release_gate.thresholds == harness.ReleaseThresholds(
         max_required_case_errors=0,
         max_required_quality_failures=0,
-        max_required_skips=0,
     )
     required_dimensions = {
         dimension
@@ -4072,10 +4047,8 @@ def test_release_inventory_owns_required_dimensions_and_named_cases() -> None:
     six_file_case = by_id["six_file_document_report_release_gate"]
     assert six_file_case.apply_plan is True
     assert six_file_case.execute_flow is True
-    assert len(six_file_case.file_id_envs) == 6
-    assert len(six_file_case.attachment_evidence_sha256_envs) == 6
-    assert len(six_file_case.runtime_file_path_envs) == 6
-    assert len(six_file_case.runtime_file_sha256_envs) == 6
+    assert len(six_file_case.attachments) == 6
+    assert len(six_file_case.runtime_files) == 6
     assert six_file_case.expected is not None
     assert six_file_case.expected["expected_runtime_evidence"] == {
         "source_file_count": 6,
@@ -4271,7 +4244,7 @@ def test_release_expectation_typos_fail_closed(tmp_path: Path) -> None:
     cases_path.write_text(
         json.dumps(
             {
-                "version": 5,
+                "version": 6,
                 "cases": [
                     {
                         "id": "typo",
@@ -4350,7 +4323,7 @@ def test_smoke_v3_is_locked_balanced_and_directly_selectable() -> None:
     assert sum("json" in case.cohorts for case in cases) == 3
     assert sum("single_missing_dimension" in case.cohorts for case in cases) == 1
     assert sum("technical_contract" in case.cohorts for case in cases) == 2
-    assert sum(bool(case.file_id_envs) for case in cases) == 3
+    assert sum(bool(case.attachments) for case in cases) == 3
     assert [case.case_id for case in cases if case.execute_flow] == [
         "six_file_document_report_release_gate"
     ]
@@ -4922,7 +4895,7 @@ def test_case_loader_merges_synthetic_user_profile_with_case_overrides(
     cases_path.write_text(
         json.dumps(
             {
-                "version": 5,
+                "version": 6,
                 "synthetic_user_profiles": {
                     "document_report_owner": {
                         "description": "Owner building a report from documents.",
@@ -4991,7 +4964,7 @@ def test_case_loader_requires_answers_for_plan_required_question_paths(
     harness = _battle_harness()
     cases_path = tmp_path / "cases.json"
     payload = {
-        "version": 5,
+        "version": 6,
         "synthetic_user_profiles": {
             "document_owner": {
                 "description": "Owner who uploads source documents.",
@@ -5357,7 +5330,7 @@ def test_first_question_forbidden_and_unclassified_always_fail() -> None:
 def test_evaluator_identity_carries_relevance_semantics_version() -> None:
     harness = _battle_harness()
     assert harness.QUESTION_RELEVANCE_SEMANTICS_VERSION == 2
-    assert harness.SUPPORTED_CASES_FILE_VERSION == 5
+    assert harness.SUPPORTED_CASES_FILE_VERSION == 6
     identity = harness._suite_evaluator_identity(
         release_identity={},
         run_context={},

@@ -40,6 +40,8 @@ def _summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
             "run_context": {
                 "auto_confirm_requirements": True,
                 "confirm_message_sha256": "c" * 64,
+                "max_concurrency": 1,
+                "repetitions": 3,
                 "ui_language": "sv",
             },
         },
@@ -53,12 +55,14 @@ def _row(
     *,
     repetition: int = 1,
     verdict: str = "pass",
+    cohorts: list[str] | None = None,
 ) -> dict[str, Any]:
     return {
         "case_id": case_id,
         "repetition": repetition,
         "outcome_class": outcome,
         "expectation_verdict": verdict,
+        "cohorts": cohorts if cohorts is not None else [],
     }
 
 
