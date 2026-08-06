@@ -1016,6 +1016,24 @@ implementation). Remaining outside the ungated series: corpus
 answer-closure, H matrix verification, and the batch peer review when
 quota returns. 122-case checkpoint at DEV-460cafabddc2 in flight.
 
+Template-fill frontier 2026-08-06 afternoon (flagship
+advanced_sundsvall_tjansteskrivelse evidence chain): `9ce11fc6e` DOCX
+byte hydration (the bounded-hydration perf change made original bytes
+opt-in for text-classified files and the Builder never opted in, so
+every template reached the placeholder scan with blob=None and died as
+template_attachment_unreadable while the model could still read the
+placeholders in extracted text — root cause of both "stale fixture"
+readings; fresh-upload replay proved it) and `a755cfd5f` human-named
+placeholder binding (bare/dotted Swedish placeholders like
+sections.ärendet.text previously either became unplaced required form
+fields or unresolved rejections, making AI-fills-your-template flows
+unbuildable with real templates; the contract now binds a placeholder
+to the latest preceding step's declared string field with a matching
+folded name, spec form fields keep precedence, unmatched bare names
+still fall back to runtime form fields; prompt teaches the folded
+naming; the rejected-proposal capture tap now also records architecture
+rejections). Both self-validated (full flows suite + pyright + ruff).
+
 Slice-C inputs found live 2026-08-06: (1) the ASCII-English schema-key
 lexicon conflicts with prose-requested Swedish keys (case
 simple_document_metadata_json dies in builder_error: the user asked for
