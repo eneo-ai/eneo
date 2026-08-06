@@ -1,3 +1,4 @@
+import { readTraceId } from "@eneo/eneo-js";
 import { getBackendUrl } from "$lib/core/environment.server";
 import { DEFAULT_LANDING_PAGE } from "$lib/core/constants";
 import { setFrontendAuthCookie } from "$lib/features/auth/auth.server";
@@ -35,7 +36,9 @@ export const load: PageServerLoad = async ({ url, fetch }) => {
 
     if (!response.ok) {
       const errorData = await response.json().catch(() => ({}));
-      const correlationId = response.headers.get("x-correlation-id") ?? null;
+      // Returned (and passed on) as `correlationId` for the callback page and
+      // the `?correlation=` login param; the value is the trace id.
+      const correlationId = readTraceId(response.headers) ?? null;
 
       console.error("[Federation Callback] Backend auth failed", {
         status: response.status,
