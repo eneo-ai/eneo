@@ -44,9 +44,18 @@ _OUTCOME_RANK: dict[str, int] = {
 }
 
 
-def _load_rows(path: Path) -> tuple[dict[str, dict[str, Any]], dict[str, Any]]:
+def _load_rows(path: Path) -> tuple[dict[str, list[dict[str, Any]]], dict[str, Any]]:
+    """Group every repetition per case.
+
+    Discarding all but the last repetition threw away the only evidence that
+    distinguishes a real change from proposal variance — and that variance is
+    large: 36 of 122 cases changed outcome between two runs of neighbouring
+    builds (2026-08-06). Callers decide how to summarize; nothing is dropped
+    here.
+    """
+
     summary = cast(dict[str, Any], json.loads(path.read_text()))
-    rows: dict[str, dict[str, Any]] = {}
+    rows: dict[str, list[dict[str, Any]]] = {}
     for row_value in cast(list[Any], summary.get("results") or []):
         if not isinstance(row_value, dict):
             continue
@@ -54,12 +63,9 @@ def _load_rows(path: Path) -> tuple[dict[str, dict[str, Any]], dict[str, Any]]:
         case_id = row.get("case_id")
         if not isinstance(case_id, str) or not case_id:
             continue
-        # Keep the last repetition per case: it reflects the final journey.
-        existing = rows.get(case_id)
-        if existing is None or (row.get("repetition") or 0) >= (
-            existing.get("repetition") or 0
-        ):
-            rows[case_id] = row
+        rows.setdefault(case_id, []).append(row)
+    for case_rows in rows.values():
+        case_rows.sort(key=lambda item: item.get("repetition") or 0)
     return rows, summary
 
 
@@ -115,6 +121,9 @@ def _case_delta(
     case_id: str,
     baseline: dict[str, Any] | None,
     current: dict[str, Any] | None,
+    *,
+    baseline_repetitions: list[dict[str, Any]] | None = None,
+    current_repetitions: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     before = str((baseline or {}).get("outcome_class") or "absent")
     after = str((current or {}).get("outcome_class") or "absent")
@@ -136,6 +145,20 @@ def _case_delta(
         "direction": direction,
         "outcome": f"{before} -> {after}",
     }
+    observed = {
+        outcome
+        for rows in (baseline_repetitions or [], current_repetitions or [])
+        for row in rows
+        for outcome in [row.get("outcome_class")]
+        if isinstance(outcome, str)
+    }
+    if len(observed) > 1 and (
+        len(baseline_repetitions or []) > 1 or len(current_repetitions or []) > 1
+    ):
+        # The same build produced different outcomes for this case, so its
+        # transition is variance until repeated measurement says otherwise.
+        delta["unstable"] = True
+        delta["observed_outcomes"] = sorted(observed)
     if baseline is not None and current is not None:
         before_codes = _failure_codes(baseline)
         after_codes = _failure_codes(current)
@@ -216,26 +239,60 @@ def compare(
 
     case_ids = sorted(set(baseline_rows) | set(current_rows))
     deltas = [
-        _case_delta(case_id, baseline_rows.get(case_id), current_rows.get(case_id))
+        _case_delta(
+            case_id,
+            _representative_row(baseline_rows.get(case_id)),
+            _representative_row(current_rows.get(case_id)),
+            baseline_repetitions=baseline_rows.get(case_id) or [],
+            current_repetitions=current_rows.get(case_id) or [],
+        )
         for case_id in case_ids
     ]
     directions = Counter(delta["direction"] for delta in deltas)
     remaining_blockers = Counter(
         code
-        for case_id in current_rows
-        for code in _failure_codes(current_rows[case_id])
+        for case_rows in current_rows.values()
+        for row in case_rows
+        for code in _failure_codes(row)
     )
     outcome_counts = Counter(
-        row.get("outcome_class") or "unknown" for row in current_rows.values()
+        row.get("outcome_class") or "unknown"
+        for case_rows in current_rows.values()
+        for row in case_rows
     )
+    unstable = [delta["case_id"] for delta in deltas if delta.get("unstable") is True]
     return {
         "baseline": _identity(baseline_summary),
         "current": _identity(current_summary),
         "direction_counts": dict(directions),
         "current_outcomes": dict(outcome_counts),
         "remaining_blockers_ranked": remaining_blockers.most_common(),
+        "unstable_cases": unstable,
         "cases": deltas,
     }
+
+
+def _representative_row(
+    case_rows: list[dict[str, Any]] | None,
+) -> dict[str, Any] | None:
+    """Pick the modal outcome's row so one unlucky repetition cannot decide.
+
+    With a single repetition this is the row itself; with several it is the
+    most frequently observed outcome, which is what a comparison should
+    report for a stochastic proposal step.
+    """
+
+    if not case_rows:
+        return None
+    if len(case_rows) == 1:
+        return case_rows[0]
+    modal_outcome = Counter(
+        row.get("outcome_class") or "unknown" for row in case_rows
+    ).most_common(1)[0][0]
+    for row in case_rows:
+        if (row.get("outcome_class") or "unknown") == modal_outcome:
+            return row
+    return case_rows[-1]
 
 
 def _render_markdown(report: dict[str, Any], *, only_changed: bool) -> str:
