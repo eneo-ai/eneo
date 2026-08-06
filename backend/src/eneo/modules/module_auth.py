@@ -63,7 +63,10 @@ class ModuleTicketRequest(BaseModel):
 
 
 class ModuleTicketResponse(BaseModel):
-    ticket: str
+    """The raw ticket travels only inside ``redirect_target`` - a single
+    carrier keeps the secret surface minimal and leaves no field to build
+    side-flows on."""
+
     redirect_target: str
     expires_in: int
 
@@ -230,9 +233,7 @@ class ModuleAuthBroker:
             query_params["state"] = state
         separator = "&" if "?" in redirect_uri else "?"
         redirect_target = f"{redirect_uri}{separator}{urlencode(query_params)}"
-        return ModuleTicketResponse(
-            ticket=ticket, redirect_target=redirect_target, expires_in=ttl
-        )
+        return ModuleTicketResponse(redirect_target=redirect_target, expires_in=ttl)
 
     async def exchange_ticket(
         self, api_key: ApiKeyV2InDB, ticket: str

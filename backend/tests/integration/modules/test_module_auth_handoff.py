@@ -1,4 +1,5 @@
 from datetime import datetime, timedelta, timezone
+from urllib.parse import parse_qs, urlparse
 from uuid import uuid4
 
 import pytest
@@ -119,10 +120,14 @@ async def test_partial_config_patch_preserves_key_and_full_handoff_succeeds(
         headers={"Authorization": f"Bearer {admin_token}"},
     )
     assert ticket_response.status_code == 201, ticket_response.text
-    ticket = ticket_response.json()["ticket"]
-    redirect_target = ticket_response.json()["redirect_target"]
+    ticket_body = ticket_response.json()
+    # redirect_target is the ticket's only carrier - the raw ticket must not
+    # appear as a field of its own.
+    assert "ticket" not in ticket_body
+    redirect_target = ticket_body["redirect_target"]
     assert redirect_target.startswith(UPDATED_REDIRECT_URI + "?ticket=")
     assert redirect_target.endswith("&state=module-csrf-binding-123")
+    ticket = parse_qs(urlparse(redirect_target).query)["ticket"][0]
 
     exchange = await client.post(
         "/api/v1/module-auth/token/",

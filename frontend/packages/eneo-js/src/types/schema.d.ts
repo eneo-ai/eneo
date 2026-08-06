@@ -7612,7 +7612,7 @@ export interface paths {
     put?: never;
     /**
      * Issue Module Ticket
-     * @description Issue a one-time, short-lived login ticket for a module. Requires a session token; the frontend redirects the browser to `redirect_target`, where the module exchanges the ticket server-side. A module-supplied `state` value is echoed on `redirect_target` so the module can bind the callback to the browser session that initiated the login (login-CSRF protection).
+     * @description Issue a one-time, short-lived login ticket for a module. Requires a session token; the frontend redirects the browser to `redirect_target`, which is the ticket's only carrier - the module exchanges the ticket server-side. A module-supplied `state` value is echoed on `redirect_target` so the module can bind the callback to the browser session that initiated the login (login-CSRF protection).
      */
     post: operations["issue_module_ticket_api_v1_module_auth_tickets__post"];
     delete?: never;
@@ -14362,10 +14362,13 @@ export interface components {
        */
       state?: string | null;
     };
-    /** ModuleTicketResponse */
+    /**
+     * ModuleTicketResponse
+     * @description The raw ticket travels only inside ``redirect_target`` - a single
+     *     carrier keeps the secret surface minimal and leaves no field to build
+     *     side-flows on.
+     */
     ModuleTicketResponse: {
-      /** Ticket */
-      ticket: string;
       /** Redirect Target */
       redirect_target: string;
       /** Expires In */

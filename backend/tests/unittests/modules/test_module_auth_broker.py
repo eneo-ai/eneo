@@ -1,5 +1,5 @@
 from unittest.mock import AsyncMock, MagicMock
-from urllib.parse import quote_plus
+from urllib.parse import parse_qs, quote_plus, urlparse
 from uuid import uuid4
 
 import pytest
@@ -134,6 +134,11 @@ async def issue(broker, user=None, redirect_uri=REDIRECT_URI, state=None):
     )
 
 
+def issued_ticket(result):
+    """Extract the ticket from redirect_target - its only carrier."""
+    return parse_qs(urlparse(result.redirect_target).query)["ticket"][0]
+
+
 class TestIssueTicket:
     async def test_issues_ticket_with_redirect_target(self):
         broker = make_broker()
@@ -142,6 +147,8 @@ class TestIssueTicket:
         assert result.redirect_target.startswith(REDIRECT_URI + "?ticket=")
         assert result.expires_in > 0
         assert len(broker.redis_client.store) == 1
+        # redirect_target is the ticket's only carrier.
+        assert "ticket" not in result.model_dump()
 
     async def test_unknown_module_raises_not_found(self):
         broker = make_broker()
@@ -207,7 +214,7 @@ class TestIssueTicket:
 class TestExchangeTicket:
     async def test_full_handoff_yields_module_scoped_token(self):
         broker = make_broker()
-        ticket = (await issue(broker)).ticket
+        ticket = issued_ticket(await issue(broker))
 
         result = await broker.exchange_ticket(api_key=make_api_key(), ticket=ticket)
 
@@ -229,7 +236,7 @@ class TestExchangeTicket:
 
     async def test_ticket_is_single_use(self):
         broker = make_broker()
-        ticket = (await issue(broker)).ticket
+        ticket = issued_ticket(await issue(broker))
         await broker.exchange_ticket(api_key=make_api_key(), ticket=ticket)
 
         with pytest.raises(AuthenticationException):
@@ -243,7 +250,7 @@ class TestExchangeTicket:
 
     async def test_personal_key_rejected(self):
         broker = make_broker()
-        ticket = (await issue(broker)).ticket
+        ticket = issued_ticket(await issue(broker))
 
         with pytest.raises(UnauthorizedException):
             await broker.exchange_ticket(
@@ -261,7 +268,7 @@ class TestExchangeTicket:
         self, key_overrides
     ):
         broker = make_broker()
-        ticket = (await issue(broker)).ticket
+        ticket = issued_ticket(await issue(broker))
 
         with pytest.raises(UnauthorizedException):
             await broker.exchange_ticket(
@@ -270,7 +277,7 @@ class TestExchangeTicket:
 
     async def test_key_not_registered_for_module_rejected(self):
         broker = make_broker()
-        ticket = (await issue(broker)).ticket
+        ticket = issued_ticket(await issue(broker))
 
         with pytest.raises(UnauthorizedException):
             await broker.exchange_ticket(
@@ -279,7 +286,7 @@ class TestExchangeTicket:
 
     async def test_wrong_service_key_does_not_consume_ticket(self):
         broker = make_broker()
-        ticket = (await issue(broker)).ticket
+        ticket = issued_ticket(await issue(broker))
 
         with pytest.raises(UnauthorizedException):
             await broker.exchange_ticket(
@@ -291,7 +298,7 @@ class TestExchangeTicket:
 
     async def test_rotated_successor_of_registered_key_accepted(self):
         broker = make_broker()
-        ticket = (await issue(broker)).ticket
+        ticket = issued_ticket(await issue(broker))
 
         rotated = make_api_key(id=uuid4(), rotated_from_key_id=SERVICE_KEY_ID)
         result = await broker.exchange_ticket(api_key=rotated, ticket=ticket)
@@ -299,7 +306,7 @@ class TestExchangeTicket:
 
     async def test_key_from_other_tenant_rejected(self):
         broker = make_broker()
-        ticket = (await issue(broker)).ticket
+        ticket = issued_ticket(await issue(broker))
 
         with pytest.raises(UnauthorizedException):
             await broker.exchange_ticket(
@@ -308,7 +315,7 @@ class TestExchangeTicket:
 
     async def test_inactive_user_rejected(self):
         broker = make_broker()
-        ticket = (await issue(broker)).ticket
+        ticket = issued_ticket(await issue(broker))
         broker.user_repo.get_user_by_id_and_tenant_id.return_value = make_user(
             is_active=False
         )
