@@ -5,7 +5,11 @@
   import type { EneoInrefCustomComponentProps } from "@eneo/ui/components/markdown";
   import { getMessageContext } from "../../MessageContext.svelte";
   import { getFaviconUrlService } from "$lib/features/knowledge/FaviconUrlService.svelte";
-  import { citedTextDocumentReferences, documentNumber } from "../../mcpReferenceDocs";
+  import {
+    citedTextDocumentReferences,
+    documentNumber,
+    redundantInrefIds
+  } from "../../mcpReferenceDocs";
   import { m } from "$lib/paraglide/messages";
 
   let { token }: EneoInrefCustomComponentProps = $props();
@@ -43,6 +47,13 @@
       };
   });
 
+  // Chips whose neighbour already cites the same document: rendering them
+  // would repeat a number without adding a source.
+  const redundantIds = $derived.by(() => {
+    const message = current();
+    return redundantInrefIds(message.mcp_tool_references ?? [], message.answer ?? "");
+  });
+
   type MetaBag = Record<string, unknown> & {
     sourceType?: string;
     title?: string;
@@ -51,6 +62,7 @@
   };
 
   const mcpReference = $derived.by(() => {
+    if (redundantIds.has(token.id)) return;
     const idx = mcpToolReferences.findIndex((ref) => ref.id.startsWith(token.id));
     if (idx > -1) {
       const ref = mcpToolReferences[idx];

@@ -58,6 +58,46 @@ export function citedTextDocumentReferences<T extends McpRefLike>(refs: T[], ans
   return cited;
 }
 
+/**
+ * Inline citations that would render a chip identical to the one beside them.
+ *
+ * Citation numbers are per document, so a model citing two passages of the
+ * same document back to back ("...API:er. [1] [1]") produces two chips with
+ * the same number and no added meaning. Runs are detected on the answer text —
+ * consecutive inrefs separated by whitespace only — and within a run every
+ * citation after the first of a given document is redundant. Citing the same
+ * document again later in the answer is left alone: it marks a different
+ * claim, and its chip stands on its own.
+ *
+ * An id is only reported when *every* one of its occurrences is redundant, so
+ * a citation that also appears on its own somewhere still renders.
+ */
+export function redundantInrefIds<T extends McpRefLike>(refs: T[], answer: string): Set<string> {
+  const textRefs = textDocumentReferences(refs);
+  const allOccurrencesRedundant = new Map<string, boolean>();
+
+  let documentsInRun = new Set<string>();
+  let previousEnd = -1;
+  for (const match of answer.matchAll(INREF_PATTERN)) {
+    const start = match.index ?? 0;
+    const continuesRun = previousEnd > -1 && answer.slice(previousEnd, start).trim() === "";
+    if (!continuesRun) documentsInRun = new Set<string>();
+
+    const prefix = match[1];
+    const ref = textRefs.find((candidate) => candidate.id.startsWith(prefix));
+    // An unresolved id is never suppressed: better a stray chip than a
+    // silently dropped citation.
+    const key = ref ? canonicalDocKey(ref) : null;
+    const redundant = key !== null && documentsInRun.has(key);
+    if (key !== null) documentsInRun.add(key);
+
+    allOccurrencesRedundant.set(prefix, (allOccurrencesRedundant.get(prefix) ?? true) && redundant);
+    previousEnd = start + match[0].length;
+  }
+
+  return new Set([...allOccurrencesRedundant].filter(([, always]) => always).map(([id]) => id));
+}
+
 export function canonicalDocKey(ref: McpRefLike): string {
   const uri = ref.uri ?? "";
   const hashIndex = uri.indexOf("#");
