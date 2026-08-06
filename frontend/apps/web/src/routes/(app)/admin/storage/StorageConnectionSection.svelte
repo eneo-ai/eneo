@@ -66,6 +66,8 @@
   let connectionRevisionConflict = $state(false);
   let success = $state<SuccessKind | null>(null);
   let switchInFlight = $state(false);
+  let previousActionCode = $state<string | null>(null);
+  let previousActionFailed = $state(false);
   let alertRef = $state<HTMLElement | null>(null);
 
   let endpointUrl = $state("");
@@ -187,10 +189,23 @@
     dialogOpen = true;
   }
 
+  function resetPreviousActionState(): void {
+    previousActionCode = null;
+    previousActionFailed = false;
+  }
+
+  function recordPreviousActionFailure(error: unknown): void {
+    previousActionCode =
+      error instanceof EneoError && typeof error.response?.code === "string"
+        ? error.response.code
+        : null;
+    previousActionFailed = true;
+  }
+
   async function switchBackDestination(): Promise<void> {
     if (switchInFlight) return;
     switchInFlight = true;
-    resetSubmissionState();
+    resetPreviousActionState();
     try {
       connection = await eneo.objectStoreConnection.switchBackDestination();
       success = "switch-back";
@@ -200,11 +215,7 @@
         onAuthorityRevoked?.();
       } else {
         success = null;
-        submissionCode =
-          error instanceof EneoError && typeof error.response?.code === "string"
-            ? error.response.code
-            : null;
-        submissionUnknown = submissionCode === null;
+        recordPreviousActionFailure(error);
         await loadConnection();
       }
     } finally {
@@ -215,13 +226,17 @@
   async function forgetPreviousDestination(): Promise<void> {
     if (switchInFlight) return;
     switchInFlight = true;
-    resetSubmissionState();
+    resetPreviousActionState();
     try {
       await eneo.objectStoreConnection.forgetPreviousDestination();
       await loadConnection();
     } catch (error: unknown) {
-      if (hasStatus(error, 403)) onAuthorityRevoked?.();
-      else await loadConnection();
+      if (hasStatus(error, 403)) {
+        onAuthorityRevoked?.();
+      } else {
+        recordPreviousActionFailure(error);
+        await loadConnection();
+      }
     } finally {
       switchInFlight = false;
     }
@@ -535,6 +550,15 @@
               <p class="text-secondary mt-2 max-w-[68ch] text-sm leading-5">
                 {m.storage_switch_previous_description()}
               </p>
+              {#if previousActionFailed}
+                <Alert.Root class="mt-3" variant="destructive" aria-live="assertive">
+                  <AlertCircle />
+                  <Alert.Title>{errorTitle(previousActionCode)}</Alert.Title>
+                  <Alert.Description>
+                    {errorDescription(previousActionCode)}
+                  </Alert.Description>
+                </Alert.Root>
+              {/if}
             </div>
             <div class="flex shrink-0 flex-col gap-2 sm:flex-row">
               <Button

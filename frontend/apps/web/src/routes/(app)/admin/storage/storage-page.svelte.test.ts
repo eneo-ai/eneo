@@ -483,6 +483,88 @@ describe("admin storage settings page", () => {
     await expect.element(page.getByText("storage_switch_error_new_writes_title")).toBeVisible();
   });
 
+  test("shows why switching back to the previous destination was refused", async () => {
+    testUser.isPlatformAdmin = true;
+    getPolicy.mockResolvedValue(policy());
+    getObjectStoreConnection.mockReset().mockResolvedValue({
+      source: "admin",
+      configured: true,
+      credentials_can_be_managed: true,
+      revision: 2,
+      endpoint_url: "https://new.example.test",
+      region: "se-1",
+      bucket: "eneo-content-new",
+      addressing_style: "path",
+      updated_at: "2026-08-06T10:00:00Z",
+      previous_destination: {
+        endpoint_url: "https://old.example.test",
+        region: "se-1",
+        bucket: "eneo-content",
+        addressing_style: "path",
+        updated_at: "2026-08-03T18:00:00Z"
+      }
+    });
+    switchBackObjectStoreDestination.mockRejectedValue(
+      new EneoError(
+        "New files still go to object storage",
+        "RESPONSE",
+        409,
+        0,
+        { code: "object_store_new_writes_not_redirected" },
+        { endpoint: "POST@/admin/object-store-connection/destination/switch-back" }
+      )
+    );
+
+    render(StoragePage);
+
+    await page.getByRole("button", { name: "storage_switch_back_action" }).click();
+
+    // The reason has to be readable on the page: this action never opens the
+    // connection dialog where submission errors are rendered.
+    await expect.element(page.getByText("storage_switch_error_new_writes_title")).toBeVisible();
+  });
+
+  test("shows why removing the previous destination failed", async () => {
+    testUser.isPlatformAdmin = true;
+    getPolicy.mockResolvedValue(policy());
+    getObjectStoreConnection.mockReset().mockResolvedValue({
+      source: "admin",
+      configured: true,
+      credentials_can_be_managed: true,
+      revision: 2,
+      endpoint_url: "https://new.example.test",
+      region: "se-1",
+      bucket: "eneo-content-new",
+      addressing_style: "path",
+      updated_at: "2026-08-06T10:00:00Z",
+      previous_destination: {
+        endpoint_url: "https://old.example.test",
+        region: "se-1",
+        bucket: "eneo-content",
+        addressing_style: "path",
+        updated_at: "2026-08-03T18:00:00Z"
+      }
+    });
+    forgetPreviousObjectStoreDestination.mockRejectedValue(
+      new EneoError(
+        "Connection data is temporarily unavailable",
+        "RESPONSE",
+        503,
+        0,
+        { code: "object_store_connection_database_unavailable" },
+        { endpoint: "DELETE@/admin/object-store-connection/previous" }
+      )
+    );
+
+    render(StoragePage);
+
+    await page.getByRole("button", { name: "storage_switch_forget_action" }).click();
+
+    await expect
+      .element(page.getByText("storage_connection_error_unavailable_title"))
+      .toBeVisible();
+  });
+
   test("reloads the existing connection after a setup conflict", async () => {
     testUser.isPlatformAdmin = true;
     getPolicy.mockResolvedValue(policy());

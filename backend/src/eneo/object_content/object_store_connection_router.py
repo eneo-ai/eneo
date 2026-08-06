@@ -239,7 +239,7 @@ async def replace_object_store_destination(
     container: _ConnectionAdminContainer,
 ) -> ObjectStoreConnectionPublic:
     user = container.user()
-    stored = await object_content_runtime.replace_object_store_destination(
+    switch = await object_content_runtime.replace_object_store_destination(
         candidate,
         actor_user_id=user.id,
     )
@@ -248,13 +248,10 @@ async def replace_object_store_destination(
         extra={
             "actor_user_id": str(user.id),
             "actor": {"type": "platform_admin", "via": "session"},
-            "revision": stored.revision,
+            "revision": switch.active.revision,
         },
     )
-    return _public_stored_connection(
-        stored,
-        await object_content_runtime.previous_object_store_destination(),
-    )
+    return _public_stored_connection(switch.active, switch.previous)
 
 
 @router.post(
@@ -272,7 +269,7 @@ async def switch_back_object_store_destination(
     container: _ConnectionAdminContainer,
 ) -> ObjectStoreConnectionPublic:
     user = container.user()
-    stored = await object_content_runtime.switch_back_object_store_destination(
+    switch = await object_content_runtime.switch_back_object_store_destination(
         actor_user_id=user.id,
     )
     logger.info(
@@ -280,13 +277,10 @@ async def switch_back_object_store_destination(
         extra={
             "actor_user_id": str(user.id),
             "actor": {"type": "platform_admin", "via": "session"},
-            "revision": stored.revision,
+            "revision": switch.active.revision,
         },
     )
-    return _public_stored_connection(
-        stored,
-        await object_content_runtime.previous_object_store_destination(),
-    )
+    return _public_stored_connection(switch.active, switch.previous)
 
 
 @router.delete(

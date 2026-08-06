@@ -115,6 +115,18 @@ class StoredObjectStoreConnection:
     updated_at: datetime
 
 
+@dataclass(frozen=True, slots=True)
+class DestinationSwitch:
+    """Both destination projections as they were committed together.
+
+    The router answers from this result, so a successful switch is never
+    reported as a failure because a later read could not reach the database.
+    """
+
+    active: StoredObjectStoreConnection
+    previous: StoredObjectStoreConnection
+
+
 class ObjectStoreConnectionError(RuntimeError):
     code = "object_store_connection_error"
 
@@ -507,7 +519,7 @@ class ObjectStoreConnectionService:
         candidate: ObjectStoreConnectionInput,
         *,
         actor_user_id: UUID,
-    ) -> StoredObjectStoreConnection:
+    ) -> DestinationSwitch:
         """Switch the deployment to a destination the operator already filled.
 
         The operator copies the content namespace to the new bucket first
@@ -545,7 +557,7 @@ class ObjectStoreConnectionService:
         self,
         *,
         actor_user_id: UUID,
-    ) -> StoredObjectStoreConnection:
+    ) -> DestinationSwitch:
         """Return to the archived previous destination with its stored keys."""
         self._require_encryption()
         async with self._transaction() as session:
@@ -601,7 +613,7 @@ class ObjectStoreConnectionService:
         actor_user_id: UUID,
         stored: StoredObjectStoreConnection,
         binding: StoreBindingSnapshot,
-    ) -> StoredObjectStoreConnection:
+    ) -> DestinationSwitch:
         if not binding.confirmed or binding.binding_id is None:
             raise ObjectStoreDestinationSwitchBlocked(
                 "The current destination has no established storage binding"
@@ -677,7 +689,11 @@ class ObjectStoreConnectionService:
             ).reset_remote_inventory()
             await session.flush()
             await session.refresh(active)
-            return _stored(active)
+            await session.refresh(previous)
+            return DestinationSwitch(
+                active=_stored(active),
+                previous=_stored(previous),
+            )
 
     async def _require_switchable(self, session: AsyncSession) -> None:
         """Refuse the switch while any write could still reach a destination."""
@@ -735,9 +751,10 @@ class ObjectStoreConnectionService:
         """Admit a bucket that already holds this deployment's copied bytes.
 
         Unlike first-time creation, the content namespace is expected to be
-        non-empty. A marker naming another installation is refused; a
-        missing marker is created with the active binding identity so the
-        existing pairing verification keeps working unchanged.
+        non-empty. A marker naming another installation is refused. For a
+        bucket with no marker yet, every fallible check runs first and the
+        permanent marker is written last, so a rejected switch never leaves
+        the target paired to this installation.
         """
         probe_settings = self._probe_settings(settings)
         store = self._store_factory(probe_settings)
@@ -751,32 +768,51 @@ class ObjectStoreConnectionService:
             except ObjectStoreUnavailableError as error:
                 self._raise_probe_error(error)
                 raise
-            if not marker_matches:
-                try:
-                    creation = await store.prepare_binding_creation(
-                        binding_id,
-                        require_empty_namespace=False,
-                    )
-                    if creation is not None:
-                        await store.create_binding(creation)
-                except ObjectStoreBindingError as error:
-                    raise ObjectStoreProbeBindingMismatch(
-                        "Object storage is bound to another Eneo installation"
-                    ) from error
-                except ObjectStoreUnavailableError as error:
-                    self._raise_probe_error(error)
-                    raise
         finally:
             await store.close()
 
-        await self._probe(
-            settings,
-            binding=StoreBindingSnapshot(
-                deployment_id=settings.deployment_id,
-                binding_id=binding_id,
-                confirmed=True,
-            ),
-        )
+        if marker_matches:
+            # Switch-back and retried switches: the pairing already exists, so
+            # verify it as usual.
+            await self._probe(
+                settings,
+                binding=StoreBindingSnapshot(
+                    deployment_id=settings.deployment_id,
+                    binding_id=binding_id,
+                    confirmed=True,
+                ),
+            )
+            return
+
+        # Unmarked target: prove readiness and a complete write/read/delete
+        # round trip before claiming the bucket.
+        await self._probe(settings, binding=None)
+        await self._create_switch_marker(probe_settings, binding_id=binding_id)
+
+    async def _create_switch_marker(
+        self,
+        probe_settings: ObjectContentSettings,
+        *,
+        binding_id: UUID,
+    ) -> None:
+        """Write the durable pairing marker as the final remote admission."""
+        store = self._store_factory(probe_settings)
+        try:
+            creation = await store.prepare_binding_creation(
+                binding_id,
+                require_empty_namespace=False,
+            )
+            if creation is not None:
+                await store.create_binding(creation)
+        except ObjectStoreBindingError as error:
+            raise ObjectStoreProbeBindingMismatch(
+                "Object storage is bound to another Eneo installation"
+            ) from error
+        except ObjectStoreUnavailableError as error:
+            self._raise_probe_error(error)
+            raise
+        finally:
+            await store.close()
 
     @asynccontextmanager
     async def _transaction(

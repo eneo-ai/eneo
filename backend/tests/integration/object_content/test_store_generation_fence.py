@@ -7,6 +7,7 @@ move completion, or inventory recording fails typed instead.
 """
 
 from collections.abc import AsyncGenerator
+from datetime import UTC, datetime
 from hashlib import sha256
 from uuid import uuid4
 
@@ -205,3 +206,107 @@ async def test_stale_reconciler_run_records_nothing_after_revision_advance(
 
 async def _chunks(payload: bytes) -> AsyncGenerator[bytes]:
     yield payload
+
+
+async def test_generation_change_preserves_already_committed_inventory(
+    object_content_database: DatabaseSessionManager,
+    real_object_store: RealObjectStore,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A rotation mid-run must not erase transitions that already committed.
+
+    Object inventory and missing-content marking commit before the multipart
+    phase runs. If the store generation advances in between, the run has to
+    report what it durably changed, or operators lose sight of an integrity
+    transition that really happened.
+    """
+    payload = b"committed-inventory"
+    digest = sha256(payload).digest()
+    async with object_content_database.session() as session, session.begin():
+        tenant_id = (await session.scalars(select(Tenants.id))).one()
+        user_id = (await session.scalars(select(Users.id))).one()
+        token = uuid4().hex
+        owner = Files(
+            name=f"{token}.txt",
+            mimetype="application/octet-stream",
+            file_type="text",
+            tenant_id=tenant_id,
+            user_id=user_id,
+            parent_file_id=None,
+        )
+        content = ObjectContents(
+            tenant_id=tenant_id,
+            created_by_user_id=user_id,
+            storage_kind=StorageKind.OBJECT_STORE.value,
+            state=ContentState.AVAILABLE.value,
+            access_class="private_resource",
+            sha256=digest,
+            size_bytes=len(payload),
+            declared_media_type="application/octet-stream",
+            verified_media_type="application/octet-stream",
+            idempotency_key=token,
+            request_fingerprint=digest,
+            available_at=datetime.now(UTC),
+        )
+        session.add_all([owner, content])
+        await session.flush()
+        # A row whose object was never written: a complete inventory must mark
+        # it missing.
+        descriptor = ObjectStoreObjects()
+        descriptor.content_id = content.id
+        descriptor.storage_kind = StorageKind.OBJECT_STORE.value
+        descriptor.object_key = new_object_key(real_object_store.settings)
+        descriptor.verification_chunk_size_bytes = len(payload)
+        descriptor.verification_chunk_sha256 = digest
+        session.add(descriptor)
+        session.add(
+            FileContentReferences(
+                file_id=owner.id,
+                content_id=content.id,
+                variant="original",
+                ordinal=0,
+            )
+        )
+        await session.flush()
+        content.reference_count = 1
+        content_id = content.id
+
+    reconciler = ObjectContentReconciler(
+        ObjectContentCoreSettings(_env_file=None),
+        object_content_database,
+        object_store_provider=ObjectStoreProvider.fixed(
+            real_object_store.settings,
+            real_object_store.store,
+        ),
+    )
+
+    # One clean run first: missing-marking only considers rows that predate the
+    # previous completed cycle.
+    first = await reconciler.run_once()
+    assert first.object_cycle_completed
+
+    # Now advance the generation once object inventory and missing-marking have
+    # committed, before the multipart phase records anything.
+    original_multipart = ObjectContentReconciler._reconcile_multipart_page
+
+    async def rotate_then_record(self, store_lease):  # type: ignore[no-untyped-def]
+        await _advance_connection_revision(object_content_database, revision=1)
+        return await original_multipart(self, store_lease)
+
+    monkeypatch.setattr(
+        ObjectContentReconciler, "_reconcile_multipart_page", rotate_then_record
+    )
+
+    result = await reconciler.run_once()
+
+    assert result.object_cycle_completed, (
+        "a completed inventory cycle must still be reported"
+    )
+    assert result.missing_objects == 1, (
+        "a durable missing-content transition must not be hidden"
+    )
+    async with object_content_database.session() as session, session.begin():
+        row = await session.get(ObjectContents, content_id)
+        assert row is not None
+        assert row.state == ContentState.FAILED.value
+        assert row.failure_code == "backend_missing"

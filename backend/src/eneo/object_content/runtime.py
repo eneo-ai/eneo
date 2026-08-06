@@ -35,6 +35,7 @@ from eneo.object_content.content import (
 )
 from eneo.object_content.content_service import ObjectContentService
 from eneo.object_content.object_store_connection import (
+    DestinationSwitch,
     ObjectStoreConnectionDatabaseUnavailable,
     ObjectStoreConnectionError,
     ObjectStoreConnectionInput,
@@ -313,32 +314,32 @@ class ObjectContentRuntime:
         candidate: ObjectStoreConnectionInput,
         *,
         actor_user_id: UUID,
-    ) -> StoredObjectStoreConnection:
+    ) -> DestinationSwitch:
         connection_service = self._connection_service
         if connection_service is None:
             raise ObjectContentConfigurationError(
                 "Admin-managed object storage is unavailable in this runtime"
             )
-        stored = await connection_service.replace_destination(
+        switch = await connection_service.replace_destination(
             candidate,
             actor_user_id=actor_user_id,
         )
-        await self._publish_saved_object_store_connection(stored)
-        return stored
+        await self._publish_saved_object_store_connection(switch.active)
+        return switch
 
     async def switch_back_object_store_destination(
         self,
         *,
         actor_user_id: UUID,
-    ) -> StoredObjectStoreConnection:
+    ) -> DestinationSwitch:
         connection_service = self._connection_service
         if connection_service is None:
             raise ObjectContentConfigurationError(
                 "Admin-managed object storage is unavailable in this runtime"
             )
-        stored = await connection_service.switch_back(actor_user_id=actor_user_id)
-        await self._publish_saved_object_store_connection(stored)
-        return stored
+        switch = await connection_service.switch_back(actor_user_id=actor_user_id)
+        await self._publish_saved_object_store_connection(switch.active)
+        return switch
 
     async def forget_previous_object_store_destination(
         self,

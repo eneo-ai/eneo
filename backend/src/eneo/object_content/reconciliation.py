@@ -119,30 +119,11 @@ class ObjectContentReconciler:
             )
 
         async with provider.acquire(refresh=False) as store_lease:
-            try:
-                return await self._run_remote_once(
-                    lifecycle_advanced=lifecycle_advanced,
-                    inline_deleted=inline_deleted,
-                    store_lease=store_lease,
-                )
-            except ObjectContentUnavailableError:
-                # A concurrent rotation or destination cutover advanced the
-                # store generation mid-run. Every fenced transaction under the
-                # stale lease was refused before becoming durable; the leased
-                # items expire and the next run converges them under the new
-                # generation.
-                return ReconciliationResult(
-                    lifecycle_advanced=lifecycle_advanced,
-                    inline_deleted=inline_deleted,
-                    content_processed=0,
-                    moves_processed=0,
-                    references_audited=0,
-                    reference_drifts=0,
-                    missing_objects=0,
-                    object_cycle_completed=False,
-                    multipart_aborted=0,
-                    orphan_objects_deleted=0,
-                )
+            return await self._run_remote_once(
+                lifecycle_advanced=lifecycle_advanced,
+                inline_deleted=inline_deleted,
+                store_lease=store_lease,
+            )
 
     async def _run_remote_once(
         self,
@@ -167,23 +148,36 @@ class ObjectContentReconciler:
                 ),
             )
 
-        await asyncio.gather(
-            *(
-                self._process_content(
-                    item,
-                    lease_owner,
-                    store_lease=store_lease,
-                    lease_started_at=content_lease_started_at,
+        content_processed = len(work)
+        remote_work_available = True
+        try:
+            await asyncio.gather(
+                *(
+                    self._process_content(
+                        item,
+                        lease_owner,
+                        store_lease=store_lease,
+                        lease_started_at=content_lease_started_at,
+                    )
+                    for item in work
                 )
-                for item in work
             )
-        )
+        except ObjectContentUnavailableError:
+            # A rotation or destination switch advanced the store generation.
+            # Refused transitions are not durable, so report none processed;
+            # the leases expire and the next run converges them.
+            content_processed = 0
+            remote_work_available = False
 
         object_cycle_completed = False
         missing_objects = 0
         multipart_aborted = 0
         orphan_objects_deleted = 0
         try:
+            if not remote_work_available:
+                raise ObjectContentUnavailableError(
+                    "Object-store generation changed during reconciliation"
+                )
             object_cycle_completed = await self._reconcile_object_page(store_lease)
             async with self._database.session() as session, session.begin():
                 missing_objects = await ObjectContentReconciliationRepository(
@@ -196,10 +190,12 @@ class ObjectContentReconciler:
                 lease_owner,
                 store_lease=store_lease,
             )
-        except ObjectStoreUnavailableError:
+        except (ObjectStoreUnavailableError, ObjectContentUnavailableError):
             # Each preceding phase commits independently. Preserve its result
-            # when a later object-store call becomes unavailable so the worker
-            # summary agrees with the durable transitions already recorded.
+            # when a later object-store call becomes unavailable, or when a
+            # rotation or destination switch advances the store generation, so
+            # the worker summary agrees with the durable transitions already
+            # recorded.
             pass
         async with self._database.session() as session, session.begin():
             (
@@ -210,15 +206,18 @@ class ObjectContentReconciler:
             ).audit_reference_counts(
                 limit=self._core_settings.reconciliation_batch_size
             )
-        moves_processed = await ObjectContentMoveExecutor(
-            self._core_settings,
-            self._database,
-            store_lease=store_lease,
-        ).run_once()
+        try:
+            moves_processed = await ObjectContentMoveExecutor(
+                self._core_settings,
+                self._database,
+                store_lease=store_lease,
+            ).run_once()
+        except ObjectContentUnavailableError:
+            moves_processed = 0
         return ReconciliationResult(
             lifecycle_advanced=lifecycle_advanced,
             inline_deleted=inline_deleted,
-            content_processed=len(work),
+            content_processed=content_processed,
             moves_processed=moves_processed,
             references_audited=references_audited,
             reference_drifts=reference_drifts,

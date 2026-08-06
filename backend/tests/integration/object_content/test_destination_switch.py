@@ -28,11 +28,15 @@ from eneo.object_content.configuration import (
 )
 from eneo.object_content.content import StorageKind
 from eneo.object_content.object_store_connection import (
+    ObjectStoreConnectionError,
     ObjectStoreConnectionInput,
     ObjectStoreConnectionService,
     ObjectStoreNewWritesNotRedirected,
 )
-from eneo.object_content.s3_object_store import S3ObjectStore
+from eneo.object_content.s3_object_store import (
+    ObjectStoreUnavailableError,
+    S3ObjectStore,
+)
 from eneo.object_content.store_binding import ensure_store_binding_ready
 from eneo.settings.encryption_service import EncryptionService
 from tests.integration.object_content.conftest import RealObjectStore
@@ -201,12 +205,16 @@ async def test_switch_serves_copied_content_and_switches_back(
         deployment_id=created.deployment_id,
     )
 
-    switched = await service.replace_destination(
+    switch = await service.replace_destination(
         _connection_input(real_unpaired_object_store),
         actor_user_id=actor,
     )
+    switched = switch.active
     assert switched.bucket == real_unpaired_object_store.settings.bucket
     assert switched.revision == 2
+    # The mutation carries both projections, so a caller never has to read the
+    # archived row again after the switch has already committed.
+    assert switch.previous.bucket == real_object_store.settings.bucket
     # The deployment identity carries over, so every stored object key stays
     # valid and no content row is touched by the switch.
     assert switched.deployment_id == created.deployment_id
@@ -240,8 +248,9 @@ async def test_switch_serves_copied_content_and_switches_back(
 
     # Switch back to the archived destination, reusing its stored credentials.
     restored = await service.switch_back(actor_user_id=actor)
-    assert restored.bucket == real_object_store.settings.bucket
-    assert restored.revision == 3
+    assert restored.active.bucket == real_object_store.settings.bucket
+    assert restored.active.revision == 3
+    assert restored.previous.bucket == real_unpaired_object_store.settings.bucket
 
 
 async def _any_user_id(database: DatabaseSessionManager):
@@ -358,3 +367,77 @@ async def _copy_object(
 
 async def _chunks(payload: bytes) -> AsyncGenerator[bytes]:
     yield payload
+
+
+async def test_rejected_switch_leaves_no_binding_marker_on_the_target(
+    object_content_database: DatabaseSessionManager,
+    real_object_store: RealObjectStore,
+    real_unpaired_object_store: RealObjectStore,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A target that fails the data probe must not stay paired to us.
+
+    Credentials can be able to write the small marker and list the prefix
+    while still failing a content upload. Claiming the bucket before that is
+    proven would leave another Eneo installation unable to adopt it.
+    """
+    service = _service(object_content_database, real_object_store)
+    actor = await _any_user_id(object_content_database)
+    created = await service.create(
+        _connection_input(real_object_store), actor_user_id=actor
+    )
+    await ensure_store_binding_ready(
+        object_content_database,
+        service.settings_for(created),
+        real_object_store.store,
+    )
+    await _select_inline_writes(object_content_database)
+
+    original_upload = S3ObjectStore.upload
+
+    async def refuse_content_upload(self, key, content, **kwargs):  # type: ignore[no-untyped-def]
+        if self._settings.bucket == real_unpaired_object_store.settings.bucket:
+            raise ObjectStoreUnavailableError("injected content upload refusal")
+        return await original_upload(self, key, content, **kwargs)
+
+    monkeypatch.setattr(S3ObjectStore, "upload", refuse_content_upload)
+
+    with pytest.raises(ObjectStoreConnectionError):
+        await service.replace_destination(
+            _connection_input(real_unpaired_object_store),
+            actor_user_id=actor,
+        )
+
+    monkeypatch.undo()
+
+    # No durable claim on the rejected target, and no database change.
+    target = S3ObjectStore(
+        real_unpaired_object_store.settings.model_copy(
+            update={"deployment_id": created.deployment_id}
+        )
+    )
+    try:
+        assert not await target.verify_binding(
+            (await _binding_id(object_content_database))
+        )
+    finally:
+        await target.close()
+
+    async with object_content_database.session() as session, session.begin():
+        rows = (
+            await session.execute(
+                select(ObjectStoreConnections.id, ObjectStoreConnections.bucket)
+            )
+        ).all()
+    assert [(row[0], row[1]) for row in rows] == [
+        (1, real_object_store.settings.bucket)
+    ]
+
+
+async def _binding_id(database: DatabaseSessionManager):
+    from eneo.object_content.store_binding import StoreBindingRepository
+
+    async with database.session() as session, session.begin():
+        snapshot = await StoreBindingRepository(session).snapshot()
+    assert snapshot.binding_id is not None
+    return snapshot.binding_id
