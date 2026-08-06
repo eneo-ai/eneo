@@ -432,7 +432,12 @@ class AIBuilderService:
                 raise RuntimeError(
                     "FileService is required for AI Builder attachments."
                 )
-            validated_files = await self.file_service.get_files_by_ids(message_file_ids)
+            # Original bytes are required so DOCX attachments can be inspected
+            # structurally (template placeholders), not just as extracted text.
+            validated_files = await self.file_service.get_files_by_ids(
+                message_file_ids,
+                include_text_original_bytes=True,
+            )
             if len({file.id for file in validated_files}) != len(set(message_file_ids)):
                 raise AIBuilderBadRequestException(
                     "One or more referenced files are unavailable for this AI Builder session.",
@@ -446,7 +451,8 @@ class AIBuilderService:
                     "FileService is required for AI Builder attachments."
                 )
             attachment_files = await self.file_service.get_files_by_ids(
-                session_file_ids
+                session_file_ids,
+                include_text_original_bytes=True,
             )
         merged_files: dict[UUID, File] = {file.id: file for file in attachment_files}
         for file in validated_files:

@@ -542,6 +542,7 @@ class FileService:
         self,
         file_ids: list[UUID],
         include_transcription: bool = True,
+        include_text_original_bytes: bool = False,
     ) -> list[File]:
         metadata = await self.repo.get_list_by_id_and_owner(
             ids=file_ids,
@@ -550,6 +551,7 @@ class FileService:
         return await self._hydrate_files(
             metadata,
             include_transcription=include_transcription,
+            include_text_original_bytes=include_text_original_bytes,
         )
 
     async def get_public_files(self) -> list[FilePublic]:

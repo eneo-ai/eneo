@@ -1255,7 +1255,7 @@ class TestPlannerContextPreparation:
         current_file = _make_file(tenant_id=user.tenant_id, owner_user_id=user.id)
         files_by_id = {file.id: file for file in [*persisted_files, current_file]}
         repo.list_session_file_ids.return_value = [file.id for file in persisted_files]
-        file_service.get_files_by_ids.side_effect = lambda file_ids: [
+        file_service.get_files_by_ids.side_effect = lambda file_ids, **_: [
             files_by_id[file_id] for file_id in file_ids
         ]
         completion_service = AsyncMock()
@@ -2883,7 +2883,13 @@ async def test_prepare_message_context_does_not_persist_new_files_before_message
         message_file_ids=[file_id],
     )
 
-    file_service.get_files_by_ids.assert_awaited_once_with([file_id])
+    # Original bytes must be requested so DOCX attachments keep their
+    # structural form (template placeholder inspection reads the archive,
+    # not the extracted text projection).
+    file_service.get_files_by_ids.assert_awaited_once_with(
+        [file_id],
+        include_text_original_bytes=True,
+    )
     assert len(context.attachment_files) == 1
     assert context.attachment_files[0].id == file_id
 
