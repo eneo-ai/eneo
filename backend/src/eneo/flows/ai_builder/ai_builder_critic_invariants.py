@@ -65,7 +65,7 @@ from eneo.flows.ai_builder.ai_builder_result_contract import (
     resolve_result_output_field_roles,
 )
 from eneo.flows.ai_builder.ai_builder_slot_classification_contract import (
-    quoted_text_from_planning_reference,
+    quoted_texts_from_planning_references,
 )
 from eneo.flows.ai_builder.ai_builder_source_reader_contracts import (
     source_capture_field_satisfied,
@@ -387,14 +387,7 @@ def _runtime_metadata_requires_form_fields_remediation(
     # user's own wording as slot evidence, so quote it.
     slot = context.resolved_slots.get("runtime_metadata_fields")
     quotes = (
-        [
-            text
-            for item in slot.evidence
-            for text in [quoted_text_from_planning_reference(item)]
-            if text is not None
-        ]
-        if slot is not None
-        else []
+        quoted_texts_from_planning_references(slot.evidence) if slot is not None else []
     )
     quoted_evidence = (
         " Användarens ord: " + " / ".join(f'"{quote}"' for quote in quotes[:2])

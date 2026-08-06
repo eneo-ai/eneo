@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import unicodedata
-from collections.abc import Collection, Iterable, Mapping
+from collections.abc import Collection, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, Literal, cast, get_args
 from uuid import UUID
@@ -91,6 +91,17 @@ class ClassifiedEvidence:
 
     def planning_reference(self) -> str:
         return f"quote:{self.source_id}:{self.quote}"
+
+
+def quoted_texts_from_planning_references(references: Sequence[str]) -> list[str]:
+    """Return every user quote carried by persisted evidence references."""
+
+    return [
+        text
+        for reference in references
+        for text in [quoted_text_from_planning_reference(reference)]
+        if text is not None
+    ]
 
 
 def quoted_text_from_planning_reference(reference: str) -> str | None:

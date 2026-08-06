@@ -588,10 +588,13 @@ def test_plan_proposal_prompt_identifies_runtime_metadata_as_compiler_policy():
     )
 
     assert "input_fields" in prompt
-    assert "Runtime metadata policy" in prompt
-    assert "compiler" in prompt
-    assert "do not invent input_fields from defaults" in prompt
+    # Ownership is state-dependent: server-owned when the compiler has the
+    # fields, model-owned otherwise. A blanket "compiler-owned" claim left
+    # nobody declaring prose-requested metadata (live loop 2026-08-06).
+    assert "Never invent input_fields from defaults" in prompt
     assert "explicit no-extra-fields decision" in prompt
+    assert "already compiled" in prompt
+    assert "yours to declare" in prompt
     assert "source-reading JSON output_fields" in prompt
     assert "folded from the user's own wording" in prompt
     assert "keep key names the user asked for" in prompt
@@ -937,3 +940,69 @@ def test_plan_proposal_prompt_scopes_audio_transcription_to_backend():
     assert "Human review checkpoints are compiler-owned in create mode" in prompt
     assert "Do not set review_mode" in prompt
     assert "separate AI step" in prompt
+
+
+def test_requested_runtime_fields_block_names_the_owner_when_none_are_compiled() -> (
+    None
+):
+    # Verified against the live failing session 2026-08-06: planning state
+    # carried the metadata request but no input_fields, so no server-owned
+    # block rendered and nothing told the model to declare them.
+    state = _planning_state_with_architecture(
+        StepTriple(input_type="text", output_type="text", output_mode="pass_through")
+    )
+    state.resolved_slots["runtime_metadata_fields"] = ResolvedSlot(
+        name="runtime_metadata_fields",
+        value="basic_runtime_metadata",
+        source="model",
+        evidence=["quote:user_message:msg-1:fyller i område och beräknad klartid"],
+        confidence="high",
+        evidence_level="explicit",
+    )
+
+    prompt = build_plan_proposal_system_prompt(
+        planning_state=state,
+        confirmed_requirements=None,
+        attachment_context=None,
+        flow_context=None,
+        is_edit_mode=False,
+        resource_catalog=_empty_catalog(),
+    )
+
+    assert "Requested runtime input fields:" in prompt
+    assert "fyller i område och beräknad klartid" in prompt
+    assert "Server-owned runtime input fields:" not in prompt
+    assert "yours to declare" in prompt
+
+
+def test_requested_runtime_fields_block_absent_when_server_owns_the_fields() -> None:
+    state = _planning_state_with_architecture(
+        StepTriple(input_type="text", output_type="text", output_mode="pass_through")
+    )
+    state.resolved_slots["runtime_metadata_fields"] = ResolvedSlot(
+        name="runtime_metadata_fields",
+        value="basic_runtime_metadata",
+        source="model",
+        evidence=["quote:user_message:msg-1:fyller i område och beräknad klartid"],
+        confidence="high",
+        evidence_level="explicit",
+    )
+    state.input_fields = [
+        FlowInputFieldIntent(
+            name="omrade",
+            label="Område",
+            provenance="user_confirmed",
+        )
+    ]
+
+    prompt = build_plan_proposal_system_prompt(
+        planning_state=state,
+        confirmed_requirements=None,
+        attachment_context=None,
+        flow_context=None,
+        is_edit_mode=False,
+        resource_catalog=_empty_catalog(),
+    )
+
+    assert "Server-owned runtime input fields:" in prompt
+    assert "Requested runtime input fields:" not in prompt

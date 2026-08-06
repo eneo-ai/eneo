@@ -18,6 +18,9 @@ from eneo.flows.ai_builder.ai_builder_create_compiler import (
     create_compile_context_from_planning_state,
 )
 from eneo.flows.ai_builder.ai_builder_event_models import RequirementsSummaryPayload
+from eneo.flows.ai_builder.ai_builder_framework_policy import (
+    runtime_metadata_allows_input_fields,
+)
 from eneo.flows.ai_builder.ai_builder_output_sections_signals import (
     RequestedOutputSections,
 )
@@ -34,8 +37,14 @@ from eneo.flows.ai_builder.ai_builder_result_contract import (
     derive_result_contract,
     render_result_contract_prompt_block,
 )
+from eneo.flows.ai_builder.ai_builder_runtime_input_fields import (
+    normalize_runtime_metadata_state,
+)
 from eneo.flows.ai_builder.ai_builder_schema_evidence import (
     project_schema_fields,
+)
+from eneo.flows.ai_builder.ai_builder_slot_classification_contract import (
+    quoted_texts_from_planning_references,
 )
 from eneo.flows.ai_builder.ai_builder_template_attachment_contract import (
     MAX_TEMPLATE_PREPARATION_STAGES,
@@ -70,7 +79,7 @@ def build_plan_proposal_system_prompt(
             "- Use input_fields only for secondary inmatningsfält/input variables the user fills in at runtime.",
             "- Declare each confirmed runtime value as its own input_field AND list it in uses_form_fields on the step that consumes it; never silently drop requested runtime fields.",
             "- Do not add an input_field for the primary text, document, file, or audio material being processed; the backend supplies that from the committed architecture.",
-            "- Runtime metadata policy is compiler-owned: do not invent input_fields from defaults. Declare secondary input_fields only when confirmed requirements, confirmed resolved slots, or the semantic workflow clearly needs runtime variables; if a resolved slot shows an explicit no-extra-fields decision, leave them empty.",
+            "- Never invent input_fields from defaults, and leave them empty when a resolved slot shows an explicit no-extra-fields decision. Fields listed under `Server-owned runtime input fields` are already compiled — do not redeclare them. Otherwise the fields under `Requested runtime input fields` (and any other runtime value the confirmed requirements or the semantic workflow clearly needs) are yours to declare.",
             "- For committed audio input, the backend inserts the first transcription/upload step; start propose_flow steps with the analysis, structuring, or synthesis work after transcription. Transcript review is compiler-owned and stays on that backend-inserted step.",
             "- Human review checkpoints are compiler-owned in create mode: the backend places confirmed review intents on their producing steps. Do not set review_mode, and do not model human review as a separate AI step or as instruction prose.",
             "- Do not author field-level previous-step paths or text-output refs in create mode; the backend owns those underlag channels from the proposed step outputs and committed architecture.",
@@ -129,6 +138,18 @@ def build_plan_proposal_system_prompt(
                 server_owned_fields_block,
             ]
         )
+    if not is_edit_mode and server_owned_fields_block is None:
+        requested_runtime_fields_block = _requested_runtime_input_fields_block(
+            planning_state
+        )
+        if requested_runtime_fields_block is not None:
+            lines.extend(
+                [
+                    "",
+                    "Requested runtime input fields:",
+                    requested_runtime_fields_block,
+                ]
+            )
     file_roles_block = _file_roles_block(planning_state)
     if file_roles_block is not None:
         lines.extend(["", "Uploaded file roles:", file_roles_block])
@@ -155,6 +176,37 @@ def build_plan_proposal_system_prompt(
         lines.extend(["", plan_revision_context])
     if attachment_context:
         lines.extend(["", "Attachment context:", attachment_context])
+    return "\n".join(lines)
+
+
+def _requested_runtime_input_fields_block(
+    planning_state: PlanningState,
+) -> str | None:
+    """State who owns runtime metadata fields the server has not compiled.
+
+    The compiler materializes runtime fields only from planning state, so a
+    metadata request that lives in prose has no server-owned block — and a
+    blanket "compiler-owned" rule left nobody declaring the fields while the
+    critic demanded them (a live journey looped four identical proposals,
+    2026-08-06). Naming the request, with the user's own words, puts
+    ownership where it can actually be satisfied.
+    """
+
+    slot = planning_state.resolved_slots.get("runtime_metadata_fields")
+    if slot is None or not runtime_metadata_allows_input_fields(
+        normalize_runtime_metadata_state(slot.value)
+    ):
+        return None
+    quotes = quoted_texts_from_planning_references(slot.evidence)
+    lines = [
+        "- The user asked to supply these values at runtime; the server has "
+        "not compiled them, so declare each one as its own input_field and "
+        "reference it from the consuming step through uses_form_fields."
+    ]
+    lines.extend(
+        f"- user request: {render_ai_builder_evidence_value(quote)}"
+        for quote in quotes[:3]
+    )
     return "\n".join(lines)
 
 
