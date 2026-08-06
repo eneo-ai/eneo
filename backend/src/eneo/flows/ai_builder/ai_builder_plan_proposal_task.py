@@ -336,6 +336,9 @@ def _output_schema_evidence_block(planning_state: PlanningState) -> str | None:
                 "- Prefer source-derived output_fields for placeholders that can be "
                 "extracted from uploaded documents; use input_fields only for values "
                 "the user must provide at runtime.",
+                "- Keep preparation output_fields FLAT: one string field per "
+                "placeholder (source references belong inside the text, not as "
+                "nested objects). Nesting deeper than three levels is rejected.",
             ]
         )
     terminal_output = planning_state.resolved_slots.get("terminal_output")
