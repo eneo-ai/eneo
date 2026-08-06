@@ -8116,6 +8116,7 @@ export interface components {
       | "file_uploaded"
       | "file_deleted"
       | "file_original_download_link_created"
+      | "file_signed_url_minted"
       | "website_created"
       | "website_updated"
       | "website_deleted"
@@ -9562,6 +9563,11 @@ export interface components {
        * @description Whether insights are enabled for this assistant. If enabled, users with appropriate permissions can see all sessions for this assistant.
        */
       insight_enabled: boolean;
+      /**
+       * Inline File Text
+       * @description Whether attached file text is inlined into the prompt (True) or the file is surfaced to the model as a signed URL only (False).
+       */
+      inline_file_text: boolean;
       /**
        * Data Retention Days
        * @description Number of days to retain data for this assistant
@@ -11466,6 +11472,11 @@ export interface components {
        * @default false
        */
       insight_enabled?: boolean;
+      /**
+       * Inline File Text
+       * @default true
+       */
+      inline_file_text?: boolean;
       /**
        * Data Retention Days
        * @description Number of days to retain data for this assistant
@@ -15336,6 +15347,11 @@ export interface components {
        * @description Whether insights are enabled for this assistant. If enabled, users with appropriate permissions can see all sessions for this assistant.
        */
       insight_enabled?: boolean | null;
+      /**
+       * Inline File Text
+       * @description Whether to inline attached file text into the prompt. When False, a file whose original is available via signed URL is surfaced as that URL only (e.g. to avoid large files blowing the context window).
+       */
+      inline_file_text?: boolean | null;
       /** Data Retention Days */
       data_retention_days?: number | null;
       /**
@@ -16847,6 +16863,11 @@ export interface components {
        * @default true
        */
       api_key_expiry_notifications?: boolean;
+      /**
+       * File References Enabled
+       * @default false
+       */
+      file_references_enabled?: boolean;
     };
     /**
      * SharePointSubscriptionPublic

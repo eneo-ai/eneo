@@ -72,6 +72,7 @@ class Assistant(Entity):
         tool_assistants: list["Assistant"] | None = None,
         description: Optional[str] = None,
         insight_enabled: bool = False,
+        inline_file_text: bool = True,
         data_retention_days: Optional[int] = None,
         metadata_json: dict[str, object] | None = None,
         icon_id: Optional[UUID] = None,
@@ -98,6 +99,7 @@ class Assistant(Entity):
         self.tool_assistants = tool_assistants or []
         self.description = description
         self.insight_enabled = insight_enabled
+        self.inline_file_text = inline_file_text
         self.data_retention_days = data_retention_days
         self.type = (
             AssistantType.DEFAULT_ASSISTANT if is_default else AssistantType.ASSISTANT
@@ -262,6 +264,7 @@ class Assistant(Entity):
         published: bool | None = None,
         description: Union[str, None, NotProvided] = NOT_PROVIDED,
         insight_enabled: bool | None = None,
+        inline_file_text: bool | None = None,
         data_retention_days: Union[int, None, NotProvided] = NOT_PROVIDED,
         metadata_json: Union[dict[str, object], None, NotProvided] = NOT_PROVIDED,
         icon_id: Union[UUID, None, NotProvided] = NOT_PROVIDED,
@@ -300,6 +303,9 @@ class Assistant(Entity):
 
         if insight_enabled is not None:
             self.insight_enabled = insight_enabled
+
+        if inline_file_text is not None:
+            self.inline_file_text = inline_file_text
 
         if is_provided(data_retention_days):
             self.data_retention_days = data_retention_days
@@ -343,6 +349,7 @@ class Assistant(Entity):
             stream=stream,
             extended_logging=extended_logging,
             model_kwargs=model_kwargs,
+            inline_file_text=self.inline_file_text,
         )
 
     async def ask(
@@ -435,6 +442,7 @@ class Assistant(Entity):
             mcp_servers=[] if self.has_knowledge() else effective_mcp_servers,
             require_tool_approval=require_tool_approval,
             skill_runtime=skill_runtime,
+            inline_file_text=self.inline_file_text,
         )
 
         return response, datastore_result
