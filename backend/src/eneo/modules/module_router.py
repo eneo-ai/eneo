@@ -27,6 +27,9 @@ router = APIRouter(
 )
 
 _Container = Annotated[Container, Depends(get_container())]
+_MutationContainer = Annotated[
+    Container, Depends(get_container(transaction_scope="function"))
+]
 
 
 @router.get(
@@ -70,7 +73,7 @@ async def update_module_client_config(
     tenant_id: UUID,
     module_id: UUID,
     config: ModuleClientConfig,
-    container: _Container,
+    container: _MutationContainer,
 ) -> ModuleTenantClientConfig:
     updates = config.update_values()
     if not updates:
