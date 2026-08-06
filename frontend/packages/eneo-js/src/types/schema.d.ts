@@ -16889,6 +16889,11 @@ export interface components {
        * @default false
        */
       file_references_enabled?: boolean;
+      /**
+       * Object Store Configured
+       * @default false
+       */
+      object_store_configured?: boolean;
     };
     /**
      * SharePointSubscriptionPublic
