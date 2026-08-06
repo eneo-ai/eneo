@@ -1859,6 +1859,63 @@ class TestExtendedClarificationHints:
         assert analysis.next_issue.suggestion is not None
         assert analysis.next_issue.suggestion.question_id == "post_processing_goal"
 
+    def test_unevidenced_goal_classification_asks_purpose_before_terminal(
+        self,
+    ) -> None:
+        # E2 (4 diagnostic engineering defects, e.g.
+        # interview_open_volunteer_interest): a goal classified with medium
+        # confidence but NO cited evidence is below commit grade — assuming
+        # it and spending the question on terminal_output picks the wrong
+        # question. Purpose is asked first; a quoted classification keeps
+        # the assumption path.
+        case_id = "interview_open_volunteer_interest"
+        prompt = _battle_case_prompt(case_id)
+        conversation = [
+            ConversationMessage(
+                message_id="test-source",
+                role="user",
+                content=prompt,
+                metadata={"ui_language": "sv"},
+            )
+        ]
+        planning_state = PlanningState.empty()
+        planning_state.resolved_slots["primary_runtime_input"] = ResolvedSlot(
+            name="primary_runtime_input",
+            value="text",
+            source="model",
+            confidence="high",
+            evidence=[f"quote:user_message:test-source:{prompt}"],
+            evidence_level="explicit",
+        )
+
+        def analyze(evidence: tuple[ClassifiedEvidence, ...]):
+            return analyze_discovery(
+                conversation,
+                planning_state=planning_state,
+                slot_classification_result=SlotClassificationResult(
+                    slots=(
+                        ClassifiedSlot(
+                            slot_name="post_processing_goal",
+                            value="action_followup",
+                            confidence="medium",
+                            reason="Implied by the request.",
+                            evidence=evidence,
+                            evidence_level="inferred",
+                        ),
+                    )
+                ),
+            )
+
+        unevidenced = analyze(())
+        assert unevidenced.next_issue is not None
+        assert unevidenced.next_issue.issue_id == "post_processing_goal"
+
+        quoted = analyze(_classifier_evidence(prompt))
+        assert (
+            quoted.next_issue is None
+            or quoted.next_issue.issue_id != "post_processing_goal"
+        )
+
     def test_interview_input_cohort_keeps_input_first(self) -> None:
         case_id = "interview_input_building_supplement"
         prompt = _battle_case_prompt(case_id)

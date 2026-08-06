@@ -262,10 +262,14 @@ def post_processing_goal_is_vague(
             # The classifier contract returns `unknown` with low confidence
             # for ordinary semantic ambiguity — that is exactly the
             # unresolved case the purpose question exists for, not only
-            # explicit user uncertainty.
+            # explicit user uncertainty. A classification without cited
+            # user-owned evidence is equally below commit grade: assuming
+            # it spends the question budget on downstream slots like
+            # terminal_output while the purpose is still guesswork.
             return (
                 classified_goal.value == UNKNOWN_SLOT_VALUE
                 or classified_goal.confidence == "low"
+                or not classified_goal.evidence
             )
         return any(
             slot.slot_name != "post_processing_goal"
