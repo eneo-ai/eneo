@@ -1876,6 +1876,32 @@ def test_suite_result_does_not_evaluate_invalid_live_evidence(tmp_path: Path) ->
     assert result["evidence_failed_check_count"] > 0
 
 
+def test_suite_result_keeps_error_terminated_journey_outcome(
+    tmp_path: Path,
+) -> None:
+    # An error-terminated turn has no provenance to validate; the journey
+    # outcome is the truth (13 builder_error rows were masked as
+    # invalid_evidence in the 2026-08-06 checkpoint).
+    harness = _battle_harness()
+    bundle = _complete_reanalysis_bundle(
+        harness,
+        case_id="error-terminated",
+        expected={},
+    )
+    bundle["observation_input_identity"]["sha256"] = "f" * 64
+    journey = bundle.setdefault("journey", {})
+    assert isinstance(journey, dict)
+    journey["outcome_class"] = "builder_error"
+    bundle_path = tmp_path / "error-terminated.json"
+    bundle_path.write_text(json.dumps(bundle), encoding="utf-8")
+
+    result = harness._suite_result(bundle, bundle_path)
+
+    assert result["outcome_class"] == "builder_error"
+    assert result["observation_status"] == "error_terminated"
+    assert result["expectation_verdict"] == "not_evaluated"
+
+
 def test_release_thresholds_are_predeclared_and_compared(
     tmp_path: Path,
     monkeypatch: MonkeyPatch,

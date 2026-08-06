@@ -16,6 +16,9 @@ from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
     RuntimeToolCall,
     provider_safe_tool_call_id,
 )
+from eneo.flows.ai_builder.ai_builder_create_proposal import (
+    capture_malformed_proposal_arguments,
+)
 from eneo.flows.ai_builder.ai_builder_domain_models import TargetKind
 from eneo.flows.ai_builder.ai_builder_error_contract import (
     AIBuilderBadRequestException,
@@ -799,6 +802,11 @@ async def _request_self_correction_events(
                         correction_tool_call.function.arguments
                     )
                 except ToolArgumentParseError as error:
+                    capture_malformed_proposal_arguments(
+                        correction_tool_call.function.arguments,
+                        session_id=str(ctx.session_id),
+                        error_message=str(error),
+                    )
                     failure_kind: ToolProcessingFailureKind = "parse"
                     failure_codes = frozenset[str]()
                     failure_fingerprint = _proposal_failure_fingerprint(
@@ -1081,6 +1089,11 @@ async def _execute_forced_tool_retry(
         try:
             arguments = parse_tool_call_arguments(tool_call.function.arguments)
         except ToolArgumentParseError as error:
+            capture_malformed_proposal_arguments(
+                tool_call.function.arguments,
+                session_id=str(ctx.session_id),
+                error_message=str(error),
+            )
             _record_attempt_failure(ctx, failure_kind="parse")
             logger.warning("Forced proposal retry returned invalid payload: %s", error)
             return ForcedToolRetryOutcome(

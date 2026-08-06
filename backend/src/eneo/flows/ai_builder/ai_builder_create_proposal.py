@@ -91,6 +91,35 @@ def _capture_rejected_proposal_arguments(
         logger.warning("Rejected proposal capture failed", exc_info=True)
 
 
+def capture_malformed_proposal_arguments(
+    raw_arguments: str,
+    *,
+    session_id: str,
+    error_message: str,
+) -> None:
+    """Capture tool arguments that failed raw JSON decoding.
+
+    Malformed-JSON repair responses are the one rejection class the
+    structured tap cannot see (there is no parsed dict yet), which left
+    the self-correction dead-end family unattributable. Same env gate,
+    text payload.
+    """
+
+    capture_dir = os.environ.get(REJECTED_PROPOSAL_CAPTURE_DIR_ENV)
+    if not capture_dir:
+        return
+    try:
+        directory = Path(capture_dir)
+        directory.mkdir(parents=True, exist_ok=True)
+        digest = hashlib.sha256(raw_arguments.encode("utf-8")).hexdigest()[:12]
+        (directory / f"malformed-proposal-{digest}.txt").write_text(
+            f"session_id: {session_id}\nerror: {error_message}\n---\n{raw_arguments}",
+            encoding="utf-8",
+        )
+    except OSError:
+        logger.warning("Malformed proposal capture failed", exc_info=True)
+
+
 PROPOSE_FLOW_CREATE_FORCED_TOOL_PROMPT = (
     "Your previous reply was prose only. "
     "Now call propose_flow with one complete semantic flow intent. "

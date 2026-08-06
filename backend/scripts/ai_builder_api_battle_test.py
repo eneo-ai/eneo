@@ -35,6 +35,10 @@ SUPPORTED_CASES_FILE_VERSION = 5
 # Bump when the meaning of question-relevance checks changes; receipts
 # across different semantics versions must never be compared.
 QUESTION_RELEVANCE_SEMANTICS_VERSION = 2
+# v2: error-terminated journeys classify as their journey outcome
+# (builder_error / provider_outcome_unknown) instead of being masked as
+# invalid_evidence — a failed turn has no provenance to validate.
+OUTCOME_CLASSIFICATION_SEMANTICS_VERSION = 2
 SUPPORTED_RECEIPT_ARTIFACT_VERSION = "ai-builder-live-release.v3"
 
 
@@ -1412,6 +1416,9 @@ def _suite_evaluator_identity(
     }
     payload = {
         "question_relevance_semantics_version": (QUESTION_RELEVANCE_SEMANTICS_VERSION),
+        "outcome_classification_semantics_version": (
+            OUTCOME_CLASSIFICATION_SEMANTICS_VERSION
+        ),
         "source_revision": build.get("source_revision"),
         "harness_sha256": build.get("harness_sha256"),
         "cases_sha256": build.get("cases_sha256"),
@@ -4267,9 +4274,18 @@ def _suite_result(bundle: JsonObject, bundle_path: Path) -> JsonObject:
         observation_status = "execution_failure"
         expectation_verdict = "not_evaluated"
     elif completed_live_execution and evidence_valid is not True:
-        outcome_class = "invalid_evidence"
-        observation_status = "invalid_evidence"
-        expectation_verdict = "not_evaluated"
+        journey_outcome = journey.get("outcome_class")
+        if journey_outcome in {"builder_error", "provider_outcome_unknown"}:
+            # An error-terminated turn has no provenance to validate; the
+            # journey outcome is the truth and must not be masked as an
+            # observation problem (13 masked rows in the 2026-08-06 run).
+            outcome_class = journey_outcome
+            observation_status = "error_terminated"
+            expectation_verdict = "not_evaluated"
+        else:
+            outcome_class = "invalid_evidence"
+            observation_status = "invalid_evidence"
+            expectation_verdict = "not_evaluated"
     elif isinstance(journey.get("outcome_class"), str):
         outcome_class = journey["outcome_class"]
         observation_status = "completed"

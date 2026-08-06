@@ -191,11 +191,13 @@ def _identity(summary: dict[str, Any]) -> dict[str, Any]:
 
 def _semantics_marker(summary: dict[str, Any]) -> Any:
     identity = summary.get("evaluator_identity")
-    if isinstance(identity, dict):
-        return cast(dict[str, Any], identity).get(
-            "question_relevance_semantics_version", 1
-        )
-    return 1
+    if not isinstance(identity, dict):
+        return (1, 1)
+    typed_identity = cast(dict[str, Any], identity)
+    return (
+        typed_identity.get("question_relevance_semantics_version", 1),
+        typed_identity.get("outcome_classification_semantics_version", 1),
+    )
 
 
 def compare(
