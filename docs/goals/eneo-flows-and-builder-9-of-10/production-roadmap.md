@@ -1081,6 +1081,19 @@ self_correction_invalid_payload dead-ends, 4 singles. HARNESS FOLLOW-UP
 journeys should classify as their journey outcome (builder_error), not
 invalid_evidence.
 
+Feedback-path shadowing 2026-08-06 evening IV: two more layers stood
+between the quoted remediation and the model, each found by pushing the
+fix to a live replay instead of trusting unit tests. `d30a75620`: the
+create-mode remediation TRANSLATION TABLE shadowed the invariant's
+rendered text with a static sentence — a None entry now defers to the
+invariant, keeping one owner for per-context wording while the table
+still translates mechanics-oriented entries. `add6c8a86`: the quote
+then reached the model carrying its internal source id
+("user_message:<uuid>:...") because the evidence encoding had no
+decoder; one now lives beside ClassifiedEvidence.planning_reference.
+Both were duplicate/absent-owner defects of the class the standing
+directive targets. Verification replay in flight at DEV-add6c8a86834.
+
 Quality-capture payoff 2026-08-06 evening III: the armed tap
 attributed the water-leak loop on first replay — four byte-identical
 compiled specs, form_fields empty, because the bare "add relevant form
