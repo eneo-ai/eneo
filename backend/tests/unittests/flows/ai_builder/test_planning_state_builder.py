@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import json
 from datetime import datetime, timezone
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import pytest
 
@@ -520,6 +520,131 @@ class TestArchitectureCommitPreservation:
         )
 
         assert rebuilt.architecture_commit is None
+
+
+class TestAttachmentDerivedSlotPreservation:
+    """Slots resolved from file bytes cannot be rebuilt from conversation.
+
+    The live defect (2026-08-07): dispatch resolved
+    `docx_output_mode=template_fill_docx` from placeholders found in the
+    uploaded template; `commit_turn`'s rebuild lost the slot, re-derived
+    `pass_through`, and the commit-invariance guard refused every commit —
+    the whole docx-template case family died deterministically as
+    `provider_outcome_unknown`.
+    """
+
+    @staticmethod
+    def _structural_slot(file_id: UUID) -> ResolvedSlot:
+        return ResolvedSlot(
+            name="docx_output_mode",
+            value="template_fill_docx",
+            source="attachment_structure",
+            evidence=[f"file:{file_id}:template_placeholders:kundnamn"],
+            confidence="high",
+        )
+
+    def test_carries_slot_while_its_file_is_attached(self) -> None:
+        file_id = uuid4()
+        rebuilt = _state()
+        persisted = _state()
+        persisted.resolved_slots["docx_output_mode"] = self._structural_slot(file_id)
+
+        carry_forward_persisted_planner_state(
+            rebuilt, persisted, attached_file_ids={file_id}
+        )
+
+        carried = rebuilt.resolved_slots.get("docx_output_mode")
+        assert carried is not None
+        assert carried.value == "template_fill_docx"
+        assert carried.is_commit_grade
+
+    def test_drops_slot_when_its_file_is_detached(self) -> None:
+        rebuilt = _state()
+        persisted = _state()
+        persisted.resolved_slots["docx_output_mode"] = self._structural_slot(uuid4())
+
+        carry_forward_persisted_planner_state(
+            rebuilt, persisted, attached_file_ids=set()
+        )
+
+        assert "docx_output_mode" not in rebuilt.resolved_slots
+
+    def test_never_overwrites_a_commit_grade_rebuilt_slot(self) -> None:
+        # The user's explicit answer in conversation outranks structure.
+        file_id = uuid4()
+        rebuilt = _state()
+        rebuilt.resolved_slots["docx_output_mode"] = ResolvedSlot(
+            name="docx_output_mode",
+            value="generated_docx",
+            source="structured_answer",
+            evidence=["answer:generated_docx"],
+            confidence="high",
+        )
+        persisted = _state()
+        persisted.resolved_slots["docx_output_mode"] = self._structural_slot(file_id)
+
+        carry_forward_persisted_planner_state(
+            rebuilt, persisted, attached_file_ids={file_id}
+        )
+
+        assert rebuilt.resolved_slots["docx_output_mode"].value == "generated_docx"
+
+    def test_replaces_a_policy_default_rebuilt_slot(self) -> None:
+        file_id = uuid4()
+        rebuilt = _state()
+        rebuilt.resolved_slots["docx_output_mode"] = ResolvedSlot(
+            name="docx_output_mode",
+            value="generated_docx",
+            source="policy_default",
+            evidence=[],
+            confidence="low",
+        )
+        persisted = _state()
+        persisted.resolved_slots["docx_output_mode"] = self._structural_slot(file_id)
+
+        carry_forward_persisted_planner_state(
+            rebuilt, persisted, attached_file_ids={file_id}
+        )
+
+        assert rebuilt.resolved_slots["docx_output_mode"].value == "template_fill_docx"
+
+    def test_conversation_derived_slots_are_not_carried(self) -> None:
+        # Conversation-derived slots are the rebuild's job; carrying them
+        # would let stale answers shadow the current conversation.
+        rebuilt = _state()
+        persisted = _state()
+        persisted.resolved_slots["terminal_output"] = ResolvedSlot(
+            name="terminal_output",
+            value="docx_document",
+            source="structured_answer",
+            evidence=["answer:docx_document"],
+            confidence="high",
+        )
+
+        carry_forward_persisted_planner_state(
+            rebuilt, persisted, attached_file_ids=set()
+        )
+
+        assert "terminal_output" not in rebuilt.resolved_slots
+
+    def test_slot_without_parseable_file_evidence_is_not_carried(self) -> None:
+        # Fail closed: a structural slot that cannot name its files cannot
+        # prove they are still attached.
+        rebuilt = _state()
+        persisted = _state()
+        persisted.resolved_slots["docx_output_mode"] = ResolvedSlot(
+            name="docx_output_mode",
+            value="template_fill_docx",
+            source="attachment_structure",
+            evidence=["structure:placeholders_present"],
+            confidence="high",
+        )
+
+        carry_forward_persisted_planner_state(
+            rebuilt, persisted, attached_file_ids={uuid4()}
+        )
+
+        assert "docx_output_mode" not in rebuilt.resolved_slots
 
 
 class TestMappedFileLimitPreservation:

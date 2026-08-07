@@ -401,6 +401,11 @@ def carry_forward_persisted_planner_state(
         if file_role.file_id not in current_file_ids:
             rebuilt.file_roles.append(file_role)
             current_file_ids.add(file_role.file_id)
+    _carry_forward_attachment_derived_slots(
+        rebuilt,
+        persisted,
+        attached_file_ids=attached_file_ids,
+    )
     carried_evidence = rebuilt.output_schema_evidence
     if carried_evidence is None and persisted.output_schema_evidence is not None:
         carried_evidence = _carryable_output_schema_evidence(
@@ -430,6 +435,58 @@ def carry_forward_persisted_planner_state(
     # Carried-forward template roles can complete the explicit-template
     # picture only now, after persisted roles merged.
     resolve_docx_mode_from_template_evidence(rebuilt)
+
+
+def _carry_forward_attachment_derived_slots(
+    rebuilt: PlanningState,
+    persisted: PlanningState,
+    *,
+    attached_file_ids: Collection[UUID],
+) -> None:
+    """Preserve slots resolved from file bytes across a conversation rebuild.
+
+    Conversation-derived slots are the rebuild's job. Slots with source
+    `attachment_structure` were resolved by inspecting attached bytes —
+    template placeholders, structural markers — and no amount of
+    conversation replay can reproduce them. Losing one made `commit_turn`
+    re-derive a different architecture than the one it was committing, and
+    the commit-invariance guard then refused every commit for the whole
+    docx-template case family (2026-08-07, drift receipts on record).
+
+    A slot is carried only while every file its evidence names is still
+    attached, and never over a commit-grade slot the rebuild resolved
+    itself — an explicit answer in conversation outranks structure.
+    """
+
+    attached = set(attached_file_ids)
+    for name, slot in persisted.resolved_slots.items():
+        if slot.source != "attachment_structure":
+            continue
+        current = rebuilt.resolved_slots.get(name)
+        if current is not None and current.is_commit_grade:
+            continue
+        evidence_file_ids = _slot_evidence_file_ids(slot)
+        if not evidence_file_ids or not evidence_file_ids <= attached:
+            continue
+        rebuilt.resolved_slots[name] = slot
+
+
+def _slot_evidence_file_ids(slot: ResolvedSlot) -> set[UUID]:
+    """File ids a structural slot's evidence names (`file:<uuid>:<marker>`).
+
+    Unparseable entries yield no id, so a slot that cannot prove which
+    files back it is never carried.
+    """
+
+    file_ids: set[UUID] = set()
+    for entry in slot.evidence:
+        if not entry.startswith("file:"):
+            continue
+        try:
+            file_ids.add(UUID(entry.split(":", 2)[1]))
+        except (IndexError, ValueError):
+            return set()
+    return file_ids
 
 
 def _carryable_output_schema_evidence(
