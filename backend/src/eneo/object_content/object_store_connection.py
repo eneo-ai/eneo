@@ -747,7 +747,7 @@ class ObjectStoreConnectionService:
             # change, which the commit refuses via the captured revision.
             fenced = await self._advance_generation(expected_revision=stored.revision)
             await self._require_target_holds_every_object(settings)
-            return await self._commit_switch(
+            switch = await self._commit_switch(
                 candidate,
                 settings=settings,
                 actor_user_id=actor_user_id,
@@ -776,6 +776,25 @@ class ObjectStoreConnectionService:
                     candidate_revision=candidate_revision,
                 )
             raise
+
+        # The committed switch re-asserts its own marker. A concurrent
+        # attempt's cleanup can race the admission check and remove the marker
+        # this switch verified, and no ordering of lock-free remote deletes
+        # can fully prevent that — so the endgame is made harmless instead:
+        # whatever happened during the race, the active destination ends up
+        # marked. Failure here is logged, not raised; the switch has committed
+        # and readiness surfaces a persistently missing marker.
+        try:
+            await self._create_switch_marker(
+                self._probe_settings(settings), binding_id=binding.binding_id
+            )
+        except Exception:
+            logger.warning(
+                "object_content.switch_marker_reassert_failed",
+                extra={"endpoint_url": settings.endpoint_url},
+                exc_info=True,
+            )
+        return switch
 
     async def _commit_switch(
         self,

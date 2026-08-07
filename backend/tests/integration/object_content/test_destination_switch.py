@@ -772,6 +772,71 @@ async def test_a_second_switch_cannot_overwrite_a_live_candidate(
         assert candidate.bucket == real_unpaired_object_store.settings.bucket
 
 
+async def test_committed_switch_reasserts_a_marker_lost_to_concurrent_cleanup(
+    object_content_database: DatabaseSessionManager,
+    real_object_store: RealObjectStore,
+    real_unpaired_object_store: RealObjectStore,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The active destination ends up marked, whatever raced the switch.
+
+    A concurrent attempt's cleanup can remove the marker between this
+    switch's admission check and its commit; no ordering of lock-free remote
+    deletes prevents every interleaving. The committed switch therefore
+    re-asserts its own marker, so the race's worst outcome is a marker that
+    briefly disappeared, never an active destination without one.
+    """
+    service = _service(object_content_database, real_object_store)
+    actor = await _any_user_id(object_content_database)
+    created = await service.create(
+        _connection_input(real_object_store), actor_user_id=actor
+    )
+    await ensure_store_binding_ready(
+        object_content_database,
+        service.settings_for(created),
+        real_object_store.store,
+    )
+    await _select_inline_writes(object_content_database)
+    binding_id = await _binding_id(object_content_database)
+
+    # A competing attempt's cleanup deletes the target's marker after this
+    # switch admitted it, just before the swap commits.
+    original_commit = ObjectStoreConnectionService._commit_switch
+
+    async def steal_marker_then_commit(self, candidate, **kwargs):  # type: ignore[no-untyped-def]
+        thief = S3ObjectStore(
+            real_unpaired_object_store.settings.model_copy(
+                update={"deployment_id": created.deployment_id}
+            )
+        )
+        try:
+            await thief.remove_binding(binding_id)
+            assert not await thief.verify_binding(binding_id)
+        finally:
+            await thief.close()
+        return await original_commit(self, candidate, **kwargs)
+
+    monkeypatch.setattr(
+        ObjectStoreConnectionService, "_commit_switch", steal_marker_then_commit
+    )
+    switch = await service.replace_destination(
+        _connection_input(real_unpaired_object_store),
+        actor_user_id=actor,
+    )
+    monkeypatch.undo()
+
+    assert switch.active.bucket == real_unpaired_object_store.settings.bucket
+    active_store = S3ObjectStore(
+        real_unpaired_object_store.settings.model_copy(
+            update={"deployment_id": created.deployment_id}
+        )
+    )
+    try:
+        assert await active_store.verify_binding(binding_id)
+    finally:
+        await active_store.close()
+
+
 async def test_switch_refuses_while_a_previous_destination_is_archived(
     object_content_database: DatabaseSessionManager,
     real_object_store: RealObjectStore,

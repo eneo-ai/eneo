@@ -6,6 +6,14 @@ and the administrator-managed connection table gains a second, temporary
 slot used by a destination migration (candidate before cutover, retiring
 source after it). Slot 1 remains permanently the active destination.
 
+Like every migration in this repository, this one moves ownership in a
+single step and expects services to run the matching application version:
+a pre-migration process reading the dropped binding columns fails fast and
+typed — object-content readiness reports not-ready and no write path can
+corrupt state — and recovers as soon as it restarts on the new version.
+Apply migrations as part of the normal upgrade that replaces the running
+images, not against services left on the previous version.
+
 Revision ID: 202608061200
 Revises: 202607061000
 Create Date: 2026-08-06 12:00:00.000000
