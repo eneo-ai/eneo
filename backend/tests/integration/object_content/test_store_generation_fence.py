@@ -313,6 +313,105 @@ async def test_generation_change_preserves_already_committed_inventory(
         assert row.failure_code == "backend_missing"
 
 
+async def test_missing_marking_is_refused_after_a_revision_advance(
+    object_content_database: DatabaseSessionManager,
+    real_object_store: RealObjectStore,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A stale source inventory must not fail content during a switch.
+
+    Missing-marking consumes one destination's completed inventory. If the
+    destination is switched away between the inventory page commit and the
+    marking transaction, the key may exist on the copied target, so the
+    transition must be refused by the generation fence like every other
+    remote-derived transition — not committed against the new destination.
+    """
+    payload = b"exists-on-the-new-destination"
+    digest = sha256(payload).digest()
+    async with object_content_database.session() as session, session.begin():
+        tenant_id = (await session.scalars(select(Tenants.id))).one()
+        user_id = (await session.scalars(select(Users.id))).one()
+        token = uuid4().hex
+        owner = Files(
+            name=f"{token}.txt",
+            mimetype="application/octet-stream",
+            file_type="text",
+            tenant_id=tenant_id,
+            user_id=user_id,
+            parent_file_id=None,
+        )
+        content = ObjectContents(
+            tenant_id=tenant_id,
+            created_by_user_id=user_id,
+            storage_kind=StorageKind.OBJECT_STORE.value,
+            state=ContentState.AVAILABLE.value,
+            access_class="private_resource",
+            sha256=digest,
+            size_bytes=len(payload),
+            declared_media_type="application/octet-stream",
+            verified_media_type="application/octet-stream",
+            idempotency_key=token,
+            request_fingerprint=digest,
+            available_at=datetime.now(UTC),
+        )
+        session.add_all([owner, content])
+        await session.flush()
+        descriptor = ObjectStoreObjects()
+        descriptor.content_id = content.id
+        descriptor.storage_kind = StorageKind.OBJECT_STORE.value
+        descriptor.object_key = new_object_key(real_object_store.settings)
+        descriptor.verification_chunk_size_bytes = len(payload)
+        descriptor.verification_chunk_sha256 = digest
+        session.add(descriptor)
+        session.add(
+            FileContentReferences(
+                file_id=owner.id,
+                content_id=content.id,
+                variant="original",
+                ordinal=0,
+            )
+        )
+        await session.flush()
+        content.reference_count = 1
+        content_id = content.id
+
+    reconciler = ObjectContentReconciler(
+        ObjectContentCoreSettings(_env_file=None),
+        object_content_database,
+        object_store_provider=ObjectStoreProvider.fixed(
+            real_object_store.settings,
+            real_object_store.store,
+        ),
+    )
+
+    first = await reconciler.run_once()
+    assert first.object_cycle_completed
+
+    # The destination is switched away between the inventory page commit and
+    # the missing-marking transaction.
+    original_page = ObjectContentReconciler._reconcile_object_page
+
+    async def complete_page_then_rotate(self, store_lease):  # type: ignore[no-untyped-def]
+        completed = await original_page(self, store_lease)
+        await _advance_connection_revision(object_content_database, revision=1)
+        return completed
+
+    monkeypatch.setattr(
+        ObjectContentReconciler, "_reconcile_object_page", complete_page_then_rotate
+    )
+
+    result = await reconciler.run_once()
+
+    assert result.missing_objects == 0, (
+        "a stale source inventory must not mark content missing"
+    )
+    async with object_content_database.session() as session, session.begin():
+        row = await session.get(ObjectContents, content_id)
+        assert row is not None
+        assert row.state == ContentState.AVAILABLE.value
+        assert row.failure_code is None
+
+
 async def test_sibling_content_transition_survives_a_mid_batch_rotation(
     object_content_database: DatabaseSessionManager,
     real_object_store: RealObjectStore,

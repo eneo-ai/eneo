@@ -187,6 +187,14 @@ class ObjectContentReconciler:
                 )
             object_cycle_completed = await self._reconcile_object_page(store_lease)
             async with self._database.session() as session, session.begin():
+                # Missing-marking consumes a completed inventory of one
+                # destination, so like every other remote-derived transition
+                # it must not commit after that destination was switched away.
+                await require_store_generation(
+                    session,
+                    slot=store_lease.slot,
+                    revision=store_lease.revision,
+                )
                 missing_objects = await ObjectContentReconciliationRepository(
                     session
                 ).mark_missing_from_completed_inventory(

@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from datetime import timedelta
 from uuid import UUID, uuid4
 
-from sqlalchemy import delete, exists, func, select
+from sqlalchemy import delete, exists, func, select, text
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -157,6 +157,10 @@ class StoreBindingRepository:
             )
 
         row = await self._row_for_update(slot)
+        if row is None and slot == ACTIVE_DESTINATION_SLOT:
+            adopted = await self._adopt_legacy_binding(deployment_id)
+            if adopted is not None:
+                return adopted
         if row is None:
             if (
                 slot == ACTIVE_DESTINATION_SLOT
@@ -303,6 +307,61 @@ class StoreBindingRepository:
             row.claim_until = None
             await self._session.flush()
 
+    async def _adopt_legacy_binding(self, deployment_id: UUID) -> StoreBinding | None:
+        """Adopt binding facts a pre-upgrade process wrote after the expand.
+
+        The expand migration copies the legacy reconciliation-state columns
+        once. A previous-version worker still running in the deployment
+        window can initialize or confirm a binding in those columns
+        afterwards, so an absent table row consults them and adopts what it
+        finds. The contract release drops the columns together with this
+        fallback.
+        """
+        column_present = await self._session.scalar(
+            text(
+                "SELECT 1 FROM information_schema.columns "
+                "WHERE table_name = 'object_content_reconciliation_state' "
+                "AND column_name = 'store_binding_id'"
+            )
+        )
+        if not column_present:
+            return None
+        legacy = (
+            await self._session.execute(
+                text(
+                    "SELECT store_deployment_id, store_binding_id, "
+                    "store_binding_confirmed_at, store_binding_create_started_at "
+                    "FROM object_content_reconciliation_state "
+                    "WHERE id = 1 AND store_binding_id IS NOT NULL"
+                )
+            )
+        ).one_or_none()
+        if legacy is None:
+            return None
+        stored_deployment_id, binding_id, confirmed_at, create_started_at = legacy
+        if stored_deployment_id != deployment_id:
+            raise ObjectContentConfigurationError(
+                "Object-content deployment identity does not match PostgreSQL"
+            )
+        await self._session.execute(
+            insert(ObjectStoreBindings)
+            .values(
+                slot=ACTIVE_DESTINATION_SLOT,
+                deployment_id=stored_deployment_id,
+                binding_id=binding_id,
+                confirmed_at=confirmed_at,
+                create_started_at=create_started_at,
+            )
+            .on_conflict_do_nothing(index_elements=[ObjectStoreBindings.slot])
+        )
+        return StoreBinding(
+            deployment_id=stored_deployment_id,
+            binding_id=binding_id,
+            confirmed=confirmed_at is not None,
+            claim_id=None,
+            creation_started=create_started_at is not None,
+        )
+
     async def _row_for_update(self, slot: int) -> ObjectStoreBindings | None:
         return (
             await self._session.scalars(
@@ -379,9 +438,38 @@ async def ensure_store_binding_ready(
 
     if binding.confirmed:
         if not marker_exists:
-            raise ObjectContentConfigurationError(
-                "The confirmed object-content storage binding is missing"
-            )
+            async with database.session() as session, session.begin():
+                admin_managed = await session.scalar(
+                    select(ObjectStoreConnections.id).where(
+                        ObjectStoreConnections.id == slot
+                    )
+                )
+            if admin_managed is None:
+                # An environment-managed destination can be repointed by
+                # editing configuration, so a missing marker keeps failing
+                # closed: it may be a different bucket entirely.
+                raise ObjectContentConfigurationError(
+                    "The confirmed object-content storage binding is missing"
+                )
+            # An administrator-managed destination only changes through
+            # probed, fenced flows, so the confirmed database binding is the
+            # durable authority and an absent marker is a lost projection —
+            # the endgame of a cleanup racing a destination switch. Re-assert
+            # it instead of failing readiness permanently.
+            try:
+                creation = await store.prepare_binding_creation(
+                    binding.binding_id, require_empty_namespace=False
+                )
+                if creation is not None:
+                    await store.create_binding(creation)
+            except ObjectStoreBindingError as error:
+                raise ObjectContentConfigurationError(
+                    "Object-content storage does not match PostgreSQL"
+                ) from error
+            except ObjectStoreUnavailableError as error:
+                raise ObjectContentUnavailableError(
+                    "Durable object content is temporarily unavailable"
+                ) from error
         return
 
     if not marker_exists:

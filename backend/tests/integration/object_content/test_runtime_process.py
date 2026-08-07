@@ -48,7 +48,10 @@ from eneo.object_content.s3_object_store import (
     S3ObjectStore,
     new_object_key,
 )
-from eneo.object_content.store_binding import StoreBindingRepository
+from eneo.object_content.store_binding import (
+    StoreBindingRepository,
+    ensure_store_binding_ready,
+)
 from tests.integration.object_content.conftest import (
     POSTGRES_13_IMAGE,
     RealObjectStore,
@@ -708,3 +711,117 @@ async def test_confirmed_binding_read_does_not_wait_for_bootstrap_lock(
 
     assert binding.confirmed
     assert binding.binding_id == binding_id
+
+
+@pytest.mark.asyncio
+async def test_absent_binding_row_adopts_legacy_column_facts(
+    object_content_database: DatabaseSessionManager,
+    real_object_store: RealObjectStore,
+) -> None:
+    """Binding facts a pre-upgrade worker recorded stay visible to head code.
+
+    The expand migration copies the legacy reconciliation-state columns once;
+    a previous-version worker still running in the deployment window can
+    initialize and confirm a binding in them afterwards. An absent table row
+    consults those columns and adopts what it finds, so the mixed-version
+    window cannot strand an initialized deployment.
+    """
+    deployment_id = real_object_store.settings.deployment_id
+    binding_id = uuid4()
+    async with object_content_database.session() as session, session.begin():
+        await session.execute(
+            text(
+                "UPDATE object_content_reconciliation_state "
+                "SET store_deployment_id = :deployment_id, "
+                "store_binding_id = :binding_id, "
+                "store_binding_confirmed_at = now() "
+                "WHERE id = 1"
+            ),
+            {"deployment_id": deployment_id, "binding_id": binding_id},
+        )
+
+    async with object_content_database.session() as session, session.begin():
+        binding = await StoreBindingRepository(session).get_or_initialize(
+            deployment_id,
+            claim_id=uuid4(),
+            claim_seconds=30,
+        )
+
+    assert binding.confirmed
+    assert binding.binding_id == binding_id
+    async with object_content_database.session() as session, session.begin():
+        adopted = (
+            await session.execute(
+                text(
+                    "SELECT deployment_id, binding_id, confirmed_at "
+                    "FROM object_store_bindings WHERE slot = 1"
+                )
+            )
+        ).one()
+    assert adopted[0] == deployment_id
+    assert adopted[1] == binding_id
+    assert adopted[2] is not None
+
+
+@pytest.mark.asyncio
+async def test_admin_managed_confirmed_binding_reasserts_a_lost_marker(
+    object_content_database: DatabaseSessionManager,
+    real_object_store: RealObjectStore,
+) -> None:
+    """A lost marker on an administrator-managed destination self-heals.
+
+    The confirmed database binding is the durable authority for a destination
+    that only changes through probed, fenced flows; the bucket marker is its
+    projection. Losing the marker to a cleanup race must degrade to one
+    readiness cycle, not a permanent outage. An environment-managed
+    destination keeps failing closed: its bucket can be repointed by editing
+    configuration, so an absent marker may mean a different bucket entirely.
+    """
+    await ensure_store_binding_ready(
+        object_content_database,
+        real_object_store.settings,
+        real_object_store.store,
+    )
+    client = _raw_client(real_object_store)
+    client.delete_object(
+        Bucket=real_object_store.settings.bucket,
+        Key=f"v1/.eneo-bindings/{real_object_store.settings.deployment_id.hex}",
+    )
+
+    # Without a stored connection this is the environment-managed
+    # configuration, which must keep failing closed.
+    with pytest.raises(ObjectContentConfigurationError):
+        await ensure_store_binding_ready(
+            object_content_database,
+            real_object_store.settings,
+            real_object_store.store,
+        )
+
+    async with object_content_database.session() as session, session.begin():
+        await session.execute(
+            text(
+                "INSERT INTO object_store_connections "
+                "(id, revision, role, endpoint_url, region, bucket, "
+                "access_key_id_encrypted, secret_access_key_encrypted, "
+                "deployment_id, addressing_style, updated_by_actor) "
+                "VALUES (1, 1, 'active', :endpoint_url, :region, :bucket, "
+                "'encrypted', 'encrypted', :deployment_id, 'path', "
+                "'platform_admin')"
+            ),
+            {
+                "endpoint_url": real_object_store.settings.endpoint_url,
+                "region": real_object_store.settings.region,
+                "bucket": real_object_store.settings.bucket,
+                "deployment_id": real_object_store.settings.deployment_id,
+            },
+        )
+
+    await ensure_store_binding_ready(
+        object_content_database,
+        real_object_store.settings,
+        real_object_store.store,
+    )
+    async with object_content_database.session() as session, session.begin():
+        binding = await StoreBindingRepository(session).snapshot()
+    assert binding.binding_id is not None
+    assert await real_object_store.store.verify_binding(binding.binding_id)
