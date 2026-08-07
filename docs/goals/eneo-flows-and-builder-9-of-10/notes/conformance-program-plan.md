@@ -216,6 +216,31 @@ metadata versions, and decision events
 its version matches the latest summary). Fix the module that regenerates
 a new summary unless a matching confirmation is genuinely lost.
 
+**Family 1+2 fixes landed and proven live (2026-08-07 midday).**
+`6454652a7` carries attachment-derived slots across the planning-state
+rebuild; `1a5e3c3f7` makes committed planning state own the critic's
+output intent and folds three private copies of the commit-grade slot
+read into one `PlanningState.commit_grade_slot_value`. Proof
+(`family-fix-proof`, 12 observations, 4 cases × 3): the
+`provider_outcome_unknown` wedge is **gone in 12/12**;
+`attachment_docx_template_placeholders_to_fields` reaches
+`plan_first_pass`; `medium_decision_letter_template_attachment` 2/3
+`plan_repaired`. The two declared-terminal cases still fail but now with
+*visible, captured* leaf causes:
+
+- `declared_terminal_everyday_kulturbidrag_docx` —
+  `self_correction_quality_failure`: every attempt rejected with
+  `final_text_step_must_reference_relevant_structured_outputs` (6
+  identical captures in `/tmp/rejected-proposals/quality-rejected-*`).
+  A critic-vs-model impasse: the remediation does not lead the model to
+  a shape the invariant accepts.
+- `declared_terminal_everyday_bygglovsremiss_text` —
+  `self_correction_invalid_plan`: `steps.1.output_fields[1]` rejected
+  ("must be a field object with name, field_type, and description; no
+  output_fields were accepted") — captured in
+  `/tmp/rejected-proposals/rejected-proposal-*`. Owner candidate: the
+  structured-field normalizer / output_fields admission path.
+
 **Instability posture (Pass 6):** the pilot's 68/155 joint-state
 instability is a diagnostic, not a stabilization target — 23/155 (~15%)
 flip pass↔fail; much of the rest alternates first-pass vs repaired. No
