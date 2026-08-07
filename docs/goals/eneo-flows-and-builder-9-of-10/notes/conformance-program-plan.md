@@ -147,6 +147,87 @@ quantities are written down. A pilot alone does not close this slice.
 
 ---
 
+## Slice 1a — Deterministic-failure triage (adjudicated 2026-08-07, Pass 6)
+
+The 155×3 frozen-build pilot surfaced failure families that are
+**deterministic** (3/3 repetitions). They are cheaper to attribute than
+the stochastic rubric cluster, they are user-visible crashes rather than
+rubric misses, and they carry different owners and proof conditions — so
+they are triaged here, before leaf attribution, and never merged into the
+Slice 2 table. Ordering adjudicated by peer Pass 6; attributions below
+were verified in source and live receipts the same day.
+
+**Family 1 — commit drift, previously mislabeled "router conflict"
+(~7 cases, includes the whole docx-template group).** Mechanism proven
+end to end (probe `router-cause-probe3`, 6/6, drift diff on record):
+
+1. Dispatch-time state resolves `docx_output_mode=template_fill_docx`
+   from *structural* attachment evidence — placeholders found in the
+   uploaded bytes (`_apply_structural_template_docx_mode`,
+   `ai_builder_attachment_context.py`), source `attachment_structure`,
+   commit-grade. The architecture pin is correct: `template_fill`,
+   `document_to_docx_template`.
+2. `commit_turn` (`ai_builder_repo.py:1736`) rebuilds planning state from
+   conversation only; `carry_forward_persisted_planner_state` carries
+   commits, file roles, and schema evidence but **never resolved slots**.
+   The narrower rebuild-side resolver
+   (`resolve_docx_mode_from_template_evidence`,
+   `planning_state_builder.py:1198`) accepts only a model-classified
+   explicit role with `quote:` evidence — structural evidence does not
+   qualify — so the rebuilt state derives `pass_through` /
+   `document_to_structured_report`.
+3. The commit-invariance guard compares the pin against the re-derivation,
+   refuses, and the turn is released as `provider_outcome_unknown`.
+   Until 2026-08-07 the cause was observable nowhere (81 wedged sessions
+   in one dev space, empty diagnostic trail); `83edb5dc3` logs the cause
+   at the wrap site and `3b60613b8` puts the pinned-vs-draft diff in the
+   error.
+
+   **Owner: the `commit_turn` rebuild.** Two assemblies of the same state
+   disagree; the guard is doing its job. Fix direction: the rebuilt state
+   must preserve attachment-derived commit-grade slots whose source files
+   are still attached, at which point the narrow rebuild-side re-resolver
+   is the duplicate path and should be deleted. Do not weaken the guard.
+   `easy_preschool_incident_note_json` (JSON, no attachment) is in the
+   family's case list — capture its drift diff before assuming the same
+   mechanism.
+
+**Family 2 — critic false-kill (part of 21 builder_error cases).** The
+critic re-derives output intent from raw conversation text
+(`resolve_output_intent`, keyword heuristics in
+`ai_builder_framework_policy.py`) instead of reading committed planning
+state — a second owner for a concern the classifier already owns, and
+the weaker one holds veto power. Reproduced offline with no provider
+call: `declared_terminal_everyday_bygglovsremiss_text`, whose prompt says
+"Slutresultatet ska vara text — ingen PDF, ingen DOCX-mall", resolves to
+`template_fill_docx` through double negation-blindness, and the critic
+kills the build (`template_fill_docx_requires_template_fill_step`). The
+committed slot for the same session was correct (`generated_docx`, high
+confidence). **Owner: critic-context construction** — it should consume
+committed state; the duplicate keyword derivation shrinks or dies.
+
+**Family 3 — confirmation loop (3 cases, 3/3).** The harness sends the
+standard confirmation and the builder answers with another
+`requirements_summary`, three turns, never proposing (verified in the
+pilot bundle for `text_terminal_intranatsnyhet_namndbeslut`). Attribution
+protocol per Pass 6: record the three summary versions, confirmation
+metadata versions, and decision events
+(`ai_builder_requirements_state.py:171` accepts a confirmation only when
+its version matches the latest summary). Fix the module that regenerates
+a new summary unless a matching confirmation is genuinely lost.
+
+**Instability posture (Pass 6):** the pilot's 68/155 joint-state
+instability is a diagnostic, not a stabilization target — 23/155 (~15%)
+flip pass↔fail; much of the rest alternates first-pass vs repaired. No
+generic "reduce randomness" slice. Deterministic behavior tests own
+correctness; repeated targeted cohorts own incidence.
+
+**Harness gap noted:** `force_new` is passed on every session creation
+but absent from `run_context` identity; add it when the harness is next
+touched.
+
+---
+
 ## Slice 1 — Freeze the evidence packet
 
 **Owner:** analysis inputs.
@@ -165,7 +246,19 @@ attribution can be re-run from it alone.
 
 **Owner:** offline analysis over the frozen packet.
 
-One row per (case, expected leaf group) for all 43 cases:
+**Scope updated 2026-08-07 (Pass 6):** the corpus is 155 cases with 86
+authored leaf expectations; 54 failed in at least one pilot observation.
+One row per **(case, repetition, expected leaf group)** — one row per
+case cannot name a single disappearance stage when repetitions take
+different paths. Publish case-level aggregates from the rows. Each row
+additionally records: observation outcome and evaluability; authoring
+attachment vs runtime-only input vs runtime sample; file-role provenance,
+confidence, extraction coverage, and content hash; terminal type/mode at
+classification, planning, proposal, and compiled stages; leaf authority
+(explicit name, declared schema, placeholder, result-contract role, or
+author inference); failed/evaluated repetition count.
+
+Original row description (grain superseded above):
 
 - case id, compiled terminal output type, cohort;
 - expected aliases for the group;
@@ -182,6 +275,10 @@ One row per (case, expected leaf group) for all 43 cases:
   not-required / undetermined.
 
 `undetermined` is a legitimate outcome; never guess a stage to fill a row.
+
+Decision-rule additions (Pass 6): runtime-only uploads cannot establish
+template or schema obligations at authoring time; dependent DOCX/PDF mode
+slots must be absent when the declared terminal makes them irrelevant.
 
 **Done when:** every row carries a stage and a classification, counts per
 (stage × terminal type) are published, and the largest determined cluster
