@@ -694,6 +694,14 @@ class ProposalSubmissionOwner:
             # A proposal response already came back from the provider. If local
             # compilation or persistence now fails, replay could repeat paid
             # provider work, so the durable turn must remain outcome-unknown.
+            # The wrap hides the cause from the client by design; this log is
+            # the only place the real failure is observable.
+            logger.error(
+                "AI Builder proposal compilation or persistence failed after "
+                "the provider responded; wrapping into provider-outcome-unknown.",
+                exc_info=error,
+                extra={"request_id": str(ctx.request_id)},
+            )
             raise AIBuilderProviderOutcomeUnknownException() from error
 
     async def _retry_forced_proposal_after_text(
