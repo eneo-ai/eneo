@@ -143,6 +143,28 @@ class MCPProxySession:
             sanitized = "t_" + sanitized
         return sanitized
 
+    @staticmethod
+    def _describe_for_llm(
+        *,
+        server_name: str,
+        name: str,
+        title: str | None,
+        description: str | None,
+    ) -> str:
+        """Model-facing description, opening with the tool's display name.
+
+        The wire name is a sanitized ``server__tool`` identifier the model must
+        emit verbatim, so it cannot double as a label; left to itself the model
+        recites that identifier when a user asks what the assistant can do. MCP's
+        optional ``title`` is the human-readable name the chat UI already prefers
+        for tool-call chips, and the description is the only channel that carries
+        it to the model: the OpenAI function schema has no title field.
+        """
+        base = description or f"Tool from {server_name}"
+        if not title or title == name:
+            return base
+        return f'Display name: "{title}".\n{base}'
+
     def _register_tool(
         self,
         server: MCPServer,
@@ -180,7 +202,12 @@ class MCPProxySession:
                 "type": "function",
                 "function": {
                     "name": prefixed_name,
-                    "description": description or f"Tool from {server.name}",
+                    "description": self._describe_for_llm(
+                        server_name=server.name,
+                        name=name,
+                        title=title,
+                        description=description,
+                    ),
                     "parameters": input_schema or {"type": "object", "properties": {}},
                 },
             }

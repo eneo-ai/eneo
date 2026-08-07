@@ -795,6 +795,7 @@ class TestMCPProxySessionToolCollision:
         for tool_def in tools:
             tool = MagicMock()
             tool.name = tool_def["name"]
+            tool.title = tool_def.get("title")
             tool.description = tool_def.get("description", "")
             tool.input_schema = tool_def.get("input_schema", {})
             tool.is_enabled_by_default = tool_def.get("is_enabled", True)
@@ -876,6 +877,44 @@ class TestMCPProxySessionToolCollision:
 
             # Warning logged
             mock_logger.warning.assert_called()
+
+
+class TestMCPProxySessionToolDisplayName:
+    """The MCP title reaches the model through the function description."""
+
+    def _proxy(self, title: str | None) -> MCPProxySession:
+        tool = MagicMock()
+        tool.name = "ingest_urls"
+        tool.title = title
+        tool.description = "Fetch files from HTTPS links."
+        tool.input_schema = {"type": "object", "properties": {}}
+        tool.is_enabled_by_default = True
+        tool.requires_approval = False
+
+        server = MagicMock()
+        server.id = uuid4()
+        server.name = "files"
+        server.http_url = "http://localhost:8080"
+        server.tools = [tool]
+        return MCPProxySession([server])
+
+    def test_title_is_prepended_to_the_description(self):
+        [tool] = self._proxy("Ladda upp filer").get_tools_for_llm()
+
+        assert tool["function"]["name"] == "files__ingest_urls"
+        assert tool["function"]["description"] == (
+            'Display name: "Ladda upp filer".\nFetch files from HTTPS links.'
+        )
+
+    def test_description_is_untouched_without_a_title(self):
+        [tool] = self._proxy(None).get_tools_for_llm()
+
+        assert tool["function"]["description"] == "Fetch files from HTTPS links."
+
+    def test_title_equal_to_the_tool_name_adds_nothing(self):
+        [tool] = self._proxy("ingest_urls").get_tools_for_llm()
+
+        assert tool["function"]["description"] == "Fetch files from HTTPS links."
 
 
 # =============================================================================
