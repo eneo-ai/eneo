@@ -241,6 +241,43 @@ read into one `PlanningState.commit_grade_slot_value`. Proof
   `/tmp/rejected-proposals/rejected-proposal-*`. Owner candidate: the
   structured-field normalizer / output_fields admission path.
 
+**Full-checkpoint verification (2026-08-07, `checkpoint-8a08a80-155x3`,
+DEV-8a08a80d949c, equal 3-rep design vs the pilot).** Conformance per
+repetition 47/47/50 → **52/52/60** (mean +6.7 against same-build wobble
+≤3). Family conversions at suite scale: provider_outcome_unknown 22→6
+observations, requirements_unconfirmed 21→2, interaction_limit 21→2,
+plans produced 290→330. builder_error rose 35→50 — journeys that died at
+turn one now reach the downstream guards. The comparator's formal
+per-case verdict is `no_measurable_change` because 100 cases were
+unstable in at least one build and unstable cases get no direction;
+the aggregate movement is the evidence.
+
+**Post-checkpoint blocker ranking (by distinct case):**
+`architecture_materialization_failed` 13 — of which **10 are the held
+citations-slice fail-closed refusal** ("citation sidecar cannot be
+preserved"), now the program's top mechanical blocker. The new corpus
+tripled its exposure. This is a product decision, not a bug: either the
+citations slice gets implemented, or planning must stop promising
+citation sidecars the lowering refuses — refusal after planning is a
+dead build the user paid for. **Escalated to the roadmap owner; do not
+implement the citations slice under this plan's authority.** Remaining:
+self_correction_invalid_plan 9, self_correction_quality_failure 8,
+critic impasse 6 (auto-binder investigation), residual
+provider_outcome_unknown 4 (third wrap site instrumented `dd4b9074e`,
+attribution in progress).
+
+**Repair-economics ranking (787 rejection captures from the checkpoint,
+by rejection count):** invalid-plan side — `assembly_plan_invariant_failed`
+206, per-source documents[] shape 49, `unknown_form_field_refs_open` 30,
+`unplaced_form_fields` 22; quality side —
+`final_text_step_must_reference_relevant_structured_outputs` 103,
+`runtime_metadata_requires_form_fields` 60,
+`prose_output_field_names_must_survive` 31,
+`rich_workflow_requires_form_fields` 27. These eight checks own nearly
+all repair spend; the "no repairs" goal routes through making first-pass
+proposals satisfy them — via derived state and compiler ownership, never
+by teaching the prompt case-specific vocabulary.
+
 **Instability posture (Pass 6):** the pilot's 68/155 joint-state
 instability is a diagnostic, not a stabilization target — 23/155 (~15%)
 flip pass↔fail; much of the rest alternates first-pass vs repaired. No
