@@ -632,13 +632,13 @@ docker compose run --rm db-init
 missing policy table.
 
 The store-binding migration (`202608061200`) moves the database-to-bucket
-pairing facts to a per-destination table and drops the old columns in the same
-step, as this repository's migrations always do. A backend or worker still
-running the previous version fails fast and typed against the new schema —
-readiness reports not-ready and nothing can corrupt state — and recovers as
-soon as it restarts on the matching image. Run the migration as part of the
-upgrade that replaces the running images; do not apply it against services
-deliberately left on the previous version.
+pairing facts to a per-destination table. It is the expand half of an
+expand/contract change: the legacy columns stay in place with their
+constraints, so a backend or worker still running the previous version keeps
+working against the upgraded schema during the deployment window. Binding
+work such a process records in that window converges through the idempotent,
+verified marker operations once it restarts on the new version. The old
+columns are dropped by a separate migration in a later release.
 
 For the File/Icon normalization upgrade, stop backend and worker producers
 before Alembic starts and do not restart them until the migration succeeds. If

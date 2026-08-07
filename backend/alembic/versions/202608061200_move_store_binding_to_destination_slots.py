@@ -6,13 +6,14 @@ and the administrator-managed connection table gains a second, temporary
 slot used by a destination migration (candidate before cutover, retiring
 source after it). Slot 1 remains permanently the active destination.
 
-Like every migration in this repository, this one moves ownership in a
-single step and expects services to run the matching application version:
-a pre-migration process reading the dropped binding columns fails fast and
-typed — object-content readiness reports not-ready and no write path can
-corrupt state — and recovers as soon as it restarts on the new version.
-Apply migrations as part of the normal upgrade that replaces the running
-images, not against services left on the previous version.
+This is the expand half of an expand/contract change: the legacy binding
+columns on the reconciliation state stay in place with their constraints, so
+a process still running the previous version keeps working against the
+upgraded schema during the deployment window. Post-upgrade code reads and
+writes only the new table; legacy values a pre-upgrade process writes in
+that window converge through the idempotent, verified marker operations.
+The contract step — dropping the legacy columns — ships as its own revision
+in a later release, once no process reads them.
 
 Revision ID: 202608061200
 Revises: 202607061000
@@ -33,22 +34,6 @@ depends_on: str | Sequence[str] | None = None
 _BINDINGS = "object_store_bindings"
 _CONNECTIONS = "object_store_connections"
 _STATE = "object_content_reconciliation_state"
-
-_STATE_BINDING_CONSTRAINTS = (
-    "ck_object_content_reconciliation_state_binding_pair",
-    "ck_object_content_reconciliation_state_binding_confirmation",
-    "ck_object_content_reconciliation_state_binding_claim_pair",
-    "ck_object_content_reconciliation_state_binding_claim_state",
-    "ck_object_content_reconciliation_state_binding_create_state",
-)
-_STATE_BINDING_COLUMNS = (
-    "store_deployment_id",
-    "store_binding_id",
-    "store_binding_confirmed_at",
-    "store_binding_claim_id",
-    "store_binding_claim_until",
-    "store_binding_create_started_at",
-)
 
 
 def upgrade() -> None:
@@ -105,10 +90,9 @@ def upgrade() -> None:
         )
     )
 
-    for name in _STATE_BINDING_CONSTRAINTS:
-        op.drop_constraint(name, _STATE, type_="check")
-    for name in _STATE_BINDING_COLUMNS:
-        op.drop_column(_STATE, name)
+    # Expand only: the legacy binding columns and their constraints remain so
+    # a pre-upgrade process keeps working during the deployment window. A
+    # later release drops them once no running code reads them.
 
     op.add_column(
         _CONNECTIONS,
@@ -164,33 +148,9 @@ def downgrade() -> None:
     )
     op.drop_column(_CONNECTIONS, "role")
 
-    op.add_column(
-        _STATE, sa.Column("store_deployment_id", sa.UUID(), nullable=True)
-    )
-    op.add_column(_STATE, sa.Column("store_binding_id", sa.UUID(), nullable=True))
-    op.add_column(
-        _STATE,
-        sa.Column(
-            "store_binding_confirmed_at", sa.TIMESTAMP(timezone=True), nullable=True
-        ),
-    )
-    op.add_column(
-        _STATE, sa.Column("store_binding_claim_id", sa.UUID(), nullable=True)
-    )
-    op.add_column(
-        _STATE,
-        sa.Column(
-            "store_binding_claim_until", sa.TIMESTAMP(timezone=True), nullable=True
-        ),
-    )
-    op.add_column(
-        _STATE,
-        sa.Column(
-            "store_binding_create_started_at",
-            sa.TIMESTAMP(timezone=True),
-            nullable=True,
-        ),
-    )
+    # The legacy columns were never dropped (expand-only upgrade), so the
+    # downgrade only copies the authoritative facts back into them: work
+    # recorded by post-upgrade code exists in the table alone.
     op.execute(
         sa.text(
             f"""
@@ -205,31 +165,5 @@ def downgrade() -> None:
             WHERE state.id = 1 AND binding.slot = 1
             """
         )
-    )
-    op.create_check_constraint(
-        "ck_object_content_reconciliation_state_binding_pair",
-        _STATE,
-        "(store_deployment_id IS NULL) = (store_binding_id IS NULL)",
-    )
-    op.create_check_constraint(
-        "ck_object_content_reconciliation_state_binding_confirmation",
-        _STATE,
-        "store_binding_confirmed_at IS NULL OR store_binding_id IS NOT NULL",
-    )
-    op.create_check_constraint(
-        "ck_object_content_reconciliation_state_binding_claim_pair",
-        _STATE,
-        "(store_binding_claim_id IS NULL) = (store_binding_claim_until IS NULL)",
-    )
-    op.create_check_constraint(
-        "ck_object_content_reconciliation_state_binding_claim_state",
-        _STATE,
-        "store_binding_claim_id IS NULL OR "
-        "(store_binding_id IS NOT NULL AND store_binding_confirmed_at IS NULL)",
-    )
-    op.create_check_constraint(
-        "ck_object_content_reconciliation_state_binding_create_state",
-        _STATE,
-        "store_binding_create_started_at IS NULL OR store_binding_id IS NOT NULL",
     )
     op.drop_table(_BINDINGS)

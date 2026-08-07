@@ -772,6 +772,90 @@ async def test_a_second_switch_cannot_overwrite_a_live_candidate(
         assert candidate.bucket == real_unpaired_object_store.settings.bucket
 
 
+async def test_zombie_cleanup_cannot_unbind_an_adopted_destination(
+    object_content_database: DatabaseSessionManager,
+    real_object_store: RealObjectStore,
+    real_unpaired_object_store: RealObjectStore,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Cleanup owns the marker only while it owns the candidate revision.
+
+    An interrupted attempt's cleanup can wake up after a same-target retry
+    has adopted the destination and switched to it. The retry's adoption
+    advanced the candidate revision, so the zombie's ownership handshake
+    fails before it issues any remote delete, and the active destination
+    stays bound.
+    """
+    service = _service(object_content_database, real_object_store)
+    actor = await _any_user_id(object_content_database)
+    created = await service.create(
+        _connection_input(real_object_store), actor_user_id=actor
+    )
+    await ensure_store_binding_ready(
+        object_content_database,
+        service.settings_for(created),
+        real_object_store.store,
+    )
+    await _select_inline_writes(object_content_database)
+    binding_id = await _binding_id(object_content_database)
+
+    class SimulatedProcessLoss(BaseException):
+        pass
+
+    original_create = S3ObjectStore.create_binding
+
+    async def lose_process_after_marker(self, creation):  # type: ignore[no-untyped-def]
+        await original_create(self, creation)
+        raise SimulatedProcessLoss("the worker died before the swap committed")
+
+    monkeypatch.setattr(S3ObjectStore, "create_binding", lose_process_after_marker)
+    with pytest.raises(SimulatedProcessLoss):
+        await service.replace_destination(
+            _connection_input(real_unpaired_object_store),
+            actor_user_id=actor,
+        )
+    monkeypatch.undo()
+
+    async with object_content_database.session() as session, session.begin():
+        interrupted = await session.get(
+            ObjectStoreConnections, TEMPORARY_DESTINATION_SLOT
+        )
+        assert interrupted is not None
+        interrupted_revision = interrupted.revision
+
+    # The same-target retry adopts the marked destination and switches.
+    switch = await service.replace_destination(
+        _connection_input(real_unpaired_object_store),
+        actor_user_id=actor,
+    )
+    assert switch.active.bucket == real_unpaired_object_store.settings.bucket
+
+    # The interrupted attempt's cleanup finally runs with its stale
+    # ownership. The revision handshake must stop it before any remote
+    # delete, leaving the active destination bound.
+    candidate_settings = service.settings_for(created).model_copy(
+        update={
+            "endpoint_url": real_unpaired_object_store.settings.endpoint_url,
+            "bucket": real_unpaired_object_store.settings.bucket,
+        }
+    )
+    await service._abandon_switch_claim(  # noqa: SLF001
+        candidate_settings,
+        binding_id=binding_id,
+        candidate_revision=interrupted_revision,
+    )
+
+    active_store = S3ObjectStore(
+        real_unpaired_object_store.settings.model_copy(
+            update={"deployment_id": created.deployment_id}
+        )
+    )
+    try:
+        assert await active_store.verify_binding(binding_id)
+    finally:
+        await active_store.close()
+
+
 async def test_committed_switch_reasserts_a_marker_lost_to_concurrent_cleanup(
     object_content_database: DatabaseSessionManager,
     real_object_store: RealObjectStore,

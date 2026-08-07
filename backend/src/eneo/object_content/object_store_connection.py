@@ -1108,19 +1108,28 @@ class ObjectStoreConnectionService:
         return that bucket to the world instead of overwriting the only record
         of it.
         """
-        async with self._transaction() as session:
+        # Take ownership of the stale record before touching its bucket, the
+        # same revision handshake cleanup uses: a retry of the interrupted
+        # attempt that adopts the row first wins, and this release backs off
+        # without issuing a remote delete.
+        async with self._transaction(mutation=True) as session:
             row = await session.scalar(
-                select(ObjectStoreConnections).where(
+                select(ObjectStoreConnections)
+                .where(
                     ObjectStoreConnections.id == TEMPORARY_DESTINATION_SLOT,
                     ObjectStoreConnections.role == "candidate",
                 )
+                .with_for_update()
             )
             stale = _stored(row) if row is not None else None
-        if stale is None or (
-            stale.endpoint_url == settings.endpoint_url
-            and stale.bucket == settings.bucket
-        ):
-            return
+            if stale is None or (
+                stale.endpoint_url == settings.endpoint_url
+                and stale.bucket == settings.bucket
+            ):
+                return
+            assert row is not None
+            row.revision = row.revision + 1
+            owned_revision = row.revision
 
         stale_settings = self.settings_for(stale)
         store = self._store_factory(self._probe_settings(stale_settings))
@@ -1145,9 +1154,9 @@ class ObjectStoreConnectionService:
                 .with_for_update()
             )
             # Only retire the exact record whose marker was just removed: a
-            # concurrent attempt may have claimed the slot in the meantime,
+            # concurrent attempt may have adopted the slot in the meantime,
             # and deleting that would strand its bucket instead.
-            if current is None or current.revision != stale.revision:
+            if current is None or current.revision != owned_revision:
                 return
             await StoreBindingRepository(session).clear_slot(
                 slot=TEMPORARY_DESTINATION_SLOT
@@ -1213,29 +1222,37 @@ class ObjectStoreConnectionService:
     ) -> None:
         """Best-effort unclaim of the target after a self-inflicted rejection.
 
-        The marker is removed only while this attempt still owns the recorded
-        candidate: a concurrent attempt for the same destination re-records
-        the row and advances its revision, and its marker must survive our
-        failure. A failure here is logged and swallowed — the marker, the
-        claim, and the candidate keep the state recoverable by retrying.
+        The candidate row's revision serialises ownership of the marker: this
+        attempt first advances the revision under lock — proving no one else
+        adopted the destination — and only then touches the store. A same-
+        target retry adopts the row the same way, so whichever side moves the
+        revision first wins and the loser never issues a remote delete. A
+        failure here is logged and swallowed — the marker, the claim, and the
+        candidate keep the state recoverable by retrying.
         """
         try:
+            owned_revision: int | None = None
             if candidate_revision is not None:
-                async with self._transaction() as session:
-                    owned = await session.scalar(
-                        select(ObjectStoreConnections.revision).where(
+                async with self._transaction(mutation=True) as session:
+                    row = await session.scalar(
+                        select(ObjectStoreConnections)
+                        .where(
                             ObjectStoreConnections.id == TEMPORARY_DESTINATION_SLOT,
                             ObjectStoreConnections.role == "candidate",
                         )
+                        .with_for_update()
                     )
-                if owned != candidate_revision:
-                    return
+                    if row is None or row.revision != candidate_revision:
+                        return
+                    row.revision = row.revision + 1
+                    owned_revision = row.revision
 
             store = self._store_factory(self._probe_settings(settings))
             try:
                 await store.remove_binding(binding_id)
             finally:
                 await store.close()
+
             async with self._transaction(mutation=True) as session:
                 row = await session.scalar(
                     select(ObjectStoreConnections)
@@ -1245,15 +1262,15 @@ class ObjectStoreConnectionService:
                     )
                     .with_for_update()
                 )
-                if candidate_revision is not None:
-                    # Re-checked under lock: give way if a concurrent attempt
-                    # re-recorded the candidate while the marker was removed.
-                    if row is None or row.revision != candidate_revision:
+                if owned_revision is not None:
+                    # Give way if anything re-recorded the candidate after
+                    # ownership was taken; that owner's marker is not ours.
+                    if row is None or row.revision != owned_revision:
                         return
                 await StoreBindingRepository(session).clear_slot(
                     slot=TEMPORARY_DESTINATION_SLOT
                 )
-                if candidate_revision is not None and row is not None:
+                if owned_revision is not None and row is not None:
                     await session.delete(row)
         except Exception:
             logger.warning(
@@ -1310,7 +1327,33 @@ class ObjectStoreConnectionService:
                     confirmed=True,
                 ),
             )
-            return False, None
+            if not persist_candidate:
+                return False, None
+            # Adopt the destination by advancing the candidate row it is
+            # recorded in: an interrupted earlier attempt's cleanup checks the
+            # revision before it may delete this marker, so the adoption is
+            # what makes the observed marker safe to rely on.
+            async with self._transaction(mutation=True) as session:
+                active_revision = await session.scalar(
+                    select(ObjectStoreConnections.revision).where(
+                        ObjectStoreConnections.id == ACTIVE_DESTINATION_SLOT
+                    )
+                )
+                if active_revision != expected_revision:
+                    raise ObjectStoreConnectionConflict(
+                        "The object-store connection changed while it was being tested"
+                    )
+                adopted_revision = await self._record_candidate(
+                    session,
+                    candidate,
+                    settings=settings,
+                )
+                await StoreBindingRepository(session).record_switch_claim(
+                    slot=TEMPORARY_DESTINATION_SLOT,
+                    deployment_id=settings.deployment_id,
+                    binding_id=binding_id,
+                )
+            return False, adopted_revision
 
         # Unmarked target: prove readiness and a complete write/read/delete
         # round trip before claiming the bucket.

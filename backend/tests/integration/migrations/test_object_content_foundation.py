@@ -122,6 +122,17 @@ def test_fresh_upgrade_downgrade_reupgrade_and_orm_parity(
         ObjectContentReconciliationState,
         ObjectStoreBindings,
     )
+    # Expand/contract: the legacy binding columns stay on the reconciliation
+    # singleton — unmapped by the ORM — until a later release drops them, so
+    # a pre-upgrade process keeps working during the deployment window.
+    legacy_binding_columns = {
+        "store_deployment_id",
+        "store_binding_id",
+        "store_binding_confirmed_at",
+        "store_binding_claim_id",
+        "store_binding_claim_until",
+        "store_binding_create_started_at",
+    }
     engine = create_engine(database_url)
     try:
         inspector = inspect(engine)
@@ -130,17 +141,11 @@ def test_fresh_upgrade_downgrade_reupgrade_and_orm_parity(
             database_columns = {
                 str(column["name"]) for column in inspector.get_columns(table_name)
             }
+            if model is ObjectContentReconciliationState:
+                assert legacy_binding_columns <= database_columns
+                database_columns -= legacy_binding_columns
             orm_columns = {column.name for column in model.__table__.columns}
             assert database_columns == orm_columns, table_name
-        # Binding facts live on the per-destination bindings table, not
-        # the reconciliation singleton.
-        reconciliation_columns = {
-            str(column["name"])
-            for column in inspector.get_columns(
-                ObjectContentReconciliationState.__tablename__
-            )
-        }
-        assert not any(name.startswith("store_") for name in reconciliation_columns)
         binding_checks = {
             str(constraint["name"])
             for constraint in inspector.get_check_constraints(
