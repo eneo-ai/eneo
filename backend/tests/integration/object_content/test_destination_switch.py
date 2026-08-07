@@ -892,11 +892,19 @@ async def test_the_current_destination_is_refused_in_any_equivalent_form(
 
     monkeypatch.setattr(ObjectStoreConnectionService, "_probe", count_probes)
 
-    same_destination = _connection_input(real_object_store).model_copy(
-        update={"endpoint_url": f"{real_object_store.settings.endpoint_url}/"}
+    endpoint = real_object_store.settings.endpoint_url
+    scheme, _, authority = endpoint.partition("://")
+    host, _, port = authority.partition(":")
+    equivalents = (
+        f"{endpoint}/",
+        f"{scheme}://{host.upper()}:{port}" if port else f"{scheme}://{host.upper()}",
     )
-    with pytest.raises(ObjectStoreConnectionInvalid):
-        await service.replace_destination(same_destination, actor_user_id=actor)
+    for equivalent in equivalents:
+        same_destination = _connection_input(real_object_store).model_copy(
+            update={"endpoint_url": equivalent}
+        )
+        with pytest.raises(ObjectStoreConnectionInvalid):
+            await service.replace_destination(same_destination, actor_user_id=actor)
     monkeypatch.undo()
 
     assert probes == 0, "a self-switch must be refused before any remote work"

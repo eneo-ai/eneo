@@ -37,6 +37,7 @@ from eneo.object_content.configuration import (
     ObjectContentCoreSettings,
     ObjectContentSettings,
     ObjectStoreOperatorSettings,
+    canonical_endpoint_origin,
 )
 from eneo.object_content.content import (
     ObjectContentConfigurationError,
@@ -615,14 +616,11 @@ class ObjectStoreConnectionService:
                 "Object storage is not managed in Admin"
             )
         # Compare what the destination will actually be, not what was typed:
-        # the settings model canonicalizes the endpoint, so `https://host/`
-        # and `https://host` name one destination. Comparing raw input would
-        # let the active bucket pass as "new" and switch onto itself.
+        # `https://host/`, `https://HOST` and `https://host:443` all name one
+        # destination. Comparing raw input would let the active bucket pass
+        # as "new" and switch onto itself.
         canonical = self._settings(candidate, deployment_id=stored.deployment_id)
-        if (
-            canonical.endpoint_url == stored.endpoint_url
-            and canonical.bucket == stored.bucket
-        ):
+        if self._same_place(canonical, stored):
             raise ObjectStoreConnectionInvalid(
                 "The new destination is the same as the current one"
             )
@@ -1127,10 +1125,7 @@ class ObjectStoreConnectionService:
                 .with_for_update()
             )
             stale = _stored(row) if row is not None else None
-            if stale is None or (
-                stale.endpoint_url == settings.endpoint_url
-                and stale.bucket == settings.bucket
-            ):
+            if stale is None or self._same_place(settings, stale):
                 return
             assert row is not None
             row.revision = row.revision + 1
@@ -1205,10 +1200,7 @@ class ObjectStoreConnectionService:
             row.revision = 1
             session.add(row)
         else:
-            if row.role == "candidate" and (
-                row.endpoint_url != settings.endpoint_url
-                or row.bucket != settings.bucket
-            ):
+            if row.role == "candidate" and not self._same_place(settings, _stored(row)):
                 raise ObjectStoreDestinationAlreadyBound(
                     f"Another destination change is already claiming bucket "
                     f"'{row.bucket}'; finish or release it first"
@@ -1748,6 +1740,23 @@ class ObjectStoreConnectionService:
             raise ObjectStoreCredentialEncryptionUnavailable(
                 "Credential encryption is not configured"
             )
+
+    @staticmethod
+    def _same_place(
+        settings: ObjectContentSettings,
+        stored: StoredObjectStoreConnection,
+    ) -> bool:
+        """Whether two configurations address the same bucket.
+
+        Region and addressing style are access details, not identity: the
+        same bucket reached with a different signing region is still the same
+        bytes, and must never be admitted as a new destination.
+        """
+        return canonical_endpoint_origin(
+            settings.endpoint_url
+        ) == canonical_endpoint_origin(stored.endpoint_url) and (
+            settings.bucket == stored.bucket
+        )
 
     @staticmethod
     def _same_destination(

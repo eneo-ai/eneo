@@ -13,6 +13,29 @@ from pydantic import (
 )
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+_DEFAULT_PORTS = {"http": 80, "https": 443}
+
+
+def canonical_endpoint_origin(endpoint_url: str) -> str:
+    """Return an endpoint's identity, for deciding if two name one place.
+
+    Hostnames are case-insensitive and a default port is implicit, so
+    ``https://HOST``, ``https://host:443`` and ``https://host/`` all address
+    the same destination. Comparing raw strings would let one of those pass
+    as a different destination than another. This is used only to compare
+    endpoints — never to rewrite what is stored or contacted.
+    """
+    parsed = urlparse(endpoint_url)
+    scheme = parsed.scheme.lower()
+    host = (parsed.hostname or "").lower()
+    if ":" in host:  # IPv6 literal, which needs its brackets back
+        host = f"[{host}]"
+    port = parsed.port
+    if port is not None and port != _DEFAULT_PORTS.get(scheme):
+        return f"{scheme}://{host}:{port}"
+    return f"{scheme}://{host}"
+
+
 _MEBIBYTE = 1024 * 1024
 _MINIMUM_MULTIPART_PART_BYTES = 5 * _MEBIBYTE
 _MAXIMUM_MULTIPART_PART_BYTES = 5 * 1024 * _MEBIBYTE
