@@ -428,7 +428,7 @@ class DefaultAssistant(AssistantPublic):
     completion_model: Optional[CompletionModelSparse] = None
     insight_enabled: bool = False
     inline_file_text: bool = True
-    knowledge_mode: KnowledgeMode = KnowledgeMode.TOOL
+    knowledge_mode: KnowledgeMode = KnowledgeMode.INJECT
 
 
 SessionInDB.model_rebuild()

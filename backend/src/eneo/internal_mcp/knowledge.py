@@ -435,8 +435,13 @@ def _sample_targets(
         return []
     if len(listings) <= count:
         return list(listings)
-    stride = len(listings) // count
-    return list(listings[::stride])[:count]
+    # Pick each target at the midpoint of one of ``count`` equal bands. Integer
+    # strides collapse to 1 whenever ``count < len(listings) < 2 * count``,
+    # which would select the first N documents instead of spanning the list.
+    return [
+        listings[((2 * index + 1) * len(listings)) // (2 * count)]
+        for index in range(count)
+    ]
 
 
 def _search_result_content(query: str, chunks) -> list[TextContent | EmbeddedResource]:
@@ -513,12 +518,18 @@ def _overview_content(
         ]
 
     shown_to = offset + len(title_lines)
+    listing_status = (
+        " This completes the title listing."
+        if shown_to >= total
+        else " The title listing is incomplete."
+    )
     content: list[TextContent | EmbeddedResource] = [
         TextContent(
             type="text",
             text=(
                 f"{scope.label} contains {total} document(s). "
-                f"Showing {offset + 1}-{shown_to} by title:\n" + "\n".join(title_lines)
+                f"Showing {offset + 1}-{shown_to} by title.{listing_status}\n"
+                + "\n".join(title_lines)
             ),
         )
     ]
@@ -535,7 +546,7 @@ def _overview_content(
                     f"{len(excerpts)} excerpt(s) sampled from {sampled_documents} "
                     "of these documents follow. They are a small sample, not the "
                     "whole source: base any statement about what this source "
-                    "covers on the full title list above."
+                    "covers on the document titles returned across all pages."
                 ),
             )
         )
@@ -554,9 +565,10 @@ def _overview_content(
             TextContent(
                 type="text",
                 text=(
-                    f"Titles truncated at document {shown_to} of {total}. Call "
-                    f"describe_source again with offset={shown_to} for the next "
-                    "part."
+                    f"Titles truncated at document {shown_to} of {total}. Do not "
+                    "answer the source-overview question yet. Call describe_source "
+                    f"again with offset={shown_to} for the next part, and continue "
+                    "until the title listing is complete."
                 ),
             )
         )
@@ -644,7 +656,7 @@ async def search_knowledge(
         )
 
     fetched = len(chunks)
-    if mode == "overview":
+    if mode == "overview" and not scope.info_blob_ids:
         chunks = _diversify(chunks, per_doc=OVERVIEW_CHUNKS_PER_DOC, cap=cap)
     else:
         chunks = chunks[:cap]
@@ -737,11 +749,12 @@ async def describe_source(
 
     Returns the source's document titles plus short excerpts sampled from
     across its documents. Write the summary yourself from that material, and
-    base statements about what the source covers on the full title list: the
-    excerpts are a small sample, not the whole source. Long sources are
-    returned in parts; the notice at the end gives the offset for the next
-    part. To go deeper on one document, read it with read_source or query it
-    with search_knowledge and within=<document_id>.
+    base statements about what the source covers on the complete title list:
+    the excerpts are a small sample, not the whole source. Long sources are
+    returned in parts; keep calling with the offset from each truncation notice
+    and do not answer until the title listing is complete. To go deeper on one
+    document, read it with read_source or query it with search_knowledge and
+    within=<document_id>.
     """
     offset = max(0, offset)
     async with internal_tool_context(ctx) as (container, _user, assistant_id):

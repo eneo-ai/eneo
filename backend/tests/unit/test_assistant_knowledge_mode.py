@@ -6,13 +6,18 @@ alongside external MCP servers, and injects only a token-cheap source catalog.
 External MCP servers are always passed regardless of knowledge.
 """
 
-from unittest.mock import AsyncMock, MagicMock
+import runpy
+from pathlib import Path
+from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
 import pytest
 
 from eneo.ai_models.completion_models.completion_model import ModelKwargs
+from eneo.assistants.api.assistant_models import DefaultAssistant, KnowledgeMode
 from eneo.assistants.assistant import Assistant
+from eneo.database.tables.assistant_table import Assistants
+from eneo.info_blobs.info_blob import InfoBlobChunkInDBWithScore
 from eneo.services.service import DatastoreResult
 
 
@@ -37,10 +42,14 @@ def _assistant(**overrides):
     return Assistant(**defaults)
 
 
-def _references_service():
+def _references_service(result: DatastoreResult | None = None):
     service = MagicMock()
     service.get_references = AsyncMock(
-        return_value=DatastoreResult(chunks=[], no_duplicate_chunks=[], info_blobs=[])
+        return_value=(
+            result
+            if result is not None
+            else DatastoreResult(chunks=[], no_duplicate_chunks=[], info_blobs=[])
+        )
     )
     return service
 
@@ -53,9 +62,20 @@ def _completion_service():
 
 class TestKnowledgeModeGating:
     @pytest.mark.asyncio
-    async def test_inject_mode_retrieves_and_gets_no_knowledge_server(self):
+    async def test_default_mode_preserves_legacy_injected_retrieval(self):
         assistant = _assistant()
-        references_service = _references_service()
+        chunk = InfoBlobChunkInDBWithScore(
+            id=uuid4(),
+            text="Legacy retrieved passage",
+            chunk_no=0,
+            info_blob_id=uuid4(),
+            tenant_id=uuid4(),
+            info_blob_title="Legacy source",
+            score=0.9,
+        )
+        references_service = _references_service(
+            DatastoreResult(chunks=[chunk], no_duplicate_chunks=[chunk], info_blobs=[])
+        )
         completion_service = _completion_service()
 
         await assistant.ask(
@@ -64,8 +84,18 @@ class TestKnowledgeModeGating:
             references_service=references_service,
         )
 
-        references_service.get_references.assert_awaited_once()
+        assert assistant.knowledge_mode == KnowledgeMode.INJECT
+        references_service.get_references.assert_awaited_once_with(
+            question="Hello",
+            session=None,
+            collections=assistant.collections,
+            websites=assistant.websites,
+            integration_knowledge_list=assistant.integration_knowledge_list,
+            num_chunks=30,
+            version=1,
+        )
         kwargs = completion_service.get_response.await_args.kwargs
+        assert kwargs["info_blob_chunks"] == [chunk]
         assert kwargs["mcp_servers"] == []
         assert kwargs["knowledge_catalog"] == ""
 
@@ -73,7 +103,9 @@ class TestKnowledgeModeGating:
     async def test_tool_mode_skips_retrieval_and_attaches_server(self):
         external_server = MagicMock()
         knowledge_server = MagicMock()
-        assistant = _assistant(mcp_servers=[external_server])
+        assistant = _assistant(
+            mcp_servers=[external_server], knowledge_mode=KnowledgeMode.TOOL
+        )
         references_service = _references_service()
         completion_service = _completion_service()
 
@@ -95,7 +127,9 @@ class TestKnowledgeModeGating:
     @pytest.mark.asyncio
     async def test_knowledge_and_external_mcp_coexist_in_inject_mode(self):
         external_server = MagicMock()
-        assistant = _assistant(mcp_servers=[external_server])
+        assistant = _assistant(
+            mcp_servers=[external_server], knowledge_mode=KnowledgeMode.INJECT
+        )
         references_service = _references_service()
         completion_service = _completion_service()
 
@@ -122,6 +156,34 @@ class TestKnowledgeModeGating:
         )
 
         references_service.get_references.assert_not_awaited()
+
+
+class TestKnowledgeModeDefaults:
+    def test_migration_backfills_existing_rows_to_legacy_inject(self):
+        migration = (
+            Path(__file__).parents[2]
+            / "alembic/versions/202607061000_add_knowledge_mode_to_assistants.py"
+        )
+
+        with patch("alembic.op.add_column") as add_column:
+            runpy.run_path(str(migration))["upgrade"]()
+
+        column = add_column.call_args.args[1]
+        assert column.name == "knowledge_mode"
+        assert column.nullable is False
+        assert str(column.server_default.arg) == "inject"
+
+    def test_database_defaults_new_rows_to_legacy_inject(self):
+        column = Assistants.__table__.c.knowledge_mode
+
+        assert column.default.arg == "inject"
+        assert str(column.server_default.arg) == "inject"
+
+    def test_default_assistant_response_fallback_is_legacy_inject(self):
+        assert (
+            DefaultAssistant.model_fields["knowledge_mode"].default
+            == KnowledgeMode.INJECT
+        )
 
 
 class TestKnowledgeCatalog:
@@ -238,6 +300,17 @@ class TestKnowledgeCatalog:
         assert "call knowledge__describe_source" in catalog
         assert "a semantic query cannot describe a corpus" in catalog
         assert "what a source covers (rule 3)" in catalog
+
+    def test_catalog_grounds_source_summaries_without_requiring_search(self):
+        catalog = _assistant().build_knowledge_catalog()
+
+        assert "results from the built-in knowledge tools" in catalog
+        assert "Ground every knowledge answer in search results" not in catalog
+
+    def test_catalog_requires_every_source_description_page(self):
+        catalog = _assistant().build_knowledge_catalog()
+
+        assert "do not answer until the title listing is complete" in catalog
 
     def test_catalog_documents_narrowing_a_search(self):
         catalog = _assistant().build_knowledge_catalog()

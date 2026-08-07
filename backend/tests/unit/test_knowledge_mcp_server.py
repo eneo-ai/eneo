@@ -540,6 +540,36 @@ class TestSearchScoping:
 
         assert [c.resource.meta["score"] for c in content[1:]] == [0.8, 0.9]
 
+    async def test_document_overview_uses_the_full_result_cap(self, monkeypatch):
+        cid, blob_id = uuid4(), uuid4()
+        assistant = _assistant_with_sources(collections=[(cid, "Waste FAQ")])
+        blob = SimpleNamespace(
+            id=blob_id,
+            title="Waste policy",
+            group_id=cid,
+            website_id=None,
+            integration_knowledge_id=None,
+        )
+        chunks = [
+            _chunk(info_blob_id=blob_id, chunk_no=8, score=0.9),
+            _chunk(info_blob_id=blob_id, chunk_no=2, score=0.8),
+            _chunk(info_blob_id=blob_id, chunk_no=5, score=0.7),
+            _chunk(info_blob_id=blob_id, chunk_no=1, score=0.6),
+            _chunk(info_blob_id=blob_id, chunk_no=4, score=0.5),
+        ]
+        _patch_search_context(monkeypatch, assistant, blob=blob, chunks=chunks)
+
+        content = await search_knowledge(
+            "waste", ctx=None, within=str(blob_id), mode="overview", max_results=4
+        )
+
+        assert [str(c.resource.uri).rsplit("-", 1)[-1] for c in content[1:]] == [
+            "1",
+            "2",
+            "5",
+            "8",
+        ]
+
     async def test_out_of_scope_within_is_indistinguishable_from_missing(
         self, monkeypatch
     ):
@@ -622,6 +652,19 @@ class TestSampleTargets:
         assert targets[-1] != listings[OVERVIEW_SAMPLE_DOCUMENTS - 1]
         assert listings.index(targets[-1]) > 50
 
+    @pytest.mark.parametrize("document_count", [13, 23])
+    def test_near_cap_sources_still_span_the_whole_listing(self, document_count):
+        listings = [
+            InfoBlobListing(id=uuid4(), title=f"D{i}", url=None)
+            for i in range(document_count)
+        ]
+
+        targets = _sample_targets(listings, OVERVIEW_SAMPLE_DOCUMENTS)
+
+        assert len(targets) == OVERVIEW_SAMPLE_DOCUMENTS
+        assert len({target.id for target in targets}) == OVERVIEW_SAMPLE_DOCUMENTS
+        assert targets[-1] == listings[-1]
+
     def test_empty_listing_samples_nothing(self):
         assert _sample_targets([], 12) == []
 
@@ -668,6 +711,7 @@ class TestOverviewContent:
 
         assert "Collection 'Waste FAQ' contains 1 document(s)" in content[0].text
         assert f"document_id: {blob_id}" in content[0].text
+        assert "completes the title listing" in content[0].text
         assert "small sample, not the whole source" in content[1].text
         assert str(content[2].resource.uri) == (f"eneo://info-blob/{blob_id}#chunk-4")
 
@@ -721,7 +765,10 @@ class TestOverviewContent:
         )
 
         assert "offset=2" in cut[-1].text
+        assert "Do not answer" in cut[-1].text
+        assert "title listing is incomplete" in cut[0].text
         assert all("offset=" not in block.text for block in complete)
+        assert "completes the title listing" in complete[0].text
 
     def test_offset_is_reflected_in_the_shown_range(self):
         content = _overview_content(

@@ -73,7 +73,7 @@ class Assistant(Entity):
         description: Optional[str] = None,
         insight_enabled: bool = False,
         inline_file_text: bool = True,
-        knowledge_mode: KnowledgeMode = KnowledgeMode.TOOL,
+        knowledge_mode: KnowledgeMode = KnowledgeMode.INJECT,
         data_retention_days: Optional[int] = None,
         metadata_json: dict[str, object] | None = None,
         icon_id: Optional[UUID] = None,
@@ -315,9 +315,12 @@ class Assistant(Entity):
             "källan'), call knowledge__describe_source with that source's "
             "source_id from the listing: a semantic query cannot describe a "
             "corpus, so never answer such questions by searching for words "
-            "like 'summary' or 'content'.\n"
-            "4. Ground every knowledge answer in search results. If the "
-            "results do not contain the answer and no other tool "
+            "like 'summary' or 'content'. If describe_source says its title "
+            "listing is incomplete, keep calling it with the supplied offset "
+            "and do not answer until the title listing is complete.\n"
+            "4. Ground every knowledge answer in results from the built-in "
+            "knowledge tools. For factual searches, if the search results do "
+            "not contain the answer and no other tool "
             "legitimately covers the question (rule 2), say it could not be "
             "found in the knowledge sources; never answer from general "
             "knowledge. If the results answer only part of the question, "
