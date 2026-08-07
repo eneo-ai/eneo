@@ -1381,6 +1381,122 @@ def test_negated_document_artifacts_do_not_trigger_terminal_alignment_for_json()
     assert "pdf_terminal_output_alignment" not in issue_ids
 
 
+def test_committed_terminal_outranks_negation_blind_text_heuristic() -> None:
+    """Committed planning state owns output intent; raw text is fallback only.
+
+    Live repro (declared_terminal_everyday_bygglovsremiss_text, 3/3): the
+    prompt names DOCX only to reject it — "ingen PDF, ingen DOCX-mall" —
+    and the keyword heuristic resolved docx_document + template_fill_docx.
+    The critic then killed a correct text plan for missing a template-fill
+    step. The classifier had already committed the terminal correctly.
+    """
+
+    prompt = (
+        "Vi skickar bygglovsremisser till miljökontoret. Vid körning laddar "
+        "jag upp alla inkomna remissvar och vill ha löpande text tillbaka. "
+        "Slutresultatet ska vara text — ingen PDF, ingen DOCX-mall och "
+        "ingen JSON-fil."
+    )
+    planning_state = PlanningState.empty()
+    planning_state.resolved_slots["terminal_output"] = ResolvedSlot(
+        name="terminal_output",
+        value="structured_text",
+        source="requirements_summary",
+        evidence=["requirements_summary.resolved_requirements:terminal_output"],
+        confidence="high",
+    )
+    spec = FlowDraftSpecCore(
+        flow_name="Jämför remissyttranden",
+        steps=[
+            _step(
+                "step_text",
+                "Jämför yttranden",
+                "Jämför remissvaren och skriv löpande text.",
+                output_type=OutputType.TEXT,
+            )
+        ],
+    )
+
+    context = build_conversation_critic_context(
+        [{"role": "user", "content": prompt}],
+        spec,
+        planning_state=planning_state,
+    )
+    issues = evaluate_critic_invariants(context)
+
+    assert context.output_intent.terminal_output == "structured_text"
+    assert context.output_intent.docx_output_mode is None
+    assert "template_fill_docx_requires_template_fill_step" not in {
+        issue.id for issue in issues
+    }
+
+
+def test_committed_docx_mode_outranks_text_heuristic() -> None:
+    # Committed generated_docx must silence the template-fill invariant even
+    # when the conversation mentions a template it rejects.
+    prompt = (
+        "Leverera ett DOCX-underlag som genereras ur texten — vi har ingen "
+        "bidragsmall att fylla i."
+    )
+    planning_state = PlanningState.empty()
+    planning_state.resolved_slots["terminal_output"] = ResolvedSlot(
+        name="terminal_output",
+        value="docx_document",
+        source="requirements_summary",
+        evidence=["requirements_summary.resolved_requirements:terminal_output"],
+        confidence="high",
+    )
+    planning_state.resolved_slots["docx_output_mode"] = ResolvedSlot(
+        name="docx_output_mode",
+        value="generated_docx",
+        source="requirements_summary",
+        evidence=["requirements_summary.resolved_requirements:docx_output_mode"],
+        confidence="high",
+    )
+    spec = FlowDraftSpecCore(
+        flow_name="Kulturbidrag",
+        steps=[
+            _step(
+                "step_docx",
+                "Skriv underlag",
+                "Generera ett DOCX-underlag ur texten.",
+                output_type=OutputType.DOCX,
+            )
+        ],
+    )
+
+    context = build_conversation_critic_context(
+        [{"role": "user", "content": prompt}],
+        spec,
+        planning_state=planning_state,
+    )
+
+    assert context.output_intent.terminal_output == "docx_document"
+    assert context.output_intent.docx_output_mode == "generated_docx"
+
+
+def test_uncommitted_state_keeps_text_derived_intent() -> None:
+    # With nothing committed, the heuristic remains the only signal.
+    prompt = "Skapa en PDF-rapport av dokumentet."
+    context = build_conversation_critic_context(
+        [{"role": "user", "content": prompt}],
+        FlowDraftSpecCore(
+            flow_name="Rapport",
+            steps=[
+                _step(
+                    "step_pdf",
+                    "Skriv rapport",
+                    "Skriv en rapport.",
+                    output_type=OutputType.PDF,
+                )
+            ],
+        ),
+        planning_state=PlanningState.empty(),
+    )
+
+    assert context.output_intent.terminal_output == "pdf_document"
+
+
 def test_flags_missing_form_fields_when_runtime_metadata_was_requested() -> None:
     conversation = [
         {

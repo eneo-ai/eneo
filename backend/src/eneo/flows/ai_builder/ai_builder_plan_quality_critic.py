@@ -17,6 +17,7 @@ from eneo.flows.ai_builder.ai_builder_domain_models import (
     ConversationMessage,
 )
 from eneo.flows.ai_builder.ai_builder_framework_policy import (
+    OutputIntentResolution,
     aggregate_unprompted_user_text,
     extract_answer_signals,
     resolve_output_intent,
@@ -81,6 +82,46 @@ def build_conversation_aware_quality_feedback(
     )
 
 
+def _output_intent_with_committed_state(
+    text_derived: OutputIntentResolution,
+    planning_state: PlanningState | None,
+) -> OutputIntentResolution:
+    """Committed planning state owns output intent; raw text is fallback.
+
+    The keyword heuristic is negation-blind: a prompt that names DOCX only
+    to reject it ("ingen DOCX-mall") resolved docx_document +
+    template_fill_docx, and the critic killed correct plans against that
+    misreading while the classifier had already committed the terminal
+    correctly (2026-08-07, deterministic on the declared-terminal family).
+
+    When a commit-grade terminal exists it wins, and the dependent
+    DOCX/PDF mode comes from committed slots or stays None — an invariant
+    that cannot establish the mode does not fire, which fails open instead
+    of false-killing. With nothing committed, the text heuristic remains
+    the only signal.
+    """
+
+    if planning_state is None:
+        return text_derived
+    terminal = planning_state.commit_grade_slot_value("terminal_output")
+    if terminal is None:
+        return text_derived
+    return OutputIntentResolution(
+        terminal_output=terminal,
+        content_shape=text_derived.content_shape,
+        docx_output_mode=(
+            planning_state.commit_grade_slot_value("docx_output_mode")
+            if terminal == "docx_document"
+            else None
+        ),
+        pdf_generation_mode=(
+            planning_state.commit_grade_slot_value("pdf_generation_mode")
+            if terminal == "pdf_document"
+            else None
+        ),
+    )
+
+
 def build_conversation_critic_context(
     conversation: list[ConversationMessage] | list[Mapping[str, Any]],
     spec: FlowDraftSpecCore,
@@ -114,7 +155,10 @@ def build_conversation_critic_context(
         signal_text,
         model_form_intake_signals=model_form_intake_signals,
     )
-    output_intent = resolve_output_intent(text, answer_signals)
+    output_intent = _output_intent_with_committed_state(
+        resolve_output_intent(text, answer_signals),
+        planning_state,
+    )
     input_intent = resolve_input_intent(text, answer_signals, flow=flow)
     compile_context = create_compile_context_from_planning_state(planning_state)
 

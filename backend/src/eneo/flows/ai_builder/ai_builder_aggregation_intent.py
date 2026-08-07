@@ -58,7 +58,7 @@ def derive_aggregation_intent_from_slots(
     *,
     document_material_input: bool,
 ) -> AggregationIntent:
-    comparison_scope = _commit_grade_slot_value(state, "comparison_scope")
+    comparison_scope = state.commit_grade_slot_value("comparison_scope")
     if (
         document_material_input
         and comparison_scope in SAME_RUN_DOCUMENT_COMPARISON_SCOPE_VALUES
@@ -66,10 +66,3 @@ def derive_aggregation_intent_from_slots(
         return "compare"
 
     return "linear"
-
-
-def _commit_grade_slot_value(state: PlanningState, slot_name: str) -> str | None:
-    slot = state.resolved_slots.get(slot_name)
-    if slot is None or not slot.is_commit_grade:
-        return None
-    return slot.value

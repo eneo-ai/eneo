@@ -703,6 +703,20 @@ class PlanningState(_PlanningModel):
     architecture_commit: ArchitectureCommit | None = None
     mapped_file_limit: MappedFileLimit = Field(default_factory=MappedFileLimit)
 
+    def commit_grade_slot_value(self, slot_name: str) -> str | None:
+        """The slot's value when it can drive irreversible planner decisions.
+
+        The single accessor for "what did the user actually commit to" —
+        three modules once carried their own copy of this check, and one of
+        them disagreeing with the others is how the critic killed correct
+        plans.
+        """
+
+        slot = self.resolved_slots.get(slot_name)
+        if slot is None or not slot.is_commit_grade:
+            return None
+        return slot.value
+
     @property
     def input_schema_evidence(self) -> SchemaEvidence | None:
         return self.schema_resolution.input_evidence()

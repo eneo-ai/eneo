@@ -94,7 +94,7 @@ def derive_architecture_commit_draft(
 
 
 def _input_type_from_state(state: PlanningState) -> FlowInputType | None:
-    value = _commit_grade_slot_value(state, "primary_runtime_input")
+    value = state.commit_grade_slot_value("primary_runtime_input")
     if value is None:
         return None
     return flow_input_type_from_primary_runtime_input_value(value)
@@ -119,7 +119,7 @@ def flow_input_type_from_primary_runtime_input_value(
 
 
 def _output_type_from_state(state: PlanningState) -> FlowOutputType | None:
-    value = _commit_grade_slot_value(state, "terminal_output")
+    value = state.commit_grade_slot_value("terminal_output")
     if value is None:
         return None
     return {
@@ -139,7 +139,7 @@ def _output_mode_from_state(
     input_type: FlowInputType,
     output_type: FlowOutputType,
 ) -> FlowOutputMode:
-    docx_mode = _commit_grade_slot_value(state, "docx_output_mode")
+    docx_mode = state.commit_grade_slot_value("docx_output_mode")
     document_delivery_mode = (
         "template_fill"
         if output_type is FlowOutputType.DOCX and docx_mode == "template_fill_docx"
@@ -167,7 +167,7 @@ def _chosen_patterns_for_state(
         return []
     pattern_ids.append(primary)
 
-    runtime_metadata = _commit_grade_slot_value(state, "runtime_metadata_fields")
+    runtime_metadata = state.commit_grade_slot_value("runtime_metadata_fields")
     if (
         runtime_metadata is not None
         and runtime_metadata != "no_extra_metadata"
@@ -220,26 +220,15 @@ def _primary_pattern_id(
     return None
 
 
-def _commit_grade_slot_value(state: PlanningState, slot_name: str) -> str | None:
-    slot = state.resolved_slots.get(slot_name)
-    if slot is None or not slot.is_commit_grade:
-        return None
-    return slot.value
-
-
 def _report_disposition_from_state(state: PlanningState) -> ReportDisposition | None:
-    value = _commit_grade_slot_value(state, "report_disposition")
+    value = state.commit_grade_slot_value("report_disposition")
     if not report_disposition_is_relevant(
-        primary_runtime_input=_commit_grade_slot_value(
-            state,
-            "primary_runtime_input",
+        primary_runtime_input=state.commit_grade_slot_value("primary_runtime_input"),
+        terminal_output=state.commit_grade_slot_value("terminal_output"),
+        document_material_scope=state.commit_grade_slot_value(
+            "document_material_scope"
         ),
-        terminal_output=_commit_grade_slot_value(state, "terminal_output"),
-        document_material_scope=_commit_grade_slot_value(
-            state,
-            "document_material_scope",
-        ),
-        docx_output_mode=_commit_grade_slot_value(state, "docx_output_mode"),
+        docx_output_mode=state.commit_grade_slot_value("docx_output_mode"),
         unresolved_values_are_relevant=False,
     ):
         return None
