@@ -120,6 +120,18 @@ async def claim_ai_builder_send_turn(
             released_state is BuilderTurnState.PROVIDER_OUTCOME_UNKNOWN
             and not isinstance(caught_error, AIBuilderBadRequestException)
         ):
+            # The wrap hides the cause from the client by design, so this log
+            # is the only place the real failure is observable. Without it,
+            # 81 wedged sessions accumulated with no trace of what broke.
+            logger.error(
+                "AI Builder turn released into provider-outcome-unknown; "
+                "wrapping the causing error.",
+                exc_info=caught_error,
+                extra={
+                    "session_id": str(session_id),
+                    "request_id": str(lease.request_id),
+                },
+            )
             raise AIBuilderProviderOutcomeUnknownException() from caught_error
         raise caught_error.with_traceback(caught_error.__traceback__)
 

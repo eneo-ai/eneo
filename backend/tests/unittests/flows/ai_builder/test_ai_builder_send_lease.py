@@ -136,6 +136,83 @@ def _force_fast_send_lock_refresh(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.mark.asyncio
+async def test_unknown_outcome_wrap_logs_the_causing_error(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The wrap hides the cause from the client; the log is the only trace.
+
+    Before this, sessions accumulated in provider_outcome_unknown with no
+    record anywhere of what actually broke (81 in one dev space).
+    """
+
+    from eneo.flows.ai_builder.ai_builder_domain_models import BuilderTurnState
+    from eneo.flows.ai_builder.ai_builder_error_contract import (
+        AIBuilderProviderOutcomeUnknownException,
+    )
+
+    request_repo = _FakeSendLeaseRepo()
+    request_repo.refresh_result = True
+    request_repo.finish_refresh.set()
+    _force_fast_send_lock_refresh(monkeypatch)
+
+    async def release_unknown(**kwargs: object) -> BuilderTurnState:
+        request_repo.events.append("release")
+        return BuilderTurnState.PROVIDER_OUTCOME_UNKNOWN
+
+    monkeypatch.setattr(request_repo, "release_session_send", release_unknown)
+
+    @contextlib.asynccontextmanager
+    async def heartbeat_session_scope() -> AsyncGenerator[AsyncSession, None]:
+        yield cast(AsyncSession, object())
+
+    monkeypatch.setattr(
+        ai_builder_send_lease.sessionmanager,
+        "session",
+        heartbeat_session_scope,
+    )
+    monkeypatch.setattr(
+        ai_builder_send_lease,
+        "AIBuilderRepository",
+        lambda session: _FakeHeartbeatRepo(request_repo),
+    )
+
+    # SimpleLogger instances are not registered with the logging manager, so
+    # caplog cannot attach by name; route the module logger through a
+    # standard one for the assertion.
+    import logging as std_logging
+
+    monkeypatch.setattr(
+        ai_builder_send_lease,
+        "logger",
+        std_logging.getLogger("test.ai_builder_send_lease"),
+    )
+
+    cause = RuntimeError("attachment blob missing")
+    with caplog.at_level("ERROR", logger="test.ai_builder_send_lease"):
+        with pytest.raises(AIBuilderProviderOutcomeUnknownException) as exc_info:
+            async with claim_ai_builder_send_turn(
+                repo=cast(AIBuilderRepository, request_repo),
+                session_id=uuid4(),
+                tenant_id=uuid4(),
+                accepted_turn=_accepted_turn(uuid4()),
+                preparation_baseline=_preparation_baseline(),
+            ):
+                request_repo.finish_refresh.set()
+                raise cause
+
+    assert exc_info.value.__cause__ is cause
+    wrap_records = [
+        record
+        for record in caplog.records
+        if "provider-outcome-unknown" in record.getMessage()
+    ]
+    assert len(wrap_records) == 1
+    assert wrap_records[0].exc_info is not None
+    assert wrap_records[0].exc_info[1] is cause
+
+
+@pytest.mark.asyncio
 async def test_claim_ai_builder_send_turn_raises_without_release_when_claim_fails() -> (
     None
 ):
