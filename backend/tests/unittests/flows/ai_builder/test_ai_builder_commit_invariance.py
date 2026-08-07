@@ -132,6 +132,13 @@ class TestDraftPreservation:
             assert_architecture_commit_draft_matches_pinned(before=prior, after=draft)
 
         assert "semantic body" in str(excinfo.value)
+        # The message must name what drifted: the error is server-log-only,
+        # so an undifferentiated message left a deterministic failure family
+        # undiagnosable.
+        assert "tuples_chain" in str(excinfo.value)
+        assert "'pinned'" in str(excinfo.value)
+        assert "'draft'" in str(excinfo.value)
+        assert "chosen_patterns" not in str(excinfo.value)
 
     def test_commit_drift_error_is_value_error(self) -> None:
         prior = _make_commit()

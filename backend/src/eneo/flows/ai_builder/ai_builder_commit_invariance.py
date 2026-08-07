@@ -44,11 +44,24 @@ def assert_architecture_commit_draft_matches_pinned(
     if before is None or after is None:
         return
     if not architecture_commit_draft_matches_pinned(before=before, after=after):
+        # The error is server-log-only (turn release wraps it before the
+        # client sees anything), so the diff belongs in the message: without
+        # it, a whole deterministic failure family was undiagnosable.
+        pinned_payload = canonical_architecture_commit_payload(before)
+        draft_payload = canonical_architecture_commit_payload(after)
+        drifted = {
+            field: {
+                "pinned": pinned_payload[field],
+                "draft": draft_payload[field],
+            }
+            for field in pinned_payload
+            if pinned_payload[field] != draft_payload[field]
+        }
         raise CommitDriftError(
             "architecture_commit draft mutated the pinned committed "
-            "architecture (tuples_chain / chosen_patterns / "
-            "required_capabilities). The LLM may omit architecture_commit "
-            "after commit, but must not re-author a different semantic body"
+            "architecture. The LLM may omit architecture_commit after "
+            f"commit, but must not re-author a different semantic body. "
+            f"Drifted fields: {drifted!r}"
         )
 
 
