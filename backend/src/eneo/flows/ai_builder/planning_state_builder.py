@@ -1018,6 +1018,20 @@ def _merged_model_file_roles(
             classified_role=classified_role,
         ):
             continue
+        # Every turn re-classifies. An unchanged decision must not touch the
+        # persisted role: appending a fresh model:file_role:<hash> plus a
+        # duplicate quote on each identical decision grew the evidence
+        # without bound and moved every state hash derived from it — the
+        # requirements-confirmation loop was this churn.
+        if (
+            existing_role.source == "model"
+            and existing_role.role == classified_role.role
+            and existing_role.confidence == classified_role.confidence
+            and existing_role.evidence_level == classified_role.evidence_level
+        ):
+            continue
+        # A new decision carries its own evidence; stacking it onto the old
+        # decision's evidence would describe two decisions at once.
         roles_by_id[classified_role.file_id] = existing_role.model_copy(
             update={
                 "role": classified_role.role,
@@ -1025,7 +1039,6 @@ def _merged_model_file_roles(
                 "confidence": classified_role.confidence,
                 "evidence_level": classified_role.evidence_level,
                 "evidence": [
-                    *existing_role.evidence,
                     f"model:file_role:{prompt_hash}",
                     *[item.planning_reference() for item in classified_role.evidence],
                 ],

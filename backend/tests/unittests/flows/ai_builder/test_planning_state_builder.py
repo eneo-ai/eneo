@@ -3785,12 +3785,116 @@ class TestModelSlotMerge:
         assert role.role == "example_output"
         assert role.source == "model"
         assert role.confidence == "medium"
+        # The model decision replaces the heuristic's evidence: evidence
+        # describes the current decision, not the history of decisions.
         assert role.evidence == [
-            "fallback:unclassified_file",
             f"model:file_role:{'h' * 64}",
             "quote:user_message:test-source:så här ska rapporten se ut",
         ]
         assert role.candidate_roles == ["context_only", "example_output"]
+
+    def test_identical_reclassification_does_not_touch_the_role(self) -> None:
+        """An unchanged decision must not churn the persisted role.
+
+        Every turn re-classifies attachments. Appending a fresh
+        model:file_role:<hash> plus a duplicate quote on each identical
+        decision grew the evidence list without bound and moved every
+        state hash derived from it (2026-08-07: the confirmation loop).
+        """
+
+        file_id = UUID("00000000-0000-0000-0000-000000000706")
+        state = _state()
+        state.file_roles = [
+            FileRoleEvidence(
+                file_id=file_id,
+                filename="protokoll.pdf",
+                file_type="document",
+                mimetype="application/pdf",
+                has_readable_text=True,
+                coverage="fully_seen",
+                role="runtime_input_sample",
+                source="model",
+                confidence="high",
+                evidence_level="explicit",
+                evidence=[
+                    f"model:file_role:{'a' * 64}",
+                    "quote:user_message:test-source:ett typiskt exempel",
+                ],
+                candidate_roles=["context_only", "runtime_input_sample"],
+            )
+        ]
+        before = state.file_roles[0].model_copy(deep=True)
+
+        merge_llm_resolved_slots(
+            state,
+            SlotClassificationResult(
+                file_roles=(
+                    ClassifiedFileRole(
+                        file_id=file_id,
+                        role="runtime_input_sample",
+                        confidence="high",
+                        evidence_level="explicit",
+                        reason="same decision, new turn",
+                        evidence=_model_evidence("ett typiskt exempel"),
+                    ),
+                )
+            ),
+            prompt_hash="b" * 64,
+            freeform_text="",
+        )
+
+        assert state.file_roles[0] == before
+
+    def test_changed_reclassification_replaces_evidence_not_appends(
+        self,
+    ) -> None:
+        # A new decision carries its own evidence; stacking it on the old
+        # decision's evidence describes two decisions at once.
+        file_id = UUID("00000000-0000-0000-0000-000000000707")
+        state = _state()
+        state.file_roles = [
+            FileRoleEvidence(
+                file_id=file_id,
+                filename="mall.docx",
+                file_type="document",
+                mimetype="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                has_readable_text=True,
+                coverage="fully_seen",
+                role="context_only",
+                source="model",
+                confidence="medium",
+                evidence_level="inferred",
+                evidence=[
+                    f"model:file_role:{'a' * 64}",
+                    "quote:user_message:test-source:bifogar ett dokument",
+                ],
+            )
+        ]
+
+        merge_llm_resolved_slots(
+            state,
+            SlotClassificationResult(
+                file_roles=(
+                    ClassifiedFileRole(
+                        file_id=file_id,
+                        role="template",
+                        confidence="high",
+                        evidence_level="explicit",
+                        reason="the user names the upload as the template",
+                        evidence=_model_evidence("den bifogade mallen"),
+                    ),
+                )
+            ),
+            prompt_hash="b" * 64,
+            freeform_text="",
+        )
+
+        role = state.file_roles[0]
+        assert role.role == "template"
+        assert role.evidence == [
+            f"model:file_role:{'b' * 64}",
+            "quote:user_message:test-source:den bifogade mallen",
+        ]
 
     def test_model_example_output_constraints_follow_current_file_evidence(
         self,
