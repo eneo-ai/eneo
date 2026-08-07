@@ -83,6 +83,7 @@ from eneo.flows.domain.flow import FlowPersistedJsonObject
 from eneo.flows.flow_authoring_spec import (
     FlowDraftSpecCore,
 )
+from eneo.main.logging import get_logger
 
 if TYPE_CHECKING:
     from eneo.flows.domain.flow import Flow
@@ -92,6 +93,30 @@ _FLOW_DRAFT_SPEC_FLOW_NAME_JSON_KEY = (
     FlowDraftSpecCore.model_fields[_FLOW_DRAFT_SPEC_FLOW_NAME_FIELD].serialization_alias
     or _FLOW_DRAFT_SPEC_FLOW_NAME_FIELD
 )
+
+
+logger = get_logger(__name__)
+
+
+def _log_unknown_outcome_claim_rejection(row: "BuilderSessions") -> None:
+    """The claim-time wedge rejection was invisible: nothing recorded why a
+    session's effective turn state was provider-outcome-unknown, so the
+    residual family in the 155-case checkpoint could not be attributed.
+    Logs the row facts that decide `effective_builder_turn_state`.
+    """
+
+    logger.error(
+        "AI Builder send rejected: effective turn state is provider-outcome-unknown.",
+        extra={
+            "session_id": str(row.id),
+            "stored_turn_state": row.latest_turn_state,
+            "active_request_id": str(row.active_request_id),
+            "lock_expires_at": (
+                row.lock_expires_at.isoformat() if row.lock_expires_at else None
+            ),
+            "latest_turn_id": str(row.latest_turn_id),
+        },
+    )
 
 
 def _session_send_lock_available_clause() -> sa.ColumnElement[bool]:
@@ -993,6 +1018,7 @@ class AIBuilderRepository:
                     effective_state is BuilderTurnState.PROVIDER_OUTCOME_UNKNOWN
                     and not acknowledge_duplicate_provider_spend
                 ):
+                    _log_unknown_outcome_claim_rejection(row)
                     raise AIBuilderProviderOutcomeUnknownException()
             else:
                 if lock_is_active:
@@ -1001,6 +1027,7 @@ class AIBuilderRepository:
                         code=AIBuilderErrorCode.SESSION_MESSAGE_IN_PROGRESS,
                     )
                 if effective_state is BuilderTurnState.PROVIDER_OUTCOME_UNKNOWN:
+                    _log_unknown_outcome_claim_rejection(row)
                     raise AIBuilderProviderOutcomeUnknownException()
 
             attachment_file_ids = tuple(
@@ -1107,6 +1134,7 @@ class AIBuilderRepository:
                     effective_state is BuilderTurnState.PROVIDER_OUTCOME_UNKNOWN
                     and not acceptance.acknowledge_duplicate_provider_spend
                 ):
+                    _log_unknown_outcome_claim_rejection(row)
                     return SessionTurnClaim(
                         disposition=(
                             SessionTurnClaimDisposition.PROVIDER_OUTCOME_UNKNOWN
@@ -1121,6 +1149,7 @@ class AIBuilderRepository:
                         code=AIBuilderErrorCode.SESSION_MESSAGE_IN_PROGRESS,
                     )
                 if effective_state is BuilderTurnState.PROVIDER_OUTCOME_UNKNOWN:
+                    _log_unknown_outcome_claim_rejection(row)
                     return SessionTurnClaim(
                         disposition=(
                             SessionTurnClaimDisposition.PROVIDER_OUTCOME_UNKNOWN
