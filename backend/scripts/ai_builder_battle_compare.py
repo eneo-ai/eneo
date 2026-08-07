@@ -520,7 +520,12 @@ def compare(
         "current": _identity(current_summary),
         "rescored_cases": rescored_cases,
         "identity_differences": identity_differences,
-        "verdict": _verdict(dict(directions), noise_margin=noise_margin),
+        "verdict": _verdict(
+            dict(directions),
+            noise_margin=noise_margin,
+            baseline_summary=baseline_summary,
+            current_summary=current_summary,
+        ),
         "evidence": _evidence_strength(baseline_summary, current_summary),
         "direction_counts": dict(directions),
         "direction_counts_by_cohort": _cohort_directions(deltas, rescored),
@@ -576,6 +581,8 @@ def _verdict(
     directions: dict[str, int],
     *,
     noise_margin: int | None,
+    baseline_summary: dict[str, Any],
+    current_summary: dict[str, Any],
 ) -> dict[str, Any]:
     """Answer the only question a baseline exists to answer.
 
@@ -583,13 +590,28 @@ def _verdict(
     how a noise-sized move becomes a claimed win, so an undeclared margin
     yields no verdict at all — the counts still print, and the reader still
     sees exactly which cases moved.
+
+    The margin was calibrated on repetition-to-repetition movement of runs
+    with one design. Comparing a repeated baseline against a single-run
+    candidate measures a different quantity — modal states with dropped
+    unstable cases against raw observations — so a mismatched design gets
+    no verdict either, rather than a false negative dressed as one.
     """
 
     improved = directions.get("improved", 0)
     regressed = directions.get("regressed", 0)
     net = improved - regressed
+    baseline_reps = _run_context(baseline_summary).get("repetitions")
+    current_reps = _run_context(current_summary).get("repetitions")
+    design_matched = (
+        isinstance(baseline_reps, int)
+        and isinstance(current_reps, int)
+        and baseline_reps == current_reps
+    )
     if noise_margin is None:
         answer = "margin_not_declared"
+    elif not design_matched:
+        answer = "inconclusive_design_mismatch"
     elif net > noise_margin:
         answer = "improved"
     elif -net > noise_margin:
@@ -602,6 +624,8 @@ def _verdict(
         "improved": improved,
         "regressed": regressed,
         "noise_margin": noise_margin,
+        "baseline_repetitions": baseline_reps,
+        "current_repetitions": current_reps,
     }
 
 
@@ -744,6 +768,14 @@ def _render_markdown(report: dict[str, Any], *, only_changed: bool) -> str:
             "  No verdict: pass --noise-margin with a margin chosen *before* "
             "this run. Choosing it now is how a noise-sized move becomes a "
             "claimed win."
+        )
+    elif verdict["answer"] == "inconclusive_design_mismatch":
+        lines.append(
+            f"  No verdict: baseline ran "
+            f"{verdict['baseline_repetitions']} repetition(s) and current "
+            f"{verdict['current_repetitions']}; the margin is only valid "
+            "between runs of the same design. Re-run the candidate with the "
+            "baseline's repetition count."
         )
     lines.append(f"Evidence: {evidence['kind']} — {evidence['note']}")
     lines.append("")

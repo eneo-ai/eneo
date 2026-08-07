@@ -541,6 +541,43 @@ def test_failed_checks_aggregate_across_repetitions(tmp_path: Path) -> None:
     ]
 
 
+def test_mixed_repetition_design_gets_no_margin_verdict(tmp_path: Path) -> None:
+    # The margin is calibrated on same-design repetition movement. A repeated
+    # baseline against a single-run candidate measures a different quantity,
+    # so "no_measurable_change" there would be a false negative in disguise.
+    module = _compare_module()
+    baseline_path = tmp_path / "base.json"
+    base_payload = _summary(
+        [_row("case-a", "plan_first_pass", repetition=i) for i in (1, 2, 3)]
+    )
+    base_payload["evaluator_identity"]["run_context"]["repetitions"] = 3
+    baseline_path.write_text(json.dumps(base_payload), encoding="utf-8")
+    current_path = tmp_path / "cur.json"
+    cur_payload = _summary([_row("case-a", "plan_first_pass")])
+    cur_payload["evaluator_identity"]["run_context"]["repetitions"] = 1
+    current_path.write_text(json.dumps(cur_payload), encoding="utf-8")
+
+    report = module.compare(baseline_path, current_path, noise_margin=5)
+
+    assert report["verdict"]["answer"] == "inconclusive_design_mismatch"
+
+
+def test_matched_repetition_design_gets_margin_verdict(tmp_path: Path) -> None:
+    module = _compare_module()
+    baseline_path = tmp_path / "base.json"
+    base_payload = _summary([_row("case-a", "plan_first_pass", verdict="fail")])
+    base_payload["evaluator_identity"]["run_context"]["repetitions"] = 1
+    baseline_path.write_text(json.dumps(base_payload), encoding="utf-8")
+    current_path = tmp_path / "cur.json"
+    cur_payload = _summary([_row("case-a", "plan_first_pass", verdict="pass")])
+    cur_payload["evaluator_identity"]["run_context"]["repetitions"] = 1
+    current_path.write_text(json.dumps(cur_payload), encoding="utf-8")
+
+    report = module.compare(baseline_path, current_path, noise_margin=0)
+
+    assert report["verdict"]["answer"] == "improved"
+
+
 def test_case_missing_from_one_run_is_coverage_change(tmp_path: Path) -> None:
     module = _compare_module()
     baseline = _write(tmp_path, "base.json", [_row("case-a", "plan_first_pass")])
