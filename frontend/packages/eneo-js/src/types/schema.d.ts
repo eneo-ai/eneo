@@ -11479,7 +11479,7 @@ export interface components {
        * @default true
        */
       inline_file_text?: boolean;
-      /** @default tool */
+      /** @default inject */
       knowledge_mode?: components["schemas"]["KnowledgeMode"];
       /**
        * Data Retention Days
