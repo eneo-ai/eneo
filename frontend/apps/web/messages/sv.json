@@ -4306,6 +4306,8 @@
   "storage_switch_error_new_writes_description": "Stäng dialogen och välj PostgreSQL som lagringsmål för nya filer, byt sedan destination. Nya filer lagras i databasen under bytet så att ingenting skrivs till en destination medan den ändras; du väljer objektlagring igen efteråt.",
   "storage_switch_error_diverged_title": "Objektlagringen har ändrats sedan bytet",
   "storage_switch_error_diverged_description": "Filer har lagrats i objektlagringen efter bytet och finns inte i den tidigare destinationen. Kopiera nuvarande bucket till den tidigare destinationen och använd Byt destination i stället för Byt tillbaka.",
+  "storage_switch_error_policy_changed_title": "Lagringspolicyn ändrades under bytet",
+  "storage_switch_error_policy_changed_description": "Någon ändrade lagringsmål eller flyttar medan destinationen verifierades, så det frysta läget kan inte garanteras. Kontrollera att inget skrivits till objektlagringen och försök igen.",
   "storage_switch_error_copy_incomplete_title": "Kopian är inte komplett",
   "storage_switch_error_copy_incomplete_description": "Den nya destinationen saknar filer som Eneo fortfarande ansvarar för. Kör kopieringen igen mot rätt prefix, kontrollera att antalet objekt stämmer och försök sedan igen.",
   "storage_switch_error_previous_present_title": "Ta bort den tidigare destinationen först",

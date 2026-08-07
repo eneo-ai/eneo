@@ -181,6 +181,19 @@ class ObjectStoreSwitchBackDiverged(ObjectStoreDestinationSwitchBlocked):
     code = "object_store_switch_back_diverged"
 
 
+class ObjectStorePolicyChangedDuringSwitch(ObjectStoreDestinationSwitchBlocked):
+    """The storage policy moved while the candidate was being verified.
+
+    Every path that can create a remote object requires a policy change —
+    selecting object storage for new writes, or resuming moves — and every
+    policy change advances the policy revision. A revision that moved during
+    verification therefore means the frozen state this switch counted on may
+    not have held, so the switch starts over instead of trusting it.
+    """
+
+    code = "object_store_policy_changed_during_switch"
+
+
 class ObjectStoreDestinationCopyIncomplete(ObjectStoreConnectionError):
     """The target does not hold every object this deployment must serve.
 
@@ -703,14 +716,16 @@ class ObjectStoreConnectionService:
                 "The current destination has no established storage binding"
             )
         # Fast feedback before any remote work; re-checked under lock below.
+        # The policy revision observed here is the identity of the quiet
+        # state: it must still hold when the swap commits.
         async with self._transaction() as session:
-            await self._require_switchable(session)
+            policy_revision = await self._require_switchable(session)
 
         settings = self._settings(
             candidate,
             deployment_id=stored.deployment_id,
         )
-        fresh_marker = await self._admit_switch_target(
+        fresh_marker, candidate_revision = await self._admit_switch_target(
             candidate,
             settings,
             binding_id=binding.binding_id,
@@ -727,7 +742,9 @@ class ObjectStoreConnectionService:
             # remote work admitted earlier either commits before this point
             # (and is therefore part of what gets verified) or fails its own
             # generation check afterwards. Comparing timestamps could not
-            # order these: a transaction's now() predates its commit.
+            # order these: a transaction's now() predates its commit. Work
+            # admitted under the advanced generation instead requires a policy
+            # change, which the commit refuses via the captured revision.
             fenced = await self._advance_generation(expected_revision=stored.revision)
             await self._require_target_holds_every_object(settings)
             return await self._commit_switch(
@@ -736,23 +753,27 @@ class ObjectStoreConnectionService:
                 actor_user_id=actor_user_id,
                 stored=fenced,
                 require_previous_revision=require_previous_revision,
+                expected_policy_revision=policy_revision,
             )
         except (
             ObjectStoreDestinationSwitchBlocked,
             ObjectStoreDestinationCopyIncomplete,
             ObjectStoreMovesNotPaused,
             ObjectStoreNewWritesNotRedirected,
-            ObjectStoreConnectionConflict,
         ):
-            # The switch is definitively rejected, so the target must not stay
-            # paired to this installation. An ambiguous outcome
-            # (ObjectStoreConnectionMutationOutcomeUnknown) deliberately keeps
-            # the marker: the swap may have committed.
+            # The switch rejected itself with the shared state untouched, so
+            # the target must not stay paired to this installation. A revision
+            # conflict (ObjectStoreConnectionConflict) deliberately does NOT
+            # clean up: it means another actor advanced the connection — a
+            # competing switch may have adopted this very marker, and the
+            # recorded candidate keeps the bucket recoverable either way. An
+            # ambiguous outcome (ObjectStoreConnectionMutationOutcomeUnknown)
+            # keeps the marker too: the swap may have committed.
             if fresh_marker:
                 await self._abandon_switch_claim(
                     settings,
                     binding_id=binding.binding_id,
-                    clear_candidate=require_previous_revision is None,
+                    candidate_revision=candidate_revision,
                 )
             raise
 
@@ -764,6 +785,7 @@ class ObjectStoreConnectionService:
         actor_user_id: UUID,
         stored: StoredObjectStoreConnection,
         require_previous_revision: int | None,
+        expected_policy_revision: int,
     ) -> DestinationSwitch:
         access_key_id_encrypted = self._encryption.encrypt(
             candidate.access_key_id.get_secret_value()
@@ -781,7 +803,12 @@ class ObjectStoreConnectionService:
                 raise ObjectStoreConnectionConflict(
                     "The object-store connection changed while it was being tested"
                 )
-            await self._require_switchable(session)
+            if await self._require_switchable(session) != expected_policy_revision:
+                raise ObjectStorePolicyChangedDuringSwitch(
+                    "The storage policy changed while the destination was "
+                    "being verified; confirm nothing was written to object "
+                    "storage, then try again"
+                )
 
             previous = await session.scalar(
                 select(ObjectStoreConnections)
@@ -846,8 +873,14 @@ class ObjectStoreConnectionService:
                 previous=_stored(previous),
             )
 
-    async def _require_switchable(self, session: AsyncSession) -> None:
-        """Refuse the switch while any write could still reach a destination."""
+    async def _require_switchable(self, session: AsyncSession) -> int:
+        """Refuse the switch while any write could still reach a destination.
+
+        Returns the deployment policy revision the quiet state was observed
+        under, so the committing transaction can prove the policy never moved
+        in between: creating a remote object requires selecting object storage
+        or resuming moves, and either change advances this revision.
+        """
         transient_remote = await session.scalar(
             select(func.count())
             .select_from(ObjectContents)
@@ -866,6 +899,7 @@ class ObjectStoreConnectionService:
                 select(
                     ObjectContentDeploymentPolicy.new_write_storage_target,
                     ObjectContentDeploymentPolicy.moves_paused,
+                    ObjectContentDeploymentPolicy.revision,
                 ).where(ObjectContentDeploymentPolicy.id == 1)
             )
         ).one_or_none()
@@ -901,6 +935,7 @@ class ObjectStoreConnectionService:
                     "An upload or cleanup operation is still in flight; "
                     "try again shortly"
                 )
+        return int(policy[2])
 
     async def _require_no_remote_keys_since(
         self,
@@ -1106,7 +1141,7 @@ class ObjectStoreConnectionService:
         candidate: ObjectStoreConnectionInput,
         *,
         settings: ObjectContentSettings,
-    ) -> None:
+    ) -> int:
         """Persist the destination being claimed, before its marker exists.
 
         The row lock serialises two administrators changing destination at
@@ -1147,41 +1182,60 @@ class ObjectStoreConnectionService:
         row.deployment_id = settings.deployment_id
         row.addressing_style = settings.addressing_style
         row.updated_by_actor = ObjectStoreConnectionActor.PLATFORM_ADMIN.value
+        await session.flush()
+        return row.revision
 
     async def _abandon_switch_claim(
         self,
         settings: ObjectContentSettings,
         *,
         binding_id: UUID,
-        clear_candidate: bool,
+        candidate_revision: int | None,
     ) -> None:
-        """Best-effort unclaim of the target after a definite rejection.
+        """Best-effort unclaim of the target after a self-inflicted rejection.
 
-        A failure here is logged and swallowed: the marker, the claim, and the
-        recorded candidate keep the state recoverable by retrying the same
-        destination.
+        The marker is removed only while this attempt still owns the recorded
+        candidate: a concurrent attempt for the same destination re-records
+        the row and advances its revision, and its marker must survive our
+        failure. A failure here is logged and swallowed — the marker, the
+        claim, and the candidate keep the state recoverable by retrying.
         """
         try:
+            if candidate_revision is not None:
+                async with self._transaction() as session:
+                    owned = await session.scalar(
+                        select(ObjectStoreConnections.revision).where(
+                            ObjectStoreConnections.id == TEMPORARY_DESTINATION_SLOT,
+                            ObjectStoreConnections.role == "candidate",
+                        )
+                    )
+                if owned != candidate_revision:
+                    return
+
             store = self._store_factory(self._probe_settings(settings))
             try:
                 await store.remove_binding(binding_id)
             finally:
                 await store.close()
             async with self._transaction(mutation=True) as session:
+                row = await session.scalar(
+                    select(ObjectStoreConnections)
+                    .where(
+                        ObjectStoreConnections.id == TEMPORARY_DESTINATION_SLOT,
+                        ObjectStoreConnections.role == "candidate",
+                    )
+                    .with_for_update()
+                )
+                if candidate_revision is not None:
+                    # Re-checked under lock: give way if a concurrent attempt
+                    # re-recorded the candidate while the marker was removed.
+                    if row is None or row.revision != candidate_revision:
+                        return
                 await StoreBindingRepository(session).clear_slot(
                     slot=TEMPORARY_DESTINATION_SLOT
                 )
-                if clear_candidate:
-                    row = await session.scalar(
-                        select(ObjectStoreConnections)
-                        .where(
-                            ObjectStoreConnections.id == TEMPORARY_DESTINATION_SLOT,
-                            ObjectStoreConnections.role == "candidate",
-                        )
-                        .with_for_update()
-                    )
-                    if row is not None:
-                        await session.delete(row)
+                if candidate_revision is not None and row is not None:
+                    await session.delete(row)
         except Exception:
             logger.warning(
                 "object_content.switch_claim_abandon_failed",
@@ -1197,7 +1251,7 @@ class ObjectStoreConnectionService:
         binding_id: UUID,
         expected_revision: int,
         persist_candidate: bool,
-    ) -> bool:
+    ) -> tuple[bool, int | None]:
         """Admit a bucket that already holds this deployment's copied bytes.
 
         Unlike first-time creation, the content namespace is expected to be
@@ -1205,7 +1259,8 @@ class ObjectStoreConnectionService:
         bucket with no marker yet, every fallible check runs first and the
         permanent marker is written last, so a rejected switch never leaves
         the target paired to this installation. Returns whether a fresh
-        marker was written, so a later rejection can remove it again.
+        marker was written — so a later rejection can remove it again — and
+        the revision of the candidate record this attempt owns.
         """
         if persist_candidate:
             await self._release_stale_candidate(settings, binding_id=binding_id)
@@ -1236,7 +1291,7 @@ class ObjectStoreConnectionService:
                     confirmed=True,
                 ),
             )
-            return False
+            return False, None
 
         # Unmarked target: prove readiness and a complete write/read/delete
         # round trip before claiming the bucket.
@@ -1247,6 +1302,7 @@ class ObjectStoreConnectionService:
         # untracked pairing behind. The candidate connection is recorded in
         # the same transaction, so a process loss after the marker is written
         # still leaves the touched bucket identifiable and recoverable.
+        candidate_revision: int | None = None
         async with self._transaction(mutation=True) as session:
             active_revision = await session.scalar(
                 select(ObjectStoreConnections.revision).where(
@@ -1258,7 +1314,7 @@ class ObjectStoreConnectionService:
                     "The object-store connection changed while it was being tested"
                 )
             if persist_candidate:
-                await self._record_candidate(
+                candidate_revision = await self._record_candidate(
                     session,
                     candidate,
                     settings=settings,
@@ -1279,7 +1335,7 @@ class ObjectStoreConnectionService:
                     slot=TEMPORARY_DESTINATION_SLOT
                 )
             raise
-        return True
+        return True, candidate_revision
 
     async def _create_switch_marker(
         self,

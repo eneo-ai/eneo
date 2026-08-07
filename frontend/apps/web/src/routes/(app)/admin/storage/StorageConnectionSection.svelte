@@ -348,6 +348,8 @@
       return m.storage_connection_error_encryption_title();
     if (code === "object_store_connection_revision_conflict")
       return m.storage_connection_error_conflict_title();
+    if (code === "object_store_policy_changed_during_switch")
+      return m.storage_switch_error_policy_changed_title();
     if (code === "object_store_switch_back_diverged")
       return m.storage_switch_error_diverged_title();
     if (code === "object_store_destination_switch_blocked")
@@ -379,6 +381,8 @@
       return m.storage_connection_error_encryption_description();
     if (code === "object_store_connection_revision_conflict")
       return m.storage_connection_error_conflict_description();
+    if (code === "object_store_policy_changed_during_switch")
+      return m.storage_switch_error_policy_changed_description();
     if (code === "object_store_switch_back_diverged")
       return m.storage_switch_error_diverged_description();
     if (code === "object_store_destination_switch_blocked")

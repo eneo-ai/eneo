@@ -36,6 +36,7 @@ from eneo.object_content.object_store_connection import (
     ObjectStoreDestinationCopyIncomplete,
     ObjectStoreMovesNotPaused,
     ObjectStoreNewWritesNotRedirected,
+    ObjectStorePolicyChangedDuringSwitch,
     ObjectStorePreviousDestinationPresent,
     ObjectStoreSwitchBackDiverged,
 )
@@ -479,19 +480,81 @@ async def _binding_id(database: DatabaseSessionManager):
     return snapshot.binding_id
 
 
-async def test_rejected_switch_unclaims_the_target(
+async def test_self_rejected_switch_unclaims_the_target(
     object_content_database: DatabaseSessionManager,
     real_object_store: RealObjectStore,
     real_unpaired_object_store: RealObjectStore,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A definitively rejected switch removes its own marker and claim.
+    """A switch that rejects itself removes its own marker and claim.
 
-    Writing the pairing marker is durable. If the swap afterwards loses a
-    revision race, the target bucket must not stay paired to this
-    installation: the marker is verified and removed again, and the temporary
-    binding slot is cleared, so a different bucket can be attempted next
-    without leaving this one unusable by anyone.
+    Writing the pairing marker is durable. When the switch afterwards refuses
+    for a reason it observed alone — here the copy proving incomplete — no
+    other actor can own the marker, so it is verified and removed again and
+    the temporary slot is cleared, leaving the bucket usable by anyone.
+    """
+    service = _service(object_content_database, real_object_store)
+    actor = await _any_user_id(object_content_database)
+    created = await service.create(
+        _connection_input(real_object_store), actor_user_id=actor
+    )
+    await ensure_store_binding_ready(
+        object_content_database,
+        service.settings_for(created),
+        real_object_store.store,
+    )
+    await _select_inline_writes(object_content_database)
+    binding_id = await _binding_id(object_content_database)
+
+    # Content exists on the source and is never copied, so the switch admits
+    # the target, writes the marker, and then rejects its own verification.
+    source_settings = service.settings_for(created)
+    source_store = S3ObjectStore(source_settings)
+    try:
+        await _seed_remote_content(
+            object_content_database, source_settings, source_store, b"never-copied"
+        )
+    finally:
+        await source_store.close()
+
+    with pytest.raises(ObjectStoreDestinationCopyIncomplete):
+        await service.replace_destination(
+            _connection_input(real_unpaired_object_store),
+            actor_user_id=actor,
+        )
+
+    target = S3ObjectStore(
+        real_unpaired_object_store.settings.model_copy(
+            update={"deployment_id": created.deployment_id}
+        )
+    )
+    try:
+        assert not await target.verify_binding(binding_id)
+    finally:
+        await target.close()
+
+    async with object_content_database.session() as session, session.begin():
+        claim = (
+            await session.execute(
+                text("SELECT slot FROM object_store_bindings WHERE slot = 2")
+            )
+        ).one_or_none()
+    assert claim is None, "an unclaimed target must leave no switch claim behind"
+
+
+async def test_conflicted_switch_leaves_the_marker_for_the_competing_actor(
+    object_content_database: DatabaseSessionManager,
+    real_object_store: RealObjectStore,
+    real_unpaired_object_store: RealObjectStore,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Losing a revision race must not remove a marker another actor may own.
+
+    A revision conflict means a rotation or competing switch advanced the
+    connection — and a same-target competitor may be about to activate the
+    very bucket this attempt marked. The loser therefore keeps its hands off
+    the marker; the recorded candidate keeps the bucket recoverable, and a
+    later switch elsewhere hands it back.
     """
     service = _service(object_content_database, real_object_store)
     actor = await _any_user_id(object_content_database)
@@ -534,17 +597,18 @@ async def test_rejected_switch_unclaims_the_target(
         )
     )
     try:
-        assert not await target.verify_binding(binding_id)
+        assert await target.verify_binding(binding_id)
     finally:
         await target.close()
 
     async with object_content_database.session() as session, session.begin():
-        claim = (
-            await session.execute(
-                text("SELECT slot FROM object_store_bindings WHERE slot = 2")
-            )
-        ).one_or_none()
-    assert claim is None, "an unclaimed target must leave no switch claim behind"
+        candidate = await session.get(
+            ObjectStoreConnections, TEMPORARY_DESTINATION_SLOT
+        )
+        assert candidate is not None
+        assert candidate.role == "candidate"
+        assert candidate.bucket == real_unpaired_object_store.settings.bucket
+    assert await service.get_previous() is None
 
 
 async def test_switch_refuses_a_target_missing_stored_objects(
@@ -829,6 +893,63 @@ async def test_interrupted_switch_keeps_the_claimed_destination_recoverable(
         assert not await released.verify_binding(binding_id)
     finally:
         await released.close()
+
+
+async def test_switch_refuses_when_the_policy_moved_during_verification(
+    object_content_database: DatabaseSessionManager,
+    real_object_store: RealObjectStore,
+    real_unpaired_object_store: RealObjectStore,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A policy round trip during verification invalidates the frozen state.
+
+    Creating a remote object requires selecting object storage or resuming
+    moves, and either change advances the policy revision. An administrator
+    who re-enables writes mid-verification and restores the quiet state
+    before the swap would otherwise activate a target that was never checked
+    for what they wrote.
+    """
+    service = _service(object_content_database, real_object_store)
+    actor = await _any_user_id(object_content_database)
+    created = await service.create(
+        _connection_input(real_object_store), actor_user_id=actor
+    )
+    await ensure_store_binding_ready(
+        object_content_database,
+        service.settings_for(created),
+        real_object_store.store,
+    )
+    await _select_inline_writes(object_content_database)
+
+    original_verify = ObjectStoreConnectionService._require_target_holds_every_object
+
+    async def flip_policy_mid_verification(self, settings):  # type: ignore[no-untyped-def]
+        await original_verify(self, settings)
+        # Another administrator briefly re-enables object storage and puts
+        # the quiet state back, all while this switch is verifying.
+        await _select_object_store_writes(object_content_database)
+        await _select_inline_writes(object_content_database)
+
+    monkeypatch.setattr(
+        ObjectStoreConnectionService,
+        "_require_target_holds_every_object",
+        flip_policy_mid_verification,
+    )
+
+    with pytest.raises(ObjectStorePolicyChangedDuringSwitch):
+        await service.replace_destination(
+            _connection_input(real_unpaired_object_store),
+            actor_user_id=actor,
+        )
+    monkeypatch.undo()
+
+    # The active destination is unchanged; a retry from the restored quiet
+    # state succeeds.
+    switch = await service.replace_destination(
+        _connection_input(real_unpaired_object_store),
+        actor_user_id=actor,
+    )
+    assert switch.active.bucket == real_unpaired_object_store.settings.bucket
 
 
 async def test_switch_requires_paused_moves(
