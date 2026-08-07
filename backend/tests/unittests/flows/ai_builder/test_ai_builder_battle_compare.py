@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import re
 from pathlib import Path
 from types import ModuleType
 from typing import Any
@@ -151,6 +152,47 @@ def test_same_outcome_with_changing_verdict_counts_as_instability(
         "plan_first_pass/fail",
         "plan_first_pass/pass",
     ]
+
+
+def test_every_harness_outcome_class_has_a_mechanics_rank() -> None:
+    """A class the rank map does not know falls below everything.
+
+    That hole made provider_outcome_unknown -> builder_error report as a
+    mechanics improvement, so the map must cover every outcome class the
+    harness can emit — read from its source, not from a hand-kept list.
+    """
+
+    module = _compare_module()
+    harness_source = _SCRIPT.with_name("ai_builder_api_battle_test.py").read_text(
+        encoding="utf-8"
+    )
+    emitted = set(re.findall(r'outcome_class = "(\w+)"', harness_source))
+    assert emitted, "harness source no longer matches the extraction pattern"
+    assert emitted <= set(module._OUTCOME_RANK), (
+        f"outcome classes missing a rank: {sorted(emitted - set(module._OUTCOME_RANK))}"
+    )
+
+
+def test_error_terminated_siblings_do_not_rank_as_improvement(
+    tmp_path: Path,
+) -> None:
+    # Both are error-terminated journeys without a plan; swapping one for the
+    # other is a different failure, not progress.
+    module = _compare_module()
+    baseline = _write(
+        tmp_path,
+        "base.json",
+        [_row("case-a", "provider_outcome_unknown", verdict="not_evaluated")],
+    )
+    current = _write(
+        tmp_path,
+        "cur.json",
+        [_row("case-a", "builder_error", verdict="not_evaluated")],
+    )
+
+    case = _case(module.compare(baseline, current), "case-a")
+
+    assert case["mechanics_direction"] == "changed"
 
 
 def _with_identity(

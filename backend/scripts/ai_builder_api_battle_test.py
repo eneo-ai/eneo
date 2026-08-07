@@ -6262,10 +6262,21 @@ def _quality_report(
         )
 
     for expected_role in _mapping_list(expected.get("expected_file_roles")):
+        # The check is named by what the case declares, never by the resolved
+        # file id: provisioned ids are minted per run, so a name carrying one
+        # can never aggregate across runs in the comparator's blocker ranking.
+        declared_file_id = _optional_string(expected_role, "file_id")
+        declared_index = _int_value(expected_role.get("file_index"))
+        if declared_file_id is not None:
+            check_name = f"classifier_file_role:{declared_file_id}"
+        elif declared_index is not None:
+            check_name = f"classifier_file_role:file_index_{declared_index}"
+        else:
+            check_name = "classifier_file_role:<unresolved>"
         file_id = _expected_file_id(expected_role, attached_file_ids)
         if file_id is None:
             add_check(
-                "classifier_file_role:<unresolved>",
+                check_name,
                 False,
                 None,
                 dict(expected_role),
@@ -6286,7 +6297,7 @@ def _quality_report(
             )
         expected_summary = {**expected_role, "file_id": file_id}
         add_check(
-            f"classifier_file_role:{file_id}",
+            check_name,
             actual_summary is not None
             and _classifier_claim_matches(actual_summary, expected_summary),
             actual_summary,

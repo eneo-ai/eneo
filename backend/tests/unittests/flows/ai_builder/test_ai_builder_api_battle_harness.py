@@ -1067,7 +1067,7 @@ def test_classifier_posture_gate_rejects_each_mutated_dimension() -> None:
 
     baseline_checks = checks_for(_classifier_diagnostics())
     assert baseline_checks["classifier_slot:report_disposition"]["passed"] is True
-    assert baseline_checks["classifier_file_role:file-1"]["passed"] is True
+    assert baseline_checks["classifier_file_role:file_index_0"]["passed"] is True
     assert baseline_checks["expected_assumption_topics"]["passed"] is True
     assert baseline_checks["forbidden_assumption_topics"]["passed"] is True
 
@@ -1080,9 +1080,19 @@ def test_classifier_posture_gate_rejects_each_mutated_dimension() -> None:
         ),
         ("slots", "confidence", "low", "classifier_slot:report_disposition"),
         ("slots", "evidence_level", "inferred", "classifier_slot:report_disposition"),
-        ("file_roles", "role", "reference_material", "classifier_file_role:file-1"),
-        ("file_roles", "confidence", "medium", "classifier_file_role:file-1"),
-        ("file_roles", "evidence_level", "inferred", "classifier_file_role:file-1"),
+        (
+            "file_roles",
+            "role",
+            "reference_material",
+            "classifier_file_role:file_index_0",
+        ),
+        ("file_roles", "confidence", "medium", "classifier_file_role:file_index_0"),
+        (
+            "file_roles",
+            "evidence_level",
+            "inferred",
+            "classifier_file_role:file_index_0",
+        ),
     )
     for collection, field, value, check_name in mutations:
         mutated = json.loads(json.dumps(_classifier_diagnostics()))
@@ -1100,7 +1110,10 @@ def test_classifier_posture_gate_rejects_each_mutated_dimension() -> None:
     wrong_coverage["classifier_runs"][0]["source_inventory"][1]["coverage"] = (
         "inventory_only"
     )
-    assert checks_for(wrong_coverage)["classifier_file_role:file-1"]["passed"] is False
+    assert (
+        checks_for(wrong_coverage)["classifier_file_role:file_index_0"]["passed"]
+        is False
+    )
 
     forbidden_assumption = json.loads(json.dumps(_classifier_diagnostics()))
     forbidden_assumption["classifier_runs"][0]["assumptions"].append(

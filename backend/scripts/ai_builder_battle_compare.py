@@ -30,6 +30,10 @@ from typing import Any, cast
 
 # Better outcomes rank higher; a transition to a higher rank is an
 # improvement. Ties are "changed" but neither improved nor regressed.
+# Every outcome class the harness can emit must appear here: a class that
+# falls through ranks below everything, so provider_outcome_unknown ->
+# builder_error once reported as a mechanics improvement. A test cross-checks
+# this map against the harness source.
 _OUTCOME_RANK: dict[str, int] = {
     "plan_first_pass": 6,
     "clarification_stop_intended": 5,
@@ -37,10 +41,13 @@ _OUTCOME_RANK: dict[str, int] = {
     "plan_repaired": 4,
     "stalled_unanswered_question": 3,
     "interaction_limit_reached": 2,
+    "requirements_unconfirmed": 2,
     "plan_with_error": 2,
     "builder_error": 1,
+    "provider_outcome_unknown": 1,
     "execution_failure": 1,
     "invalid_evidence": 0,
+    "unclassified": 0,
 }
 
 
