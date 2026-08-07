@@ -1134,7 +1134,13 @@ class ObjectStoreConnectionService:
             # adopting the marker while its deletion is in flight.
             await StoreBindingRepository(session).hold_release_lease(
                 slot=TEMPORARY_DESTINATION_SLOT,
-                lease_seconds=settings.binding_claim_seconds,
+                # Sized to outlive the remote deletion, including its
+                # visibility confirmation, so the guard cannot expire while
+                # the DELETE it guards is still in flight.
+                lease_seconds=(
+                    settings.binding_claim_seconds
+                    + settings.delete_visibility_timeout_seconds
+                ),
             )
 
         stale_settings = self.settings_for(stale)
@@ -1256,7 +1262,13 @@ class ObjectStoreConnectionService:
                     # marker while its deletion is in flight.
                     await StoreBindingRepository(session).hold_release_lease(
                         slot=TEMPORARY_DESTINATION_SLOT,
-                        lease_seconds=settings.binding_claim_seconds,
+                        # Sized to outlive the remote deletion, including its
+                        # visibility confirmation, so the guard cannot expire while
+                        # the DELETE it guards is still in flight.
+                        lease_seconds=(
+                            settings.binding_claim_seconds
+                            + settings.delete_visibility_timeout_seconds
+                        ),
                     )
 
             store = self._store_factory(self._probe_settings(settings))
@@ -1356,13 +1368,6 @@ class ObjectStoreConnectionService:
                     raise ObjectStoreConnectionConflict(
                         "The object-store connection changed while it was being tested"
                     )
-                if await StoreBindingRepository(session).release_lease_active(
-                    slot=TEMPORARY_DESTINATION_SLOT
-                ):
-                    raise ObjectStoreDestinationSwitchBlocked(
-                        "An earlier destination change is still being "
-                        "released; try again shortly"
-                    )
                 owner = await session.scalar(
                     select(ObjectStoreConnections)
                     .where(
@@ -1371,6 +1376,17 @@ class ObjectStoreConnectionService:
                     )
                     .with_for_update()
                 )
+                # The lease is inspected only after the candidate row lock is
+                # held: a releasing cleanup writes its lease under that same
+                # lock, so checking first would read a pre-commit snapshot,
+                # then adopt right after the release commits.
+                if await StoreBindingRepository(session).release_lease_active(
+                    slot=TEMPORARY_DESTINATION_SLOT
+                ):
+                    raise ObjectStoreDestinationSwitchBlocked(
+                        "An earlier destination change is still being "
+                        "released; try again shortly"
+                    )
                 if owner is not None:
                     adopted_revision = await self._record_candidate(
                         session,
