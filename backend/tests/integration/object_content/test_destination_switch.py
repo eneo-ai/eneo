@@ -31,6 +31,7 @@ from eneo.object_content.object_store_connection import (
     ObjectStoreConnectionConflict,
     ObjectStoreConnectionError,
     ObjectStoreConnectionInput,
+    ObjectStoreConnectionInvalid,
     ObjectStoreConnectionService,
     ObjectStoreDestinationAlreadyBound,
     ObjectStoreDestinationCopyIncomplete,
@@ -855,6 +856,54 @@ async def test_zombie_cleanup_cannot_unbind_an_adopted_destination(
         assert await active_store.verify_binding(binding_id)
     finally:
         await active_store.close()
+
+
+async def test_the_current_destination_is_refused_in_any_equivalent_form(
+    object_content_database: DatabaseSessionManager,
+    real_object_store: RealObjectStore,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A trailing slash does not make the active bucket a new destination.
+
+    The settings model strips it, so `https://host/` and `https://host` are
+    one destination. Comparing the raw input would let the active bucket
+    through as new: Eneo would probe it, spend generations, and archive the
+    destination as its own predecessor.
+    """
+    service = _service(object_content_database, real_object_store)
+    actor = await _any_user_id(object_content_database)
+    created = await service.create(
+        _connection_input(real_object_store), actor_user_id=actor
+    )
+    await ensure_store_binding_ready(
+        object_content_database,
+        service.settings_for(created),
+        real_object_store.store,
+    )
+    await _select_inline_writes(object_content_database)
+
+    probes = 0
+    original_probe = ObjectStoreConnectionService._probe
+
+    async def count_probes(self, settings, *, binding):  # type: ignore[no-untyped-def]
+        nonlocal probes
+        probes += 1
+        return await original_probe(self, settings, binding=binding)
+
+    monkeypatch.setattr(ObjectStoreConnectionService, "_probe", count_probes)
+
+    same_destination = _connection_input(real_object_store).model_copy(
+        update={"endpoint_url": f"{real_object_store.settings.endpoint_url}/"}
+    )
+    with pytest.raises(ObjectStoreConnectionInvalid):
+        await service.replace_destination(same_destination, actor_user_id=actor)
+    monkeypatch.undo()
+
+    assert probes == 0, "a self-switch must be refused before any remote work"
+    current = await service.get()
+    assert current is not None
+    assert current.revision == created.revision, "no generation may be spent"
+    assert await service.get_previous() is None, "no destination may be archived"
 
 
 async def test_adoption_is_refused_while_a_release_lease_is_live(

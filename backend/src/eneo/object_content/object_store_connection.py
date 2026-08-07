@@ -614,9 +614,14 @@ class ObjectStoreConnectionService:
             raise ObjectStoreConnectionNotConfigured(
                 "Object storage is not managed in Admin"
             )
+        # Compare what the destination will actually be, not what was typed:
+        # the settings model canonicalizes the endpoint, so `https://host/`
+        # and `https://host` name one destination. Comparing raw input would
+        # let the active bucket pass as "new" and switch onto itself.
+        canonical = self._settings(candidate, deployment_id=stored.deployment_id)
         if (
-            candidate.endpoint_url == stored.endpoint_url
-            and candidate.bucket == stored.bucket
+            canonical.endpoint_url == stored.endpoint_url
+            and canonical.bucket == stored.bucket
         ):
             raise ObjectStoreConnectionInvalid(
                 "The new destination is the same as the current one"
