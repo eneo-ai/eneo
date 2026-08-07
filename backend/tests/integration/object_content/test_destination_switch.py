@@ -34,6 +34,7 @@ from eneo.object_content.object_store_connection import (
     ObjectStoreConnectionService,
     ObjectStoreDestinationAlreadyBound,
     ObjectStoreDestinationCopyIncomplete,
+    ObjectStoreDestinationSwitchBlocked,
     ObjectStoreMovesNotPaused,
     ObjectStoreNewWritesNotRedirected,
     ObjectStorePolicyChangedDuringSwitch,
@@ -845,6 +846,131 @@ async def test_zombie_cleanup_cannot_unbind_an_adopted_destination(
         candidate_revision=interrupted_revision,
     )
 
+    active_store = S3ObjectStore(
+        real_unpaired_object_store.settings.model_copy(
+            update={"deployment_id": created.deployment_id}
+        )
+    )
+    try:
+        assert await active_store.verify_binding(binding_id)
+    finally:
+        await active_store.close()
+
+
+async def test_adoption_is_refused_while_a_release_lease_is_live(
+    object_content_database: DatabaseSessionManager,
+    real_object_store: RealObjectStore,
+    real_unpaired_object_store: RealObjectStore,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A retry must not adopt a marker whose deletion is in flight.
+
+    A releasing cleanup holds a durable lease before it touches the store,
+    so a same-target retry arriving in that window is refused with a
+    retryable reason instead of racing the pending delete. The lease expires
+    on its own, so a release that dies only delays the next attempt.
+    """
+    service = _service(object_content_database, real_object_store)
+    actor = await _any_user_id(object_content_database)
+    created = await service.create(
+        _connection_input(real_object_store), actor_user_id=actor
+    )
+    await ensure_store_binding_ready(
+        object_content_database,
+        service.settings_for(created),
+        real_object_store.store,
+    )
+    await _select_inline_writes(object_content_database)
+
+    class SimulatedProcessLoss(BaseException):
+        pass
+
+    original_create = S3ObjectStore.create_binding
+
+    async def lose_process_after_marker(self, creation):  # type: ignore[no-untyped-def]
+        await original_create(self, creation)
+        raise SimulatedProcessLoss("the worker died before the swap committed")
+
+    monkeypatch.setattr(S3ObjectStore, "create_binding", lose_process_after_marker)
+    with pytest.raises(SimulatedProcessLoss):
+        await service.replace_destination(
+            _connection_input(real_unpaired_object_store),
+            actor_user_id=actor,
+        )
+    monkeypatch.undo()
+
+    # The interrupted attempt's cleanup takes its release lease.
+    async with object_content_database.session() as session, session.begin():
+        await session.execute(
+            text(
+                "UPDATE object_store_bindings "
+                "SET claim_id = gen_random_uuid(), "
+                "claim_until = now() + interval '60 seconds' "
+                "WHERE slot = 2"
+            )
+        )
+
+    with pytest.raises(ObjectStoreDestinationSwitchBlocked):
+        await service.replace_destination(
+            _connection_input(real_unpaired_object_store),
+            actor_user_id=actor,
+        )
+
+
+async def test_an_ownerless_marker_is_reclaimed_not_trusted(
+    object_content_database: DatabaseSessionManager,
+    real_object_store: RealObjectStore,
+    real_unpaired_object_store: RealObjectStore,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A marker whose candidate record is gone is rebuilt, not relied on.
+
+    A finished release that failed its remote deletion leaves a marker with
+    no record. A retry cannot know whether that marker will persist, so it
+    reclaims the bucket and goes through the full claimed admission,
+    finishing with a marker it owns.
+    """
+    service = _service(object_content_database, real_object_store)
+    actor = await _any_user_id(object_content_database)
+    created = await service.create(
+        _connection_input(real_object_store), actor_user_id=actor
+    )
+    await ensure_store_binding_ready(
+        object_content_database,
+        service.settings_for(created),
+        real_object_store.store,
+    )
+    await _select_inline_writes(object_content_database)
+    binding_id = await _binding_id(object_content_database)
+
+    class SimulatedProcessLoss(BaseException):
+        pass
+
+    original_create = S3ObjectStore.create_binding
+
+    async def lose_process_after_marker(self, creation):  # type: ignore[no-untyped-def]
+        await original_create(self, creation)
+        raise SimulatedProcessLoss("the worker died before the swap committed")
+
+    monkeypatch.setattr(S3ObjectStore, "create_binding", lose_process_after_marker)
+    with pytest.raises(SimulatedProcessLoss):
+        await service.replace_destination(
+            _connection_input(real_unpaired_object_store),
+            actor_user_id=actor,
+        )
+    monkeypatch.undo()
+
+    # A finished release consumed the candidate record and the claim but its
+    # remote marker deletion failed, leaving the marker ownerless.
+    async with object_content_database.session() as session, session.begin():
+        await session.execute(text("DELETE FROM object_store_bindings WHERE slot = 2"))
+        await session.execute(text("DELETE FROM object_store_connections WHERE id = 2"))
+
+    switch = await service.replace_destination(
+        _connection_input(real_unpaired_object_store),
+        actor_user_id=actor,
+    )
+    assert switch.active.bucket == real_unpaired_object_store.settings.bucket
     active_store = S3ObjectStore(
         real_unpaired_object_store.settings.model_copy(
             update={"deployment_id": created.deployment_id}

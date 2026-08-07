@@ -456,12 +456,19 @@ otherwise.
 
 ### Copy and verify the objects
 
-Object keys live under `v1/<deployment-id-without-dashes>/`. Take
-`OBJECT_CONTENT_DEPLOYMENT_ID` and remove the dashes:
+Object keys live under `v1/<deployment-id-without-dashes>/`. Read that id
+from the current bucket itself — it is the filename of Eneo's pairing marker:
 
-```text
-94e1a7e3-21a7-40b8-959b-d0ecdc8827e2   →   94e1a7e321a740b8959bd0ecdc8827e2
+```bash
+rclone lsf old-store:eneo-object-content/v1/.eneo-bindings/
 ```
+
+The single filename it prints, for example
+`94e1a7e321a740b8959bd0ecdc8827e2`, is your prefix. (On a deployment
+configured through environment variables, this equals
+`OBJECT_CONTENT_DEPLOYMENT_ID` without its dashes; a connection created in
+**Admin > Storage** generates the id internally, so the bucket listing is the
+authoritative source.)
 
 Confirm that prefix lists your objects, then copy and compare both sides:
 

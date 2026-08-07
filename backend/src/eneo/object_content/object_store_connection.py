@@ -1130,6 +1130,12 @@ class ObjectStoreConnectionService:
             assert row is not None
             row.revision = row.revision + 1
             owned_revision = row.revision
+            # The lease keeps a retry of the interrupted attempt from
+            # adopting the marker while its deletion is in flight.
+            await StoreBindingRepository(session).hold_release_lease(
+                slot=TEMPORARY_DESTINATION_SLOT,
+                lease_seconds=settings.binding_claim_seconds,
+            )
 
         stale_settings = self.settings_for(stale)
         store = self._store_factory(self._probe_settings(stale_settings))
@@ -1246,6 +1252,12 @@ class ObjectStoreConnectionService:
                         return
                     row.revision = row.revision + 1
                     owned_revision = row.revision
+                    # The lease keeps a same-target retry from adopting the
+                    # marker while its deletion is in flight.
+                    await StoreBindingRepository(session).hold_release_lease(
+                        slot=TEMPORARY_DESTINATION_SLOT,
+                        lease_seconds=settings.binding_claim_seconds,
+                    )
 
             store = self._store_factory(self._probe_settings(settings))
             try:
@@ -1333,6 +1345,7 @@ class ObjectStoreConnectionService:
             # recorded in: an interrupted earlier attempt's cleanup checks the
             # revision before it may delete this marker, so the adoption is
             # what makes the observed marker safe to rely on.
+            adopted_revision: int | None = None
             async with self._transaction(mutation=True) as session:
                 active_revision = await session.scalar(
                     select(ObjectStoreConnections.revision).where(
@@ -1343,17 +1356,46 @@ class ObjectStoreConnectionService:
                     raise ObjectStoreConnectionConflict(
                         "The object-store connection changed while it was being tested"
                     )
-                adopted_revision = await self._record_candidate(
-                    session,
-                    candidate,
-                    settings=settings,
+                if await StoreBindingRepository(session).release_lease_active(
+                    slot=TEMPORARY_DESTINATION_SLOT
+                ):
+                    raise ObjectStoreDestinationSwitchBlocked(
+                        "An earlier destination change is still being "
+                        "released; try again shortly"
+                    )
+                owner = await session.scalar(
+                    select(ObjectStoreConnections)
+                    .where(
+                        ObjectStoreConnections.id == TEMPORARY_DESTINATION_SLOT,
+                        ObjectStoreConnections.role == "candidate",
+                    )
+                    .with_for_update()
                 )
-                await StoreBindingRepository(session).record_switch_claim(
-                    slot=TEMPORARY_DESTINATION_SLOT,
-                    deployment_id=settings.deployment_id,
-                    binding_id=binding_id,
-                )
-            return False, adopted_revision
+                if owner is not None:
+                    adopted_revision = await self._record_candidate(
+                        session,
+                        candidate,
+                        settings=settings,
+                    )
+                    await StoreBindingRepository(session).record_switch_claim(
+                        slot=TEMPORARY_DESTINATION_SLOT,
+                        deployment_id=settings.deployment_id,
+                        binding_id=binding_id,
+                    )
+            if adopted_revision is not None:
+                return False, adopted_revision
+            # A marker with no live candidate record is ownerless: a finished
+            # release failed to remove it, or its record was already consumed.
+            # It cannot be trusted to persist, so reclaim the bucket and go
+            # through the full claimed admission below instead.
+            reclaim_store = self._store_factory(probe_settings)
+            try:
+                await reclaim_store.remove_binding(binding_id)
+            except ObjectStoreUnavailableError as error:
+                self._raise_probe_error(error)
+                raise
+            finally:
+                await reclaim_store.close()
 
         # Unmarked target: prove readiness and a complete write/read/delete
         # round trip before claiming the bucket.

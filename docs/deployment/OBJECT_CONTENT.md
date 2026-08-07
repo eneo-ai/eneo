@@ -458,11 +458,14 @@ readable immediately.
    required: an empty queue does not by itself stop a new move from starting
    mid-copy. New uploads above `OBJECT_CONTENT_INLINE_MAXIMUM_BYTES` fail
    during this window.
-3. Copy only `v1/<OBJECT_CONTENT_DEPLOYMENT_ID>/` with `rclone copy
-   --checksum` (never `sync`, which deletes at the destination) and preserve
-   object metadata; Eneo enforces the stored media type on every read. Never
-   copy `v1/.eneo-bindings/`: that prefix holds the database-to-bucket marker
-   and Eneo manages it per destination.
+3. Copy only `v1/<deployment-id-hex>/` with `rclone copy --checksum` (never
+   `sync`, which deletes at the destination) and preserve object metadata;
+   Eneo enforces the stored media type on every read. Read the hex id from
+   the current bucket — it is the filename under `v1/.eneo-bindings/`; on an
+   environment-managed deployment it equals `OBJECT_CONTENT_DEPLOYMENT_ID`
+   without dashes, while an Admin-created connection generates it internally.
+   Never copy `v1/.eneo-bindings/` itself: that prefix holds the
+   database-to-bucket marker and Eneo manages it per destination.
 4. Compare both sides with `rclone check --checksum` until it reports no
    differences.
 5. Use **Change destination** in **Admin > Storage**. Eneo probes the

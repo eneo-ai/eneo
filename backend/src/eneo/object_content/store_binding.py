@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from datetime import timedelta
 from uuid import UUID, uuid4
 
-from sqlalchemy import delete, exists, func, select, text
+from sqlalchemy import delete, exists, func, select, text, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -157,10 +157,13 @@ class StoreBindingRepository:
             )
 
         row = await self._row_for_update(slot)
+        legacy_columns = False
         if row is None and slot == ACTIVE_DESTINATION_SLOT:
-            adopted = await self._adopt_legacy_binding(deployment_id)
-            if adopted is not None:
-                return adopted
+            legacy_columns = await self._legacy_binding_columns_present()
+            if legacy_columns:
+                adopted = await self._adopt_legacy_binding(deployment_id)
+                if adopted is not None:
+                    return adopted
         if row is None:
             if (
                 slot == ACTIVE_DESTINATION_SLOT
@@ -181,6 +184,23 @@ class StoreBindingRepository:
             row = await self._row_for_update(slot)
             if row is None:
                 raise RuntimeError("Object-store binding initialization failed")
+            if legacy_columns:
+                # Mirror the chosen identity into the legacy columns so a
+                # previous-version worker, serialized behind the state-row
+                # lock the adoption read took, initializes with the same
+                # identity instead of forking its own.
+                await self._session.execute(
+                    text(
+                        "UPDATE object_content_reconciliation_state "
+                        "SET store_deployment_id = :deployment_id, "
+                        "store_binding_id = :binding_id "
+                        "WHERE id = 1 AND store_binding_id IS NULL"
+                    ),
+                    {
+                        "deployment_id": row.deployment_id,
+                        "binding_id": row.binding_id,
+                    },
+                )
         if row.deployment_id != deployment_id:
             raise ObjectContentConfigurationError(
                 "Object-content deployment identity does not match PostgreSQL"
@@ -231,6 +251,9 @@ class StoreBindingRepository:
             .on_conflict_do_update(
                 index_elements=[ObjectStoreBindings.slot],
                 set_={
+                    # A fresh claim supersedes any expired release lease.
+                    "claim_id": None,
+                    "claim_until": None,
                     "deployment_id": deployment_id,
                     "binding_id": binding_id,
                     "create_started_at": func.now(),
@@ -245,6 +268,37 @@ class StoreBindingRepository:
             delete(ObjectStoreBindings).where(ObjectStoreBindings.slot == slot)
         )
         await self._session.flush()
+
+    async def hold_release_lease(self, *, slot: int, lease_seconds: int) -> None:
+        """Mark the slot's claimed bucket as being released.
+
+        While the lease is unexpired, a switch must not adopt the
+        destination: the releasing actor may delete its marker at any moment.
+        The lease expires on its own, so a release that dies mid-flight only
+        delays the next attempt instead of wedging it.
+        """
+        await self._session.execute(
+            update(ObjectStoreBindings)
+            .where(ObjectStoreBindings.slot == slot)
+            .values(
+                claim_id=uuid4(),
+                claim_until=func.now() + timedelta(seconds=lease_seconds),
+            )
+        )
+        await self._session.flush()
+
+    async def release_lease_active(self, *, slot: int) -> bool:
+        """Whether an unexpired release lease guards the slot's bucket."""
+        active = await self._session.scalar(
+            select(
+                exists().where(
+                    ObjectStoreBindings.slot == slot,
+                    ObjectStoreBindings.claim_id.is_not(None),
+                    ObjectStoreBindings.claim_until > func.now(),
+                )
+            )
+        )
+        return bool(active)
 
     async def mark_creation_started(
         self,
@@ -307,16 +361,8 @@ class StoreBindingRepository:
             row.claim_until = None
             await self._session.flush()
 
-    async def _adopt_legacy_binding(self, deployment_id: UUID) -> StoreBinding | None:
-        """Adopt binding facts a pre-upgrade process wrote after the expand.
-
-        The expand migration copies the legacy reconciliation-state columns
-        once. A previous-version worker still running in the deployment
-        window can initialize or confirm a binding in those columns
-        afterwards, so an absent table row consults them and adopts what it
-        finds. The contract release drops the columns together with this
-        fallback.
-        """
+    async def _legacy_binding_columns_present(self) -> bool:
+        """True while the pre-contract legacy binding columns still exist."""
         column_present = await self._session.scalar(
             text(
                 "SELECT 1 FROM information_schema.columns "
@@ -324,19 +370,34 @@ class StoreBindingRepository:
                 "AND column_name = 'store_binding_id'"
             )
         )
-        if not column_present:
-            return None
+        return bool(column_present)
+
+    async def _adopt_legacy_binding(self, deployment_id: UUID) -> StoreBinding | None:
+        """Adopt binding facts a pre-upgrade process wrote after the expand.
+
+        The expand migration copies the legacy reconciliation-state columns
+        once. A previous-version worker still running in the deployment
+        window can initialize or confirm a binding in those columns
+        afterwards, so an absent table row consults them and adopts what it
+        finds. The read locks the state row — the same lock a previous-
+        version initializer holds — so the two versions serialize instead of
+        forking separate identities from the same empty state. The contract
+        release drops the columns together with this fallback.
+        """
+        # The row is locked even when it holds no binding yet: the lock, not
+        # the filter, is what serializes this read against a previous-version
+        # initializer, and an unbound row is exactly the fork-critical case.
         legacy = (
             await self._session.execute(
                 text(
                     "SELECT store_deployment_id, store_binding_id, "
                     "store_binding_confirmed_at, store_binding_create_started_at "
                     "FROM object_content_reconciliation_state "
-                    "WHERE id = 1 AND store_binding_id IS NOT NULL"
+                    "WHERE id = 1 FOR UPDATE"
                 )
             )
         ).one_or_none()
-        if legacy is None:
+        if legacy is None or legacy[1] is None:
             return None
         stored_deployment_id, binding_id, confirmed_at, create_started_at = legacy
         if stored_deployment_id != deployment_id:
