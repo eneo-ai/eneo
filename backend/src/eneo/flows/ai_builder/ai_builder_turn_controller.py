@@ -167,8 +167,24 @@ def _attachment_evidence_fingerprint(
     output_schema = session_state.output_schema_evidence
     serialized = json.dumps(
         {
+            # Only what the summary discloses and the user attests to.
+            # Hashing the full role — evidence traces, confidence,
+            # candidate lists — made the fingerprint move on every
+            # re-classification even when nothing the user saw changed, so
+            # no confirmation could ever match and the builder re-emitted
+            # the same summary forever (2026-08-07, deterministic on the
+            # runtime-sample family).
             "file_roles": [
-                item.model_dump(mode="json")
+                {
+                    "file_id": str(item.file_id),
+                    "filename": item.filename,
+                    "file_type": item.file_type,
+                    "mimetype": item.mimetype,
+                    "role": item.role,
+                    "coverage": item.coverage,
+                    "has_readable_text": item.has_readable_text,
+                    "template_placeholders": item.template_placeholders,
+                }
                 for item in sorted(
                     session_state.file_roles,
                     key=lambda item: str(item.file_id),

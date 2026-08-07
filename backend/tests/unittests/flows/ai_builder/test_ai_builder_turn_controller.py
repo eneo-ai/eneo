@@ -300,6 +300,122 @@ def test_schema_direction_maximum_question_covers_complete_set_and_fits_limit(
     assert selected_direction.output_fingerprint == selected_fingerprint
 
 
+def test_confirmation_survives_reclassification_churn() -> None:
+    """The fingerprint attests to what the user saw, not derivation traces.
+
+    Live loop (text_terminal_intranatsnyhet_namndbeslut, 3/3): every turn's
+    re-classification appended a fresh `model:file_role:<hash>` plus a
+    duplicate quote to the file role's evidence, so the fingerprint moved
+    every turn while the requirements payload stayed byte-identical. The
+    confirmation gate compared fingerprints, no confirmation could ever
+    match, and the builder re-summarized the same requirements forever.
+    """
+
+    file_id = UUID("00000000-0000-0000-0000-000000000712")
+
+    def role(evidence: list[str], confidence: str) -> FileRoleEvidence:
+        return FileRoleEvidence(
+            file_id=file_id,
+            filename="protokoll.pdf",
+            file_type="text",
+            mimetype="application/pdf",
+            has_readable_text=True,
+            coverage="fully_seen",
+            role="runtime_input_sample",
+            source="model",
+            confidence=confidence,
+            evidence=evidence,
+            evidence_level="explicit",
+        )
+
+    state = _state(primary_runtime_input="document", terminal_output="structured_text")
+    state.architecture_commit = _finalized_commit_for_state(state)
+    state.file_roles = [role(["quote:user_message:1:exempel"], "high")]
+    confirmed = resolve_turn_control(
+        session_state=state,
+        selected_discovery_question_ids=(),
+        confirmed_attachment_evidence_fingerprint=None,
+        ui_language="sv",
+    ).decision
+    assert isinstance(confirmed, ConfirmRequirements)
+
+    churned = _state(
+        primary_runtime_input="document", terminal_output="structured_text"
+    )
+    churned.architecture_commit = _finalized_commit_for_state(churned)
+    churned.file_roles = [
+        role(
+            [
+                "quote:user_message:1:exempel",
+                "model:file_role:aaaa",
+                "quote:user_message:1:exempel",
+                "model:file_role:bbbb",
+            ],
+            "medium",
+        )
+    ]
+
+    decision = resolve_turn_control(
+        session_state=churned,
+        selected_discovery_question_ids=(),
+        confirmed_attachment_evidence_fingerprint=(
+            confirmed.attachment_evidence_fingerprint
+        ),
+        ui_language="sv",
+    ).decision
+
+    assert not isinstance(decision, ConfirmRequirements)
+
+
+def test_role_change_invalidates_confirmation() -> None:
+    # The user confirmed a runtime-input sample; the file becoming a
+    # template is a different fact and needs a fresh confirmation.
+    file_id = UUID("00000000-0000-0000-0000-000000000713")
+
+    def role(kind: str) -> FileRoleEvidence:
+        return FileRoleEvidence(
+            file_id=file_id,
+            filename="protokoll.pdf",
+            file_type="text",
+            mimetype="application/pdf",
+            has_readable_text=True,
+            coverage="fully_seen",
+            role=kind,
+            source="model",
+            confidence="high",
+            evidence=["quote:user_message:1:exempel"],
+            evidence_level="explicit",
+        )
+
+    state = _state(primary_runtime_input="document", terminal_output="structured_text")
+    state.architecture_commit = _finalized_commit_for_state(state)
+    state.file_roles = [role("runtime_input_sample")]
+    confirmed = resolve_turn_control(
+        session_state=state,
+        selected_discovery_question_ids=(),
+        confirmed_attachment_evidence_fingerprint=None,
+        ui_language="sv",
+    ).decision
+    assert isinstance(confirmed, ConfirmRequirements)
+
+    changed = _state(
+        primary_runtime_input="document", terminal_output="structured_text"
+    )
+    changed.architecture_commit = _finalized_commit_for_state(changed)
+    changed.file_roles = [role("template")]
+
+    decision = resolve_turn_control(
+        session_state=changed,
+        selected_discovery_question_ids=(),
+        confirmed_attachment_evidence_fingerprint=(
+            confirmed.attachment_evidence_fingerprint
+        ),
+        ui_language="sv",
+    ).decision
+
+    assert isinstance(decision, ConfirmRequirements)
+
+
 def test_server_builds_commit_when_no_questions_remain() -> None:
     state = _state(
         primary_runtime_input="documents",
