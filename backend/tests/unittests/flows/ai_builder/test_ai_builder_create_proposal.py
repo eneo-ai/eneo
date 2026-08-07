@@ -854,6 +854,68 @@ async def test_confirmed_create_field_preserves_options_and_provenance() -> None
 
 
 @pytest.mark.asyncio
+async def test_dropped_field_diagnostics_survive_the_storage_boundary() -> None:
+    """Field diagnostics must flow through validation, not content.
+
+    The compile path wrote dropped-field diagnostics straight into
+    `content.lint_warnings`; the storage boundary owns that field, derives
+    it from `compiled.validation`, and refuses content that pre-sets it —
+    so every create whose compile dropped a runtime field died as
+    provider-outcome-unknown after the provider was already paid
+    (2026-08-07, deterministic on the no-extra-metadata family).
+    """
+
+    from eneo.flows.ai_builder.planning_state import ResolvedSlot
+
+    state = PlanningState.empty()
+    state.resolved_slots["runtime_metadata_fields"] = ResolvedSlot(
+        name="runtime_metadata_fields",
+        value="no_extra_metadata",
+        source="structured_answer",
+        evidence=["answer:no_extra_metadata"],
+        confidence="high",
+    )
+    state.input_fields = [
+        FlowInputFieldIntent(
+            variable_name="diarienummer",
+            label="Diarienummer",
+            provenance="model_proposed",
+        )
+    ]
+
+    result = await process_create_intent_arguments(
+        turn=_make_turn(),
+        conversation=[],
+        arguments={
+            "flow_name": "Incidentnotering",
+            "plan_rationale": "Strukturera incidenten till JSON.",
+            "input_fields": [{"name": "diarienummer", "label": "Diarienummer"}],
+            "steps": [
+                {
+                    "name": "Strukturera incidenten",
+                    "instructions": "Strukturera incidentbeskrivningen.",
+                    "uses_form_fields": ["diarienummer"],
+                }
+            ],
+        },
+        tool_call_id="call-dropped-field",
+        available_model_refs=None,
+        available_kb_refs=None,
+        planning_state=state,
+    )
+
+    assert result.compiled_proposal is not None
+    # Content must not pre-set the storage-owned field.
+    assert result.compiled_proposal.content.lint_warnings == []
+
+    stored = build_flow_builder_proposal(result.compiled_proposal)
+
+    assert [w.code for w in stored.content.lint_warnings] == [
+        "runtime_metadata_form_field_dropped"
+    ]
+
+
+@pytest.mark.asyncio
 async def test_confirmed_create_field_set_rejects_model_proposed_addition() -> None:
     state = PlanningState.empty()
     state.input_fields = [
@@ -926,10 +988,16 @@ async def test_model_proposed_create_shadow_drop_is_visible() -> None:
 
     assert result.compiled_proposal is not None
     assert result.compiled_proposal.content.spec.form_fields is None
+    # Diagnostics travel on validation; the storage boundary derives the
+    # user-visible lint warnings from it.
     assert [
         (warning.code, warning.field_name, warning.field_provenance)
-        for warning in result.compiled_proposal.content.lint_warnings
+        for warning in result.compiled_proposal.validation.warnings
     ] == [("primary_input_shadow_form_field_dropped", "text", "model_proposed")]
+    stored = build_flow_builder_proposal(result.compiled_proposal)
+    assert [warning.code for warning in stored.content.lint_warnings] == [
+        "primary_input_shadow_form_field_dropped"
+    ]
 
 
 @pytest.mark.asyncio

@@ -242,12 +242,17 @@ async def _process_create_spec(
             failure_kind="quality",
         )
 
+    # Diagnostics travel on validation: the storage boundary is the sole
+    # deriver of content.lint_warnings and refuses content that pre-sets
+    # them — writing them here killed every create whose compile dropped a
+    # runtime field, after the provider was already paid.
+    if field_diagnostics:
+        validation.warnings.extend(field_diagnostics)
     return ToolProcessingResult(
         compiled_proposal=CompiledProposal(
             content=FlowBuilderProposalContent(
                 spec=spec,
                 assumptions=intent.assumptions,
-                lint_warnings=field_diagnostics or [],
                 plan_rationale=intent.plan_rationale,
             ),
             validation=validation,
