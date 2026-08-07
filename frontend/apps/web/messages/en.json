@@ -997,6 +997,8 @@
   "tool_list_knowledge_sources_done": "Listed knowledge sources",
   "tool_read_source": "Reading source document",
   "tool_read_source_done": "Read source document",
+  "tool_describe_source": "Getting an overview of the knowledge source",
+  "tool_describe_source_done": "Got an overview of the knowledge source",
   "tool_read_file": "Reading attached file",
   "tool_read_file_done": "Read attached file",
   "internal_files_server": "Attachments",
