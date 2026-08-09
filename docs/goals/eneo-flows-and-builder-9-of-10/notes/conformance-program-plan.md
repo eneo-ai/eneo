@@ -505,8 +505,9 @@ sentinel. Stochastic suite runs measure *incidence*, never correctness.
    - set a bounded maximum repetition cost; if the interval stays wider
      than the MDE, report **inconclusive** — never promote a modal result
      to proof.
-3. **Checkpoint:** run the full 122 only to checkpoint, and report the
-   outcome × expectation matrix, never first-pass alone.
+3. **Checkpoint:** run the full pinned corpus (manifest identity, not a
+   stale count) only to checkpoint, and report the outcome × expectation
+   matrix, never first-pass alone.
 4. **No-regression rule:** a case that was conformance-passing and now
    fails is a blocker unless repeated measurement of both builds shows the
    change is within the declared non-inferiority margin. Finite noisy
@@ -517,9 +518,18 @@ sentinel. Stochastic suite runs measure *incidence*, never correctness.
 
 ## Standing guardrails
 
-- Citations slice stays held behind its strict-xfail red test and the
-  fail-closed refusal; do not implement it here.
-- Structured-field depth cap stays at 3; raising it is a product decision.
+- Citations slice stays held; the sidecar itself is not implemented. The
+  fail-closed refusal was replaced by adjudicated design (Pass 7,
+  2026-08-09): document-report lowering admits the request by clearing
+  citation flags and emitting one capability warning through the
+  validation-diagnostics path; the late fatal helper is deleted once
+  unreachable.
+- Structured-field depth cap: raise to 4 only after a deterministic
+  runtime proof (compile → publish → structured output → downstream
+  consumption of the captured depth-4 array/object shape, plus a depth-5
+  rejection). Flattening is rejected — dots collide with binding-path
+  syntax. Record the tool-schema byte-cost delta when the constant moves
+  (measured 4124 → 8880 bytes for the structured-field fragment).
 - Prefer deleting a rule to adding one; every prompt sentence is paid on
   every proposal.
 - One canonical owner per concern. Before adding a path, check whether an
