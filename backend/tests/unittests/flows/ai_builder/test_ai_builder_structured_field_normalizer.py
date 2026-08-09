@@ -83,17 +83,15 @@ def test_lossy_shapes_reject_the_whole_list(
     assert "No output_fields were accepted" in message
 
 
-def test_over_depth_nesting_rejects_at_the_step_boundary() -> None:
-    # Nothing downgrades over-deep structures anymore, so the step-level
-    # depth invariant sees and rejects them as a repairable typed error.
+def test_depth_four_nesting_validates_at_the_step_boundary() -> None:
     nested = _field(
         "djup",
         field_type="object",
         fields=[
             _field(
                 "niva2",
-                field_type="object",
-                fields=[
+                field_type="array",
+                item_fields=[
                     _field(
                         "niva3",
                         field_type="object",
@@ -103,15 +101,21 @@ def test_over_depth_nesting_rejects_at_the_step_boundary() -> None:
             )
         ],
     )
-    with pytest.raises(PydanticValidationError, match="depth"):
-        SemanticStepIntent.model_validate(
-            {
-                "name": "Extrahera",
-                "instructions": "Extrahera djupa fält.",
-                "output_type": "json",
-                "output_fields": [nested],
-            }
-        )
+
+    step = SemanticStepIntent.model_validate(
+        {
+            "name": "Extrahera",
+            "instructions": "Extrahera djupa fält.",
+            "output_type": "json",
+            "output_fields": [nested],
+        }
+    )
+
+    assert step.output_fields is not None
+    assert step.output_fields[0].fields is not None
+    assert step.output_fields[0].fields[0].item_fields is not None
+    assert step.output_fields[0].fields[0].item_fields[0].fields is not None
+    assert step.output_fields[0].fields[0].item_fields[0].fields[0].name == "niva4"
 
 
 def test_one_malformed_item_rejects_valid_siblings_too() -> None:
@@ -157,7 +161,13 @@ def test_depth_rejection_names_the_offending_branch() -> None:
                     _field(
                         "underavsnitt",
                         field_type="object",
-                        fields=[_field("text")],
+                        fields=[
+                            _field(
+                                "stycke",
+                                field_type="object",
+                                fields=[_field("text")],
+                            )
+                        ],
                     )
                 ],
             )

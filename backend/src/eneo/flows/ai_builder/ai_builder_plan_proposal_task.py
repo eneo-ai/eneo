@@ -21,6 +21,9 @@ from eneo.flows.ai_builder.ai_builder_event_models import RequirementsSummaryPay
 from eneo.flows.ai_builder.ai_builder_framework_policy import (
     runtime_metadata_allows_input_fields,
 )
+from eneo.flows.ai_builder.ai_builder_new_step_models import (
+    MAX_STRUCTURED_FIELD_DEPTH,
+)
 from eneo.flows.ai_builder.ai_builder_output_sections_signals import (
     RequestedOutputSections,
 )
@@ -390,7 +393,8 @@ def _output_schema_evidence_block(planning_state: PlanningState) -> str | None:
                 "the user must provide at runtime.",
                 "- Keep preparation output_fields FLAT: one string field per "
                 "placeholder (source references belong inside the text, not as "
-                "nested objects). Nesting deeper than three levels is rejected.",
+                f"nested objects). Nesting deeper than {MAX_STRUCTURED_FIELD_DEPTH} "
+                "levels is rejected.",
                 "- Name each preparation field with the placeholder's ASCII "
                 "identifier form: lowercase, diacritics folded (å/ä→a, ö→o), "
                 'dots and spaces replaced with underscores ("sections.ärendet'

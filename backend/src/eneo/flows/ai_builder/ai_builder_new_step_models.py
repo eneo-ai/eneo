@@ -19,7 +19,8 @@ from eneo.flows.flow_review_policy import FlowStepReviewMode
 DocumentDeliveryMode = Literal["not_applicable", "generated", "template_fill"]
 StructuredFieldType = Literal["string", "number", "boolean", "object", "array"]
 
-MAX_STRUCTURED_FIELD_DEPTH = 3
+# Authoring depth guardrail; cost is bounded by the serialized tool schema.
+MAX_STRUCTURED_FIELD_DEPTH = 4
 STRUCTURED_FIELD_NAME_PATTERN = r"^[A-Za-z_][A-Za-z0-9_]*$"
 
 

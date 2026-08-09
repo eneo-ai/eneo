@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import hashlib
+import json
+from dataclasses import replace
 from datetime import datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, create_autospec
@@ -10,16 +12,21 @@ import pytest
 
 from eneo.authentication.principal_types import PrincipalType
 from eneo.files.file_service import FileService
+from eneo.flows.ai_builder.ai_builder_new_step_compiler import compile_new_step_draft
+from eneo.flows.ai_builder.ai_builder_new_step_models import NewStepDraft
 from eneo.flows.domain.canonical_json_hash import canonical_json_bytes
 from eneo.flows.domain.flow import (
     FlowRun,
     FlowRunStatus,
+    FlowStep,
     FlowStepResult,
     FlowStepResultStatus,
 )
 from eneo.flows.domain.runtime import RunExecutionState, RuntimeStep, StepInputValue
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
+from eneo.flows.flow_validators import validate_steps
 from eneo.flows.runtime.http_orchestration import FlowHttpInputResolution
+from eneo.flows.runtime.step_definition_parser import parse_runtime_steps
 from eneo.flows.runtime.step_execution_runtime import (
     StepExecutionRuntimeDeps,
     prepare_step_execution,
@@ -128,6 +135,242 @@ def _resolution_deps(
         max_inline_text_bytes=1024 * 1024,
         logger=MagicMock(),
     )
+
+
+def _publish_step(step: RuntimeStep) -> FlowStep:
+    return FlowStep(
+        id=step.step_id,
+        assistant_id=step.assistant_id,
+        step_order=step.step_order,
+        user_description=step.user_description,
+        input_source=step.input_source,
+        input_type=step.input_type,
+        input_contract=step.input_contract,
+        output_mode=step.output_mode,
+        output_type=step.output_type,
+        output_contract=step.output_contract,
+        input_bindings=step.input_bindings,
+        input_config=step.input_config,
+        output_config=step.output_config,
+        review_policy=step.review_policy,
+        timeout_seconds=step.timeout_seconds,
+    )
+
+
+def _depth_four_output_contract() -> dict[str, object]:
+    return {
+        "type": "object",
+        "properties": {
+            "documents": {
+                "type": "array",
+                "title": "Documents",
+                "description": "Source documents.",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "group": {
+                            "type": "object",
+                            "title": "Group",
+                            "description": "A source group.",
+                            "properties": {
+                                "entries": {
+                                    "type": "array",
+                                    "title": "Entries",
+                                    "description": "Grouped entries.",
+                                    "items": {
+                                        "type": "object",
+                                        "properties": {
+                                            "leaf": {
+                                                "type": "string",
+                                                "title": "Leaf",
+                                                "description": "Captured detail.",
+                                            }
+                                        },
+                                        "additionalProperties": False,
+                                        "required": ["leaf"],
+                                    },
+                                }
+                            },
+                            "additionalProperties": False,
+                            "required": ["entries"],
+                        }
+                    },
+                    "additionalProperties": False,
+                    "required": ["group"],
+                },
+            }
+        },
+        "additionalProperties": False,
+        "required": ["documents"],
+    }
+
+
+def _depth_four_runtime_steps(
+    output_contract: dict[str, object],
+) -> list[RuntimeStep]:
+    properties = output_contract["properties"]
+    assert isinstance(properties, dict)
+    documents_contract = properties["documents"]
+    assert isinstance(documents_contract, dict)
+    return parse_runtime_steps(
+        {
+            "steps": [
+                {
+                    "step_id": str(uuid4()),
+                    "step_order": 1,
+                    "assistant_id": str(uuid4()),
+                    "plan_step_ref": "step_1",
+                    "input_source": "flow_input",
+                    "input_type": "text",
+                    "output_mode": "pass_through",
+                    "output_type": "json",
+                    "output_contract": output_contract,
+                },
+                {
+                    "step_id": str(uuid4()),
+                    "step_order": 2,
+                    "assistant_id": str(uuid4()),
+                    "input_source": "previous_step",
+                    "input_type": "json",
+                    "input_bindings": {
+                        "source_refs": [
+                            {
+                                "step_ref": "step_1",
+                                "output": "structured",
+                                "field_path": "documents",
+                            }
+                        ]
+                    },
+                    "input_contract": {
+                        "type": "object",
+                        "properties": {"documents": documents_contract},
+                        "required": ["documents"],
+                        "additionalProperties": False,
+                    },
+                    "output_mode": "pass_through",
+                    "output_type": "text",
+                },
+                {
+                    "step_id": str(uuid4()),
+                    "step_order": 3,
+                    "assistant_id": str(uuid4()),
+                    "input_source": "previous_step",
+                    "input_type": "text",
+                    "input_bindings": {
+                        "source_refs": [{"step_ref": "step_1", "output": "structured"}]
+                    },
+                    "output_mode": "pass_through",
+                    "output_type": "text",
+                },
+            ]
+        }
+    )
+
+
+def test_compiler_emits_publishable_depth_four_contract() -> None:
+    producer = compile_new_step_draft(
+        step_draft=NewStepDraft.model_validate(
+            {
+                "name": "Group source material",
+                "instructions": "Group the source material.",
+                "output_type": "json",
+                "output_fields": [
+                    {
+                        "name": "documents",
+                        "field_type": "array",
+                        "description": "Source documents.",
+                        "item_fields": [
+                            {
+                                "name": "group",
+                                "field_type": "object",
+                                "description": "A source group.",
+                                "fields": [
+                                    {
+                                        "name": "entries",
+                                        "field_type": "array",
+                                        "description": "Grouped entries.",
+                                        "item_fields": [
+                                            {
+                                                "name": "leaf",
+                                                "field_type": "string",
+                                                "description": "Captured detail.",
+                                            }
+                                        ],
+                                    }
+                                ],
+                            }
+                        ],
+                    }
+                ],
+            }
+        ),
+        plan_step_ref="step_1",
+        prior_steps=[],
+    )
+
+    assert producer.output_contract == _depth_four_output_contract()
+    runtime_steps = _depth_four_runtime_steps(producer.output_contract)
+    validate_steps(
+        [_publish_step(step) for step in runtime_steps],
+        require_complete_template_fill_config=True,
+    )
+
+
+@pytest.mark.asyncio
+async def test_depth_four_structured_output_survives_publish_and_source_refs() -> None:
+    output_contract = _depth_four_output_contract()
+    runtime_steps = _depth_four_runtime_steps(output_contract)
+    validate_steps(
+        [_publish_step(step) for step in runtime_steps],
+        require_complete_template_fill_config=True,
+    )
+    assert runtime_steps[0].output_contract == output_contract
+
+    payload = {
+        "documents": [{"group": {"entries": [{"leaf": "Captured municipal detail"}]}}]
+    }
+    prior = _result(output_payload={"structured": payload})
+    run = _run()
+
+    documents = await resolve_step_input(
+        step=runtime_steps[1],
+        context={},
+        run=run,
+        prior_results=[prior],
+        deps=_resolution_deps(),
+    )
+    assert documents.structured == payload
+    assert json.loads(documents.text) == payload
+
+    whole = await resolve_step_input(
+        step=runtime_steps[2],
+        context={},
+        run=run,
+        prior_results=[prior],
+        deps=_resolution_deps(),
+    )
+    assert json.loads(whole.text) == payload
+
+    crossing_step = replace(
+        runtime_steps[1],
+        input_bindings={
+            "source_refs": [
+                {
+                    "step_ref": "step_1",
+                    "output": "structured",
+                    "field_path": "documents.group",
+                }
+            ]
+        },
+    )
+    with pytest.raises(TypedIOValidationException, match="object value"):
+        await resolve_step_input(
+            step=crossing_step,
+            context={},
+            run=run,
+            prior_results=[prior],
+            deps=_resolution_deps(),
+        )
 
 
 def test_aliases_record_the_same_flow_input_selection() -> None:
