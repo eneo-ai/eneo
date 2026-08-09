@@ -1312,29 +1312,6 @@ _TERMINAL_RENDERER_MUST_NOT_CONSUME_REVIEW_ONLY_STEP = CriticInvariant(
 )
 
 
-def _composer_question_distinct_prior_structured_step_count(
-    *, spec: FlowDraftSpecCore, composer_index: int
-) -> int:
-    """Number of distinct prior steps the composer's `input_bindings.question`
-    pulls a structured field from.
-
-    The under-bind rule suppresses only when ≥2 priors are already targeted:
-    one prior is the auto-binder's bare-minimum case and still leaves earlier
-    predecessors silently dropped.
-    """
-    composer = spec.steps[composer_index]
-    question = effective_question_binding(composer.input_bindings)
-    if question is None:
-        return 0
-    return len(
-        _prior_structured_step_indexes_referenced_by_template(
-            spec=spec,
-            template=question,
-            before_index=composer_index,
-        )
-    )
-
-
 def _prior_structured_step_indexes_referenced_by_template(
     *,
     spec: FlowDraftSpecCore,
@@ -1366,22 +1343,45 @@ def _reference_targets_structured_output(reference: TemplateReference) -> bool:
     return reference.tail == "output.structured" or bool(reference.structured_path)
 
 
-def _previous_text_step_already_composes_structured_underlag(
-    *, spec: FlowDraftSpecCore, composer_index: int
+def _composer_ancestry_consumes_at_least_two_structured_priors(
+    *,
+    spec: FlowDraftSpecCore,
+    composer_index: int,
+    json_prior_indexes: set[int],
 ) -> bool:
-    if composer_index <= 0:
-        return False
-    previous_index = composer_index - 1
-    previous_step = spec.steps[previous_index]
-    if previous_step.output_type != OutputType.TEXT or _is_renderer_step(previous_step):
-        return False
-    return (
-        _composer_question_distinct_prior_structured_step_count(
-            spec=spec,
-            composer_index=previous_index,
+    ancestry = [composer_index]
+    visited: set[int] = set()
+    consumed_indexes: set[int] = set()
+    while ancestry:
+        step_index = ancestry.pop()
+        if step_index in visited:
+            continue
+        visited.add(step_index)
+        step = spec.steps[step_index]
+        question = effective_question_binding(step.input_bindings)
+        explicit_dependencies: set[int] = (
+            _prior_structured_step_indexes_referenced_by_template(
+                spec=spec,
+                template=question,
+                before_index=step_index,
+            )
+            if question is not None
+            else set()
         )
-        >= 2
-    )
+        consumed_indexes.update(explicit_dependencies)
+        dependencies = explicit_dependencies
+        if (
+            not dependencies
+            and step.input_source == InputSource.PREVIOUS_STEP
+            and step_index > 0
+        ):
+            dependencies = {step_index - 1}
+        ancestry.extend(
+            dependency
+            for dependency in dependencies
+            if not _is_renderer_step(spec.steps[dependency])
+        )
+    return len(json_prior_indexes & consumed_indexes) >= 2
 
 
 def _prior_json_contract_count(spec: FlowDraftSpecCore, *, before_index: int) -> int:
@@ -1538,14 +1538,12 @@ _REDUNDANT_TERMINAL_JSON_FORMAT_TAIL_AFTER_FINAL_TEXT_COMPOSER = CriticInvariant
 def _final_text_step_must_reference_relevant_structured_outputs_evidence(
     context: CriticContext,
 ) -> bool:
-    """Fire when the last compositional text step reads `previous_step`
-    but at least two prior content steps emit structured JSON the
-    composer is silently dropping.
+    """Require two relevant JSON producers on the composer's ancestry.
 
-    This critic rule covers the under-bind shape where the composer reads
-    `previous_step` and only sees the most recent JSON predecessor — even
-    though earlier predecessors carry distinct fields the composer almost
-    certainly needs. Explicit fan-in topology is compiler-owned.
+    A producer counts as consumed only when the composer or a dependency
+    ancestor explicitly references its structured output. Explicit structured
+    references replace the implicit predecessor edge; without such references,
+    a `previous_step` step depends on its immediate predecessor.
 
     Suppression cases:
     - aggregation_intent == compare: document-comparison flows are handled by
@@ -1553,9 +1551,8 @@ def _final_text_step_must_reference_relevant_structured_outputs_evidence(
       is often inferred from document-output language.
     - <2 prior content steps emit JSON+output_contract: there is no
       fan-in to surface, only a 2-step refinement chain.
-    - The composer's `input_bindings.question` already targets ≥2
-      distinct prior structured fields: the spec is doing what the
-      rule would suggest despite the nominal source shape.
+    - At least two JSON producers are explicitly consumed on the composer's
+      dependency ancestry.
     """
     spec = context.spec
     if _redundant_terminal_json_format_tail_after_final_text_composer_evidence(context):
@@ -1613,46 +1610,52 @@ def _final_text_step_must_reference_relevant_structured_outputs_evidence(
                 )
             )
         return len(json_prior_indexes & consumed_indexes) < 2
-    if (
-        _composer_question_distinct_prior_structured_step_count(
-            spec=spec, composer_index=composer_index
-        )
-        >= 2
-    ):
-        return False
-    if _previous_text_step_already_composes_structured_underlag(
+    if _composer_ancestry_consumes_at_least_two_structured_priors(
         spec=spec,
         composer_index=composer_index,
+        json_prior_indexes=json_prior_indexes,
     ):
         return False
     return True
+
+
+def _final_text_step_must_reference_relevant_structured_outputs_remediation(
+    context: CriticContext,
+) -> str:
+    if _is_create_context(context):
+        return (
+            "Strukturera om planen så att det sista komponerande textsteget "
+            "följer efter de strukturerade producentsteg vars resultat behövs. "
+            "Låt producentstegen deklarera tydliga `output_fields` och låt det "
+            "terminala textsteget sammanställa resultaten efter flera JSON-steg; "
+            "i create-läget härleder kompilatorn de typade bindningarna."
+        )
+    return (
+        'Det sista komponerande textsteget läser `input_source="previous_step"` '
+        "fastän flera tidigare steg producerar strukturerad JSON. Behåll "
+        '`input_source="previous_step"` men deklarera `uses_previous_fields` för '
+        "de fält som steget faktiskt behöver från varje relevant tidigare steg "
+        "och referera dem i `input_bindings.question` via "
+        "`{{ step_<ref>.output.structured.<fält> }}`. Eventuella DOCX/PDF-"
+        "renderingar i slutet förblir orörda — regeln gäller bara det "
+        "komponerande textsteget."
+    )
 
 
 _FINAL_TEXT_STEP_MUST_REFERENCE_RELEVANT_STRUCTURED_OUTPUTS = CriticInvariant(
     id="final_text_step_must_reference_relevant_structured_outputs",
     kind="semantic",
     description=(
-        "When the last compositional text step reads `previous_step` and "
-        "at least two prior content steps emit a structured JSON "
-        "output_contract, the composer must reference structured fields "
-        "from at least two of those priors via `uses_previous_fields` and "
-        "explicit `{{ step_<ref>.output.structured.<field> }}` selectors "
-        "in `input_bindings.question`. A `previous_step` composer that "
-        "only sees the immediate predecessor silently drops the fields "
-        "earlier predecessors emit. Document renderer terminals are "
-        "skipped — the rule evaluates the step that builds the body."
+        "When at least two prior content steps emit a structured JSON "
+        "output_contract, at least two relevant producers must be explicitly "
+        "consumed on the final compositional text step's dependency ancestry. "
+        "Explicit structured references replace the implicit predecessor "
+        "edge. Document renderer terminals are skipped — the rule evaluates "
+        "the step that builds the body."
     ),
     evidence=_final_text_step_must_reference_relevant_structured_outputs_evidence,
     remediation=(
-        'Det sista komponerande textsteget läser `input_source="previous_step"` '
-        "fastän flera tidigare steg producerar strukturerad JSON. Det betyder att "
-        "endast det omedelbart föregående steget syns för komponenten — fält från "
-        "ännu tidigare steg går förlorade. Behåll "
-        '`input_source="previous_step"` men deklarera `uses_previous_fields` för '
-        "de fält som steget faktiskt behöver från varje relevant tidigare steg "
-        "och referera dem i `input_bindings.question` via "
-        "`{{ step_<ref>.output.structured.<fält> }}`. Eventuella DOCX/PDF-renderingar "
-        "i slutet förblir orörda — regeln gäller bara det komponerande textsteget."
+        _final_text_step_must_reference_relevant_structured_outputs_remediation
     ),
 )
 

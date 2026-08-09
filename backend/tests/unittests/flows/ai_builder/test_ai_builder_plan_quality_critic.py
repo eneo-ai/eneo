@@ -3270,6 +3270,7 @@ def _final_text_step_critic_context(
     terminal_output: str | None = None,
     text: str = "",
     typed_schema_request: bool = False,
+    flow: "Flow | None" = None,
 ) -> "CriticContext":
     from eneo.flows.ai_builder.ai_builder_critic_invariants import (
         CriticContext,
@@ -3284,7 +3285,7 @@ def _final_text_step_critic_context(
 
     return CriticContext(
         spec=spec,
-        flow=None,
+        flow=flow,
         answer_signals={},
         text=text.casefold(),
         requirements_text="",
@@ -3977,6 +3978,262 @@ class TestFinalTextStepReferencesRelevantStructuredOutputs:
       distinct prior structured fields: the spec is already doing the
       right thing despite the nominal `previous_step` source.
     """
+
+    def test_silent_when_refinement_chain_consumes_json_on_composer_ancestry(
+        self,
+    ) -> None:
+        spec = FlowDraftSpecCore(
+            flow_name="Refine structured evidence",
+            steps=[
+                _step(
+                    "step_a",
+                    "Extract evidence",
+                    "Extract evidence from the document.",
+                    input_type=InputType.DOCUMENT,
+                    output_type=OutputType.JSON,
+                    output_contract=_json_contract("evidence"),
+                ),
+                _step(
+                    "step_b",
+                    "Refine evidence",
+                    "Refine the extracted evidence.",
+                    input_source=InputSource.PREVIOUS_STEP,
+                    input_type=InputType.JSON,
+                    output_type=OutputType.JSON,
+                    output_contract=_json_contract("refined_evidence"),
+                    input_bindings={
+                        "source_refs": [{"step_ref": "step_a", "output": "structured"}]
+                    },
+                ),
+                _step(
+                    "step_c",
+                    "Compose report",
+                    "Compose the final report.",
+                    input_source=InputSource.PREVIOUS_STEP,
+                    input_type=InputType.TEXT,
+                    output_type=OutputType.TEXT,
+                    output_mode=OutputMode.COMPOSE_TEXT,
+                    input_bindings={
+                        "question": (
+                            "Use {{ step_b.output.structured.refined_evidence }} "
+                            "to compose the report."
+                        )
+                    },
+                ),
+                _step(
+                    "step_d",
+                    "Render PDF",
+                    "Render the report as PDF.",
+                    input_source=InputSource.PREVIOUS_STEP,
+                    input_type=InputType.TEXT,
+                    output_type=OutputType.PDF,
+                    output_mode=OutputMode.RENDER_VERBATIM,
+                ),
+            ],
+        )
+
+        issues = evaluate_critic_invariants(_final_text_step_critic_context(spec))
+
+        assert not any(issue.id == _FINAL_TEXT_STEP_INVARIANT_ID for issue in issues)
+
+    def test_fires_on_fully_implicit_json_refinement_chain(self) -> None:
+        spec = FlowDraftSpecCore(
+            flow_name="Implicit structured refinement",
+            steps=[
+                _step(
+                    "step_a",
+                    "Extract evidence",
+                    "Extract evidence.",
+                    output_type=OutputType.JSON,
+                    output_contract=_json_contract("evidence"),
+                ),
+                _step(
+                    "step_b",
+                    "Refine evidence",
+                    "Refine the evidence.",
+                    input_source=InputSource.PREVIOUS_STEP,
+                    input_type=InputType.JSON,
+                    output_type=OutputType.JSON,
+                    output_contract=_json_contract("refined_evidence"),
+                ),
+                _step(
+                    "step_c",
+                    "Compose report",
+                    "Compose the final report.",
+                    input_source=InputSource.PREVIOUS_STEP,
+                    input_type=InputType.TEXT,
+                    output_type=OutputType.TEXT,
+                    output_mode=OutputMode.COMPOSE_TEXT,
+                ),
+                _step(
+                    "step_d",
+                    "Render PDF",
+                    "Render the report as PDF.",
+                    input_source=InputSource.PREVIOUS_STEP,
+                    input_type=InputType.TEXT,
+                    output_type=OutputType.PDF,
+                    output_mode=OutputMode.RENDER_VERBATIM,
+                ),
+            ],
+        )
+
+        issues = evaluate_critic_invariants(_final_text_step_critic_context(spec))
+
+        assert any(issue.id == _FINAL_TEXT_STEP_INVARIANT_ID for issue in issues)
+
+    def test_fires_when_consumed_json_branch_is_bypassed_by_composer(self) -> None:
+        spec = FlowDraftSpecCore(
+            flow_name="Bypassed structured branch",
+            steps=[
+                _step(
+                    "step_a",
+                    "Extract product",
+                    "Extract product data.",
+                    output_type=OutputType.JSON,
+                    output_contract=_json_contract("product"),
+                ),
+                _step(
+                    "step_b",
+                    "Refine product",
+                    "Refine product data.",
+                    input_source=InputSource.PREVIOUS_STEP,
+                    input_type=InputType.JSON,
+                    output_type=OutputType.JSON,
+                    output_contract=_json_contract("refined_product"),
+                    input_bindings={
+                        "source_refs": [{"step_ref": "step_a", "output": "structured"}]
+                    },
+                ),
+                _step(
+                    "step_c",
+                    "Extract customer",
+                    "Extract customer data independently.",
+                    output_type=OutputType.JSON,
+                    output_contract=_json_contract("customer"),
+                ),
+                _step(
+                    "step_d",
+                    "Compose summary",
+                    "Compose the final summary.",
+                    input_source=InputSource.PREVIOUS_STEP,
+                    input_type=InputType.TEXT,
+                    output_type=OutputType.TEXT,
+                    input_bindings={
+                        "question": (
+                            "Use {{ step_c.output.structured.customer }} to "
+                            "compose the summary."
+                        )
+                    },
+                ),
+            ],
+        )
+
+        issues = evaluate_critic_invariants(_final_text_step_critic_context(spec))
+
+        assert any(issue.id == _FINAL_TEXT_STEP_INVARIANT_ID for issue in issues)
+
+    def test_silent_when_previous_text_ancestor_consumes_json_fan_in(self) -> None:
+        spec = FlowDraftSpecCore(
+            flow_name="Structured fan-in before final composition",
+            steps=[
+                _step(
+                    "step_a",
+                    "Extract product",
+                    "Extract product data.",
+                    output_type=OutputType.JSON,
+                    output_contract=_json_contract("product"),
+                ),
+                _step(
+                    "step_b",
+                    "Extract customer",
+                    "Extract customer data.",
+                    output_type=OutputType.JSON,
+                    output_contract=_json_contract("customer"),
+                ),
+                _step(
+                    "step_c",
+                    "Draft report",
+                    "Draft a report from the structured data.",
+                    input_source=InputSource.PREVIOUS_STEP,
+                    input_type=InputType.TEXT,
+                    output_type=OutputType.TEXT,
+                    input_bindings={
+                        "question": (
+                            "Use {{ step_a.output.structured.product }} and "
+                            "{{ step_b.output.structured.customer }} to draft "
+                            "the report."
+                        )
+                    },
+                ),
+                _step(
+                    "step_d",
+                    "Finalize report",
+                    "Finalize the report.",
+                    input_source=InputSource.PREVIOUS_STEP,
+                    input_type=InputType.TEXT,
+                    output_type=OutputType.TEXT,
+                ),
+            ],
+        )
+
+        issues = evaluate_critic_invariants(_final_text_step_critic_context(spec))
+
+        assert not any(issue.id == _FINAL_TEXT_STEP_INVARIANT_ID for issue in issues)
+
+    @pytest.mark.parametrize(
+        ("flow", "required_text", "forbidden_text"),
+        [
+            (None, "följer efter", "uses_previous_fields"),
+            (_edit_flow(), "uses_previous_fields", None),
+        ],
+        ids=("create", "edit"),
+    )
+    def test_remediation_matches_authoring_mode(
+        self,
+        flow: "Flow | None",
+        required_text: str,
+        forbidden_text: str | None,
+    ) -> None:
+        spec = FlowDraftSpecCore(
+            flow_name="Implicit structured refinement",
+            steps=[
+                _step(
+                    "step_a",
+                    "Extract product",
+                    "Extract product data.",
+                    output_type=OutputType.JSON,
+                    output_contract=_json_contract("product"),
+                ),
+                _step(
+                    "step_b",
+                    "Extract customer",
+                    "Extract customer data.",
+                    input_source=InputSource.PREVIOUS_STEP,
+                    output_type=OutputType.JSON,
+                    output_contract=_json_contract("customer"),
+                ),
+                _step(
+                    "step_c",
+                    "Compose summary",
+                    "Compose the final summary.",
+                    input_source=InputSource.PREVIOUS_STEP,
+                    input_type=InputType.TEXT,
+                    output_type=OutputType.TEXT,
+                ),
+            ],
+        )
+
+        issue = next(
+            issue
+            for issue in evaluate_critic_invariants(
+                _final_text_step_critic_context(spec, flow=flow)
+            )
+            if issue.id == _FINAL_TEXT_STEP_INVARIANT_ID
+        )
+
+        assert required_text in issue.remediation
+        if forbidden_text is not None:
+            assert forbidden_text not in issue.remediation
 
     def test_fires_on_previous_step_composer_with_multiple_json_priors(
         self,

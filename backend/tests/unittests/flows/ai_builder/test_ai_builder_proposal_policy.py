@@ -129,9 +129,28 @@ def test_plan_edit_output_intent_preserves_prior_document_terminal_type() -> Non
 
 
 def test_edit_contextual_quality_feedback_keeps_mechanics_remediation() -> None:
+    from eneo.flows.domain.flow import Flow, FlowStep
+
     feedback = format_contextual_quality_feedback(
         conversation=[],
         spec=_structured_fan_in_spec(),
+        flow=Flow(
+            id=uuid4(),
+            tenant_id=uuid4(),
+            space_id=uuid4(),
+            name="Existing flow",
+            steps=[
+                FlowStep(
+                    assistant_id=uuid4(),
+                    step_order=1,
+                    user_description="Existing step",
+                    input_source="flow_input",
+                    input_type="text",
+                    output_mode="pass_through",
+                    output_type="text",
+                )
+            ],
+        ),
     )
 
     assert feedback is not None
