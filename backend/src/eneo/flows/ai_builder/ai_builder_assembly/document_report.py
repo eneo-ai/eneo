@@ -297,7 +297,11 @@ def lower_document_report_topology(
             field_diagnostics.append(
                 LintWarning(
                     code="document_report_citations_downgraded",
-                    message="The report will not include a citation sidecar.",
+                    message=(
+                        "The report will not include source citations."
+                        if ui_language == "en"
+                        else "Rapporten kommer inte att innehålla källhänvisningar."
+                    ),
                 )
             )
 

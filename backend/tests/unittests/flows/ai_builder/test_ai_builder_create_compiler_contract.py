@@ -4898,6 +4898,9 @@ def test_report_lowering_clears_two_citation_requests_with_one_warning() -> None
     assert [warning.code for warning in diagnostics] == [
         "document_report_citations_downgraded"
     ]
+    assert [warning.message for warning in diagnostics] == [
+        "The report will not include source citations."
+    ]
 
 
 def test_structured_text_citations_keep_sidecar_without_downgrade() -> None:

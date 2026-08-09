@@ -365,6 +365,7 @@ async def test_report_citations_degrade_to_one_user_visible_warning() -> None:
             ConversationMessage(
                 role="user",
                 content="Build a cited PDF report from each uploaded document.",
+                metadata={"ui_language": "sv"},
             )
         ],
         arguments={
@@ -397,7 +398,9 @@ async def test_report_citations_degrade_to_one_user_visible_warning() -> None:
         if warning.code == "document_report_citations_downgraded"
     ]
     assert len(warnings) == 1
-    assert "will not include a citation sidecar" in warnings[0].message
+    assert warnings[0].message == (
+        "Rapporten kommer inte att innehålla källhänvisningar."
+    )
 
     stored = build_flow_builder_proposal(compiled)
     assert [
