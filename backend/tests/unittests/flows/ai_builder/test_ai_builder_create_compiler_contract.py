@@ -4849,15 +4849,66 @@ def test_report_lowering_rejects_conflicting_semantic_models() -> None:
         )
 
 
-def test_report_lowering_rejects_citations_it_cannot_preserve() -> None:
+def test_report_lowering_clears_two_citation_requests_with_one_warning() -> None:
     intent = parse_create_flow_intent_arguments(
         {
             "flow_name": "Cited source report",
             "plan_rationale": "Create a report with citation sidecars.",
             "steps": [
                 {
+                    "name": "Extract cited evidence",
+                    "instructions": "Extract evidence with citations.",
+                    "output_type": "json",
+                    "citations_requested": True,
+                    "output_fields": [
+                        {
+                            "name": "summary",
+                            "field_type": "string",
+                            "description": "Source summary.",
+                        }
+                    ],
+                },
+                {
                     "name": "Write cited report",
                     "instructions": "Write the report with citations.",
+                    "output_type": "text",
+                    "citations_requested": True,
+                },
+            ],
+        }
+    )
+
+    diagnostics = []
+    compiled = compile_create_intent_to_spec(
+        intent,
+        context=CreateCompileContext(
+            runtime_input_type=InputType.DOCUMENT,
+            final_output_type=OutputType.PDF,
+            final_output_mode=OutputMode.RENDER_VERBATIM,
+            report_disposition="both",
+            ui_language="en",
+        ),
+        field_diagnostics=diagnostics,
+    )
+
+    assert all(
+        step.output_config != {"citation_mode": "inline_inref_sidecar"}
+        for step in compiled.steps
+    )
+    assert [warning.code for warning in diagnostics] == [
+        "document_report_citations_downgraded"
+    ]
+
+
+def test_structured_text_citations_keep_sidecar_without_downgrade() -> None:
+    intent = parse_create_flow_intent_arguments(
+        {
+            "flow_name": "Cited text",
+            "plan_rationale": "Write cited structured text.",
+            "steps": [
+                {
+                    "name": "Write cited text",
+                    "instructions": "Write the text with citations.",
                     "output_type": "text",
                     "citations_requested": True,
                 }
@@ -4865,17 +4916,21 @@ def test_report_lowering_rejects_citations_it_cannot_preserve() -> None:
         }
     )
 
-    with pytest.raises(AIBuilderArchitectureError, match="citation sidecar"):
-        compile_create_intent_to_spec(
-            intent,
-            context=CreateCompileContext(
-                runtime_input_type=InputType.DOCUMENT,
-                final_output_type=OutputType.PDF,
-                final_output_mode=OutputMode.RENDER_VERBATIM,
-                report_disposition="both",
-                ui_language="en",
-            ),
-        )
+    diagnostics = []
+    compiled = compile_create_intent_to_spec(
+        intent,
+        context=CreateCompileContext(
+            runtime_input_type=InputType.TEXT,
+            final_output_type=OutputType.TEXT,
+            ui_language="en",
+        ),
+        field_diagnostics=diagnostics,
+    )
+
+    assert [step.output_config for step in compiled.steps] == [
+        {"citation_mode": "inline_inref_sidecar"}
+    ]
+    assert diagnostics == []
 
 
 def test_report_disposition_both_ignores_source_section_name_without_shape() -> None:

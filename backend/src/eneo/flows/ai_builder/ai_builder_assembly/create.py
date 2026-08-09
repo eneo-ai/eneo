@@ -645,6 +645,7 @@ def _assemble_create_intent(
         result_contract_output_fields=result_contract_output_fields,
         requested_output_section_contracts=section_contracts,
         ui_language=ui_language,
+        field_diagnostics=field_diagnostics,
     )
     section_writer_material = _resolve_section_writer_structured_sources(
         completed_steps

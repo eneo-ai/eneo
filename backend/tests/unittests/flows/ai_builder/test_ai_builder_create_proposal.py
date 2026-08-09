@@ -342,7 +342,7 @@ async def test_corrupt_report_context_fails_closed_without_model_repair() -> Non
 
 
 @pytest.mark.asyncio
-async def test_unsupported_report_citations_fail_without_model_repair() -> None:
+async def test_report_citations_degrade_to_one_user_visible_warning() -> None:
     state = PlanningState.empty()
     state.architecture_commit = finalize_architecture_commit(
         ArchitectureCommitDraft(
@@ -359,36 +359,51 @@ async def test_unsupported_report_citations_fail_without_model_repair() -> None:
         )
     )
 
-    with pytest.raises(AIBuilderArchitectureError) as exc_info:
-        await process_create_intent_arguments(
-            turn=_make_turn(),
-            conversation=[
-                ConversationMessage(
-                    role="user",
-                    content="Build a cited PDF report from each uploaded document.",
-                )
+    result = await process_create_intent_arguments(
+        turn=_make_turn(),
+        conversation=[
+            ConversationMessage(
+                role="user",
+                content="Build a cited PDF report from each uploaded document.",
+            )
+        ],
+        arguments={
+            "flow_name": "Cited source report",
+            "plan_rationale": "Write and render the cited report.",
+            "steps": [
+                {
+                    "name": "Write cited report",
+                    "instructions": "Write the report with citations.",
+                    "output_type": "text",
+                    "citations_requested": True,
+                }
             ],
-            arguments={
-                "flow_name": "Cited source report",
-                "plan_rationale": "Write and render the cited report.",
-                "steps": [
-                    {
-                        "name": "Write cited report",
-                        "instructions": "Write the report with citations.",
-                        "output_type": "text",
-                        "citations_requested": True,
-                    }
-                ],
-            },
-            tool_call_id="call-cited-report",
-            available_model_refs=None,
-            available_kb_refs=None,
-            planning_state=state,
-        )
-
-    assert exc_info.value.log_context["failure_code"] == (
-        "assembly_document_report_citations_unsupported"
+        },
+        tool_call_id="call-cited-report",
+        available_model_refs=None,
+        available_kb_refs=None,
+        planning_state=state,
     )
+
+    assert result.compiled_proposal is not None
+    compiled = result.compiled_proposal
+    assert all(
+        step.output_config != {"citation_mode": "inline_inref_sidecar"}
+        for step in compiled.content.spec.steps
+    )
+    warnings = [
+        warning
+        for warning in compiled.validation.warnings
+        if warning.code == "document_report_citations_downgraded"
+    ]
+    assert len(warnings) == 1
+    assert "will not include a citation sidecar" in warnings[0].message
+
+    stored = build_flow_builder_proposal(compiled)
+    assert [
+        (warning.code, warning.severity.value)
+        for warning in stored.content.lint_warnings
+    ] == [("document_report_citations_downgraded", "warning")]
 
 
 @pytest.mark.asyncio

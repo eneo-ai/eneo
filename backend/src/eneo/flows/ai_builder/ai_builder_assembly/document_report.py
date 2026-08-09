@@ -14,6 +14,7 @@ from eneo.flows.ai_builder.ai_builder_assembly.plan import (
     derive_underlag_channel,
     planned_step_is_source_reader,
 )
+from eneo.flows.ai_builder.ai_builder_domain_models import LintWarning
 from eneo.flows.ai_builder.ai_builder_json_schema_paths import (
     missing_structured_output_path,
 )
@@ -264,6 +265,7 @@ def lower_document_report_topology(
     result_contract_output_fields: tuple[StructuredFieldDraft, ...],
     requested_output_section_contracts: tuple[RequestedOutputSectionContract, ...],
     ui_language: str | None,
+    field_diagnostics: list[LintWarning] | None = None,
 ) -> tuple[tuple[PlannedStep, ...], DocumentReportSectionSource | None]:
     if report_disposition is None:
         return planned_steps, None
@@ -287,16 +289,20 @@ def lower_document_report_topology(
     ):
         fail_closed()
 
+    if any(step.citations_requested for step in planned_steps):
+        planned_steps = tuple(
+            replace(step, citations_requested=False) for step in planned_steps
+        )
+        if field_diagnostics is not None:
+            field_diagnostics.append(
+                LintWarning(
+                    code="document_report_citations_downgraded",
+                    message="The report will not include a citation sidecar.",
+                )
+            )
+
     renderer_step = planned_steps[-1]
     body_writer_step = planned_steps[-2]
-    if body_writer_step.citations_requested or any(
-        step.citations_requested for step in planned_steps[:-2]
-    ):
-        _raise_document_report_citations_unsupported(
-            runtime_input_type=runtime_input_type,
-            final_output_type=final_output_type,
-            report_disposition=report_disposition,
-        )
     content_steps = list(planned_steps[:-2])
     reader_index = _document_report_reader_index(tuple(content_steps))
     if reader_index is None:
@@ -889,29 +895,6 @@ def _raise_document_report_compose_topology_missing(
             "pattern_ids": ",".join(pattern_ids),
             "chain_steps": ",".join(chain_steps),
             "semantic_step_count": semantic_step_count,
-        },
-    )
-
-
-def _raise_document_report_citations_unsupported(
-    *,
-    runtime_input_type: InputType,
-    final_output_type: OutputType,
-    report_disposition: ReportDisposition,
-) -> NoReturn:
-    raise AIBuilderArchitectureError(
-        public_code="architecture_materialization_failed",
-        detail=(
-            "The requested citation sidecar cannot be preserved when the report "
-            "is lowered through structured sections and deterministic composition. "
-            "Use a structured-text result or remove the citation requirement."
-        ),
-        log_context={
-            "failure_code": "assembly_document_report_citations_unsupported",
-            "reason": "document_report_citations_unsupported",
-            "runtime_input_type": runtime_input_type.value,
-            "final_output_type": final_output_type.value,
-            "report_disposition": report_disposition,
         },
     )
 
