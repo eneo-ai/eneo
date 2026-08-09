@@ -483,8 +483,13 @@ rclone copy \
 rclone check \
   old-store:eneo-object-content/v1/<prefix>/ \
   new-store:eneo-object-content/v1/<prefix>/ \
-  --checksum
+  --download
 ```
+
+Use `--download` for the comparison: it reads both sides and compares the
+actual bytes. `--checksum` silently falls back to size-only comparison when a
+hash is unavailable — which is exactly the case for multipart-uploaded S3
+objects — so it is not proof of a faithful copy.
 
 Copy only that prefix and preserve object metadata — Eneo verifies the media
 type of every object it reads. Never copy `v1/.eneo-bindings/`: it pairs a
@@ -512,11 +517,23 @@ refuses a bucket belonging to another Eneo installation, **compares the new
 bucket against every file it is responsible for**, and switches in one step
 without a restart.
 
-That comparison is the real safety net: a copy that ran against the wrong
-prefix, or stopped early, is refused with the number of missing files rather
-than activated. The switch is also refused while any write could still reach a
-destination — if new files still target object storage or moves are not
-paused, change that first; if an upload is in flight, wait a moment and retry.
+That comparison checks each file's presence, size, and media type — the
+metadata every read verifies first. A copy that ran against the wrong prefix,
+stopped early, or lost object metadata is refused with the number of affected
+files rather than activated. Byte equality is what your `rclone check
+--download` step proves; Eneo additionally verifies the SHA-256 of every file
+it reads, so even a corrupt copy can never serve wrong bytes. The switch is
+also refused while any write could still reach a destination — if new files
+still target object storage or moves are not paused, change that first; if an
+upload is in flight, wait a moment and retry.
+
+The comparison contacts the new destination once per stored file, sixteen at
+a time, so on a large deployment the switch request runs for a while — plan
+for it inside the maintenance window, and raise any reverse-proxy request
+timeout in front of the backend if your file count is large. If your browser
+or proxy gives up before the switch answers, refresh **Admin > Storage**
+first: the switch may still have completed, and you retry only if the old
+destination is still active.
 
 If a previous destination is still archived from an earlier change, remove it
 first. Keeping it is the way back from *this* change, and a new change would

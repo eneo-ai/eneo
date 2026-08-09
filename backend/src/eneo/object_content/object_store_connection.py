@@ -848,6 +848,20 @@ class ObjectStoreConnectionService:
                 await self._require_no_remote_keys_since(
                     session, archived_at=previous.updated_at
                 )
+            elif (
+                previous is not None
+                and previous.role == "candidate"
+                and not self._same_place(settings, _stored(previous))
+            ):
+                # The slot holds a different destination's live candidate — a
+                # concurrent change recorded it after this one's admission.
+                # Overwriting it as the archive would leave that bucket's
+                # marker with no record recovery relies on, so this switch
+                # yields instead.
+                raise ObjectStoreConnectionConflict(
+                    "Another destination change claimed its candidate while "
+                    "this one was being tested"
+                )
             if previous is None:
                 previous = ObjectStoreConnections()
                 previous.id = TEMPORARY_DESTINATION_SLOT
@@ -1016,7 +1030,7 @@ class ObjectStoreConnectionService:
         self,
         settings: ObjectContentSettings,
     ) -> None:
-        """Prove the candidate already holds every key this deployment serves.
+        """Prove the candidate holds every key, at the right size and type.
 
         Eneo never sees the operator's copy, so timing rules cannot establish
         that the copy is current: quiescence can be interrupted and restored,
@@ -1024,6 +1038,14 @@ class ObjectStoreConnectionService:
         each key the deployment must serve settles it directly, and also
         catches the far more common accident of a copy that silently covered
         nothing.
+
+        This deliberately verifies presence and the object metadata reads
+        check first — length and media type — not byte equality. Proving the
+        bytes would re-read the whole bucket inside one admin request; byte
+        equality is what the operator's mandated byte comparison
+        (``rclone check --download``) establishes, and every read re-verifies
+        the canonical SHA-256 and fails closed, so a corrupt copy can never
+        serve wrong bytes.
 
         The work is driven from the database side and paged, so both the
         request count and the memory held are bounded by what this deployment
@@ -1047,9 +1069,13 @@ class ObjectStoreConnectionService:
         try:
             while True:
                 async with self._transaction() as session:
-                    keys = (
-                        await session.scalars(
-                            select(ObjectStoreObjects.object_key)
+                    rows = (
+                        await session.execute(
+                            select(
+                                ObjectStoreObjects.object_key,
+                                ObjectContents.size_bytes,
+                                ObjectContents.verified_media_type,
+                            )
                             .join(
                                 ObjectContents,
                                 ObjectContents.id == ObjectStoreObjects.content_id,
@@ -1062,10 +1088,11 @@ class ObjectStoreConnectionService:
                             .limit(_VERIFICATION_PAGE_SIZE)
                         )
                     ).all()
-                if not keys:
+                if not rows:
                     break
-                missing += await self._count_absent(store, keys)
-                last_key = keys[-1]
+                page = [(str(key), int(size), str(media)) for key, size, media in rows]
+                missing += await self._count_missing_or_mismatched(store, page)
+                last_key = page[-1][0]
         except ObjectStoreUnavailableError as error:
             self._raise_probe_error(error)
             raise
@@ -1075,28 +1102,44 @@ class ObjectStoreConnectionService:
         if missing:
             raise ObjectStoreDestinationCopyIncomplete(
                 f"The new destination is missing {missing} of {expected_total} "
-                "stored objects; complete the copy and try again"
+                "stored objects, or holds them with a different size or media "
+                "type than reads verify; complete the copy preserving object "
+                "metadata and try again"
             )
 
-    async def _count_absent(
+    async def _count_missing_or_mismatched(
         self,
         store: S3ObjectStore,
-        keys: Sequence[str],
+        rows: Sequence[tuple[str, int, str]],
     ) -> int:
-        """Count how many of one page's keys the candidate does not hold."""
-        absent = 0
-        for start in range(0, len(keys), _VERIFICATION_CONCURRENCY):
-            batch = keys[start : start + _VERIFICATION_CONCURRENCY]
+        """Count one page's keys that are absent or metadata-mismatched.
+
+        Existence alone is not enough: every read first verifies the object's
+        length and media type against the canonical row, so a truncated copy
+        or one that dropped Content-Type would pass an existence check and
+        then fail every read on the activated destination. Byte equality is
+        deliberately out of scope here — see
+        ``_require_target_holds_every_object``.
+        """
+        mismatched = 0
+        for start in range(0, len(rows), _VERIFICATION_CONCURRENCY):
+            batch = rows[start : start + _VERIFICATION_CONCURRENCY]
             outcomes = await asyncio.gather(
-                *(store.head(key) for key in batch),
+                *(store.head(key) for key, _, _ in batch),
                 return_exceptions=True,
             )
-            for outcome in outcomes:
+            for (_, size_bytes, media_type), outcome in zip(
+                batch, outcomes, strict=True
+            ):
                 if isinstance(outcome, ObjectStoreNotFoundError):
-                    absent += 1
+                    mismatched += 1
                 elif isinstance(outcome, BaseException):
                     raise outcome
-        return absent
+                elif (
+                    outcome.size_bytes != size_bytes or outcome.media_type != media_type
+                ):
+                    mismatched += 1
+        return mismatched
 
     async def _release_stale_candidate(
         self,

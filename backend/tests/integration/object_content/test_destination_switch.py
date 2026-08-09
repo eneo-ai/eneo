@@ -653,6 +653,193 @@ async def test_switch_refuses_a_target_missing_stored_objects(
         )
 
 
+@pytest.mark.parametrize(
+    ("copied_payload", "copied_media_type"),
+    [
+        (b"truncated", "application/octet-stream"),
+        (b"copy-me-exactly", "text/plain"),
+    ],
+    ids=["wrong-length", "wrong-media-type"],
+)
+async def test_switch_refuses_a_copy_with_mismatched_object_metadata(
+    object_content_database: DatabaseSessionManager,
+    real_object_store: RealObjectStore,
+    real_unpaired_object_store: RealObjectStore,
+    copied_payload: bytes,
+    copied_media_type: str,
+) -> None:
+    """A key with the wrong length or media type is not a completed copy.
+
+    Every read verifies these two header facts against the canonical row
+    before touching bytes, so a truncated copy or one that lost its
+    Content-Type would pass an existence check and then fail every read on
+    the activated destination. Byte equality stays the operator's
+    ``rclone check --download`` step, re-verified per read by SHA-256.
+    """
+    from eneo.object_content.content import capture_content
+
+    service = _service(object_content_database, real_object_store)
+    actor = await _any_user_id(object_content_database)
+    created = await service.create(
+        _connection_input(real_object_store), actor_user_id=actor
+    )
+    await ensure_store_binding_ready(
+        object_content_database,
+        service.settings_for(created),
+        real_object_store.store,
+    )
+    await _select_inline_writes(object_content_database)
+
+    source_settings = service.settings_for(created)
+    source_store = S3ObjectStore(source_settings)
+    try:
+        object_key = await _seed_remote_content(
+            object_content_database,
+            source_settings,
+            source_store,
+            b"copy-me-exactly",
+        )
+    finally:
+        await source_store.close()
+
+    # The "copy" places an object at the right key whose length or media
+    # type differs from what reads verify.
+    write_settings = real_unpaired_object_store.settings.model_copy(
+        update={"deployment_id": created.deployment_id}
+    )
+    write_store = S3ObjectStore(write_settings)
+    try:
+        async with capture_content(
+            _chunks(copied_payload),
+            declared_media_type=copied_media_type,
+            verified_media_type=copied_media_type,
+            maximum_size_bytes=len(copied_payload),
+            spool_memory_bytes=write_settings.spool_memory_bytes,
+            multipart_part_bytes=write_settings.multipart_part_bytes,
+        ) as captured:
+            await write_store.upload(object_key, captured)
+    finally:
+        await write_store.close()
+
+    with pytest.raises(ObjectStoreDestinationCopyIncomplete):
+        await service.replace_destination(
+            _connection_input(real_unpaired_object_store),
+            actor_user_id=actor,
+        )
+
+
+async def test_commit_yields_to_a_foreign_live_candidate(
+    object_content_database: DatabaseSessionManager,
+    real_object_store: RealObjectStore,
+    real_unpaired_object_store: RealObjectStore,
+    real_spare_object_store: RealObjectStore,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A switch never archives over another destination's live candidate.
+
+    A concurrent change can release this attempt's claim and record its own
+    candidate while this one is verifying. Committing anyway would overwrite
+    that record with the retiring archive and leave the other bucket's
+    marker untracked, so the commit yields with a typed conflict instead.
+    """
+    service = _service(object_content_database, real_object_store)
+    actor = await _any_user_id(object_content_database)
+    created = await service.create(
+        _connection_input(real_object_store), actor_user_id=actor
+    )
+    await ensure_store_binding_ready(
+        object_content_database,
+        service.settings_for(created),
+        real_object_store.store,
+    )
+    await _select_inline_writes(object_content_database)
+
+    binding_id = await _binding_id(object_content_database)
+    original_verify = ObjectStoreConnectionService._require_target_holds_every_object
+
+    async def hijack_candidate_mid_verification(self, settings):  # type: ignore[no-untyped-def]
+        await original_verify(self, settings)
+        # A concurrent change released this attempt's claim and recorded its
+        # own candidate — with a real marker — for a different destination.
+        spare_store = S3ObjectStore(
+            real_spare_object_store.settings.model_copy(
+                update={"deployment_id": created.deployment_id}
+            )
+        )
+        try:
+            creation = await spare_store.prepare_binding_creation(
+                binding_id, require_empty_namespace=False
+            )
+            if creation is not None:
+                await spare_store.create_binding(creation)
+        finally:
+            await spare_store.close()
+        async with object_content_database.session() as session, session.begin():
+            await session.execute(
+                text(
+                    "UPDATE object_store_connections "
+                    "SET endpoint_url = :endpoint_url, bucket = :bucket, "
+                    "revision = revision + 1 "
+                    "WHERE id = 2 AND role = 'candidate'"
+                ),
+                {
+                    "endpoint_url": real_spare_object_store.settings.endpoint_url,
+                    "bucket": real_spare_object_store.settings.bucket,
+                },
+            )
+
+    monkeypatch.setattr(
+        ObjectStoreConnectionService,
+        "_require_target_holds_every_object",
+        hijack_candidate_mid_verification,
+    )
+    with pytest.raises(ObjectStoreConnectionConflict):
+        await service.replace_destination(
+            _connection_input(real_unpaired_object_store),
+            actor_user_id=actor,
+        )
+    monkeypatch.undo()
+
+    # The foreign candidate record and its marker survive, and nothing was
+    # activated.
+    async with object_content_database.session() as session, session.begin():
+        candidate = await session.get(
+            ObjectStoreConnections, TEMPORARY_DESTINATION_SLOT
+        )
+        assert candidate is not None
+        assert candidate.role == "candidate"
+        assert candidate.bucket == real_spare_object_store.settings.bucket
+    current = await service.get()
+    assert current is not None
+    assert current.bucket == real_object_store.settings.bucket
+    spare_check = S3ObjectStore(
+        real_spare_object_store.settings.model_copy(
+            update={"deployment_id": created.deployment_id}
+        )
+    )
+    try:
+        assert await spare_check.verify_binding(binding_id)
+    finally:
+        await spare_check.close()
+
+    # The surviving candidate's own switch completes: the recovery contract
+    # the guard preserved is a working destination change, not just a row.
+    switch = await service.replace_destination(
+        _connection_input(real_spare_object_store),
+        actor_user_id=actor,
+    )
+    assert switch.active.bucket == real_spare_object_store.settings.bucket
+    active_check = S3ObjectStore(
+        real_spare_object_store.settings.model_copy(
+            update={"deployment_id": created.deployment_id}
+        )
+    )
+    try:
+        assert await active_check.verify_binding(binding_id)
+    finally:
+        await active_check.close()
+
+
 async def test_verification_cost_follows_stored_objects_not_the_target(
     object_content_database: DatabaseSessionManager,
     real_object_store: RealObjectStore,

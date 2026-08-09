@@ -466,18 +466,25 @@ readable immediately.
    without dashes, while an Admin-created connection generates it internally.
    Never copy `v1/.eneo-bindings/` itself: that prefix holds the
    database-to-bucket marker and Eneo manages it per destination.
-4. Compare both sides with `rclone check --checksum` until it reports no
-   differences.
+4. Compare both sides with `rclone check --download` until it reports no
+   differences. `--download` reads and compares the actual bytes;
+   `--checksum` falls back to size-only comparison when a hash is
+   unavailable — the multipart-uploaded S3 case — and is not proof.
 5. Use **Change destination** in **Admin > Storage**. Eneo probes the
-   candidate, refuses a bucket paired with another Eneo installation, compares
-   the candidate's inventory against every object the deployment still serves,
-   and commits one fenced transaction that swaps the destination, preserves the
+   candidate, refuses a bucket paired with another Eneo installation, verifies
+   the presence, size, and media type of every object the deployment still
+   serves (byte equality is what step 4's `--download` comparison proves, and
+   every read re-verifies the canonical SHA-256 and fails closed), and
+   commits one fenced transaction that swaps the destination, preserves the
    deployment identity and every object key, archives the previous
    destination, resets both remote inventory cursors, and raises the
    connection revision. Work started against the previous destination cannot
-   commit afterwards. No restart is needed. An archived previous destination
-   from an earlier change must be removed first, since the switch reuses that
-   slot.
+   commit afterwards. No restart is needed. The verification contacts the new
+   destination once per stored object, sixteen concurrently, so a large
+   deployment's switch request runs for a while — keep it inside the
+   maintenance window and raise any reverse-proxy request timeout in front of
+   the backend if needed. An archived previous destination from an earlier
+   change must be removed first, since the switch reuses that slot.
 6. Select object storage for new writes again and resume moves, then let one
    complete inventory cycle run and confirm no `backend_missing` content. Full
    and range reads verify the canonical SHA-256, so an incomplete or corrupt
