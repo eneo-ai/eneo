@@ -4512,6 +4512,55 @@ class TestFinalTextStepReferencesRelevantStructuredOutputs:
 
         assert any(issue.id == _FINAL_TEXT_STEP_INVARIANT_ID for issue in issues)
 
+    def test_template_fill_fires_when_composer_bypasses_immediate_json(self) -> None:
+        spec = FlowDraftSpecCore(
+            flow_name="Template report with bypassed JSON producer",
+            steps=[
+                _step(
+                    "step_a",
+                    "Extract product",
+                    "Extract product data.",
+                    output_type=OutputType.JSON,
+                    output_contract=_json_contract("product"),
+                ),
+                _step(
+                    "step_b",
+                    "Extract customer",
+                    "Extract customer data.",
+                    output_type=OutputType.JSON,
+                    output_contract=_json_contract("customer"),
+                ),
+                _step(
+                    "step_c",
+                    "Write report",
+                    "Write the report.",
+                    input_source=InputSource.PREVIOUS_STEP,
+                    input_type=InputType.TEXT,
+                    output_type=OutputType.TEXT,
+                    input_bindings={
+                        "question": (
+                            "Use {{ step_a.output.structured.product }} to "
+                            "write the report."
+                        )
+                    },
+                ),
+                _step(
+                    "step_d",
+                    "Fill template",
+                    "Fill the template.",
+                    input_source=InputSource.PREVIOUS_STEP,
+                    input_type=InputType.TEXT,
+                    output_type=OutputType.DOCX,
+                    output_mode=OutputMode.TEMPLATE_FILL,
+                    output_config={"bindings": {"summary": "{{ föregående_steg }}"}},
+                ),
+            ],
+        )
+
+        issues = evaluate_critic_invariants(_final_text_step_critic_context(spec))
+
+        assert any(issue.id == _FINAL_TEXT_STEP_INVARIANT_ID for issue in issues)
+
     def test_template_fill_direct_structured_bindings_cover_producers(self) -> None:
         spec = self._template_fill_structured_spec(
             bindings={

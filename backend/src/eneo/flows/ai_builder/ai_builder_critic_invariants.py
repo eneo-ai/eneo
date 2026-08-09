@@ -1344,12 +1344,11 @@ def _reference_targets_structured_output(reference: TemplateReference) -> bool:
     return reference.tail == "output.structured" or bool(reference.structured_path)
 
 
-def _composer_ancestry_consumes_at_least_two_structured_priors(
+def _structured_priors_consumed_on_composer_ancestry(
     *,
     spec: FlowDraftSpecCore,
     composer_index: int,
-    json_prior_indexes: set[int],
-) -> bool:
+) -> set[int]:
     ancestry = [composer_index]
     visited: set[int] = set()
     consumed_indexes: set[int] = set()
@@ -1383,7 +1382,7 @@ def _composer_ancestry_consumes_at_least_two_structured_priors(
             for dependency in dependencies
             if not _is_renderer_step(spec.steps[dependency])
         )
-    return len(json_prior_indexes & consumed_indexes) >= 2
+    return consumed_indexes
 
 
 def _prior_json_contract_count(spec: FlowDraftSpecCore, *, before_index: int) -> int:
@@ -1589,17 +1588,13 @@ def _final_text_step_must_reference_relevant_structured_outputs_evidence(
         return False
     terminal = spec.steps[-1]
     if terminal.output_mode == OutputMode.TEMPLATE_FILL:
-        consumed_indexes: set[int] = set()
+        consumed_indexes = _structured_priors_consumed_on_composer_ancestry(
+            spec=spec,
+            composer_index=composer_index,
+        )
         question = effective_question_binding(composer.input_bindings)
-        if question is not None:
-            _, structured_step_indexes = _prior_step_indexes_referenced_by_template(
-                spec=spec,
-                template=question,
-                before_index=composer_index,
-            )
-            consumed_indexes.update(structured_step_indexes)
         immediate_previous_index = composer_index - 1
-        if immediate_previous_index in json_prior_indexes:
+        if question is None and immediate_previous_index in json_prior_indexes:
             consumed_indexes.add(immediate_previous_index)
         terminal_bindings = "\n".join(_template_fill_binding_templates(terminal))
         if terminal_bindings:
@@ -1610,13 +1605,11 @@ def _final_text_step_must_reference_relevant_structured_outputs_evidence(
             )
             consumed_indexes.update(structured_step_indexes)
         return len(json_prior_indexes & consumed_indexes) < 2
-    if _composer_ancestry_consumes_at_least_two_structured_priors(
+    consumed_indexes = _structured_priors_consumed_on_composer_ancestry(
         spec=spec,
         composer_index=composer_index,
-        json_prior_indexes=json_prior_indexes,
-    ):
-        return False
-    return True
+    )
+    return len(json_prior_indexes & consumed_indexes) < 2
 
 
 def _final_text_step_must_reference_relevant_structured_outputs_remediation(
