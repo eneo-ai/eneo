@@ -176,6 +176,15 @@ class ObjectContentSettings(ObjectContentCoreSettings, ObjectStoreOperatorSettin
         parsed = urlparse(value)
         if parsed.scheme not in {"http", "https"} or not parsed.hostname:
             raise ValueError("endpoint_url must be an absolute HTTP(S) URL")
+        try:
+            # urlparse defers port parsing to this access, so a malformed
+            # port would otherwise surface later, outside the typed
+            # validation contract every consumer of this field relies on.
+            parsed.port
+        except ValueError:
+            raise ValueError(
+                "endpoint_url port must be a number between 1 and 65535"
+            ) from None
         if parsed.username or parsed.password:
             raise ValueError("endpoint_url must not contain credentials")
         if parsed.path not in {"", "/"} or parsed.query or parsed.fragment:

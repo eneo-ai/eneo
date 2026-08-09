@@ -150,6 +150,34 @@ def test_object_content_configuration_rejects_unapproved_plain_http(
         )
 
 
+@pytest.mark.parametrize(
+    "endpoint_url",
+    (
+        "https://objects.example.test:not-a-port",
+        "https://objects.example.test:99999",
+    ),
+)
+def test_endpoint_url_with_a_malformed_port_fails_typed_validation(
+    endpoint_url: str,
+) -> None:
+    """A bad port is a validation error, not a later crash.
+
+    urlparse defers port parsing, so without this check the malformed value
+    passes validation and blows up wherever the port is first read — outside
+    the typed contract, as an internal server error.
+    """
+    with pytest.raises(ValidationError, match="endpoint_url port"):
+        ObjectContentSettings(
+            _env_file=None,
+            endpoint_url=endpoint_url,
+            region="local",
+            bucket="eneo-content",
+            access_key_id="test-access",
+            secret_access_key="test-secret",
+            deployment_id=UUID("a2d539af-fef0-42aa-a7f8-14376947be2c"),
+        )
+
+
 def test_deployment_tuning_has_no_hidden_business_ceiling() -> None:
     settings = ObjectContentSettings(
         _env_file=None,
