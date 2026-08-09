@@ -278,6 +278,35 @@ all repair spend; the "no repairs" goal routes through making first-pass
 proposals satisfy them — via derived state and compiler ownership, never
 by teaching the prompt case-specific vocabulary.
 
+**Critic false-kill family closed (2026-08-09 night, Passes 8–11, gate
+GREEN MIN_SCORE 9).** The 103-rejection
+`final_text_step_must_reference_relevant_structured_outputs` impasse was
+re-attributed before fixing: the previously proposed "count source_refs
+in suppression" was disproven by an offline repro at HEAD (the
+suppression already lowers source_refs; implementing it again would
+have added a duplicate counting path). The real defect was
+composer-local crediting: 93 of 107 captures across 25 sessions had
+every JSON prior explicitly consumed on the composer's dependency
+chain. Landed, each peer-gated: `0567baa79` (ancestry-aware crediting),
+`1595e3833` (any question binding replaces the implicit edge — matches
+`step_input_resolution` replacement semantics), `eda4865ee` (one shared
+consumption calculation for template and non-template terminals; the
+unconditional immediate-predecessor credit deleted). Companion commits:
+`febe279fc` (citations downgrade warning localized, plain language),
+`5cb0cc631` + `9c040516d` (depth cap 3→4, publish-gate + runtime proof,
+full tool-schema cost 7088→11844 bytes recorded). Live probe at
+`0567baa79`: kulturbidrag (3/3-dead) → zero family captures, 2/3
+first-pass, 1 conformance pass; cyber incident 0/3 → 2/3 first-pass.
+Newly surfaced, attributed, not yet fixed:
+`assembly_document_report_model_ref_conflict` (merge refusal classified
+non-repairable → paid death; design gate pending) and the
+`rich_workflow_requires_form_fields` residual (guidance pipeline
+verified end-to-end; owner lead = server-side hint materialization).
+The 14 genuinely under-bound JSON-input composer cases are deferred to
+a compiler-owned fan-in slice with its own design gate. Frozen
+evidence: `/workspace/.codex/artifacts/evidence-freeze-20260809/`
+(799 hashed captures + classifier + probe receipts).
+
 **Instability posture (Pass 6):** the pilot's 68/155 joint-state
 instability is a diagnostic, not a stabilization target — 23/155 (~15%)
 flip pass↔fail; much of the rest alternates first-pass vs repaired. No
