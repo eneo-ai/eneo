@@ -4786,17 +4786,13 @@ def test_report_lowering_normalizes_canonical_field_shapes_and_overview_alias() 
     assert validation.valid, validation.errors
 
 
-@pytest.mark.parametrize(
-    "report_disposition",
-    ["per_source_sections", "synthesized_overview"],
-)
-def test_report_lowering_combines_distinct_models_once_and_uses_terminal_model(
-    report_disposition: ReportDisposition,
-) -> None:
+def test_report_lowering_combines_json_overview_models_once_and_uses_terminal_model() -> (
+    None
+):
     intent = parse_create_flow_intent_arguments(
         {
             "flow_name": "Conflicting report models",
-            "plan_rationale": "Combine report-writing semantics before composition.",
+            "plan_rationale": "Use a structured overview before composition.",
             "steps": [
                 {
                     "name": "Read source",
@@ -4818,16 +4814,17 @@ def test_report_lowering_combines_distinct_models_once_and_uses_terminal_model(
                     ],
                 },
                 {
-                    "name": "Draft report",
-                    "instructions": "Draft the report.",
-                    "output_type": "text",
-                    "model_ref": "model.draft",
-                },
-                {
-                    "name": "Refine report",
-                    "instructions": "Refine the report.",
-                    "output_type": "text",
-                    "model_ref": "model.refine",
+                    "name": "Write overview",
+                    "instructions": "Write the overview.",
+                    "output_type": "json",
+                    "model_ref": "model.overview",
+                    "output_fields": [
+                        {
+                            "name": "overall_conclusion",
+                            "field_type": "string",
+                            "description": "Overall conclusion.",
+                        }
+                    ],
                 },
                 {
                     "name": "Compose report",
@@ -4847,7 +4844,7 @@ def test_report_lowering_combines_distinct_models_once_and_uses_terminal_model(
             final_output_type=OutputType.PDF,
             final_output_mode=OutputMode.RENDER_VERBATIM,
             aggregation_intent="linear",
-            report_disposition=report_disposition,
+            report_disposition="synthesized_overview",
             runtime_max_files=4,
             ui_language="en",
         ),
@@ -4860,8 +4857,99 @@ def test_report_lowering_combines_distinct_models_once_and_uses_terminal_model(
     ]
     assert [warning.message for warning in diagnostics] == [
         "The steps specified different model selections; they were combined and "
-        "the report is generated with model.body."
+        "the combined report-writing step uses model selection model.body."
     ]
+    validation = validate_spec(compiled)
+    assert validation.valid, validation.errors
+
+
+def test_report_disposition_both_preserves_distinct_producer_model_selections() -> None:
+    intent = parse_create_flow_intent_arguments(
+        {
+            "flow_name": "Report with sections and overview",
+            "plan_rationale": "Write source sections and a synthesized overview.",
+            "steps": [
+                {
+                    "name": "Read sources",
+                    "instructions": "Extract source evidence.",
+                    "output_type": "json",
+                    "output_fields": [
+                        {
+                            "name": "documents",
+                            "field_type": "array",
+                            "description": "Source evidence.",
+                            "item_fields": [
+                                {
+                                    "name": "summary",
+                                    "field_type": "string",
+                                    "description": "Source summary.",
+                                }
+                            ],
+                        }
+                    ],
+                },
+                {
+                    "name": "Write source sections",
+                    "instructions": "Write one section per source.",
+                    "output_type": "json",
+                    "model_ref": "model.sections",
+                    "output_fields": [
+                        {
+                            "name": "section_text",
+                            "field_type": "string",
+                            "description": "Source section text.",
+                        }
+                    ],
+                },
+                {
+                    "name": "Draft overview",
+                    "instructions": "Draft the synthesized overview.",
+                    "output_type": "json",
+                    "model_ref": "model.draft",
+                    "output_fields": [
+                        {
+                            "name": "overview",
+                            "field_type": "string",
+                            "description": "Synthesized overview.",
+                        }
+                    ],
+                },
+                {
+                    "name": "Compose report",
+                    "instructions": "Compose the final report.",
+                    "output_type": "text",
+                    "model_ref": "model.overview",
+                },
+            ],
+        }
+    )
+
+    diagnostics = []
+    compiled = compile_create_intent_to_spec(
+        intent,
+        context=CreateCompileContext(
+            runtime_input_type=InputType.DOCUMENT,
+            final_output_type=OutputType.PDF,
+            final_output_mode=OutputMode.RENDER_VERBATIM,
+            aggregation_intent="aggregate",
+            report_disposition="both",
+            runtime_max_files=4,
+            ui_language="en",
+        ),
+        field_diagnostics=diagnostics,
+    )
+
+    assert compiled.steps[1].assistant_spec.model_ref == "model.sections"
+    assert compiled.steps[2].assistant_spec.model_ref == "model.overview"
+    assert [warning.code for warning in diagnostics] == [
+        "document_report_model_selection_combined"
+    ]
+    assert [warning.message for warning in diagnostics] == [
+        "The steps specified different model selections; they were combined and "
+        "the combined report-writing step uses model selection model.overview."
+    ]
+    validation = validate_spec(compiled)
+    assert validation.valid, validation.errors
 
 
 @pytest.mark.parametrize(
@@ -4986,7 +5074,7 @@ def test_report_lowering_emits_citation_and_model_selection_warnings() -> None:
     assert [warning.message for warning in diagnostics] == [
         "The report will not include source citations.",
         "The steps specified different model selections; they were combined and "
-        "the report is generated with model.body.",
+        "the combined report-writing step uses model selection model.body.",
     ]
 
 

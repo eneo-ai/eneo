@@ -502,8 +502,8 @@ async def test_combined_report_models_surface_warning_on_stored_plan() -> None:
     ]
     assert len(warnings) == 1
     assert warnings[0].message == (
-        "Stegen angav olika modellval; de kombinerades och rapporten genereras "
-        "med model.body."
+        "Stegen angav olika modellval; de kombinerades och det kombinerade "
+        "rapportskrivningssteget använder modellvalet model.body."
     )
 
     stored = build_flow_builder_proposal(compiled)

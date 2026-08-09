@@ -534,11 +534,13 @@ def lower_document_report_topology(
                     code="document_report_model_selection_combined",
                     message=(
                         "The steps specified different model selections; they were "
-                        "combined and the report is generated with "
+                        "combined and the combined report-writing step uses model "
+                        "selection "
                         f"{model_ref}."
                         if ui_language == "en"
                         else "Stegen angav olika modellval; de kombinerades och "
-                        f"rapporten genereras med {model_ref}."
+                        "det kombinerade rapportskrivningssteget använder modellvalet "
+                        f"{model_ref}."
                     ),
                 )
             )
