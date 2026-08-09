@@ -183,8 +183,10 @@ def test_depth_rejection_names_the_offending_branch() -> None:
             }
         )
     message = str(excinfo.value)
-    assert "sections.arendet.underavsnitt" in message
-    assert "cannot exceed" in message
+    assert (
+        "sections.arendet.underavsnitt.stycke.text: structured field nesting "
+        "depth cannot exceed 4;" in message
+    )
 
 
 def test_non_ascii_field_names_fold_instead_of_rejecting() -> None:
