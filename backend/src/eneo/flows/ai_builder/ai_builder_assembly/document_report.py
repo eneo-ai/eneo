@@ -305,6 +305,7 @@ def lower_document_report_topology(
                 )
             )
 
+    combined_producer_model_refs: list[str] = []
     renderer_step = planned_steps[-1]
     body_writer_step = planned_steps[-2]
     content_steps = list(planned_steps[:-2])
@@ -409,6 +410,15 @@ def lower_document_report_topology(
                         after_index=section_index,
                     )
                 )
+                distinct_model_refs = {
+                    model_ref
+                    for model_ref in (
+                        content_steps[section_index].model_ref,
+                        *(step.model_ref for step in remaining_report_semantics),
+                        body_writer_step.model_ref,
+                    )
+                    if model_ref is not None
+                }
                 for semantic_step in remaining_report_semantics:
                     content_steps[section_index] = _merge_report_writer_semantics(
                         content_steps[section_index],
@@ -419,6 +429,10 @@ def lower_document_report_topology(
                     semantic_step=body_writer_step,
                     preserve_review_mode=False,
                 )
+                if len(distinct_model_refs) > 1:
+                    model_ref = content_steps[section_index].model_ref
+                    assert model_ref is not None
+                    combined_producer_model_refs.append(model_ref)
         case "synthesized_overview":
             section_index = reader_index
             section_field_name = None
@@ -427,6 +441,7 @@ def lower_document_report_topology(
 
     match report_disposition:
         case "synthesized_overview" | "both":
+            overview_original_steps = tuple(content_steps[section_index + 1 :])
             content_steps, overview_semantics = _without_report_text_semantics_after(
                 content_steps,
                 after_index=section_index,
@@ -451,6 +466,20 @@ def lower_document_report_topology(
                     "ai_builder_document_report_overview_writer_inserted",
                     extra={"previous_step_name": previous_step.name},
                 )
+            overview_step = content_steps[overview_index]
+            collapsed_model_refs = tuple(
+                step.model_ref
+                for step in overview_original_steps
+                if _step_outputs_report_text(step) or step is overview_step
+            ) + (body_writer_step.model_ref,)
+            terminal_model_ref = next(
+                (
+                    model_ref
+                    for model_ref in reversed(collapsed_model_refs)
+                    if model_ref is not None
+                ),
+                None,
+            )
             for semantic_step in overview_semantics:
                 content_steps[overview_index] = _merge_report_writer_semantics(
                     content_steps[overview_index],
@@ -477,10 +506,42 @@ def lower_document_report_topology(
                 semantic_step=body_writer_step,
                 preserve_review_mode=False,
             )
+            content_steps[overview_index] = replace(
+                content_steps[overview_index],
+                model_ref=terminal_model_ref,
+            )
+            if (
+                len(
+                    {
+                        model_ref
+                        for model_ref in collapsed_model_refs
+                        if model_ref is not None
+                    }
+                )
+                > 1
+            ):
+                assert terminal_model_ref is not None
+                combined_producer_model_refs.append(terminal_model_ref)
         case "per_source_sections":
             pass
         case _ as unreachable:
             assert_never(unreachable)
+
+    if field_diagnostics is not None:
+        for model_ref in combined_producer_model_refs:
+            field_diagnostics.append(
+                LintWarning(
+                    code="document_report_model_selection_combined",
+                    message=(
+                        "The steps specified different model selections; they were "
+                        "combined and the report is generated with "
+                        f"{model_ref}."
+                        if ui_language == "en"
+                        else "Stegen angav olika modellval; de kombinerades och "
+                        f"rapporten genereras med {model_ref}."
+                    ),
+                )
+            )
 
     lowered_steps = (
         *content_steps,
@@ -532,15 +593,6 @@ def _merge_report_writer_semantics(
     semantic_step: PlannedStep,
     preserve_review_mode: bool = True,
 ) -> PlannedStep:
-    if (
-        planned_step.model_ref is not None
-        and semantic_step.model_ref is not None
-        and planned_step.model_ref != semantic_step.model_ref
-    ):
-        _raise_document_report_model_ref_conflict(
-            planned_step=planned_step,
-            semantic_step=semantic_step,
-        )
     if (
         preserve_review_mode
         and planned_step.review_mode is not None
@@ -899,26 +951,6 @@ def _raise_document_report_compose_topology_missing(
             "pattern_ids": ",".join(pattern_ids),
             "chain_steps": ",".join(chain_steps),
             "semantic_step_count": semantic_step_count,
-        },
-    )
-
-
-def _raise_document_report_model_ref_conflict(
-    *,
-    planned_step: PlannedStep,
-    semantic_step: PlannedStep,
-) -> NoReturn:
-    raise AIBuilderArchitectureError(
-        public_code="architecture_materialization_failed",
-        detail=(
-            "Report steps that lower into one semantic producer must use the same "
-            "model selection."
-        ),
-        log_context={
-            "failure_code": "assembly_document_report_model_ref_conflict",
-            "reason": "document_report_model_ref_conflict",
-            "planned_step_name": planned_step.name,
-            "semantic_step_name": semantic_step.name,
         },
     )
 

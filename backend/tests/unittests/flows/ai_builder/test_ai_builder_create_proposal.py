@@ -410,7 +410,7 @@ async def test_report_citations_degrade_to_one_user_visible_warning() -> None:
 
 
 @pytest.mark.asyncio
-async def test_conflicting_report_models_fail_without_model_repair() -> None:
+async def test_combined_report_models_surface_warning_on_stored_plan() -> None:
     state = PlanningState.empty()
     state.mapped_file_limit = MappedFileLimit(
         proposed_value=4,
@@ -432,68 +432,85 @@ async def test_conflicting_report_models_fail_without_model_repair() -> None:
         )
     )
 
-    with pytest.raises(AIBuilderArchitectureError) as exc_info:
-        await process_create_intent_arguments(
-            turn=_make_turn(),
-            conversation=[
-                ConversationMessage(
-                    role="user",
-                    content="Use the selected models to build the source report.",
-                )
-            ],
-            arguments={
-                "flow_name": "Model-specific source report",
-                "plan_rationale": "Extract evidence and write the final report.",
-                "steps": [
-                    {
-                        "name": "Read source",
-                        "instructions": "Extract source evidence.",
-                        "output_type": "json",
-                        "output_fields": [
-                            {
-                                "name": "documents",
-                                "field_type": "array",
-                                "description": "Source evidence.",
-                                "item_fields": [
-                                    {
-                                        "name": "summary",
-                                        "field_type": "string",
-                                        "description": "Source summary.",
-                                    }
-                                ],
-                            }
-                        ],
-                    },
-                    {
-                        "name": "Write overview",
-                        "instructions": "Write the overview.",
-                        "output_type": "json",
-                        "model_ref": "model.overview",
-                        "output_fields": [
-                            {
-                                "name": "overall_conclusion",
-                                "field_type": "string",
-                                "description": "Overall conclusion.",
-                            }
-                        ],
-                    },
-                    {
-                        "name": "Compose report",
-                        "instructions": "Compose the final report.",
-                        "output_type": "text",
-                        "model_ref": "model.body",
-                    },
-                ],
-            },
-            tool_call_id="call-conflicting-report-models",
-            available_model_refs=None,
-            available_kb_refs=None,
-            planning_state=state,
-        )
-
-    assert exc_info.value.log_context["failure_code"] == (
-        "assembly_document_report_model_ref_conflict"
+    catalog = build_ai_builder_resource_catalog(
+        available_models=[
+            _model_resource("draft-model-id", "draft"),
+            _model_resource("body-model-id", "body"),
+        ],
+        available_kbs=[],
     )
+    result = await process_create_intent_arguments(
+        turn=_make_turn(),
+        conversation=[
+            ConversationMessage(
+                role="user",
+                content="Use the selected models to build the source report.",
+                metadata={"ui_language": "sv"},
+            )
+        ],
+        arguments={
+            "flow_name": "Model-specific source report",
+            "plan_rationale": "Extract evidence and write the final report.",
+            "steps": [
+                {
+                    "name": "Read source",
+                    "instructions": "Extract source evidence.",
+                    "output_type": "json",
+                    "output_fields": [
+                        {
+                            "name": "documents",
+                            "field_type": "array",
+                            "description": "Source evidence.",
+                            "item_fields": [
+                                {
+                                    "name": "summary",
+                                    "field_type": "string",
+                                    "description": "Source summary.",
+                                }
+                            ],
+                        }
+                    ],
+                },
+                {
+                    "name": "Draft report",
+                    "instructions": "Draft the report.",
+                    "output_type": "text",
+                    "model_ref": "model.draft",
+                },
+                {
+                    "name": "Compose report",
+                    "instructions": "Compose the final report.",
+                    "output_type": "text",
+                    "model_ref": "model.body",
+                },
+            ],
+        },
+        tool_call_id="call-combined-report-models",
+        available_model_refs=catalog.model_refs,
+        available_kb_refs=None,
+        resource_catalog=catalog,
+        planning_state=state,
+    )
+
+    assert result.compiled_proposal is not None
+    compiled = result.compiled_proposal
+    assert compiled.content.spec.steps[1].assistant_spec.model_ref == "model.body"
+    warnings = [
+        warning
+        for warning in compiled.validation.warnings
+        if warning.code == "document_report_model_selection_combined"
+    ]
+    assert len(warnings) == 1
+    assert warnings[0].message == (
+        "Stegen angav olika modellval; de kombinerades och rapporten genereras "
+        "med model.body."
+    )
+
+    stored = build_flow_builder_proposal(compiled)
+    assert [
+        (warning.code, warning.severity.value)
+        for warning in stored.content.lint_warnings
+    ] == [("document_report_model_selection_combined", "warning")]
 
 
 @pytest.mark.asyncio

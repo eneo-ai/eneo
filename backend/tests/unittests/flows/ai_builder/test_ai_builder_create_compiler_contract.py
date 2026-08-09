@@ -4786,11 +4786,17 @@ def test_report_lowering_normalizes_canonical_field_shapes_and_overview_alias() 
     assert validation.valid, validation.errors
 
 
-def test_report_lowering_rejects_conflicting_semantic_models() -> None:
+@pytest.mark.parametrize(
+    "report_disposition",
+    ["per_source_sections", "synthesized_overview"],
+)
+def test_report_lowering_combines_distinct_models_once_and_uses_terminal_model(
+    report_disposition: ReportDisposition,
+) -> None:
     intent = parse_create_flow_intent_arguments(
         {
             "flow_name": "Conflicting report models",
-            "plan_rationale": "Use a structured overview before composition.",
+            "plan_rationale": "Combine report-writing semantics before composition.",
             "steps": [
                 {
                     "name": "Read source",
@@ -4812,67 +4818,22 @@ def test_report_lowering_rejects_conflicting_semantic_models() -> None:
                     ],
                 },
                 {
-                    "name": "Write overview",
-                    "instructions": "Write the overview.",
-                    "output_type": "json",
-                    "model_ref": "model.overview",
-                    "output_fields": [
-                        {
-                            "name": "overall_conclusion",
-                            "field_type": "string",
-                            "description": "Overall conclusion.",
-                        }
-                    ],
+                    "name": "Draft report",
+                    "instructions": "Draft the report.",
+                    "output_type": "text",
+                    "model_ref": "model.draft",
+                },
+                {
+                    "name": "Refine report",
+                    "instructions": "Refine the report.",
+                    "output_type": "text",
+                    "model_ref": "model.refine",
                 },
                 {
                     "name": "Compose report",
                     "instructions": "Compose the final report.",
                     "output_type": "text",
                     "model_ref": "model.body",
-                },
-            ],
-        }
-    )
-
-    with pytest.raises(AIBuilderArchitectureError, match="model"):
-        compile_create_intent_to_spec(
-            intent,
-            context=CreateCompileContext(
-                runtime_input_type=InputType.DOCUMENT,
-                final_output_type=OutputType.PDF,
-                final_output_mode=OutputMode.RENDER_VERBATIM,
-                aggregation_intent="linear",
-                report_disposition="synthesized_overview",
-                runtime_max_files=4,
-                ui_language="en",
-            ),
-        )
-
-
-def test_report_lowering_clears_two_citation_requests_with_one_warning() -> None:
-    intent = parse_create_flow_intent_arguments(
-        {
-            "flow_name": "Cited source report",
-            "plan_rationale": "Create a report with citation sidecars.",
-            "steps": [
-                {
-                    "name": "Extract cited evidence",
-                    "instructions": "Extract evidence with citations.",
-                    "output_type": "json",
-                    "citations_requested": True,
-                    "output_fields": [
-                        {
-                            "name": "summary",
-                            "field_type": "string",
-                            "description": "Source summary.",
-                        }
-                    ],
-                },
-                {
-                    "name": "Write cited report",
-                    "instructions": "Write the report with citations.",
-                    "output_type": "text",
-                    "citations_requested": True,
                 },
             ],
         }
@@ -4885,7 +4846,130 @@ def test_report_lowering_clears_two_citation_requests_with_one_warning() -> None
             runtime_input_type=InputType.DOCUMENT,
             final_output_type=OutputType.PDF,
             final_output_mode=OutputMode.RENDER_VERBATIM,
-            report_disposition="both",
+            aggregation_intent="linear",
+            report_disposition=report_disposition,
+            runtime_max_files=4,
+            ui_language="en",
+        ),
+        field_diagnostics=diagnostics,
+    )
+
+    assert compiled.steps[1].assistant_spec.model_ref == "model.body"
+    assert [warning.code for warning in diagnostics] == [
+        "document_report_model_selection_combined"
+    ]
+    assert [warning.message for warning in diagnostics] == [
+        "The steps specified different model selections; they were combined and "
+        "the report is generated with model.body."
+    ]
+
+
+@pytest.mark.parametrize(
+    ("draft_model_ref", "body_model_ref"),
+    [
+        ("model.shared", "model.shared"),
+        (None, "model.only"),
+    ],
+)
+def test_report_lowering_does_not_warn_for_compatible_model_selections(
+    draft_model_ref: str | None,
+    body_model_ref: str,
+) -> None:
+    intent = parse_create_flow_intent_arguments(
+        {
+            "flow_name": "Compatible report models",
+            "plan_rationale": "Combine compatible report-writing semantics.",
+            "steps": [
+                {
+                    "name": "Read source",
+                    "instructions": "Extract source evidence.",
+                    "output_type": "json",
+                    "output_fields": [
+                        {
+                            "name": "summary",
+                            "field_type": "string",
+                            "description": "Source summary.",
+                        }
+                    ],
+                },
+                {
+                    "name": "Draft report",
+                    "instructions": "Draft the report.",
+                    "output_type": "text",
+                    "model_ref": draft_model_ref,
+                },
+                {
+                    "name": "Compose report",
+                    "instructions": "Compose the final report.",
+                    "output_type": "text",
+                    "model_ref": body_model_ref,
+                },
+            ],
+        }
+    )
+
+    diagnostics = []
+    compiled = compile_create_intent_to_spec(
+        intent,
+        context=CreateCompileContext(
+            runtime_input_type=InputType.DOCUMENT,
+            final_output_type=OutputType.PDF,
+            final_output_mode=OutputMode.RENDER_VERBATIM,
+            report_disposition="synthesized_overview",
+            ui_language="en",
+        ),
+        field_diagnostics=diagnostics,
+    )
+
+    assert compiled.steps[1].assistant_spec.model_ref == body_model_ref
+    assert diagnostics == []
+
+
+def test_report_lowering_emits_citation_and_model_selection_warnings() -> None:
+    intent = parse_create_flow_intent_arguments(
+        {
+            "flow_name": "Cited source report",
+            "plan_rationale": "Create a report with citation sidecars.",
+            "steps": [
+                {
+                    "name": "Extract cited evidence",
+                    "instructions": "Extract evidence with citations.",
+                    "output_type": "json",
+                    "citations_requested": True,
+                    "model_ref": "model.reader",
+                    "output_fields": [
+                        {
+                            "name": "summary",
+                            "field_type": "string",
+                            "description": "Source summary.",
+                        }
+                    ],
+                },
+                {
+                    "name": "Draft cited report",
+                    "instructions": "Draft the report with citations.",
+                    "output_type": "text",
+                    "citations_requested": True,
+                    "model_ref": "model.draft",
+                },
+                {
+                    "name": "Write cited report",
+                    "instructions": "Write the report with citations.",
+                    "output_type": "text",
+                    "model_ref": "model.body",
+                },
+            ],
+        }
+    )
+
+    diagnostics = []
+    compiled = compile_create_intent_to_spec(
+        intent,
+        context=CreateCompileContext(
+            runtime_input_type=InputType.DOCUMENT,
+            final_output_type=OutputType.PDF,
+            final_output_mode=OutputMode.RENDER_VERBATIM,
+            report_disposition="synthesized_overview",
             ui_language="en",
         ),
         field_diagnostics=diagnostics,
@@ -4896,10 +4980,13 @@ def test_report_lowering_clears_two_citation_requests_with_one_warning() -> None
         for step in compiled.steps
     )
     assert [warning.code for warning in diagnostics] == [
-        "document_report_citations_downgraded"
+        "document_report_citations_downgraded",
+        "document_report_model_selection_combined",
     ]
     assert [warning.message for warning in diagnostics] == [
-        "The report will not include source citations."
+        "The report will not include source citations.",
+        "The steps specified different model selections; they were combined and "
+        "the report is generated with model.body.",
     ]
 
 
