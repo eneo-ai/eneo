@@ -949,14 +949,14 @@ def _later_step_reuses_structured_output(
         if step_index <= producer_index or not step.input_bindings:
             continue
         question = step.input_bindings.get("question")
-        if isinstance(
-            question, str
-        ) and producer_index in _prior_structured_step_indexes_referenced_by_template(
-            spec=spec,
-            template=question,
-            before_index=step_index,
-        ):
-            return True
+        if isinstance(question, str):
+            _, structured_step_indexes = _prior_step_indexes_referenced_by_template(
+                spec=spec,
+                template=question,
+                before_index=step_index,
+            )
+            if producer_index in structured_step_indexes:
+                return True
         source_refs = cast(object, step.input_bindings.get("source_refs"))
         if isinstance(source_refs, list):
             for ref in cast(list[object], source_refs):
@@ -1312,12 +1312,12 @@ _TERMINAL_RENDERER_MUST_NOT_CONSUME_REVIEW_ONLY_STEP = CriticInvariant(
 )
 
 
-def _prior_structured_step_indexes_referenced_by_template(
+def _prior_step_indexes_referenced_by_template(
     *,
     spec: FlowDraftSpecCore,
     template: str,
     before_index: int,
-) -> set[int]:
+) -> tuple[set[int], set[int]]:
     step_refs = {step.plan_step_ref: index for index, step in enumerate(spec.steps)}
     form_field_names = {field.name for field in (spec.form_fields or [])}
     references = analyze_template(
@@ -1325,7 +1325,8 @@ def _prior_structured_step_indexes_referenced_by_template(
         step_refs=step_refs,
         form_field_names=form_field_names,
     )
-    distinct: set[int] = set()
+    all_step_indexes: set[int] = set()
+    structured_step_indexes: set[int] = set()
     for reference in references:
         if reference.kind is not TemplateReferenceKind.STEP:
             continue
@@ -1333,10 +1334,10 @@ def _prior_structured_step_indexes_referenced_by_template(
             continue
         if reference.step_order is None or reference.step_order >= before_index:
             continue
-        if not _reference_targets_structured_output(reference):
-            continue
-        distinct.add(reference.step_order)
-    return distinct
+        all_step_indexes.add(reference.step_order)
+        if _reference_targets_structured_output(reference):
+            structured_step_indexes.add(reference.step_order)
+    return all_step_indexes, structured_step_indexes
 
 
 def _reference_targets_structured_output(reference: TemplateReference) -> bool:
@@ -1359,23 +1360,24 @@ def _composer_ancestry_consumes_at_least_two_structured_priors(
         visited.add(step_index)
         step = spec.steps[step_index]
         question = effective_question_binding(step.input_bindings)
-        explicit_dependencies: set[int] = (
-            _prior_structured_step_indexes_referenced_by_template(
-                spec=spec,
-                template=question,
-                before_index=step_index,
+        dependencies: set[int]
+        structured_dependencies: set[int]
+        if question is not None:
+            dependencies, structured_dependencies = (
+                _prior_step_indexes_referenced_by_template(
+                    spec=spec,
+                    template=question,
+                    before_index=step_index,
+                )
             )
-            if question is not None
-            else set()
-        )
-        consumed_indexes.update(explicit_dependencies)
-        dependencies = explicit_dependencies
-        if (
-            not dependencies
-            and step.input_source == InputSource.PREVIOUS_STEP
-            and step_index > 0
-        ):
-            dependencies = {step_index - 1}
+        else:
+            dependencies = (
+                {step_index - 1}
+                if step.input_source == InputSource.PREVIOUS_STEP and step_index > 0
+                else set()
+            )
+            structured_dependencies = set()
+        consumed_indexes.update(structured_dependencies)
         ancestry.extend(
             dependency
             for dependency in dependencies
@@ -1590,25 +1592,23 @@ def _final_text_step_must_reference_relevant_structured_outputs_evidence(
         consumed_indexes: set[int] = set()
         question = effective_question_binding(composer.input_bindings)
         if question is not None:
-            consumed_indexes.update(
-                _prior_structured_step_indexes_referenced_by_template(
-                    spec=spec,
-                    template=question,
-                    before_index=composer_index,
-                )
+            _, structured_step_indexes = _prior_step_indexes_referenced_by_template(
+                spec=spec,
+                template=question,
+                before_index=composer_index,
             )
+            consumed_indexes.update(structured_step_indexes)
         immediate_previous_index = composer_index - 1
         if immediate_previous_index in json_prior_indexes:
             consumed_indexes.add(immediate_previous_index)
         terminal_bindings = "\n".join(_template_fill_binding_templates(terminal))
         if terminal_bindings:
-            consumed_indexes.update(
-                _prior_structured_step_indexes_referenced_by_template(
-                    spec=spec,
-                    template=terminal_bindings,
-                    before_index=len(spec.steps) - 1,
-                )
+            _, structured_step_indexes = _prior_step_indexes_referenced_by_template(
+                spec=spec,
+                template=terminal_bindings,
+                before_index=len(spec.steps) - 1,
             )
+            consumed_indexes.update(structured_step_indexes)
         return len(json_prior_indexes & consumed_indexes) < 2
     if _composer_ancestry_consumes_at_least_two_structured_priors(
         spec=spec,

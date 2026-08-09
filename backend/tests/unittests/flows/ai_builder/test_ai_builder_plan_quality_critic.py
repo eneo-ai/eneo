@@ -4132,6 +4132,114 @@ class TestFinalTextStepReferencesRelevantStructuredOutputs:
 
         assert any(issue.id == _FINAL_TEXT_STEP_INVARIANT_ID for issue in issues)
 
+    def test_fires_when_text_reference_bypasses_structured_predecessor(self) -> None:
+        spec = FlowDraftSpecCore(
+            flow_name="Text reference bypasses structured predecessor",
+            steps=[
+                _step(
+                    "step_a",
+                    "Extract product",
+                    "Extract product data.",
+                    output_type=OutputType.JSON,
+                    output_contract=_json_contract("product"),
+                ),
+                _step(
+                    "step_b",
+                    "Extract customer",
+                    "Extract customer data.",
+                    output_type=OutputType.JSON,
+                    output_contract=_json_contract("customer"),
+                ),
+                _step(
+                    "step_c",
+                    "Write independent note",
+                    "Write an independent note.",
+                    output_type=OutputType.TEXT,
+                ),
+                _step(
+                    "step_d",
+                    "Draft structured report",
+                    "Draft a report from structured data.",
+                    input_source=InputSource.PREVIOUS_STEP,
+                    input_type=InputType.TEXT,
+                    output_type=OutputType.TEXT,
+                    input_bindings={
+                        "question": (
+                            "Use {{ step_a.output.structured.product }} and "
+                            "{{ step_b.output.structured.customer }} to draft "
+                            "the report."
+                        )
+                    },
+                ),
+                _step(
+                    "step_e",
+                    "Compose summary",
+                    "Compose the final summary.",
+                    input_source=InputSource.PREVIOUS_STEP,
+                    input_type=InputType.TEXT,
+                    output_type=OutputType.TEXT,
+                    input_bindings={
+                        "question": (
+                            "Use {{ step_c.output.text }} to compose the summary."
+                        )
+                    },
+                ),
+            ],
+        )
+
+        issues = evaluate_critic_invariants(_final_text_step_critic_context(spec))
+
+        assert any(issue.id == _FINAL_TEXT_STEP_INVARIANT_ID for issue in issues)
+
+    def test_fires_when_literal_question_bypasses_structured_predecessor(self) -> None:
+        spec = FlowDraftSpecCore(
+            flow_name="Literal question bypasses structured predecessor",
+            steps=[
+                _step(
+                    "step_a",
+                    "Extract product",
+                    "Extract product data.",
+                    output_type=OutputType.JSON,
+                    output_contract=_json_contract("product"),
+                ),
+                _step(
+                    "step_b",
+                    "Extract customer",
+                    "Extract customer data.",
+                    output_type=OutputType.JSON,
+                    output_contract=_json_contract("customer"),
+                ),
+                _step(
+                    "step_c",
+                    "Draft structured report",
+                    "Draft a report from structured data.",
+                    input_source=InputSource.PREVIOUS_STEP,
+                    input_type=InputType.TEXT,
+                    output_type=OutputType.TEXT,
+                    input_bindings={
+                        "question": (
+                            "Use {{ step_a.output.structured.product }} and "
+                            "{{ step_b.output.structured.customer }} to draft "
+                            "the report."
+                        )
+                    },
+                ),
+                _step(
+                    "step_d",
+                    "Compose summary",
+                    "Compose the final summary.",
+                    input_source=InputSource.PREVIOUS_STEP,
+                    input_type=InputType.TEXT,
+                    output_type=OutputType.TEXT,
+                    input_bindings={"question": "Compose the final summary."},
+                ),
+            ],
+        )
+
+        issues = evaluate_critic_invariants(_final_text_step_critic_context(spec))
+
+        assert any(issue.id == _FINAL_TEXT_STEP_INVARIANT_ID for issue in issues)
+
     def test_silent_when_previous_text_ancestor_consumes_json_fan_in(self) -> None:
         spec = FlowDraftSpecCore(
             flow_name="Structured fan-in before final composition",
