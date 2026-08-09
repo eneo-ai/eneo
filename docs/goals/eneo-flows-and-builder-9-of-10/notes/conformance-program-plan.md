@@ -307,6 +307,24 @@ a compiler-owned fan-in slice with its own design gate. Frozen
 evidence: `/workspace/.codex/artifacts/evidence-freeze-20260809/`
 (799 hashed captures + classifier + probe receipts).
 
+**Checkpoint `checkpoint-eda4865-155x3` (2026-08-09 23:00, 155×3 c=6,
+DEV-eda4865ee071 verified, compared vs `checkpoint-8a08a80-155x3` at
+margin 5).** Formal verdict `no_measurable_change` — 101 cases unstable
+in at least one build get no direction; the aggregate movement is the
+evidence: plans produced 330→349, builder_error 50→30, mechanics
+improved 26 / regressed 18, pass observations 164→162 (flat). Reading:
+tonight's slices converted mechanical deaths into plans, and
+conformance is now gated by the rubric-level clusters —
+`expected_leaf_output_fields` 58 distinct cases (Slice 2/5 territory),
+review-policy checks, and question-relevance checks. The citations
+fail-closed family has **zero mentions in 465 observations**. The
+residual `architecture_materialization_failed` (10 distinct cases in
+the blocker ranking) decomposes to
+`assembly_document_report_model_ref_conflict` (8 obs / 6 cases,
+kulturbidrag deterministic 3/3 — design gate pending) and
+`template_placeholder_unresolved` (2 cases). Receipts:
+`/workspace/.codex/artifacts/checkpoint-eda4865-155x3/`.
+
 **Instability posture (Pass 6):** the pilot's 68/155 joint-state
 instability is a diagnostic, not a stabilization target — 23/155 (~15%)
 flip pass↔fail; much of the rest alternates first-pass vs repaired. No
