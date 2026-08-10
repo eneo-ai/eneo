@@ -529,6 +529,9 @@ def test_flow_worker_cli_runs_preflight_then_installed_package_celery_app(
         lambda: SimpleNamespace(
             flow_celery_queue="flows.custom",
             flow_celery_worker_queues=None,
+            flow_celery_worker_concurrency=3,
+            db_pool_size=7,
+            db_pool_max_overflow=2,
         ),
     )
     monkeypatch.setattr(cli_module, "get_loglevel", lambda: 10)
@@ -558,6 +561,8 @@ def test_flow_worker_cli_runs_preflight_then_installed_package_celery_app(
             "worker",
             "--loglevel",
             "DEBUG",
+            "--concurrency",
+            "3",
             "--queues",
             "flows.custom",
         ],
@@ -572,6 +577,9 @@ def test_flow_worker_cli_uses_worker_queue_override(monkeypatch: pytest.MonkeyPa
         lambda: SimpleNamespace(
             flow_celery_queue="flows.execute",
             flow_celery_worker_queues="flows.maintenance",
+            flow_celery_worker_concurrency=2,
+            db_pool_size=6,
+            db_pool_max_overflow=1,
         ),
     )
     monkeypatch.setattr(cli_module, "get_loglevel", lambda: 20)
@@ -580,6 +588,32 @@ def test_flow_worker_cli_uses_worker_queue_override(monkeypatch: pytest.MonkeyPa
         "--queues",
         "flows.maintenance",
     ]
+
+
+def test_flow_worker_cli_uses_configured_bounded_concurrency(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    cli_module = importlib.import_module("eneo.flows.runtime.cli")
+    monkeypatch.setattr(
+        cli_module,
+        "get_settings",
+        lambda: SimpleNamespace(
+            flow_celery_queue="flows.execute",
+            flow_celery_worker_queues=None,
+            flow_celery_worker_concurrency=3,
+            db_pool_size=7,
+            db_pool_max_overflow=2,
+        ),
+    )
+    monkeypatch.setattr(cli_module, "get_loglevel", lambda: 20)
+
+    argv = cli_module._flow_worker_argv()
+
+    assert argv[argv.index("--concurrency") + 1] == "3"
+
+
+def test_flow_worker_concurrency_default_is_bounded(test_settings):
+    assert test_settings.flow_celery_worker_concurrency == 4
 
 
 def test_flow_beat_cli_uses_installed_package_celery_app_and_schedule_file(
