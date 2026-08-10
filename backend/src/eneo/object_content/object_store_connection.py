@@ -7,7 +7,8 @@ from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import datetime
 from enum import StrEnum
-from typing import Literal, TypeVar, cast
+from hashlib import sha256
+from typing import Literal, NamedTuple, TypeVar, cast
 from urllib.parse import urlparse
 from uuid import UUID, uuid4
 
@@ -83,6 +84,21 @@ _SERVED_REMOTE_CONTENT = or_(
 )
 _VERIFICATION_PAGE_SIZE = 1000
 _VERIFICATION_CONCURRENCY = 16
+
+
+class ServedSnapshot(NamedTuple):
+    """The served remote set's identity at one instant."""
+
+    total: int
+    fingerprint: bytes
+
+
+def _snapshot_entry(object_key: str, size_bytes: int, media_type: str) -> bytes:
+    """Length-prefixed encoding of one served object, delimiter-proof."""
+    key = object_key.encode()
+    media = media_type.encode()
+    return b"%d:%s%d:%d:%s" % (len(key), key, size_bytes, len(media), media)
+
 
 _PROBE_BODY = b"eneo-object-store-connection-probe-v1\n"
 _PROBE_MEDIA_TYPE = "application/octet-stream"
@@ -749,7 +765,7 @@ class ObjectStoreConnectionService:
             # admitted under the advanced generation instead requires a policy
             # change, which the commit refuses via the captured revision.
             fenced = await self._advance_generation(expected_revision=stored.revision)
-            await self._require_target_holds_every_object(settings)
+            verified_snapshot = await self._require_target_holds_every_object(settings)
             switch = await self._commit_switch(
                 candidate,
                 settings=settings,
@@ -757,6 +773,7 @@ class ObjectStoreConnectionService:
                 stored=fenced,
                 require_previous_revision=require_previous_revision,
                 expected_policy_revision=policy_revision,
+                verified_snapshot=verified_snapshot,
             )
         except (
             ObjectStoreDestinationSwitchBlocked,
@@ -808,6 +825,7 @@ class ObjectStoreConnectionService:
         stored: StoredObjectStoreConnection,
         require_previous_revision: int | None,
         expected_policy_revision: int,
+        verified_snapshot: ServedSnapshot,
     ) -> DestinationSwitch:
         access_key_id_encrypted = self._encryption.encrypt(
             candidate.access_key_id.get_secret_value()
@@ -830,6 +848,22 @@ class ObjectStoreConnectionService:
                     "The storage policy changed while the destination was "
                     "being verified; confirm nothing was written to object "
                     "storage, then try again"
+                )
+            # The exclusive active-row lock held here blocks every
+            # generation-fenced remote intent, so no NEW object can become
+            # served past this instant; local transitions can still remove
+            # objects, which is harmless — their already-verified target
+            # copies are merely surplus. Requiring the exact identity the
+            # scan verified — count and order-stable digest — catches any
+            # change during the scan without a policy move: a crash-
+            # recovered pending upload promoted under the advanced
+            # generation, and equally a completed deletion paired with such
+            # a promotion, which preserves the count while changing the set.
+            if await self._served_snapshot(session) != verified_snapshot:
+                raise ObjectStoreDestinationCopyIncomplete(
+                    "The served content changed while the new destination "
+                    "was being verified; bring the copy up to date and try "
+                    "again"
                 )
 
             previous = await session.scalar(
@@ -1029,7 +1063,7 @@ class ObjectStoreConnectionService:
     async def _require_target_holds_every_object(
         self,
         settings: ObjectContentSettings,
-    ) -> None:
+    ) -> ServedSnapshot:
         """Prove the candidate holds every key, at the right size and type.
 
         Eneo never sees the operator's copy, so timing rules cannot establish
@@ -1061,9 +1095,11 @@ class ObjectStoreConnectionService:
                 .where(_SERVED_REMOTE_CONTENT)
             )
         if not expected_total:
-            return
+            return ServedSnapshot(total=0, fingerprint=sha256(b"").digest())
 
         missing = 0
+        scanned = 0
+        fingerprint = sha256()
         last_key = ""
         store = self._store_factory(self._probe_settings(settings))
         try:
@@ -1091,6 +1127,9 @@ class ObjectStoreConnectionService:
                 if not rows:
                     break
                 page = [(str(key), int(size), str(media)) for key, size, media in rows]
+                for key, size, media in page:
+                    fingerprint.update(_snapshot_entry(key, size, media))
+                scanned += len(page)
                 missing += await self._count_missing_or_mismatched(store, page)
                 last_key = page[-1][0]
         except ObjectStoreUnavailableError as error:
@@ -1106,6 +1145,47 @@ class ObjectStoreConnectionService:
                 "type than reads verify; complete the copy preserving object "
                 "metadata and try again"
             )
+        return ServedSnapshot(total=scanned, fingerprint=fingerprint.digest())
+
+    async def _served_snapshot(self, session: AsyncSession) -> ServedSnapshot:
+        """The served set's identity: its count and an order-stable digest.
+
+        Computed from the database alone, so the committing transaction can
+        recompute it under the exclusive active-row lock and compare it with
+        what the scan actually checked. Count equality alone is not enough:
+        a deletion completed during the scan plus a recovered publication
+        promoted after its key range was checked preserves the count while
+        changing the set.
+        """
+        digest = sha256()
+        count = 0
+        last_key = ""
+        while True:
+            rows = (
+                await session.execute(
+                    select(
+                        ObjectStoreObjects.object_key,
+                        ObjectContents.size_bytes,
+                        ObjectContents.verified_media_type,
+                    )
+                    .join(
+                        ObjectContents,
+                        ObjectContents.id == ObjectStoreObjects.content_id,
+                    )
+                    .where(
+                        _SERVED_REMOTE_CONTENT,
+                        ObjectStoreObjects.object_key > last_key,
+                    )
+                    .order_by(ObjectStoreObjects.object_key)
+                    .limit(_VERIFICATION_PAGE_SIZE)
+                )
+            ).all()
+            if not rows:
+                return ServedSnapshot(total=count, fingerprint=digest.digest())
+            for key, size, media in rows:
+                digest.update(_snapshot_entry(str(key), int(size), str(media)))
+            count += len(rows)
+            last_key = str(rows[-1][0])
 
     async def _count_missing_or_mismatched(
         self,
@@ -1190,6 +1270,13 @@ class ObjectStoreConnectionService:
         store = self._store_factory(self._probe_settings(stale_settings))
         try:
             await store.remove_binding(binding_id)
+        except ObjectStoreBindingError:
+            # The bucket's marker belongs to another installation — the
+            # interrupted attempt lost its marker race — so nothing of ours
+            # exists there and there is nothing to remove. Fall through to
+            # retire the owned record; preserving it would wedge every later
+            # destination change behind a marker that is not ours to remove.
+            pass
         except ObjectStoreError as error:
             raise ObjectStoreDestinationAlreadyBound(
                 f"An interrupted destination change still claims bucket "
@@ -1447,6 +1534,12 @@ class ObjectStoreConnectionService:
             reclaim_store = self._store_factory(probe_settings)
             try:
                 await reclaim_store.remove_binding(binding_id)
+            except ObjectStoreBindingError as error:
+                # Another installation claimed the bucket while the marker
+                # was ownerless; it is theirs now.
+                raise ObjectStoreProbeBindingMismatch(
+                    "Object storage is bound to another Eneo installation"
+                ) from error
             except ObjectStoreUnavailableError as error:
                 self._raise_probe_error(error)
                 raise
@@ -1488,12 +1581,37 @@ class ObjectStoreConnectionService:
         try:
             await self._create_switch_marker(probe_settings, binding_id=binding_id)
         except ObjectStoreProbeBindingMismatch:
-            # Nothing was written, so the recorded claim has no counterpart.
-            # An unavailable outcome keeps the claim: the marker may exist.
+            # Another installation won the conditional marker creation, so
+            # nothing of ours was written and the recorded claim and
+            # candidate have no counterpart. Both are released in one
+            # ownership-checked transaction that locks the candidate row
+            # first — the same order adoption and stale release use — and
+            # touches nothing when a newer attempt has adopted the row: its
+            # claim is then not ours to clear. A lingering candidate for a
+            # foreign-marked bucket could never be released later (its
+            # marker is not ours to remove) and would wedge every subsequent
+            # destination change. An unavailable outcome instead keeps
+            # everything: our marker may exist.
             async with self._transaction(mutation=True) as session:
-                await StoreBindingRepository(session).clear_slot(
-                    slot=TEMPORARY_DESTINATION_SLOT
-                )
+                if candidate_revision is None:
+                    await StoreBindingRepository(session).clear_slot(
+                        slot=TEMPORARY_DESTINATION_SLOT
+                    )
+                else:
+                    row = await session.scalar(
+                        select(ObjectStoreConnections)
+                        .where(
+                            ObjectStoreConnections.id == TEMPORARY_DESTINATION_SLOT,
+                            ObjectStoreConnections.role == "candidate",
+                            ObjectStoreConnections.revision == candidate_revision,
+                        )
+                        .with_for_update()
+                    )
+                    if row is not None:
+                        await StoreBindingRepository(session).clear_slot(
+                            slot=TEMPORARY_DESTINATION_SLOT
+                        )
+                        await session.delete(row)
             raise
         return True, candidate_revision
 

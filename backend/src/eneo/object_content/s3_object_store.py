@@ -438,6 +438,11 @@ class S3ObjectStore:
                 await asyncio.sleep(self._settings.delete_poll_interval_seconds)
         except ObjectStoreProbeCleanupError:
             raise
+        except ObjectStoreBindingError:
+            # A foreign marker is a definitive outcome, not a cleanup
+            # failure: the caller owns nothing at this key and must be able
+            # to release its local state accordingly.
+            raise
         except (ObjectStoreError, BotoCoreError, ClientError) as error:
             raise ObjectStoreProbeCleanupError(
                 "Object content storage binding probe cleanup failed"

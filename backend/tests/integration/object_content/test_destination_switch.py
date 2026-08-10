@@ -40,9 +40,11 @@ from eneo.object_content.object_store_connection import (
     ObjectStoreNewWritesNotRedirected,
     ObjectStorePolicyChangedDuringSwitch,
     ObjectStorePreviousDestinationPresent,
+    ObjectStoreProbeBindingMismatch,
     ObjectStoreSwitchBackDiverged,
 )
 from eneo.object_content.s3_object_store import (
+    ObjectStoreBindingError,
     ObjectStoreUnavailableError,
     S3ObjectStore,
 )
@@ -728,6 +730,380 @@ async def test_switch_refuses_a_copy_with_mismatched_object_metadata(
         )
 
 
+async def test_switch_refuses_content_that_became_servable_mid_verification(
+    object_content_database: DatabaseSessionManager,
+    real_object_store: RealObjectStore,
+    real_unpaired_object_store: RealObjectStore,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Work promoted during the scan cannot ride into an unverified cutover.
+
+    A crash-recovered pending upload can be promoted to available under the
+    advanced generation without any policy change, after its key range was
+    scanned. The commit therefore requires, under the lock that fences all
+    remote intents, exactly the served set identity the scan verified.
+    """
+    service = _service(object_content_database, real_object_store)
+    actor = await _any_user_id(object_content_database)
+    created = await service.create(
+        _connection_input(real_object_store), actor_user_id=actor
+    )
+    await ensure_store_binding_ready(
+        object_content_database,
+        service.settings_for(created),
+        real_object_store.store,
+    )
+    await _select_inline_writes(object_content_database)
+
+    original_verify = ObjectStoreConnectionService._require_target_holds_every_object
+
+    async def promote_after_verification(self, settings):  # type: ignore[no-untyped-def]
+        total = await original_verify(self, settings)
+        # A recovered pending upload becomes servable on the source after
+        # its key range was scanned.
+        source_settings = service.settings_for(created)
+        source_store = S3ObjectStore(source_settings)
+        try:
+            await _seed_remote_content(
+                object_content_database,
+                source_settings,
+                source_store,
+                b"promoted-mid-verification",
+            )
+        finally:
+            await source_store.close()
+        return total
+
+    monkeypatch.setattr(
+        ObjectStoreConnectionService,
+        "_require_target_holds_every_object",
+        promote_after_verification,
+    )
+    with pytest.raises(ObjectStoreDestinationCopyIncomplete):
+        await service.replace_destination(
+            _connection_input(real_unpaired_object_store),
+            actor_user_id=actor,
+        )
+    monkeypatch.undo()
+
+    current = await service.get()
+    assert current is not None
+    assert current.bucket == real_object_store.settings.bucket
+
+
+async def test_switch_refuses_an_equal_count_set_substitution(
+    object_content_database: DatabaseSessionManager,
+    real_object_store: RealObjectStore,
+    real_unpaired_object_store: RealObjectStore,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A -1/+1 swap during the scan cannot hide behind an unchanged count.
+
+    A deletion completed during verification plus a recovered publication
+    promoted after its key range was scanned preserves the served count
+    while changing the set. The commit compares the set's identity — count
+    and order-stable digest — so the substituted object cannot ride into an
+    unverified cutover.
+    """
+    service = _service(object_content_database, real_object_store)
+    actor = await _any_user_id(object_content_database)
+    created = await service.create(
+        _connection_input(real_object_store), actor_user_id=actor
+    )
+    await ensure_store_binding_ready(
+        object_content_database,
+        service.settings_for(created),
+        real_object_store.store,
+    )
+    await _select_inline_writes(object_content_database)
+
+    # One served object exists and is faithfully copied to the target.
+    source_settings = service.settings_for(created)
+    source_store = S3ObjectStore(source_settings)
+    payload = b"verified-then-substituted"
+    try:
+        object_key = await _seed_remote_content(
+            object_content_database, source_settings, source_store, payload
+        )
+    finally:
+        await source_store.close()
+    await _copy_object(
+        real_unpaired_object_store,
+        object_key,
+        payload,
+        deployment_id=created.deployment_id,
+    )
+
+    original_verify = ObjectStoreConnectionService._require_target_holds_every_object
+
+    async def substitute_after_verification(self, settings):  # type: ignore[no-untyped-def]
+        snapshot = await original_verify(self, settings)
+        # The verified object leaves the served set while a different,
+        # never-verified object enters it: the count is unchanged.
+        async with object_content_database.session() as session, session.begin():
+            await session.execute(
+                text(
+                    "UPDATE object_contents SET state = 'failed', "
+                    "failure_code = 'backend_missing' "
+                    "WHERE id = (SELECT content_id FROM object_store_objects "
+                    "WHERE object_key = :key)"
+                ),
+                {"key": object_key},
+            )
+        replacement_store = S3ObjectStore(service.settings_for(created))
+        try:
+            await _seed_remote_content(
+                object_content_database,
+                service.settings_for(created),
+                replacement_store,
+                b"promoted-in-its-place",
+            )
+        finally:
+            await replacement_store.close()
+        return snapshot
+
+    monkeypatch.setattr(
+        ObjectStoreConnectionService,
+        "_require_target_holds_every_object",
+        substitute_after_verification,
+    )
+    with pytest.raises(ObjectStoreDestinationCopyIncomplete):
+        await service.replace_destination(
+            _connection_input(real_unpaired_object_store),
+            actor_user_id=actor,
+        )
+    monkeypatch.undo()
+
+    current = await service.get()
+    assert current is not None
+    assert current.bucket == real_object_store.settings.bucket
+
+
+async def test_mismatch_cleanup_yields_to_an_adopted_candidate(
+    object_content_database: DatabaseSessionManager,
+    real_object_store: RealObjectStore,
+    real_unpaired_object_store: RealObjectStore,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Cleanup after a lost marker race must not strip a newer owner.
+
+    If a concurrent attempt adopted the candidate row while this one was
+    losing the conditional marker creation, the row and its binding claim
+    belong to that owner now. The ownership-checked cleanup touches nothing
+    it no longer owns.
+    """
+    service = _service(object_content_database, real_object_store)
+    actor = await _any_user_id(object_content_database)
+    created = await service.create(
+        _connection_input(real_object_store), actor_user_id=actor
+    )
+    await ensure_store_binding_ready(
+        object_content_database,
+        service.settings_for(created),
+        real_object_store.store,
+    )
+    await _select_inline_writes(object_content_database)
+
+    async def adopt_then_lose_the_marker(self, creation):  # type: ignore[no-untyped-def]
+        # A concurrent same-target attempt adopts the candidate row just as
+        # this attempt loses the marker race to a foreign installation.
+        async with object_content_database.session() as session, session.begin():
+            await session.execute(
+                text(
+                    "UPDATE object_store_connections "
+                    "SET revision = revision + 1 "
+                    "WHERE id = 2 AND role = 'candidate'"
+                )
+            )
+        raise ObjectStoreBindingError(
+            "Object content storage is paired with another database"
+        )
+
+    monkeypatch.setattr(S3ObjectStore, "create_binding", adopt_then_lose_the_marker)
+    with pytest.raises(ObjectStoreProbeBindingMismatch):
+        await service.replace_destination(
+            _connection_input(real_unpaired_object_store),
+            actor_user_id=actor,
+        )
+    monkeypatch.undo()
+
+    # The adopting owner's record and claim are intact.
+    async with object_content_database.session() as session, session.begin():
+        remaining = (
+            await session.execute(
+                text(
+                    "SELECT (SELECT count(*) FROM object_store_connections "
+                    "WHERE id = 2 AND role = 'candidate') + "
+                    "(SELECT count(*) FROM object_store_bindings "
+                    "WHERE slot = 2)"
+                )
+            )
+        ).scalar_one()
+    assert remaining == 2
+
+
+async def test_a_stale_release_retires_a_foreign_marked_candidate(
+    object_content_database: DatabaseSessionManager,
+    real_object_store: RealObjectStore,
+    real_unpaired_object_store: RealObjectStore,
+    real_spare_object_store: RealObjectStore,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A foreign-marked residue candidate cannot wedge later switches.
+
+    When the interrupted attempt's own cleanup lost ownership — a concurrent
+    adoption moved the candidate revision — the residue survives with a real
+    foreign marker on its bucket. The next destination change's stale
+    release proves the marker foreign, retires the local record (nothing of
+    ours exists remotely), and completes without manual database repair.
+    """
+    service = _service(object_content_database, real_object_store)
+    actor = await _any_user_id(object_content_database)
+    created = await service.create(
+        _connection_input(real_object_store), actor_user_id=actor
+    )
+    await ensure_store_binding_ready(
+        object_content_database,
+        service.settings_for(created),
+        real_object_store.store,
+    )
+    await _select_inline_writes(object_content_database)
+
+    original_prepare = S3ObjectStore.prepare_binding_creation
+    original_create = S3ObjectStore.create_binding
+    foreign_binding_id = uuid4()
+
+    async def foreign_wins_then_adoption_moves_on(self, creation):  # type: ignore[no-untyped-def]
+        # A foreign installation's marker lands first (a REAL marker with a
+        # different binding identity), and a concurrent adoption moves the
+        # candidate revision so this attempt's own cleanup no longer owns
+        # the row.
+        foreign_writer = S3ObjectStore(
+            real_unpaired_object_store.settings.model_copy(
+                update={"deployment_id": created.deployment_id}
+            )
+        )
+        try:
+            foreign_creation = await original_prepare(
+                foreign_writer, foreign_binding_id, require_empty_namespace=False
+            )
+            assert foreign_creation is not None
+            await original_create(foreign_writer, foreign_creation)
+        finally:
+            await foreign_writer.close()
+        async with object_content_database.session() as session, session.begin():
+            await session.execute(
+                text(
+                    "UPDATE object_store_connections "
+                    "SET revision = revision + 1 "
+                    "WHERE id = 2 AND role = 'candidate'"
+                )
+            )
+        # This attempt's own conditional creation now loses to the foreign
+        # marker through the real adapter path.
+        return await original_create(self, creation)
+
+    monkeypatch.setattr(
+        S3ObjectStore, "create_binding", foreign_wins_then_adoption_moves_on
+    )
+    with pytest.raises(ObjectStoreProbeBindingMismatch):
+        await service.replace_destination(
+            _connection_input(real_unpaired_object_store),
+            actor_user_id=actor,
+        )
+    monkeypatch.undo()
+
+    # The residue survived this attempt's disowned cleanup: a candidate row
+    # for a bucket whose real marker is foreign.
+    async with object_content_database.session() as session, session.begin():
+        residue = await session.get(ObjectStoreConnections, TEMPORARY_DESTINATION_SLOT)
+        assert residue is not None
+        assert residue.bucket == real_unpaired_object_store.settings.bucket
+
+    # The next destination change proves the marker foreign, retires the
+    # residue, and completes — no manual repair.
+    switch = await service.replace_destination(
+        _connection_input(real_spare_object_store),
+        actor_user_id=actor,
+    )
+    assert switch.active.bucket == real_spare_object_store.settings.bucket
+
+    # The foreign installation's marker was never ours to remove: it still
+    # verifies with its own identity after the release.
+    foreign_check = S3ObjectStore(
+        real_unpaired_object_store.settings.model_copy(
+            update={"deployment_id": created.deployment_id}
+        )
+    )
+    try:
+        assert await foreign_check.verify_binding(foreign_binding_id)
+    finally:
+        await foreign_check.close()
+
+
+async def test_a_lost_foreign_marker_race_does_not_wedge_future_switches(
+    object_content_database: DatabaseSessionManager,
+    real_object_store: RealObjectStore,
+    real_unpaired_object_store: RealObjectStore,
+    real_spare_object_store: RealObjectStore,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Losing the marker race to another installation releases everything.
+
+    When a foreign deployment wins the conditional marker creation, nothing
+    of ours was written — but a lingering candidate row for that bucket
+    could never be released later, since its marker is not ours to remove,
+    and every subsequent destination change would fail against it.
+    """
+    service = _service(object_content_database, real_object_store)
+    actor = await _any_user_id(object_content_database)
+    created = await service.create(
+        _connection_input(real_object_store), actor_user_id=actor
+    )
+    await ensure_store_binding_ready(
+        object_content_database,
+        service.settings_for(created),
+        real_object_store.store,
+    )
+    await _select_inline_writes(object_content_database)
+
+    original_create = S3ObjectStore.create_binding
+
+    async def foreign_wins_the_marker(self, creation):  # type: ignore[no-untyped-def]
+        raise ObjectStoreBindingError(
+            "Object content storage is paired with another database"
+        )
+
+    monkeypatch.setattr(S3ObjectStore, "create_binding", foreign_wins_the_marker)
+    with pytest.raises(ObjectStoreProbeBindingMismatch):
+        await service.replace_destination(
+            _connection_input(real_unpaired_object_store),
+            actor_user_id=actor,
+        )
+    monkeypatch.setattr(S3ObjectStore, "create_binding", original_create)
+
+    # Nothing of ours lingers: no candidate row, no claim.
+    async with object_content_database.session() as session, session.begin():
+        residue = (
+            await session.execute(
+                text(
+                    "SELECT (SELECT count(*) FROM object_store_connections "
+                    "WHERE id = 2) + (SELECT count(*) FROM "
+                    "object_store_bindings WHERE slot = 2)"
+                )
+            )
+        ).scalar_one()
+    assert residue == 0
+
+    # A switch to a different, clean destination succeeds without any
+    # manual cleanup.
+    switch = await service.replace_destination(
+        _connection_input(real_spare_object_store),
+        actor_user_id=actor,
+    )
+    assert switch.active.bucket == real_spare_object_store.settings.bucket
+
+
 async def test_commit_yields_to_a_foreign_live_candidate(
     object_content_database: DatabaseSessionManager,
     real_object_store: RealObjectStore,
@@ -758,7 +1134,7 @@ async def test_commit_yields_to_a_foreign_live_candidate(
     original_verify = ObjectStoreConnectionService._require_target_holds_every_object
 
     async def hijack_candidate_mid_verification(self, settings):  # type: ignore[no-untyped-def]
-        await original_verify(self, settings)
+        verified_snapshot = await original_verify(self, settings)
         # A concurrent change released this attempt's claim and recorded its
         # own candidate — with a real marker — for a different destination.
         spare_store = S3ObjectStore(
@@ -787,6 +1163,7 @@ async def test_commit_yields_to_a_foreign_live_candidate(
                     "bucket": real_spare_object_store.settings.bucket,
                 },
             )
+        return verified_snapshot
 
     monkeypatch.setattr(
         ObjectStoreConnectionService,
@@ -1443,11 +1820,12 @@ async def test_switch_refuses_when_the_policy_moved_during_verification(
     original_verify = ObjectStoreConnectionService._require_target_holds_every_object
 
     async def flip_policy_mid_verification(self, settings):  # type: ignore[no-untyped-def]
-        await original_verify(self, settings)
+        verified_snapshot = await original_verify(self, settings)
         # Another administrator briefly re-enables object storage and puts
         # the quiet state back, all while this switch is verifying.
         await _select_object_store_writes(object_content_database)
         await _select_inline_writes(object_content_database)
+        return verified_snapshot
 
     monkeypatch.setattr(
         ObjectStoreConnectionService,
