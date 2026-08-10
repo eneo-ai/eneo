@@ -1,9 +1,16 @@
 # Eneo Flows + Flow AI Builder — Master Program (living document)
 
-Status: CP0 ANALYSIS COMPLETE — PRODUCT WORK HELD ON TWO DECISIONS.
-CP1–CP8 are held until the two blocking decisions in
-`cp0-matrix-freeze.md` §6a and §6b are answered. This file owns
-execution; `cp0-matrix-freeze.md` owns evidence and the gate inventory. Sibling context: `conformance-program-plan.md`.
+Status: PLAN COMPLETION PHASE (v9.8) — user directive 2026-08-10 18:23:
+finalize and verify the COMPLETE plan before any implementation. CP0
+measured that the previously converged program owned only ~17 of 86
+repair triggers and 3 of ~14 conformance families; v8+ assigns an
+ATTRIBUTION SLICE to every measured family (product owners are
+established by attribution, not assignment) and re-ranks by measured
+value. Under
+peer convergence (session flow-122-strategy); implementation starts only
+after the user verifies the finalized plan. The two §6 decisions in
+`cp0-matrix-freeze.md` remain the user's. This file owns execution;
+`cp0-matrix-freeze.md` owns evidence and the gate inventory.
 
 ## Mission
 
@@ -11,8 +18,9 @@ Production-excellent Flow AI Builder and Flows runtime (9/10): no
 errors, near-zero repairs on supported archetypes, plans that satisfy
 what the user actually asked, bounded resources, provable recovery,
 clean single-owner architecture. Evidence-first: no fix without an
-attributed mechanism; no claim without receipts; the 155-case suite
-(3 repetitions, margin 5, rescored-case discipline) is the instrument.
+attributed mechanism; no claim without receipts; the battle suite
+over the FINAL FROZEN CORPUS (3 repetitions, margin 5, rescored-case
+discipline; historically 155 cases) is the instrument.
 
 ## Where we are (2026-08-10; product-code baseline `2e0a4dced` — this
 ## document evolves past it, see git log for the doc HEAD)
@@ -86,19 +94,24 @@ from semantic decisions still model-owned. Therefore:
 - [x] User sign-off — approved 2026-08-10 (start held; launch on
       explicit go)
 
-## The Ranked Program (v7 — plan converged at 9; CP0 executed, CP1–CP8 held)
+## The Ranked Program (v9.8 — plan-completion phase, under peer convergence)
 
 ### Gate inventory — owned by `cp0-matrix-freeze.md` §3
 CP8 will own the release contract; this section points at the inventory
 CP8 must satisfy.
 It lives there and is authoritative. Do not restate its numbers here.
 
-TWO decisions BLOCK product work, both in `cp0-matrix-freeze.md` §6:
+THREE user decisions BLOCK product work (two in
+`cp0-matrix-freeze.md` §6, one from CP9a):
 (a) conformance scope — whether ≥90% expectation conformance is a
-release gate (it is currently PENDING in the registry) or a tracked
+release gate (currently PENDING in the registry) or a tracked
 trajectory; (b) the two unmeasured supported branches
-(`json_to_text_summary`, `audio_transcription`), which must be covered
-by cases or removed from the matrix and made to reject.
+(`json_to_text_summary`, `audio_transcription`) — cover with cases or
+remove from the matrix and make them reject; (c) question policy —
+ask about optional runtime metadata on open prompts, or assume none
+with a visible overridable assumption (evidence packet from CP9a).
+The NUMBERED EXECUTION ORDER below is the SOLE lifecycle owner; every
+other mention of sequencing is a pointer to it.
 Corpus expansion (§6c) is OPTIONAL and blocks nothing, except that a
 small attempt-proportion form of the builder-error gate would
 not be achievable at this corpus size — which is why that gate is an
@@ -115,12 +128,13 @@ any threshold.
     inventory; not a frozen statistical contract). Evidence, dispositions, corrected taxonomy and the
     gate INVENTORY live in `cp0-matrix-freeze.md`;
     clone-local hashed evidence packet
-    `.codex/artifacts/cp0-freeze-20260810/` (10/10 hashes verify, manifest
-    digest pinned in the record). TWO decisions block product work (§6a, §6b); then CP8 lands first,
-    and only then CP1–CP7.
-- [ ] CP8 Release-gate implementation — **FIRST slice after the two user
-    decisions, and a HARD BARRIER before CP1–CP7 and before any candidate
-    measurement** (otherwise verdict semantics could be chosen after
+    `.codex/artifacts/cp0-freeze-20260810/` (manifest and digest live
+    in the evidence owner; verify there, not here). THREE user decisions block product work; the numbered execution
+    order is the sole lifecycle owner; then CP8, and only then
+    builder product work.
+- [ ] CP8 Release-gate implementation — **FIRST slice after the user
+    decisions, and a HARD BARRIER before ALL builder product work and
+    any candidate measurement** (otherwise verdict semantics could be chosen after
     seeing product results). Implement the
     §3 gate inventory inside `backend/scripts/ai_builder_battle_compare.py`
     (which already owns fail-closed receipt identity), with
@@ -208,8 +222,10 @@ any threshold.
     delete the prompt's mechanical form-field block, the create
     repair mapping, and create-mode responsibility of the four
     form-field invariants (edit guards stay), and remove
-    `input_fields`/`uses_form_fields` from that archetype's proposal
-    schema (surface closure).
+    `input_fields`/`uses_form_fields` AND the retired create
+    `review_mode` from that archetype's proposal schema (surface
+    closure; the review-policy transfer itself already shipped —
+    CheckpointIntent + compiler stripping, typed intent wins).
 - [ ] CP4 JSON partial-emission diagnosis: why OSE captures some
     user-named fields and misses others (4 JSON cases). Diagnosis
     first; bounded fix gated on attributed mechanism.
@@ -237,25 +253,141 @@ any threshold.
     explicitly. The critic may
     survive only as a compiler POSTCONDITION (defect detector), never
     as a normal repair owner on a supported archetype.
-- [ ] CP6 Authoring/runtime template-path parity (RELEASE-CRITICAL,
-    added by CP0): authoring accepts an unindexed array path
-    (`ai_builder_json_schema_paths.py:13`) that the runtime rejects
-    (`variable_resolver.py:373`), so the builder can ship a template
-    that fails at execution. Acceptance = parity between the two.
-- [ ] CP7 `flow_step_invalid` decomposition (added by CP0): 22 of 38
-    validation repair triggers. Heterogeneous by ruling and dominant
-    in fact; attribute per inner code before claiming the repair tax
-    is owned.
-- [ ] Ownership-tranche gate: exploratory 155×3 checkpoint after
+- [ ] CP6 Authoring must REJECT unindexed array paths
+    (RELEASE-CRITICAL, direction FROZEN in v9.1 — "parity" alone could
+    be satisfied by weakening the runtime, which is the wrong
+    architecture): the runtime's numeric-index requirement
+    (`variable_resolver.py:374`) is the correct semantic; authoring's
+    lenient default (`ai_builder_json_schema_paths.py:9`) and its
+    backwards-compat mode are deleted under the prerelease no-compat
+    ruling, and a behaviour test proves an invalid path cannot be
+    published. Scheduled immediately after CP8.
+- [ ] CP7 Validation-trigger attribution (widened in v9 — the ONE
+    definition): the validation repair triggers NOT already owned by
+    CP3's form-field family (32 of 38 — `unknown_form_field_refs_open`
+    5 and `unplaced_form_fields` 1 are CP3's), dominated by
+    `flow_step_invalid` (22) and `assembly_plan_invariant_failed` (7)
+    plus singletons, plus `min_source_ref_steps`, `min_steps`,
+    `max_steps` and `live_model_provenance_complete` from the
+    conformance table, and
+    the bounded `checkpoint_intent_mismatch` attribution
+    (checkpoint/compiler seam, CP0 §4). Heterogeneous by ruling:
+    attribute per inner code to a named product or instrument owner
+    before any fix is implemented.
+- [ ] CP9a Question-policy EVIDENCE PACKET (ANALYSIS, step 0 —
+    v9.3): the forbidden-question and stall families are a
+    PRODUCT-POLICY-VS-CASE-CONTRACT CONFLICT with no presumed side.
+    Verified mechanics and receipt facts live in the evidence owner
+    (`cp0-matrix-freeze.md` §8b); in short, the product deliberately
+    asks `runtime_metadata_fields` on open interviews (issue created
+    when metadata absent, no normal-path assumption case, behaviour
+    tests expect the question) while 19 battle contracts forbid it.
+    DECISION AUTHORITY (v9.5): no normative rule decides this — the
+    tracked product contract says server policy owns questions and
+    assumptions must be visible, but is silent on whether absent
+    OPTIONAL metadata is safe to assume. It is therefore the USER'S
+    THIRD DECISION (pending-decision 7 below), presented with the
+    evidence and my recommendation; CP9a prepares that packet, it
+    does not decide. If the product branch (CP9b) is chosen, its
+    behaviour test must prove the question disappears on open
+    prompts, the no-metadata assumption is VISIBLE and localized
+    (the existing assumption seam), and the user can override it.
+    Sequencing is owned by the numbered execution order (steps 0–1):
+    evidence packet first; the CONDITIONAL rebaseline (rescored_cases
+    per the standing Slice-3 protocol, offline recomputation of CP0
+    counts and projections, manifest and conclusion updates) happens
+    only after — and only if — the user chooses the rubric branch;
+    the §6a/§6b decisions then read the final evidence. If the user
+    chooses the product branch, the contracts stay frozen and only
+    CP9b is scheduled. Any later instrument correction invalidates
+    earlier candidate receipts and re-enters pre-registration. Stall
+    answerability follows the same evidence-packet-then-user path
+    at the same time.
+- [ ] CP9b Question-policy product change (only if the USER chooses
+    the product branch in decision 7): implemented in execution-order position 7, inside
+    the existing discovery decision engine (the budget-exhaustion
+    path's `assume_no_runtime_metadata` seam is the candidate), with
+    the deliberately-expecting tests updated in the same slice. No new
+    policy, no new store, no second owner.
+- [ ] Remaining family assignments (v9 — every measured family has
+    an ASSIGNED ATTRIBUTION SLICE; product owners are established by
+    attribution; counts live in `cp0-matrix-freeze.md`): output-contract schema → CP5; input-contract schema and
+    expected_form_fields and unknown_form_field_refs_open and
+    unplaced_form_fields → CP3; min_source_ref_steps and
+    live_model_provenance_complete → CP7 (see its single definition
+    above); long tail → the standing re-attribution loop.
+- [ ] Conditional paths for the two open decisions (v9): §6a
+    conformance — if GATE: registry row 5 becomes gating, a
+    mixed-conformance case limit is frozen with it, and the program
+    commits to the full ~14-family scope; if TRAJECTORY: row 5 is
+    marked non-gating and the release rests on the reachable rows —
+    but RELEASE ELIGIBILITY IS NOT PROGRAM COMPLETION: the 9/10 claim
+    is withheld until the pre-registered completion condition is met —
+    FROZEN HERE: registry row 5 (expectation conformance) evaluated by
+    CP8's own cluster-aware arithmetic reaches PASS on a subsequent
+    measured run, AND at most 10% of the final corpus's cases (exact
+    count derived by CP8 from the frozen manifest — the same bar as
+    the mixed-first-pass gate) are conformance-unstable across
+    repetitions — the same verdict machinery as the gate branch, so
+    the trajectory branch cannot quietly use a weaker method — and the
+    program continues after release until then. §6b branches — if COVER:
+    the new cases for `json_to_text_summary` and `audio_transcription`
+    are written, contract-hashed and frozen BEFORE the first candidate
+    measurement (a corpus chosen after seeing product results is not
+    pre-registered), and CP8 uses that final corpus identity; if REMOVE: delete
+    the two cascade branches and make those tuples reject explicitly
+    (create has no fallback, so silence is not an option). The plan
+    is valid under either answer of each.
+- [ ] Ownership-tranche gate: exploratory final-frozen-corpus ×3 checkpoint after
     CP1–CP3 land. The release gate is a separate N=5 release
     evaluation (CP0 established that repetitions supply instability
     DETECTION, not certification power), repeated after every material
     post-gate change.
 - [ ] Post-CP5 re-attribution loop: rerun attribution and continue
-    ownership transfers until the completion contract passes — the
+    ownership transfers until the release registry passes — the
     five slices are a starting set, not assumed sufficient (31
     invariants remain in the registry;
     `ai_builder_critic_invariants.py:1823`).
+
+### Execution order (v9 — the ONE canonical order; dependencies hold)
+
+0. **CP9a evidence packet** — analysis only; delivers the
+   question-policy evidence and recommendation.
+0.2 **USER DECIDES question policy** (pending-decision 7).
+0.4 **Conditional rebaseline** — only if the user chose the rubric
+   branch: the 19 cases are corrected, added to `rescored_cases`, and
+   the CP0 counts and projections recomputed offline.
+0.6 **USER DECIDES §6a conformance scope and §6b branches**, reading
+   the (possibly rebaselined) final evidence.
+0.8 **Conditional COVER corpus freeze** — if COVER was chosen, the
+   new cases are written, contract-hashed and frozen here.
+1. **CP8** — hard barrier: blocks ALL builder product work and
+   candidate measurement (including CP9b and anything added later),
+   never an enumerated slice list. CP8 derives the exact instability
+   ceilings and checkpoint size from the FINAL frozen manifest,
+   pinning the rounding rule for the 10% ceiling (floor) — the
+   execution owner does not duplicate those numbers.
+2. **CP6** — immediately after CP8: a deterministic published-flow
+   correctness defect (authoring accepts what runtime rejects)
+   outranks conformance optimization, and the suite cannot price it
+   because it does not execute flows.
+3. **CP2**, then **CP1** — attribution already complete; disjoint
+   files; together with CP3 they clear the three stable deaths.
+4. **CP2b** — parse attribution (gates CP3 and CP5 by ruling).
+5. **CP3** — then the exploratory final-frozen-corpus ×3 tranche
+   checkpoint (after
+   CP1–CP3, per the standing gate).
+6. **CP4 → CP5** — then the post-CP5 re-attribution loop (review-family
+   residuals re-attributed against the existing checkpoint pipeline —
+   classifier, producer-shape, or harness; slice-5 commit 2, rename,
+   JSON fan-in).
+7. **CP9b** — only if the user's decision 7 chose the product
+   branch.
+8. **CP7** — validation-trigger attribution and fixes; the
+   checkpoint_intent_mismatch attribution slice rides here.
+Runtime stream L1a–L5 parallel throughout (unblocked). Maintainability
+rulings bind every slice: ownership transfers delete their old path,
+tests die with their owners, no splits for their own sake.
 
 ### Launch stream (parallel; a RELEASE GATE, not a lower tier)
 - [ ] L1a Topology verification (SPLIT + TRIMMED, iteration 34): the
@@ -303,6 +435,33 @@ any threshold.
     + newly created test volumes, validated then deleted) — never
     against production or existing development volumes. L5 verifies
     this calculated envelope, not a folk number.
+    DERIVED DESIGN (v9.1, corrected against source — beat opens NO
+    database pool: initialization is attached to `worker_process_init`
+    only (`runtime/celery_app.py:159`), and `db-init` opens a single
+    transient psycopg2 connection at startup (`init_db.py:249`),
+    counted separately as startup-only:
+      backend       NUM_WORKERS=3 × (20+10) = 90
+      ARQ worker    1 × (20+10)             = 30
+      celery execute      4 × (5+2)         = 28  (per-service pool
+                                                   override)
+      celery maintenance  2 × (5+2)         = 14  (concurrency 2)
+      celery beat                            =  0  (no pool)
+      steady-state sum                      = 162
+      + superuser_reserved_connections       =  3  (PostgreSQL default,
+                                                    verified at L5)
+      + operator headroom (psql, backup,
+        monitoring, db-init transient)       = 35
+      → max_connections=200 via the db service command.
+    The celery 5+2 pool sizes are a design estimate pending checkout-
+    demand evidence: L5's launch-concurrency smoke captures peak
+    concurrent checkouts and pool timeouts and may revise them. L5
+    FAILS when the recomputed steady-state sum exceeds the budgeted
+    162 — that is, max_connections − reserved − headroom — so the
+    35-connection operator headroom is enforced, not merely promised;
+    the aggregate-budget table in
+    `env_backend.template` documents the formula, and the sum is
+    derived from the RENDERED compose (docker compose config), not
+    from prose.
 - [ ] L2 Provider throttling: fail-fast + typed provider-throttled
     diagnosis + operator/user guidance (NO flow-level retry loop).
 - [ ] L3 Health (SOLE healthcheck owner, iteration 35):
@@ -365,14 +524,15 @@ user opts object storage in) or explicitly descoped by the user.
 ### Parallelization map (what runs concurrently; worker worktrees)
 Commit gates stay sequential per stream, but implementation and
 analysis overlap. Lanes that can run AT THE SAME TIME:
-- Lane A (analysis, no product code): CP0 matrix freeze + CP2 step 1
-  attribution table + CP4 diagnosis — all offline over the frozen
-  packet; three independent workers or scripts, anytime.
+- Lane A (analysis, no product code): CP0 matrix freeze + CP9a
+  question-policy evidence packet (delivered before the decisions
+  and CP8) + CP2 step 1 attribution table + CP4 diagnosis — all
+  offline over the frozen packet; independent workers or scripts.
 - Lane B (builder code): CP1 (owner: `planning_state_builder.py`
   merge guard) and CP2 step 2 (owners: create proposal/preparation)
   touch DISJOINT files — separate worker worktrees in parallel once
-  their design gates pass; land in sequence. HARD BARRIERS: no CP1–CP7
-  product code starts until (a) CP0's two user decisions are answered
+  their design gates pass; land in sequence. HARD BARRIERS: no builder
+  product code starts until (a) the user decisions are answered
   and (b) CP8 has landed, so verdict semantics are pre-registered in
   code before any product change or candidate measurement. Analysis
   (Lane A) and the runtime stream (Lane D) may proceed meanwhile.
@@ -383,14 +543,18 @@ analysis overlap. Lanes that can run AT THE SAME TIME:
 - Lane D (runtime stream): L1a–L1c and L2–L5 are fully parallel with ALL builder
   work — different files, own peer session
   (`flows-runtime-readiness`), own worker worktrees.
-Dependencies that stay hard: CP0 + the two user decisions + CP8 before
-ANY CP1–CP7 product code (pre-registration integrity); CP2 step 1 before
-CP2 step 2; CP4 attribution before any CP4 fix; the tranche 155×3
+Dependencies that stay hard: CP0 → CP9a evidence → question-policy
+decision → conditional rebaseline → §6a/§6b decisions → conditional
+COVER freeze → CP8, before ANY builder product code (pre-registration
+integrity — the rebaseline precedes §6a because the rubric branch
+changes the evidence that decision reads); CP2 step 1 before
+CP2 step 2; CP4 attribution before any CP4 fix; the tranche checkpoint
 after CP1–CP3 land. One live worker per session name; the
 orchestrator judges every diff and owns all git.
 
 ### Measurement cadence
-Cohort probes (3 reps, named cohorts) per slice; exploratory 155×3 at
+Cohort probes (3 reps, named cohorts) per slice; exploratory
+final-frozen-corpus ×3 at
 the tranche gate; the N=5 release evaluation at the release gate
 (detection power, not certification power), repeated after every
 material post-gate change; suite runs ≥45 min
@@ -450,9 +614,18 @@ apart (provider limits).
 4. BLOCKING (CP0 §6a) — conformance scope: is ≥90% expectation
    conformance a release gate or a tracked trajectory? It is 36.6%
    today. An optimistic current-ledger projection crosses 90% only
-   after ~14 attributed check families, several unowned; real scope is
-   larger because fixes make currently unevaluable checks apply. The
-   registry marks this metric PENDING until answered.
+   after ~14 attributed check families. Every family now has an
+   ASSIGNED ATTRIBUTION SLICE (CP9a, CP7, CP3, CP5), but for several
+   the underlying product owner is UNKNOWN until attribution runs —
+   assignment is not attribution. Real scope is larger because fixes
+   make currently unevaluable checks apply. The registry marks this
+   metric PENDING until answered; decided at step 0.6, after the
+   CONDITIONAL step-0.4 rebaseline when the rubric branch is chosen.
+7. BLOCKING (NEW, from CP9a) — question policy: should the builder
+   ask about optional runtime metadata on open prompts (current,
+   deliberate, tested behaviour that 19 battle contracts contradict)
+   or assume no metadata with a visible, overridable assumption?
+   CP9a delivers the evidence packet and recommendation.
 5. BLOCKING (CP0 §6b) — the two unmeasured supported branches
    (`json_to_text_summary`, `audio_transcription`): cover them with
    cases, or remove them from the supported matrix and make them

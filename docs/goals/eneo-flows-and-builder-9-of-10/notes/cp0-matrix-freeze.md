@@ -5,7 +5,7 @@ Executed 2026-08-10 against the clean checkpoint `342dc7ec9fc7` (suite
 provider-reported token usage, `tracked_clean=true`). No product code
 changed. This record owns the EVIDENCE and the GATE INVENTORY. It does not own
 verdict semantics: pre-registration completes when CP8 lands, and CP8
-blocks CP1–CP7 builder product work and candidate measurement (§3). The
+blocks ALL builder product work and candidate measurement (§3). The
 runtime stream (L1a–L5) is unaffected and may proceed in parallel.
 
 CP0 owns evidence and the gate inventory (§3); it does not own or ship
@@ -29,11 +29,13 @@ the release-contract scope (§3); CP8 owns that arithmetic in tracked code.
     python3 cp0_rows.py                # repair / error / critic-event counts
     python3 cp0_cost.py                # nearest-rank p95, three populations
     python3 cp0_receipt_validation.py  # canonical provider-marker scan
+    python3 qtrace.py                  # §8b forbidden-question mechanism
+    python3 qtrace2.py                 # §8b question ids + stall triggers
     python3 cp2_terminal_attribution.py
-    sha256sum -c SHA256SUMS            # 10/10 OK
+    sha256sum -c SHA256SUMS            # 12/12 OK
 
     manifest digest (pins the whole inventory):
-    38d9ca33ff060ace3ca02b95c0dfb9e077007e50624012632a0f81bf1c45f38e  SHA256SUMS
+    626476ec66d27c39ae0ab40ca33855c614e6f0fc3a9c70a935cec2eafcc48a56  SHA256SUMS
 
 Inputs: `clean_planning_states.jsonl` (1019 states, DB export),
 `SUITE_IDENTITY.json` (467 files, a local integrity record of the consumed
@@ -132,8 +134,8 @@ which already owns fail-closed receipt identity) with unit tests, one
 arithmetic module, and no duplicated constants.
 
 **Pre-registration completes when CP8 lands, not here.** CP8 is therefore
-a HARD BARRIER: it is the first slice after the two user decisions, and
-no behaviour-changing slice (CP1–CP7) and no candidate measurement may
+a HARD BARRIER: it is the first slice after the user decisions, and
+no behaviour-changing builder slice and no candidate measurement may
 run before it. Otherwise verdict semantics could still be chosen after
 seeing product results, which is exactly what pre-registration exists to
 prevent.
@@ -222,7 +224,9 @@ captures all terminate with `runtime_metadata_requires_form_fields`
 → **CP3** (`ai_builder_critic_invariants.py:375`). Separately, 5 stable
 non-acceptance non-death cases (stall / interaction limit / unconfirmed).
 
-## 4. Invariant disposition — all 31 assigned, none left unowned
+## 4. Invariant disposition — all 31 dispositioned
+
+Product owners are established by attribution, not by assignment.
 
 Registry `CRITIC_INVARIANTS` (`ai_builder_critic_invariants.py:1823`).
 Channel asymmetry (verified): in CREATE, architecture invariants are
@@ -240,7 +244,8 @@ architecture is only feedback except the two `edit_topology` ones.
   `json_input_rejects_all_previous_steps_source`,
   `multi_document_compare_requires_all_previous_steps`,
   `mixed_audio_doc_rejects_file_degradation`.
-- **5 fire in 465 observations** — every one now has an owner:
+- **5 fire in 465 observations** — every one has an assigned
+  disposition:
   - `runtime_metadata_requires_form_fields` (4 terminal + 3 repair) → CP3
   - `rich_workflow_requires_form_fields` (3 + 2) → CP3
   - `named_result_obligations_must_survive` (2 + 6) → CP5 (demote to
@@ -319,8 +324,11 @@ Ownership reality check: of the top five families, the program currently
 owns `expected_leaf_output_fields` (CP5), `classifier_file_role` (CP1),
 and part of `plan_created` (CP2/CP3). **The question family
 (`forbidden_question_event_ids` 23 solo + `first_question_relevance` 20
-solo = 43 solo-flips, second-largest lever overall) has no owner**, and
-neither do provenance, source-ref counts, or step-count checks.
+solo = 43 solo-flips, second-largest lever overall) had no owner when
+this was written** — the execution owner has since ASSIGNED attribution
+slices (question family → CP9a, provenance/source-ref/step-count → CP7),
+though the underlying product owners remain unknown until those
+attributions run. Assignment is not attribution.
 
 **The user decision is therefore scope, not feasibility:** under the
 optimistic projection ≥90% conformance requires the program to grow from
@@ -401,7 +409,8 @@ cache-read/write split, reasoning-token counts, per-call attribution
 | parse | 36 | no failure codes attached — raw tool arguments failed to validate |
 | quality | 12 | `named_result_obligations_must_survive` 6, `runtime_metadata_requires_form_fields` 3, `rich_workflow_requires_multiple_steps` 2, `rich_workflow_requires_form_fields` 2 |
 
-CP3 owns ~11, CP5 owns 6 — **~17 of 86 (20%)**. The dominant drivers:
+The CP3 slice covers ~11 observations and the CP5 slice 6 —
+**~17 of 86 (20%)**. The dominant drivers:
 
 - **Parse failures (36).** `json_to_structured_payload`'s 58.3% repair rate
   is 15/15 parse. Both CP3 and CP5 tighten the raw proposal-argument seam,
@@ -417,6 +426,29 @@ Terminal (non-repair) failure codes: `terminal_output_type_mismatch` 6,
 `flow_step_invalid` 5, `runtime_metadata_requires_form_fields` 4,
 `rich_workflow_requires_form_fields` 3,
 `named_result_obligations_must_survive` 2, then singletons.
+
+### §8b CP9 receipt facts (question family, recorded 2026-08-10)
+
+From the clean checkpoint (replay: `qtrace.py`/`qtrace2.py`, pinned in
+the manifest above, alongside `cp0_allcheck.py`): `runtime_metadata_fields` accounts for 29 of 35
+forbidden-question observations (19 cases, all open interviews; zero
+free-text questions, zero repeated questions — pure catalog selection);
+`docx_output_mode` for the other 6 (3 cases; never-suppressable set).
+Last question asked before each of the 19 stalls: `docx_output_mode` 6,
+`terminal_output` 4, `runtime_metadata_fields` 4, `post_processing_goal`
+3, `primary_runtime_input` 1, `comparison_scope` 1.
+
+Source mechanics (verified): the runtime-metadata issue is CREATED when
+the prompt lacks metadata (`ai_builder_discovery_issue_rules.py:615`);
+normal-path suppression is impossible because
+`assumption_for_candidate` has no runtime-metadata case
+(`ai_builder_discovery_decision_engine.py:148,:392`), while the
+budget-exhaustion disposition assumes it away (`:95`); discovery
+behaviour tests deliberately expect the question
+(`test_ai_builder_discovery_runtime.py:2995,:3143`). The question-policy choice
+belongs to the USER (execution owner, pending-decision 7); CP9a only
+prepares the evidence packet. The numbered execution order in the
+execution owner is the sole lifecycle authority.
 
 ### CP2 step 1 is already complete and confirms dual ownership 6/6
 
