@@ -383,7 +383,9 @@
           [
             "forvaltning",
             "department",
-            "administration"
+            "administration",
+            "berord_forvaltning",
+            "responsible_administration"
           ],
           [
             "saknade_fakta",
@@ -593,7 +595,8 @@
           [
             "monster",
             "pattern",
-            "absence_pattern"
+            "absence_pattern",
+            "typ_av_monster"
           ],
           [
             "riskniva",
@@ -720,7 +723,8 @@
             "roller",
             "roles",
             "involved_roles",
-            "roles_involved"
+            "roles_involved",
+            "berorda_roller"
           ],
           [
             "vardnadshavare",
@@ -732,7 +736,8 @@
           [
             "uppfoljning",
             "follow_up",
-            "recommended_action"
+            "recommended_action",
+            "foreslagen_uppfoljning"
           ],
           [
             "osakerhet",
@@ -833,7 +838,8 @@
           ],
           [
             "intervjufragor",
-            "interview_questions"
+            "interview_questions",
+            "forslag_pa_intervjufragor"
           ]
         ]
       },
@@ -1033,7 +1039,8 @@
           ],
           [
             "dubbeldebitering",
-            "duplicate_charge"
+            "duplicate_charge",
+            "mojlig_dubbeldebitering"
           ],
           [
             "kostnadsstalle",
@@ -4589,7 +4596,8 @@
           ],
           [
             "next_checks",
-            "nasta_kontroller"
+            "nasta_kontroller",
+            "possible_next_checks"
           ]
         ]
       },
@@ -8193,7 +8201,8 @@
             "att_satser",
             "beslutspunkter",
             "decision_clauses",
-            "decision_points"
+            "decision_points",
+            "beslutets_att_satser"
           ],
           [
             "foredragande",
@@ -9136,7 +9145,8 @@
             "svarigheter",
             "angivna_svarigheter",
             "resesvarigheter",
-            "travel_difficulties"
+            "travel_difficulties",
+            "svarigheter_kollektivtrafik"
           ],
           [
             "ledsagarbehov",
