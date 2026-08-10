@@ -195,7 +195,11 @@ services:
       - eneo_backend_data:/app/data
       - eneo_temp_files:/tmp
     networks:
+      # data_net carries Redis (broker) and PostgreSQL; proxy_tier carries
+      # outbound model calls. Without data_net this worker cannot consume
+      # its queue at all.
       - proxy_tier
+      - data_net
     depends_on:
       - backend
 
@@ -213,7 +217,9 @@ services:
       - eneo_backend_data:/app/data
       - eneo_temp_files:/tmp
     networks:
+      # data_net for broker/DB; proxy_tier for outbound webhook delivery.
       - proxy_tier
+      - data_net
     depends_on:
       - backend
 
@@ -230,7 +236,9 @@ services:
       - eneo_backend_data:/app/data
       - eneo_temp_files:/tmp
     networks:
-      - proxy_tier
+      # Beat only schedules over the broker and reads the DB; it makes no
+      # outbound calls, so data_net alone is correct.
+      - data_net
     depends_on:
       - backend
       - redis
