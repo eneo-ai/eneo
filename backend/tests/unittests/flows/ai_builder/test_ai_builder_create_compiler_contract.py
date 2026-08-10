@@ -4863,6 +4863,82 @@ def test_report_lowering_combines_json_overview_models_once_and_uses_terminal_mo
     assert validation.valid, validation.errors
 
 
+def test_per_source_sections_combines_distinct_models_once_and_uses_terminal_model() -> (
+    None
+):
+    intent = parse_create_flow_intent_arguments(
+        {
+            "flow_name": "Conflicting report models",
+            "plan_rationale": "Combine report-writing semantics before composition.",
+            "steps": [
+                {
+                    "name": "Read source",
+                    "instructions": "Extract source evidence.",
+                    "output_type": "json",
+                    "output_fields": [
+                        {
+                            "name": "documents",
+                            "field_type": "array",
+                            "description": "Source evidence.",
+                            "item_fields": [
+                                {
+                                    "name": "summary",
+                                    "field_type": "string",
+                                    "description": "Source summary.",
+                                }
+                            ],
+                        }
+                    ],
+                },
+                {
+                    "name": "Draft report",
+                    "instructions": "Draft the report.",
+                    "output_type": "text",
+                    "model_ref": "model.draft",
+                },
+                {
+                    "name": "Refine report",
+                    "instructions": "Refine the report.",
+                    "output_type": "text",
+                    "model_ref": "model.refine",
+                },
+                {
+                    "name": "Compose report",
+                    "instructions": "Compose the final report.",
+                    "output_type": "text",
+                    "model_ref": "model.body",
+                },
+            ],
+        }
+    )
+
+    diagnostics = []
+    compiled = compile_create_intent_to_spec(
+        intent,
+        context=CreateCompileContext(
+            runtime_input_type=InputType.DOCUMENT,
+            final_output_type=OutputType.PDF,
+            final_output_mode=OutputMode.RENDER_VERBATIM,
+            aggregation_intent="linear",
+            report_disposition="per_source_sections",
+            runtime_max_files=4,
+            ui_language="en",
+        ),
+        field_diagnostics=diagnostics,
+    )
+
+    assert compiled.steps[1].assistant_spec.model_ref == "model.body"
+    assert [warning.code for warning in diagnostics] == [
+        "document_report_model_selection_combined"
+    ]
+    assert [warning.message for warning in diagnostics] == [
+        "The steps specified different model selections; they were combined and "
+        "the combined report-writing step uses model selection model.body."
+    ]
+    validation = validate_spec(compiled)
+    assert validation.valid, validation.errors
+
+
 def test_report_disposition_both_preserves_distinct_producer_model_selections() -> None:
     intent = parse_create_flow_intent_arguments(
         {
