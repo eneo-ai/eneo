@@ -1,12 +1,13 @@
 # Eneo Flows + Flow AI Builder — Master Program (living document)
 
-Status: CONVERGING — iteration 32 (max effort) returned
-changes_required at 7; all findings source-verified and absorbed into
-the v2 program below; iteration 33 (max effort, min-score 9) is
-adjudicating v2. No implementation until convergence, then user
-sign-off. This file is self-contained so ANY coding agent can continue
-the program. Sibling context: `conformance-program-plan.md` (the
-detailed slice protocol and the full verdict ledger, same directory).
+Status: CONVERGING — iterations 32 (score 7) and 33 (score 8, max
+effort) each returned changes_required; every finding was
+source-verified locally and absorbed. This file is now program v3;
+iteration 34 (max effort, min-score 9) adjudicates it. No
+implementation until convergence, then user sign-off. This file is
+self-contained so ANY coding agent can continue the program. Sibling
+context: `conformance-program-plan.md` (the detailed slice protocol
+and the full verdict ledger, same directory).
 
 ## Mission
 
@@ -83,33 +84,64 @@ from semantic decisions still model-owned. Therefore:
 - [ ] Program convergence (iteration 32+ running, min-score 9)
 - [ ] User sign-off on the converged program
 
-## The Ranked Program (v2 — after iteration 32; under adjudication)
+## The Ranked Program (v3 — after iteration 33; under adjudication)
 
-### Completion contract (proposed; iteration 33 adjudicating)
-One matrix row per supported archetype (json-terminal,
-document-report, text-terminal, template-fill — ~90% of usage):
-admission predicate → canonical compiler owner → model-owned creative
-fields → retired create invariants → explicit fallback behavior →
-deterministic compile test + publish/run sentinel. Everything
-unmatched routes to the observable free-proposal fallback
-(`ai_builder_architecture_derivation.py:40`).
-Numeric exit thresholds (proposed): first-pass acceptance ≥90% on
-supported archetypes (now ~79%); normal-path semantic critic hits on
-supported archetypes 0; repairs per accepted create plan ≤0.05;
-deterministic deaths on stable cohort 0, total builder_error ≤10/465
-(now 27); model-authored mechanical fields monotone non-increasing.
+### Completion contract (attempt-level; no accepted-plan denominators)
+Every eligible create attempt lands in ONE bucket of an exhaustive
+ledger: supported row (exactly one, by ordered exclusive predicates)
+or fallback → then first-pass / repaired / failed / stalled /
+provider-unknown. Thresholds are per eligible attempt, never per
+accepted plan (a death before acceptance must count against us):
+- Supported coverage ≥90% of eligible create attempts (exclusive
+  row-or-fallback assignment; the old "~90%" used an unstated
+  plan-producing denominator — corrected).
+- First-pass accepted plan ≥95% of eligible supported attempts;
+  repair attempts ≤0.05 per eligible supported attempt.
+- Normal-path semantic critic hits on supported archetypes: 0.
+- Stable explicit user obligations: zero stable failures; supported
+  conformance ≥90%; leaf flip rate ≤10%.
+- Deterministic product deaths 0; product-attributable builder errors
+  ≤1%; stalls and provider failures tracked separately (≤10/465 stays
+  only as an interim tranche target).
+- Bounded p95 provider calls, tokens, and planning latency (baseline
+  extracted from the clean checkpoint in CP0).
+- Release verdict from a powered sample; 3 repetitions stay
+  exploratory.
 Scope: EXCELLENT CREATE MODE + runtime launch. Edit mode keeps its
 guards; edit excellence is a later program (explicitly out of scope).
+SURFACE-CLOSURE MILESTONE (greenfield adjudication, iteration 33):
+the end state is a CLOSED proposal contract per supported archetype —
+every ownership transfer must also remove the transferred field from
+that archetype's proposal schema. Closure is a matrix milestone, not
+a hoped-for side effect. No rewrite: compile context + assembly stay
+the migration seam.
 
 ### Critical path (builder stream; each slice design-gated → worker →
 ### commit-gated → cohort probe)
-- [ ] CP1 File-role flip closure. The margin regression IS the task-14
-    case (same mechanism, confirmed). Owner:
-    `_merged_model_file_roles` / `_model_file_role_can_replace`
-    (`planning_state_builder.py:896`). Candidate invariant:
-    explicit-evidence roles are sticky absent new contradicting
-    evidence (kin of the evidence-churn family). The extra question
-    round is attributed inside this same case study.
+- [ ] CP0 Matrix freeze (analysis only, no product code). Ordered
+    mutually exclusive predicates with precedence for the supported
+    archetypes (current draft rows mix terminal type/topology/mode
+    and can overlap — e.g. JSON-to-artifact vs text-to-artifact vs
+    document-to-structured-report patterns in
+    `ai_builder_architecture_derivation.py:186`). Classify EVERY
+    frozen create observation into exactly one row or fallback and
+    publish the ledger; define the eligible-attempt denominator; map
+    ALL 31 invariants to impossible-and-delete / retained
+    postcondition / fallback-only (CP1–CP5 alone are not assumed to
+    reach zero hits); extract baseline p95 provider calls, tokens,
+    latency. Matrix rows get stable IDs + versions.
+- [ ] CP1 File-role flip closure (TRIMMED, iteration 33). The margin
+    regression IS the task-14 case (same mechanism, confirmed).
+    Deepen the EXISTING merge owner `_model_file_role_can_replace`
+    (`planning_state_builder.py:1006`) — verified: it checks source
+    and heuristic confidence but never the existing role's evidence
+    LEVEL, so an inferred re-classification can replace an
+    explicit-quote-backed role. Fix: monotonic precedence from
+    existing evidence level + citation identity — same-evidence flips
+    rejected, genuinely later explicit corrections accepted,
+    conflicting evidence becomes explicit ambiguity. NO role-history
+    store. The extra question round is attributed inside this same
+    case study.
 - [ ] CP2 Terminal ownership consolidation (premise CORRECTED in
     iteration 32, source-verified): the mismatch is SERVER-vs-SERVER
     dual ownership — compile derives the terminal from
@@ -121,36 +153,75 @@ guards; edit excellence is a later program (explicitly out of scope).
     (`ai_builder_compiled_spec_preparation.py:70`). Ninth
     dual-ownership family. Step 1: attribution table with BOTH
     derivations per observation (re-derive offline from persisted
-    planning state + conversation). Step 2 if confirmed: committed
-    terminal becomes the single create-path owner; conversation
-    derivation survives only for edit semantics; delete the alignment
-    guard + create-side mismatch repair. `flow_step_invalid` stays a
-    separate heterogeneous family (`flow_validators.py:227`).
-- [ ] CP3 Runtime-input-field contract. Classifier output persists into
-    the EXISTING typed owner `FlowInputFieldIntent`
-    (`planning_state_builder.py:267`) through the existing hints path
-    (`ai_builder_create_compiler.py:940,1100`) — no parallel
-    declaration; at most a bounded consumer-role field on the
-    existing type. Then delete the prompt's mechanical form-field
-    block, the create repair mapping, and create-mode responsibility
-    of the four form-field invariants (edit guards stay).
+    planning state + conversation). Step 2 if confirmed (AMENDED,
+    iteration 33): keep the postcondition but feed it
+    `CreateCompileContext.final_output_type` — same-owner self-check,
+    not dual ownership; delete only the conversation re-derivation on
+    the create path and the model-repair ownership (a create mismatch
+    becomes a compiler defect, never model-repairable feedback);
+    conversation derivation survives only for edit semantics.
+    Exit check: no create caller still invokes
+    `terminal_output_type_for_conversation`. `flow_step_invalid`
+    stays a separate heterogeneous family (`flow_validators.py:227`).
+- [ ] CP3 Runtime-input-field contract (AMENDED, iteration 33).
+    `FlowInputFieldIntent` stays the field VALUE schema, but verified
+    it carries no citations/confidence
+    (`ai_builder_proposal_intent.py:80`) and the classifier exposes
+    only boolean form intake
+    (`ai_builder_slot_classification_contract.py:162`) — so the
+    classifier ships a bounded CITED DELTA ENVELOPE (update/clear +
+    per-field citations + confidence; the same transport pattern as
+    ClassifiedNamedResultDelta), a transport contract around the
+    existing value type, never a second owner. Durable owner stays
+    conversation metadata; `PlanningState.input_fields` stays the
+    derived view; placement defaults to the archetype's one
+    deterministic consumer; semantic purpose only for evidence-backed
+    multi-consumer cases; never leak physical `PlannedStepRole`
+    upstream. Then delete the prompt's mechanical form-field block,
+    the create repair mapping, and create-mode responsibility of the
+    four form-field invariants (edit guards stay), and remove
+    `input_fields`/`uses_form_fields` from that archetype's proposal
+    schema (surface closure).
 - [ ] CP4 JSON partial-emission diagnosis: why OSE captures some
     user-named fields and misses others (4 JSON cases). Diagnosis
     first; bounded fix gated on attributed mechanism.
-- [ ] CP5 Named-result completion, redesigned: named evidence owns
-    PRESENCE, never design. Bounded proposal interface where
-    obligated names are inexpressibly present as keys while the model
-    authors each field's type/nesting (candidate: tool-schema
-    `required` + open per-key subschema; prove provider support
-    first). No new store; no synthesized types; the critic stays
-    until the interface makes it unreachable, then dies.
+- [ ] CP5 Named-result completion, redesigned (AMENDED, iteration 33):
+    named evidence owns PRESENCE, never design. Verified blockers the
+    design gate must resolve BEFORE code: the current invariant
+    accepts an obligated name at ANY depth
+    (`ai_builder_critic_invariants.py:854` via
+    `schema_property_names_at_any_depth`), so naive top-level
+    `required` keys would silently choose nesting; and the proposal
+    tool schema is built independently at TWO sites — token budgeting
+    (`ai_builder_planner_request_preparation.py:463`) and submission
+    (`ai_builder_proposal_submission.py:171`) — with obligations
+    reaching neither. Design gate decides: top-level placement as a
+    canonical product rule OR a bounded per-name design map with a
+    defined compiler projection; then materialize ONE schema reused
+    by both budgeting and submission; then one provider strict-tool
+    probe with a nested obligated field. No recursive schema DSL. If
+    the provider cannot express the contract, the critic stays.
 - [ ] Ownership-tranche gate: full 155×3 after CP1–CP3 land (one of
-    exactly TWO full runs; the other is the release candidate).
+    exactly TWO full runs; the other is the powered release
+    candidate).
+- [ ] Post-CP5 re-attribution loop: rerun attribution and continue
+    ownership transfers until the completion contract passes — the
+    five slices are a starting set, not assumed sufficient (31
+    invariants remain in the registry;
+    `ai_builder_critic_invariants.py:1823`).
 
 ### Launch stream (parallel; a RELEASE GATE, not a lower tier)
-- [ ] L1 Durable topology (USER PERMISSION GRANTED 2026-08-10 for the
-    `.devcontainer` path, scoped to this work). Fine details with
-    long-term leverage, each traced to a real incident:
+- [ ] L1 Durable topology (RE-TARGETED, iteration 33): the release
+    proof runs against the ACTUAL launch artifact,
+    `docs/deployment/docker-compose.yml` — verified to already own
+    the three roles (execute, maintenance with
+    `FLOW_CELERY_WORKER_QUEUES=flows.maintenance`, beat) with
+    `restart: unless-stopped`. The `.devcontainer` compose (whose
+    flow worker just runs `sleep infinity`, no maintenance role) is
+    developer ergonomics: bring it to parity under the USER
+    PERMISSION GRANTED 2026-08-10 (scoped), but it is OFF the release
+    critical path. Fine details with long-term leverage, each traced
+    to a real incident, applied to the deployment artifact first:
     - Three first-class compose services (execute worker, maintenance
       worker, beat) with explicit queue env, `restart: unless-stopped`
       and native healthchecks — no manually started processes inside
@@ -180,12 +251,16 @@ guards; edit excellence is a later program (explicitly out of scope).
 - [ ] L3 Health: execution-consumer presence + beat freshness on the
     existing operator surface; deployment-native healthchecks. No new
     public liveness endpoint.
-- [ ] L4 Object-content scope (USER DECISION): if in launch scope,
-    attach celery-worker-flows to object_content_net + prove one
-    read/write journey.
-- [ ] L5 Launch receipt: pool-budget arithmetic vs SHOW max_connections
-    under bounded load + one queue-recovery smoke at launch
-    concurrency.
+- [ ] L4 Object-content scope (DEFAULT OUT, iteration 33): the tracked
+    deployment default keeps bounded durable content in PostgreSQL
+    with no separate object store (`docs/deployment/README.md:68`),
+    so the BASE launch ships PostgreSQL-only. Object storage becomes
+    a conditional opt-in gate (attach worker to object_content_net +
+    one read/write journey) ONLY if the user opts in.
+- [ ] L5 Launch receipt: pool-budget arithmetic vs SHOW
+    max_connections under bounded load + one queue-recovery smoke at
+    launch concurrency + exact deployment revision/config identity +
+    rollback/drain evidence.
 Release requires L1–L5 resolved or explicitly descoped by the user.
 
 ### Standing rulings — NOT slices (adjudicated; apply when touched)
@@ -251,5 +326,11 @@ exactly two points (tranche gate, release candidate); suite runs
 ## Pending user decisions
 1. ~~Permission to edit `.devcontainer/docker-compose.yml` for the
    durable three-role topology (L1)~~ — GRANTED 2026-08-10, scoped to
-   the topology work.
-2. Whether bundled object storage is in launch scope (L4).
+   the topology work (now dev-parity only; release proof targets the
+   deployment compose).
+2. Object storage: the program defaults the base launch to
+   PostgreSQL-only (matches the tracked deployment default). Confirm,
+   or opt object storage INTO launch scope (activates the L4
+   conditional gate).
+3. Sign-off on the converged program once the peer loop goes green at
+   minimum score 9.
