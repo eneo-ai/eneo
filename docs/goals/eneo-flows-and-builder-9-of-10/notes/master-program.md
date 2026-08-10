@@ -148,9 +148,33 @@ guards; edit excellence is a later program (explicitly out of scope).
     exactly TWO full runs; the other is the release candidate).
 
 ### Launch stream (parallel; a RELEASE GATE, not a lower tier)
-- [ ] L1 Durable topology: `.devcontainer` three-role compose + tracked
-    max_connections (USER PERMISSION PENDING — protected path) +
-    clean-volume recreation proof.
+- [ ] L1 Durable topology (USER PERMISSION GRANTED 2026-08-10 for the
+    `.devcontainer` path, scoped to this work). Fine details with
+    long-term leverage, each traced to a real incident:
+    - Three first-class compose services (execute worker, maintenance
+      worker, beat) with explicit queue env, `restart: unless-stopped`
+      and native healthchecks — no manually started processes inside
+      `sleep infinity` containers (incident: dead beat + missing
+      maintenance consumer orphaned 4 runs and saturated concurrency).
+    - Beat is a singleton by construction (duplicate beat = duplicate
+      redispatch storms).
+    - Queue names get ONE source of truth shared by producer and
+      consumer config (the orphan incident was consumer-topology
+      drift).
+    - Tracked Postgres max_connections=300 in compose/conf, not a
+      volume-local ALTER SYSTEM (dies on volume recreation); prove
+      with a clean-volume rebuild.
+    - GIT_COMMIT stamped at container start so `/version` can never
+      lie (retires the manual re-stamp discipline that already bit us
+      once).
+    - Worker lifecycle for long tasks, design-gate questions: prefetch
+      multiplier 1 for the execute role (a dying worker must not
+      hoard prefetched runs); redelivery has ONE owner — the
+      flow_run_recovery_policy — never broker acks-late as a second
+      redelivery mechanism (dual-ownership disease applies to
+      infrastructure too); warm-shutdown window vs recovery redispatch
+      adjudicated so termination mid-run always leaves recoverable
+      state.
 - [ ] L2 Provider throttling: fail-fast + typed provider-throttled
     diagnosis + operator/user guidance (NO flow-level retry loop).
 - [ ] L3 Health: execution-consumer presence + beat freshness on the
@@ -225,6 +249,7 @@ exactly two points (tranche gate, release candidate); suite runs
   launches after ~00:10).
 
 ## Pending user decisions
-1. Permission to edit `.devcontainer/docker-compose.yml` (protected)
-   for the durable three-role topology (3.1).
-2. Whether bundled object storage is in launch scope (3.4).
+1. ~~Permission to edit `.devcontainer/docker-compose.yml` for the
+   durable three-role topology (L1)~~ — GRANTED 2026-08-10, scoped to
+   the topology work.
+2. Whether bundled object storage is in launch scope (L4).
