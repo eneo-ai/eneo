@@ -301,6 +301,17 @@ Release requires L1a–L1c, L2, L3, and L5 resolved (L4 only if the
 user opts object storage in) or explicitly descoped by the user.
 
 ### Standing rulings — NOT slices (adjudicated; apply when touched)
+- PRERELEASE — NO COMPATIBILITY (user directive, restated
+  2026-08-10): Flows and the Flow AI Builder have zero production
+  users. No legacy paths, no backwards-compatibility shims, no
+  deprecation cycles, no feature flags or rollout scaffolding, no
+  version-keyed branches. When a transfer lands, the old path is
+  DELETED in the same slice, not retired gradually. Bigger refactors
+  are affordable when they remove real complexity — the constraint is
+  clean ownership, not continuity. Persisted prerelease data may be
+  regenerated instead of migrated (the frozen evidence packet stays
+  readable offline for attribution, which is analysis, not a product
+  compatibility obligation).
 - `planning_state_builder.py` split (3 owners + facade) only AFTER the
   ownership tranche settles. `step_input_resolution.py` splits when
   CP5 touches it. `step_execution_runtime.py` provider seam only if
