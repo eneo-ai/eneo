@@ -1,18 +1,21 @@
 # Eneo Flows + Flow AI Builder — Master Program (living document)
 
-Status: EXECUTION PHASE — the completed plan went GREEN at 9
-(iteration 63) and the user made all three decisions (2026-08-10
-~19:38: TRAJECTORY / SPLIT branches / BALANCED question rule).
-Current position in the numbered order: step 0.8 (freeze the
-audio_transcription corpus cases), then CP8, then product slices. CP0
-measured that the previously converged program owned only ~17 of 86
-repair triggers and 3 of ~14 conformance families; v8+ assigns an
-ATTRIBUTION SLICE to every measured family (product owners are
-established by attribution, not assignment) and re-ranks by measured
-value. Under
-peer convergence (session flow-122-strategy); implementation starts only
-after the user verifies the finalized plan. The two §6 decisions in
-`cp0-matrix-freeze.md` remain the user's. This file owns execution;
+Status: EXECUTION PHASE, program **v10.2** (peer-adjudicated
+iterations 74–77, session `flow-122-strategy`; promoted 2026-08-10
+after the sole remaining finding was a one-clause self-contradiction).
+LANDED: CP0 (evidence), CP8a (instrument/product separation,
+`0228f0e1d`), L1c (`355ad6f68`), L1a (`8df804213`). All three user
+decisions stand (2026-08-10 ~19:38: TRAJECTORY / SPLIT / BALANCED).
+
+v10.2 REPLACED v9.8 after three source-verified audits — structural
+debt, a systematic dual-ownership inventory, and runtime-slice drift —
+established that the program owned the measured failure FAMILIES but
+not the structural DISEASES behind them. What changed: an adopted END
+STATE, a dual-ownership ledger with load-bearing statuses, five new
+slices, an evidence-ranked order, and a god-module doctrine under which
+no standalone split slice exists.
+
+This file owns execution and is the SOLE execution-order owner;
 `cp0-matrix-freeze.md` owns evidence and the gate inventory.
 
 ## Mission
@@ -23,7 +26,8 @@ what the user actually asked, bounded resources, provable recovery,
 clean single-owner architecture. Evidence-first: no fix without an
 attributed mechanism; no claim without receipts; the battle suite
 over the FINAL FROZEN CORPUS (3 repetitions, margin 5, rescored-case
-discipline; historically 155 cases) is the instrument.
+discipline) is the instrument. Population is always derived from the
+frozen manifest, never restated as a prose constant.
 
 ## Where we are (2026-08-10; product-code baseline `2e0a4dced` — this
 ## document evolves past it, see git log for the doc HEAD)
@@ -71,6 +75,53 @@ from semantic decisions still model-owned. Therefore:
   it never did. Any such path must be designed deliberately, not
   assumed.
 
+## THE END STATE (adjudicated iteration 74 — ADOPTED)
+
+The existing hybrid compiler, made STRICTER. The stronger form — "the
+model never proposes structure; assembly emits the whole skeleton" —
+was proposed and REJECTED with reason: it would replace useful semantic
+decomposition with a second pattern-driven compiler, recreating dual
+ownership one level up.
+
+- The MODEL owns: semantic work units, instructions, names, field
+  design. This is permanent, not transitional.
+- `CreateCompileContext` + `ai_builder_assembly` own: physical
+  topology, step kinds and order, wiring, runtime inputs, output modes,
+  checkpoints, fixed transformations.
+- `Pattern` stays selection metadata, never executable topology.
+- The server PREVENTS the model from proposing runtime mechanics.
+  SURFACE CLOSURE means schema omission AND parser rejection — a closed
+  surface that silently strips is not closed
+  (`ai_builder_proposal_intent.py` owned-key stripping).
+- CP3 and CP5 keep their planned shape under this end state.
+
+## Dual-ownership ledger (audit 2026-08-10; statuses are load-bearing)
+
+TRUE = two independent derivations with reachable disagreement.
+SELF_CHECK = one canonical derivation verified twice (KEEP IT).
+LAYERED = pure function of the owner. HAZARD = parallel
+implementations, no comparison guard, drift risk only. UNPROVEN =
+claimed but no reachable counterexample yet; a receipt precedes any
+code.
+
+Program completion resolves every TRUE row. This is a BOUNDED AUDIT
+ARTIFACT re-checked per slice, not a permanent grep gate.
+
+| # | Fact | Status | Owner |
+|---|---|---|---|
+| D1 | Terminal output type (create) | TRUE | CP2 (exit check covers the 2nd caller `ai_builder_scoped_plan_revision.py:151`) |
+| D2 | Proposal tool schema built at two sites | TRUE | CP3 |
+| D3 | Mixed audio+doc re-inference on create | TRUE | CP-D3 |
+| D4 | Terminal step `output_type` still emit-able | TRUE | CP3 |
+| D5 | Form-field placement A/B exclusion divergence | UNPROVEN | receipt task |
+| D6 | Commit re-derivation at persist | SELF_CHECK — keep `CommitDriftError` | CP-D6 (receipt-gated) |
+| D7 | Classifier slot vs merged slot re-ask | UNPROVEN | receipt task |
+| D8 | Runtime-metadata request re-derived | TRUE | CP3 |
+| D9 | Edit terminal type: two derivations, opposite precedence | TRUE | CP-EDIT |
+| D10 | `CreateCompileContext` built 4–5× with different args | TRUE | CP3 (materializer) |
+| D11 | `confirmed_form_field_incompatible` implemented twice | HAZARD | split-when-touched |
+| D12 | Rate-limit vocabulary | HAZARD | ruling below; binds L2 |
+
 ## Done ledger (checkmarks; update when a slice lands + gates)
 
 - [x] Deterministic death families closed (commit-drift, critic
@@ -96,8 +147,21 @@ from semantic decisions still model-owned. Therefore:
 - [x] Program convergence — GREEN at 9, iteration 38 (2026-08-10)
 - [x] User sign-off — approved 2026-08-10 (start held; launch on
       explicit go)
+- [x] CP0 matrix freeze — evidence + gate inventory (`35d3ee251`)
+- [x] Step 0.8 audio_transcription corpus freeze (`905d6f4ca`)
+- [x] L1c connection-envelope self-consistency (`355ad6f68`; gate
+      receipt `l1c-connection-envelope-20260810T185321Z`, green 8)
+- [x] L1a celery queue-name ownership via per-service role
+      (`8df804213`; gate receipt
+      `l1a-queue-name-ownership-20260810T194013Z`, green 8)
+- [x] CP8a instrument/product separation (`0228f0e1d`; gate receipt
+      `flows-builder-9-10-program-20260810T203713Z`, green 9)
+- [x] Three structural audits + v10.2 program revision (adopted end
+      state, dual-ownership ledger, god-module doctrine; iterations
+      74–77)
 
-## The Ranked Program (v9.8 — plan-completion phase, under peer convergence)
+## The Ranked Program (v10.2 — execution phase; slice bodies carry
+## their originating iteration tags)
 
 ### Gate inventory — owned by `cp0-matrix-freeze.md` §3
 CP8 will own the release contract; this section points at the inventory
@@ -265,6 +329,70 @@ any threshold.
     backwards-compat mode are deleted under the prerelease no-compat
     ruling, and a behaviour test proves an invalid path cannot be
     published. Scheduled immediately after CP8.
+- [ ] CP-D3 Mixed-audio create re-inference — DELETION, not
+    synchronization. The three mixed-audio invariants are labelled EDIT
+    guardrails (`ai_builder_critic_invariants.py:1743` region) yet
+    create runs them as fatal architecture checks
+    (`ai_builder_proposal_policy.py:219`), re-deriving input intent
+    from conversation text (`ai_builder_plan_quality_critic.py:162`)
+    despite having already materialized `CreateCompileContext`.
+    FORBIDDEN fix: passing `explicit_question_ids` to align the two
+    derivations — that synchronizes dual ownership instead of removing
+    it. Correct fix: gate all three OUT of create, retain for edit, let
+    compiler/assembly postconditions protect create topology. Tests:
+    create non-firing AND edit rejection at the public policy
+    interfaces. Any residual create need is owner-fed from the compile
+    context, never text re-inference. Closes a post-payment death path.
+- [ ] CP-ADMIT Architecture-commit admissibility — DESIGN GATE FIRST,
+    producing a per-code dependency table for every member of
+    `_NON_MODEL_REPAIRABLE_ARCHITECTURE_FAILURE_CODES`
+    (`ai_builder_create_proposal.py:66`). Only predicates decidable
+    from planning-state/server inputs BEFORE the provider call move to
+    commit or discovery time; `_architecture_hints_are_supported`
+    (`ai_builder_assembly/create.py:967`) is that predicate today and
+    is server-decidable, but runs one LLM call too late. VERIFIED
+    counter-example: the `flow_input_schema` codes run against the
+    COMPILED spec (`ai_builder_create_compiler.py:419` region) and stay
+    as compiler postconditions. Extracts ONLY the gates seam.
+    `assembly_document_report_review_mode_conflict` becomes a USER
+    QUESTION, not an error. No blanket "kills 8 of 10" claim.
+- [ ] CP-EDIT Edit-path terminal-type ownership (design gate first):
+    ONE conversation-derivation owner with ONE precedence rule — today
+    `ai_builder_proposal_policy.py:265` (latest message first) and
+    `ai_builder_plan_quality_critic.py:85` (committed slot first)
+    disagree and feed two different guards. Carries the
+    `aggregation_intent` edit-wiring fix
+    (`ai_builder_proposal_finalization.py:275` never passes it, so
+    compare-edits draw false-positive critic hits).
+- [ ] CP-D6 Commit-drift bypass — RECEIPT-GATED. One behavior test at
+    the decision+persistence exit interface reproducing architecture
+    drift WITH a selected question. VERIFIED: a `_phase_priority`
+    reorder would be INERT — `revise_architecture` is only eligible
+    when there are no ask targets, and the turn controller
+    short-circuits `ask_question` first
+    (`ai_builder_turn_controller.py:249`). If the receipt reproduces a
+    lost turn, the fix is the ELIGIBILITY rule plus the controller
+    contract; if it does not reproduce, DELETE this slice.
+    `CommitDriftError` is retained either way.
+- [ ] `json_to_text_summary` REMOVAL (user decision §6b SPLIT):
+    delete all THREE live declarations — the derivation cascade branch
+    (`ai_builder_architecture_derivation.py:186` region), pattern
+    metadata (`pattern_registry.py:210` region), and assembly's
+    supported set (`ai_builder_assembly/create.py:118` region) — make
+    the tuple reject explicitly, add the product behavior test, drop
+    the supported matrix row, AND write the matrix-state revision that
+    CP8b's row 14 reads (receipt revision must match it).
+- [ ] Critic disposition table (RECEIPT TASK, analysis lane): all 31
+    invariant IDs with classification, canonical fact owner,
+    normal-path action, destination (delete / postcondition / genuine
+    guard), PRODUCTION reachability — not merely evaluator
+    reachability — and the deletion test that dies with it. Until it
+    exists, the audit's 13 DERIVABLE / 16 GENUINE / 2 DEAD split and
+    the 731-line closure are CANDIDATES: counter-evidence already
+    found — a candidate-DEAD invariant has a direct firing behavior
+    test (`test_ai_builder_plan_quality_critic.py:1906`). Registry
+    STRUCTURE is kept; each deletion rides its owning CP with per-ID
+    evidence and updates the kind-pinning tests in the same commit.
 - [ ] CP7 Validation-trigger attribution (widened in v9 — the ONE
     definition): the validation repair triggers NOT already owned by
     CP3's form-field family (32 of 38 — `unknown_form_field_refs_open`
@@ -352,48 +480,53 @@ any threshold.
     invariants remain in the registry;
     `ai_builder_critic_invariants.py:1823`).
 
-### Execution order (v9 — the ONE canonical order; dependencies hold)
+### Execution order (v10.2 — the ONE canonical order; steps 0–0.8 of
+### the v9 order are COMPLETE; dependencies hold)
 
-0. **CP9a evidence packet** — analysis only; delivers the
-   question-policy evidence and recommendation.
-0.2 **USER DECIDES question policy** (pending-decision 7).
-0.4 **Conditional rebaseline** — only if the user chose the rubric
-   branch: the 19 cases are corrected, added to `rescored_cases`, and
-   the CP0 counts and projections recomputed offline.
-0.6 **USER DECIDES §6a conformance scope and §6b branches**, reading
-   the (possibly rebaselined) final evidence.
-0.8 **Conditional COVER corpus freeze** — if COVER was chosen, the
-   new cases are written, contract-hashed and frozen here.
-1. **CP8** — hard barrier: blocks ALL builder product work and
-   candidate measurement (including CP9b and anything added later),
-   never an enumerated slice list. CP8 derives the exact instability
-   ceilings and checkpoint size from the FINAL frozen manifest,
-   pinning the rounding rule for the 10% ceiling (floor) — the
-   execution owner does not duplicate those numbers.
-2. **CP6** — immediately after CP8: a deterministic published-flow
-   correctness defect (authoring accepts what runtime rejects)
-   outranks conformance optimization, and the suite cannot price it
-   because it does not execute flows.
-3. **CP2**, then **CP1** — attribution already complete; disjoint
-   files; together with CP3 they clear the three stable deaths.
-4. **CP2b** — parse attribution (gates CP3 and CP5 by ruling).
-5. **CP3** — then the exploratory final-frozen-corpus ×3 tranche
-   checkpoint (after
-   CP1–CP3, per the standing gate).
-6. **CP4 → CP5** — then the post-CP5 re-attribution loop (review-family
-   residuals re-attributed against the existing checkpoint pipeline —
-   classifier, producer-shape, or harness; slice-5 commit 2, rename,
-   JSON fan-in).
-7. **CP9b** — only if the user's decision 7 chose the product
-   branch.
-8. **CP7** — validation-trigger attribution and fixes; the
-   checkpoint_intent_mismatch attribution slice rides here.
-Runtime stream L1a–L5 parallel throughout (unblocked). Maintainability
-rulings bind every slice: ownership transfers delete their old path,
-tests die with their owners, no splits for their own sake.
+1. **CP8b**, then **CP8c** — instrument completion. The CP8 barrier
+   HOLDS: no builder product work and no candidate measurement until
+   both land (never an enumerated slice list). CP8b derives every
+   instability ceiling and checkpoint size from the FINAL frozen
+   manifest and pins the rounding rule; this owner never duplicates
+   those numbers.
+2. **CP6** (release-critical: authoring accepts what runtime rejects —
+   a deterministic published-flow defect the suite cannot price because
+   it does not execute flows) and the **`json_to_text_summary`
+   removal**. Disjoint files: may run as parallel worktrees, land in
+   sequence.
+3. **CP-D3** — one verified deletion; a cohort probe re-measures the
+   mixed-audio family.
+4. **CP2**, then **CP1** — evidence rank: CP2 has 6/6 deterministic
+   receipts (`cp0-matrix-freeze.md` §CP2 step 1); disjoint files. CP1
+   carries D7 only if its receipt proves the slot variant.
+5. **CP-ADMIT implementation** — only after CP2+CP1 land AND its
+   per-code dependency table exists; the table and design gate run in
+   the analysis lane during steps 3–4.
+6. **CP2b** (parse attribution; gates CP3 and CP5 by ruling), then
+   **CP3** (+D2 +D4 +D8 +D10 — the schema materializer and the
+   compile-context materializer are ONE lifecycle fix).
+7. **Tranche checkpoint** — exploratory final-frozen-manifest ×3 after
+   CP1–CP3, per the standing gate.
+8. **CP4 → CP5**, then **CP-EDIT**, **CP-D6**, **CP9b** (only if
+   decision 7 chose the product branch), **CP7**; the post-CP5
+   re-attribution loop runs alongside.
+9. Runtime lane, parallel throughout, own peer session
+   (`flows-runtime-readiness`): **L2** (rescoped — see the launch
+   stream), then **L1b → L3** (they collide on
+   `docs/deployment/docker-compose.yml`, so they sequence), then **L5**
+   as the terminal evidence slice.
+10. Post-program: **PKG**, per `docs/flows/package-layout.md`.
+
+Receipt tasks (analysis lane, any time): D5 reachability, D7
+occurrence, the critic disposition table.
+
+Maintainability rulings bind every slice: ownership transfers delete
+their old path, tests die with their owners, no splits for their own
+sake.
 
 ### Launch stream (parallel; a RELEASE GATE, not a lower tier)
-- [ ] L1a Topology verification (SPLIT + TRIMMED, iteration 34): the
+- [x] L1a Topology verification — LANDED `8df804213` (gate green 8)
+    ORIGINAL SPEC: (SPLIT + TRIMMED, iteration 34): the
     release artifact `docs/deployment/docker-compose.yml` already
     owns the three roles (execute, maintenance with
     `FLOW_CELERY_WORKER_ROLE=maintenance`, beat) with
@@ -432,7 +565,8 @@ tests die with their owners, no splits for their own sake.
     digest set for rollback. Runtime `GIT_COMMIT`
     stamping remains a DEVCONTAINER-ONLY mechanism and is deleted
     from the production plan.
-- [ ] L1c Capacity envelope (NEW, iteration 34): max_connections=300
+- [x] L1c Capacity envelope — LANDED `355ad6f68` (gate green 8)
+    ORIGINAL SPEC: (NEW, iteration 34): max_connections=300
     was a dev-incident value, not policy — the configured envelope is
     already 3 HTTP workers × 30 pool (`run.sh:39`,
     `main/config.py:271`) + 2 celery roles × 4 processes × 30
@@ -453,8 +587,25 @@ tests die with their owners, no splits for their own sake.
     Large (600) is deliberately not covered and belongs behind a
     pooler. Pool right-sizing waits for L5's measured peak checkouts.
     The slice changes no pool, no concurrency and no code path.
-- [ ] L2 Provider throttling: fail-fast + typed provider-throttled
-    diagnosis + operator/user guidance (NO flow-level retry loop).
+- [ ] L2 Provider failure typing (RESCOPED, drift audit 2026-08-10 —
+    two of the three original sub-claims were ALREADY SHIPPED and the
+    real defect is broader than throttling). Verified: fail-fast is
+    already in place (`litellm_runtime_config.py:35` forces
+    `num_retries=0`), and there is NO flow-level throttle retry to
+    remove (the only retry in the step path is a JSON-mode capability
+    fallback, `step_execution_runtime.py:501`). The ACTUAL defect: the
+    flow runtime DISCARDS the transport's typed provider failures —
+    `litellm_transport.py:184` already raises a typed
+    `provider_rate_limited`, but `executor.py:1881-1938` has no branch
+    for it, so a 429 (and `provider_unavailable` alike) collapses into
+    generic `STEP_EXECUTION_FAILED`. The slice is therefore an ADAPTER
+    from the transport's typed codes into `FlowApiErrorCode` — both
+    codes together, not throttling alone. The D12 ruling binds: the
+    canonical typed disposition stays in the model-provider domain and
+    the Builder must not gain a third vocabulary. Blast radius is the
+    largest of the runtime lane: taxonomy registry (hard-fails on a
+    missing code), en+sv messages (exact key-set equality test),
+    regenerated SDK artifacts, and the error-catalog docs contract.
 - [ ] L3 Health (SOLE healthcheck owner, iteration 35):
     execution-consumer presence + beat freshness on the existing
     operator surface, plus every deployment-native container
@@ -474,6 +625,54 @@ Release requires L1a–L1c, L2, L3, and L5 resolved (L4 only if the
 user opts object storage in) or explicitly descoped by the user.
 
 ### Standing rulings — NOT slices (adjudicated; apply when touched)
+- END STATE (above) is adopted and binding: no second skeleton
+  compiler; surface closure means OMIT AND REJECT, never omit-and-strip.
+- NON-REPAIRABLE CODES — a PROPERTY invariant, not a count. Every
+  non-model-repairable code must (a) depend only on server/external
+  state or denote a compiler defect, (b) never consume a model retry,
+  and (c) fail BEFORE provider use whenever its inputs are already
+  server-known. "The list may only shrink" is REJECTED: new genuine
+  external or user-decision failures may legitimately appear.
+- PROVIDER-ERROR VOCABULARY (D12): the canonical typed disposition
+  lives in the MODEL-PROVIDER domain; the Builder and the Flow runtime
+  each map it into their own public contracts. L2 must not create a
+  third vocabulary — the Builder already has its own
+  (`ai_builder_error_contract.py:326` region) alongside the transport's
+  (`litellm_transport.py:184` region).
+- GOD MODULES — a split must earn its diff by ONE of three
+  justifications, and NO standalone split slice exists in this program.
+  (A) DELETION-FIRST: never restructure what a slice deletes —
+  `ai_builder_critic_invariants.py` keeps its registry structure and
+  loses content via the CPs. (B) CHURN × SLICE-TRAFFIC: only the three
+  highest-churn files qualify (`ai_builder_assembly/create.py` 59
+  commits, `ai_builder_create_compiler.py` 52,
+  `planning_state_builder.py` 52), and the extraction IS the owning
+  slice's work — CP-ADMIT extracts only the gates seam; the
+  compile-context seam extraction IS the D10/CP3 materializer. (C)
+  DEPENDENCY STRUCTURE: rides PKG, deferred.
+  `planning_state_builder.py` and `ai_builder_conversation_metadata.py`
+  are RECORDED SEAMS — module names, interfaces and caller-change
+  analysis are produced at the owning slice's design gate, never
+  pre-committed here. DO NOT SPLIT: `ai_builder_repo.py` (2095 lines
+  but 15 commits — big and quiet), `ai_builder_router.py` (projection
+  seam noted only), `ai_builder_slot_classification_contract.py` (1720
+  lines, 10 commits — CP3 EXTENDS it), `ai_builder_error_contract.py`
+  and `ai_builder_framework_policy.py` (declared constant tables; size
+  is data, not complexity).
+- PACKAGE RESTRUCTURE (PKG) is DEFERRED out of the active program.
+  `docs/flows/package-layout.md` is the tracked standard and is
+  explicit that layout decisions are not mass-move plans. A cycle-free
+  import graph proves feasibility, not value, and restructuring
+  mid-migration would invalidate every frozen file:line anchor in this
+  program. Post-migration: only moves that shorten a DEMONSTRATED
+  change path, one at a time, with the root-count guard lowered in the
+  same commit. The SCC digest is the PKG design gate's first input —
+  it is NOT an active evidence requirement and supplies no evidence for
+  critic deletion or ownership transfers.
+- NO PROSE POPULATION CONSTANTS: every checkpoint population is
+  "final-frozen-manifest × N"; renderers may display the derived count.
+  The stale "155" this program carried for days is exactly what the
+  ruling prevents.
 - PRERELEASE — NO COMPATIBILITY (user directive, restated
   2026-08-10; SCOPED in iteration 37): Flows and the Flow AI Builder
   have zero production users. No legacy paths, no
@@ -531,17 +730,30 @@ analysis overlap. Lanes that can run AT THE SAME TIME:
   placement decision need no code and can be adjudicated while Lane B
   implements; CP3's delta-envelope design gate needs only CP0's
   archetype placement rows.
-- Lane D (runtime stream): L1a–L1c and L2–L5 are fully parallel with ALL builder
-  work — different files, own peer session
-  (`flows-runtime-readiness`), own worker worktrees.
-Dependencies that stay hard: CP0 → CP9a evidence → question-policy
-decision → conditional rebaseline → §6a/§6b decisions → conditional
-COVER freeze → CP8, before ANY builder product code (pre-registration
-integrity — the rebaseline precedes §6a because the rubric branch
-changes the evidence that decision reads); CP2 step 1 before
-CP2 step 2; CP4 attribution before any CP4 fix; the tranche checkpoint
-after CP1–CP3 land. One live worker per session name; the
-orchestrator judges every diff and owns all git.
+- Lane D (runtime stream): parallel with ALL builder work — different
+  files, own peer session (`flows-runtime-readiness`), own worker
+  worktrees. INTERNAL ordering corrected by the drift audit
+  (2026-08-10): L1b and L3 COLLIDE on
+  `docs/deployment/docker-compose.yml` (L1b rewrites nine `image:`
+  lines, L3 adds `healthcheck:` blocks to four interleaved services),
+  so they SEQUENCE — L1b first, it has near-zero blast radius. L5 is
+  terminal: it consumes L1b's resolved digests and L3's probes. Only
+  L2 is genuinely independent of the other three, so the true parallel
+  pair is L2 with (L1b or L3), never L1b with L3. Note four of six
+  launch slices now converge on that one untested compose file — a
+  known risk L5's launch receipt is the check for. L3 will also touch
+  `runtime/cli.py`, which L1a rewrote: same owner, no conflict, keep
+  the runtime session sequential.
+Dependencies that stay hard (v10.2 — the v9 prerequisites CP0 → CP9a
+evidence → the three user decisions → the corpus freeze are all
+COMPLETE): CP8b and CP8c before ANY builder product code or candidate
+measurement (pre-registration integrity); CP2 step 1 before CP2 step 2;
+CP2 and CP1 before CP-ADMIT implementation, and CP-ADMIT's per-code
+dependency table before its design gate closes; CP2b before CP3 and
+CP5; CP4 attribution before any CP4 fix; the tranche checkpoint after
+CP1–CP3 land; the `json_to_text_summary` removal writes the
+matrix-state revision CP8b's row 14 reads. One live worker per session
+name; the orchestrator judges every diff and owns all git.
 
 ### Measurement cadence
 Cohort probes (3 reps, named cohorts) per slice; exploratory
