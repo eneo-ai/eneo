@@ -1,10 +1,14 @@
 # Eneo Flows + Flow AI Builder — Master Program (living document)
 
-Status: CONVERGING — iterations 32 (7), 33 (8), 34 (8), 35 (8), 36 (8), 37
-(8, all max effort) returned changes_required; every finding was source-verified
-locally and absorbed through iteration 37. This file is now
-program v7; iteration 38 (max effort, min-score 9) adjudicates it. No implementation until
-convergence, then user sign-off. This file is self-contained so ANY
+Status: CONVERGED GREEN — iteration 38 (max effort) returned VERDICT
+green, GREEN_LIGHT yes, MIN_SCORE 9 on program v7 after seven
+adjudication rounds (32→38, scores 7,8,8,8,8,8,9; every finding
+source-verified locally before adoption). AWAITING USER SIGN-OFF —
+no CP1–CP5 product code before CP0 is frozen, and no implementation
+at all before the user approves. Final peer cautions: if CP0 shows a
+threshold or repetition budget is infeasible, revise scope or
+architecture — never weaken thresholds after the fact; record
+zero-production-use evidence before any destructive regeneration. This file is self-contained so ANY
 coding agent can continue the program. Sibling context:
 `conformance-program-plan.md` (the detailed slice protocol and the
 full verdict ledger, same directory).
@@ -82,10 +86,10 @@ from semantic decisions still model-owned. Therefore:
       case-gated; comparator case-local waiver; frozen baselines)
 - [x] Architecture verdict adopted (Pass 31) + shape-coverage and
       repair cross-tab evidence
-- [ ] Program convergence (iteration 32+ running, min-score 9)
+- [x] Program convergence — GREEN at 9, iteration 38 (2026-08-10)
 - [ ] User sign-off on the converged program
 
-## The Ranked Program (v7 — after iteration 37; under adjudication)
+## The Ranked Program (v7 — CONVERGED GREEN, iteration 38)
 
 ### Completion contract (attempt-level; no accepted-plan denominators)
 Every eligible create attempt lands in ONE bucket of an exhaustive
