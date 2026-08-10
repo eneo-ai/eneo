@@ -1,7 +1,10 @@
 # Eneo Flows + Flow AI Builder — Master Program (living document)
 
-Status: PLAN COMPLETION PHASE (v9.8) — user directive 2026-08-10 18:23:
-finalize and verify the COMPLETE plan before any implementation. CP0
+Status: EXECUTION PHASE — the completed plan went GREEN at 9
+(iteration 63) and the user made all three decisions (2026-08-10
+~19:38: TRAJECTORY / SPLIT branches / BALANCED question rule).
+Current position in the numbered order: step 0.8 (freeze the
+audio_transcription corpus cases), then CP8, then product slices. CP0
 measured that the previously converged program owned only ~17 of 86
 repair triggers and 3 of ~14 conformance families; v8+ assigns an
 ATTRIBUTION SLICE to every measured family (product owners are
@@ -611,24 +614,26 @@ apart (provider limits).
    launch; L4 stays dormant until the user opts in later.
 3. ~~Sign-off~~ — APPROVED 2026-08-10, start held: execution begins
    only on the user's explicit go.
-4. BLOCKING (CP0 §6a) — conformance scope: is ≥90% expectation
-   conformance a release gate or a tracked trajectory? It is 36.6%
-   today. An optimistic current-ledger projection crosses 90% only
-   after ~14 attributed check families. Every family now has an
-   ASSIGNED ATTRIBUTION SLICE (CP9a, CP7, CP3, CP5), but for several
-   the underlying product owner is UNKNOWN until attribution runs —
-   assignment is not attribution. Real scope is larger because fixes
-   make currently unevaluable checks apply. The registry marks this
-   metric PENDING until answered; decided at step 0.6, after the
-   CONDITIONAL step-0.4 rebaseline when the rubric branch is chosen.
-7. BLOCKING (NEW, from CP9a) — question policy: should the builder
-   ask about optional runtime metadata on open prompts (current,
-   deliberate, tested behaviour that 19 battle contracts contradict)
-   or assume no metadata with a visible, overridable assumption?
-   CP9a delivers the evidence packet and recommendation.
-5. BLOCKING (CP0 §6b) — the two unmeasured supported branches
-   (`json_to_text_summary`, `audio_transcription`): cover them with
-   cases, or remove them from the supported matrix and make them
-   reject. With no create fallback, they would otherwise ship untested.
+4. ~~§6a conformance scope~~ — DECIDED 2026-08-10 19:35: TRAJECTORY.
+   Release rests on the reachable registry rows; conformance is the
+   north star with the FROZEN completion condition (registry row 5
+   PASS by CP8's arithmetic + ≤10% conformance-unstable cases); the
+   9/10 claim is withheld until then and the program continues after
+   release. No rebaseline was needed (see decision 7 — the product
+   branch was chosen, so the 19 contracts stay frozen).
+5. ~~§6b unmeasured branches~~ — DECIDED 2026-08-10 19:38: SPLIT.
+   `audio_transcription` is COVERED (2–3 battle cases written,
+   contract-hashed and frozen at step 0.8 before CP8);
+   `json_to_text_summary` is REMOVED — the cascade branch is deleted
+   and that tuple rejects explicitly (builder product code, rides
+   behind CP8), and its matrix row is dropped from the supported set.
+7. ~~Question policy~~ — DECIDED 2026-08-10 19:38: the BALANCED RULE.
+   Ask what shapes the flow (architectural slots, docx mode when the
+   terminal is docx); assume visibly what is optional — the
+   runtime-metadata question disappears on open prompts in favour of
+   a visible, overridable assumption, and stays available when the
+   prompt mentions metadata. CP9b implements with its frozen
+   acceptance criteria; the 19 battle contracts stay frozen (product
+   branch), so NO rescoring and NO rebaseline.
 6. OPTIONAL (CP0 §6c) — corpus expansion: precision only; blocks
    nothing.
