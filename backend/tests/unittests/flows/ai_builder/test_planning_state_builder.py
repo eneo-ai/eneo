@@ -53,6 +53,7 @@ from eneo.flows.ai_builder.ai_builder_slot_classification_contract import (
     ClassifiedFileRole,
     ClassifiedFormIntake,
     ClassifiedNamedResultDelta,
+    ClassifiedNamedResultEvidence,
     ClassifiedSlot,
     SlotClassificationAttempt,
     SlotClassificationConfidence,
@@ -2536,6 +2537,9 @@ class TestModelSlotMerge:
             source="structured_answer",
         )
 
+        initial_evidence = _model_evidence(
+            "JSON-resultatet ska innehålla case_id och status."
+        )
         merge_llm_resolved_slots(
             state,
             SlotClassificationResult(
@@ -2544,8 +2548,13 @@ class TestModelSlotMerge:
                     names=("case_id", "status"),
                     confidence="high",
                     reason="The user explicitly named the JSON result fields.",
-                    evidence=_model_evidence(
-                        "JSON-resultatet ska innehålla case_id och status."
+                    evidence=initial_evidence,
+                    evidence_by_name=tuple(
+                        ClassifiedNamedResultEvidence(
+                            name=name,
+                            evidence=initial_evidence,
+                        )
+                        for name in ("case_id", "status")
                     ),
                 )
             ),
@@ -2632,6 +2641,7 @@ class TestModelSlotMerge:
             output_evidence=declared,
             example_inference=None,
         )
+        priority_evidence = _model_evidence("Lägg även till priority.")
         merge_llm_resolved_slots(
             replayed,
             SlotClassificationResult(
@@ -2640,7 +2650,13 @@ class TestModelSlotMerge:
                     names=("priority",),
                     confidence="high",
                     reason="The user named another field.",
-                    evidence=_model_evidence("Lägg även till priority."),
+                    evidence=priority_evidence,
+                    evidence_by_name=(
+                        ClassifiedNamedResultEvidence(
+                            name="priority",
+                            evidence=priority_evidence,
+                        ),
+                    ),
                 )
             ),
             prompt_hash="c" * 64,
@@ -2726,6 +2742,7 @@ class TestModelSlotMerge:
             for index in range(NAMED_RESULT_EVIDENCE_MAX_ITEMS)
         ]
 
+        overflow_evidence = _model_evidence("Add overflow.")
         with pytest.raises(AIBuilderBadRequestException) as exc_info:
             merge_llm_resolved_slots(
                 state,
@@ -2735,11 +2752,17 @@ class TestModelSlotMerge:
                         names=("overflow",),
                         confidence="high",
                         reason="The user added a field.",
-                        evidence=_model_evidence("Add status."),
+                        evidence=overflow_evidence,
+                        evidence_by_name=(
+                            ClassifiedNamedResultEvidence(
+                                name="overflow",
+                                evidence=overflow_evidence,
+                            ),
+                        ),
                     )
                 ),
                 prompt_hash="a" * 64,
-                freeform_text="Add status.",
+                freeform_text="Add overflow.",
             )
 
         assert exc_info.value.code is AIBuilderErrorCode.SCHEMA_LIMIT_EXCEEDED
@@ -2867,6 +2890,21 @@ class TestModelSlotMerge:
             prompt_hash="f" * 64,
             freeform_text=replacement_name,
         )
+        replacement = next(
+            item
+            for item in state.named_result_evidence
+            if item.name == replacement_name
+        )
+        replacement_reference = ClassifiedEvidence(
+            source_id=churn_sources[0].source_id,
+            quote=churn_sources[0].text,
+        ).planning_reference()
+        removal_reference = ClassifiedEvidence(
+            source_id=churn_sources[1].source_id,
+            quote=churn_sources[1].text,
+        ).planning_reference()
+        assert replacement.evidence == [replacement_reference]
+        assert removal_reference not in replacement.evidence
         churn_snapshot = discovery_runtime._materialized_named_result_snapshot(
             state,
             classified_evidence=churn_evidence,
@@ -2874,6 +2912,11 @@ class TestModelSlotMerge:
         )
         assert churn_snapshot is not None
         assert len(churn_snapshot.evidence) == NAMED_RESULT_PROVENANCE_MAX_ITEMS
+        snapshot_references = {
+            item.to_classified_evidence().planning_reference()
+            for item in churn_snapshot.evidence
+        }
+        assert removal_reference in snapshot_references
         assert all(
             item.to_classified_evidence().planning_reference() not in removed_references
             for item in churn_snapshot.evidence
@@ -2953,6 +2996,7 @@ class TestModelSlotMerge:
             example_inference=None,
         )
 
+        named_evidence = _model_evidence("case_id och status")
         merge_llm_resolved_slots(
             state,
             SlotClassificationResult(
@@ -2961,7 +3005,14 @@ class TestModelSlotMerge:
                     names=("case_id", "status"),
                     confidence="high",
                     reason="The user also mentioned field names in prose.",
-                    evidence=_model_evidence("case_id och status"),
+                    evidence=named_evidence,
+                    evidence_by_name=tuple(
+                        ClassifiedNamedResultEvidence(
+                            name=name,
+                            evidence=named_evidence,
+                        )
+                        for name in ("case_id", "status")
+                    ),
                 )
             ),
             prompt_hash="b" * 64,

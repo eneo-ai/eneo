@@ -791,15 +791,18 @@ def _merge_model_named_result_evidence(
         if fold_result_field_name(item.name) not in removed
     ]
     existing = {fold_result_field_name(item.name) for item in retained}
-    provenance = [
-        item.planning_reference()
-        for item in classified_evidence.evidence[:NAMED_RESULT_EVIDENCE_MAX_CITATIONS]
-    ]
+    provenance_by_name = {
+        fold_result_field_name(item.name): [
+            evidence.planning_reference()
+            for evidence in item.evidence[:NAMED_RESULT_EVIDENCE_MAX_CITATIONS]
+        ]
+        for item in classified_evidence.evidence_by_name
+    }
     additions = [
         NamedResultEvidence(
             name=name,
             confidence=classified_evidence.confidence,
-            evidence=provenance,
+            evidence=provenance_by_name[fold_result_field_name(name)],
         )
         for name in classified_evidence.names
         if fold_result_field_name(name) not in existing

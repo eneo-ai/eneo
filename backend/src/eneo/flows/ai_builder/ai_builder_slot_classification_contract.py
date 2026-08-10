@@ -180,6 +180,12 @@ class ClassifiedCheckpointUpdate:
 
 
 @dataclass(frozen=True, slots=True)
+class ClassifiedNamedResultEvidence:
+    name: str
+    evidence: tuple[ClassifiedEvidence, ...]
+
+
+@dataclass(frozen=True, slots=True)
 class ClassifiedNamedResultDelta:
     operation: Literal["update", "clear"]
     names: tuple[str, ...]
@@ -187,6 +193,7 @@ class ClassifiedNamedResultDelta:
     reason: str
     removed_names: tuple[str, ...] = ()
     evidence: tuple[ClassifiedEvidence, ...] = ()
+    evidence_by_name: tuple[ClassifiedNamedResultEvidence, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -500,18 +507,20 @@ def _parse_named_result_evidence(
     )
     if not user_owned_evidence:
         return None
-    names = _parse_cited_named_result_names(
+    evidence_by_name = _parse_cited_named_result_evidence(
         raw_name_items,
         evidence=user_owned_evidence,
         source_texts=source_texts,
     )
-    removed_names = _parse_cited_named_result_names(
+    removed_evidence_by_name = _parse_cited_named_result_evidence(
         raw_removed_name_items,
         evidence=user_owned_evidence,
         source_texts=source_texts,
     )
-    if names is None or removed_names is None:
+    if evidence_by_name is None or removed_evidence_by_name is None:
         return None
+    names = tuple(item.name for item in evidence_by_name)
+    removed_names = tuple(item.name for item in removed_evidence_by_name)
     folded_names = [fold_result_field_name(name) for name in (*names, *removed_names)]
     if (
         any(not name for name in folded_names)
@@ -531,6 +540,7 @@ def _parse_named_result_evidence(
         ),
         removed_names=removed_names,
         evidence=user_owned_evidence,
+        evidence_by_name=(*evidence_by_name, *removed_evidence_by_name),
     )
 
 
@@ -605,50 +615,62 @@ def _parse_checkpoint_updates(
     return tuple(updates)
 
 
-def _parse_cited_named_result_names(
+def _parse_cited_named_result_evidence(
     raw_names: list[object],
     *,
     evidence: tuple[ClassifiedEvidence, ...],
     source_texts: Mapping[str, str],
-) -> tuple[str, ...] | None:
-    names: list[str] = []
+) -> tuple[ClassifiedNamedResultEvidence, ...] | None:
+    evidence_by_name: list[ClassifiedNamedResultEvidence] = []
     for raw_name in raw_names:
         if not isinstance(raw_name, str) or not raw_name:
             return None
-        name = _cited_named_result_name(
+        named_evidence = _cited_named_result_evidence(
             raw_name,
             evidence=evidence,
             source_texts=source_texts,
         )
-        if name is None or name in names:
+        if named_evidence is None or any(
+            item.name == named_evidence.name for item in evidence_by_name
+        ):
             return None
-        names.append(name)
-    return tuple(names)
+        evidence_by_name.append(named_evidence)
+    return tuple(evidence_by_name)
 
 
-def _cited_named_result_name(
+def _cited_named_result_evidence(
     raw_name: str,
     *,
     evidence: tuple[ClassifiedEvidence, ...],
     source_texts: Mapping[str, str],
-) -> str | None:
-    occurrence_kinds = {
-        kind
-        for cited in evidence
-        for kind in _cited_field_occurrence_kinds(
+) -> ClassifiedNamedResultEvidence | None:
+    cited_occurrences: list[
+        tuple[ClassifiedEvidence, frozenset[Literal["quoted", "unquoted"]]]
+    ] = []
+    for cited in evidence:
+        occurrence_kinds = _cited_field_occurrence_kinds(
             source_text=source_texts[cited.source_id],
             quote=cited.quote,
             field_name=raw_name,
         )
-    }
+        if occurrence_kinds:
+            cited_occurrences.append((cited, occurrence_kinds))
+    occurrence_kinds = {kind for _, kinds in cited_occurrences for kind in kinds}
     if occurrence_kinds == {"quoted"}:
-        return raw_name
-    if occurrence_kinds != {"unquoted"}:
+        name = raw_name
+    elif occurrence_kinds == {"unquoted"}:
+        phrase = raw_name
+        while phrase.endswith(("[]", "{}")):
+            phrase = phrase[:-2]
+        name = _normalize_unquoted_named_result_name(phrase)
+    else:
         return None
-    phrase = raw_name
-    while phrase.endswith(("[]", "{}")):
-        phrase = phrase[:-2]
-    return _normalize_unquoted_named_result_name(phrase)
+    if name is None:
+        return None
+    return ClassifiedNamedResultEvidence(
+        name=name,
+        evidence=tuple(cited for cited, _ in cited_occurrences),
+    )
 
 
 def _normalize_unquoted_named_result_name(phrase: str) -> str | None:
