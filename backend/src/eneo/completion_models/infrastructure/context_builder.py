@@ -21,6 +21,7 @@ from eneo.completion_models.infrastructure.message_payload import (
 from eneo.completion_models.infrastructure.static_prompts import (
     HALLUCINATION_GUARD,
     SHOW_REFERENCES_PROMPT,
+    TOOL_NAMING_INSTRUCTION,
     TRANSCRIPTION_PROMPT,
 )
 from eneo.files.file_models import File, FileType
@@ -198,7 +199,7 @@ class ChunkGrouping:
 
 
 class _Prompt:
-    def __init__(self, version: int = 1, model_name: str = ""):
+    def __init__(self, version: int = 1, model_name: str = "", has_tools: bool = False):
         super().__init__()
         self.prompt: str | None = None
         self.knowledge: str | None = None
@@ -208,6 +209,7 @@ class _Prompt:
         self._knowledge_tokens: int = 0
         self.version: int = version
         self.model_name: str = model_name
+        self.has_tools: bool = has_tools
 
     @override
     def __str__(self):
@@ -215,6 +217,12 @@ class _Prompt:
 
         if self.prompt:
             components.append(self.prompt)
+
+        # Tools are advertised on this request, so teach the model how to name
+        # them before it composes an answer. Grouped with the other instructions
+        # ahead of the data blocks below.
+        if self.has_tools:
+            components.append(TOOL_NAMING_INSTRUCTION)
 
         # Add references prompt if either knowledge or web search results exist
         # but only for version 2
@@ -662,7 +670,9 @@ class ContextBuilder:
 
         # Create the necessary parts of the prompt.
         # Add the tokens used.
-        _prompt = _Prompt(version=version, model_name=model_name)
+        _prompt = _Prompt(
+            version=version, model_name=model_name, has_tools=bool(tool_dicts)
+        )
         _prompt.add_prompt(
             prompt=prompt,
             transcription=bool(transcription_inputs),
