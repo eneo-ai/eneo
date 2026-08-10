@@ -325,6 +325,33 @@ kulturbidrag deterministic 3/3 — design gate pending) and
 `template_placeholder_unresolved` (2 cases). Receipts:
 `/workspace/.codex/artifacts/checkpoint-eda4865-155x3/`.
 
+**Slice 1 + Slice 2 executed (2026-08-10 morning).** Frozen packet:
+`/workspace/.codex/artifacts/slice2-evidence-manifest-20260810/`
+(934 hashed receipt files from `checkpoint-eda4865-155x3` + the pilot,
+924 `builder_sessions` planning-state snapshots, evaluator identities).
+Attribution over 2143 (case, repetition, leaf-group) rows — 659
+unsatisfied rows classified by evidence presence per stage and the
+decision rule (extractor + classifier scripts beside the artifact;
+contract matching is exact leaf-name, prose matching is normalized
+substring):
+
+| classification | rows | cases | owner |
+|---|---|---|---|
+| rubric_defect (rule 3, author-inferred) | 284 | 44 | cases JSON (Slice 3) |
+| slice5_candidate (user-named, non-JSON, never typed) | 216 | 34 | Slice 5 seam decision |
+| product_defect: json_schema_loss (user-named, JSON terminal) | 104 | 16 | planning/schema evidence |
+| product_defect: terminal_contract_drop (typed upstream, dropped at terminal) | 30 | 10 | proposal/assembly terminal schema |
+| product_defect: planning_to_proposal_loss | 16 | 7 | proposal guidance/compiler |
+| undetermined | 9 | 7 | — |
+
+The author-inferred verdict is verified at three levels: aliases absent
+from the case prompt, absent from every user-role message in all 465+
+conversations (0/284 rows), and never confirmed. Two cases whose
+aliases appear in case metadata move to undetermined. The largest
+determined cluster names one owner (the cases JSON), satisfying the
+slice's done-condition; Slice 3 execution and the Slice 5 seam protocol
+are gated on the next peer pass.
+
 **Instability posture (Pass 6):** the pilot's 68/155 joint-state
 instability is a diagnostic, not a stabilization target — 23/155 (~15%)
 flip pass↔fail; much of the rest alternates first-pass vs repaired. No
