@@ -18,8 +18,12 @@ services:
       - OBJECT_CONTENT_ACCESS_KEY_ID
       - OBJECT_CONTENT_SECRET_ACCESS_KEY
       - OBJECT_CONTENT_DEPLOYMENT_ID
-      - OBJECT_CONTENT_ALLOW_INSECURE_HTTP
-      - OBJECT_CONTENT_ADMIN_ALLOWED_ENDPOINT_ORIGINS
+      # Guardrail defaults for the bundled `object-content` profile below. They
+      # are inert while that profile is off, because nothing resolves the
+      # allowlisted host. Development only; production keeps the secure
+      # defaults (plain HTTP refused, empty allowlist).
+      - OBJECT_CONTENT_ALLOW_INSECURE_HTTP=${OBJECT_CONTENT_ALLOW_INSECURE_HTTP:-true}
+      - 'OBJECT_CONTENT_ADMIN_ALLOWED_ENDPOINT_ORIGINS=${OBJECT_CONTENT_ADMIN_ALLOWED_ENDPOINT_ORIGINS:-["http://object-content:8333"]}'
     volumes:
       - ../:/workspace
       # Isolate .venv from host to prevent host-side uv/python from corrupting it
