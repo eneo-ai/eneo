@@ -512,23 +512,37 @@ shape alone cannot prove that. Today 5 of 122 cases apply and 1 executes.
 
 ## Slice 5 — Typed cross-step content obligations for non-JSON terminals
 
-**Owner:** `PlanningState` evidence + the `ai_builder_result_contract`
-projection into `CreateCompileContext`. This is the product fix. Proceed
-only if Slice 2 shows the non-JSON gap is material.
+**Ownership (v2 ladder, adjudicated Passes 21–24; supersedes the
+original ResultContract wording):** conversation classifier metadata is
+the durable authority; `PlanningState` is the rebuilt typed view; the
+distinct computed `named_result_obligations` projection feeds the
+proposal prompt and critic name preservation directly. `ResultContract`
+stays policy-owned and gains nothing here — routing named obligations
+through it or `CreateCompileContext` would recreate a duplicate
+projection. Proceed only if Slice 2 shows the non-JSON gap is material
+(it did: 14 stable non-JSON cases).
 
-**Shape — replace, do not supplement.** Replace the fake prose-field
+**Status:** commit 1 landed as `e25b0f9a8` — the representation
+replacement (NamedResultEvidence; non-JSON clear deleted; classifier
+emits for all terminals; builder schema 17 / classifier 20). Commit 2
+(pending, own design+commit gates): non-JSON assembly completion for
+the seam-eligible cohort only (10 observations / 5 cases,
+`slice5_seam_table_v2.jsonl`), via one private whole-consumer admission
+predicate in assembly under the Pass 22 four-condition rule.
+
+**Shape — replace, do not supplement.** Replaced the fake prose-field
 *schema* representation with one neutral, bounded, cited **named-result
 evidence** value inside `planning_state.py`. It carries identity and
-provenance, not schema shape. Because the product is prerelease, delete the
-obsolete path rather than adding compatibility reads. Do not create a
-module.
+provenance, not schema shape. Prerelease: obsolete paths deleted, no
+compatibility reads, no new module.
 
-`ResultContract` remains the sole computed projection:
-- terminal JSON → derive the open field-name contract;
-- non-JSON → expose content obligations only where a value must cross an
-  existing typed seam;
-- declared schemas remain the sole owner of type, nesting, validation, and
-  requiredness;
+Boundaries that stand:
+- terminal JSON → named obligations drive prompt/critic name
+  preservation only, never a manufactured terminal schema;
+- non-JSON → obligations materialize only across an existing typed seam
+  (commit 2), else evidence is retained without materializing;
+- declared schemas remain the sole owner of type, nesting, validation,
+  and requiredness;
 - template placeholders keep their existing owner.
 
 **Required invariant (state it in code and test it):**

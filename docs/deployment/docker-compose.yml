@@ -29,7 +29,9 @@
 #   proxy_tier (external) - Traefik, frontend, backend, worker. Internet-facing
 #                           traffic and outbound access (LLM APIs, OIDC, crawls).
 #   data_net   (internal) - PostgreSQL and Redis. No internet egress, and only
-#                           backend, worker and db-init can reach them. Frontend,
+#                           backend, worker, db-init, and the Flow Celery
+#                           services (execution worker, maintenance worker,
+#                           beat scheduler) can reach them. Frontend,
 #                           Traefik and future module containers cannot.
 #   module_net (internal) - Traefik and backend. Reserved for optional module
 #                           containers. Modules get no internet egress; all
