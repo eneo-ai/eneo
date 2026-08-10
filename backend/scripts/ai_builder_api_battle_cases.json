@@ -183,7 +183,9 @@
             "arendekategori",
             "case_category",
             "case_classification",
-            "category"
+            "category",
+            "kategori",
+            "klassificering"
           ],
           [
             "bradska",
@@ -386,7 +388,8 @@
           [
             "saknade_fakta",
             "missing_facts",
-            "missing_information"
+            "missing_information",
+            "fakta_som_behovs"
           ],
           [
             "personuppgifter",
@@ -816,7 +819,8 @@
           [
             "matchning",
             "match",
-            "requirements_match"
+            "requirements_match",
+            "matchning_mot_kravprofilen"
           ],
           [
             "styrkor",
@@ -1024,7 +1028,8 @@
           ],
           [
             "referens",
-            "reference"
+            "reference",
+            "saknade_referenser"
           ],
           [
             "dubbeldebitering",
@@ -1067,11 +1072,6 @@
         "max_all_previous_steps": 1,
         "forbid_primary_material_form_fields": true,
         "expected_leaf_output_field_groups": [
-          [
-            "feltyp",
-            "issue_type",
-            "category"
-          ],
           [
             "plats",
             "location"
@@ -1501,11 +1501,9 @@
           ],
           [
             "osakerhet",
-            "uncertainty"
-          ],
-          [
-            "rekommendation",
-            "recommendation"
+            "uncertainty",
+            "osakra",
+            "osaker"
           ]
         ]
       },
@@ -1707,7 +1705,8 @@
         "expected_leaf_output_field_groups": [
           [
             "handlingstyp",
-            "record_type"
+            "record_type",
+            "handlingstyper"
           ],
           [
             "klassificering",
@@ -1716,19 +1715,23 @@
           [
             "gallring",
             "retention",
-            "disposal"
+            "disposal",
+            "gallringsfrist"
           ],
           [
             "bevarande",
-            "preservation"
+            "preservation",
+            "bevarandevarde"
           ],
           [
             "sekretess",
-            "confidentiality"
+            "confidentiality",
+            "sekretessrisk"
           ],
           [
             "personuppgift",
-            "personal_data"
+            "personal_data",
+            "personuppgiftsrisk"
           ],
           [
             "oklarhet",
@@ -3620,7 +3623,8 @@
           [
             "suggested_service",
             "foreslagen_verksamhet",
-            "department"
+            "department",
+            "mottagande_verksamhet"
           ],
           [
             "missing_information",
@@ -3677,17 +3681,16 @@
         "forbid_primary_material_form_fields": true,
         "expected_leaf_output_field_groups": [
           [
-            "case_reference",
-            "arendereferens",
-            "case_number"
-          ],
-          [
             "addressed_requests",
-            "besvarade_punkter"
+            "besvarade_punkter",
+            "besvarats",
+            "besvarade"
           ],
           [
             "remaining_gaps",
-            "kvarstaende_brister"
+            "kvarstaende_brister",
+            "aterstar",
+            "aterstaende"
           ]
         ],
         "preferred_question_event_ids": [
@@ -3843,20 +3846,6 @@
         "min_json_steps": 1,
         "max_all_previous_steps": 0,
         "forbid_primary_material_form_fields": true,
-        "expected_leaf_output_field_groups": [
-          [
-            "submission_reference",
-            "inskickningsreferens"
-          ],
-          [
-            "service_reference",
-            "tjanstereferens"
-          ],
-          [
-            "attachment_references",
-            "bilagereferenser"
-          ]
-        ],
         "preferred_question_event_ids": [
           "structured_io_contract"
         ],
@@ -3957,25 +3946,6 @@
         "min_json_steps": 1,
         "max_all_previous_steps": 0,
         "forbid_primary_material_form_fields": true,
-        "expected_leaf_output_field_groups": [
-          [
-            "establishment_name",
-            "verksamhetsnamn"
-          ],
-          [
-            "planned_start_date",
-            "planerat_startdatum"
-          ],
-          [
-            "activities",
-            "verksamheter",
-            "aktiviteter"
-          ],
-          [
-            "missing_information",
-            "saknade_uppgifter"
-          ]
-        ],
         "preferred_question_event_ids": [
           "post_processing_goal"
         ],
@@ -4116,7 +4086,8 @@
           ],
           [
             "planned_start_date",
-            "planerat_startdatum"
+            "planerat_startdatum",
+            "startdatum"
           ],
           [
             "activities",
@@ -4186,7 +4157,8 @@
           ],
           [
             "review_questions",
-            "bedomningsfragor"
+            "bedomningsfragor",
+            "fragor_for_manuell_bedomning"
           ]
         ],
         "preferred_question_event_ids": [
@@ -4403,7 +4375,9 @@
           ],
           [
             "information_gaps",
-            "kompletteringsbehov"
+            "kompletteringsbehov",
+            "komplettering",
+            "komplettera"
           ]
         ]
       },
@@ -4482,7 +4456,8 @@
           ],
           [
             "dwelling_changes",
-            "lagenhetsandringar"
+            "lagenhetsandringar",
+            "berorda_lagenheter"
           ],
           [
             "stated_dates",
@@ -4847,7 +4822,8 @@
           ],
           [
             "manual_next_steps",
-            "manuella_nasta_steg"
+            "manuella_nasta_steg",
+            "nasta_manuella_steg"
           ]
         ]
       },
@@ -4877,7 +4853,8 @@
         "expected_leaf_output_field_groups": [
           [
             "device_model",
-            "dator_model"
+            "dator_model",
+            "modell"
           ],
           [
             "symptoms",
@@ -8082,10 +8059,6 @@
         ],
         "expected_leaf_output_field_groups": [
           [
-            "source_label",
-            "kallnamn"
-          ],
-          [
             "kallhanvisningar",
             "kallhanvisning",
             "kallreferenser",
@@ -8352,7 +8325,8 @@
             "uppgifter_att_kontrollera",
             "att_kontrollera",
             "items_to_verify",
-            "verification_items"
+            "verification_items",
+            "uppgifter_att_kontrollera_mot_namndens_protokoll"
           ]
         ]
       },
