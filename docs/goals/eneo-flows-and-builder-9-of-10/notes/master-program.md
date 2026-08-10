@@ -3,9 +3,10 @@
 Status: CONVERGED GREEN — iteration 38 (max effort) returned VERDICT
 green, GREEN_LIGHT yes, MIN_SCORE 9 on program v7 after seven
 adjudication rounds (32→38, scores 7,8,8,8,8,8,9; every finding
-source-verified locally before adoption). AWAITING USER SIGN-OFF —
-no CP1–CP5 product code before CP0 is frozen, and no implementation
-at all before the user approves. Final peer cautions: if CP0 shows a
+source-verified locally before adoption). USER SIGN-OFF: APPROVED
+2026-08-10 with the START HELD — the user launches execution
+explicitly; until then, prepare specs only. No CP1–CP5 product code
+before CP0 is frozen. Final peer cautions: if CP0 shows a
 threshold or repetition budget is infeasible, revise scope or
 architecture — never weaken thresholds after the fact; record
 zero-production-use evidence before any destructive regeneration. This file is self-contained so ANY
@@ -87,7 +88,8 @@ from semantic decisions still model-owned. Therefore:
 - [x] Architecture verdict adopted (Pass 31) + shape-coverage and
       repair cross-tab evidence
 - [x] Program convergence — GREEN at 9, iteration 38 (2026-08-10)
-- [ ] User sign-off on the converged program
+- [x] User sign-off — approved 2026-08-10 (start held; launch on
+      explicit go)
 
 ## The Ranked Program (v7 — CONVERGED GREEN, iteration 38)
 
@@ -452,9 +454,7 @@ apart (provider limits).
    durable three-role topology (L1)~~ — GRANTED 2026-08-10, scoped to
    the topology work (now dev-parity only; release proof targets the
    deployment compose).
-2. Object storage: the program defaults the base launch to
-   PostgreSQL-only (matches the tracked deployment default). Confirm,
-   or opt object storage INTO launch scope (activates the L4
-   conditional gate).
-3. Sign-off on the converged program once the peer loop goes green at
-   minimum score 9.
+2. ~~Object storage~~ — DECIDED 2026-08-10: PostgreSQL-only base
+   launch; L4 stays dormant until the user opts in later.
+3. ~~Sign-off~~ — APPROVED 2026-08-10, start held: execution begins
+   only on the user's explicit go.
