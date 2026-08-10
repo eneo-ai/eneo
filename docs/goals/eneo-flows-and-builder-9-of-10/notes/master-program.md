@@ -275,17 +275,43 @@ Release requires L1–L5 resolved or explicitly descoped by the user.
 - Edit guards and compiler postconditions stay until their owner makes
   them unreachable; each CP names its deletions in advance.
 - Tests are proportional to observable risk (user directive
-  2026-08-10): when a slice deletes an invariant, repair path, or
-  behavior, the tests guarding it are part of that slice's deletion
-  list and die in the same commit. New tests pin an attributed
-  mechanism or contract — never one-per-code-path, never a sibling of
-  an existing guard. Test cleanup rides each slice; no standalone
-  test-audit slice.
+  2026-08-10): test CORE functionality, not everything reachable.
+  When a slice deletes an invariant, repair path, or behavior, the
+  tests guarding it are part of that slice's deletion list and die in
+  the same commit. New tests pin an attributed mechanism or contract
+  — never one-per-code-path, never a sibling of an existing guard.
+  The tests themselves stay simple: plain arrange-act-assert on the
+  real contract; no elaborate fixture machinery, mock towers, or
+  parametrization mazes where a direct case is clearer. Test cleanup
+  rides each slice; no standalone test-audit slice.
+
+### Parallelization map (what runs concurrently; worker worktrees)
+Commit gates stay sequential per stream, but implementation and
+analysis overlap. Lanes that can run AT THE SAME TIME:
+- Lane A (analysis, no product code): CP0 matrix freeze + CP2 step 1
+  attribution table + CP4 diagnosis — all offline over the frozen
+  packet; three independent workers or scripts, anytime.
+- Lane B (builder code): CP1 (owner: `planning_state_builder.py`
+  merge guard) and CP2 step 2 (owners: create proposal/preparation)
+  touch DISJOINT files — separate worker worktrees in parallel once
+  their design gates pass; land in sequence.
+- Lane C (early design gates): CP5's provider strict-tool probe and
+  placement decision need no code and can be adjudicated while Lane B
+  implements; CP3's delta-envelope design gate needs only CP0's
+  archetype placement rows.
+- Lane D (runtime stream): L1–L5 are fully parallel with ALL builder
+  work — different files, own peer session
+  (`flows-runtime-readiness`), own worker worktrees.
+Dependencies that stay hard: CP0 before CP3 implementation (placement
+rows) and before the completion-contract verdicts; CP2 step 1 before
+CP2 step 2; CP4 attribution before any CP4 fix; the tranche 155×3
+after CP1–CP3 land. One live worker per session name; the
+orchestrator judges every diff and owns all git.
 
 ### Measurement cadence
 Cohort probes (3 reps, named cohorts) per slice; full 155×3 at
-exactly two points (tranche gate, release candidate); suite runs
-≥45 min apart (provider limits).
+exactly two points (tranche gate, powered release candidate); suite
+runs ≥45 min apart (provider limits).
 
 ## Operating protocol (for any agent continuing this)
 
