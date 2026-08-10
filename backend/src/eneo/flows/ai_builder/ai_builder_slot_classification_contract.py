@@ -195,6 +195,28 @@ class ClassifiedNamedResultDelta:
     evidence: tuple[ClassifiedEvidence, ...] = ()
     evidence_by_name: tuple[ClassifiedNamedResultEvidence, ...] = ()
 
+    def __post_init__(self) -> None:
+        changed_names = tuple(
+            fold_result_field_name(name) for name in (*self.names, *self.removed_names)
+        )
+        mapped_names = tuple(
+            fold_result_field_name(item.name) for item in self.evidence_by_name
+        )
+        if (
+            any(not name for name in (*changed_names, *mapped_names))
+            or len(changed_names) != len(set(changed_names))
+            or len(mapped_names) != len(set(mapped_names))
+            or set(mapped_names) != set(changed_names)
+        ):
+            raise ValueError("evidence_by_name must exactly cover named-result changes")
+        allowed_evidence = set(self.evidence)
+        if any(
+            not item.evidence
+            or any(citation not in allowed_evidence for citation in item.evidence)
+            for item in self.evidence_by_name
+        ):
+            raise ValueError("evidence_by_name citations must belong to delta evidence")
+
 
 @dataclass(frozen=True, slots=True)
 class SlotClassificationResult:

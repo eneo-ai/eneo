@@ -74,6 +74,7 @@ from eneo.flows.ai_builder.ai_builder_slot_classification_contract import (
     ClassifiedEvidence,
     ClassifiedFileRole,
     ClassifiedNamedResultDelta,
+    ClassifiedNamedResultEvidence,
     ClassifiedSchemaDirection,
     ClassifiedSlot,
     SlotClassificationAttempt,
@@ -2189,15 +2190,22 @@ def test_runtime_does_not_materialize_low_confidence_named_result_snapshot() -> 
         "terminal_output",
         "structured_json",
     )
+    classified_evidence = (
+        ClassifiedEvidence(
+            source_id="user_message:user-1",
+            quote="Maybe case_id.",
+        ),
+    )
     classified = ClassifiedNamedResultDelta(
         operation="update",
         names=("case_id",),
         confidence="low",
         reason="The field name was uncertain.",
-        evidence=(
-            ClassifiedEvidence(
-                source_id="user_message:user-1",
-                quote="Maybe case_id.",
+        evidence=classified_evidence,
+        evidence_by_name=(
+            ClassifiedNamedResultEvidence(
+                name="case_id",
+                evidence=classified_evidence,
             ),
         ),
     )

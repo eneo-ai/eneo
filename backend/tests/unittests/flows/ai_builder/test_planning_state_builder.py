@@ -2419,6 +2419,40 @@ class TestSlotClassificationMetadataReplay:
 
 
 class TestModelSlotMerge:
+    def test_named_result_delta_rejects_missing_per_name_evidence(self) -> None:
+        with pytest.raises(
+            ValueError,
+            match="evidence_by_name must exactly cover named-result changes",
+        ):
+            ClassifiedNamedResultDelta(
+                operation="update",
+                names=("case_id",),
+                confidence="high",
+                reason="The user explicitly named the result field.",
+                evidence=_model_evidence("case_id"),
+            )
+
+    def test_named_result_delta_rejects_per_name_evidence_outside_delta(
+        self,
+    ) -> None:
+        with pytest.raises(
+            ValueError,
+            match="evidence_by_name citations must belong to delta evidence",
+        ):
+            ClassifiedNamedResultDelta(
+                operation="update",
+                names=("case_id",),
+                confidence="high",
+                reason="The user explicitly named the result field.",
+                evidence=_model_evidence("case_id"),
+                evidence_by_name=(
+                    ClassifiedNamedResultEvidence(
+                        name="case_id",
+                        evidence=_model_evidence("unrelated evidence"),
+                    ),
+                ),
+            )
+
     def test_duplicate_checkpoint_producer_is_rejected_at_merge_boundary(
         self,
     ) -> None:
@@ -2956,6 +2990,7 @@ class TestModelSlotMerge:
                 evidence=["quote:user_message:user-1:case-id"],
             )
         ]
+        repeated_evidence = _model_evidence("Case ID")
 
         merge_llm_resolved_slots(
             state,
@@ -2965,7 +3000,13 @@ class TestModelSlotMerge:
                     names=("Case ID",),
                     confidence="high",
                     reason="The user repeated the same result name.",
-                    evidence=_model_evidence("Case ID"),
+                    evidence=repeated_evidence,
+                    evidence_by_name=(
+                        ClassifiedNamedResultEvidence(
+                            name="Case ID",
+                            evidence=repeated_evidence,
+                        ),
+                    ),
                 )
             ),
             prompt_hash="f" * 64,

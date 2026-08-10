@@ -22,7 +22,7 @@ from collections.abc import Iterator, Mapping
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlsplit, urlunsplit
 from urllib.request import Request, urlopen
@@ -5767,6 +5767,22 @@ def _classifier_runs(
     return _mapping_list(diagnostics.get("classifier_runs"))
 
 
+def _persisted_named_result_names(
+    diagnostics: Mapping[str, object] | None,
+) -> list[str]:
+    names: list[str] = []
+    for run in _classifier_runs(diagnostics):
+        snapshot = run.get("named_result_evidence")
+        if not isinstance(snapshot, Mapping):
+            continue
+        snapshot = cast(Mapping[str, object], snapshot)
+        for named_result in _mapping_list(snapshot.get("named_results")):
+            name = named_result.get("name")
+            if isinstance(name, str) and name:
+                names.append(name)
+    return names
+
+
 def _classifier_evidence_contract_is_valid(
     diagnostics: Mapping[str, object] | None,
 ) -> bool:
@@ -6403,6 +6419,63 @@ def _quality_report(
                 evidence=runtime_evidence,
                 expected=expected_runtime_evidence,
             )
+        )
+        if _field_expectation_groups(expected):
+            persisted_named_results = _persisted_named_result_names(
+                classifier_diagnostics
+            )
+            add_check(
+                "sentinel_named_result_evidence",
+                bool(persisted_named_results),
+                persisted_named_results,
+                "at least one persisted named result",
+            )
+
+        steps = _step_summaries(summary)
+        minimum_steps = _int_value(expected.get("min_steps"))
+        maximum_steps = _int_value(expected.get("max_steps"))
+        expected_terminal_type = expected.get("terminal_output_type")
+        expected_terminal_mode = expected.get("terminal_document_output_mode")
+        step_count = _int_value(summary.get("step_count"))
+        renderer_step_present = any(
+            step.get("output_type") == expected_terminal_type
+            and step.get("output_mode") == expected_terminal_mode
+            for step in steps
+        )
+        per_source_reader_present = any(
+            step.get("input_source") == "flow_input"
+            and step.get("input_type") in {"document", "file"}
+            and step.get("output_type") == "json"
+            for step in steps
+        )
+        actual_invariants = {
+            "terminal_output_type": summary.get("terminal_output_type"),
+            "terminal_output_mode": summary.get("terminal_output_mode"),
+            "renderer_step_present": renderer_step_present,
+            "per_source_reader_present": per_source_reader_present,
+            "step_count": step_count,
+        }
+        expected_invariants = {
+            "terminal_output_type": expected_terminal_type,
+            "terminal_output_mode": expected_terminal_mode,
+            "renderer_step_present": True,
+            "per_source_reader_present": True,
+            "step_count": {"min": minimum_steps, "max": maximum_steps},
+        }
+        add_check(
+            "sentinel_invariant_vector",
+            isinstance(expected_terminal_type, str)
+            and isinstance(expected_terminal_mode, str)
+            and minimum_steps is not None
+            and maximum_steps is not None
+            and actual_invariants["terminal_output_type"] == expected_terminal_type
+            and actual_invariants["terminal_output_mode"] == expected_terminal_mode
+            and renderer_step_present
+            and per_source_reader_present
+            and step_count is not None
+            and minimum_steps <= step_count <= maximum_steps,
+            actual_invariants,
+            expected_invariants,
         )
     if plan is None:
         return {"checks": checks, "warnings": warnings}

@@ -3749,6 +3749,91 @@ def test_apply_and_fetch_flow_preserves_compiled_structure_scope(
     )
 
 
+def test_runtime_sentinel_checks_persisted_named_results_and_plan_invariants() -> None:
+    harness = _battle_harness()
+    plan = _document_plan(
+        terminal_mode="render_verbatim",
+        terminal_input_source="previous_step",
+    )
+    diagnostics = _classifier_diagnostics()
+    classifier_runs = diagnostics["classifier_runs"]
+    assert isinstance(classifier_runs, list)
+    classifier_run = classifier_runs[0]
+    assert isinstance(classifier_run, dict)
+    classifier_run["named_result_evidence"] = {
+        "operation": "replace",
+        "named_results": [
+            {
+                "name": "summary",
+                "confidence": "high",
+                "evidence": ["quote:user_message:user-1:summary"],
+            }
+        ],
+        "confidence": "high",
+        "reason": "The result includes a summary.",
+        "evidence": [
+            {
+                "source_id": "user_message:user-1",
+                "quote": "summary",
+            }
+        ],
+    }
+    expected = {
+        "min_steps": 2,
+        "max_steps": 2,
+        "terminal_output_type": "pdf",
+        "terminal_document_output_mode": "render_verbatim",
+        "expected_leaf_output_field_groups": [["summary"]],
+        "expected_runtime_evidence": {},
+    }
+
+    def checks_for(
+        *,
+        candidate_plan: dict[str, Any],
+        candidate_diagnostics: dict[str, object],
+    ) -> dict[str, dict[str, object]]:
+        report = harness._quality_report(
+            plan=candidate_plan,
+            summary=harness._summarize_plan(candidate_plan),
+            expected=expected,
+            event_summary={},
+            classifier_diagnostics=candidate_diagnostics,
+        )
+        return {check["name"]: check for check in report["checks"]}
+
+    baseline = checks_for(
+        candidate_plan=plan,
+        candidate_diagnostics=diagnostics,
+    )
+    assert baseline["sentinel_named_result_evidence"]["passed"] is True
+    assert baseline["sentinel_invariant_vector"]["passed"] is True
+
+    missing_evidence = json.loads(json.dumps(diagnostics))
+    missing_classifier_runs = missing_evidence["classifier_runs"]
+    assert isinstance(missing_classifier_runs, list)
+    missing_classifier_run = missing_classifier_runs[0]
+    assert isinstance(missing_classifier_run, dict)
+    missing_classifier_run["named_result_evidence"] = None
+    assert (
+        checks_for(
+            candidate_plan=plan,
+            candidate_diagnostics=missing_evidence,
+        )["sentinel_named_result_evidence"]["passed"]
+        is False
+    )
+
+    missing_reader = json.loads(json.dumps(plan))
+    missing_steps = missing_reader["proposal"]["spec"]["steps"]
+    assert isinstance(missing_steps, list)
+    missing_steps[0]["input_source"] = "question"
+    invariant_check = checks_for(
+        candidate_plan=missing_reader,
+        candidate_diagnostics=diagnostics,
+    )["sentinel_invariant_vector"]
+    assert invariant_check["passed"] is False
+    assert invariant_check["actual"]["per_source_reader_present"] is False
+
+
 def test_six_file_runtime_gate_rejects_each_release_dimension() -> None:
     harness = _battle_harness()
     expected = {
