@@ -69,7 +69,10 @@ from eneo.flows.ai_builder.ai_builder_slot_classifier import (
     slot_classification_prompt_hash,
     slot_classification_provider_identity,
 )
-from eneo.flows.ai_builder.planning_state import PlanningState
+from eneo.flows.ai_builder.planning_state import (
+    NAMED_RESULT_PROVENANCE_MAX_ITEMS,
+    PlanningState,
+)
 from eneo.flows.ai_builder.planning_state_builder import (
     apply_model_blocked_slots,
     apply_policy_defaults_from_resolved_slots,
@@ -823,7 +826,6 @@ def _materialized_named_result_snapshot(
         and prior_classification.named_result_evidence is not None
         else ()
     )
-    evidence = tuple(dict.fromkeys((*prior_evidence, *classified_evidence.evidence)))
     named_results = state.named_result_evidence
     if not named_results:
         return SlotClassificationNamedResultEvidenceMetadata.from_materialized_state(
@@ -833,6 +835,23 @@ def _materialized_named_result_snapshot(
             reason=classified_evidence.reason,
             evidence=classified_evidence.evidence,
         )
+    surviving_references = {
+        reference for item in named_results for reference in item.evidence
+    }
+    evidence = [
+        item
+        for item in dict.fromkeys((*prior_evidence, *classified_evidence.evidence))
+        if item.planning_reference() in surviving_references
+    ]
+    retained_references = {item.planning_reference() for item in evidence}
+    for item in classified_evidence.evidence:
+        reference = item.planning_reference()
+        if reference in retained_references:
+            continue
+        if len(evidence) >= NAMED_RESULT_PROVENANCE_MAX_ITEMS:
+            break
+        evidence.append(item)
+        retained_references.add(reference)
     return SlotClassificationNamedResultEvidenceMetadata.from_materialized_state(
         operation="replace",
         named_results=named_results,

@@ -15,6 +15,7 @@ from uuid import UUID, uuid4
 
 import pytest
 
+from eneo.flows.ai_builder import ai_builder_discovery_runtime as discovery_runtime
 from eneo.flows.ai_builder.ai_builder_action_policy import (
     build_planner_action_policy,
 )
@@ -22,6 +23,7 @@ from eneo.flows.ai_builder.ai_builder_architecture_derivation import (
     derive_architecture_commit_draft,
 )
 from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
+    SlotClassificationMetadata,
     SlotClassificationNamedResultEvidenceMetadata,
     metadata_with_slot_classification,
     slot_classification_metadata_from_attempt,
@@ -45,8 +47,6 @@ from eneo.flows.ai_builder.ai_builder_schema_evidence import (
     derive_freeform_schema_candidates,
 )
 from eneo.flows.ai_builder.ai_builder_slot_classification_contract import (
-    CLASSIFICATION_EVIDENCE_MAX_LENGTH,
-    NAMED_RESULT_SNAPSHOT_CITATION_MAX_ITEMS,
     CheckpointUpdateOperation,
     ClassifiedCheckpointUpdate,
     ClassifiedEvidence,
@@ -67,6 +67,7 @@ from eneo.flows.ai_builder.planning_state import (
     FCM_VERSION,
     NAMED_RESULT_EVIDENCE_MAX_CITATIONS,
     NAMED_RESULT_EVIDENCE_MAX_ITEMS,
+    NAMED_RESULT_PROVENANCE_MAX_ITEMS,
     PLANNER_CONTRACT_VERSION,
     PLANNING_STATE_PAYLOAD_CAP_BYTES,
     ArchitectureCommit,
@@ -361,6 +362,48 @@ def _model_evidence(*quotes: str) -> tuple[ClassifiedEvidence, ...]:
         ClassifiedEvidence(source_id="user_message:test-source", quote=quote)
         for quote in quotes
     )
+
+
+def _parse_named_result_delta(
+    *,
+    names: tuple[str, ...],
+    removed_names: tuple[str, ...] = (),
+    classification_input: SlotClassificationInput,
+) -> SlotClassificationResult:
+    parsed = parse_slot_classification_response(
+        json.dumps(
+            {
+                "slots": [],
+                "file_roles": [],
+                "checkpoint_updates": [],
+                "form_intake": None,
+                "named_result_evidence": {
+                    "operation": "update",
+                    "names": list(names),
+                    "removed_names": list(removed_names),
+                    "confidence": "high",
+                    "reason": "The user explicitly changed named results.",
+                    "evidence": [
+                        {
+                            "source_id": source.source_id,
+                            "quote": source.text,
+                        }
+                        for source in classification_input.sources
+                    ],
+                },
+                "example_output_constraints": None,
+                "schema_direction": None,
+                "secondary_obligations": [],
+                "assumptions": [],
+                "contradictions": [],
+            }
+        ),
+        allowed_slot_values={},
+        classification_input=classification_input,
+    )
+    assert parsed is not None
+    assert parsed.named_result_evidence is not None
+    return parsed
 
 
 def _slot_classification_metadata(
@@ -2706,38 +2749,77 @@ class TestModelSlotMerge:
             "actual_value": NAMED_RESULT_EVIDENCE_MAX_ITEMS + 1,
         }
 
-    def test_maximum_named_result_evidence_stays_below_payload_cap(self) -> None:
+    def test_maximum_named_result_evidence_completes_persisted_lifecycle(self) -> None:
         state = _state()
-        names = tuple(
-            f"field_{index:03d}_" + "n" * (240 - len(f"field_{index:03d}_"))
-            for index in range(NAMED_RESULT_EVIDENCE_MAX_ITEMS)
-        )
-        evidence = tuple(
-            ClassifiedEvidence(
-                source_id="user_message:test-source",
-                quote=f"{index:03d}" + "q" * (CLASSIFICATION_EVIDENCE_MAX_LENGTH - 3),
-            )
-            for index in range(NAMED_RESULT_SNAPSHOT_CITATION_MAX_ITEMS)
-        )
-
-        merge_llm_resolved_slots(
-            state,
-            SlotClassificationResult(
-                named_result_evidence=ClassifiedNamedResultDelta(
-                    operation="update",
-                    names=names,
-                    confidence="high",
-                    reason="The user named the maximum supported result fields.",
-                    evidence=evidence,
+        prior_classification: SlotClassificationMetadata | None = None
+        latest_classification: SlotClassificationMetadata | None = None
+        for index in range(NAMED_RESULT_EVIDENCE_MAX_ITEMS):
+            prefix = f"field_{index:03d}_"
+            name = prefix + "n" * (240 - len(prefix))
+            message_id = f"maximum-{index}"
+            sources = tuple(
+                SlotClassificationSource(
+                    source_id=f"user_message:{message_id}:{citation_index}",
+                    kind="user_message",
+                    text=name,
+                    message_id=message_id,
                 )
-            ),
-            prompt_hash="a" * 64,
-            freeform_text="Maximum named result evidence.",
-        )
+                for citation_index in range(NAMED_RESULT_EVIDENCE_MAX_CITATIONS)
+            )
+            classification_input = SlotClassificationInput(
+                sources=sources,
+                current_user_message_id=message_id,
+            )
+            parsed = _parse_named_result_delta(
+                names=(name,),
+                classification_input=classification_input,
+            )
+            classified_evidence = parsed.named_result_evidence
+            assert classified_evidence is not None
+            merge_llm_resolved_slots(
+                state,
+                parsed,
+                prompt_hash=f"{index:064x}",
+                freeform_text=name,
+            )
+            snapshot = discovery_runtime._materialized_named_result_snapshot(
+                state,
+                classified_evidence=classified_evidence,
+                prior_classification=prior_classification,
+            )
+            assert snapshot is not None
+            latest_classification = slot_classification_metadata_from_attempt(
+                SlotClassificationAttempt(outcome="resolved", result=parsed),
+                prompt_hash=f"{index:064x}",
+                classification_input=classification_input,
+                model="openai/gpt-test",
+                provider="openai",
+                retained_source_inventory=(
+                    ()
+                    if prior_classification is None
+                    else prior_classification.source_inventory
+                ),
+                named_result_evidence_snapshot=snapshot,
+            )
+            prior_classification = latest_classification
 
-        assert all(
-            len(item.evidence) <= NAMED_RESULT_EVIDENCE_MAX_CITATIONS
-            for item in state.named_result_evidence
+        assert latest_classification is not None
+        metadata = metadata_with_slot_classification(None, latest_classification)
+        assert metadata is not None
+        replayed = build_planning_state_from_conversation(
+            [
+                ConversationMessage(
+                    message_id="maximum-replay",
+                    role="user",
+                    content="Replay the maximum named-result snapshot.",
+                    metadata=metadata,
+                )
+            ]
+        )
+        assert replayed.named_result_evidence == state.named_result_evidence
+        assert len(state.named_result_evidence) == NAMED_RESULT_EVIDENCE_MAX_ITEMS
+        assert sum(len(item.evidence) for item in state.named_result_evidence) == (
+            NAMED_RESULT_EVIDENCE_MAX_ITEMS * NAMED_RESULT_EVIDENCE_MAX_CITATIONS
         )
         payload_bytes = len(
             json.dumps(
@@ -2747,6 +2829,80 @@ class TestModelSlotMerge:
             ).encode("utf-8")
         )
         assert payload_bytes < PLANNING_STATE_PAYLOAD_CAP_BYTES
+
+        removed_item = state.named_result_evidence[0]
+        removed_name = removed_item.name
+        removed_references = set(removed_item.evidence)
+        replacement_prefix = "replacement_"
+        replacement_name = replacement_prefix + "r" * (240 - len(replacement_prefix))
+        churn_message_id = "maximum-churn"
+        churn_sources = (
+            SlotClassificationSource(
+                source_id=f"user_message:{churn_message_id}:replacement",
+                kind="user_message",
+                text=replacement_name,
+                message_id=churn_message_id,
+            ),
+            SlotClassificationSource(
+                source_id=f"user_message:{churn_message_id}:removed",
+                kind="user_message",
+                text=removed_name,
+                message_id=churn_message_id,
+            ),
+        )
+        churn_input = SlotClassificationInput(
+            sources=churn_sources,
+            current_user_message_id=churn_message_id,
+        )
+        churn_result = _parse_named_result_delta(
+            names=(replacement_name,),
+            removed_names=(removed_name,),
+            classification_input=churn_input,
+        )
+        churn_evidence = churn_result.named_result_evidence
+        assert churn_evidence is not None
+        merge_llm_resolved_slots(
+            state,
+            churn_result,
+            prompt_hash="f" * 64,
+            freeform_text=replacement_name,
+        )
+        churn_snapshot = discovery_runtime._materialized_named_result_snapshot(
+            state,
+            classified_evidence=churn_evidence,
+            prior_classification=latest_classification,
+        )
+        assert churn_snapshot is not None
+        assert len(churn_snapshot.evidence) == NAMED_RESULT_PROVENANCE_MAX_ITEMS
+        assert all(
+            item.to_classified_evidence().planning_reference() not in removed_references
+            for item in churn_snapshot.evidence
+        )
+        churn_classification = slot_classification_metadata_from_attempt(
+            SlotClassificationAttempt(outcome="resolved", result=churn_result),
+            prompt_hash="f" * 64,
+            classification_input=churn_input,
+            model="openai/gpt-test",
+            provider="openai",
+            retained_source_inventory=latest_classification.source_inventory,
+            named_result_evidence_snapshot=churn_snapshot,
+        )
+        churn_metadata = metadata_with_slot_classification(
+            None,
+            churn_classification,
+        )
+        assert churn_metadata is not None
+        churn_replayed = build_planning_state_from_conversation(
+            [
+                ConversationMessage(
+                    message_id=churn_message_id,
+                    role="user",
+                    content=replacement_name,
+                    metadata=churn_metadata,
+                )
+            ]
+        )
+        assert churn_replayed.named_result_evidence == state.named_result_evidence
 
     def test_named_result_evidence_deduplicates_folded_name_collisions(self) -> None:
         state = _state()

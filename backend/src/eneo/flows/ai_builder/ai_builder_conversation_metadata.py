@@ -48,7 +48,6 @@ from eneo.flows.ai_builder.ai_builder_slot_classification_contract import (
     CLASSIFICATION_NOTE_MAX_LENGTH,
     CLASSIFICATION_NOTES_MAX_ITEMS,
     CLASSIFICATION_REASON_MAX_LENGTH,
-    NAMED_RESULT_SNAPSHOT_CITATION_MAX_ITEMS,
     SLOT_CLASSIFICATION_SCHEMA_VERSION,
     UNKNOWN_SLOT_VALUE,
     CheckpointUpdateOperation,
@@ -73,6 +72,7 @@ from eneo.flows.ai_builder.ai_builder_slot_vocabulary import (
 )
 from eneo.flows.ai_builder.planning_state import (
     NAMED_RESULT_EVIDENCE_MAX_ITEMS,
+    NAMED_RESULT_PROVENANCE_MAX_ITEMS,
     AttachmentCoverage,
     CheckpointProducerKind,
     ExampleOutputConstraintEvidence,
@@ -333,7 +333,7 @@ class SlotClassificationNamedResultEvidenceMetadata(BaseModel):
     reason: str = Field(min_length=1, max_length=CLASSIFICATION_REASON_MAX_LENGTH)
     evidence: list[SlotClassificationEvidence] = Field(
         min_length=1,
-        max_length=NAMED_RESULT_SNAPSHOT_CITATION_MAX_ITEMS,
+        max_length=NAMED_RESULT_PROVENANCE_MAX_ITEMS,
     )
 
     @model_validator(mode="after")
