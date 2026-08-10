@@ -30,7 +30,10 @@ from eneo.info_blobs.info_blob import (
     InfoBlobInDBNoText,
     InfoBlobUpdate,
 )
-from eneo.main.exceptions import InfoBlobPublicationConflictError
+from eneo.main.exceptions import (
+    InfoBlobPublicationConflictError,
+    NotFoundException,
+)
 from eneo.object_content.content import ContentState
 
 
@@ -48,6 +51,24 @@ class InfoBlobOriginal:
 class InfoBlobPublication:
     info_blob: InfoBlobInDB
     original: InfoBlobOriginal | None
+
+
+@dataclass(frozen=True, slots=True)
+class InfoBlobListing:
+    """One document's identity, without its text.
+
+    Listing a source means reading hundreds of rows whose ``text`` column is
+    TOASTed; hydrating full entities for a title list would move megabytes to
+    render kilobytes.
+    """
+
+    id: UUID
+    title: str | None
+    url: str | None
+
+    @property
+    def label(self) -> str:
+        return self.title or self.url or "Untitled source"
 
 
 class InfoBlobRepository:
@@ -542,6 +563,8 @@ class InfoBlobRepository:
 
     async def get(self, id: UUID) -> InfoBlobInDB:
         record = await self.delegate.get(id)
+        if record is None:
+            raise NotFoundException()
         return InfoBlobInDB.model_validate(record)
 
     async def get_by_title_and_group(
@@ -736,6 +759,63 @@ class InfoBlobRepository:
             )
         )
         return [InfoBlobInDB.model_validate(record) for record in records]
+
+    @staticmethod
+    def _source_filter(
+        group_ids: list[UUID],
+        website_ids: list[UUID],
+        integration_knowledge_ids: list[UUID],
+    ) -> ColumnElement[bool]:
+        return sa.or_(
+            InfoBlobs.group_id.in_(group_ids),
+            InfoBlobs.website_id.in_(website_ids),
+            InfoBlobs.integration_knowledge_id.in_(integration_knowledge_ids),
+        )
+
+    async def count_by_sources(
+        self,
+        *,
+        group_ids: list[UUID],
+        website_ids: list[UUID],
+        integration_knowledge_ids: list[UUID],
+    ) -> int:
+        stmt = sa.select(sa.func.count()).where(
+            self._source_filter(group_ids, website_ids, integration_knowledge_ids),
+            active_info_blob_version(),
+        )
+        return await self.session.scalar(stmt) or 0
+
+    async def list_by_sources(
+        self,
+        *,
+        group_ids: list[UUID],
+        website_ids: list[UUID],
+        integration_knowledge_ids: list[UUID],
+        limit: int,
+        offset: int = 0,
+    ) -> list[InfoBlobListing]:
+        """Document identities across the given sources, alphabetically.
+
+        Ordered on the displayed label rather than ``created_at`` because the
+        result is read by a human (via the model) as a table of contents; ``id``
+        breaks ties so paging by ``offset`` stays stable.
+        """
+        label = sa.func.coalesce(InfoBlobs.title, InfoBlobs.url)
+        stmt = (
+            sa.select(InfoBlobs.id, InfoBlobs.title, InfoBlobs.url)
+            .where(
+                self._source_filter(group_ids, website_ids, integration_knowledge_ids),
+                active_info_blob_version(),
+            )
+            .order_by(label.nulls_last(), InfoBlobs.id)
+            .limit(limit)
+            .offset(offset)
+        )
+        rows = await self.session.execute(stmt)
+        return [
+            InfoBlobListing(id=row.id, title=row.title, url=row.url)
+            for row in rows.all()
+        ]
 
     async def delete(self, id: UUID) -> InfoBlobInDB:
         source_id = await self.session.scalar(

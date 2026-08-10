@@ -11,6 +11,7 @@ from eneo.assistants.api.assistant_models import (
     AssistantBase,
     AssistantCreatePublic,
     AssistantUpdatePublic,
+    KnowledgeMode,
 )
 from eneo.assistants.assistant import Assistant
 from eneo.assistants.assistant_service import AssistantService
@@ -52,6 +53,7 @@ def setup_fixture():
     mock_db_result.fetchall.return_value = []
     repo.session.execute = AsyncMock(return_value=mock_db_result)
     user = TEST_USER
+    auth_service = MagicMock()
     assistant = AssistantCreatePublic(
         name="test_name",
         prompt=PromptCreate(text="test_prompt"),
@@ -86,6 +88,7 @@ def setup_fixture():
         repo=repo,
         space_repo=space_repo,
         user=user,
+        auth_service=auth_service,
         service_repo=AsyncMock(),
         step_repo=AsyncMock(),
         completion_model_crud_service=AsyncMock(),
@@ -127,6 +130,7 @@ async def assistant_service():
     return AssistantService(
         repo=AsyncMock(),
         user=MagicMock(id=uuid4()),
+        auth_service=MagicMock(),
         service_repo=AsyncMock(),
         step_repo=AsyncMock(),
         completion_model_crud_service=AsyncMock(),
@@ -477,6 +481,8 @@ async def test_personal_chat_can_change_personal_default_completion_model(setup:
         {"attachment_ids": []},
         {"description": None},
         {"insight_enabled": False},
+        {"inline_file_text": False},
+        {"knowledge_mode": KnowledgeMode.INJECT},
         {"data_retention_days": None},
         {"metadata_json": {}},
         {"icon_id": uuid4()},
@@ -602,8 +608,8 @@ async def test_create_from_template_keeps_fallback_when_template_has_no_model(
     )
 
 
-async def test_update_rejects_adding_mcp_when_knowledge_exists(setup: Setup):
-    """Cannot add MCP servers when assistant already has knowledge."""
+async def test_update_allows_mcp_alongside_knowledge(setup: Setup):
+    """Knowledge and MCP servers coexist on an assistant."""
     assistant = MagicMock()
     assistant.has_knowledge.return_value = True
     assistant.has_mcp.return_value = False
@@ -619,63 +625,12 @@ async def test_update_rejects_adding_mcp_when_knowledge_exists(setup: Setup):
     mock_result.fetchall.return_value = [(mcp_id,)]
     setup.service.repo.session.execute = AsyncMock(return_value=mock_result)
 
-    with pytest.raises(
-        BadRequestException, match="Knowledge and MCP servers cannot both be active"
-    ):
-        await setup.service.update_assistant(
-            assistant_id=TEST_UUID,
-            mcp_server_ids=[mcp_id],
-        )
-
-
-async def test_update_rejects_adding_knowledge_when_mcp_exists(setup: Setup):
-    """Cannot add knowledge when assistant already has MCP servers."""
-    assistant = MagicMock()
-    assistant.has_knowledge.return_value = False
-    assistant.has_mcp.return_value = True
-    assistant.mcp_servers = [MagicMock()]
-
-    # After update() is called with groups, has_knowledge should return True
-    assistant.update.side_effect = lambda **kwargs: setattr(
-        assistant, "has_knowledge", MagicMock(return_value=True)
+    await setup.service.update_assistant(
+        assistant_id=TEST_UUID,
+        mcp_server_ids=[mcp_id],
     )
 
-    space = MagicMock()
-    space.get_assistant.return_value = assistant
-    setup.service.space_repo.get_space_by_assistant.return_value = space
-
-    with pytest.raises(
-        BadRequestException, match="Knowledge and MCP servers cannot both be active"
-    ):
-        await setup.service.update_assistant(
-            assistant_id=TEST_UUID,
-            groups=[uuid4()],
-        )
-
-
-async def test_update_rejects_keeping_both_when_legacy_assistant(setup: Setup):
-    """Legacy edge case: assistant has both, updating MCP with non-empty list is still rejected."""
-    assistant = MagicMock()
-    assistant.has_knowledge.return_value = True
-    assistant.has_mcp.return_value = True
-    assistant.mcp_servers = [MagicMock()]
-
-    space = MagicMock()
-    space.get_assistant.return_value = assistant
-    setup.service.space_repo.get_space_by_assistant.return_value = space
-
-    mcp_id = uuid4()
-    mock_result = MagicMock()
-    mock_result.fetchall.return_value = [(mcp_id,)]
-    setup.service.repo.session.execute = AsyncMock(return_value=mock_result)
-
-    with pytest.raises(
-        BadRequestException, match="Knowledge and MCP servers cannot both be active"
-    ):
-        await setup.service.update_assistant(
-            assistant_id=TEST_UUID,
-            mcp_server_ids=[mcp_id],
-        )
+    assistant.update.assert_called_once()
 
 
 async def test_update_allows_removing_mcp_when_both_exist(setup: Setup):

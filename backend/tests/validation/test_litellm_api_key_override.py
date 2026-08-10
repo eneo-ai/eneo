@@ -9,9 +9,10 @@ Run with:
     cd backend && uv run pytest tests/validation/test_litellm_api_key_override.py -v
 """
 
-import pytest
 from unittest.mock import AsyncMock, patch
+
 import litellm
+import pytest
 
 
 @pytest.mark.asyncio

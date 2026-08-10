@@ -3,9 +3,10 @@ Integration tests for production bugs found through code review.
 These tests verify API-level behavior and error handling.
 """
 
-import pytest
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timedelta, timezone
 from uuid import uuid4
+
+import pytest
 
 pytestmark = pytest.mark.integration
 
@@ -153,14 +154,14 @@ class TestGdprExportWithMixedMetadata:
         self, client, auth_headers, db_session, test_tenant, test_user
     ):
         """Verify GDPR export handles logs with and without target metadata."""
+        from eneo.audit.domain.action_types import ActionType
+        from eneo.audit.domain.actor_types import ActorType
+        from eneo.audit.domain.audit_log import AuditLog
+        from eneo.audit.domain.entity_types import EntityType
+        from eneo.audit.domain.outcome import Outcome
         from eneo.audit.infrastructure.audit_log_repo_impl import (
             AuditLogRepositoryImpl,
         )
-        from eneo.audit.domain.audit_log import AuditLog
-        from eneo.audit.domain.action_types import ActionType
-        from eneo.audit.domain.entity_types import EntityType
-        from eneo.audit.domain.actor_types import ActorType
-        from eneo.audit.domain.outcome import Outcome
 
         # Create logs with different metadata structures
         async with db_session() as session:
@@ -282,14 +283,14 @@ class TestCsvExportMemoryLimit:
         - Response includes X-Records-Truncated: true when limit is hit
         - Response includes X-Total-Records header with actual count
         """
+        from eneo.audit.domain.action_types import ActionType
+        from eneo.audit.domain.actor_types import ActorType
+        from eneo.audit.domain.audit_log import AuditLog
+        from eneo.audit.domain.entity_types import EntityType
+        from eneo.audit.domain.outcome import Outcome
         from eneo.audit.infrastructure.audit_log_repo_impl import (
             AuditLogRepositoryImpl,
         )
-        from eneo.audit.domain.audit_log import AuditLog
-        from eneo.audit.domain.action_types import ActionType
-        from eneo.audit.domain.entity_types import EntityType
-        from eneo.audit.domain.actor_types import ActorType
-        from eneo.audit.domain.outcome import Outcome
 
         # Create more logs than the test limit
         test_limit = 50  # Use explicit limit for testing (default is 50,000)

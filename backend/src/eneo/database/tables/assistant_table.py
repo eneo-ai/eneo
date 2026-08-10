@@ -28,6 +28,18 @@ class Assistants(BasePublic):
     published: Mapped[bool] = mapped_column()
     description: Mapped[Optional[str]] = mapped_column()
     insight_enabled: Mapped[bool] = mapped_column(default=False)
+    # When False, an attached file whose original is available via signed URL is
+    # surfaced to the model as that URL only (text not inlined) — e.g. to keep a
+    # large CSV from blowing the context window. Default True preserves the
+    # historical inline-the-extracted-text behavior for existing assistants.
+    inline_file_text: Mapped[bool] = mapped_column(default=True, server_default="true")
+    # How attached knowledge reaches the model: "tool" exposes it as a
+    # searchable MCP tool the model calls on demand; "inject" retrieves on
+    # every turn and packs chunks into the prompt (legacy behavior, also the
+    # runtime fallback for models without tool calling).
+    knowledge_mode: Mapped[str] = mapped_column(
+        default="inject", server_default="inject"
+    )
     data_retention_days: Mapped[Optional[int]] = mapped_column()
     metadata_json: Mapped[Optional[dict[str, object]]] = mapped_column(JSONB)
     # TODO: refactor since this is a somewhat weird solution having a

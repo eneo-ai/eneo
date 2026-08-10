@@ -1,6 +1,7 @@
 """Tests for validate_public_origin() helper."""
 
 import pytest
+
 from eneo.main.config import (
     validate_public_origin,
     validate_redirect_path,

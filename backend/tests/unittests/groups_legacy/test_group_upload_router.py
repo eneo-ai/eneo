@@ -142,6 +142,7 @@ def test_upload_reports_unavailable_storage_before_staging_or_job_creation(
             session_audio_maximum_bytes=1024,
             knowledge_file_maximum_bytes=1024,
             knowledge_audio_maximum_bytes=1024,
+            object_store_revision=7,
         ),
     )
 
@@ -159,5 +160,6 @@ def test_upload_reports_unavailable_storage_before_staging_or_job_creation(
     staging.assert_not_awaited()
     job_service.queue_durable_knowledge_job.assert_not_awaited()
     object_content.ensure_target_ready.assert_awaited_once_with(
-        StorageKind.OBJECT_STORE
+        StorageKind.OBJECT_STORE,
+        object_store_revision=7,
     )

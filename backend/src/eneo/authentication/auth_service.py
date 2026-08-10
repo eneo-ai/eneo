@@ -3,6 +3,7 @@ import secrets
 import string
 from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Any, cast
+from uuid import UUID
 
 import bcrypt
 import jwt
@@ -102,6 +103,43 @@ class AuthService:
             token_payload.model_dump(), secret_key, algorithm=JWT_ALGORITHM
         )
         return access_token
+
+    def create_scoped_mcp_token(
+        self,
+        user: UserInDB,
+        *,
+        assistant_id: UUID,
+        expires_in: int = 15,
+    ) -> str:
+        """Mint a short-lived access token for a loopback MCP server.
+
+        Eneo attaches an ephemeral MCP server pointing at its own loopback
+        endpoint, authenticated with this token. The token authenticates as
+        ``user`` exactly like a normal access token (so the loopback endpoint
+        reuses ``authenticate``), and additionally carries an ``assistant_id``
+        claim so tools need no scope argument and cannot be redirected to
+        another assistant. Unknown claims ride through ``JWTPayload`` (which
+        ignores them on decode) and are read out separately by the loopback
+        endpoint.
+        """
+        secret_key = str(JWT_SECRET)
+
+        jwt_meta = JWTMeta(
+            aud=JWT_AUDIENCE,
+            iat=datetime.timestamp(datetime.now(timezone.utc) - timedelta(seconds=2)),
+            exp=datetime.timestamp(
+                datetime.now(timezone.utc) + timedelta(minutes=expires_in)
+            ),
+        )
+        jwt_creds = JWTCreds(sub=user.email, username=user.username)
+        payload = {
+            **JWTPayload(
+                **jwt_meta.model_dump(),
+                **jwt_creds.model_dump(),
+            ).model_dump(),
+            "assistant_id": str(assistant_id),
+        }
+        return jwt.encode(payload, secret_key, algorithm=JWT_ALGORITHM)
 
     def get_username_from_token(self, token: str, secret_key: str) -> str | None:
         return self.get_jwt_payload(token, key=str(secret_key)).username

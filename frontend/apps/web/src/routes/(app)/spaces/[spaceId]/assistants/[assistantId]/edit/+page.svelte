@@ -30,6 +30,8 @@
   import IconUpload from "$lib/features/icons/IconUpload.svelte";
   import ApiKeysSettingsSection from "$lib/features/api-keys/ApiKeysSettingsSection.svelte";
   import SkillBindingsEditor from "$lib/features/skills/SkillBindingsEditor.svelte";
+  import { Badge } from "$lib/components/ui/badge/index.js";
+  import { resolve } from "$app/paths";
   import {
     loadSkillBindingCatalogPage,
     loadSkillBindingPreview
@@ -46,6 +48,14 @@
   const isHelpAssistant = $derived(
     (data.assistant as { is_help_assistant?: boolean }).is_help_assistant ?? false
   );
+
+  // URL-only file handling is backed by originals in object storage. Without a
+  // connected store file text is always inlined, so the toggle is locked and
+  // says why, with a link on to the setup page for those who can act on it.
+  const objectStorageMissing = $derived(!data.settings.object_store_configured);
+  // Only platform admins can connect a store — the storage page disables every
+  // control for anyone else — so nobody else is pointed at it.
+  const canConfigureStorage = $derived(data.user.is_platform_admin === true);
 
   const {
     state: { currentSpace },
@@ -461,15 +471,6 @@
           ></AssistantSettingsAttachments>
         </Settings.Row>
 
-        <!-- Knowledge and MCP are mutually exclusive. Only disable knowledge when MCP is active
-             AND no knowledge exists. If both somehow exist (legacy data), allow editing both
-             so the user can remove one to resolve the conflict. -->
-        {@const hasAnyKnowledge =
-          ($update.groups?.length ?? 0) > 0 ||
-          ($update.websites?.length ?? 0) > 0 ||
-          ($update.integration_knowledge_list?.length ?? 0) > 0}
-        {@const hasAnyMCP = ($update.mcp_servers?.length ?? 0) > 0}
-        {@const knowledgeDisabledByMCP = hasAnyMCP && !hasAnyKnowledge}
         <Settings.Row
           title={m.knowledge()}
           description={m.select_additional_knowledge()}
@@ -482,15 +483,7 @@
             discardChanges("integration_knowledge_list");
           }}
         >
-          {#if knowledgeDisabledByMCP}
-            <p
-              class="label-warning border-label-default bg-label-dimmer text-label-stronger mb-2 rounded-md border px-2 py-1 text-sm"
-            >
-              <span class="font-bold">{m.warning()}:&nbsp;</span
-              >{m.knowledge_disabled_when_mcp_active()}
-            </p>
-          {/if}
-          <div class={knowledgeDisabledByMCP ? "pointer-events-none opacity-50" : ""}>
+          <div>
             <SelectKnowledge
               originMode="personal"
               bind:selectedWebsites={$update.websites}
@@ -512,15 +505,7 @@
             discardChanges("integration_knowledge_list");
           }}
         >
-          {#if knowledgeDisabledByMCP}
-            <p
-              class="label-warning border-label-default bg-label-dimmer text-label-stronger mb-2 rounded-md border px-2 py-1 text-sm"
-            >
-              <span class="font-bold">{m.warning()}:&nbsp;</span
-              >{m.knowledge_disabled_when_mcp_active()}
-            </p>
-          {/if}
-          <div class={knowledgeDisabledByMCP ? "pointer-events-none opacity-50" : ""}>
+          <div>
             <SelectKnowledge
               originMode="organization"
               bind:selectedWebsites={$update.websites}
@@ -591,15 +576,68 @@
             ></SelectModelSpecificSettings>
           </Settings.Row>
         {/if}
+
+        {#if data.settings.file_references_enabled}
+          <Settings.Row
+            title={m.inline_file_text()}
+            description={m.inline_file_text_description()}
+            hasChanges={$currentChanges.diff.inline_file_text !== undefined}
+            revertFn={() => {
+              discardChanges("inline_file_text");
+            }}
+          >
+            <svelte:fragment slot="title">
+              {#if objectStorageMissing}
+                <Badge variant="secondary" class="ml-2">{m.inline_file_text_locked()}</Badge>
+              {/if}
+            </svelte:fragment>
+            <svelte:fragment slot="description">
+              {#if objectStorageMissing}
+                <p
+                  class="label-warning border-label-default bg-label-dimmer text-label-stronger mt-2.5 rounded-md border px-2 py-1 text-sm"
+                >
+                  <span class="font-bold">{m.hint()}:&nbsp;</span
+                  >{m.inline_file_text_object_storage_hint()}
+                  {#if canConfigureStorage}
+                    <a href={resolve("/admin/storage")} class="underline"
+                      >{m.configure_object_storage()}</a
+                    >
+                  {/if}
+                </p>
+              {/if}
+            </svelte:fragment>
+            <div class="border-default flex h-14 border-b py-2">
+              <Input.RadioSwitch
+                bind:value={$update.inline_file_text}
+                disabled={objectStorageMissing}
+                labelTrue={m.enable()}
+                labelFalse={m.disable()}
+              ></Input.RadioSwitch>
+            </div>
+          </Settings.Row>
+        {/if}
+
+        <Settings.Row
+          title={m.knowledge_mode()}
+          description={m.knowledge_mode_description()}
+          hasChanges={$currentChanges.diff.knowledge_mode !== undefined}
+          revertFn={() => {
+            discardChanges("knowledge_mode");
+          }}
+        >
+          <div class="border-default flex h-14 border-b py-2">
+            <Input.RadioSwitch
+              bind:value={
+                () => $update.knowledge_mode !== "inject",
+                (v) => ($update.knowledge_mode = v ? "tool" : "inject")
+              }
+              labelTrue={m.knowledge_mode_tool()}
+              labelFalse={m.knowledge_mode_inject()}
+            ></Input.RadioSwitch>
+          </div>
+        </Settings.Row>
       </Settings.Group>
 
-      <!-- Same mutual exclusivity logic as above: only disable MCP when knowledge
-           is active AND no MCP exists. If both exist (legacy data), keep both editable. -->
-      {@const mcpDisabledByKnowledge =
-        (($update.groups?.length ?? 0) > 0 ||
-          ($update.websites?.length ?? 0) > 0 ||
-          ($update.integration_knowledge_list?.length ?? 0) > 0) &&
-        ($update.mcp_servers?.length ?? 0) === 0}
       <Settings.Group title={m.mcp_servers()}>
         <Settings.Row
           title={m.mcp_servers()}
@@ -611,14 +649,6 @@
             discardChanges("mcp_tools");
           }}
         >
-          {#if mcpDisabledByKnowledge}
-            <p
-              class="label-warning border-label-default bg-label-dimmer text-label-stronger mb-2 rounded-md border px-2 py-1 text-sm"
-            >
-              <span class="font-bold">{m.warning()}:&nbsp;</span
-              >{m.mcp_disabled_when_knowledge_active()}
-            </p>
-          {/if}
           {#if mcpEnforced}
             <!-- Policy GRANTs these servers to the personal assistant; they are
                  applied automatically at ask-time, so the picker is read-only. -->
@@ -635,7 +665,7 @@
               {m.governance_assistant_mcp_provided_by_policy()}
             </p>
           {:else}
-            <div class={mcpDisabledByKnowledge ? "pointer-events-none opacity-50" : ""}>
+            <div>
               <SelectMCPServers
                 bind:selectedMCPServers={$update.mcp_servers}
                 bind:selectedMCPTools={$update.mcp_tools}

@@ -131,7 +131,10 @@ class FileService:
             raise RuntimeError(
                 "Object-store File admission requires a non-ambient transaction"
             )
-        await self._object_content.ensure_target_ready(storage_target)
+        await self._object_content.ensure_target_ready(
+            storage_target,
+            object_store_revision=snapshot.object_store_revision,
+        )
 
         async with self.protocol.prepare_upload(
             upload_file,
@@ -187,7 +190,8 @@ class FileService:
                     for entry in captured_file.contents
                 )
                 async with self._object_content.upload_for_publication(
-                    contents
+                    contents,
+                    object_store_revision=snapshot.object_store_revision,
                 ) as publication:
                     async with self._write_transaction():
                         return await self._publish_verified_family(
@@ -218,6 +222,11 @@ class FileService:
                     declared_media_type=pending.declared_media_type,
                     verified_media_type=pending.verified_media_type,
                     business_maximum_bytes=source_business_maximum_bytes,
+                    object_store_revision=(
+                        self._upload_admission.object_store_revision
+                        if self._upload_admission is not None
+                        else None
+                    ),
                 )
             )
             contents.append(
@@ -631,12 +640,14 @@ class FileService:
         file_id: UUID,
         *,
         range_header: str | None = None,
+        expected_tenant_id: UUID | None = None,
     ) -> FileDownload:
         session = self.repo.session
         if session.in_transaction():
             raise RuntimeError("File downloads require a non-ambient transaction")
         async with session.begin():
             metadata = await self.repo.get_by_id(file_id=file_id)
+            self._require_token_tenant(metadata, expected_tenant_id)
             references = await self.repo.get_content_references([file_id])
             reference = self._primary_reference(metadata, references)
         return await self._open_download(
@@ -657,12 +668,14 @@ class FileService:
         file_id: UUID,
         *,
         range_header: str | None = None,
+        expected_tenant_id: UUID | None = None,
     ) -> FileDownload:
         session = self.repo.session
         if session.in_transaction():
             raise RuntimeError("File downloads require a non-ambient transaction")
         async with session.begin():
             metadata = await self.repo.get_by_id(file_id=file_id)
+            self._require_token_tenant(metadata, expected_tenant_id)
             references = await self.repo.get_content_references([file_id])
             reference = self._original_reference(references)
         return await self._open_download(
@@ -670,6 +683,15 @@ class FileService:
             reference,
             range_header=range_header,
         )
+
+    @staticmethod
+    def _require_token_tenant(
+        metadata: FileMetadata,
+        expected_tenant_id: UUID | None,
+    ) -> None:
+        """Refuse a signed download whose token was minted for another tenant."""
+        if expected_tenant_id is not None and metadata.tenant_id != expected_tenant_id:
+            raise UnauthorizedException("Token not valid for this file")
 
     async def _open_download(
         self,
@@ -795,6 +817,14 @@ class FileService:
                 FilePublic(
                     **info.model_dump(),
                     transcription=transcription,
+                    has_download_reference=(
+                        file.file_type is FileType.TEXT
+                        and self._first_reference(
+                            file_references,
+                            FileContentVariant.ORIGINAL,
+                        )
+                        is not None
+                    ),
                 )
             )
         return projected

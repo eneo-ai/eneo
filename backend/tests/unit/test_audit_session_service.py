@@ -1,11 +1,11 @@
 """Unit tests for AuditSessionService - Redis-based session management."""
 
 import json
-import pytest
+from datetime import datetime, timezone
 from unittest.mock import AsyncMock, patch
 from uuid import uuid4
-from datetime import datetime, timezone
 
+import pytest
 import redis.exceptions
 from fastapi import HTTPException
 

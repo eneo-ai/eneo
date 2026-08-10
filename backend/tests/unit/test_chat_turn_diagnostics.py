@@ -64,34 +64,12 @@ async def _read(
     session_id: UUID,
     message_id: UUID,
     container,
-    enabled: bool = True,
 ) -> ChatTurnDiagnostics:
     return await get_chat_turn_diagnostics(
         session_id=session_id,
         message_id=message_id,
-        settings=SimpleNamespace(show_chat_debug_panel=enabled),
         container=container,
     )
-
-
-async def test_disabled_diagnostics_do_not_resolve_the_session():
-    session_id = uuid4()
-    message_id = uuid4()
-    container, _, session_repo, question_repo, _ = _container(
-        partner=OwnedChatPartner(uuid4(), None),
-        stored=StoredSkillActivation(_evidence()),
-    )
-
-    with pytest.raises(NotFoundException):
-        await _read(
-            session_id=session_id,
-            message_id=message_id,
-            container=container,
-            enabled=False,
-        )
-
-    session_repo.get_owned_chat_partner.assert_not_awaited()
-    question_repo.get_skill_activation_evidence.assert_not_awaited()
 
 
 @pytest.mark.parametrize(

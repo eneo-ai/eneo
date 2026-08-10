@@ -263,9 +263,10 @@ def assistant_with_model():
 
 
 @pytest.mark.asyncio
-async def test_ask_skips_mcp_when_knowledge_present(assistant_with_model):
+async def test_ask_forwards_mcp_alongside_knowledge(assistant_with_model):
     embedding_model = MagicMock(id=1)
-    assistant_with_model.mcp_servers = [MagicMock()]
+    mcp_servers = [MagicMock()]
+    assistant_with_model.mcp_servers = mcp_servers
     assistant_with_model.collections = [MagicMock(embedding_model=embedding_model)]
     assistant_with_model.websites = [MagicMock(embedding_model=embedding_model)]
 
@@ -282,11 +283,10 @@ async def test_ask_skips_mcp_when_knowledge_present(assistant_with_model):
         version=2,
     )
 
-    # Knowledge retrieval should be called
+    # Inject-mode retrieval runs AND the assistant's MCP servers stay available
     references_service.get_references.assert_called_once()
-    # MCP servers should be excluded from completion call
     call_kwargs = completion_service.get_response.call_args.kwargs
-    assert call_kwargs["mcp_servers"] == []
+    assert call_kwargs["mcp_servers"] == mcp_servers
 
 
 @pytest.mark.asyncio

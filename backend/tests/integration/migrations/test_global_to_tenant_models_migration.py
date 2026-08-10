@@ -32,15 +32,15 @@ interference with other integration tests. This is necessary because:
 """
 
 import json
+from datetime import datetime, timezone
 from pathlib import Path
+from uuid import uuid4
 
 import psycopg2
 import pytest
+
 from alembic import command
 from alembic.config import Config
-from datetime import datetime, timezone
-from uuid import uuid4
-
 
 # Mark tests to run only when explicitly selected (not as part of larger suite)
 # These tests downgrade/upgrade the database schema and must run in isolation.
