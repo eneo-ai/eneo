@@ -336,7 +336,7 @@ def test_policy_mutation_composes_existing_session_and_identity_fences() -> None
     dependency_calls = {dependency.call for dependency in route.dependant.dependencies}
     assert deployment_policy_router._require_policy_session_auth in dependency_calls
     assert deployment_policy_router._require_policy_user_identity in dependency_calls
-    assert deployment_policy_router._require_policy_platform_admin in dependency_calls
+    assert deployment_policy_router._require_policy_storage_admin in dependency_calls
     assert route.responses[403]["model"].__name__ == "GeneralError"
     assert route.responses[409]["model"].__name__ == "GeneralError"
 
@@ -356,7 +356,7 @@ def test_inventory_read_composes_existing_platform_authority_fences() -> None:
     dependency_calls = {dependency.call for dependency in route.dependant.dependencies}
     assert deployment_policy_router._require_policy_session_auth in dependency_calls
     assert deployment_policy_router._require_policy_user_identity in dependency_calls
-    assert deployment_policy_router._require_policy_platform_admin in dependency_calls
+    assert deployment_policy_router._require_policy_storage_admin in dependency_calls
     assert route.responses[403]["model"].__name__ == "GeneralError"
 
 
@@ -726,7 +726,7 @@ async def test_policy_replace_uses_revision_compare_and_swap() -> None:
         knowledge_file_limit_bytes=3,
         transcription_audio_limit_bytes=4,
         moves_paused=False,
-        updated_by_actor="platform_admin",
+        updated_by_actor="storage_admin",
         updated_by_user_id=uuid4(),
         created_at=datetime.now(timezone.utc),
         updated_at=datetime.now(timezone.utc),
@@ -758,7 +758,7 @@ async def test_move_pause_uses_the_policy_revision_compare_and_swap() -> None:
         knowledge_file_limit_bytes=3,
         transcription_audio_limit_bytes=4,
         moves_paused=True,
-        updated_by_actor="platform_admin",
+        updated_by_actor="storage_admin",
         updated_by_user_id=uuid4(),
         created_at=datetime.now(timezone.utc),
         updated_at=datetime.now(timezone.utc),

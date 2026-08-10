@@ -110,7 +110,7 @@ _ResultT = TypeVar("_ResultT")
 
 class ObjectStoreConnectionActor(StrEnum):
     MIGRATION = "migration"
-    PLATFORM_ADMIN = "platform_admin"
+    STORAGE_ADMIN = "storage_admin"
 
 
 class ObjectStoreConnectionSource(StrEnum):
@@ -250,6 +250,10 @@ class ObjectStoreMovesNotPaused(ObjectStoreConnectionError):
 
 class ObjectStorePreviousDestinationMissing(ObjectStoreConnectionError):
     code = "object_store_previous_destination_missing"
+
+
+class ObjectStorePendingDestinationMissing(ObjectStoreConnectionError):
+    code = "object_store_pending_destination_missing"
 
 
 class ObjectStoreConnectionInvalid(ObjectStoreConnectionError):
@@ -428,7 +432,7 @@ class ObjectStoreConnectionRepository:
                 revision=ObjectStoreConnections.revision + 1,
                 access_key_id_encrypted=access_key_id_encrypted,
                 secret_access_key_encrypted=secret_access_key_encrypted,
-                updated_by_actor=ObjectStoreConnectionActor.PLATFORM_ADMIN.value,
+                updated_by_actor=ObjectStoreConnectionActor.STORAGE_ADMIN.value,
                 updated_by_user_id=actor_user_id,
                 updated_at=func.now(),
             )
@@ -508,7 +512,7 @@ class ObjectStoreConnectionService:
                 settings=settings,
                 access_key_id_encrypted=access_key_id_encrypted,
                 secret_access_key_encrypted=secret_access_key_encrypted,
-                actor=ObjectStoreConnectionActor.PLATFORM_ADMIN,
+                actor=ObjectStoreConnectionActor.STORAGE_ADMIN,
                 actor_user_id=actor_user_id,
             )
             if stored is None:
@@ -750,6 +754,99 @@ class ObjectStoreConnectionService:
             )
             await session.delete(row)
 
+    async def get_candidate(self) -> StoredObjectStoreConnection | None:
+        """Return the pending destination attempt, if one is recorded."""
+        async with self._transaction() as session:
+            row = await session.scalar(
+                select(ObjectStoreConnections).where(
+                    ObjectStoreConnections.id == TEMPORARY_DESTINATION_SLOT,
+                    ObjectStoreConnections.role == "candidate",
+                )
+            )
+            return _stored(row) if row is not None else None
+
+    async def get_temporary_destinations(
+        self,
+    ) -> tuple[StoredObjectStoreConnection | None, StoredObjectStoreConnection | None]:
+        """Return (previous, pending) from one read of the temporary slot.
+
+        The slot holds at most one row, so reading it once cannot report a
+        retiring archive and a pending candidate together — two separate
+        reads could, if a forget and a new admission landed between them.
+        """
+        async with self._transaction() as session:
+            row = await session.scalar(
+                select(ObjectStoreConnections).where(
+                    ObjectStoreConnections.id == TEMPORARY_DESTINATION_SLOT
+                )
+            )
+            # Classify inside the transaction: commit expires the ORM
+            # instance, so touching it afterwards would raise instead of
+            # answering exactly when recovery controls are needed.
+            if row is None:
+                return (None, None)
+            stored = _stored(row)
+            role = row.role
+        if role == "retiring":
+            return (stored, None)
+        if role == "candidate":
+            return (None, stored)
+        return (None, None)
+
+    async def abandon_switch_candidate(
+        self, *, actor_user_id: UUID, expected_revision: int
+    ) -> None:
+        """Release the pending destination attempt an administrator names.
+
+        An ambiguous pre-cutover failure deliberately preserves the slot-2
+        candidate and its remote marker so a retry can finish or clean up.
+        This gives that state a first-class exit: the administrator abandons
+        the exact attempt they saw (compare-and-swap on its revision), which
+        releases the lease, removes the remote marker, and clears both
+        temporary rows — the same sequence a later switch to a different
+        destination would run as a side effect.
+        """
+        del actor_user_id  # authorization happens at the router boundary
+        self._require_encryption()
+        async with self._transaction() as session:
+            binding = await StoreBindingRepository(session).snapshot()
+        if binding.binding_id is None:
+            raise ObjectStoreDestinationSwitchBlocked(
+                "The current destination has no established storage binding"
+            )
+        async with self._transaction(mutation=True) as session:
+            row = await session.scalar(
+                select(ObjectStoreConnections)
+                .where(
+                    ObjectStoreConnections.id == TEMPORARY_DESTINATION_SLOT,
+                    ObjectStoreConnections.role == "candidate",
+                )
+                .with_for_update()
+            )
+            if row is None:
+                raise ObjectStorePendingDestinationMissing(
+                    "There is no pending destination attempt"
+                )
+            if row.revision != expected_revision:
+                raise ObjectStoreConnectionConflict(
+                    "The pending destination attempt changed; review the "
+                    "latest state before abandoning it"
+                )
+            stale = _stored(row)
+            stale_settings = self.settings_for(stale)
+            row.revision = row.revision + 1
+            owned_revision = row.revision
+            await StoreBindingRepository(session).hold_release_lease(
+                slot=TEMPORARY_DESTINATION_SLOT,
+                lease_seconds=(
+                    stale_settings.binding_claim_seconds
+                    + stale_settings.delete_visibility_timeout_seconds
+                ),
+            )
+        await self._finish_candidate_release(
+            stale, owned_revision=owned_revision, binding_id=binding.binding_id
+        )
+
     async def _switch(
         self,
         candidate: ObjectStoreConnectionInput,
@@ -801,6 +898,7 @@ class ObjectStoreConnectionService:
                 actor_user_id=actor_user_id,
                 stored=fenced,
                 require_previous_revision=require_previous_revision,
+                require_candidate_revision=candidate_revision,
                 expected_policy_revision=policy_revision,
                 verified_snapshot=verified_snapshot,
             )
@@ -853,6 +951,7 @@ class ObjectStoreConnectionService:
         actor_user_id: UUID,
         stored: StoredObjectStoreConnection,
         require_previous_revision: int | None,
+        require_candidate_revision: int | None,
         expected_policy_revision: int,
         verified_snapshot: ServedSnapshot,
     ) -> DestinationSwitch:
@@ -912,23 +1011,22 @@ class ObjectStoreConnectionService:
                     session, archived_at=previous.updated_at
                 )
             elif (
-                previous is not None
-                and previous.role == "candidate"
-                and not self._same_place(settings, _stored(previous))
+                previous is None
+                or previous.role != "candidate"
+                or previous.revision != require_candidate_revision
+                or not self._same_place(settings, _stored(previous))
             ):
-                # The slot holds a different destination's live candidate — a
-                # concurrent change recorded it after this one's admission.
-                # Overwriting it as the archive would leave that bucket's
-                # marker with no record recovery relies on, so this switch
-                # yields instead.
+                # A forward switch may only commit the exact candidate this
+                # attempt admitted. A missing or moved row means an abandon
+                # released it (its marker is already handed back) or a
+                # concurrent change claimed the slot; committing past either
+                # would activate a destination whose only record is gone.
                 raise ObjectStoreConnectionConflict(
-                    "Another destination change claimed its candidate while "
-                    "this one was being tested"
+                    "The pending destination attempt was abandoned or "
+                    "claimed by another change while it was being tested"
                 )
-            if previous is None:
-                previous = ObjectStoreConnections()
-                previous.id = TEMPORARY_DESTINATION_SLOT
-                session.add(previous)
+            # Both guards above prove the slot row exists: switch-back pins
+            # the retiring row, a forward switch pins its admitted candidate.
             # The archive adopts the retired generation's revision. Active
             # revisions grow monotonically, so every archive exposes a value
             # no earlier archive ever carried; a client compare-and-swap on
@@ -955,7 +1053,7 @@ class ObjectStoreConnectionService:
             active.secret_access_key_encrypted = secret_access_key_encrypted
             active.addressing_style = settings.addressing_style
             active.revision = active.revision + 1
-            active.updated_by_actor = ObjectStoreConnectionActor.PLATFORM_ADMIN.value
+            active.updated_by_actor = ObjectStoreConnectionActor.STORAGE_ADMIN.value
             active.updated_by_user_id = actor_user_id
             active.updated_at = func.now()
 
@@ -1300,6 +1398,22 @@ class ObjectStoreConnectionService:
                 ),
             )
 
+        await self._finish_candidate_release(
+            stale, owned_revision=owned_revision, binding_id=binding_id
+        )
+
+    async def _finish_candidate_release(
+        self,
+        stale: StoredObjectStoreConnection,
+        *,
+        owned_revision: int,
+        binding_id: UUID,
+    ) -> None:
+        """Remove the owned candidate's marker, then retire its record.
+
+        Callers must already own the candidate row: revision bumped to
+        owned_revision under lock with the release lease held.
+        """
         stale_settings = self.settings_for(stale)
         store = self._store_factory(self._probe_settings(stale_settings))
         try:
@@ -1382,7 +1496,7 @@ class ObjectStoreConnectionService:
         )
         row.deployment_id = settings.deployment_id
         row.addressing_style = settings.addressing_style
-        row.updated_by_actor = ObjectStoreConnectionActor.PLATFORM_ADMIN.value
+        row.updated_by_actor = ObjectStoreConnectionActor.STORAGE_ADMIN.value
         await session.flush()
         return row.revision
 

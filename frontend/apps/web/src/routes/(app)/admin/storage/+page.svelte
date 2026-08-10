@@ -472,7 +472,7 @@
   function policyActorLabel(actor: DeploymentPolicy["policy"]["updated_by_actor"]): string {
     const labels: Record<DeploymentPolicy["policy"]["updated_by_actor"], () => string> = {
       migration: m.storage_policy_actor_migration,
-      platform_admin: m.storage_policy_actor_platform_admin
+      storage_admin: m.storage_policy_actor_storage_admin
     };
     return labels[actor]();
   }

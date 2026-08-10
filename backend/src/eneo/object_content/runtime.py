@@ -369,6 +369,38 @@ class ObjectContentRuntime:
             return None
         return await connection_service.get_previous()
 
+    async def pending_object_store_destination(
+        self,
+    ) -> StoredObjectStoreConnection | None:
+        connection_service = self._connection_service
+        if connection_service is None:
+            return None
+        return await connection_service.get_candidate()
+
+    async def temporary_object_store_destinations(
+        self,
+    ) -> tuple[StoredObjectStoreConnection | None, StoredObjectStoreConnection | None]:
+        connection_service = self._connection_service
+        if connection_service is None:
+            return (None, None)
+        return await connection_service.get_temporary_destinations()
+
+    async def abandon_pending_object_store_destination(
+        self,
+        *,
+        actor_user_id: UUID,
+        expected_revision: int,
+    ) -> None:
+        connection_service = self._connection_service
+        if connection_service is None:
+            raise ObjectContentConfigurationError(
+                "Admin-managed object storage is unavailable in this runtime"
+            )
+        await connection_service.abandon_switch_candidate(
+            actor_user_id=actor_user_id,
+            expected_revision=expected_revision,
+        )
+
     async def _publish_saved_object_store_connection(
         self,
         stored: StoredObjectStoreConnection,

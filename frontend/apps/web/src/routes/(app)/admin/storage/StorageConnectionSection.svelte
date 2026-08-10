@@ -68,6 +68,10 @@
   let switchInFlight = $state(false);
   let previousActionCode = $state<string | null>(null);
   let previousActionFailed = $state(false);
+  let abandonInFlight = $state(false);
+  let pendingActionCode = $state<string | null>(null);
+  let pendingActionFailed = $state(false);
+  let unresolvedPendingAbandon = $state<{ revision: number } | null>(null);
   let unresolvedPreviousAction = $state<
     | { kind: "switch-back"; endpointUrl: string; bucket: string; revision: number }
     | { kind: "forget"; revision: number }
@@ -105,6 +109,7 @@
   );
   const canSwitch = $derived(canRotate);
   const previousDestination = $derived(connection?.previous_destination ?? null);
+  const pendingDestination = $derived(connection?.pending_destination ?? null);
   const formValid = $derived(
     accessKeyId.trim().length > 0 &&
       secretAccessKey.length > 0 &&
@@ -137,6 +142,10 @@
   async function recoverConnection(): Promise<void> {
     if (unresolvedPreviousAction) {
       await resolvePreviousOutcome();
+      return;
+    }
+    if (unresolvedPendingAbandon) {
+      await resolvePendingOutcome();
       return;
     }
     if (
@@ -214,6 +223,16 @@
     previousActionFailed = true;
   }
 
+  // True when the server's outcome is genuinely unknown: either the backend
+  // said so explicitly, or the transport failed and no response arrived at
+  // all — the mutation may have committed either way.
+  function previousOutcomeIsUnknown(error: unknown): boolean {
+    if (errorCode(error) === "object_store_connection_mutation_outcome_unknown") return true;
+    return (
+      error instanceof EneoError && (error.stage === "CONNECTION" || error.stage === "UNKNOWN")
+    );
+  }
+
   function reconcilePreviousOutcome(
     current: ObjectStoreConnection
   ): "committed" | "not-applied" | "diverged" {
@@ -253,6 +272,54 @@
     }
   }
 
+  // The abandon may have committed even though its response was lost.
+  // Reconcile against the attempt the administrator actually saw: gone means
+  // done; the same revision means untouched (retry is safe); a different
+  // revision means a newer attempt now owns the slot and must be reviewed
+  // first. The captured revision survives a failed refresh — retrying the
+  // load resumes this resolution instead of silently re-arming the button
+  // against whatever the reload happens to return.
+  async function resolvePendingOutcome(): Promise<void> {
+    const pending = unresolvedPendingAbandon;
+    if (!pending) return;
+    if (!(await loadConnection())) return;
+    unresolvedPendingAbandon = null;
+    const current = pendingDestination;
+    if (current !== null) {
+      pendingActionFailed = true;
+      pendingActionCode =
+        current.revision === pending.revision
+          ? "object_store_connection_mutation_outcome_unknown"
+          : "object_store_connection_revision_conflict";
+    }
+  }
+
+  async function abandonPendingDestination(): Promise<void> {
+    if (abandonInFlight || switchInFlight || unresolvedPendingAbandon) return;
+    const target = pendingDestination;
+    if (target === null) return;
+    abandonInFlight = true;
+    pendingActionCode = null;
+    pendingActionFailed = false;
+    try {
+      await eneo.objectStoreConnection.abandonPendingDestination(target.revision);
+      await loadConnection();
+    } catch (error: unknown) {
+      if (hasStatus(error, 403)) {
+        onAuthorityRevoked?.();
+      } else if (previousOutcomeIsUnknown(error)) {
+        unresolvedPendingAbandon = { revision: target.revision };
+        await resolvePendingOutcome();
+      } else {
+        pendingActionCode = errorCode(error);
+        pendingActionFailed = true;
+        await loadConnection();
+      }
+    } finally {
+      abandonInFlight = false;
+    }
+  }
+
   async function switchBackDestination(): Promise<void> {
     if (switchInFlight || unresolvedPreviousAction) return;
     const target = previousDestination;
@@ -266,7 +333,7 @@
     } catch (error: unknown) {
       if (hasStatus(error, 403)) {
         onAuthorityRevoked?.();
-      } else if (errorCode(error) === "object_store_connection_mutation_outcome_unknown") {
+      } else if (previousOutcomeIsUnknown(error)) {
         success = null;
         unresolvedPreviousAction = {
           kind: "switch-back",
@@ -297,7 +364,7 @@
     } catch (error: unknown) {
       if (hasStatus(error, 403)) {
         onAuthorityRevoked?.();
-      } else if (errorCode(error) === "object_store_connection_mutation_outcome_unknown") {
+      } else if (previousOutcomeIsUnknown(error)) {
         unresolvedPreviousAction = { kind: "forget", revision: target.revision };
         await resolvePreviousOutcome();
       } else {
@@ -431,6 +498,8 @@
       return m.storage_switch_error_previous_present_title();
     if (code === "object_store_connection_mutation_outcome_unknown")
       return m.storage_switch_outcome_not_applied_title();
+    if (code === "object_store_destination_already_bound")
+      return m.storage_switch_error_already_bound_title();
     return m.storage_connection_error_unavailable_title();
   }
 
@@ -466,6 +535,8 @@
       return m.storage_switch_error_previous_present_description();
     if (code === "object_store_connection_mutation_outcome_unknown")
       return m.storage_switch_outcome_not_applied_description();
+    if (code === "object_store_destination_already_bound")
+      return m.storage_switch_error_already_bound_description();
     return m.storage_connection_error_unavailable_description();
   }
 
@@ -561,7 +632,7 @@
           ? readinessLabel(capability.readiness_code)
           : m.storage_connection_health_unknown()}
       </p>
-      <p class="text-muted mt-1 text-xs">{m.storage_connection_platform_admin_only()}</p>
+      <p class="text-muted mt-1 text-xs">{m.storage_connection_storage_admin_only()}</p>
     </div>
   {:else if loadStatus === "loading"}
     <div class="flex flex-col gap-3" aria-busy="true">
@@ -669,6 +740,47 @@
                 disabled={!canSwitch || switchInFlight}
               >
                 {m.storage_switch_forget_action()}
+              </Button>
+            </div>
+          </div>
+        </div>
+      {/if}
+
+      {#if pendingDestination}
+        <div class="border-default rounded-md border p-4">
+          <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+            <div class="min-w-0">
+              <p class="text-sm font-medium">{m.storage_pending_title()}</p>
+              <p class="text-secondary mt-1 truncate text-sm" title={pendingDestination.bucket}>
+                {pendingDestination.endpoint_url} · {pendingDestination.bucket}
+              </p>
+              <p class="text-secondary mt-2 max-w-[68ch] text-sm leading-5">
+                {m.storage_pending_description()}
+              </p>
+              {#if pendingActionFailed}
+                <Alert.Root class="mt-3" variant="destructive" aria-live="assertive">
+                  <AlertCircle />
+                  <Alert.Title>{errorTitle(pendingActionCode)}</Alert.Title>
+                  <Alert.Description>
+                    {errorDescription(pendingActionCode)}
+                  </Alert.Description>
+                </Alert.Root>
+              {/if}
+            </div>
+            <div class="flex shrink-0 flex-col gap-2 sm:flex-row">
+              <Button
+                variant="ghost"
+                onclick={abandonPendingDestination}
+                disabled={!canSwitch ||
+                  switchInFlight ||
+                  abandonInFlight ||
+                  unresolvedPendingAbandon !== null}
+                aria-busy={abandonInFlight}
+              >
+                {#if abandonInFlight}
+                  <Loader2 data-icon="inline-start" class="animate-spin" aria-hidden="true" />
+                {/if}
+                {m.storage_pending_abandon_action()}
               </Button>
             </div>
           </div>

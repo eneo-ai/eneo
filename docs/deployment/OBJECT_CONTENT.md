@@ -451,6 +451,9 @@ copy buckets; the operator copies with their own tooling and Eneo performs the
 guarded switch. Object keys carry no endpoint or bucket, so a faithful copy is
 readable immediately.
 
+0. Confirm every backend and worker process runs the current release. The
+   coordinated upgrade window above guarantees this; a pre-upgrade process
+   does not hold the write fence the switch relies on.
 1. Create an empty private bucket and a bucket-scoped application identity on
    the new service, and back up the current bucket.
 2. Select `postgres_inline` for new writes in **Admin > Storage**, let queued
@@ -644,11 +647,14 @@ missing policy table.
 The store-binding migration (`202608061200`) moves the database-to-bucket
 pairing facts to a per-destination table. It is the expand half of an
 expand/contract change: the legacy columns stay in place with their
-constraints, so a backend or worker still running the previous version keeps
-working against the upgraded schema during the deployment window. Binding
-work such a process records in that window converges through the idempotent,
-verified marker operations once it restarts on the new version. The old
-columns are dropped by a separate migration in a later release.
+constraints so the later contract migration owns their removal explicitly.
+Running pre-upgrade processes against the upgraded schema is unsupported —
+this release upgrades through the coordinated maintenance window above, with
+every pre-upgrade backend and worker stopped before Alembic runs.
+Destination switching assumes every running writer holds the
+store-generation fence, which pre-upgrade code does not, so never change
+destination while any pre-upgrade process is running. The old columns are
+dropped by a separate migration in a later release.
 
 For the File/Icon normalization upgrade, stop backend and worker producers
 before Alembic starts and do not restart them until the migration succeeds. If

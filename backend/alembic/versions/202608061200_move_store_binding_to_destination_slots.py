@@ -7,13 +7,17 @@ slot used by a destination migration (candidate before cutover, retiring
 source after it). Slot 1 remains permanently the active destination.
 
 This is the expand half of an expand/contract change: the legacy binding
-columns on the reconciliation state stay in place with their constraints, so
-a process still running the previous version keeps working against the
-upgraded schema during the deployment window. Post-upgrade code reads and
-writes only the new table; legacy values a pre-upgrade process writes in
-that window converge through the idempotent, verified marker operations.
-The contract step — dropping the legacy columns — ships as its own revision
-in a later release, once no process reads them.
+columns on the reconciliation state stay in place with their constraints so
+that the later contract revision owns their removal explicitly. Running
+pre-upgrade processes against the upgraded schema is unsupported: this
+release upgrades through a coordinated maintenance window in which every
+pre-upgrade backend and worker is stopped before Alembic runs and only
+current-release processes start afterwards (see
+docs/deployment/OBJECT_CONTENT.md). Destination switching in particular
+assumes every running writer holds the store-generation fence, which
+pre-upgrade code does not. Post-upgrade code reads and writes only the new
+table. The contract step — dropping the legacy columns — ships as its own
+revision in a later release, once no process reads them.
 
 Revision ID: 202608061200
 Revises: 202607061000
@@ -45,9 +49,7 @@ def upgrade() -> None:
         sa.Column("confirmed_at", sa.TIMESTAMP(timezone=True), nullable=True),
         sa.Column("claim_id", sa.UUID(), nullable=True),
         sa.Column("claim_until", sa.TIMESTAMP(timezone=True), nullable=True),
-        sa.Column(
-            "create_started_at", sa.TIMESTAMP(timezone=True), nullable=True
-        ),
+        sa.Column("create_started_at", sa.TIMESTAMP(timezone=True), nullable=True),
         sa.Column(
             "created_at",
             sa.TIMESTAMP(timezone=True),
@@ -91,8 +93,8 @@ def upgrade() -> None:
     )
 
     # Expand only: the legacy binding columns and their constraints remain so
-    # a pre-upgrade process keeps working during the deployment window. A
-    # later release drops them once no running code reads them.
+    # the later contract migration owns their removal explicitly. A later
+    # release drops them once no running code reads them.
 
     op.add_column(
         _CONNECTIONS,
@@ -137,12 +139,8 @@ def downgrade() -> None:
             "backup"
         )
 
-    op.drop_constraint(
-        "ck_object_store_connections_role", _CONNECTIONS, type_="check"
-    )
-    op.drop_constraint(
-        "ck_object_store_connections_slots", _CONNECTIONS, type_="check"
-    )
+    op.drop_constraint("ck_object_store_connections_role", _CONNECTIONS, type_="check")
+    op.drop_constraint("ck_object_store_connections_slots", _CONNECTIONS, type_="check")
     op.create_check_constraint(
         "ck_object_store_connections_singleton", _CONNECTIONS, "id = 1"
     )

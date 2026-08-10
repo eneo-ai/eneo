@@ -5912,7 +5912,7 @@ export interface paths {
     };
     /**
      * Get Object Content Inventory
-     * @description Get bounded deployment-wide object-content inventory facts. Platform administrators only.
+     * @description Get bounded deployment-wide object-content inventory facts. Requires the storage administration permission (held by the Owner role by default).
      */
     get: operations["get_object_content_inventory_api_v1_admin_object_content_inventory_get"];
     put?: never;
@@ -5932,7 +5932,7 @@ export interface paths {
     };
     /**
      * Get Object Content Moves
-     * @description Get bounded aggregate progress and typed failure reasons for explicit object-content moves. Platform administrators only.
+     * @description Get bounded aggregate progress and typed failure reasons for explicit object-content moves. Requires the storage administration permission (held by the Owner role by default).
      */
     get: operations["get_object_content_moves_api_v1_admin_object_content_moves_get"];
     put?: never;
@@ -5976,7 +5976,7 @@ export interface paths {
     };
     /**
      * Get Object Store Connection
-     * @description Get the deployment-wide S3-compatible destination without returning credentials or internal object identifiers. Platform administrators only.
+     * @description Get the deployment-wide S3-compatible destination without returning credentials or internal object identifiers. Requires the storage administration permission (held by the Owner role by default).
      */
     get: operations["get_object_store_connection_api_v1_admin_object_store_connection_get"];
     put?: never;
@@ -6066,6 +6066,26 @@ export interface paths {
      * @description Forget the archived previous destination. The bucket itself is operator-owned and is never touched; decommission it at the provider when it is no longer needed.
      */
     delete: operations["forget_previous_object_store_destination_api_v1_admin_object_store_connection_previous_delete"];
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/admin/object-store-connection/pending": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post?: never;
+    /**
+     * Abandon Pending Object Store Destination
+     * @description Abandon the pending destination attempt an interrupted or ambiguous change left behind. Releases its remote marker and clears the temporary records; the bucket itself is operator-owned and its content is never touched.
+     */
+    delete: operations["abandon_pending_object_store_destination_api_v1_admin_object_store_connection_pending_delete"];
     options?: never;
     head?: never;
     patch?: never;
@@ -14458,6 +14478,7 @@ export interface components {
       /** Updated At */
       updated_at?: string | null;
       previous_destination?: components["schemas"]["PreviousObjectStoreDestination"] | null;
+      pending_destination?: components["schemas"]["PendingObjectStoreDestination"] | null;
     };
     /**
      * ObjectStoreConnectionSource
@@ -15653,6 +15674,30 @@ export interface components {
       additional_redirect_uris?: string[] | null;
     };
     /**
+     * PendingObjectStoreDestination
+     * @description A destination attempt recorded by an interrupted or ambiguous switch.
+     */
+    PendingObjectStoreDestination: {
+      /** Revision */
+      revision: number;
+      /** Endpoint Url */
+      endpoint_url: string;
+      /** Region */
+      region: string;
+      /** Bucket */
+      bucket: string;
+      /**
+       * Addressing Style
+       * @enum {string}
+       */
+      addressing_style: "path" | "virtual";
+      /**
+       * Updated At
+       * Format: date-time
+       */
+      updated_at: string;
+    };
+    /**
      * PendingQueueSummary
      * @description Pending crawl queue summary.
      */
@@ -15747,7 +15792,7 @@ export interface components {
      * PolicyActor
      * @enum {string}
      */
-    PolicyActor: "migration" | "platform_admin";
+    PolicyActor: "migration" | "storage_admin";
     /** PolicyCompletionModelInput */
     PolicyCompletionModelInput: {
       /**
@@ -41418,6 +41463,72 @@ export interface operations {
     parameters: {
       query: {
         /** @description Revision of the archived destination being forgotten */
+        expected_revision: number;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  abandon_pending_object_store_destination_api_v1_admin_object_store_connection_pending_delete: {
+    parameters: {
+      query: {
+        /** @description Revision of the pending destination attempt being abandoned */
         expected_revision: number;
       };
       header?: never;

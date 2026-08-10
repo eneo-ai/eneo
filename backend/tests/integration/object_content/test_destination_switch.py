@@ -1796,6 +1796,195 @@ async def test_interrupted_switch_keeps_the_claimed_destination_recoverable(
         await released.close()
 
 
+async def test_an_administrator_can_abandon_an_interrupted_candidate(
+    object_content_database: DatabaseSessionManager,
+    real_object_store: RealObjectStore,
+    real_unpaired_object_store: RealObjectStore,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The pending attempt has a first-class exit that unblocks rollback.
+
+    An ambiguous pre-cutover failure preserves the slot-2 candidate and its
+    remote marker. Without an abandon operation, the only cleanups are side
+    effects of unrelated destination attempts, and the migration downgrade
+    refuses while either temporary row exists.
+    """
+    from eneo.database.tables.object_store_binding_table import ObjectStoreBindings
+    from eneo.object_content.object_store_connection import (
+        ObjectStorePendingDestinationMissing,
+    )
+
+    service = _service(object_content_database, real_object_store)
+    actor = await _any_user_id(object_content_database)
+    created = await service.create(
+        _connection_input(real_object_store), actor_user_id=actor
+    )
+    await ensure_store_binding_ready(
+        object_content_database,
+        service.settings_for(created),
+        real_object_store.store,
+    )
+    await _select_inline_writes(object_content_database)
+    binding_id = await _binding_id(object_content_database)
+
+    # No pending attempt yet: abandoning is a typed 404, not a silent no-op.
+    with pytest.raises(ObjectStorePendingDestinationMissing):
+        await service.abandon_switch_candidate(actor_user_id=actor, expected_revision=1)
+
+    class SimulatedProcessLoss(BaseException):
+        pass
+
+    original_create = S3ObjectStore.create_binding
+
+    async def lose_process_after_marker(self, creation):  # type: ignore[no-untyped-def]
+        await original_create(self, creation)
+        raise SimulatedProcessLoss("the worker died before the swap committed")
+
+    monkeypatch.setattr(S3ObjectStore, "create_binding", lose_process_after_marker)
+    with pytest.raises(SimulatedProcessLoss):
+        await service.replace_destination(
+            _connection_input(real_unpaired_object_store),
+            actor_user_id=actor,
+        )
+    monkeypatch.undo()
+
+    pending = await service.get_candidate()
+    assert pending is not None
+    assert pending.bucket == real_unpaired_object_store.settings.bucket
+    # The single-read accessor the admin GET uses classifies the same row:
+    # a candidate is pending, never previous.
+    single_previous, single_pending = await service.get_temporary_destinations()
+    assert single_previous is None
+    assert single_pending is not None
+    assert single_pending.revision == pending.revision
+
+    # A stale token cannot abandon an attempt the administrator did not see.
+    with pytest.raises(ObjectStoreConnectionConflict):
+        await service.abandon_switch_candidate(
+            actor_user_id=actor, expected_revision=pending.revision + 1
+        )
+
+    await service.abandon_switch_candidate(
+        actor_user_id=actor, expected_revision=pending.revision
+    )
+
+    # Both temporary rows are gone (the downgrade guard passes) and the
+    # touched bucket's marker was handed back.
+    async with object_content_database.session() as session, session.begin():
+        remaining_connection = await session.get(
+            ObjectStoreConnections, TEMPORARY_DESTINATION_SLOT
+        )
+        remaining_binding = await session.scalar(
+            select(ObjectStoreBindings).where(
+                ObjectStoreBindings.slot == TEMPORARY_DESTINATION_SLOT
+            )
+        )
+    assert remaining_connection is None
+    assert remaining_binding is None
+    assert await service.get_candidate() is None
+
+    released = S3ObjectStore(
+        real_unpaired_object_store.settings.model_copy(
+            update={"deployment_id": created.deployment_id}
+        )
+    )
+    try:
+        assert not await released.verify_binding(binding_id)
+    finally:
+        await released.close()
+
+    # The active destination is untouched and future switches stay possible.
+    current = await service.get()
+    assert current is not None
+    assert current.bucket == real_object_store.settings.bucket
+
+
+async def test_an_abandoned_candidate_cannot_commit(
+    object_content_database: DatabaseSessionManager,
+    real_object_store: RealObjectStore,
+    real_unpaired_object_store: RealObjectStore,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A switch whose candidate was abandoned mid-verification must yield.
+
+    Abandon hands the target's marker back and deletes the only record of
+    the claim. If the in-flight switch then committed anyway, it would
+    activate a destination whose recovery record is gone — the abandon and
+    the switch would both report success with contradictory outcomes.
+    """
+    from eneo.database.tables.object_store_binding_table import ObjectStoreBindings
+
+    service = _service(object_content_database, real_object_store)
+    actor = await _any_user_id(object_content_database)
+    created = await service.create(
+        _connection_input(real_object_store), actor_user_id=actor
+    )
+    await ensure_store_binding_ready(
+        object_content_database,
+        service.settings_for(created),
+        real_object_store.store,
+    )
+    await _select_inline_writes(object_content_database)
+    binding_id = await _binding_id(object_content_database)
+
+    original_verify = ObjectStoreConnectionService._require_target_holds_every_object
+
+    async def abandon_mid_verification(self, settings):  # type: ignore[no-untyped-def]
+        snapshot = await original_verify(self, settings)
+        pending = await service.get_candidate()
+        assert pending is not None
+        await service.abandon_switch_candidate(
+            actor_user_id=actor, expected_revision=pending.revision
+        )
+        return snapshot
+
+    monkeypatch.setattr(
+        ObjectStoreConnectionService,
+        "_require_target_holds_every_object",
+        abandon_mid_verification,
+    )
+    with pytest.raises(ObjectStoreConnectionConflict):
+        await service.replace_destination(
+            _connection_input(real_unpaired_object_store),
+            actor_user_id=actor,
+        )
+    monkeypatch.undo()
+
+    # The abandon's outcome stands alone: active destination unchanged, no
+    # temporary rows, and the target bucket's marker handed back.
+    current = await service.get()
+    assert current is not None
+    assert current.bucket == real_object_store.settings.bucket
+    async with object_content_database.session() as session, session.begin():
+        remaining_connection = await session.get(
+            ObjectStoreConnections, TEMPORARY_DESTINATION_SLOT
+        )
+        remaining_binding = await session.scalar(
+            select(ObjectStoreBindings).where(
+                ObjectStoreBindings.slot == TEMPORARY_DESTINATION_SLOT
+            )
+        )
+    assert remaining_connection is None
+    assert remaining_binding is None
+
+    released = S3ObjectStore(
+        real_unpaired_object_store.settings.model_copy(
+            update={"deployment_id": created.deployment_id}
+        )
+    )
+    try:
+        assert not await released.verify_binding(binding_id)
+    finally:
+        await released.close()
+
+    # Nothing is wedged: the same destination can be switched to afresh.
+    switched = await service.replace_destination(
+        _connection_input(real_unpaired_object_store),
+        actor_user_id=actor,
+    )
+    assert switched.active.bucket == real_unpaired_object_store.settings.bucket
+
+
 async def test_switch_refuses_when_the_policy_moved_during_verification(
     object_content_database: DatabaseSessionManager,
     real_object_store: RealObjectStore,
@@ -1949,6 +2138,12 @@ async def test_a_stale_revision_cannot_mutate_a_replacement_archive(
     remaining = await service.get_previous()
     assert remaining is not None
     assert remaining.revision == second.previous.revision
+    # The single-read accessor reports the retiring archive as previous and
+    # nothing pending.
+    single_previous, single_pending = await service.get_temporary_destinations()
+    assert single_pending is None
+    assert single_previous is not None
+    assert single_previous.revision == remaining.revision
     current = await service.get()
     assert current is not None
     assert current.bucket == real_object_store.settings.bucket

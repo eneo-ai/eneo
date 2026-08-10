@@ -67,7 +67,7 @@ class ObjectStoreConnections(TimestampMixin, BaseWithTableName):
             name="ck_object_store_connections_addressing_style",
         ),
         CheckConstraint(
-            "updated_by_actor IN ('migration', 'platform_admin')",
+            "updated_by_actor IN ('migration', 'storage_admin')",
             name="ck_object_store_connections_actor",
         ),
     )

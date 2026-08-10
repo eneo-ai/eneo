@@ -5,7 +5,8 @@ export function initObjectStoreConnection(client) {
   return {
     /**
      * Get the deployment-wide S3-compatible destination without credentials.
-     * Session-backed platform administrators only.
+     * Requires a session-backed user holding the storage administration
+     * permission (held by the Owner role by default).
      * @throws {EneoError}
      * @returns {Promise<import('../types/resources').ObjectStoreConnection>}
      */
@@ -82,6 +83,20 @@ export function initObjectStoreConnection(client) {
      */
     forgetPreviousDestination: async (expectedRevision) => {
       await client.fetch("/api/v1/admin/object-store-connection/previous", {
+        method: "delete",
+        params: { query: { expected_revision: expectedRevision } }
+      });
+    },
+
+    /**
+     * Abandon the pending destination attempt an interrupted or ambiguous
+     * change left behind. Bucket content is never touched.
+     * @param {number} expectedRevision
+     * @throws {EneoError}
+     * @returns {Promise<void>}
+     */
+    abandonPendingDestination: async (expectedRevision) => {
+      await client.fetch("/api/v1/admin/object-store-connection/pending", {
         method: "delete",
         params: { query: { expected_revision: expectedRevision } }
       });
