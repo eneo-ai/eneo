@@ -175,6 +175,13 @@ Release requires L1–L5 resolved or explicitly descoped by the user.
   dissolve); implement only what survives re-attribution.
 - Edit guards and compiler postconditions stay until their owner makes
   them unreachable; each CP names its deletions in advance.
+- Tests are proportional to observable risk (user directive
+  2026-08-10): when a slice deletes an invariant, repair path, or
+  behavior, the tests guarding it are part of that slice's deletion
+  list and die in the same commit. New tests pin an attributed
+  mechanism or contract — never one-per-code-path, never a sibling of
+  an existing guard. Test cleanup rides each slice; no standalone
+  test-audit slice.
 
 ### Measurement cadence
 Cohort probes (3 reps, named cohorts) per slice; full 155×3 at
