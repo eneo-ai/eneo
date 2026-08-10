@@ -1,18 +1,9 @@
 # Eneo Flows + Flow AI Builder — Master Program (living document)
 
-Status: CONVERGED GREEN — iteration 38 (max effort) returned VERDICT
-green, GREEN_LIGHT yes, MIN_SCORE 9 on program v7 after seven
-adjudication rounds (32→38, scores 7,8,8,8,8,8,9; every finding
-source-verified locally before adoption). USER SIGN-OFF: APPROVED
-2026-08-10 with the START HELD — the user launches execution
-explicitly; until then, prepare specs only. No CP1–CP5 product code
-before CP0 is frozen. Final peer cautions: if CP0 shows a
-threshold or repetition budget is infeasible, revise scope or
-architecture — never weaken thresholds after the fact; record
-zero-production-use evidence before any destructive regeneration. This file is self-contained so ANY
-coding agent can continue the program. Sibling context:
-`conformance-program-plan.md` (the detailed slice protocol and the
-full verdict ledger, same directory).
+Status: CP0 ANALYSIS COMPLETE — PRODUCT WORK HELD ON TWO DECISIONS.
+CP1–CP8 are held until the two blocking decisions in
+`cp0-matrix-freeze.md` §6a and §6b are answered. This file owns
+execution; `cp0-matrix-freeze.md` owns evidence and the gate inventory. Sibling context: `conformance-program-plan.md`.
 
 ## Mission
 
@@ -62,8 +53,12 @@ from semantic decisions still model-owned. Therefore:
   makes them unreachable.
 - Honest ceiling without the transfers: conformance plateaus ~45–55%,
   leaf instability 20–30%.
-- The free semantic proposal path remains for genuinely novel shapes,
-  with explicit observability.
+- CORRECTED BY CP0 (2026-08-10): there is NO free semantic proposal
+  path in create. `ai_builder_proposal_submission.py:422` raises
+  `architecture_materialization_failed` when no architecture is
+  committed. This bullet previously claimed such a fallback existed;
+  it never did. Any such path must be designed deliberately, not
+  assumed.
 
 ## Done ledger (checkmarks; update when a slice lands + gates)
 
@@ -91,77 +86,50 @@ from semantic decisions still model-owned. Therefore:
 - [x] User sign-off — approved 2026-08-10 (start held; launch on
       explicit go)
 
-## The Ranked Program (v7 — CONVERGED GREEN, iteration 38)
+## The Ranked Program (v7 — plan converged at 9; CP0 executed, CP1–CP8 held)
 
-### Completion contract (attempt-level; no accepted-plan denominators)
-Every eligible create attempt lands in ONE bucket of an exhaustive
-ledger: supported row (exactly one, by ordered exclusive predicates)
-or fallback → then first-pass / repaired / failed / stalled /
-provider-unknown. Thresholds are per eligible attempt, never per
-accepted plan (a death before acceptance must count against us):
-- Supported coverage ≥90% of eligible create attempts (exclusive
-  row-or-fallback assignment; the old "~90%" used an unstated
-  plan-producing denominator — corrected).
-- First-pass accepted plan ≥95% of eligible supported attempts;
-  repair attempts ≤0.05 per eligible supported attempt.
-- Normal-path semantic critic hits on supported archetypes: 0.
-- Stable explicit user obligations: zero stable failures; supported
-  conformance ≥90%; leaf flip rate ≤10%.
-- Deterministic product deaths 0; product-attributable builder errors
-  ≤1%; stalls and provider failures tracked separately (≤10/465 stays
-  only as an interim tranche target).
-- Bounded p95 provider calls, tokens, and planning latency — CP0
-  freezes LIMITS (not just baselines) from the clean-checkpoint
-  distribution.
-- OVERALL conformance ≥90% across ALL eligible attempts, independent
-  of the supported/fallback split (90% coverage × 90% supported
-  conformance alone would allow 81% overall — not excellent). The
-  fallback cohort keeps its own floor as a DIAGNOSTIC metric (CP0
-  sets it), but the overall floor is absolute.
-- Release verdict from a powered sample: CP0 freezes the power
-  calculation and release sample size; 3 repetitions stay
-  exploratory. The two full runs are planned MINIMUMS — the release
-  run repeats after the last material product change (post-CP5
-  re-attribution included), never before it.
-Scope: EXCELLENT CREATE MODE + runtime launch. Edit mode keeps its
-guards; edit excellence is a later program (explicitly out of scope).
-SURFACE-CLOSURE MILESTONE (greenfield adjudication, iteration 33):
-the end state is a CLOSED proposal contract per supported archetype —
-every ownership transfer must also remove the transferred field from
-that archetype's proposal schema. Closure is a matrix milestone, not
-a hoped-for side effect. No rewrite: compile context + assembly stay
-the migration seam.
+### Gate inventory — owned by `cp0-matrix-freeze.md` §3
+CP8 will own the release contract; this section points at the inventory
+CP8 must satisfy.
+It lives there and is authoritative. Do not restate its numbers here.
+
+TWO decisions BLOCK product work, both in `cp0-matrix-freeze.md` §6:
+(a) conformance scope — whether ≥90% expectation conformance is a
+release gate (it is currently PENDING in the registry) or a tracked
+trajectory; (b) the two unmeasured supported branches
+(`json_to_text_summary`, `audio_transcription`), which must be covered
+by cases or removed from the matrix and made to reject.
+Corpus expansion (§6c) is OPTIONAL and blocks nothing, except that a
+small attempt-proportion form of the builder-error gate would
+not be achievable at this corpus size — which is why that gate is an
+   exact zero count instead.
+
+Feasibility rule established by CP0 and binding on every future gate:
+a gate that a PERFECT product could not pass on the actual corpus is a
+broken gate, not a high bar. Audit best-case feasibility before freezing
+any threshold.
 
 ### Critical path (builder stream; each slice design-gated → worker →
 ### commit-gated → cohort probe)
-- [ ] CP0 Matrix freeze (analysis only, no product code). Ordered
-    mutually exclusive predicates with precedence for the supported
-    archetypes (current draft rows mix terminal type/topology/mode
-    and can overlap — e.g. JSON-to-artifact vs text-to-artifact vs
-    document-to-structured-report patterns in
-    `ai_builder_architecture_derivation.py:186`). Classify EVERY
-    frozen create observation into exactly one row or fallback and
-    publish the ledger; define the eligible-attempt denominator; map
-    ALL 31 invariants to impossible-and-delete / retained
-    postcondition / fallback-only (CP1–CP5 alone are not assumed to
-    reach zero hits); extract baseline p95 provider calls, tokens,
-    latency. Matrix rows get stable IDs + versions. EXPLICIT
-    DELIVERABLES (iteration 35): the power calculation + release
-    repetition count N, the p95 cost LIMITS, the fallback-cohort
-    diagnostic floor, and the absolute overall ≥90% conformance
-    floor — all frozen before any product slice implements.
-    TOLERANCE-PATH DISPOSITION (iteration 37): classify every
-    existing strip/ignore/leniency path as supported normalization /
-    fallback-only / reject / DELETE — at minimum:
-    `_CREATE_INTENT_ROOT_IGNORED_KEYS` + retired-key tolerance and
-    its test (`test_ai_builder_tools.py:116`), backend-owned step-key
-    stripping, JSON-path backwards-compat leniency
-    (`ai_builder_json_schema_paths.py:17`), and the capability
-    manifest's one-bump deprecation promise
-    (`flow_capability_manifest.py:12`). Fallback also gets its OWN
-    explicit accepted contract — it never inherits supported-row
-    exceptions. Folded into CP0; no standalone compatibility-audit
-    program.
+- [x] CP0 Matrix freeze — analysis DONE 2026-08-10 (evidence + gate
+    inventory; not a frozen statistical contract). Evidence, dispositions, corrected taxonomy and the
+    gate INVENTORY live in `cp0-matrix-freeze.md`;
+    clone-local hashed evidence packet
+    `.codex/artifacts/cp0-freeze-20260810/` (10/10 hashes verify, manifest
+    digest pinned in the record). TWO decisions block product work (§6a, §6b); then CP8 lands first,
+    and only then CP1–CP7.
+- [ ] CP8 Release-gate implementation — **FIRST slice after the two user
+    decisions, and a HARD BARRIER before CP1–CP7 and before any candidate
+    measurement** (otherwise verdict semantics could be chosen after
+    seeing product results). Implement the
+    §3 gate inventory inside `backend/scripts/ai_builder_battle_compare.py`
+    (which already owns fail-closed receipt identity), with
+    the six findings in `cp0-matrix-freeze.md` §3 — best-case
+    feasibility audit of every threshold, cluster-aware intervals that
+    cannot false-pass adverse clustering, provider detection by the
+    canonical marker with bounded slot-level re-measurement, one
+    arithmetic module with no duplicated constants, and contract tests
+    pinning the worked counterexamples.
 - [ ] CP1 File-role flip closure (TRIMMED, iteration 33). The margin
     regression IS the task-14 case (same mechanism, confirmed).
     Deepen the EXISTING merge owner `_model_file_role_can_replace`
@@ -195,6 +163,14 @@ the migration seam.
     Exit check: no create caller still invokes
     `terminal_output_type_for_conversation`. `flow_step_invalid`
     stays a separate heterogeneous family (`flow_validators.py:227`).
+- [ ] CP2b Parse-failure attribution (GATES CP3 AND CP5, added by CP0):
+    parse failures are the single largest repair driver (36 of 86) and
+    `json_to_structured_payload` is 15/15 parse. Both CP3 and CP5
+    tighten the same raw-argument seam, so neither may implement
+    before this is attributed. Instrument already exists, env-gated
+    off: set `ENEO_AI_BUILDER_REJECTED_PROPOSAL_CAPTURE_DIR`
+    (`ai_builder_proposal_capture.py:22`) and re-run the 24-obs JSON
+    cohort.
 - [ ] CP3 Runtime-input-field contract (AMENDED, iteration 33).
     `FlowInputFieldIntent` stays the field VALUE schema, but verified
     it carries no citations/confidence
@@ -256,12 +232,24 @@ the migration seam.
     NO ESCAPE HATCH (iteration 34): if the provider cannot express
     the contract, the design gate picks one of two closed outcomes —
     declared top-level placement as the canonical product rule, or
-    classifying that shape as observable fallback. The critic may
+    classifying that shape as OUT of the supported matrix (there is no
+    free fallback in create — CP0 §2), with the branch made to reject
+    explicitly. The critic may
     survive only as a compiler POSTCONDITION (defect detector), never
     as a normal repair owner on a supported archetype.
+- [ ] CP6 Authoring/runtime template-path parity (RELEASE-CRITICAL,
+    added by CP0): authoring accepts an unindexed array path
+    (`ai_builder_json_schema_paths.py:13`) that the runtime rejects
+    (`variable_resolver.py:373`), so the builder can ship a template
+    that fails at execution. Acceptance = parity between the two.
+- [ ] CP7 `flow_step_invalid` decomposition (added by CP0): 22 of 38
+    validation repair triggers. Heterogeneous by ruling and dominant
+    in fact; attribute per inner code before claiming the repair tax
+    is owned.
 - [ ] Ownership-tranche gate: exploratory 155×3 checkpoint after
-    CP1–CP3 land. The release gate is a separate POWERED 155×N run
-    (N from CP0's MDE calculation), repeated after every material
+    CP1–CP3 land. The release gate is a separate N=5 release
+    evaluation (CP0 established that repetitions supply instability
+    DETECTION, not certification power), repeated after every material
     post-gate change.
 - [ ] Post-CP5 re-attribution loop: rerun attribution and continue
     ownership transfers until the completion contract passes — the
@@ -383,10 +371,11 @@ analysis overlap. Lanes that can run AT THE SAME TIME:
 - Lane B (builder code): CP1 (owner: `planning_state_builder.py`
   merge guard) and CP2 step 2 (owners: create proposal/preparation)
   touch DISJOINT files — separate worker worktrees in parallel once
-  their design gates pass; land in sequence. HARD BARRIER (iteration
-  36): NO CP1–CP5 product code starts until CP0 is frozen — the
-  success criteria are pre-registered before implementation, never
-  after. Analysis (Lane A) and runtime (Lane D) run during CP0.
+  their design gates pass; land in sequence. HARD BARRIERS: no CP1–CP7
+  product code starts until (a) CP0's two user decisions are answered
+  and (b) CP8 has landed, so verdict semantics are pre-registered in
+  code before any product change or candidate measurement. Analysis
+  (Lane A) and the runtime stream (Lane D) may proceed meanwhile.
 - Lane C (early design gates): CP5's provider strict-tool probe and
   placement decision need no code and can be adjudicated while Lane B
   implements; CP3's delta-envelope design gate needs only CP0's
@@ -394,17 +383,17 @@ analysis overlap. Lanes that can run AT THE SAME TIME:
 - Lane D (runtime stream): L1a–L1c and L2–L5 are fully parallel with ALL builder
   work — different files, own peer session
   (`flows-runtime-readiness`), own worker worktrees.
-Dependencies that stay hard: CP0 frozen before ANY CP1–CP5 product
-code (pre-registration integrity) and before the completion-contract
-verdicts; CP2 step 1 before
+Dependencies that stay hard: CP0 + the two user decisions + CP8 before
+ANY CP1–CP7 product code (pre-registration integrity); CP2 step 1 before
 CP2 step 2; CP4 attribution before any CP4 fix; the tranche 155×3
 after CP1–CP3 land. One live worker per session name; the
 orchestrator judges every diff and owns all git.
 
 ### Measurement cadence
 Cohort probes (3 reps, named cohorts) per slice; exploratory 155×3 at
-the tranche gate; POWERED 155×N (N from CP0) at the release gate,
-repeated after every material post-gate change; suite runs ≥45 min
+the tranche gate; the N=5 release evaluation at the release gate
+(detection power, not certification power), repeated after every
+material post-gate change; suite runs ≥45 min
 apart (provider limits).
 
 ## Operating protocol (for any agent continuing this)
@@ -458,3 +447,15 @@ apart (provider limits).
    launch; L4 stays dormant until the user opts in later.
 3. ~~Sign-off~~ — APPROVED 2026-08-10, start held: execution begins
    only on the user's explicit go.
+4. BLOCKING (CP0 §6a) — conformance scope: is ≥90% expectation
+   conformance a release gate or a tracked trajectory? It is 36.6%
+   today. An optimistic current-ledger projection crosses 90% only
+   after ~14 attributed check families, several unowned; real scope is
+   larger because fixes make currently unevaluable checks apply. The
+   registry marks this metric PENDING until answered.
+5. BLOCKING (CP0 §6b) — the two unmeasured supported branches
+   (`json_to_text_summary`, `audio_transcription`): cover them with
+   cases, or remove them from the supported matrix and make them
+   reject. With no create fallback, they would otherwise ship untested.
+6. OPTIONAL (CP0 §6c) — corpus expansion: precision only; blocks
+   nothing.

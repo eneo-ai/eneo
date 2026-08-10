@@ -436,9 +436,11 @@ metadata contract (never prose parsing), compiled through the existing
 hints path, deleting the prompt block and create-repair ownership;
 retires the create-mode responsibility of four form-field invariants.
 (4) Broad document-report skeleton compilation deferred until the
-semantic stage sequence has a typed owner. (5) The free semantic
-proposal path stays for unmatched workflows with explicit
-observability. (6) Honest A-alone ceiling recorded: conformance
+semantic stage sequence has a typed owner. (5) SUPERSEDED BY CP0 (2026-08-10): there is no free semantic
+proposal path in create — `ai_builder_proposal_submission.py:422`
+raises `architecture_materialization_failed` without a committed
+architecture. Unmatched workflows must be covered by cases or made to
+reject; see `cp0-matrix-freeze.md` §2 and §6b. (6) Honest A-alone ceiling recorded: conformance
 plateaus ~45–55%, leaf instability 20–30% — the ownership-transfer
 phases are how we exceed it. Prerequisite before the first slice:
 inner-code cross-tab of the 9 invalid-plan + 7 quality-failure
