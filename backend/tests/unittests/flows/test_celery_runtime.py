@@ -30,6 +30,7 @@ from eneo.flows.runtime.celery_execution_backend import (
     FLOW_EXECUTE_TASK_NAME,
     CeleryFlowExecutionBackend,
 )
+from eneo.main.config import Settings
 
 EXPECTED_FLOW_CELERY_TASKS = {
     "flows.execute",
@@ -518,22 +519,30 @@ def test_flow_worker_cli_app_path_loads_registered_flow_tasks():
     assert EXPECTED_FLOW_CELERY_TASKS <= set(celery_app.tasks)
 
 
+def _worker_settings(base: Settings, **overrides: object) -> Settings:
+    """Validated Settings double seeded by the isolated fixture.
+
+    `model_validate` re-runs validation, so a new required field or a
+    wrong type fails here instead of drifting silently; `model_copy`
+    would skip it.
+    """
+    return Settings.model_validate({**base.model_dump(), **overrides})
+
+
 def test_flow_worker_cli_runs_preflight_then_installed_package_celery_app(
     monkeypatch: pytest.MonkeyPatch,
+    test_settings: Settings,
 ):
     cli_module = importlib.import_module("eneo.flows.runtime.cli")
     calls: list[str | tuple[str, str, list[str]]] = []
-    monkeypatch.setattr(
-        cli_module,
-        "get_settings",
-        lambda: SimpleNamespace(
-            flow_celery_queue="flows.custom",
-            flow_celery_worker_queues=None,
-            flow_celery_worker_concurrency=3,
-            db_pool_size=7,
-            db_pool_max_overflow=2,
-        ),
+    settings = _worker_settings(
+        test_settings,
+        flow_celery_queue="flows.custom",
+        flow_celery_worker_concurrency=3,
+        db_pool_size=7,
+        db_pool_max_overflow=2,
     )
+    monkeypatch.setattr(cli_module, "get_settings", lambda: settings)
     monkeypatch.setattr(cli_module, "get_loglevel", lambda: 10)
     monkeypatch.setattr(
         cli_module.celery_preflight,
@@ -569,42 +578,57 @@ def test_flow_worker_cli_runs_preflight_then_installed_package_celery_app(
     )
 
 
-def test_flow_worker_cli_uses_worker_queue_override(monkeypatch: pytest.MonkeyPatch):
+def test_flow_worker_cli_maintenance_role_uses_configured_maintenance_queue(
+    monkeypatch: pytest.MonkeyPatch,
+    test_settings: Settings,
+):
+    """The role resolves through the settings, so renaming the queue follows."""
     cli_module = importlib.import_module("eneo.flows.runtime.cli")
-    monkeypatch.setattr(
-        cli_module,
-        "get_settings",
-        lambda: SimpleNamespace(
-            flow_celery_queue="flows.execute",
-            flow_celery_worker_queues="flows.maintenance",
-            flow_celery_worker_concurrency=2,
-            db_pool_size=6,
-            db_pool_max_overflow=1,
-        ),
+    settings = _worker_settings(
+        test_settings,
+        flow_celery_worker_role="maintenance",
+        flow_celery_maintenance_queue="flows.maintenance.renamed",
     )
+    monkeypatch.setattr(cli_module, "get_settings", lambda: settings)
     monkeypatch.setattr(cli_module, "get_loglevel", lambda: 20)
 
     assert cli_module._flow_worker_argv()[-2:] == [
         "--queues",
-        "flows.maintenance",
+        "flows.maintenance.renamed",
+    ]
+
+
+def test_flow_worker_cli_execute_role_uses_configured_execute_queue(
+    monkeypatch: pytest.MonkeyPatch,
+    test_settings: Settings,
+):
+    cli_module = importlib.import_module("eneo.flows.runtime.cli")
+    settings = _worker_settings(
+        test_settings,
+        flow_celery_worker_role="execute",
+        flow_celery_queue="flows.execute.renamed",
+    )
+    monkeypatch.setattr(cli_module, "get_settings", lambda: settings)
+    monkeypatch.setattr(cli_module, "get_loglevel", lambda: 20)
+
+    assert cli_module._flow_worker_argv()[-2:] == [
+        "--queues",
+        "flows.execute.renamed",
     ]
 
 
 def test_flow_worker_cli_uses_configured_bounded_concurrency(
     monkeypatch: pytest.MonkeyPatch,
+    test_settings: Settings,
 ):
     cli_module = importlib.import_module("eneo.flows.runtime.cli")
-    monkeypatch.setattr(
-        cli_module,
-        "get_settings",
-        lambda: SimpleNamespace(
-            flow_celery_queue="flows.execute",
-            flow_celery_worker_queues=None,
-            flow_celery_worker_concurrency=3,
-            db_pool_size=7,
-            db_pool_max_overflow=2,
-        ),
+    settings = _worker_settings(
+        test_settings,
+        flow_celery_worker_concurrency=3,
+        db_pool_size=7,
+        db_pool_max_overflow=2,
     )
+    monkeypatch.setattr(cli_module, "get_settings", lambda: settings)
     monkeypatch.setattr(cli_module, "get_loglevel", lambda: 20)
 
     argv = cli_module._flow_worker_argv()

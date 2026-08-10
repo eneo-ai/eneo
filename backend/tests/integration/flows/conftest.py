@@ -456,7 +456,6 @@ async def flow_broker_worker_seam(
                 "redis_db_auth_broker": 3,
                 "flow_celery_queue": queue_name,
                 "flow_celery_maintenance_queue": queue_name,
-                "flow_celery_worker_queues": queue_name,
                 "flow_task_timeout_seconds": _FLOW_TASK_TIMEOUT_SECONDS,
                 "celery_visibility_timeout_seconds": (_FLOW_VISIBILITY_TIMEOUT_SECONDS),
             }
@@ -542,7 +541,6 @@ def _flow_worker_environment(*, settings: Settings, queue_name: str) -> dict[str
             "REDIS_DB_AUTH_BROKER": str(settings.redis_db_auth_broker),
             "FLOW_CELERY_QUEUE": queue_name,
             "FLOW_CELERY_MAINTENANCE_QUEUE": queue_name,
-            "FLOW_CELERY_WORKER_QUEUES": queue_name,
             "FLOW_TASK_TIMEOUT_SECONDS": str(_FLOW_TASK_TIMEOUT_SECONDS),
             "CELERY_VISIBILITY_TIMEOUT_SECONDS": str(_FLOW_VISIBILITY_TIMEOUT_SECONDS),
             "FLOW_MAX_INLINE_TEXT_BYTES": str(settings.flow_max_inline_text_bytes),

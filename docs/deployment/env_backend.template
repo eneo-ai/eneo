@@ -379,9 +379,12 @@ FLOW_CELERY_MAINTENANCE_QUEUE=flows.maintenance
 # Each prefork child owns a database pool, so maximum worker demand is
 # FLOW_CELERY_WORKER_CONCURRENCY × (DB_POOL_SIZE + DB_POOL_MAX_OVERFLOW).
 FLOW_CELERY_WORKER_CONCURRENCY=4
-# Optional worker subscription override. Leave unset for the execute worker;
-# set to flows.maintenance on the dedicated maintenance worker.
-# FLOW_CELERY_WORKER_QUEUES=flows.execute
+# Do not set FLOW_CELERY_WORKER_ROLE here. Both worker services declare their
+# role in docker-compose.yml, and a per-service value overrides this file, so a
+# value set here has NO effect on them - it would only mislead, and it would
+# apply to any future role that forgets to declare one. The role resolves to
+# the queue names above, which are their single owner, so renaming a queue
+# follows automatically. There is no queue-name override for the same reason.
 FLOW_TASK_TIMEOUT_SECONDS=3600
 CELERY_VISIBILITY_TIMEOUT_SECONDS=7200
 

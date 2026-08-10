@@ -396,12 +396,19 @@ tests die with their owners, no splits for their own sake.
 - [ ] L1a Topology verification (SPLIT + TRIMMED, iteration 34): the
     release artifact `docs/deployment/docker-compose.yml` already
     owns the three roles (execute, maintenance with
-    `FLOW_CELERY_WORKER_QUEUES=flows.maintenance`, beat) with
+    `FLOW_CELERY_WORKER_ROLE=maintenance`, beat) with
     `restart: unless-stopped` — verify rather than build. Remaining
-    deltas only: beat singleton by construction and one source of
-    truth for queue names shared by producer and consumer config (the
-    orphan incident was consumer-topology drift). ALL healthchecks —
-    container-native and operator surfaces — belong to L3 alone.
+    deltas only:
+    (a) QUEUE-NAME OWNERSHIP — one source of truth shared by producer
+        and consumer config; the orphan incident was consumer-topology
+        drift. Deployment declares a per-service ROLE and the settings
+        own the names.
+    (b) BEAT SINGLETON — NOT A GOAL of this slice and nothing is
+        claimed about it: `container_name` only prevents a collision
+        within one compose project, so a real guard (lease or advisory
+        lock) needs its own design.
+    ALL healthchecks — container-native and operator surfaces — belong
+    to L3 alone.
     Devcontainer parity (three roles instead of `sleep infinity`) is
     developer ergonomics under the scoped 2026-08-10 permission — off
     the release critical path.
@@ -575,7 +582,7 @@ apart (provider limits).
   exact SHA, restart backend with fresh `GIT_COMMIT`, verify
   `/version`; celery via `cd /workspace/backend && bash run.sh` inside
   the worker/beat containers (maintenance consumer:
-  `FLOW_CELERY_WORKER_QUEUES=flows.maintenance`); NEVER bare
+  `FLOW_CELERY_WORKER_ROLE=maintenance`); NEVER bare
   `docker restart` (kills the processes; safe pkill pattern
   `[b]in/celery`). Postgres max_connections=300 is a
   TEMPORARY measurement-environment value (volume-local); never

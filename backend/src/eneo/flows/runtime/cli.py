@@ -2,11 +2,14 @@ from __future__ import annotations
 
 import logging
 import os
-from typing import NoReturn
+from typing import TYPE_CHECKING, NoReturn
 
 from eneo.flows.runtime import celery_preflight
 from eneo.main.config import get_loglevel, get_settings
 from eneo.main.logging import get_logger
+
+if TYPE_CHECKING:
+    from eneo.main.config import Settings
 
 # Celery task registration is per app instance; `src.eneo...` creates
 # a second app with no Flow tasks registered.
@@ -19,9 +22,23 @@ def _celery_loglevel() -> str:
     return logging.getLevelName(get_loglevel())
 
 
+def _flow_worker_queues(settings: "Settings") -> str:
+    """Resolve which queues this worker consumes from its declared role.
+
+    Deployment declares a ROLE, never a queue name: the two queue-name
+    settings are the single owner, so renaming a queue cannot leave a
+    worker subscribed to the old name while beat schedules onto the new
+    one. There is deliberately no name override — the environment file is
+    shared by every role, so an override would apply to all of them.
+    """
+    if settings.flow_celery_worker_role == "maintenance":
+        return settings.flow_celery_maintenance_queue
+    return settings.flow_celery_queue
+
+
 def _flow_worker_argv() -> list[str]:
     settings = get_settings()
-    worker_queues = settings.flow_celery_worker_queues or settings.flow_celery_queue
+    worker_queues = _flow_worker_queues(settings)
     per_process_budget = settings.db_pool_size + settings.db_pool_max_overflow
     logger.info(
         "Flow worker database connection budget: %s processes * "

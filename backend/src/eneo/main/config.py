@@ -4,7 +4,7 @@ import os
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional
+from typing import Literal, Optional
 from urllib.parse import urlparse
 
 from pydantic import Field, computed_field, field_validator, model_validator
@@ -306,7 +306,12 @@ class Settings(BaseSettings):
     flow_max_concurrent_runs_per_tenant: int = 4
     flow_celery_queue: str = "flows.execute"
     flow_celery_maintenance_queue: str = "flows.maintenance"
-    flow_celery_worker_queues: str | None = None
+    # Deployment declares the ROLE; the two queue-name settings above are the
+    # single owner of the names, so renaming a queue cannot leave a worker
+    # subscribed to the old one. There is deliberately NO queue-name override:
+    # this file is shared by every role, so an override would apply to all of
+    # them and could strand the maintenance queue with no consumer.
+    flow_celery_worker_role: Literal["execute", "maintenance"] = "execute"
     flow_celery_worker_concurrency: int = 4
     flow_task_timeout_seconds: int = 3600
     celery_visibility_timeout_seconds: int = 7200
