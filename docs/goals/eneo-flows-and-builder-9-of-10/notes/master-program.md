@@ -1,9 +1,9 @@
 # Eneo Flows + Flow AI Builder — Master Program (living document)
 
-Status: CONVERGING — iterations 32 (7), 33 (8), 34 (8, all max
-effort) returned changes_required; every finding was source-verified
-locally and absorbed. This file is now program v4; iteration 35
-(max effort, min-score 9) adjudicates it. No implementation until
+Status: CONVERGING — iterations 32 (7), 33 (8), 34 (8), 35 (8, all
+max effort) returned changes_required; every finding was source-verified
+locally and absorbed, as were iteration 35's. This file is now
+program v5; iteration 36 (max effort, min-score 9) adjudicates it. No implementation until
 convergence, then user sign-off. This file is self-contained so ANY
 coding agent can continue the program. Sibling context:
 `conformance-program-plan.md` (the detailed slice protocol and the
@@ -139,7 +139,11 @@ the migration seam.
     ALL 31 invariants to impossible-and-delete / retained
     postcondition / fallback-only (CP1–CP5 alone are not assumed to
     reach zero hits); extract baseline p95 provider calls, tokens,
-    latency. Matrix rows get stable IDs + versions.
+    latency. Matrix rows get stable IDs + versions. EXPLICIT
+    DELIVERABLES (iteration 35): the power calculation + release
+    repetition count N, the p95 cost LIMITS, the fallback-cohort
+    diagnostic floor, and the absolute overall ≥90% conformance
+    floor — all frozen before any product slice implements.
 - [ ] CP1 File-role flip closure (TRIMMED, iteration 33). The margin
     regression IS the task-14 case (same mechanism, confirmed).
     Deepen the EXISTING merge owner `_model_file_role_can_replace`
@@ -187,15 +191,17 @@ the migration seam.
     derived view; placement defaults to the archetype's one
     deterministic consumer; semantic purpose only for evidence-backed
     multi-consumer cases; never leak physical `PlannedStepRole`
-    upstream. HARD DEPENDENCY (iteration 34): before CP3 removes
-    fields, pull forward ONE archetype-aware proposal-schema
-    materializer — a single function whose output is passed through
-    the existing `ProposalTurnContext`
-    (`ai_builder_proposal_tool_contracts.py:331`) and used verbatim
-    by BOTH token budgeting
-    (`ai_builder_planner_request_preparation.py:463`) and submission
-    (`ai_builder_proposal_submission.py:171`); CP3 and CP5 both
-    consume it and neither invents its own schema adaptation. Then
+    upstream. HARD DEPENDENCY (iterations 34+35): before CP3
+    removes fields, pull forward ONE archetype-aware proposal-schema
+    materializer with the CORRECT carrier lifecycle (verified:
+    budgeting finishes before `ProposalTurnContext` exists, and
+    `ProposalPrepared` carries no schema today) — materialize once
+    during preparation, store the schema on `ProposalPrepared`
+    (`ai_builder_planner_request_preparation.py:171`), pass it into
+    submission, and set it on `ProposalTurnContext` for the initial
+    and repair calls; DELETE `_active_submission_tool_schemas`
+    (`ai_builder_proposal_submission.py:164`). CP3 and CP5 both
+    consume this one schema; neither invents its own adaptation. Then
     delete the prompt's mechanical form-field block, the create
     repair mapping, and create-mode responsibility of the four
     form-field invariants (edit guards stay), and remove
@@ -378,8 +384,10 @@ apart (provider limits).
   the worker/beat containers (maintenance consumer:
   `FLOW_CELERY_WORKER_QUEUES=flows.maintenance`); NEVER bare
   `docker restart` (kills the processes; safe pkill pattern
-  `[b]in/celery`). Postgres max_connections=300 (volume-local — make
-  durable per 3.1). Evidence packets:
+  `[b]in/celery`). Postgres max_connections=300 is a
+  TEMPORARY measurement-environment value (volume-local); never
+  promote it — L1c derives and owns the calculated launch envelope.
+  Evidence packets:
   `/workspace/.codex/artifacts/slice2-evidence-manifest-20260810/`
   (self-replaying, hashed) and `evidence-freeze-20260809/`.
 - Night window: no work 01:00–06:00 Stockholm (Codex included; no
