@@ -56,27 +56,52 @@ from semantic decisions still model-owned. Therefore:
 - The free semantic proposal path remains for genuinely novel shapes,
   with explicit observability.
 
+## Done ledger (checkmarks; update when a slice lands + gates)
+
+- [x] Deterministic death families closed (commit-drift, critic
+      intent, confirmation loop, evidence churn, lint_warnings,
+      citations degrade, critic false-kill/ancestry, model-ref
+      degrade) — deaths 50→27 across three checkpoints
+- [x] Slice 1 frozen evidence packet + Slice 2 leaf attribution
+      (unique grain, stability separated)
+- [x] Slice 3 rubric corrections (11 deletions + 30 receipt-verified
+      aliases; 25-case rescored discipline proven in comparator)
+- [x] Slice 5 commit 1: NamedResultEvidence representation (six
+      hardening rounds; schema v17/v20)
+- [x] Depth cap 3→4 with publish-gate + runtime proof
+- [x] Document-report assembly split (4 concerns, AST-verified)
+- [x] Production compose network P0 + isolation note
+- [x] Crash recovery proven through the scheduled path (`6559ef503`)
+- [x] One-record-per-source runtime contract (`0b45457bd`)
+- [x] Database connection budget bounded + logged (`2e0a4dced`)
+- [x] Measurement instrument hardened (sentinel checks executable +
+      case-gated; comparator case-local waiver; frozen baselines)
+- [x] Architecture verdict adopted (Pass 31) + shape-coverage and
+      repair cross-tab evidence
+- [ ] Program convergence (iteration 32+ running, min-score 9)
+- [ ] User sign-off on the converged program
+
 ## The Ranked Program (v1 — being converged; update on each pass)
 
 ### Tier 1 — Ownership transfers (quality + architecture)
-1.1 Runtime-input-field contract compilation. Typed field declarations
+- [ ] 1.1 Runtime-input-field contract compilation. Typed field declarations
     + semantic consumer in the classifier/metadata contract (never
     prose parsing) → existing hints path
     (`ai_builder_create_compiler.py:940,1100`) → delete the prompt
     block + create-repair ownership → retires create-mode
     responsibility of the four form-field invariants. FREEZE THE TYPED
     CONTRACT FIRST; design-gate before code.
-1.2 Terminal-shape ownership. terminal_output_type_mismatch (6 obs)
+- [ ] 1.2 Terminal-shape ownership. terminal_output_type_mismatch (6 obs)
     despite a committed terminal slot — attribute why proposals can
     mismatch, then make it inexpressible (intent schema) or
     compile-time-corrected (assembly).
-1.3 Named-result completion for JSON terminals (the 9/9 failing
+- [ ] 1.3 Named-result completion for JSON terminals (the 9/9 failing
     probes): compiled terminal contract consumes
     `named_result_obligations` where no declared schema owns the
     terminal; via the existing projection; after 2.1.
 
 ### Tier 2 — Classifier correctness (runs FIRST; foundation)
-2.1 Diagnostics tranche: (a) partial named-result emission (4 JSON
+- [ ] 2.1 Diagnostics tranche: (a) partial named-result emission (4 JSON
     cases); (b) file-role flip regression — re-classification
     downgrades an explicit-quote-backed role 3/3 (candidate invariant:
     explicit-evidence roles are sticky absent new contradicting
@@ -84,41 +109,41 @@ from semantic decisions still model-owned. Therefore:
     added question round in the same case.
 
 ### Tier 3 — Launch operability (runtime stream, parallel)
-3.1 Durable topology: `.devcontainer` three-role compose + tracked
+- [ ] 3.1 Durable topology: `.devcontainer` three-role compose + tracked
     max_connections (USER PERMISSION PENDING — path is on the user's
     protected list) + clean-volume recreation proof.
-3.2 Provider throttling: fail-fast + typed provider-throttled
+- [ ] 3.2 Provider throttling: fail-fast + typed provider-throttled
     diagnosis + operator/user guidance (adjudicated; NO flow-level
     retry loop).
-3.3 Health: execution-consumer presence + beat freshness on the
+- [ ] 3.3 Health: execution-consumer presence + beat freshness on the
     existing operator surface; deployment-native healthchecks for
     celery services. No new public liveness endpoint.
-3.4 Object-content scope (USER DECISION): if bundled storage is in
+- [ ] 3.4 Object-content scope (USER DECISION): if bundled storage is in
     launch scope, attach celery-worker-flows to object_content_net +
     prove one read/write journey.
-3.5 Launch receipt: pool-budget arithmetic vs SHOW max_connections
+- [ ] 3.5 Launch receipt: pool-budget arithmetic vs SHOW max_connections
     under bounded load + one queue-recovery smoke at launch
     concurrency.
 
 ### Tier 4 — Maintainability / clean architecture (split-when-touched)
 Adjudicated rulings (runtime pass 2 + builder passes 24/30/31):
-4.1 `planning_state_builder.py` split (3 owners + facade) AFTER Tier 1
+- [ ] 4.1 `planning_state_builder.py` split (3 owners + facade) AFTER Tier 1
     settles — Tier 1 rewrites its evidence lifecycle again.
-4.2 `step_input_resolution.py` split when 1.3/Slice-6 touches it
+- [ ] 4.2 `step_input_resolution.py` split when 1.3/Slice-6 touches it
     (seams: orchestration / source-ref projection / file extraction /
     overflow rules; its deps object erases owners to Any — fix then).
-4.3 `step_execution_runtime.py` provider-call seam only if 3.2 changes
+- [ ] 4.3 `step_execution_runtime.py` provider-call seam only if 3.2 changes
     provider behavior.
-4.4 `executor.py`: DO NOT SPLIT (cohesive around one run transaction).
-4.5 `flow_run_repo.py`: future read-only evidence repository seam;
+- [ ] 4.4 `executor.py`: DO NOT SPLIT (cohesive around one run transaction).
+- [ ] 4.5 `flow_run_repo.py`: future read-only evidence repository seam;
     wait. `flow_models.py`: local fixes only; no 24-importer split.
-4.6 `field_diagnostics` → `compile_diagnostics` rename at next touch.
-4.7 Slice-5 commit 2 (non-JSON seam completion; 10-obs cohort) —
+- [ ] 4.6 `field_diagnostics` → `compile_diagnostics` rename at next touch.
+- [ ] 4.7 Slice-5 commit 2 (non-JSON seam completion; 10-obs cohort) —
     re-verify cohort post-commit-1; may fold into 1.3's shadow.
-4.8 JSON fan-in (reworked template-fill route) after 1.2.
+- [ ] 4.8 JSON fan-in (reworked template-fill route) after 1.2.
 
 ### Sequencing
-2.1 → 1.1 → 1.2 → 1.3 (builder stream, each design-gated then
+- [ ] 2.1 → 1.1 → 1.2 → 1.3 (builder stream, each design-gated then
 commit-gated), Tier 3 parallel (runtime stream, own peer session),
 Tier 4 rides whichever slice touches its file. Cohort probes (3 reps)
 per slice; full 155×3 at tier boundaries; suite runs ≥45 min apart
