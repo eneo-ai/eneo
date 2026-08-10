@@ -1,9 +1,9 @@
 # Eneo Flows + Flow AI Builder — Master Program (living document)
 
-Status: CONVERGING — iterations 32 (7), 33 (8), 34 (8), 35 (8), 36 (8,
-all max effort) returned changes_required; every finding was source-verified
-locally and absorbed through iteration 36. This file is now
-program v6; iteration 37 (max effort, min-score 9) adjudicates it. No implementation until
+Status: CONVERGING — iterations 32 (7), 33 (8), 34 (8), 35 (8), 36 (8), 37
+(8, all max effort) returned changes_required; every finding was source-verified
+locally and absorbed through iteration 37. This file is now
+program v7; iteration 38 (max effort, min-score 9) adjudicates it. No implementation until
 convergence, then user sign-off. This file is self-contained so ANY
 coding agent can continue the program. Sibling context:
 `conformance-program-plan.md` (the detailed slice protocol and the
@@ -85,7 +85,7 @@ from semantic decisions still model-owned. Therefore:
 - [ ] Program convergence (iteration 32+ running, min-score 9)
 - [ ] User sign-off on the converged program
 
-## The Ranked Program (v6 — after iteration 36; under adjudication)
+## The Ranked Program (v7 — after iteration 37; under adjudication)
 
 ### Completion contract (attempt-level; no accepted-plan denominators)
 Every eligible create attempt lands in ONE bucket of an exhaustive
@@ -144,6 +144,18 @@ the migration seam.
     repetition count N, the p95 cost LIMITS, the fallback-cohort
     diagnostic floor, and the absolute overall ≥90% conformance
     floor — all frozen before any product slice implements.
+    TOLERANCE-PATH DISPOSITION (iteration 37): classify every
+    existing strip/ignore/leniency path as supported normalization /
+    fallback-only / reject / DELETE — at minimum:
+    `_CREATE_INTENT_ROOT_IGNORED_KEYS` + retired-key tolerance and
+    its test (`test_ai_builder_tools.py:116`), backend-owned step-key
+    stripping, JSON-path backwards-compat leniency
+    (`ai_builder_json_schema_paths.py:17`), and the capability
+    manifest's one-bump deprecation promise
+    (`flow_capability_manifest.py:12`). Fallback also gets its OWN
+    explicit accepted contract — it never inherits supported-row
+    exceptions. Folded into CP0; no standalone compatibility-audit
+    program.
 - [ ] CP1 File-role flip closure (TRIMMED, iteration 33). The margin
     regression IS the task-14 case (same mechanism, confirmed).
     Deepen the EXISTING merge owner `_model_file_role_can_replace`
@@ -200,8 +212,17 @@ the migration seam.
     (`ai_builder_planner_request_preparation.py:171`), pass it into
     submission, and set it on `ProposalTurnContext` for the initial
     and repair calls; DELETE `_active_submission_tool_schemas`
-    (`ai_builder_proposal_submission.py:164`). CP3 and CP5 both
-    consume this one schema; neither invents its own adaptation. Then
+    (`ai_builder_proposal_submission.py:164`). The SAME schema (same
+    hash) serves THREE consumers — token budgeting, provider
+    submission (initial AND repair), and SERVER-SIDE validation of
+    the raw tool arguments BEFORE normalization (iteration 37: today
+    the parser normalizes first, silently dropping retired root keys
+    via `_CREATE_INTENT_ROOT_IGNORED_KEYS`
+    (`ai_builder_proposal_intent.py:77`) and stripping backend-owned
+    step keys (`:505`) — a closed surface that still strips is not
+    closed; a supported-row payload carrying an excluded field must
+    FAIL). CP3 and CP5 both consume this one schema; neither invents
+    its own adaptation. Then
     delete the prompt's mechanical form-field block, the create
     repair mapping, and create-mode responsibility of the four
     form-field invariants (edit guards stay), and remove
@@ -310,16 +331,22 @@ user opts object storage in) or explicitly descoped by the user.
 
 ### Standing rulings — NOT slices (adjudicated; apply when touched)
 - PRERELEASE — NO COMPATIBILITY (user directive, restated
-  2026-08-10): Flows and the Flow AI Builder have zero production
-  users. No legacy paths, no backwards-compatibility shims, no
-  deprecation cycles, no feature flags or rollout scaffolding, no
-  version-keyed branches. When a transfer lands, the old path is
-  DELETED in the same slice, not retired gradually. Bigger refactors
-  are affordable when they remove real complexity — the constraint is
-  clean ownership, not continuity. Persisted prerelease data may be
-  regenerated instead of migrated (the frozen evidence packet stays
-  readable offline for attribution, which is analysis, not a product
-  compatibility obligation).
+  2026-08-10; SCOPED in iteration 37): Flows and the Flow AI Builder
+  have zero production users. No legacy paths, no
+  backwards-compatibility shims, no deprecation cycles, no feature
+  flags or rollout scaffolding, no version-keyed COMPATIBILITY
+  readers/branches for prerelease Flow/Builder data. When a transfer
+  lands, the old path is DELETED in the same slice, not retired
+  gradually. Bigger refactors are affordable when they remove real
+  complexity — the constraint is clean ownership, not continuity.
+  Persisted prerelease data may be regenerated instead of migrated
+  (the frozen evidence packet stays readable offline for
+  attribution — analysis, not a product obligation), with
+  zero-production-use evidence recorded before any destructive
+  regeneration. EXPLICITLY PRESERVED (not compatibility): immutable
+  published Flow versions (core domain invariant), FCM/protocol
+  version stamps as identity, operational rollback, and the
+  repository's protected historical-job reader (AGENTS.md).
 - `planning_state_builder.py` split (3 owners + facade) only AFTER the
   ownership tranche settles. `step_input_resolution.py` splits when
   CP5 touches it. `step_execution_runtime.py` provider seam only if
