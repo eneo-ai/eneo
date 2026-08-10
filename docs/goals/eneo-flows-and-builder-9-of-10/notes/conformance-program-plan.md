@@ -508,17 +508,24 @@ without recording why.
 **Rationale:** Slice 5 changes cross-step runtime behavior, and compiled
 shape alone cannot prove that. Today 5 of 122 cases apply and 1 executes.
 
-**Adopted sentinel assertions (Pass 25, recorded Pass 26):** every
-sentinel repetition after Slice 5 commit 1 must additionally assert
-(a) cited named-result evidence persisted in the session's planning
-state, and (b) the compiled/public plan shape is unchanged against the
-frozen baseline receipts (`sentinel-baseline-c71fa78-v3`,
-`SENTINEL_BASELINE_SHA256SUMS`). Runtime delivery alone does not prove
-the representation behavior. All three-repetition runs — sentinel,
-targeted probes, and the full 155×3 checkpoint — are exploratory /
-checkpoint-grade evidence per this plan's verification protocol; no
-incidence claim graduates beyond that without an interval able to
-resolve the predeclared MDE.
+**Adopted sentinel assertions (Pass 25; made executable and corrected
+Pass 27):** every sentinel repetition after Slice 5 commit 1 must
+assert, via harness checks (not manual inspection): (a) cited
+named-result evidence persisted in the session's planning diagnostics,
+and (b) a predeclared structural INVARIANT VECTOR — terminal output
+type and mode, renderer and per-source reader presence, step count
+within the case's declared bounds — never cross-run plan equality,
+which model variance invalidates. Causal public-shape parity is owned
+solely by the deterministic paired compile test
+(`test_ai_builder_create_compiler_contract.py`, before/after
+representative intents). The frozen baseline receipts
+(`sentinel-baseline-c71fa78-v3`, hashed) remain the runtime-delivery
+comparison. All three-repetition runs — sentinel, targeted probes, and
+the full 155×3 checkpoint — are exploratory / checkpoint-grade
+evidence; no incidence claim graduates beyond that without an interval
+able to resolve the predeclared MDE. The sentinel-assertion checks are
+a declared instrument change: subsequent comparisons state
+`--allow-harness-change`.
 
 ---
 
