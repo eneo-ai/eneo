@@ -38,6 +38,12 @@ depends_on: str | Sequence[str] | None = None
 _BINDINGS = "object_store_bindings"
 _CONNECTIONS = "object_store_connections"
 _STATE = "object_content_reconciliation_state"
+#: Candidate ownership tokens are drawn from this sequence, never from a
+#: per-row counter: the temporary row is deleted whenever an attempt is
+#: abandoned, and a restarting counter would re-issue a live token to a
+#: later, unrelated attempt. The sequence therefore outlives both the row
+#: and this schema.
+_CANDIDATE_REVISION_SEQUENCE = "object_store_candidate_revision_seq"
 
 
 def upgrade() -> None:
@@ -96,6 +102,12 @@ def upgrade() -> None:
     # the later contract migration owns their removal explicitly. A later
     # release drops them once no running code reads them.
 
+    # Deliberately standalone and IF NOT EXISTS: the allocator must outlive
+    # this schema. A downgrade leaves it behind (see below), so a re-upgrade
+    # continues where it stopped instead of re-issuing tokens that clients
+    # may still hold.
+    op.execute(f"CREATE SEQUENCE IF NOT EXISTS {_CANDIDATE_REVISION_SEQUENCE}")
+
     op.add_column(
         _CONNECTIONS,
         sa.Column(
@@ -139,6 +151,11 @@ def downgrade() -> None:
             "backup"
         )
 
+    # The candidate token sequence is intentionally NOT dropped. Its whole
+    # purpose is that a token is never issued twice, and a stale
+    # administrator page or delayed request can outlive a downgrade; a
+    # recreated sequence would restart at 1 and let such a token authorize
+    # an unrelated later attempt. An unused sequence costs one catalog row.
     op.drop_constraint("ck_object_store_connections_role", _CONNECTIONS, type_="check")
     op.drop_constraint("ck_object_store_connections_slots", _CONNECTIONS, type_="check")
     op.create_check_constraint(

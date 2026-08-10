@@ -78,6 +78,8 @@ def rename_db(test_settings, monkeypatch):
                 'eneo-content', 'enc-key-id', 'enc-secret',
                 %s, 'path', 'platform_admin'
             )
+            ON CONFLICT (id) DO UPDATE
+                SET updated_by_actor = 'platform_admin', revision = 1
             """,
             (str(uuid4()),),
         )

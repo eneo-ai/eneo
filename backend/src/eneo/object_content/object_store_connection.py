@@ -13,7 +13,7 @@ from urllib.parse import urlparse
 from uuid import UUID, uuid4
 
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, ValidationError
-from sqlalchemy import and_, func, or_, select, update
+from sqlalchemy import and_, func, or_, select, text, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -82,6 +82,10 @@ _SERVED_REMOTE_CONTENT = or_(
         ),
     ),
 )
+#: Candidate ownership tokens come from this sequence so a deleted and
+#: recreated temporary row never re-issues an earlier attempt's token.
+_CANDIDATE_REVISION_SEQUENCE = "object_store_candidate_revision_seq"
+
 _VERIFICATION_PAGE_SIZE = 1000
 _VERIFICATION_CONCURRENCY = 16
 
@@ -834,7 +838,7 @@ class ObjectStoreConnectionService:
                 )
             stale = _stored(row)
             stale_settings = self.settings_for(stale)
-            row.revision = row.revision + 1
+            row.revision = await self._next_candidate_revision(session)
             owned_revision = row.revision
             await StoreBindingRepository(session).hold_release_lease(
                 slot=TEMPORARY_DESTINATION_SLOT,
@@ -1383,7 +1387,7 @@ class ObjectStoreConnectionService:
             if stale is None or self._same_place(settings, stale):
                 return
             assert row is not None
-            row.revision = row.revision + 1
+            row.revision = await self._next_candidate_revision(session)
             owned_revision = row.revision
             # The lease keeps a retry of the interrupted attempt from
             # adopting the marker while its deletion is in flight.
@@ -1453,6 +1457,23 @@ class ObjectStoreConnectionService:
             )
             await session.delete(current)
 
+    @staticmethod
+    async def _next_candidate_revision(session: AsyncSession) -> int:
+        """Draw the next never-reused candidate ownership token.
+
+        Every delayed ownership check (abandon, stale release, adoption, and
+        the switch commit) accepts a row only when its revision still equals
+        the token its caller captured. A counter restarting at 1 whenever the
+        temporary row is deleted would let a stale token name a later,
+        unrelated attempt, so the token comes from a sequence instead;
+        nextval is exempt from rollback, so an abandoned attempt never
+        returns its value to circulation.
+        """
+        revision = await session.scalar(
+            text(f"SELECT nextval('{_CANDIDATE_REVISION_SEQUENCE}')")
+        )
+        return int(cast(int, revision))
+
     async def _record_candidate(
         self,
         session: AsyncSession,
@@ -1475,15 +1496,13 @@ class ObjectStoreConnectionService:
         if row is None:
             row = ObjectStoreConnections()
             row.id = TEMPORARY_DESTINATION_SLOT
-            row.revision = 1
             session.add(row)
-        else:
-            if row.role == "candidate" and not self._same_place(settings, _stored(row)):
-                raise ObjectStoreDestinationAlreadyBound(
-                    f"Another destination change is already claiming bucket "
-                    f"'{row.bucket}'; finish or release it first"
-                )
-            row.revision = row.revision + 1
+        elif row.role == "candidate" and not self._same_place(settings, _stored(row)):
+            raise ObjectStoreDestinationAlreadyBound(
+                f"Another destination change is already claiming bucket "
+                f"'{row.bucket}'; finish or release it first"
+            )
+        row.revision = await self._next_candidate_revision(session)
         row.role = "candidate"
         row.endpoint_url = settings.endpoint_url
         row.region = settings.region
@@ -1531,7 +1550,7 @@ class ObjectStoreConnectionService:
                     )
                     if row is None or row.revision != candidate_revision:
                         return
-                    row.revision = row.revision + 1
+                    row.revision = await self._next_candidate_revision(session)
                     owned_revision = row.revision
                     # The lease keeps a same-target retry from adopting the
                     # marker while its deletion is in flight.

@@ -2169,6 +2169,8 @@ async def test_reused_candidate_revision_cannot_publish_for_another_destination(
 
     original_publish_marker = ObjectStoreConnectionService._publish_candidate_marker
 
+    forged_revision: list[int] = []
+
     async def replace_candidate_before_marker(
         self,
         settings,
@@ -2179,7 +2181,8 @@ async def test_reused_candidate_revision_cannot_publish_for_another_destination(
     ):  # type: ignore[no-untyped-def]
         pending = await service.get_candidate()
         assert pending is not None
-        assert pending.revision == candidate_revision == 1
+        assert pending.revision == candidate_revision
+        forged_revision.append(candidate_revision)
         await service.abandon_switch_candidate(
             actor_user_id=actor,
             expected_revision=pending.revision,
@@ -2193,12 +2196,15 @@ async def test_reused_candidate_revision_cannot_publish_for_another_destination(
                          access_key_id_encrypted, secret_access_key_encrypted,
                          deployment_id, addressing_style, updated_by_actor)
                     VALUES
-                        (2, 1, 'candidate', :endpoint_url, :region, :bucket,
-                         'encrypted-access', 'encrypted-secret',
+                        (2, :revision, 'candidate', :endpoint_url, :region,
+                         :bucket, 'encrypted-access', 'encrypted-secret',
                          gen_random_uuid(), :addressing_style, :updated_by_actor)
                     """
                 ),
                 {
+                    # Forge the exact collision the sequence now prevents:
+                    # a different destination carrying this attempt's token.
+                    "revision": candidate_revision,
                     "endpoint_url": real_unpaired_object_store.settings.endpoint_url,
                     "region": real_unpaired_object_store.settings.region,
                     "bucket": foreign_bucket,
@@ -2244,8 +2250,112 @@ async def test_reused_candidate_revision_cannot_publish_for_another_destination(
         foreign = await session.get(ObjectStoreConnections, TEMPORARY_DESTINATION_SLOT)
         assert foreign is not None
         assert foreign.role == "candidate"
-        assert foreign.revision == 1
+        assert forged_revision == [foreign.revision]
         assert foreign.bucket == foreign_bucket
+
+
+async def test_a_stale_abandon_token_cannot_cancel_a_later_attempt(
+    object_content_database: DatabaseSessionManager,
+    real_object_store: RealObjectStore,
+    real_unpaired_object_store: RealObjectStore,
+    real_spare_object_store: RealObjectStore,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Candidate ownership tokens are never handed out twice.
+
+    Deleting the temporary row used to restart its revision counter, so a
+    stale admin page holding the token of an abandoned attempt could pass
+    the abandon guard against a DIFFERENT attempt recorded afterwards and
+    destroy its marker and recovery record mid-migration.
+    """
+    from eneo.database.tables.object_store_binding_table import ObjectStoreBindings
+
+    service = _service(object_content_database, real_object_store)
+    actor = await _any_user_id(object_content_database)
+    created = await service.create(
+        _connection_input(real_object_store), actor_user_id=actor
+    )
+    await ensure_store_binding_ready(
+        object_content_database,
+        service.settings_for(created),
+        real_object_store.store,
+    )
+    await _select_inline_writes(object_content_database)
+    binding_id = await _binding_id(object_content_database)
+
+    class SimulatedProcessLoss(BaseException):
+        pass
+
+    original_create = S3ObjectStore.create_binding
+
+    async def lose_process_after_marker(self, creation):  # type: ignore[no-untyped-def]
+        await original_create(self, creation)
+        raise SimulatedProcessLoss("the worker died before the swap committed")
+
+    # Attempt X claims one destination and is interrupted after its marker.
+    monkeypatch.setattr(S3ObjectStore, "create_binding", lose_process_after_marker)
+    with pytest.raises(SimulatedProcessLoss):
+        await service.replace_destination(
+            _connection_input(real_unpaired_object_store),
+            actor_user_id=actor,
+        )
+    monkeypatch.undo()
+
+    pending_x = await service.get_candidate()
+    assert pending_x is not None
+    stale_token = pending_x.revision
+
+    # An administrator abandons X, and attempt Y claims a different bucket.
+    await service.abandon_switch_candidate(
+        actor_user_id=actor, expected_revision=stale_token
+    )
+    monkeypatch.setattr(S3ObjectStore, "create_binding", lose_process_after_marker)
+    with pytest.raises(SimulatedProcessLoss):
+        await service.replace_destination(
+            _connection_input(real_spare_object_store),
+            actor_user_id=actor,
+        )
+    monkeypatch.undo()
+
+    pending_y = await service.get_candidate()
+    assert pending_y is not None
+    assert pending_y.bucket == real_spare_object_store.settings.bucket
+    # The decisive property: Y never re-uses X's token.
+    assert pending_y.revision != stale_token
+
+    # The stale page's DELETE must be refused, not applied to Y.
+    with pytest.raises(ObjectStoreConnectionConflict):
+        await service.abandon_switch_candidate(
+            actor_user_id=actor, expected_revision=stale_token
+        )
+
+    # Y's record and its remote marker are intact.
+    surviving = await service.get_candidate()
+    assert surviving is not None
+    assert surviving.revision == pending_y.revision
+    assert surviving.bucket == real_spare_object_store.settings.bucket
+    async with object_content_database.session() as session, session.begin():
+        claim = await session.scalar(
+            select(ObjectStoreBindings).where(
+                ObjectStoreBindings.slot == TEMPORARY_DESTINATION_SLOT
+            )
+        )
+    assert claim is not None
+    marked = S3ObjectStore(
+        real_spare_object_store.settings.model_copy(
+            update={"deployment_id": created.deployment_id}
+        )
+    )
+    try:
+        assert await marked.verify_binding(binding_id)
+    finally:
+        await marked.close()
+
+    # Y stays finishable: its own token still abandons it cleanly.
+    await service.abandon_switch_candidate(
+        actor_user_id=actor, expected_revision=pending_y.revision
+    )
+    assert await service.get_candidate() is None
 
 
 async def test_an_abandoned_candidate_cannot_commit(
