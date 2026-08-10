@@ -524,8 +524,13 @@ comparison. All three-repetition runs — sentinel, targeted probes, and
 the full 155×3 checkpoint — are exploratory / checkpoint-grade
 evidence; no incidence claim graduates beyond that without an interval
 able to resolve the predeclared MDE. The sentinel-assertion checks are
-a declared instrument change: subsequent comparisons state
-`--allow-harness-change`.
+NOT scoring-neutral (they enter the quality report), so they are gated
+on explicit case-contract fields carried only by the sentinel case:
+that case's contract hash changes and it lands in `rescored_cases`,
+its mechanism/runtime evidence is compared separately, and
+`--allow-harness-change` is then valid solely for the unaffected cases
+whose scoring is provably identical (Pass 28 correction — the flag is
+never a blanket waiver for scoring-affecting edits).
 
 ---
 
