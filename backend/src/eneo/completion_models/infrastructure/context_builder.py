@@ -19,6 +19,7 @@ from eneo.completion_models.infrastructure.message_payload import (
     countable_messages,
 )
 from eneo.completion_models.infrastructure.static_prompts import (
+    ATTACHED_FILE_REFERENCES_INSTRUCTION,
     HALLUCINATION_GUARD,
     SHOW_REFERENCES_PROMPT,
     TOOL_NAMING_INSTRUCTION,
@@ -176,13 +177,14 @@ def build_file_references_string(
         return ""
 
     references = "\n".join(entries)
+    # Mechanics only: the behavioral rules (never judge readability from the
+    # url, never ask for re-upload, read_file as fallback) live in
+    # ATTACHED_FILE_REFERENCES_INSTRUCTION, stated once in the system prompt.
+    # This block repeats per message with referenced files, history included.
     return (
-        "Each attached file below also has a download URL. Pass the URL to a "
-        "tool that accepts a URL input when the tool needs the original file; "
-        "the file's raw bytes are NOT in this prompt. Prefer a tool suited to "
-        "the file and the task; when no more specific tool fits and a "
-        "read_file tool is available, use it to read the file's text "
-        "content.\n\n"
+        "The user attached these files to the conversation (one JSON entry "
+        'per file). Their raw bytes are NOT in this prompt; each "url" is a '
+        "signed attachment reference for tools that accept a URL input.\n\n"
         f"{references}"
     )
 
@@ -199,7 +201,13 @@ class ChunkGrouping:
 
 
 class _Prompt:
-    def __init__(self, version: int = 1, model_name: str = "", has_tools: bool = False):
+    def __init__(
+        self,
+        version: int = 1,
+        model_name: str = "",
+        has_tools: bool = False,
+        has_file_references: bool = False,
+    ):
         super().__init__()
         self.prompt: str | None = None
         self.knowledge: str | None = None
@@ -210,6 +218,7 @@ class _Prompt:
         self.version: int = version
         self.model_name: str = model_name
         self.has_tools: bool = has_tools
+        self.has_file_references: bool = has_file_references
 
     @override
     def __str__(self):
@@ -223,6 +232,12 @@ class _Prompt:
         # ahead of the data blocks below.
         if self.has_tools:
             components.append(TOOL_NAMING_INSTRUCTION)
+
+        # Attached-file reference entries render in the messages; state the
+        # tool-arbitration rule once here instead of per message. Meaningless
+        # without tools to pass a url to, hence the has_tools gate.
+        if self.has_file_references and self.has_tools:
+            components.append(ATTACHED_FILE_REFERENCES_INSTRUCTION)
 
         # Add references prompt if either knowledge or web search results exist
         # but only for version 2
@@ -671,7 +686,10 @@ class ContextBuilder:
         # Create the necessary parts of the prompt.
         # Add the tokens used.
         _prompt = _Prompt(
-            version=version, model_name=model_name, has_tools=bool(tool_dicts)
+            version=version,
+            model_name=model_name,
+            has_tools=bool(tool_dicts),
+            has_file_references=bool(file_reference_urls),
         )
         _prompt.add_prompt(
             prompt=prompt,
