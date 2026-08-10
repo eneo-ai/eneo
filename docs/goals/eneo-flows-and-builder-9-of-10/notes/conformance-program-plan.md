@@ -374,6 +374,28 @@ planning_to_proposal_loss planning-evidence lifecycle investigation
 over the stable core, with the runtime-metadata materialization ranked
 by the same stability cross-tab.
 
+**Lifecycle investigation corrected and re-adjudicated (2026-08-10,
+Passes 19–20).** Pass 19 REFUTED the first lifecycle finding — the
+extractor read `output_schema_evidence` as a serialized key when it is
+a computed view over `schema_resolution`; both analysis scripts now
+materialize `PlanningState.model_validate` (packet REPLAY.md carries
+the verbatim venv command). The corrected clusters (typed regeneration
+reproduces the reviewer's independent 35/165 measurement):
+`evaluator_alias_miss` 32 receipts / 8 JSON cases — the product
+compiled the demanded concepts under Swedish head-final compounds the
+alias lists missed; landed as `440f9ce76` (10 receipt-verified exact
+aliases, manifest `alias_manifest_iter20.json`).
+`prose_only_no_typed_evidence` 88 / 18 — JSON subset (4 cases) is
+stochastic partial classifier emission (the emission instruction
+already exists; Owner-A prompt work WITHDRAWN per Pass 19); the
+non-JSON subset (~14 cases) is guaranteed empty by the unconditional
+clear and remains Slice 5's cohort. `terminal_drop` 33/10 and
+`quote_only` 11/4 stay under attribution. Slice 5 design draft
+(named-result evidence replacing the schema-named classifier
+delta/prose_field_names representation globally, extraction producer
+included per Pass 20, JSON behavior preserved by regression) is at the
+Pass 21 design gate.
+
 **Instability posture (Pass 6):** the pilot's 68/155 joint-state
 instability is a diagnostic, not a stabilization target — 23/155 (~15%)
 flip pass↔fail; much of the rest alternates first-pass vs repaired. No
