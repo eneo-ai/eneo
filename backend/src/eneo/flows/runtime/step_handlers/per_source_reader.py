@@ -63,6 +63,7 @@ class PerSourceReaderCall:
     source_number: int
     file_id: UUID
     source_label: str
+    document: dict[str, Any]
     output: StepExecutionOutput
     deps: StepExecutionRuntimeDeps
     elapsed_ms: int
@@ -250,11 +251,13 @@ async def _execute_one_source(
         ),
     )
     elapsed_ms = int((time.perf_counter() - started) * 1000)
+    source_label = _raw_source_label(source_number, output.runtime_input_metadata)
     try:
-        _raise_if_per_source_output_is_not_object(
+        document = _extract_per_source_document(
             output=output,
             step_order=step.step_order,
             source_number=source_number,
+            source_label=source_label,
         )
     except Exception as exc:
         # This call retrieved before it failed validation, so its evidence
@@ -264,7 +267,8 @@ async def _execute_one_source(
     return PerSourceReaderCall(
         source_number=source_number,
         file_id=file_id,
-        source_label=_raw_source_label(source_number, output.runtime_input_metadata),
+        source_label=source_label,
+        document=document,
         output=output,
         deps=prepared_step.deps,
         elapsed_ms=elapsed_ms,
@@ -285,9 +289,8 @@ async def _assemble_per_source_output(
         )
     first_output = per_source_calls[0].output
     documents = [
-        document
+        _source_document_items(call)
         for call in sorted(per_source_calls, key=lambda item: item.source_number)
-        for document in _source_document_items(call)
     ]
     assembled_structured = {"documents": documents}
     full_text = json.dumps(assembled_structured, ensure_ascii=False)
@@ -398,42 +401,49 @@ def _documents_item_schema(
     return dict(typed_item_schema)
 
 
-def _raise_if_per_source_output_is_not_object(
+def _extract_per_source_document(
     *,
     output: StepExecutionOutput,
     step_order: int,
     source_number: int,
-) -> None:
-    if isinstance(output.structured_output, dict):
-        return
-    raise TypedIOValidationException(
-        f"Step {step_order}: per-source reader source {source_number} returned "
-        "non-object JSON.",
-        code=FlowApiErrorCode.TYPED_IO_CONTRACT_VIOLATION.value,
-    )
-
-
-def _source_document_items(call: PerSourceReaderCall) -> list[dict[str, Any]]:
-    structured_output = cast(dict[str, Any], call.output.structured_output)
+    source_label: str,
+) -> dict[str, Any]:
+    structured_output = output.structured_output
+    if not isinstance(structured_output, dict):
+        raise TypedIOValidationException(
+            f"Step {step_order}: per-source reader source {source_number} returned "
+            "non-object JSON.",
+            code=FlowApiErrorCode.TYPED_IO_CONTRACT_VIOLATION.value,
+        )
     documents = structured_output.get("documents")
     if not isinstance(documents, list):
         raise TypedIOValidationException(
-            f"Step output for source {call.source_number} must contain documents[].",
+            f"Step output for source {source_number} must contain documents[].",
             code=FlowApiErrorCode.TYPED_IO_CONTRACT_VIOLATION.value,
         )
-    items: list[dict[str, Any]] = []
-    for index, raw_item in enumerate(cast(list[object], documents), start=1):
-        if not isinstance(raw_item, dict):
-            raise TypedIOValidationException(
-                f"Step output for source {call.source_number} documents[{index}] "
-                "must be an object.",
-                code=FlowApiErrorCode.TYPED_IO_CONTRACT_VIOLATION.value,
-            )
-        item = dict(cast(dict[str, Any], raw_item))
-        item["source_label"] = call.source_label
-        item["source_file_id"] = str(call.file_id)
-        items.append(item)
-    return items
+    typed_documents = cast(list[object], documents)
+    document_count = len(typed_documents)
+    if document_count != 1:
+        raise TypedIOValidationException(
+            f"Step {step_order}: per-source reader source {source_number} "
+            f"({source_label}) returned {document_count} documents; "
+            "expected exactly one.",
+            code=FlowApiErrorCode.TYPED_IO_CONTRACT_VIOLATION.value,
+        )
+    raw_document = typed_documents[0]
+    if not isinstance(raw_document, dict):
+        raise TypedIOValidationException(
+            f"Step output for source {source_number} documents[1] must be an object.",
+            code=FlowApiErrorCode.TYPED_IO_CONTRACT_VIOLATION.value,
+        )
+    return dict(cast(dict[str, Any], raw_document))
+
+
+def _source_document_items(call: PerSourceReaderCall) -> dict[str, Any]:
+    item = dict(call.document)
+    item["source_label"] = call.source_label
+    item["source_file_id"] = str(call.file_id)
+    return item
 
 
 def _raw_source_label(

@@ -2530,6 +2530,67 @@ async def test_per_source_reader_executes_one_model_call_per_file_and_sets_ident
     assert len(output.runtime_input_metadata["per_source_calls"]) == 2
 
 
+@pytest.mark.parametrize("document_count", [0, 2])
+@pytest.mark.asyncio
+async def test_per_source_reader_rejects_not_exactly_one_document_per_source(
+    user,
+    document_count,
+):
+    executor, _, flow_run_repo, _ = _build_executor(user)
+    file_id = uuid4()
+    executor.file_service.get_files_by_ids.return_value = [
+        _runtime_file(
+            file_id=file_id,
+            text="Contract source text",
+            name="contract-source.pdf",
+        )
+    ]
+    flow_run_repo.list_step_input_file_ids = AsyncMock(return_value=[file_id])
+    documents = [{"title": f"Record {index}"} for index in range(document_count)]
+    assistant = _mock_assistant_for_execute_step(
+        response_text=json.dumps({"documents": documents})
+    )
+    executor._load_assistant = AsyncMock(return_value=assistant)
+    step = _runtime_step(
+        input_type="document",
+        output_type="json",
+        output_contract={
+            "type": "object",
+            "properties": {
+                "documents": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {"title": {"type": "string"}},
+                        "required": ["title"],
+                        "additionalProperties": False,
+                    },
+                }
+            },
+            "required": ["documents"],
+            "additionalProperties": False,
+        },
+        input_config={
+            "runtime_input": {
+                "enabled": True,
+                "input_format": "document",
+                "execution_mode": "per_source",
+                "max_files": 1,
+            }
+        },
+    )
+    run = _run(status=FlowRunStatus.RUNNING, user=user, input_payload={})
+
+    with pytest.raises(TypedIOValidationException) as exc_info:
+        await executor._execute_step(step=step, run=run, attempt_no=1)
+
+    assert exc_info.value.code == FlowApiErrorCode.TYPED_IO_CONTRACT_VIOLATION.value
+    assert str(exc_info.value) == (
+        "Step 1: per-source reader source 1 (contract-source.pdf) returned "
+        f"{document_count} documents; expected exactly one."
+    )
+
+
 @pytest.mark.asyncio
 async def test_per_source_reader_reuses_json_capability_rejection_across_calls(user):
     executor, _, flow_run_repo, _ = _build_executor(user)
