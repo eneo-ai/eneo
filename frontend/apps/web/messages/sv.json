@@ -4312,6 +4312,8 @@
   "storage_switch_error_copy_incomplete_description": "Den nya destinationen saknar filer som Eneo fortfarande ansvarar för. Kör kopieringen igen mot rätt prefix, kontrollera att antalet objekt stämmer och försök sedan igen.",
   "storage_switch_error_previous_present_title": "Ta bort den tidigare destinationen först",
   "storage_switch_error_previous_present_description": "En arkiverad tidigare destination sparas fortfarande för Byt tillbaka. Ta bort den under Tidigare destination när du inte längre behöver vägen tillbaka, och byt sedan destination.",
+  "storage_switch_outcome_not_applied_title": "Ändringen genomfördes inte",
+  "storage_switch_outcome_not_applied_description": "Resultatet kunde inte bekräftas direkt, men det uppdaterade läget visar att ändringen aldrig genomfördes. Du kan försöka igen.",
   "storage_switch_error_moves_not_paused_title": "Pausa flyttar innan du byter destination",
   "storage_switch_error_moves_not_paused_description": "Pausade flyttar garanterar att ingenting skrivs till objektlagringen medan din kopia görs och destinationen byts. Pausa flyttar under Flytta befintligt innehåll och försök igen; återuppta dem efter bytet.",
   "storage_connection_environment_title": "Driften hanterar den här anslutningen",

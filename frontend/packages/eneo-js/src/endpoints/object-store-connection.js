@@ -57,23 +57,33 @@ export function initObjectStoreConnection(client) {
 
     /**
      * Return to the archived previous destination using its stored credentials.
+     * The revision names the archive the administrator saw; the backend
+     * refuses if a concurrent change replaced it.
+     * @param {number} expectedPreviousRevision
      * @throws {EneoError}
      * @returns {Promise<import('../types/resources').ObjectStoreConnection>}
      */
-    switchBackDestination: async () => {
+    switchBackDestination: async (expectedPreviousRevision) => {
       return await client.fetch("/api/v1/admin/object-store-connection/destination/switch-back", {
-        method: "post"
+        method: "post",
+        requestBody: {
+          "application/json": { expected_previous_revision: expectedPreviousRevision }
+        }
       });
     },
 
     /**
      * Forget the archived previous destination. The bucket is never touched.
+     * The revision names the archive the administrator saw; the backend
+     * refuses if a concurrent change replaced it.
+     * @param {number} expectedRevision
      * @throws {EneoError}
      * @returns {Promise<void>}
      */
-    forgetPreviousDestination: async () => {
+    forgetPreviousDestination: async (expectedRevision) => {
       await client.fetch("/api/v1/admin/object-store-connection/previous", {
-        method: "delete"
+        method: "delete",
+        params: { query: { expected_revision: expectedRevision } }
       });
     }
   };

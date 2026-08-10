@@ -68,6 +68,11 @@
   let switchInFlight = $state(false);
   let previousActionCode = $state<string | null>(null);
   let previousActionFailed = $state(false);
+  let unresolvedPreviousAction = $state<
+    | { kind: "switch-back"; endpointUrl: string; bucket: string; revision: number }
+    | { kind: "forget"; revision: number }
+    | null
+  >(null);
   let alertRef = $state<HTMLElement | null>(null);
 
   let endpointUrl = $state("");
@@ -130,6 +135,10 @@
   }
 
   async function recoverConnection(): Promise<void> {
+    if (unresolvedPreviousAction) {
+      await resolvePreviousOutcome();
+      return;
+    }
     if (
       (await loadConnection()) &&
       (mutationOutcomeUnknown || connectionAlreadyConfigured || connectionRevisionConflict)
@@ -194,25 +203,78 @@
     previousActionFailed = false;
   }
 
+  function errorCode(error: unknown): string | null {
+    return error instanceof EneoError && typeof error.response?.code === "string"
+      ? error.response.code
+      : null;
+  }
+
   function recordPreviousActionFailure(error: unknown): void {
-    previousActionCode =
-      error instanceof EneoError && typeof error.response?.code === "string"
-        ? error.response.code
-        : null;
+    previousActionCode = errorCode(error);
     previousActionFailed = true;
   }
 
+  function reconcilePreviousOutcome(
+    current: ObjectStoreConnection
+  ): "committed" | "not-applied" | "diverged" {
+    const pending = unresolvedPreviousAction;
+    if (!pending) return "diverged";
+    if (pending.kind === "switch-back") {
+      if (current.endpoint_url === pending.endpointUrl && current.bucket === pending.bucket)
+        return "committed";
+    } else if (current.previous_destination == null) {
+      return "committed";
+    }
+    return current.previous_destination?.revision === pending.revision ? "not-applied" : "diverged";
+  }
+
+  // A 503 outcome-unknown means the mutation may have committed even though the
+  // response was lost. A later successful read is definitive, so reconcile
+  // against the state captured before the action instead of treating the
+  // ambiguity as a retryable failure: retrying a committed switch-back would
+  // reverse a completed cutover. Three outcomes: the mutation committed, the
+  // archive the administrator saw is untouched (retry is safe), or a
+  // concurrent change replaced it (review before acting again).
+  async function resolvePreviousOutcome(): Promise<void> {
+    const pending = unresolvedPreviousAction;
+    if (!pending) return;
+    if (!(await loadConnection())) return;
+    const outcome = connection === null ? "diverged" : reconcilePreviousOutcome(connection);
+    unresolvedPreviousAction = null;
+    if (outcome === "committed") {
+      if (pending.kind === "switch-back") success = "switch-back";
+      await onConnectionChanged?.();
+    } else {
+      previousActionFailed = true;
+      previousActionCode =
+        outcome === "not-applied"
+          ? "object_store_connection_mutation_outcome_unknown"
+          : "object_store_connection_revision_conflict";
+    }
+  }
+
   async function switchBackDestination(): Promise<void> {
-    if (switchInFlight) return;
+    if (switchInFlight || unresolvedPreviousAction) return;
+    const target = previousDestination;
+    if (target === null) return;
     switchInFlight = true;
     resetPreviousActionState();
     try {
-      connection = await eneo.objectStoreConnection.switchBackDestination();
+      connection = await eneo.objectStoreConnection.switchBackDestination(target.revision);
       success = "switch-back";
       await onConnectionChanged?.();
     } catch (error: unknown) {
       if (hasStatus(error, 403)) {
         onAuthorityRevoked?.();
+      } else if (errorCode(error) === "object_store_connection_mutation_outcome_unknown") {
+        success = null;
+        unresolvedPreviousAction = {
+          kind: "switch-back",
+          endpointUrl: target.endpoint_url,
+          bucket: target.bucket,
+          revision: target.revision
+        };
+        await resolvePreviousOutcome();
       } else {
         success = null;
         recordPreviousActionFailure(error);
@@ -224,15 +286,20 @@
   }
 
   async function forgetPreviousDestination(): Promise<void> {
-    if (switchInFlight) return;
+    if (switchInFlight || unresolvedPreviousAction) return;
+    const target = previousDestination;
+    if (target === null) return;
     switchInFlight = true;
     resetPreviousActionState();
     try {
-      await eneo.objectStoreConnection.forgetPreviousDestination();
+      await eneo.objectStoreConnection.forgetPreviousDestination(target.revision);
       await loadConnection();
     } catch (error: unknown) {
       if (hasStatus(error, 403)) {
         onAuthorityRevoked?.();
+      } else if (errorCode(error) === "object_store_connection_mutation_outcome_unknown") {
+        unresolvedPreviousAction = { kind: "forget", revision: target.revision };
+        await resolvePreviousOutcome();
       } else {
         recordPreviousActionFailure(error);
         await loadConnection();
@@ -362,6 +429,8 @@
       return m.storage_switch_error_copy_incomplete_title();
     if (code === "object_store_previous_destination_present")
       return m.storage_switch_error_previous_present_title();
+    if (code === "object_store_connection_mutation_outcome_unknown")
+      return m.storage_switch_outcome_not_applied_title();
     return m.storage_connection_error_unavailable_title();
   }
 
@@ -395,6 +464,8 @@
       return m.storage_switch_error_copy_incomplete_description();
     if (code === "object_store_previous_destination_present")
       return m.storage_switch_error_previous_present_description();
+    if (code === "object_store_connection_mutation_outcome_unknown")
+      return m.storage_switch_outcome_not_applied_description();
     return m.storage_connection_error_unavailable_description();
   }
 

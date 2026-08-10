@@ -26,8 +26,15 @@ class ObjectStoreConnections(TimestampMixin, BaseWithTableName):
     Slot 1 is permanently the active destination every reader consults.
     Slot 2 exists only while a destination migration holds a candidate or,
     after cutover, the retiring source. The cutover transaction swaps
-    destination payloads between the slots and advances each row's revision
-    from its own pre-swap value; rows never change identity.
+    destination payloads between the slots; rows never change identity.
+
+    Revision semantics: slot 1 advances monotonically with every mutation
+    (rotation, generation fence, cutover). While slot 2 holds a candidate,
+    its revision is a slot-local ownership token that moves on every claim
+    change. At cutover the archive adopts the retired active generation's
+    revision, so no archive ever re-exposes a value an earlier archive
+    carried — administrators name that revision when switching back to or
+    forgetting the archive, and a stale token is refused.
     """
 
     id: Mapped[int] = mapped_column(SmallInteger, primary_key=True)

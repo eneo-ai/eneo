@@ -288,7 +288,10 @@ async def test_switch_serves_copied_content_and_switches_back(
         await new_store.close()
 
     # Switch back to the archived destination, reusing its stored credentials.
-    restored = await service.switch_back(actor_user_id=actor)
+    restored = await service.switch_back(
+        actor_user_id=actor,
+        expected_previous_revision=switch.previous.revision,
+    )
     assert restored.active.bucket == real_object_store.settings.bucket
     assert restored.active.revision == 5
     assert restored.previous.bucket == real_unpaired_object_store.settings.bucket
@@ -1689,7 +1692,7 @@ async def test_switch_refuses_while_a_previous_destination_is_archived(
         real_object_store.store,
     )
     await _select_inline_writes(object_content_database)
-    await service.replace_destination(
+    switch = await service.replace_destination(
         _connection_input(real_unpaired_object_store),
         actor_user_id=actor,
     )
@@ -1701,7 +1704,9 @@ async def test_switch_refuses_while_a_previous_destination_is_archived(
         )
 
     # Forgetting the archive releases the slot and the switch proceeds.
-    await service.forget_previous_destination(actor_user_id=actor)
+    await service.forget_previous_destination(
+        actor_user_id=actor, expected_revision=switch.previous.revision
+    )
     restored = await service.replace_destination(
         _connection_input(real_object_store),
         actor_user_id=actor,
@@ -1887,6 +1892,68 @@ async def test_switch_requires_paused_moves(
         )
 
 
+async def test_a_stale_revision_cannot_mutate_a_replacement_archive(
+    object_content_database: DatabaseSessionManager,
+    real_object_store: RealObjectStore,
+    real_unpaired_object_store: RealObjectStore,
+) -> None:
+    """Switch-back and forget act only on the archive the administrator saw.
+
+    A stale page can hold the revision of an archive that a concurrent
+    administrator has since forgotten and replaced. Its request must be
+    refused with the typed revision conflict instead of restoring or
+    deleting the replacement.
+    """
+    service = _service(object_content_database, real_object_store)
+    actor = await _any_user_id(object_content_database)
+    created = await service.create(
+        _connection_input(real_object_store), actor_user_id=actor
+    )
+    await ensure_store_binding_ready(
+        object_content_database,
+        service.settings_for(created),
+        real_object_store.store,
+    )
+    await _select_inline_writes(object_content_database)
+
+    first = await service.replace_destination(
+        _connection_input(real_unpaired_object_store),
+        actor_user_id=actor,
+    )
+    stale_revision = first.previous.revision
+
+    # A rival administrator forgets that archive and completes another
+    # switch, archiving a different destination in its place.
+    await service.forget_previous_destination(
+        actor_user_id=actor, expected_revision=stale_revision
+    )
+    second = await service.replace_destination(
+        _connection_input(real_object_store),
+        actor_user_id=actor,
+    )
+    # Archives adopt the strictly growing active generation, so a
+    # replacement always carries a LARGER revision than any earlier archive.
+    assert second.previous.revision > stale_revision
+
+    with pytest.raises(ObjectStoreConnectionConflict):
+        await service.forget_previous_destination(
+            actor_user_id=actor, expected_revision=stale_revision
+        )
+    with pytest.raises(ObjectStoreConnectionConflict):
+        await service.switch_back(
+            actor_user_id=actor,
+            expected_previous_revision=stale_revision,
+        )
+
+    # The replacement archive and the active destination are untouched.
+    remaining = await service.get_previous()
+    assert remaining is not None
+    assert remaining.revision == second.previous.revision
+    current = await service.get()
+    assert current is not None
+    assert current.bucket == real_object_store.settings.bucket
+
+
 async def test_switch_back_is_refused_after_remote_content_diverged(
     object_content_database: DatabaseSessionManager,
     real_object_store: RealObjectStore,
@@ -1928,7 +1995,10 @@ async def test_switch_back_is_refused_after_remote_content_diverged(
         await new_store.close()
 
     with pytest.raises(ObjectStoreSwitchBackDiverged):
-        await service.switch_back(actor_user_id=actor)
+        await service.switch_back(
+            actor_user_id=actor,
+            expected_previous_revision=switch.previous.revision,
+        )
 
 
 async def test_switch_back_loses_to_a_concurrent_remove(
@@ -1965,13 +2035,18 @@ async def test_switch_back_loses_to_a_concurrent_remove(
     original_probe = ObjectStoreConnectionService._probe
 
     async def forget_during_probe(self, settings, *, binding):  # type: ignore[no-untyped-def]
-        await service.forget_previous_destination(actor_user_id=actor)
+        await service.forget_previous_destination(
+            actor_user_id=actor, expected_revision=switch.previous.revision
+        )
         return await original_probe(self, settings, binding=binding)
 
     monkeypatch.setattr(ObjectStoreConnectionService, "_probe", forget_during_probe)
 
     with pytest.raises(ObjectStoreConnectionConflict):
-        await service.switch_back(actor_user_id=actor)
+        await service.switch_back(
+            actor_user_id=actor,
+            expected_previous_revision=switch.previous.revision,
+        )
     monkeypatch.undo()
 
     # Only the removal succeeded: the active destination is unchanged and the

@@ -413,6 +413,7 @@ describe("admin storage settings page", () => {
       addressing_style: "path",
       updated_at: "2026-08-06T10:00:00Z",
       previous_destination: {
+        revision: 1,
         endpoint_url: "https://old.example.test",
         region: "se-1",
         bucket: "eneo-content",
@@ -499,6 +500,7 @@ describe("admin storage settings page", () => {
       addressing_style: "path",
       updated_at: "2026-08-06T10:00:00Z",
       previous_destination: {
+        revision: 1,
         endpoint_url: "https://old.example.test",
         region: "se-1",
         bucket: "eneo-content",
@@ -540,6 +542,7 @@ describe("admin storage settings page", () => {
       addressing_style: "path",
       updated_at: "2026-08-06T10:00:00Z",
       previous_destination: {
+        revision: 1,
         endpoint_url: "https://old.example.test",
         region: "se-1",
         bucket: "eneo-content",
@@ -565,6 +568,242 @@ describe("admin storage settings page", () => {
     await expect
       .element(page.getByText("storage_connection_error_unavailable_title"))
       .toBeVisible();
+  });
+
+  test("renders a committed switch-back whose acknowledgement was lost as done", async () => {
+    testUser.isPlatformAdmin = true;
+    getPolicy.mockResolvedValue(policy());
+    getObjectStoreConnection
+      .mockReset()
+      .mockResolvedValueOnce({
+        source: "admin",
+        configured: true,
+        credentials_can_be_managed: true,
+        revision: 2,
+        endpoint_url: "https://new.example.test",
+        region: "se-1",
+        bucket: "eneo-content-new",
+        addressing_style: "path",
+        updated_at: "2026-08-06T10:00:00Z",
+        previous_destination: {
+          revision: 1,
+          endpoint_url: "https://old.example.test",
+          region: "se-1",
+          bucket: "eneo-content",
+          addressing_style: "path",
+          updated_at: "2026-08-03T18:00:00Z"
+        }
+      })
+      // The refresh proves the switch-back committed: the previous destination
+      // is active again even though the mutation response was lost.
+      .mockResolvedValue({
+        source: "admin",
+        configured: true,
+        credentials_can_be_managed: true,
+        revision: 4,
+        endpoint_url: "https://old.example.test",
+        region: "se-1",
+        bucket: "eneo-content",
+        addressing_style: "path",
+        updated_at: "2026-08-06T11:00:00Z",
+        previous_destination: {
+          revision: 3,
+          endpoint_url: "https://new.example.test",
+          region: "se-1",
+          bucket: "eneo-content-new",
+          addressing_style: "path",
+          updated_at: "2026-08-06T10:00:00Z"
+        }
+      });
+    switchBackObjectStoreDestination.mockRejectedValue(
+      new EneoError(
+        "The save result could not be confirmed",
+        "RESPONSE",
+        503,
+        0,
+        { code: "object_store_connection_mutation_outcome_unknown" },
+        { endpoint: "POST@/admin/object-store-connection/destination/switch-back" }
+      )
+    );
+
+    render(StoragePage);
+
+    await page.getByRole("button", { name: "storage_switch_back_action" }).click();
+
+    // The committed cutover must render as done, not as a retryable failure
+    // that would invite reversing it.
+    await expect.element(page.getByText("storage_switch_back_done_title")).toBeVisible();
+    await expect
+      .element(page.getByText("storage_switch_outcome_not_applied_title"))
+      .not.toBeInTheDocument();
+  });
+
+  test("reports an unconfirmed switch-back that never applied and allows retry", async () => {
+    testUser.isPlatformAdmin = true;
+    getPolicy.mockResolvedValue(policy());
+    getObjectStoreConnection.mockReset().mockResolvedValue({
+      source: "admin",
+      configured: true,
+      credentials_can_be_managed: true,
+      revision: 2,
+      endpoint_url: "https://new.example.test",
+      region: "se-1",
+      bucket: "eneo-content-new",
+      addressing_style: "path",
+      updated_at: "2026-08-06T10:00:00Z",
+      previous_destination: {
+        revision: 1,
+        endpoint_url: "https://old.example.test",
+        region: "se-1",
+        bucket: "eneo-content",
+        addressing_style: "path",
+        updated_at: "2026-08-03T18:00:00Z"
+      }
+    });
+    switchBackObjectStoreDestination.mockRejectedValue(
+      new EneoError(
+        "The save result could not be confirmed",
+        "RESPONSE",
+        503,
+        0,
+        { code: "object_store_connection_mutation_outcome_unknown" },
+        { endpoint: "POST@/admin/object-store-connection/destination/switch-back" }
+      )
+    );
+
+    render(StoragePage);
+
+    await page.getByRole("button", { name: "storage_switch_back_action" }).click();
+
+    await expect.element(page.getByText("storage_switch_outcome_not_applied_title")).toBeVisible();
+    await expect
+      .element(page.getByRole("button", { name: "storage_switch_back_action" }))
+      .toBeEnabled();
+  });
+
+  test("shows divergence when the archive changed under an unconfirmed switch-back", async () => {
+    testUser.isPlatformAdmin = true;
+    getPolicy.mockResolvedValue(policy());
+    getObjectStoreConnection
+      .mockReset()
+      .mockResolvedValueOnce({
+        source: "admin",
+        configured: true,
+        credentials_can_be_managed: true,
+        revision: 2,
+        endpoint_url: "https://new.example.test",
+        region: "se-1",
+        bucket: "eneo-content-new",
+        addressing_style: "path",
+        updated_at: "2026-08-06T10:00:00Z",
+        previous_destination: {
+          revision: 1,
+          endpoint_url: "https://old.example.test",
+          region: "se-1",
+          bucket: "eneo-content",
+          addressing_style: "path",
+          updated_at: "2026-08-03T18:00:00Z"
+        }
+      })
+      // A concurrent administrator replaced the archive: same destinations,
+      // but the archived row is a different revision.
+      .mockResolvedValue({
+        source: "admin",
+        configured: true,
+        credentials_can_be_managed: true,
+        revision: 4,
+        endpoint_url: "https://new.example.test",
+        region: "se-1",
+        bucket: "eneo-content-new",
+        addressing_style: "path",
+        updated_at: "2026-08-06T11:00:00Z",
+        previous_destination: {
+          revision: 3,
+          endpoint_url: "https://old.example.test",
+          region: "se-1",
+          bucket: "eneo-content",
+          addressing_style: "path",
+          updated_at: "2026-08-06T11:00:00Z"
+        }
+      });
+    switchBackObjectStoreDestination.mockRejectedValue(
+      new EneoError(
+        "The save result could not be confirmed",
+        "RESPONSE",
+        503,
+        0,
+        { code: "object_store_connection_mutation_outcome_unknown" },
+        { endpoint: "POST@/admin/object-store-connection/destination/switch-back" }
+      )
+    );
+
+    render(StoragePage);
+
+    await page.getByRole("button", { name: "storage_switch_back_action" }).click();
+
+    await expect.element(page.getByText("storage_connection_error_conflict_title")).toBeVisible();
+    await expect
+      .element(page.getByText("storage_switch_outcome_not_applied_title"))
+      .not.toBeInTheDocument();
+  });
+
+  test("renders a committed forget whose acknowledgement was lost as done", async () => {
+    testUser.isPlatformAdmin = true;
+    getPolicy.mockResolvedValue(policy());
+    getObjectStoreConnection
+      .mockReset()
+      .mockResolvedValueOnce({
+        source: "admin",
+        configured: true,
+        credentials_can_be_managed: true,
+        revision: 2,
+        endpoint_url: "https://new.example.test",
+        region: "se-1",
+        bucket: "eneo-content-new",
+        addressing_style: "path",
+        updated_at: "2026-08-06T10:00:00Z",
+        previous_destination: {
+          revision: 1,
+          endpoint_url: "https://old.example.test",
+          region: "se-1",
+          bucket: "eneo-content",
+          addressing_style: "path",
+          updated_at: "2026-08-03T18:00:00Z"
+        }
+      })
+      .mockResolvedValue({
+        source: "admin",
+        configured: true,
+        credentials_can_be_managed: true,
+        revision: 2,
+        endpoint_url: "https://new.example.test",
+        region: "se-1",
+        bucket: "eneo-content-new",
+        addressing_style: "path",
+        updated_at: "2026-08-06T10:00:00Z",
+        previous_destination: null
+      });
+    forgetPreviousObjectStoreDestination.mockRejectedValue(
+      new EneoError(
+        "The save result could not be confirmed",
+        "RESPONSE",
+        503,
+        0,
+        { code: "object_store_connection_mutation_outcome_unknown" },
+        { endpoint: "DELETE@/admin/object-store-connection/previous" }
+      )
+    );
+
+    render(StoragePage);
+
+    await page.getByRole("button", { name: "storage_switch_forget_action" }).click();
+
+    await expect
+      .element(page.getByRole("button", { name: "storage_switch_back_action" }))
+      .not.toBeInTheDocument();
+    await expect
+      .element(page.getByText("storage_switch_outcome_not_applied_title"))
+      .not.toBeInTheDocument();
   });
 
   test("reloads the existing connection after a setup conflict", async () => {

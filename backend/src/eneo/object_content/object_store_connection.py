@@ -662,6 +662,7 @@ class ObjectStoreConnectionService:
         self,
         *,
         actor_user_id: UUID,
+        expected_previous_revision: int,
     ) -> DestinationSwitch:
         """Return to the archived previous destination with its stored keys."""
         self._require_encryption()
@@ -676,6 +677,15 @@ class ObjectStoreConnectionService:
         if previous is None:
             raise ObjectStorePreviousDestinationMissing(
                 "There is no archived previous destination"
+            )
+        # The client names the archive it intends to restore. Without this
+        # compare, a stale request could restore a replacement archived by a
+        # concurrent administrator. The commit re-checks this same revision
+        # under the row lock, so intent stays pinned through the switch.
+        if previous.revision != expected_previous_revision:
+            raise ObjectStoreConnectionConflict(
+                "The archived previous destination changed; review the "
+                "latest state before switching back"
             )
         candidate = ObjectStoreConnectionInput(
             endpoint_url=previous.endpoint_url,
@@ -703,7 +713,9 @@ class ObjectStoreConnectionService:
             require_previous_revision=previous.revision,
         )
 
-    async def forget_previous_destination(self, *, actor_user_id: UUID) -> None:
+    async def forget_previous_destination(
+        self, *, actor_user_id: UUID, expected_revision: int
+    ) -> None:
         """Drop the archived previous-destination record (bucket untouched)."""
         del actor_user_id  # authorization happens at the router boundary
         async with self._transaction(mutation=True) as session:
@@ -718,6 +730,13 @@ class ObjectStoreConnectionService:
             if row is None:
                 raise ObjectStorePreviousDestinationMissing(
                     "There is no archived previous destination"
+                )
+            # Deleting the way back is destructive; only the archive the
+            # administrator actually saw may be forgotten.
+            if row.revision != expected_revision:
+                raise ObjectStoreConnectionConflict(
+                    "The archived previous destination changed; review the "
+                    "latest state before removing it"
                 )
             await session.delete(row)
 
@@ -899,10 +918,15 @@ class ObjectStoreConnectionService:
             if previous is None:
                 previous = ObjectStoreConnections()
                 previous.id = TEMPORARY_DESTINATION_SLOT
-                previous.revision = 1
                 session.add(previous)
-            else:
-                previous.revision = previous.revision + 1
+            # The archive adopts the retired generation's revision. Active
+            # revisions grow monotonically, so every archive exposes a value
+            # no earlier archive ever carried; a client compare-and-swap on
+            # it stays sound across forget-and-rearchive cycles, which a
+            # slot-local counter restarting after forget could not
+            # guarantee. Candidate-ownership guards are unaffected: they
+            # all predicate on role "candidate", which this row leaves here.
+            previous.revision = active.revision
             previous.role = "retiring"
             previous.endpoint_url = active.endpoint_url
             previous.region = active.region

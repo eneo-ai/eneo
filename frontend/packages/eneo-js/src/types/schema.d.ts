@@ -14479,6 +14479,14 @@ export interface components {
        */
       secret_access_key: string;
     };
+    /**
+     * ObjectStoreSwitchBackInput
+     * @description Names the archived destination the administrator intends to restore.
+     */
+    ObjectStoreSwitchBackInput: {
+      /** Expected Previous Revision */
+      expected_previous_revision: number;
+    };
     /** OpenIdConnectLogin */
     OpenIdConnectLogin: {
       /** Code */
@@ -15875,6 +15883,8 @@ export interface components {
     };
     /** PreviousObjectStoreDestination */
     PreviousObjectStoreDestination: {
+      /** Revision */
+      revision: number;
       /** Endpoint Url */
       endpoint_url: string;
       /** Region */
@@ -41328,7 +41338,11 @@ export interface operations {
       path?: never;
       cookie?: never;
     };
-    requestBody?: never;
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["ObjectStoreSwitchBackInput"];
+      };
+    };
     responses: {
       /** @description Successful Response */
       200: {
@@ -41375,6 +41389,15 @@ export interface operations {
           "application/json": components["schemas"]["GeneralError"];
         };
       };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
       /** @description Service Unavailable */
       503: {
         headers: {
@@ -41388,7 +41411,10 @@ export interface operations {
   };
   forget_previous_object_store_destination_api_v1_admin_object_store_connection_previous_delete: {
     parameters: {
-      query?: never;
+      query: {
+        /** @description Revision of the archived destination being forgotten */
+        expected_revision: number;
+      };
       header?: never;
       path?: never;
       cookie?: never;
@@ -41418,6 +41444,24 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
         };
       };
       /** @description Service Unavailable */

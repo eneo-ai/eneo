@@ -4312,6 +4312,8 @@
   "storage_switch_error_copy_incomplete_description": "The new destination is missing files Eneo is still responsible for. Run the copy again against the right prefix, confirm the object count matches, and try again.",
   "storage_switch_error_previous_present_title": "Remove the previous destination first",
   "storage_switch_error_previous_present_description": "An archived previous destination is still kept for Switch back. Remove it under Previous destination once you no longer need the way back, then change destination.",
+  "storage_switch_outcome_not_applied_title": "The change was not applied",
+  "storage_switch_outcome_not_applied_description": "The result could not be confirmed at first, but the refreshed state shows the change never took effect. You can try again.",
   "storage_switch_error_moves_not_paused_title": "Pause moves before switching destination",
   "storage_switch_error_moves_not_paused_description": "Paused moves guarantee that nothing is written to object storage while your copy is made and the destination changes. Pause moves under Move existing content and try again; resume them after the switch.",
   "storage_connection_environment_title": "This connection is managed by operations",

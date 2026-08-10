@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Annotated, Literal
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, Query, Request
 from pydantic import BaseModel
 
 from eneo.authentication.auth_dependencies import (
@@ -61,11 +61,18 @@ _PLATFORM_ADMIN_DEPENDENCIES = [
 
 
 class PreviousObjectStoreDestination(BaseModel):
+    revision: int
     endpoint_url: str
     region: str
     bucket: str
     addressing_style: Literal["path", "virtual"]
     updated_at: datetime
+
+
+class ObjectStoreSwitchBackInput(BaseModel):
+    """Names the archived destination the administrator intends to restore."""
+
+    expected_previous_revision: int
 
 
 class ObjectStoreConnectionPublic(BaseModel):
@@ -113,6 +120,7 @@ def _public_previous(
     if previous is None:
         return None
     return PreviousObjectStoreDestination(
+        revision=previous.revision,
         endpoint_url=previous.endpoint_url,
         region=previous.region,
         bucket=previous.bucket,
@@ -266,11 +274,13 @@ async def replace_object_store_destination(
     responses=responses.get_responses([400, 403, 404, 409, 503]),
 )
 async def switch_back_object_store_destination(
+    intent: ObjectStoreSwitchBackInput,
     container: _ConnectionAdminContainer,
 ) -> ObjectStoreConnectionPublic:
     user = container.user()
     switch = await object_content_runtime.switch_back_object_store_destination(
         actor_user_id=user.id,
+        expected_previous_revision=intent.expected_previous_revision,
     )
     logger.info(
         "object_store.destination_switched_back",
@@ -292,14 +302,18 @@ async def switch_back_object_store_destination(
         "provider when it is no longer needed."
     ),
     dependencies=_PLATFORM_ADMIN_DEPENDENCIES,
-    responses=responses.get_responses([403, 404, 503]),
+    responses=responses.get_responses([403, 404, 409, 503]),
 )
 async def forget_previous_object_store_destination(
     container: _ConnectionAdminContainer,
+    expected_revision: int = Query(
+        description="Revision of the archived destination being forgotten"
+    ),
 ) -> None:
     user = container.user()
     await object_content_runtime.forget_previous_object_store_destination(
         actor_user_id=user.id,
+        expected_revision=expected_revision,
     )
     logger.info(
         "object_store.previous_destination_forgotten",

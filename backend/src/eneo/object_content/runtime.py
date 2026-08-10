@@ -331,13 +331,17 @@ class ObjectContentRuntime:
         self,
         *,
         actor_user_id: UUID,
+        expected_previous_revision: int,
     ) -> DestinationSwitch:
         connection_service = self._connection_service
         if connection_service is None:
             raise ObjectContentConfigurationError(
                 "Admin-managed object storage is unavailable in this runtime"
             )
-        switch = await connection_service.switch_back(actor_user_id=actor_user_id)
+        switch = await connection_service.switch_back(
+            actor_user_id=actor_user_id,
+            expected_previous_revision=expected_previous_revision,
+        )
         await self._publish_saved_object_store_connection(switch.active)
         return switch
 
@@ -345,6 +349,7 @@ class ObjectContentRuntime:
         self,
         *,
         actor_user_id: UUID,
+        expected_revision: int,
     ) -> None:
         connection_service = self._connection_service
         if connection_service is None:
@@ -352,7 +357,8 @@ class ObjectContentRuntime:
                 "Admin-managed object storage is unavailable in this runtime"
             )
         await connection_service.forget_previous_destination(
-            actor_user_id=actor_user_id
+            actor_user_id=actor_user_id,
+            expected_revision=expected_revision,
         )
 
     async def previous_object_store_destination(
