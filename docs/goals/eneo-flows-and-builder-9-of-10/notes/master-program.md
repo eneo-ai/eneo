@@ -1,13 +1,13 @@
 # Eneo Flows + Flow AI Builder — Master Program (living document)
 
-Status: CONVERGING — iterations 32 (score 7) and 33 (score 8, max
-effort) each returned changes_required; every finding was
-source-verified locally and absorbed. This file is now program v3;
-iteration 34 (max effort, min-score 9) adjudicates it. No
-implementation until convergence, then user sign-off. This file is
-self-contained so ANY coding agent can continue the program. Sibling
-context: `conformance-program-plan.md` (the detailed slice protocol
-and the full verdict ledger, same directory).
+Status: CONVERGING — iterations 32 (7), 33 (8), 34 (8, all max
+effort) returned changes_required; every finding was source-verified
+locally and absorbed. This file is now program v4; iteration 35
+(max effort, min-score 9) adjudicates it. No implementation until
+convergence, then user sign-off. This file is self-contained so ANY
+coding agent can continue the program. Sibling context:
+`conformance-program-plan.md` (the detailed slice protocol and the
+full verdict ledger, same directory).
 
 ## Mission
 
@@ -103,10 +103,17 @@ accepted plan (a death before acceptance must count against us):
 - Deterministic product deaths 0; product-attributable builder errors
   ≤1%; stalls and provider failures tracked separately (≤10/465 stays
   only as an interim tranche target).
-- Bounded p95 provider calls, tokens, and planning latency (baseline
-  extracted from the clean checkpoint in CP0).
-- Release verdict from a powered sample; 3 repetitions stay
-  exploratory.
+- Bounded p95 provider calls, tokens, and planning latency — CP0
+  freezes LIMITS (not just baselines) from the clean-checkpoint
+  distribution.
+- Fallback quality floor: the ≤10% fallback cohort carries its own
+  conformance floor (CP0 sets the number from baseline) so accepted
+  fallback plans cannot hide non-conformance.
+- Release verdict from a powered sample: CP0 freezes the power
+  calculation and release sample size; 3 repetitions stay
+  exploratory. The two full runs are planned MINIMUMS — the release
+  run repeats after the last material product change (post-CP5
+  re-attribution included), never before it.
 Scope: EXCELLENT CREATE MODE + runtime launch. Edit mode keeps its
 guards; edit excellence is a later program (explicitly out of scope).
 SURFACE-CLOSURE MILESTONE (greenfield adjudication, iteration 33):
@@ -177,9 +184,18 @@ the migration seam.
     derived view; placement defaults to the archetype's one
     deterministic consumer; semantic purpose only for evidence-backed
     multi-consumer cases; never leak physical `PlannedStepRole`
-    upstream. Then delete the prompt's mechanical form-field block,
-    the create repair mapping, and create-mode responsibility of the
-    four form-field invariants (edit guards stay), and remove
+    upstream. HARD DEPENDENCY (iteration 34): before CP3 removes
+    fields, pull forward ONE archetype-aware proposal-schema
+    materializer — a single function whose output is passed through
+    the existing `ProposalTurnContext`
+    (`ai_builder_proposal_tool_contracts.py:331`) and used verbatim
+    by BOTH token budgeting
+    (`ai_builder_planner_request_preparation.py:463`) and submission
+    (`ai_builder_proposal_submission.py:171`); CP3 and CP5 both
+    consume it and neither invents its own schema adaptation. Then
+    delete the prompt's mechanical form-field block, the create
+    repair mapping, and create-mode responsibility of the four
+    form-field invariants (edit guards stay), and remove
     `input_fields`/`uses_form_fields` from that archetype's proposal
     schema (surface closure).
 - [ ] CP4 JSON partial-emission diagnosis: why OSE captures some
@@ -199,8 +215,13 @@ the migration seam.
     canonical product rule OR a bounded per-name design map with a
     defined compiler projection; then materialize ONE schema reused
     by both budgeting and submission; then one provider strict-tool
-    probe with a nested obligated field. No recursive schema DSL. If
-    the provider cannot express the contract, the critic stays.
+    probe with a nested obligated field. No recursive schema DSL.
+    NO ESCAPE HATCH (iteration 34): if the provider cannot express
+    the contract, the design gate picks one of two closed outcomes —
+    declared top-level placement as the canonical product rule, or
+    classifying that shape as observable fallback. The critic may
+    survive only as a compiler POSTCONDITION (defect detector), never
+    as a normal repair owner on a supported archetype.
 - [ ] Ownership-tranche gate: full 155×3 after CP1–CP3 land (one of
     exactly TWO full runs; the other is the powered release
     candidate).
@@ -211,41 +232,44 @@ the migration seam.
     `ai_builder_critic_invariants.py:1823`).
 
 ### Launch stream (parallel; a RELEASE GATE, not a lower tier)
-- [ ] L1 Durable topology (RE-TARGETED, iteration 33): the release
-    proof runs against the ACTUAL launch artifact,
-    `docs/deployment/docker-compose.yml` — verified to already own
-    the three roles (execute, maintenance with
+- [ ] L1a Topology verification (SPLIT + TRIMMED, iteration 34): the
+    release artifact `docs/deployment/docker-compose.yml` already
+    owns the three roles (execute, maintenance with
     `FLOW_CELERY_WORKER_QUEUES=flows.maintenance`, beat) with
-    `restart: unless-stopped`. The `.devcontainer` compose (whose
-    flow worker just runs `sleep infinity`, no maintenance role) is
-    developer ergonomics: bring it to parity under the USER
-    PERMISSION GRANTED 2026-08-10 (scoped), but it is OFF the release
-    critical path. Fine details with long-term leverage, each traced
-    to a real incident, applied to the deployment artifact first:
-    - Three first-class compose services (execute worker, maintenance
-      worker, beat) with explicit queue env, `restart: unless-stopped`
-      and native healthchecks — no manually started processes inside
-      `sleep infinity` containers (incident: dead beat + missing
-      maintenance consumer orphaned 4 runs and saturated concurrency).
-    - Beat is a singleton by construction (duplicate beat = duplicate
-      redispatch storms).
-    - Queue names get ONE source of truth shared by producer and
-      consumer config (the orphan incident was consumer-topology
-      drift).
-    - Tracked Postgres max_connections=300 in compose/conf, not a
-      volume-local ALTER SYSTEM (dies on volume recreation); prove
-      with a clean-volume rebuild.
-    - GIT_COMMIT stamped at container start so `/version` can never
-      lie (retires the manual re-stamp discipline that already bit us
-      once).
-    - Worker lifecycle for long tasks, design-gate questions: prefetch
-      multiplier 1 for the execute role (a dying worker must not
-      hoard prefetched runs); redelivery has ONE owner — the
-      flow_run_recovery_policy — never broker acks-late as a second
-      redelivery mechanism (dual-ownership disease applies to
-      infrastructure too); warm-shutdown window vs recovery redispatch
-      adjudicated so termination mid-run always leaves recoverable
-      state.
+    `restart: unless-stopped` — verify rather than build. Remaining
+    deltas only: native healthchecks for the celery services, beat
+    singleton by construction, one source of truth for queue names
+    shared by producer and consumer config (the orphan incident was
+    consumer-topology drift). Health SURFACES belong to L3 alone.
+    Devcontainer parity (three roles instead of `sleep infinity`) is
+    developer ergonomics under the scoped 2026-08-10 permission — off
+    the release critical path.
+    DELETED as already shipped (verified `worker/celery/app.py:33`):
+    prefetch-1, acks-late, reject-on-worker-lost. That trio + the
+    status/revision CAS (`flow_dispatch.py:89`) IS the deliberate
+    crash-safety design: the database owns execution eligibility and
+    at-least-once broker delivery is a normal input, not a second
+    lifecycle owner. `acks_late` stays untouched; any future change
+    needs a process-crash matrix (before claim / after claim / during
+    shutdown) first.
+- [ ] L1b Immutable release identity (NEW, iteration 34): production
+    reads the baked release manifest first — `GIT_COMMIT` is only a
+    fallback (`main/config.py:193`) — while every deployment role
+    ships mutable `:latest` images. Pin ONE immutable SHA tag/digest
+    across backend, workers, beat, and init; verify the baked
+    version; record the digest for rollback. Runtime `GIT_COMMIT`
+    stamping remains a DEVCONTAINER-ONLY mechanism and is deleted
+    from the production plan.
+- [ ] L1c Capacity envelope (NEW, iteration 34): max_connections=300
+    was a dev-incident value, not policy — the configured envelope is
+    already 3 HTTP workers × 30 pool (`run.sh:39`,
+    `main/config.py:271`) + 2 celery roles × 4 processes × 30
+    (`flows/runtime/cli.py:23`) = 330 before ARQ, beat, init, and
+    reserved capacity. Derive the reference-deployment budget, tune
+    per-role pool sizes AND max_connections together with explicit
+    headroom, and track the result in deployment config (never a
+    volume-local ALTER SYSTEM); prove with a clean-volume rebuild.
+    L5 verifies this calculated envelope, not a folk number.
 - [ ] L2 Provider throttling: fail-fast + typed provider-throttled
     diagnosis + operator/user guidance (NO flow-level retry loop).
 - [ ] L3 Health: execution-consumer presence + beat freshness on the
@@ -261,7 +285,8 @@ the migration seam.
     max_connections under bounded load + one queue-recovery smoke at
     launch concurrency + exact deployment revision/config identity +
     rollback/drain evidence.
-Release requires L1–L5 resolved or explicitly descoped by the user.
+Release requires L1a–L1c, L2, L3, and L5 resolved (L4 only if the
+user opts object storage in) or explicitly descoped by the user.
 
 ### Standing rulings — NOT slices (adjudicated; apply when touched)
 - `planning_state_builder.py` split (3 owners + facade) only AFTER the
@@ -319,7 +344,11 @@ runs ≥45 min apart (provider limits).
   Never stage the user's protected files (`SolReview/`,
   `docs/adr/marketplace-*`, `.devcontainer/`, `goal.md`,
   `notes/handoff.md`, `notes/hermes-*`, `state.yaml`,
-  `frontend/package.json`).
+  `frontend/package.json`). ONE scoped exception, granted
+  2026-08-10: `.devcontainer` compose changes for the three-role
+  dev-parity topology (L1a) may be edited and committed; every other
+  protected path stays untouchable, and pre-existing devcontainer
+  content must survive.
 - Commits: `ENEO_DEVCONTAINER_NAME=developz_devcontainer-eneo-1
   git commit ...`; the container-side pyright pre-commit checks the
   DEPLOYED tree — if it OOMs (exit 247), run pyright manually on the
