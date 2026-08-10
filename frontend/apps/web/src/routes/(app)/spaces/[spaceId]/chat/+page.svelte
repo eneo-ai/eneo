@@ -24,7 +24,6 @@
   const data = $derived.by(() => ({ ...rawData, chatPartner: rawData.chatPartner! }));
 
   const {
-    featureFlags,
     user,
     state: { userInfo }
   } = getAppContext();
@@ -36,9 +35,7 @@
   const chat = untrack(() => initChatService(data));
 
   const debugAvailable = $derived(
-    featureFlags.showChatDebugPanel &&
-      user.hasPermission("assistant_debug") &&
-      chat.partner.type !== "group-chat"
+    user.hasPermission("assistant_debug") && chat.partner.type !== "group-chat"
   );
 
   let currentTab = writable("chat");

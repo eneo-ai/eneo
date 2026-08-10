@@ -48,6 +48,10 @@ def test_runtime_gates_enable_knowledge_and_url_only_files(monkeypatch):
         "eneo.files.file_reference.file_reference_base_url",
         lambda settings=None: "https://eneo.example",
     )
+    monkeypatch.setattr(
+        "eneo.files.file_reference.object_store_configured",
+        lambda: True,
+    )
     stored_file = _file()
 
     availability = resolve_internal_mcp_availability(

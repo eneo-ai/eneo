@@ -15,6 +15,22 @@ MCP_TOOL_REFERENCES_INSTRUCTION = (
     "source_id."
 )
 
+# Appended to the system prompt on every request that advertises tools. Tool
+# identifiers are sanitized `server__tool` strings (see MCPProxySession) that the
+# model must emit verbatim when calling, so they leak into prose unless the model
+# is told otherwise: asked "what tools do you have?", it answers with a list of
+# wire identifiers. Pairs with the `Display name:` line each tool description
+# opens with when its server supplies an MCP title.
+TOOL_NAMING_INSTRUCTION = (
+    "The tool identifiers you call with (for example knowledge__search_knowledge) "
+    "are internal wiring, not names for users. When you mention a tool, use the "
+    "Display name from its description when it has one, otherwise plain language "
+    "for what the tool does, in the language of the conversation. If the user "
+    "asks what you can do or which tools you have, answer with a short summary "
+    "of capabilities grouped by what the user can accomplish, not an inventory "
+    "of identifiers. Show a raw identifier only when the user asks for it."
+)
+
 SHOW_REFERENCES_PROMPT = """Use the provided sources delimited by triple quotes to answer questions.
 Only use the sources to answer questions. You MUST reference every source you use by adding an inline XML self-closing tag immediately after the information: <inref id="<source_id>"/>
 

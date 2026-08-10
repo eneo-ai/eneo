@@ -189,6 +189,21 @@ def _reference_settings(base_url: str | None = "http://host.docker.internal:8123
     return SimpleNamespace(file_reference_base_url=base_url, public_origin=None)
 
 
+def _enable_file_references(
+    monkeypatch,
+    base_url: str | None = "http://host.docker.internal:8123",
+    object_store: bool = True,
+):
+    """Put the deployment in the state URL-only mode requires: a reference base
+    URL to mint against and an object store holding the originals."""
+    monkeypatch.setattr(
+        file_reference_mod, "get_settings", lambda: _reference_settings(base_url)
+    )
+    monkeypatch.setattr(
+        file_reference_mod, "object_store_configured", lambda: object_store
+    )
+
+
 def _stub_file(
     file_type: FileType = FileType.TEXT,
     original_available: bool = True,
@@ -206,23 +221,21 @@ def _stub_file(
 
 class TestUrlOnlyFileIds:
     def test_empty_when_inlining_enabled(self, monkeypatch):
-        monkeypatch.setattr(
-            file_reference_mod, "get_settings", lambda: _reference_settings()
-        )
+        _enable_file_references(monkeypatch)
         assert url_only_file_ids([_stub_file()], inline_file_text=True) == set()
 
     def test_empty_without_base_url(self, monkeypatch):
-        monkeypatch.setattr(
-            file_reference_mod,
-            "get_settings",
-            lambda: _reference_settings(base_url=None),
-        )
+        _enable_file_references(monkeypatch, base_url=None)
+        assert url_only_file_ids([_stub_file()], inline_file_text=False) == set()
+
+    def test_empty_without_object_storage(self, monkeypatch):
+        """The assistant toggle is locked on inlining without an object store,
+        so a value saved while one was connected must not keep files URL-only."""
+        _enable_file_references(monkeypatch, object_store=False)
         assert url_only_file_ids([_stub_file()], inline_file_text=False) == set()
 
     def test_selects_only_text_files_with_original(self, monkeypatch):
-        monkeypatch.setattr(
-            file_reference_mod, "get_settings", lambda: _reference_settings()
-        )
+        _enable_file_references(monkeypatch)
         text_with_original = _stub_file()
         text_without_original = _stub_file(original_available=False)
         image_with_original = _stub_file(file_type=FileType.IMAGE)
@@ -242,9 +255,7 @@ class TestSendPathUrlOnlyFiltering:
     async def test_message_derived_images_dropped_for_url_only_parent(
         self, monkeypatch
     ):
-        monkeypatch.setattr(
-            file_reference_mod, "get_settings", lambda: _reference_settings()
-        )
+        _enable_file_references(monkeypatch)
         stored_parent = _stub_file()
         plain_parent = _stub_file(original_available=False, name="small.pdf")
         stored_derived = _stub_file(
@@ -281,9 +292,7 @@ class TestSendPathUrlOnlyFiltering:
 
     @pytest.mark.asyncio
     async def test_history_derivatives_skip_url_only_parents(self, monkeypatch):
-        monkeypatch.setattr(
-            file_reference_mod, "get_settings", lambda: _reference_settings()
-        )
+        _enable_file_references(monkeypatch)
         stored_parent = _stub_file()
         plain_parent = _stub_file(original_available=False, name="small.pdf")
         question = SimpleNamespace(files=[stored_parent, plain_parent])
@@ -311,9 +320,7 @@ class TestSendPathUrlOnlyFiltering:
     async def test_fit_guard_ignores_url_only_uploads(self, monkeypatch):
         import eneo.assistants.assistant_service as assistant_service_mod
 
-        monkeypatch.setattr(
-            file_reference_mod, "get_settings", lambda: _reference_settings()
-        )
+        _enable_file_references(monkeypatch)
         fit_check = MagicMock()
         monkeypatch.setattr(
             assistant_service_mod,

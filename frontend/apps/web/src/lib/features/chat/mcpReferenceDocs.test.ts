@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { citedTextDocumentReferences } from "./mcpReferenceDocs";
+import { citedTextDocumentReferences, mergeAdjacentCitations } from "./mcpReferenceDocs";
 
 function ref(
   id: string,
@@ -78,5 +78,103 @@ describe("citedTextDocumentReferences", () => {
     expect(
       citedTextDocumentReferences([ref("11111111-aaaa-4aaa-8aaa-aaaaaaaaaaaa")], "Plain answer.")
     ).toEqual([]);
+  });
+});
+
+describe("mergeAdjacentCitations", () => {
+  const DOC = "eneo://info-blob/a858607e-d7f7-424d-9c98-4706bd2c11a0";
+  const OTHER = "eneo://info-blob/b0000000-d7f7-424d-9c98-4706bd2c11a0";
+
+  const passage = (id: string, uri: string, chunk: number) =>
+    ref(id, { uri: `${uri}#chunk-${chunk}`, content: `passage ${chunk}` });
+
+  const first = passage("11111111-aaaa-4aaa-8aaa-aaaaaaaaaaaa", DOC, 1);
+  const second = passage("22222222-bbbb-4bbb-8bbb-bbbbbbbbbbbb", DOC, 10);
+  const elsewhere = passage("33333333-cccc-4ccc-8ccc-cccccccccccc", OTHER, 2);
+
+  const shortId = (id: string) => id.slice(0, 8);
+
+  it("suppresses a neighbouring citation of the same document", () => {
+    const { suppressed } = mergeAdjacentCitations(
+      [first, second],
+      `Server-side API:er.${inref(first.id)} ${inref(second.id)}`
+    );
+
+    expect([...suppressed]).toEqual([shortId(second.id)]);
+  });
+
+  it("hands the suppressed passage to the chip that survives", () => {
+    const { absorbedBy } = mergeAdjacentCitations(
+      [first, second],
+      `Server-side API:er.${inref(first.id)} ${inref(second.id)}`
+    );
+
+    expect(absorbedBy.get(shortId(first.id))).toEqual([second]);
+  });
+
+  it("keeps neighbouring citations of different documents", () => {
+    const { suppressed, absorbedBy } = mergeAdjacentCitations(
+      [first, elsewhere],
+      `Two sources.${inref(first.id)} ${inref(elsewhere.id)}`
+    );
+
+    expect([...suppressed]).toEqual([]);
+    expect(absorbedBy.size).toBe(0);
+  });
+
+  it("keeps a later citation of the same document separated by prose", () => {
+    const { suppressed, absorbedBy } = mergeAdjacentCitations(
+      [first, second],
+      `One claim.${inref(first.id)} A separate claim.${inref(second.id)}`
+    );
+
+    expect([...suppressed]).toEqual([]);
+    expect(absorbedBy.size).toBe(0);
+  });
+
+  it("neither suppresses nor absorbs a citation that also stands alone", () => {
+    const { suppressed, absorbedBy } = mergeAdjacentCitations(
+      [first, second],
+      `Together.${inref(first.id)} ${inref(second.id)} Alone.${inref(second.id)}`
+    );
+
+    expect([...suppressed]).toEqual([]);
+    expect(absorbedBy.size).toBe(0);
+  });
+
+  it("folds a run of three passages into the first, in citation order", () => {
+    const third = passage("44444444-dddd-4ddd-8ddd-dddddddddddd", DOC, 4);
+    const { suppressed, absorbedBy } = mergeAdjacentCitations(
+      [first, second, third],
+      `Everything.${inref(first.id)} ${inref(second.id)} ${inref(third.id)}`
+    );
+
+    expect([...suppressed].sort()).toEqual([shortId(second.id), shortId(third.id)].sort());
+    expect(absorbedBy.get(shortId(first.id))).toEqual([second, third]);
+  });
+
+  it("absorbs a repeated passage only once", () => {
+    const { absorbedBy } = mergeAdjacentCitations(
+      [first, second],
+      `A.${inref(first.id)} ${inref(second.id)} B.${inref(first.id)} ${inref(second.id)}`
+    );
+
+    expect(absorbedBy.get(shortId(first.id))).toEqual([second]);
+  });
+
+  it("never suppresses a citation id that matches no reference", () => {
+    const { suppressed } = mergeAdjacentCitations(
+      [first],
+      `Claim.${inref(first.id)} <inref id="deadbeef"/>`
+    );
+
+    expect([...suppressed]).toEqual([]);
+  });
+
+  it("reports nothing for an answer without citations", () => {
+    const { suppressed, absorbedBy } = mergeAdjacentCitations([first], "Plain answer.");
+
+    expect([...suppressed]).toEqual([]);
+    expect(absorbedBy.size).toBe(0);
   });
 });

@@ -11539,7 +11539,7 @@ export interface components {
        * @default true
        */
       inline_file_text?: boolean;
-      /** @default tool */
+      /** @default inject */
       knowledge_mode?: components["schemas"]["KnowledgeMode"];
       /**
        * Data Retention Days
@@ -16980,6 +16980,11 @@ export interface components {
        * @default false
        */
       file_references_enabled?: boolean;
+      /**
+       * Object Store Configured
+       * @default false
+       */
+      object_store_configured?: boolean;
     };
     /**
      * SharePointSubscriptionPublic

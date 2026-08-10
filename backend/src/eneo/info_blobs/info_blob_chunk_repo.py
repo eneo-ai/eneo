@@ -1,3 +1,5 @@
+from collections.abc import Sequence
+from dataclasses import dataclass
 from typing import Any, Optional
 from uuid import UUID
 
@@ -13,6 +15,20 @@ from eneo.info_blobs.info_blob import (
     InfoBlobChunkInDBWithScore,
     InfoBlobChunkWithEmbedding,
 )
+
+
+@dataclass(frozen=True, slots=True)
+class InfoBlobChunkExcerpt:
+    """A chunk read for its text alone.
+
+    Distinct from ``InfoBlobChunkInDB``, which inherits an ``embedding`` field:
+    sampling has no use for the vectors and hydrating them would move kilobytes
+    per row for nothing.
+    """
+
+    info_blob_id: UUID
+    chunk_no: int
+    text: str
 
 
 class InfoBlobChunkRepo:
@@ -31,12 +47,18 @@ class InfoBlobChunkRepo:
         group_ids: list[UUID],
         website_ids: list[UUID],
         integration_knowledge_ids: list[UUID],
+        info_blob_ids: list[UUID] | None = None,
     ) -> sa.Select[Any]:
+        # A single document is just a narrower scope handle than a collection,
+        # so it joins the same OR: no branch, no scope-kind discriminator.
+        # Every bucket widens the match; callers that need one scope alone pass
+        # empty lists for the rest (``.in_([])`` renders false-y).
         return stmt.where(
             sa.or_(
                 InfoBlobs.group_id.in_(group_ids),
                 InfoBlobs.website_id.in_(website_ids),
                 InfoBlobs.integration_knowledge_id.in_(integration_knowledge_ids),
+                InfoBlobs.id.in_(info_blob_ids or []),
             )
         )
 
@@ -71,6 +93,7 @@ class InfoBlobChunkRepo:
         group_ids: list[UUID] | None = None,
         website_ids: list[UUID] | None = None,
         integration_knowledge_ids: list[UUID] | None = None,
+        info_blob_ids: list[UUID] | None = None,
         limit: int = 30,
     ) -> list[InfoBlobChunkInDBWithScore]:
         # Postgres will sometimes think that a sequential scan of the whole table is
@@ -107,6 +130,7 @@ class InfoBlobChunkRepo:
             group_ids or [],
             website_ids or [],
             integration_knowledge_ids=integration_knowledge_ids or [],
+            info_blob_ids=info_blob_ids or [],
         )
 
         chunks_in_db = await self.session.execute(stmt)
@@ -121,6 +145,69 @@ class InfoBlobChunkRepo:
         ]
 
         return chunks_with_score
+
+    async def sample_evenly(
+        self,
+        *,
+        info_blob_ids: Sequence[UUID],
+        per_document: int = 1,
+    ) -> list[InfoBlobChunkExcerpt]:
+        """Chunks spread evenly through each of the given documents.
+
+        Position-based, not similarity-based: this backs questions about what a
+        source contains, which have no content query to embed. Chunks are taken
+        at the midpoints of ``per_document`` equal bands, so a single sample
+        lands mid-document rather than on the opening chunk, which for uploaded
+        PDFs is usually a title page.
+        """
+        if not info_blob_ids or per_document < 1:
+            return []
+
+        ranked = (
+            sa.select(
+                InfoBlobChunks.info_blob_id,
+                InfoBlobChunks.chunk_no,
+                InfoBlobChunks.text,
+                sa.func.row_number()
+                .over(
+                    partition_by=InfoBlobChunks.info_blob_id,
+                    order_by=InfoBlobChunks.chunk_no,
+                )
+                .label("rn"),
+                sa.func.count()
+                .over(partition_by=InfoBlobChunks.info_blob_id)
+                .label("total"),
+            )
+            .join(InfoBlobs, InfoBlobs.id == InfoBlobChunks.info_blob_id)
+            # Without this a superseded version's chunks could be sampled while
+            # the title list beside them only shows active documents.
+            .where(
+                InfoBlobChunks.info_blob_id.in_(info_blob_ids),
+                active_info_blob_version(),
+            )
+            .subquery()
+        )
+
+        band_midpoints = [
+            sa.cast(
+                sa.func.floor(ranked.c.total * (2 * k + 1) / (2.0 * per_document)) + 1,
+                sa.Integer,
+            )
+            for k in range(per_document)
+        ]
+        stmt = (
+            sa.select(ranked.c.info_blob_id, ranked.c.chunk_no, ranked.c.text)
+            .where(sa.or_(*[ranked.c.rn == midpoint for midpoint in band_midpoints]))
+            .order_by(ranked.c.info_blob_id, ranked.c.rn)
+        )
+
+        rows = await self.session.execute(stmt)
+        return [
+            InfoBlobChunkExcerpt(
+                info_blob_id=row.info_blob_id, chunk_no=row.chunk_no, text=row.text
+            )
+            for row in rows.all()
+        ]
 
     async def keyword_search(
         self,

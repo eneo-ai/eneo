@@ -5,7 +5,11 @@
   import type { EneoInrefCustomComponentProps } from "@eneo/ui/components/markdown";
   import { getMessageContext } from "../../MessageContext.svelte";
   import { getFaviconUrlService } from "$lib/features/knowledge/FaviconUrlService.svelte";
-  import { citedTextDocumentReferences, documentNumber } from "../../mcpReferenceDocs";
+  import {
+    citedTextDocumentReferences,
+    documentNumber,
+    mergeAdjacentCitations
+  } from "../../mcpReferenceDocs";
   import { m } from "$lib/paraglide/messages";
 
   let { token }: EneoInrefCustomComponentProps = $props();
@@ -43,6 +47,17 @@
       };
   });
 
+  // Chips whose neighbour already cites the same document: rendering them
+  // would repeat a number without adding a source, so they fold into that
+  // neighbour and hand it their passages.
+  const citationMerge = $derived.by(() => {
+    const message = current();
+    return mergeAdjacentCitations(message.mcp_tool_references ?? [], message.answer ?? "");
+  });
+
+  /** Passage separator inside the snippet modal, which renders Markdown. */
+  const PASSAGE_BREAK = "\n\n---\n\n";
+
   type MetaBag = Record<string, unknown> & {
     sourceType?: string;
     title?: string;
@@ -51,6 +66,7 @@
   };
 
   const mcpReference = $derived.by(() => {
+    if (citationMerge.suppressed.has(token.id)) return;
     const idx = mcpToolReferences.findIndex((ref) => ref.id.startsWith(token.id));
     if (idx > -1) {
       const ref = mcpToolReferences[idx];
@@ -60,10 +76,15 @@
       const pageRange = meta.pageRange ?? null;
       const section = meta.section ?? null;
       const labelText = section ? `${title} → ${section}` : title;
+      // The snippet carries this passage plus any the folded-away chips beside
+      // it would have shown, so collapsing them costs the reader nothing.
+      const passages = [ref, ...(citationMerge.absorbedBy.get(token.id) ?? [])]
+        .map((passage) => passage.content)
+        .filter((content): content is string => !!content);
       return {
         id: ref.id,
         uri: ref.uri,
-        content: ref.content ?? null,
+        content: passages.length ? passages.join(PASSAGE_BREAK) : null,
         title,
         labelText,
         sourceType: sourceType ?? null,

@@ -27,6 +27,8 @@ services:
       # Plain HTTP is fine for local development; production keeps the
       # HTTPS-only default. Container env wins over backend/.env, so override
       # this from the host environment if you need to test the refusal.
+      # The endpoint allowlist from earlier revisions is gone: this branch
+      # removed OBJECT_CONTENT_ADMIN_ALLOWED_ENDPOINT_ORIGINS entirely.
       - OBJECT_CONTENT_ALLOW_INSECURE_HTTP=${OBJECT_CONTENT_ALLOW_INSECURE_HTTP:-true}
     volumes:
       - ../:/workspace
