@@ -738,6 +738,16 @@ class ObjectStoreConnectionService:
                     "The archived previous destination changed; review the "
                     "latest state before removing it"
                 )
+            # An interrupted switch-back can leave its durable slot-2 switch
+            # claim behind. Once the retiring row is gone that claim has no
+            # recoverable owner and would only block the migration downgrade,
+            # so it is released in the same transaction. No live forward
+            # switch can hold this slot: switches are refused while an
+            # archive exists, and a racing switch-back fails its archived-row
+            # revision check at commit.
+            await StoreBindingRepository(session).clear_slot(
+                slot=TEMPORARY_DESTINATION_SLOT
+            )
             await session.delete(row)
 
     async def _switch(

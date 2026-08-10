@@ -1954,6 +1954,69 @@ async def test_a_stale_revision_cannot_mutate_a_replacement_archive(
     assert current.bucket == real_object_store.settings.bucket
 
 
+async def test_forget_releases_an_interrupted_switch_back_claim(
+    object_content_database: DatabaseSessionManager,
+    real_object_store: RealObjectStore,
+    real_unpaired_object_store: RealObjectStore,
+) -> None:
+    """Forget leaves no orphaned slot-2 binding claim behind.
+
+    A switch-back records its durable slot-2 switch claim before writing the
+    marker, so an interrupted attempt leaves that claim beside the retiring
+    row. Once the archive is forgotten the claim has no recoverable owner;
+    keeping it would only block the migration downgrade, which refuses while
+    either table still holds slot 2.
+    """
+    from eneo.database.tables.object_store_binding_table import ObjectStoreBindings
+    from eneo.object_content.store_binding import StoreBindingRepository
+
+    service = _service(object_content_database, real_object_store)
+    actor = await _any_user_id(object_content_database)
+    created = await service.create(
+        _connection_input(real_object_store), actor_user_id=actor
+    )
+    await ensure_store_binding_ready(
+        object_content_database,
+        service.settings_for(created),
+        real_object_store.store,
+    )
+    await _select_inline_writes(object_content_database)
+
+    switch = await service.replace_destination(
+        _connection_input(real_unpaired_object_store),
+        actor_user_id=actor,
+    )
+
+    # An interrupted switch-back: the claim was recorded durably, then the
+    # process stopped before any remote or commit work.
+    async with object_content_database.session() as session, session.begin():
+        await StoreBindingRepository(session).record_switch_claim(
+            slot=TEMPORARY_DESTINATION_SLOT,
+            deployment_id=created.deployment_id,
+            binding_id=uuid4(),
+        )
+
+    await service.forget_previous_destination(
+        actor_user_id=actor, expected_revision=switch.previous.revision
+    )
+
+    # Both slot-2 rows are gone: the downgrade precondition (no slot 2 in
+    # either table) accepts this state again.
+    async with object_content_database.session() as session, session.begin():
+        remaining_connection = await session.scalar(
+            select(ObjectStoreConnections).where(
+                ObjectStoreConnections.id == TEMPORARY_DESTINATION_SLOT
+            )
+        )
+        remaining_binding = await session.scalar(
+            select(ObjectStoreBindings).where(
+                ObjectStoreBindings.slot == TEMPORARY_DESTINATION_SLOT
+            )
+        )
+    assert remaining_connection is None
+    assert remaining_binding is None
+
+
 async def test_switch_back_is_refused_after_remote_content_diverged(
     object_content_database: DatabaseSessionManager,
     real_object_store: RealObjectStore,

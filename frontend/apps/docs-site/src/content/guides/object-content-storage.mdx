@@ -6,8 +6,7 @@ import { Callout, Steps, Tabs } from "nextra/components";
 
 - PostgreSQL inline is the complete ready-to-use default. Compatible object
   storage is optional.
-- Operators configure storage infrastructure, outbound endpoint approval, and
-  safety bounds. Administrators connect a destination and choose one
+- Operators configure storage infrastructure and safety bounds. Administrators connect a destination and choose one
   deployment-wide target for eligible new File, Icon, and knowledge original
   writes in **Admin > Storage** without restarting backend or worker.
 - A policy change affects new writes only. Existing content never moves
@@ -170,7 +169,7 @@ mean “more services.”
 | Owner          | Responsibility                                                                                                                        |
 | -------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
 | Administrator  | Connect a destination, change or roll back it, rotate its access keys, and set the new-write target and business upload limits in **Admin > Storage** |
-| Operator       | Run PostgreSQL and any optional compatible endpoint; approve outbound endpoint origins and own TLS, certificates, capacity, backups, and process safety tuning |
+| Operator       | Run PostgreSQL and any optional compatible endpoint; own TLS, certificates, capacity, backups, network reachability, and process safety tuning |
 
 Tenant admins can review policy, effective limits, and capability status.
 Deployment-wide content inventory spans tenants and is part of that same
@@ -351,8 +350,6 @@ Mount a private CA read-only into both backend and worker and set
 remain supported for upgrades. Eneo adopts them when encrypted persistence is
 available; otherwise they remain read-only in the admin interface. Do not
 configure the same destination through both paths.
-Add the adopted endpoint's origin to the allowlist before rotating its access
-keys in Admin.
 
 Do **not** enable the bundled profile. Start the normal stack and verify:
 
