@@ -396,6 +396,26 @@ delta and fake prose-schema representation globally, extraction producer
 included per Pass 20, JSON behavior preserved by regression) is at the
 Pass 21 design gate.
 
+**Checkpoint `checkpoint-342dc7e-155x3` (2026-08-10 13:40, clean after
+two invalidated attempts: dev-DB connection exhaustion then provider
+rate limiting — both environmental, both fixed/cooled).** vs
+`checkpoint-eda4865-155x3`, margin 5, `--allow-harness-change`
+(case-local: rescored == the frozen 25 exactly). Formal verdict
+`no_measurable_change` (81 unstable cases get no direction; one
+margin-flagged regression `text_terminal_intranatsnyhet_namndbeslut`
+pending attribution). Aggregates: pass observations 162→170, plans
+349→360 (first-pass 274→286), builder_error 30→27, stalled 24→19,
+provider_unknown 6→2. Three-checkpoint death trajectory: builder_error
+50→30→27; architecture_materialization 13→10→**2** (model-ref family
+gone from the ranking); provider_unknown 22→6→2. Blockers now:
+self_correction_invalid_plan 9, quality_failure 7, flow_step_invalid 4,
+rich_workflow 3, plus the NEW `named_result_obligations_must_survive`
+2 — the system now enforces obligations it previously dropped
+silently. Probes: the 3 JSON prose-loss cases still fail leaf checks
+9/9 (conversion awaits commit 2 + emission reliability). Sentinel: the
+invariant-vector failures were a pre-existing rubric bound
+(min=max=4 vs the owned 5–6 step topology), corrected in `342dc7ec9`.
+
 **Instability posture (Pass 6):** the pilot's 68/155 joint-state
 instability is a diagnostic, not a stabilization target — 23/155 (~15%)
 flip pass↔fail; much of the rest alternates first-pass vs repaired. No
