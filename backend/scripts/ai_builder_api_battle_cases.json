@@ -9602,6 +9602,117 @@
           "selected_option_id": "no_direct_compare"
         }
       }
+    },
+    {
+      "id": "transcribe_only_interview_recording_text",
+      "complexity": "easy",
+      "domain": "municipality_meetings",
+      "required": false,
+      "prompt": "Jag vill bygga ett flöde där jag laddar upp en ljudinspelning från en intervju. Flödet ska transkribera inspelningen till text, ordagrant och utan sammanfattning eller analys. Slutresultatet ska vara ren text — ingen JSON, ingen PDF och ingen DOCX-mall. Jag fyller inte i några egna uppgifter vid körning.",
+      "expected": {
+        "min_steps": 1,
+        "max_steps": 1,
+        "terminal_output_type": "text",
+        "expected_primary_input_type": "audio",
+        "expected_output_modes": [
+          "transcribe_only"
+        ],
+        "forbid_primary_material_form_fields": true,
+        "forbidden_question_event_ids": [
+          "runtime_metadata_fields",
+          "docx_output_mode",
+          "pdf_generation_mode",
+          "report_disposition",
+          "comparison_scope",
+          "post_processing_goal",
+          "primary_runtime_input",
+          "terminal_output",
+          "mapped_file_limit"
+        ],
+        "max_question_event_count": 0
+      },
+      "cohorts": [
+        "audio",
+        "transcription"
+      ]
+    },
+    {
+      "id": "transcribe_only_citizen_dialogue_verbatim",
+      "complexity": "medium",
+      "domain": "municipality_citizen_services",
+      "required": false,
+      "prompt": "Vid varje körning laddar handläggaren upp en ljudfil från en medborgardialog. Flödet ska ge en ordagrann transkribering av hela inspelningen som löpande text, med styckeindelning där det är naturligt. Ingen sammanfattning, inga slutsatser och ingen strukturerad data — bara texten. Inga extra uppgifter fylls i vid körning.",
+      "expected": {
+        "min_steps": 1,
+        "max_steps": 1,
+        "terminal_output_type": "text",
+        "expected_primary_input_type": "audio",
+        "expected_output_modes": [
+          "transcribe_only"
+        ],
+        "forbid_primary_material_form_fields": true,
+        "forbidden_question_event_ids": [
+          "runtime_metadata_fields",
+          "docx_output_mode",
+          "pdf_generation_mode",
+          "report_disposition",
+          "comparison_scope",
+          "post_processing_goal",
+          "primary_runtime_input",
+          "terminal_output",
+          "mapped_file_limit"
+        ],
+        "max_question_event_count": 0
+      },
+      "cohorts": [
+        "audio",
+        "transcription"
+      ]
+    },
+    {
+      "id": "interview_goal_transcription_text",
+      "complexity": "easy",
+      "domain": "municipality_meetings",
+      "required": false,
+      "prompt": "Vi spelar in våra samverkansmöten och vill kunna få ut texten ur inspelningarna. Hjälp mig bygga ett flöde för det.",
+      "expected": {
+        "min_steps": 1,
+        "max_steps": 1,
+        "terminal_output_type": "text",
+        "expected_primary_input_type": "audio",
+        "expected_output_modes": [
+          "transcribe_only"
+        ],
+        "forbidden_question_event_ids": [
+          "docx_output_mode",
+          "pdf_generation_mode",
+          "comparison_scope",
+          "report_disposition",
+          "runtime_metadata_fields",
+          "mapped_file_limit"
+        ],
+        "allowed_question_event_ids": [
+          "primary_runtime_input",
+          "terminal_output",
+          "post_processing_goal"
+        ],
+        "max_question_event_count": 3,
+        "max_reopened_question_count": 0
+      },
+      "cohorts": [
+        "audio",
+        "transcription",
+        "vague"
+      ],
+      "synthetic_user_profile": "audio_source",
+      "question_answer_overrides": {
+        "terminal_output": {
+          "selected_option_id": "structured_text"
+        },
+        "post_processing_goal": {
+          "selected_option_id": "stop_after_primary_operation"
+        }
+      }
     }
   ]
 }
