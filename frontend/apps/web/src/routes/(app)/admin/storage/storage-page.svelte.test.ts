@@ -1069,6 +1069,52 @@ describe("admin storage settings page", () => {
     expect(getPolicy).toHaveBeenCalledTimes(2);
   });
 
+  test("keeps the previous-destination controls after rotating credentials", async () => {
+    testUser.canAdministerStorage = true;
+    getPolicy.mockResolvedValue(policy());
+    const archived = {
+      revision: 1,
+      endpoint_url: "https://old.example.test",
+      region: "se-1",
+      bucket: "eneo-content-old",
+      addressing_style: "path",
+      updated_at: "2026-08-03T18:00:00Z"
+    } as const;
+    const connection = {
+      source: "admin",
+      configured: true,
+      credentials_can_be_managed: true,
+      revision: 3,
+      endpoint_url: "https://objects.example.test",
+      region: "se-1",
+      bucket: "eneo-content",
+      addressing_style: "path",
+      updated_at: "2026-08-03T18:00:00Z",
+      previous_destination: archived
+    } as const;
+    getObjectStoreConnection.mockReset().mockResolvedValue(connection);
+    // Rotation leaves the archive in place, so its response carries it too.
+    rotateObjectStoreCredentials.mockResolvedValue({
+      ...connection,
+      revision: 4,
+      previous_destination: archived
+    });
+
+    render(StoragePage);
+
+    await page.getByRole("button", { name: "storage_connection_rotate_action" }).click();
+    await page.getByLabelText("storage_connection_access_key").fill("new-access-key");
+    await page.getByLabelText("storage_connection_secret_key").fill("new-secret-key");
+    await page.getByRole("button", { name: "storage_connection_test_and_rotate" }).click();
+
+    await expect.element(page.getByText("storage_connection_rotated_title")).toBeVisible();
+    // The recovery controls must survive a rotation: the page does not
+    // reload the connection after a successful save.
+    await expect
+      .element(page.getByRole("button", { name: "storage_switch_back_action" }))
+      .toBeVisible();
+  });
+
   test("replaces the complete key pair without presenting the destination as editable", async () => {
     testUser.canAdministerStorage = true;
     getPolicy.mockResolvedValue(policy());

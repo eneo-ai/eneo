@@ -252,7 +252,17 @@ async def rotate_object_store_credentials(
             "revision": stored.revision,
         },
     )
-    return _public_stored_connection(stored)
+    # Rotation leaves the temporary slot untouched, so the response must
+    # still carry it: the admin page renders switch-back, forget, and
+    # abandon from these fields and does not reload after a successful
+    # rotation.
+    (
+        previous,
+        pending,
+    ) = await object_content_runtime.temporary_object_store_destinations()
+    connection = _public_stored_connection(stored, previous)
+    connection.pending_destination = _public_pending(pending)
+    return connection
 
 
 @router.post(
