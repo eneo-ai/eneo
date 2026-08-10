@@ -784,7 +784,12 @@ async def test_iterate_stream_stops_at_max_rounds():
             pending_approval_ids=set(),
         )
 
-    assert mocked_acompletion.await_count == 10
+    # One follow-up per executed round, then one forced toolless final. The
+    # mock keeps emitting tool calls even then; those are dropped and the
+    # turn still ends cleanly.
+    assert mocked_acompletion.await_count == 11
+    assert mocked_acompletion.await_args_list[-1].kwargs["tool_choice"] == "none"
+    assert len(mcp_proxy.calls) == 10
     assert any(chunk.stop for chunk in completions)
 
 
@@ -1108,3 +1113,105 @@ async def test_iterate_stream_approved_tools_execute_and_continue():
         and c.tool_calls_metadata[0].result_status == "succeeded"
     ]
     assert execution_events
+
+
+async def test_non_streaming_round_cap_refuses_calls_and_forces_final_answer():
+    adapter = _make_completion_adapter()
+    mcp_proxy = _FakeMCPProxy()
+    max_rounds = TenantModelAdapter.MAX_TOOL_ROUNDS
+    responses = [
+        _response(
+            tool_calls=[_response_tool_call(f"call_{i}", '{"q":"x"}')],
+            finish_reason="tool_calls",
+        )
+        for i in range(max_rounds + 1)
+    ]
+    responses.append(_response(content="answer from gathered context"))
+
+    with patch(
+        "eneo.completion_models.infrastructure.adapters.tenant_model_adapter._acompletion_call",
+        AsyncMock(side_effect=responses),
+    ) as completion_call:
+        completion = await adapter.get_response(
+            context=SimpleNamespace(),
+            model_kwargs={},
+            mcp_proxy=mcp_proxy,
+        )
+
+    assert completion.text == "answer from gathered context"
+    assert completion.stop is True
+    # The budget covers max_rounds executed rounds; the pending round is
+    # refused, not executed.
+    assert len(mcp_proxy.calls) == max_rounds
+    # Initial call + one follow-up per executed round + the forced final.
+    assert completion_call.await_count == max_rounds + 2
+    final_call = completion_call.await_args_list[-1]
+    assert final_call.kwargs["tool_choice"] == "none"
+    refusals = [
+        message
+        for message in final_call.kwargs["messages"]
+        if message.get("role") == "tool"
+        and "Tool round limit reached" in message.get("content", "")
+    ]
+    assert len(refusals) == 1
+    assert refusals[0]["tool_call_id"] == f"call_{max_rounds}"
+
+
+async def test_iterate_stream_round_cap_refuses_calls_and_forces_final_answer():
+    adapter = _make_adapter()
+    mcp_proxy = _FakeMCPProxy()
+    messages: list[dict] = []
+    max_rounds = TenantModelAdapter.MAX_TOOL_ROUNDS
+    follow_ups = [
+        _AsyncChunkStream([_tool_call_chunk(tool_call_id=f"call_{i}")])
+        for i in range(1, max_rounds + 1)
+    ]
+    follow_ups.append(
+        _AsyncChunkStream([_text_chunk("partial answer", finish_reason="stop")])
+    )
+
+    stream = _AsyncChunkStream(
+        [_tool_call_chunk(tool_call_id="call_0")],
+        eneo_context={
+            "mcp_proxy": mcp_proxy,
+            "messages": messages,
+            "kwargs": {},
+            "has_tools": True,
+        },
+    )
+
+    with patch(
+        "eneo.completion_models.infrastructure.adapters.tenant_model_adapter._acompletion_call",
+        AsyncMock(side_effect=follow_ups),
+    ) as completion_call:
+        completions = await _collect(
+            adapter,
+            stream,
+            require_tool_approval=False,
+            approval_manager=None,
+            approval_context=None,
+            pending_approval_ids=set(),
+        )
+
+    # max_rounds rounds execute; the pending round is refused, not executed.
+    assert len(mcp_proxy.calls) == max_rounds
+    # One follow-up per executed round + the forced toolless final.
+    assert completion_call.await_count == max_rounds + 1
+    assert completion_call.await_args_list[-1].kwargs["tool_choice"] == "none"
+    refusals = [
+        message
+        for message in messages
+        if message["role"] == "tool"
+        and "Tool round limit reached" in message["content"]
+    ]
+    assert len(refusals) == 1
+    assert refusals[0]["tool_call_id"] == f"call_{max_rounds}"
+    streamed_text = "".join(c.text for c in completions if c.text)
+    assert "partial answer" in streamed_text
+    refused_events = [
+        tm
+        for c in _tool_call_events(completions)
+        for tm in (c.tool_calls_metadata or [])
+        if tm.result_status == "failed" and tm.tool_call_id == f"call_{max_rounds}"
+    ]
+    assert refused_events
