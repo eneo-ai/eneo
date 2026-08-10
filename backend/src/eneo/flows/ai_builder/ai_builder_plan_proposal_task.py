@@ -161,6 +161,9 @@ def build_plan_proposal_system_prompt(
     output_schema_block = _output_schema_evidence_block(planning_state)
     if output_schema_block is not None:
         lines.extend(["", "Output schema evidence:", output_schema_block])
+    named_result_block = _named_result_obligations_block(planning_state)
+    if named_result_block is not None:
+        lines.extend(["", "Named result obligations:", named_result_block])
     example_style_block = _example_output_style_evidence_block(planning_state)
     if example_style_block is not None:
         lines.extend(["", "Example-output style evidence:", example_style_block])
@@ -417,34 +420,31 @@ def _output_schema_evidence_block(planning_state: PlanningState) -> str | None:
                 "fields or validation constraints.",
             ]
         )
-    if evidence.source == "prose_field_names":
-        field_label = (
-            "top-level key preview normalized from cited user-named fields"
-            if projection.lossy
-            else "top-level keys normalized from cited user-named fields"
-        )
-        preservation_instruction = (
-            "- The canonical schema retains the normalized keys; this display is "
-            "only a truncated preview. Keep output_fields "
-            "consistent with the canonical schema and do not infer missing names, "
-            "types, nesting, requiredness, or validation constraints."
-            if projection.lossy
-            else "- Preserve these canonical keys exactly. Unquoted phrases were "
-            "normalized; quoted or backticked literal keys were preserved. Types, "
-            "nesting, requiredness, and validation constraints remain unspecified."
-        )
-        return "\n".join(
-            [
-                f"- source: {evidence.source}, {evidence.confidence} confidence",
-                f"- {field_label}: {field_text}",
-                preservation_instruction,
-            ]
-        )
     return "\n".join(
         [
             f"- source: {evidence.source}, {evidence.confidence} confidence",
             f"- declared top-level fields: {field_text}",
             "- Use output_fields consistent with these user-declared fields.",
+        ]
+    )
+
+
+def _named_result_obligations_block(planning_state: PlanningState) -> str | None:
+    terminal_output = planning_state.resolved_slots.get("terminal_output")
+    obligations = planning_state.named_result_obligations
+    if (
+        terminal_output is None
+        or terminal_output.value != "structured_json"
+        or not obligations
+    ):
+        return None
+    names = ", ".join(render_ai_builder_evidence_value(name) for name in obligations)
+    return "\n".join(
+        [
+            f"- user-named result keys: {names}",
+            "- Preserve every name as a key somewhere in the outcome contract. "
+            "Types, nesting, requiredness, and validation constraints remain "
+            "unspecified.",
         ]
     )
 

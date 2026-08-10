@@ -87,7 +87,7 @@ _VALID_CLASSIFICATION_RESPONSE: dict[str, object] = {
     "file_roles": [],
     "checkpoint_updates": [],
     "form_intake": None,
-    "output_schema_fields": None,
+    "named_result_evidence": None,
     "example_output_constraints": None,
     "schema_direction": None,
     "secondary_obligations": [],
@@ -237,16 +237,16 @@ def test_parser_normalizes_only_cited_user_named_output_field_phrases() -> None:
     def parse_fields(
         *,
         quote: str,
-        field_names: list[str],
+        names: list[str],
     ) -> tuple[str, ...] | None:
         result = parse_slot_classification_response(
             json.dumps(
                 {
                     **_VALID_CLASSIFICATION_RESPONSE,
-                    "output_schema_fields": {
+                    "named_result_evidence": {
                         "operation": "update",
-                        "field_names": field_names,
-                        "removed_field_names": [],
+                        "names": names,
+                        "removed_names": [],
                         "confidence": "high",
                         "reason": "The user explicitly enumerated JSON fields.",
                         "evidence": [_evidence(quote)],
@@ -258,8 +258,8 @@ def test_parser_normalizes_only_cited_user_named_output_field_phrases() -> None:
         )
         assert result is not None
         return (
-            result.output_schema_fields.field_names
-            if result.output_schema_fields is not None
+            result.named_result_evidence.names
+            if result.named_result_evidence is not None
             else None
         )
 
@@ -269,7 +269,7 @@ def test_parser_normalizes_only_cited_user_named_output_field_phrases() -> None:
     )
     assert parse_fields(
         quote=quote,
-        field_names=[
+        names=[
             "sökta insatser",
             "mottagna uppgifter",
             "Åtgärd ٢",
@@ -279,18 +279,18 @@ def test_parser_normalizes_only_cited_user_named_output_field_phrases() -> None:
     assert (
         parse_fields(
             quote="JSON-resultatet ska innehålla sökta insatser och sokta-insatser.",
-            field_names=["sökta insatser", "sokta-insatser"],
+            names=["sökta insatser", "sokta-insatser"],
         )
         is None
     )
     assert (
         parse_fields(
             quote='JSON-resultatet ska innehålla "Case ID" och Case ID.',
-            field_names=["Case ID"],
+            names=["Case ID"],
         )
         is None
     )
-    assert parse_fields(quote=quote, field_names=["sökta insatser", "beslut"]) is None
+    assert parse_fields(quote=quote, names=["sökta insatser", "beslut"]) is None
 
 
 @pytest.mark.parametrize(
@@ -309,10 +309,10 @@ def test_parser_accepts_field_declaration_using_source_relative_citation_boundar
                 "file_roles": [],
                 "checkpoint_updates": [],
                 "form_intake": None,
-                "output_schema_fields": {
+                "named_result_evidence": {
                     "operation": "update",
-                    "field_names": ["id"],
-                    "removed_field_names": [],
+                    "names": ["id"],
+                    "removed_names": [],
                     "confidence": "high",
                     "reason": "The user explicitly named the JSON property.",
                     "evidence": [_evidence(evidence_quote)],
@@ -329,8 +329,8 @@ def test_parser_accepts_field_declaration_using_source_relative_citation_boundar
     )
 
     assert result is not None
-    assert result.output_schema_fields is not None
-    assert result.output_schema_fields.field_names == ("id",)
+    assert result.named_result_evidence is not None
+    assert result.named_result_evidence.names == ("id",)
 
 
 @pytest.mark.parametrize(
@@ -365,10 +365,10 @@ def test_parser_distinguishes_json_shape_notation_from_literal_field_punctuation
                 "file_roles": [],
                 "checkpoint_updates": [],
                 "form_intake": None,
-                "output_schema_fields": {
+                "named_result_evidence": {
                     "operation": "update",
-                    "field_names": [classified_name],
-                    "removed_field_names": [],
+                    "names": [classified_name],
+                    "removed_names": [],
                     "confidence": "high",
                     "reason": "The user explicitly named the JSON property.",
                     "evidence": [_evidence(quote)],
@@ -385,12 +385,12 @@ def test_parser_distinguishes_json_shape_notation_from_literal_field_punctuation
     )
 
     assert result is not None
-    assert result.output_schema_fields is not None
-    assert result.output_schema_fields.field_names == (expected_name,)
+    assert result.named_result_evidence is not None
+    assert result.named_result_evidence.names == (expected_name,)
 
 
 @pytest.mark.parametrize(
-    "field_names, quote",
+    "names, quote",
     [
         (["case_id", "invented_field"], "JSON output field: case_id."),
         (["id"], "The JSON output provides identifiers."),
@@ -408,8 +408,8 @@ def test_parser_distinguishes_json_shape_notation_from_literal_field_punctuation
         (["id"], "Return id\N{COMBINING ACUTE ACCENT} in the JSON output."),
     ],
 )
-def test_parser_refuses_unverified_output_schema_fields(
-    field_names: list[str],
+def test_parser_refuses_unverified_named_result_evidence(
+    names: list[str],
     quote: str,
 ) -> None:
     result = parse_slot_classification_response(
@@ -419,10 +419,10 @@ def test_parser_refuses_unverified_output_schema_fields(
                 "file_roles": [],
                 "checkpoint_updates": [],
                 "form_intake": None,
-                "output_schema_fields": {
+                "named_result_evidence": {
                     "operation": "update",
-                    "field_names": field_names,
-                    "removed_field_names": [],
+                    "names": names,
+                    "removed_names": [],
                     "confidence": "high",
                     "reason": "Claimed field declaration.",
                     "evidence": [_evidence(quote)],
@@ -439,7 +439,7 @@ def test_parser_refuses_unverified_output_schema_fields(
     )
 
     assert result is not None
-    assert result.output_schema_fields is None
+    assert result.named_result_evidence is None
 
 
 @pytest.mark.parametrize(
@@ -450,7 +450,7 @@ def test_parser_refuses_unverified_output_schema_fields(
         ('Return [ "id", "status" ] in the JSON output.', '"id"'),
     ],
 )
-def test_parser_refuses_short_citations_of_nested_or_list_field_names(
+def test_parser_refuses_short_citations_of_nested_or_list_names(
     source_text: str,
     evidence_quote: str,
 ) -> None:
@@ -461,10 +461,10 @@ def test_parser_refuses_short_citations_of_nested_or_list_field_names(
                 "file_roles": [],
                 "checkpoint_updates": [],
                 "form_intake": None,
-                "output_schema_fields": {
+                "named_result_evidence": {
                     "operation": "update",
-                    "field_names": ["id"],
-                    "removed_field_names": [],
+                    "names": ["id"],
+                    "removed_names": [],
                     "confidence": "high",
                     "reason": "Claimed field declaration.",
                     "evidence": [_evidence(evidence_quote)],
@@ -481,7 +481,7 @@ def test_parser_refuses_short_citations_of_nested_or_list_field_names(
     )
 
     assert result is not None
-    assert result.output_schema_fields is None
+    assert result.named_result_evidence is None
 
 
 @pytest.mark.parametrize(
@@ -505,10 +505,10 @@ def test_parser_accepts_only_cited_output_field_deltas(
                 "file_roles": [],
                 "checkpoint_updates": [],
                 "form_intake": None,
-                "output_schema_fields": {
+                "named_result_evidence": {
                     "operation": "update",
-                    "field_names": list(added),
-                    "removed_field_names": list(removed),
+                    "names": list(added),
+                    "removed_names": list(removed),
                     "confidence": "high",
                     "reason": "Apply the user's current field change.",
                     "evidence": [_evidence(quote)],
@@ -526,11 +526,11 @@ def test_parser_accepts_only_cited_output_field_deltas(
 
     assert result is not None
     if accepted:
-        assert result.output_schema_fields is not None
-        assert result.output_schema_fields.field_names == added
-        assert result.output_schema_fields.removed_field_names == removed
+        assert result.named_result_evidence is not None
+        assert result.named_result_evidence.names == added
+        assert result.named_result_evidence.removed_names == removed
     else:
-        assert result.output_schema_fields is None
+        assert result.named_result_evidence is None
 
 
 def test_parser_accepts_explicit_clear_of_named_json_fields() -> None:
@@ -543,10 +543,10 @@ def test_parser_accepts_explicit_clear_of_named_json_fields() -> None:
                 "file_roles": [],
                 "checkpoint_updates": [],
                 "form_intake": None,
-                "output_schema_fields": {
+                "named_result_evidence": {
                     "operation": "clear",
-                    "field_names": [],
-                    "removed_field_names": [],
+                    "names": [],
+                    "removed_names": [],
                     "confidence": "high",
                     "reason": "The user removed the named field constraints.",
                     "evidence": [_evidence(quote)],
@@ -563,13 +563,13 @@ def test_parser_accepts_explicit_clear_of_named_json_fields() -> None:
     )
 
     assert result is not None
-    assert result.output_schema_fields is not None
-    assert result.output_schema_fields.operation == "clear"
-    assert result.output_schema_fields.field_names == ()
+    assert result.named_result_evidence is not None
+    assert result.named_result_evidence.operation == "clear"
+    assert result.named_result_evidence.names == ()
 
 
 def test_parser_rejects_field_delta_reconstructed_from_prior_user_sources() -> None:
-    field_names = tuple(f"field_{index}" for index in range(4))
+    names = tuple(f"field_{index}" for index in range(4))
     sources = tuple(
         SlotClassificationSource(
             source_id=f"user_message:user-{index}",
@@ -577,7 +577,7 @@ def test_parser_rejects_field_delta_reconstructed_from_prior_user_sources() -> N
             text=f"Include {field_name} in the JSON output.",
             message_id=f"user-{index}",
         )
-        for index, field_name in enumerate(field_names)
+        for index, field_name in enumerate(names)
     )
 
     result = parse_slot_classification_response(
@@ -587,10 +587,10 @@ def test_parser_rejects_field_delta_reconstructed_from_prior_user_sources() -> N
                 "file_roles": [],
                 "checkpoint_updates": [],
                 "form_intake": None,
-                "output_schema_fields": {
+                "named_result_evidence": {
                     "operation": "update",
-                    "field_names": list(field_names),
-                    "removed_field_names": [],
+                    "names": list(names),
+                    "removed_names": [],
                     "confidence": "high",
                     "reason": "Reconstructed complete JSON field set.",
                     "evidence": [
@@ -613,7 +613,7 @@ def test_parser_rejects_field_delta_reconstructed_from_prior_user_sources() -> N
     )
 
     assert result is not None
-    assert result.output_schema_fields is None
+    assert result.named_result_evidence is None
 
 
 def test_parser_stamps_complete_schema_candidate_set_and_accepts_both_boundaries() -> (
@@ -2207,7 +2207,7 @@ def test_classification_prompt_places_evidence_bounds_in_model_contract() -> Non
         "slot, file_role, form_intake, and checkpoint_update classification" in prompt
     )
     assert (
-        f"up to {classification_contract.OUTPUT_SCHEMA_FIELD_EVIDENCE_MAX_ITEMS} exact evidence "
+        f"up to {classification_contract.NAMED_RESULT_EVIDENCE_MAX_ITEMS} exact evidence "
         "quotes" in prompt
     )
     assert (
@@ -2426,7 +2426,7 @@ async def test_classify_slots_requests_bounded_json_schema_response_format() -> 
         "file_roles",
         "checkpoint_updates",
         "form_intake",
-        "output_schema_fields",
+        "named_result_evidence",
         "example_output_constraints",
         "schema_direction",
         "secondary_obligations",
@@ -2434,11 +2434,11 @@ async def test_classify_slots_requests_bounded_json_schema_response_format() -> 
         "contradictions",
     ]
     assert schema["additionalProperties"] is False
-    output_fields_schema = schema["properties"]["output_schema_fields"]["anyOf"][0]
+    output_fields_schema = schema["properties"]["named_result_evidence"]["anyOf"][0]
     assert output_fields_schema["required"] == [
         "operation",
-        "field_names",
-        "removed_field_names",
+        "names",
+        "removed_names",
         "confidence",
         "reason",
         "evidence",
@@ -2447,9 +2447,13 @@ async def test_classify_slots_requests_bounded_json_schema_response_format() -> 
         "update",
         "clear",
     ]
-    assert "maxItems" not in output_fields_schema["properties"]["field_names"]
-    assert "maxItems" not in output_fields_schema["properties"]["removed_field_names"]
-    assert output_fields_schema["properties"]["field_names"]["items"]["maxLength"] == (
+    assert output_fields_schema["properties"]["names"]["maxItems"] == (
+        classification_contract.NAMED_RESULT_EVIDENCE_MAX_ITEMS
+    )
+    assert output_fields_schema["properties"]["removed_names"]["maxItems"] == (
+        classification_contract.NAMED_RESULT_EVIDENCE_MAX_ITEMS
+    )
+    assert output_fields_schema["properties"]["names"]["items"]["maxLength"] == (
         classification_contract.CLASSIFICATION_EVIDENCE_MAX_LENGTH
     )
     slot_schema = schema["properties"]["slots"]
@@ -2784,7 +2788,7 @@ def test_raw_classifier_capture_writes_pre_parse_content(
     from eneo.flows.ai_builder import ai_builder_slot_classifier as classifier
 
     monkeypatch.setenv(classifier.RAW_CLASSIFIER_CAPTURE_DIR_ENV, str(tmp_path))
-    raw = '{"slots": [], "output_schema_fields": ["fält[]"]}'
+    raw = '{"slots": [], "named_result_evidence": ["fält[]"]}'
     classifier._capture_raw_classifier_response(
         raw, slot_names=("structured_io_contract",), model="openai/gpt"
     )
@@ -2798,7 +2802,7 @@ def test_raw_classifier_capture_writes_pre_parse_content(
 
 def test_parser_accepts_names_cited_with_shape_notation_in_source() -> None:
     # Live capture 2026-08-06: the model correctly strips []/{} shape
-    # notation from its field_names while the user's text carries it
+    # notation from its names while the user's text carries it
     # ("applicant_channels[]"). The bracket belongs to the cited mention,
     # not its boundary — rejecting it silently collapsed the whole delta.
     quote = (
@@ -2809,14 +2813,14 @@ def test_parser_accepts_names_cited_with_shape_notation_in_source() -> None:
         json.dumps(
             {
                 **_VALID_CLASSIFICATION_RESPONSE,
-                "output_schema_fields": {
+                "named_result_evidence": {
                     "operation": "update",
-                    "field_names": [
+                    "names": [
                         "service_reference",
                         "applicant_channels",
                         "submitted_fields",
                     ],
-                    "removed_field_names": [],
+                    "removed_names": [],
                     "confidence": "high",
                     "reason": "Fälten är uppräknade i texten.",
                     "evidence": [_evidence(quote)],
@@ -2828,8 +2832,8 @@ def test_parser_accepts_names_cited_with_shape_notation_in_source() -> None:
     )
 
     assert result is not None
-    assert result.output_schema_fields is not None
-    assert result.output_schema_fields.field_names == (
+    assert result.named_result_evidence is not None
+    assert result.named_result_evidence.names == (
         "service_reference",
         "applicant_channels",
         "submitted_fields",
@@ -2845,10 +2849,10 @@ def test_parser_fails_the_attempt_for_a_malformed_present_delta() -> None:
         json.dumps(
             {
                 **_VALID_CLASSIFICATION_RESPONSE,
-                "output_schema_fields": {
+                "named_result_evidence": {
                     "operation": "update",
-                    "field_names": 42,
-                    "removed_field_names": [],
+                    "names": 42,
+                    "removed_names": [],
                     "confidence": "high",
                     "reason": "Trasig delta.",
                     "evidence": [_evidence(quote)],

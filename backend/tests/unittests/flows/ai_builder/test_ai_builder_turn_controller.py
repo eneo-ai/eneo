@@ -59,6 +59,7 @@ from eneo.flows.ai_builder.planning_state import (
     ExampleOutputSourceCoverage,
     ExampleOutputStyleConstraint,
     FileRoleEvidence,
+    NamedResultEvidence,
     PlanningState,
     ResolvedSlot,
     SchemaResolution,
@@ -565,42 +566,41 @@ def test_server_confirmation_discloses_truncated_template_placeholders_in_swedis
 
 
 @pytest.mark.parametrize(
-    ("ui_language", "normalization_text", "schema_text"),
+    ("ui_language", "named_text", "contract_text"),
     [
         (
             "sv",
-            "normaliserats från citerade fält som användaren namngett",
-            "Fälttyper och struktur är inte fastställda.",
+            "Användaren har namngett innehåll som slutresultatet ska bevara",
+            "Typer, struktur och obligatoriska fält är inte fastställda.",
         ),
         (
             "en",
-            "normalized from cited user-named fields",
-            "Field types and structure are not yet fixed.",
+            "The user named content that the final result must preserve",
+            "Types, structure, and required fields are not fixed.",
         ),
     ],
 )
-def test_server_confirmation_distinguishes_named_json_fields_from_full_schema(
+def test_server_confirmation_distinguishes_named_results_from_full_schema(
     ui_language: str,
-    normalization_text: str,
-    schema_text: str,
+    named_text: str,
+    contract_text: str,
 ) -> None:
     state = _state(primary_runtime_input="text", terminal_output="structured_json")
-    state.output_schema_evidence = build_schema_evidence(
-        json_schema={
-            "type": "object",
-            "properties": {"case_id": {}, "status": {}},
-        },
-        source="prose_field_names",
-        confidence="high",
-        evidence=("quote:user_message:user-1:case_id and status",),
-    )
+    state.named_result_evidence = [
+        NamedResultEvidence(
+            name=name,
+            confidence="high",
+            evidence=["quote:user_message:user-1:case_id and status"],
+        )
+        for name in ("case_id", "status")
+    ]
     state.architecture_commit = _finalized_commit_for_state(state)
 
     decision = _decision(state=state, ui_language=ui_language)
 
     assert isinstance(decision, ConfirmRequirements)
-    assert normalization_text in decision.payload.summary
-    assert schema_text in decision.payload.summary
+    assert named_text in decision.payload.summary
+    assert contract_text in decision.payload.summary
 
 
 @pytest.mark.parametrize(
@@ -608,29 +608,27 @@ def test_server_confirmation_distinguishes_named_json_fields_from_full_schema(
     [
         (
             "sv",
-            "Förhandsvisning av JSON-nycklar som normaliserats från citerade fält "
-            "som användaren namngett (visar 8 av 9)",
+            "field_7 (+1)",
         ),
         (
             "en",
-            "JSON key preview normalized from cited user-named fields (showing 8 of 9)",
+            "field_7 (+1)",
         ),
     ],
 )
-def test_server_confirmation_discloses_bounded_named_field_preview(
+def test_server_confirmation_discloses_bounded_named_result_preview(
     ui_language: str,
     expected: str,
 ) -> None:
     state = _state(primary_runtime_input="text", terminal_output="structured_json")
-    state.output_schema_evidence = build_schema_evidence(
-        json_schema={
-            "type": "object",
-            "properties": {f"field_{index}": {} for index in range(9)},
-        },
-        source="prose_field_names",
-        confidence="high",
-        evidence=("quote:user_message:user-1:named JSON fields",),
-    )
+    state.named_result_evidence = [
+        NamedResultEvidence(
+            name=f"field_{index}",
+            confidence="high",
+            evidence=["quote:user_message:user-1:named result"],
+        )
+        for index in range(9)
+    ]
     state.architecture_commit = _finalized_commit_for_state(state)
 
     decision = _decision(state=state, ui_language=ui_language)

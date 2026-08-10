@@ -1018,10 +1018,8 @@ def _terminal_output_schema_from_planning_state(
     if evidence is None:
         return None
     if evidence.source != "declared_schema":
-        # Prose field names and inferred examples are hints: the proposal
-        # owns types and nesting, and the critic enforces name survival.
-        # Pinning them verbatim overwrote the model's typed fields with a
-        # flat name-only schema and forced repair loops.
+        # Inferred examples are hints: the proposal owns types and nesting.
+        # Pinning them verbatim would overwrite the model's typed fields.
         return None
     if final_output_type != OutputType.JSON:
         return None

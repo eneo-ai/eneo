@@ -132,6 +132,7 @@ class CriticContext:
     resolved_slots: Mapping[str, ResolvedSlot] = field(
         default_factory=dict[str, ResolvedSlot]
     )
+    named_result_obligations: tuple[str, ...] = ()
     output_schema_evidence: SchemaEvidence | None = None
 
 
@@ -817,7 +818,7 @@ def _action_followup_requires_followup_fields_evidence(
     # A user-DECLARED exact output schema becomes the terminal contract
     # verbatim, and the model cannot modify it — demanding follow-up roles
     # beyond it would loop repair forever on a constraint the model does not
-    # control. Only declared schemas carry that authority: prose field names
+    # control. Only declared schemas carry that authority: named-result evidence
     # and inferred examples are hints, not user-owned contracts.
     if (
         context.output_schema_evidence is not None
@@ -850,19 +851,12 @@ def _action_followup_requires_followup_fields_evidence(
     )
 
 
-def _missing_prose_output_field_names(context: CriticContext) -> tuple[str, ...]:
-    evidence = context.output_schema_evidence
-    if evidence is None or evidence.source != "prose_field_names":
-        return ()
-    raw_properties = evidence.json_schema.get("properties")
-    if not isinstance(raw_properties, dict):
-        return ()
-    hinted_names = tuple(
-        str(name)
-        for name in cast(dict[str, object], raw_properties)
-        if str(name).strip()
-    )
-    if not hinted_names:
+def _missing_named_result_obligations(context: CriticContext) -> tuple[str, ...]:
+    if (
+        not context.named_result_obligations
+        or not context.spec.steps
+        or context.spec.steps[-1].output_type != OutputType.JSON
+    ):
         return ()
     outcome_contract = next(
         (
@@ -873,25 +867,27 @@ def _missing_prose_output_field_names(context: CriticContext) -> tuple[str, ...]
         None,
     )
     if outcome_contract is None:
-        return hinted_names
+        return context.named_result_obligations
     declared = {
         fold_result_field_name(name)
         for name in schema_property_names_at_any_depth(outcome_contract)
     }
     return tuple(
-        name for name in hinted_names if fold_result_field_name(name) not in declared
+        name
+        for name in context.named_result_obligations
+        if fold_result_field_name(name) not in declared
     )
 
 
-def _prose_output_field_names_must_survive_evidence(
+def _named_result_obligations_must_survive_evidence(
     context: CriticContext,
 ) -> bool:
-    return bool(_missing_prose_output_field_names(context))
+    return bool(_missing_named_result_obligations(context))
 
 
-def _prose_output_field_names_remediation(context: CriticContext) -> str:
+def _named_result_obligations_remediation(context: CriticContext) -> str:
     missing = ", ".join(
-        f"`{name}`" for name in _missing_prose_output_field_names(context)
+        f"`{name}`" for name in _missing_named_result_obligations(context)
     )
     return (
         "Användaren namngav utdatafält som saknas i planens strukturerade "
@@ -900,16 +896,16 @@ def _prose_output_field_names_remediation(context: CriticContext) -> str:
     )
 
 
-_PROSE_OUTPUT_FIELD_NAMES_MUST_SURVIVE = CriticInvariant(
-    id="prose_output_field_names_must_survive",
+_NAMED_RESULT_OBLIGATIONS_MUST_SURVIVE = CriticInvariant(
+    id="named_result_obligations_must_survive",
     kind="semantic",
     description=(
         "Field names the user explicitly requested must survive as keys in "
-        "the outcome contract; prose evidence no longer pins the schema, so "
+        "the outcome contract; named-result evidence does not pin the schema, so "
         "survival is the enforced contract."
     ),
-    evidence=_prose_output_field_names_must_survive_evidence,
-    remediation=_prose_output_field_names_remediation,
+    evidence=_named_result_obligations_must_survive_evidence,
+    remediation=_named_result_obligations_remediation,
 )
 
 
@@ -1840,7 +1836,7 @@ CRITIC_INVARIANTS: tuple[CriticInvariant, ...] = (
     _STANDALONE_AUDIO_REQUIRES_TRANSCRIPTION_STEP,
     _SOURCE_READER_REQUIRED_FIELDS_MUST_BE_CAPTURED,
     _ACTION_FOLLOWUP_REQUIRES_FOLLOWUP_FIELDS,
-    _PROSE_OUTPUT_FIELD_NAMES_MUST_SURVIVE,
+    _NAMED_RESULT_OBLIGATIONS_MUST_SURVIVE,
     _FIELD_REUSE_REQUIRES_INPUT_BINDINGS,
     _MULTI_DOCUMENT_COMPARE_REQUIRES_EXPLICIT_FAN_IN,
     _SIMPLE_TEXT_TRANSFORM_MUST_REMAIN_SINGLE_STEP,

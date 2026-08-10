@@ -392,7 +392,7 @@ non-JSON subset (~14 cases) is guaranteed empty by the unconditional
 clear and remains Slice 5's cohort. `terminal_drop` 33/10 and
 `quote_only` 11/4 stay under attribution. Slice 5 design draft
 (named-result evidence replacing the schema-named classifier
-delta/prose_field_names representation globally, extraction producer
+delta and fake prose-schema representation globally, extraction producer
 included per Pass 20, JSON behavior preserved by regression) is at the
 Pass 21 design gate.
 
@@ -516,7 +516,7 @@ shape alone cannot prove that. Today 5 of 122 cases apply and 1 executes.
 projection into `CreateCompileContext`. This is the product fix. Proceed
 only if Slice 2 shows the non-JSON gap is material.
 
-**Shape — replace, do not supplement.** Replace the `prose_field_names`
+**Shape — replace, do not supplement.** Replace the fake prose-field
 *schema* representation with one neutral, bounded, cited **named-result
 evidence** value inside `planning_state.py`. It carries identity and
 provenance, not schema shape. Because the product is prerelease, delete the

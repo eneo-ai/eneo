@@ -1055,7 +1055,7 @@ class TestGetSessionEndpoint:
                     "checkpoint_updates": [],
                     "secondary_obligations": [],
                     "form_intake": None,
-                    "output_schema_fields": None,
+                    "named_result_evidence": None,
                     "example_output_constraints": None,
                     "schema_direction": None,
                     "assumptions": [],

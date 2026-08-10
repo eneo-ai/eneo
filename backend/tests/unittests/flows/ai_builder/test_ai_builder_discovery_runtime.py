@@ -34,7 +34,7 @@ from eneo.flows.ai_builder.ai_builder_attachment_context import (
     render_ai_builder_attachment_evidence,
 )
 from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
-    SlotClassificationOutputSchemaFieldsMetadata,
+    SlotClassificationNamedResultEvidenceMetadata,
     metadata_with_slot_classification,
     slot_classification_metadata_from_attempt,
 )
@@ -73,7 +73,7 @@ from eneo.flows.ai_builder.ai_builder_slot_classification_contract import (
     UNKNOWN_SLOT_VALUE,
     ClassifiedEvidence,
     ClassifiedFileRole,
-    ClassifiedOutputSchemaFieldDelta,
+    ClassifiedNamedResultDelta,
     ClassifiedSchemaDirection,
     ClassifiedSlot,
     SlotClassificationAttempt,
@@ -99,6 +99,7 @@ from eneo.flows.ai_builder.planning_state import (
     ExampleOutputSourceCoverage,
     FileRoleEvidence,
     MappedFileLimit,
+    NamedResultEvidence,
     PlanningState,
     ResolvedSlot,
 )
@@ -123,7 +124,7 @@ def _make_response(content: object, *, complete_contract: bool = True) -> MagicM
                         "file_roles": [],
                         "checkpoint_updates": [],
                         "form_intake": None,
-                        "output_schema_fields": None,
+                        "named_result_evidence": None,
                         "example_output_constraints": None,
                         "schema_direction": None,
                         "secondary_obligations": [],
@@ -480,10 +481,10 @@ def test_blank_current_turn_cannot_readmit_prior_named_json_fields() -> None:
                 "file_roles": [],
                 "checkpoint_updates": [],
                 "form_intake": None,
-                "output_schema_fields": {
+                "named_result_evidence": {
                     "operation": "update",
-                    "field_names": ["sökta insatser"],
-                    "removed_field_names": [],
+                    "names": ["sökta insatser"],
+                    "removed_names": [],
                     "confidence": "high",
                     "reason": "The earlier turn named the field.",
                     "evidence": [
@@ -506,7 +507,7 @@ def test_blank_current_turn_cannot_readmit_prior_named_json_fields() -> None:
 
     assert classification_input.current_user_message_id == "user-current"
     assert result is not None
-    assert result.output_schema_fields is None
+    assert result.named_result_evidence is None
 
 
 def test_slot_classification_input_rejects_attachment_inventory_over_limit() -> None:
@@ -1850,7 +1851,7 @@ async def test_runtime_does_not_mutate_planning_state_when_metadata_admission_fa
 
 
 @pytest.mark.asyncio
-async def test_runtime_classifies_named_json_fields_after_slots_are_resolved(
+async def test_runtime_classifies_named_results_after_slots_are_resolved(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     state = _resolved_state()
@@ -1866,10 +1867,10 @@ async def test_runtime_classifies_named_json_fields_after_slots_are_resolved(
                 "file_roles": [],
                 "checkpoint_updates": [],
                 "form_intake": None,
-                "output_schema_fields": {
+                "named_result_evidence": {
                     "operation": "update",
-                    "field_names": ["sökta insatser", "status"],
-                    "removed_field_names": [],
+                    "names": ["sökta insatser", "status"],
+                    "removed_names": [],
                     "confidence": "high",
                     "reason": "The user explicitly named the JSON fields.",
                     "evidence": [
@@ -1909,13 +1910,11 @@ async def test_runtime_classifies_named_json_fields_after_slots_are_resolved(
     )
 
     litellm_client.acompletion.assert_awaited_once()
-    evidence = context.planning_state.output_schema_evidence
-    assert evidence is not None
-    assert evidence.source == "prose_field_names"
-    assert evidence.json_schema["properties"] == {
-        "sokta_insatser": {},
-        "status": {},
-    }
+    assert context.planning_state.output_schema_evidence is None
+    assert context.planning_state.named_result_obligations == (
+        "sokta_insatser",
+        "status",
+    )
 
     assert context.slot_classification_metadata is not None
     persisted_metadata = metadata_with_slot_classification(
@@ -1939,11 +1938,8 @@ async def test_runtime_classifies_named_json_fields_after_slots_are_resolved(
             )
         ]
     )
-    assert replayed.output_schema_evidence is not None
-    assert replayed.output_schema_evidence.json_schema["properties"] == {
-        "sokta_insatser": {},
-        "status": {},
-    }
+    assert replayed.output_schema_evidence is None
+    assert replayed.named_result_obligations == ("sokta_insatser", "status")
 
     replayed.resolved_slots = context.planning_state.resolved_slots.copy()
     draft = derive_architecture_commit_draft(replayed)
@@ -2000,10 +1996,10 @@ async def test_runtime_atomically_resolves_json_terminal_and_named_fields(
                 "file_roles": [],
                 "checkpoint_updates": [],
                 "form_intake": None,
-                "output_schema_fields": {
+                "named_result_evidence": {
                     "operation": "update",
-                    "field_names": ["case_id", "status"],
-                    "removed_field_names": [],
+                    "names": ["case_id", "status"],
+                    "removed_names": [],
                     "confidence": "high",
                     "reason": "The user explicitly named the JSON fields.",
                     "evidence": [
@@ -2045,15 +2041,16 @@ async def test_runtime_atomically_resolves_json_terminal_and_named_fields(
     assert context.planning_state.resolved_slots["terminal_output"].value == (
         "structured_json"
     )
-    evidence = context.planning_state.output_schema_evidence
-    assert evidence is not None
-    assert evidence.json_schema["properties"] == {"case_id": {}, "status": {}}
+    assert context.planning_state.output_schema_evidence is None
+    assert context.planning_state.named_result_obligations == ("case_id", "status")
     assert context.slot_classification_metadata is not None
-    assert context.slot_classification_metadata.output_schema_fields is not None
+    assert context.slot_classification_metadata.named_result_evidence is not None
 
 
 @pytest.mark.asyncio
-async def test_runtime_updates_replayed_field_snapshot_from_current_delta() -> None:
+async def test_runtime_materializes_incremental_named_result_addition_and_removal() -> (
+    None
+):
     prior_source = SlotClassificationSource(
         source_id="user_message:user-1",
         kind="user_message",
@@ -2078,9 +2075,18 @@ async def test_runtime_updates_replayed_field_snapshot_from_current_delta() -> N
         ),
     )
     prior_snapshot = (
-        SlotClassificationOutputSchemaFieldsMetadata.from_materialized_state(
+        SlotClassificationNamedResultEvidenceMetadata.from_materialized_state(
             operation="replace",
-            field_names=("case_id", "status"),
+            named_results=(
+                NamedResultEvidence(
+                    name=name,
+                    confidence="high",
+                    evidence=[
+                        "quote:user_message:user-1:Return JSON with case_id and status."
+                    ],
+                )
+                for name in ("case_id", "status")
+            ),
             confidence="high",
             reason="Initial materialized field snapshot.",
             evidence=(
@@ -2097,7 +2103,7 @@ async def test_runtime_updates_replayed_field_snapshot_from_current_delta() -> N
         classification_input=SlotClassificationInput(sources=(prior_source,)),
         model="openai/gpt-test",
         provider="openai",
-        output_schema_fields_snapshot=prior_snapshot,
+        named_result_evidence_snapshot=prior_snapshot,
     )
     assert prior_classification is not None
     prior_metadata = metadata_with_slot_classification(None, prior_classification)
@@ -2110,16 +2116,16 @@ async def test_runtime_updates_replayed_field_snapshot_from_current_delta() -> N
                 "file_roles": [],
                 "checkpoint_updates": [],
                 "form_intake": None,
-                "output_schema_fields": {
+                "named_result_evidence": {
                     "operation": "update",
-                    "field_names": ["priority"],
-                    "removed_field_names": [],
+                    "names": ["priority"],
+                    "removed_names": ["status"],
                     "confidence": "high",
                     "reason": "The user added one field.",
                     "evidence": [
                         {
                             "source_id": "user_message:user-2",
-                            "quote": "Also add priority",
+                            "quote": "Remove status and add priority",
                         }
                     ],
                 },
@@ -2142,7 +2148,7 @@ async def test_runtime_updates_replayed_field_snapshot_from_current_delta() -> N
             ConversationMessage(
                 message_id="user-2",
                 role="user",
-                content="Also add priority.",
+                content="Remove status and add priority.",
             ),
         ],
         litellm_client=litellm_client,
@@ -2153,13 +2159,11 @@ async def test_runtime_updates_replayed_field_snapshot_from_current_delta() -> N
         ui_language="en",
     )
 
-    evidence = context.planning_state.output_schema_evidence
-    assert evidence is not None
-    assert evidence.json_schema["properties"] == {
-        "case_id": {},
-        "status": {},
-        "priority": {},
-    }
+    assert context.planning_state.output_schema_evidence is None
+    assert context.planning_state.named_result_obligations == (
+        "case_id",
+        "priority",
+    )
     call = litellm_client.acompletion.await_args
     assert call is not None
     system_prompt = call.kwargs["messages"][0]["content"]
@@ -2167,24 +2171,27 @@ async def test_runtime_updates_replayed_field_snapshot_from_current_delta() -> N
     assert "Report only additions or removals explicitly requested" in system_prompt
     assert '["case_id", "status"]' not in user_prompt
     assert context.slot_classification_metadata is not None
-    materialized = context.slot_classification_metadata.output_schema_fields
+    materialized = context.slot_classification_metadata.named_result_evidence
     assert materialized is not None
-    assert materialized.field_names == ["case_id", "status", "priority"]
+    assert [item.name for item in materialized.named_results] == [
+        "case_id",
+        "priority",
+    ]
     assert {item.source_id for item in materialized.evidence} == {
         "user_message:user-1",
         "user_message:user-2",
     }
 
 
-def test_runtime_does_not_materialize_low_confidence_output_field_snapshot() -> None:
+def test_runtime_does_not_materialize_low_confidence_named_result_snapshot() -> None:
     state = _resolved_state()
     state.resolved_slots["terminal_output"] = _slot(
         "terminal_output",
         "structured_json",
     )
-    classified = ClassifiedOutputSchemaFieldDelta(
+    classified = ClassifiedNamedResultDelta(
         operation="update",
-        field_names=("case_id",),
+        names=("case_id",),
         confidence="low",
         reason="The field name was uncertain.",
         evidence=(
@@ -2196,9 +2203,9 @@ def test_runtime_does_not_materialize_low_confidence_output_field_snapshot() -> 
     )
 
     assert (
-        runtime._materialized_output_schema_field_snapshot(
+        runtime._materialized_named_result_snapshot(
             state,
-            classified_fields=classified,
+            classified_evidence=classified,
             prior_classification=None,
         )
         is None
@@ -2206,13 +2213,18 @@ def test_runtime_does_not_materialize_low_confidence_output_field_snapshot() -> 
 
 
 @pytest.mark.asyncio
-async def test_runtime_discards_named_json_fields_for_non_json_terminal_output(
+@pytest.mark.parametrize(
+    "terminal_output",
+    ["structured_text", "pdf_document", "docx_document"],
+)
+async def test_runtime_retains_named_result_evidence_for_non_json_terminal_output(
     monkeypatch: pytest.MonkeyPatch,
+    terminal_output: str,
 ) -> None:
     state = _resolved_state()
     state.resolved_slots["terminal_output"] = _slot(
         "terminal_output",
-        "pdf_document",
+        terminal_output,
     )
     state.resolved_slots["runtime_metadata_fields"] = ResolvedSlot(
         name="runtime_metadata_fields",
@@ -2229,10 +2241,10 @@ async def test_runtime_discards_named_json_fields_for_non_json_terminal_output(
                 "file_roles": [],
                 "checkpoint_updates": [],
                 "form_intake": None,
-                "output_schema_fields": {
+                "named_result_evidence": {
                     "operation": "update",
-                    "field_names": ["case_id", "status"],
-                    "removed_field_names": [],
+                    "names": ["case_id", "status"],
+                    "removed_names": [],
                     "confidence": "high",
                     "reason": "The user named fields for an intermediate JSON matrix.",
                     "evidence": [
@@ -2271,11 +2283,39 @@ async def test_runtime_discards_named_json_fields_for_non_json_terminal_output(
         max_output_tokens=2_000,
     )
 
+    assert [
+        item.name
+        for item in getattr(context.planning_state, "named_result_evidence", ())
+    ] == ["case_id", "status"]
     assert context.planning_state.output_schema_evidence is None
     assert context.slot_classification_result is not None
-    assert context.slot_classification_result.output_schema_fields is None
     assert context.slot_classification_metadata is not None
-    assert context.slot_classification_metadata.output_schema_fields is None
+    persisted_metadata = metadata_with_slot_classification(
+        {
+            "question_answer": {
+                "question_id": "terminal_output",
+                "selected_option_id": terminal_output,
+                "selected_value": terminal_output,
+            }
+        },
+        context.slot_classification_metadata,
+    )
+    assert persisted_metadata is not None
+    replayed = build_planning_state_from_conversation(
+        [
+            ConversationMessage(
+                message_id="user-1",
+                role="user",
+                content="PDF-rapporten ska innehålla case_id och status.",
+                metadata=persisted_metadata,
+            )
+        ]
+    )
+    assert [item.name for item in getattr(replayed, "named_result_evidence", ())] == [
+        "case_id",
+        "status",
+    ]
+    assert replayed.output_schema_evidence is None
 
 
 @pytest.mark.asyncio

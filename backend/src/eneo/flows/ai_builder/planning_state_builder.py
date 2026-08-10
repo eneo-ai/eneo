@@ -18,7 +18,7 @@ from eneo.flows.ai_builder.ai_builder_aggregation_intent import (
 )
 from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
     ClassifierRetentionClass,
-    SlotClassificationOutputSchemaFieldsMetadata,
+    SlotClassificationNamedResultEvidenceMetadata,
     question_answer_from_metadata,
     slot_classification_from_metadata,
 )
@@ -35,6 +35,7 @@ from eneo.flows.ai_builder.ai_builder_error_contract import (
     AIBuilderBadRequestException,
     AIBuilderErrorCode,
 )
+from eneo.flows.ai_builder.ai_builder_field_identity import fold_result_field_name
 from eneo.flows.ai_builder.ai_builder_form_intake_signals import (
     FORM_INTAKE_NEEDS_FIELDS_SIGNAL,
     FORM_INTAKE_SIGNAL_ID,
@@ -52,9 +53,6 @@ from eneo.flows.ai_builder.ai_builder_framework_policy import (
 from eneo.flows.ai_builder.ai_builder_input_architecture_policy import (
     resolve_input_intent,
 )
-from eneo.flows.ai_builder.ai_builder_json_schema_paths import (
-    top_level_schema_property_names,
-)
 from eneo.flows.ai_builder.ai_builder_proposal_intent import FlowInputFieldIntent
 from eneo.flows.ai_builder.ai_builder_requirements_state import (
     RequirementsState,
@@ -71,15 +69,13 @@ from eneo.flows.ai_builder.ai_builder_runtime_input_fields import (
     infer_runtime_metadata_slot,
 )
 from eneo.flows.ai_builder.ai_builder_schema_evidence import (
-    SCHEMA_PROVENANCE_MAX_ITEMS,
-    SchemaLimitExceeded,
     build_schema_evidence,
 )
 from eneo.flows.ai_builder.ai_builder_slot_classification_contract import (
     UNKNOWN_SLOT_VALUE,
     ClassifiedFileRole,
     ClassifiedFormIntake,
-    ClassifiedOutputSchemaFieldDelta,
+    ClassifiedNamedResultDelta,
     SlotClassificationResult,
 )
 from eneo.flows.ai_builder.ai_builder_slot_vocabulary import (
@@ -89,6 +85,7 @@ from eneo.flows.ai_builder.ai_builder_slot_vocabulary import (
 from eneo.flows.ai_builder.planning_state import (
     BUILDER_SCHEMA_VERSION,
     FCM_VERSION,
+    NAMED_RESULT_EVIDENCE_MAX_ITEMS,
     PLANNER_CONTRACT_VERSION,
     TEMPLATE_PLACEHOLDER_EVIDENCE_PREFIX,
     TEMPLATE_PLACEHOLDER_SOURCE_EVIDENCE_SUFFIX,
@@ -98,6 +95,7 @@ from eneo.flows.ai_builder.planning_state import (
     FileRole,
     FileRoleEvidence,
     MappedFileLimit,
+    NamedResultEvidence,
     PlanningSignal,
     PlanningState,
     ResolvedSlot,
@@ -145,7 +143,7 @@ CLASSIFIER_REBUILD_INPUT_CLASSES: frozenset[ClassifierRetentionClass] = frozense
         "file_role",
         "checkpoint_update",
         "form_intake",
-        "output_schema_fields",
+        "named_result_evidence",
         "example_output_constraint",
         "schema_direction",
         "secondary_obligation",
@@ -180,7 +178,6 @@ def build_planning_state_from_conversation(
         ),
     )
     _replay_slot_classification_metadata(state, conversation, flow=flow)
-    _clear_prose_output_schema_for_non_json_terminal(state)
     _reconcile_report_disposition_after_classifier_replay(state, conversation)
     resolve_docx_mode_from_template_evidence(state)
     _reconcile_dependent_slot_relevance(state)
@@ -305,11 +302,10 @@ def _replay_slot_classification_metadata(
             prompt_hash=prompt_hash,
             freeform_text=freeform_text,
             model_blocked_slots=model_blocked_slots,
-            defer_output_schema_relevance=True,
         )
-        _apply_replayed_output_schema_fields(
+        _apply_replayed_named_result_evidence(
             state,
-            snapshot=classification.output_schema_fields,
+            snapshot=classification.named_result_evidence,
         )
         replayed = True
     if replayed:
@@ -494,7 +490,7 @@ def _carryable_output_schema_evidence(
     *,
     attached_file_ids: Collection[UUID],
 ) -> SchemaEvidence | None:
-    if evidence.source in {"declared_schema", "prose_field_names"}:
+    if evidence.source == "declared_schema":
         return None
 
     attached = set(attached_file_ids)
@@ -636,7 +632,6 @@ def merge_llm_resolved_slots(
     prompt_hash: str,
     freeform_text: str,
     model_blocked_slots: frozenset[str] = frozenset(),
-    defer_output_schema_relevance: bool = False,
 ) -> None:
     """Overlay model slots without displacing explicit user or flow evidence."""
     if not prompt_hash.strip():
@@ -722,12 +717,10 @@ def merge_llm_resolved_slots(
             evidence_level=classified_slot.evidence_level,
         )
 
-    _merge_model_output_schema_fields(
+    _merge_model_named_result_evidence(
         state,
-        classified_fields=classification_result.output_schema_fields,
+        classified_evidence=classification_result.named_result_evidence,
     )
-    if not defer_output_schema_relevance:
-        _clear_prose_output_schema_for_non_json_terminal(state)
 
 
 def _merge_model_checkpoint_updates(
@@ -774,167 +767,63 @@ def _merge_model_checkpoint_updates(
     )
 
 
-def _clear_prose_output_schema_for_non_json_terminal(state: PlanningState) -> None:
-    terminal_output = state.resolved_slots.get("terminal_output")
-    current = state.output_schema_evidence
-    if (
-        current is None
-        or current.source != "prose_field_names"
-        or (terminal_output is not None and terminal_output.value == "structured_json")
-    ):
-        return
-    state.replace_schema_resolution(
-        input_evidence=state.input_schema_evidence,
-        output_evidence=None,
-        example_inference=state.example_output_schema_inference,
-    )
-
-
-def _merge_model_output_schema_fields(
+def _merge_model_named_result_evidence(
     state: PlanningState,
     *,
-    classified_fields: ClassifiedOutputSchemaFieldDelta | None,
+    classified_evidence: ClassifiedNamedResultDelta | None,
 ) -> None:
-    terminal_output = state.resolved_slots.get("terminal_output")
-    terminal_is_json = (
-        terminal_output is not None and terminal_output.value == "structured_json"
-    )
     if (
-        classified_fields is None
-        or classified_fields.confidence == "low"
-        or not classified_fields.evidence
-        or not terminal_is_json
+        classified_evidence is None
+        or classified_evidence.confidence == "low"
+        or not classified_evidence.evidence
     ):
         return
-    current = state.output_schema_evidence
-    if current is not None and current.source == "declared_schema":
+    if classified_evidence.operation == "clear":
+        state.named_result_evidence = []
         return
-    if classified_fields.operation == "clear":
-        _replace_prose_output_schema_fields(
-            state,
-            field_names=(),
-            confidence=classified_fields.confidence,
-            provenance=tuple(
-                item.planning_reference() for item in classified_fields.evidence
-            ),
+    removed = {
+        fold_result_field_name(name) for name in classified_evidence.removed_names
+    }
+    retained = [
+        item
+        for item in state.named_result_evidence
+        if fold_result_field_name(item.name) not in removed
+    ]
+    existing = {fold_result_field_name(item.name) for item in retained}
+    provenance = [item.planning_reference() for item in classified_evidence.evidence]
+    additions = [
+        NamedResultEvidence(
+            name=name,
+            confidence=classified_evidence.confidence,
+            evidence=provenance,
         )
-        return
-    current_prose = (
-        current
-        if current is not None and current.source == "prose_field_names"
-        else None
-    )
-    current_field_names = (
-        tuple(top_level_schema_property_names(current_prose.json_schema))
-        if current_prose is not None
-        else ()
-    )
-    removed = set(classified_fields.removed_field_names)
-    field_names = tuple(
-        name for name in current_field_names if name not in removed
-    ) + tuple(
-        name
-        for name in classified_fields.field_names
-        if name not in current_field_names and name not in removed
-    )
-    provenance = tuple(
-        dict.fromkeys(
-            (
-                *(current_prose.evidence if current_prose is not None else ()),
-                *(item.planning_reference() for item in classified_fields.evidence),
-            )
+        for name in classified_evidence.names
+        if fold_result_field_name(name) not in existing
+        and fold_result_field_name(name) not in removed
+    ]
+    named_results = [*retained, *additions]
+    if len(named_results) > NAMED_RESULT_EVIDENCE_MAX_ITEMS:
+        raise AIBuilderBadRequestException(
+            "The named results exceed the Builder safety limit.",
+            code=AIBuilderErrorCode.SCHEMA_LIMIT_EXCEEDED,
+            context={
+                "reason": "named_result_count",
+                "max_value": NAMED_RESULT_EVIDENCE_MAX_ITEMS,
+                "actual_value": len(named_results),
+            },
         )
-    )
-    _replace_prose_output_schema_fields(
-        state,
-        field_names=field_names,
-        confidence=classified_fields.confidence,
-        provenance=provenance,
-    )
+    state.named_result_evidence = named_results
 
 
-def _apply_replayed_output_schema_fields(
+def _apply_replayed_named_result_evidence(
     state: PlanningState,
     *,
-    snapshot: SlotClassificationOutputSchemaFieldsMetadata | None,
+    snapshot: SlotClassificationNamedResultEvidenceMetadata | None,
 ) -> None:
     if snapshot is None or snapshot.confidence == "low" or not snapshot.evidence:
         return
-    _replace_prose_output_schema_fields(
-        state,
-        field_names=tuple(snapshot.field_names),
-        confidence=snapshot.confidence,
-        provenance=tuple(
-            item.to_classified_evidence().planning_reference()
-            for item in snapshot.evidence
-        ),
-    )
-
-
-def _replace_prose_output_schema_fields(
-    state: PlanningState,
-    *,
-    field_names: tuple[str, ...],
-    confidence: SlotConfidence,
-    provenance: tuple[str, ...],
-) -> None:
-    current = state.output_schema_evidence
-    if current is not None and current.source == "declared_schema":
-        return
-    if len(provenance) > SCHEMA_PROVENANCE_MAX_ITEMS:
-        raise AIBuilderBadRequestException(
-            "The named JSON-field history exceeds the Builder safety limit. "
-            "Confirm the complete field contract as a JSON Schema instead.",
-            code=AIBuilderErrorCode.SCHEMA_LIMIT_EXCEEDED,
-            context={
-                "reason": "output_schema_field_provenance",
-                "max_value": SCHEMA_PROVENANCE_MAX_ITEMS,
-                "actual_value": len(provenance),
-            },
-        )
-    if not field_names:
-        if current is not None and current.source == "prose_field_names":
-            state.replace_schema_resolution(
-                input_evidence=state.input_schema_evidence,
-                output_evidence=None,
-                example_inference=state.example_output_schema_inference,
-            )
-        return
-    try:
-        evidence = build_schema_evidence(
-            json_schema={
-                "type": "object",
-                "properties": {name: {} for name in field_names},
-            },
-            source="prose_field_names",
-            confidence=confidence,
-            evidence=provenance,
-        )
-    except SchemaLimitExceeded as error:
-        raise AIBuilderBadRequestException(
-            "The named JSON fields exceed the Builder schema safety limit.",
-            code=AIBuilderErrorCode.SCHEMA_LIMIT_EXCEEDED,
-            context={
-                "reason": error.reason,
-                "max_value": error.max_value,
-                **(
-                    {"actual_value": error.actual_value}
-                    if error.actual_value is not None
-                    else {}
-                ),
-            },
-        ) from error
-    example_inference = state.example_output_schema_inference
-    if example_inference is not None and example_inference.status == "inferred":
-        example_inference = ExampleOutputSchemaInferenceOutcome(
-            status="not_inferred",
-            reason="higher_priority_schema",
-            source_file_ids=example_inference.source_file_ids,
-        )
-    state.replace_schema_resolution(
-        input_evidence=state.input_schema_evidence,
-        output_evidence=evidence,
-        example_inference=example_inference,
+    state.named_result_evidence = (
+        list(snapshot.named_results) if snapshot.operation == "replace" else []
     )
 
 

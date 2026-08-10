@@ -12,16 +12,14 @@ from uuid import UUID
 from pydantic import ValidationError
 
 from eneo.flows.ai_builder.ai_builder_canonicalization import canonical_question_id
+from eneo.flows.ai_builder.ai_builder_field_identity import fold_result_field_name
 from eneo.flows.ai_builder.ai_builder_result_contract import (
     RESULT_OBLIGATION_VALUES,
     ResultObligation,
 )
-from eneo.flows.ai_builder.ai_builder_schema_evidence import (
-    SCHEMA_PROVENANCE_MAX_ITEMS,
-    SchemaLimitExceeded,
-    canonical_schema_bytes,
-)
+from eneo.flows.ai_builder.ai_builder_schema_evidence import SCHEMA_PROVENANCE_MAX_ITEMS
 from eneo.flows.ai_builder.planning_state import (
+    NAMED_RESULT_EVIDENCE_MAX_ITEMS,
     AttachmentCoverage,
     CheckpointProducerKind,
     ExampleOutputConstraintEvidence,
@@ -53,11 +51,11 @@ _FIELD_STRUCTURAL_BOUNDARIES = frozenset(
     {"$", "@", "#", "/", "\\", ":", "[", "]", "{", "}", "."}
 )
 UNKNOWN_SLOT_VALUE = "unknown"
-SLOT_CLASSIFICATION_SCHEMA_VERSION = 19
+SLOT_CLASSIFICATION_SCHEMA_VERSION = 20
 CLASSIFICATION_EVIDENCE_MAX_ITEMS = 3
 CLASSIFICATION_EVIDENCE_MAX_LENGTH = 240
 CLASSIFICATION_REASON_MAX_LENGTH = 500
-OUTPUT_SCHEMA_FIELD_EVIDENCE_MAX_ITEMS = SCHEMA_PROVENANCE_MAX_ITEMS
+NAMED_RESULT_CITATION_MAX_ITEMS = SCHEMA_PROVENANCE_MAX_ITEMS
 CLASSIFICATION_NOTE_MAX_LENGTH = 500
 CLASSIFICATION_NOTES_MAX_ITEMS = 10
 EXAMPLE_OUTPUT_HEADINGS_MAX_ITEMS = 20
@@ -182,12 +180,12 @@ class ClassifiedCheckpointUpdate:
 
 
 @dataclass(frozen=True, slots=True)
-class ClassifiedOutputSchemaFieldDelta:
+class ClassifiedNamedResultDelta:
     operation: Literal["update", "clear"]
-    field_names: tuple[str, ...]
+    names: tuple[str, ...]
     confidence: SlotClassificationConfidence
     reason: str
-    removed_field_names: tuple[str, ...] = ()
+    removed_names: tuple[str, ...] = ()
     evidence: tuple[ClassifiedEvidence, ...] = ()
 
 
@@ -197,7 +195,7 @@ class SlotClassificationResult:
     file_roles: tuple[ClassifiedFileRole, ...] = ()
     checkpoint_updates: tuple[ClassifiedCheckpointUpdate, ...] = ()
     form_intake: ClassifiedFormIntake | None = None
-    output_schema_fields: ClassifiedOutputSchemaFieldDelta | None = None
+    named_result_evidence: ClassifiedNamedResultDelta | None = None
     example_output_constraints: ExampleOutputConstraintEvidence | None = None
     schema_direction: ClassifiedSchemaDirection | None = None
     secondary_obligations: tuple[ResultObligation, ...] = ()
@@ -387,11 +385,11 @@ def parse_slot_classification_response(
         classification_input=classification_input,
     )
     try:
-        output_schema_fields = _parse_output_schema_fields(
-            raw_dict.get("output_schema_fields"),
+        named_result_evidence = _parse_named_result_evidence(
+            raw_dict.get("named_result_evidence"),
             classification_input=classification_input,
         )
-    except _MalformedOutputSchemaFieldDelta:
+    except _MalformedNamedResultDelta:
         # A structurally malformed present delta fails the attempt visibly
         # (parse_failed retries); resolving without the fields was the
         # silent schema loss the raw capture attributed. Citation-level
@@ -415,7 +413,7 @@ def parse_slot_classification_response(
         file_roles=file_roles,
         checkpoint_updates=checkpoint_updates,
         form_intake=form_intake,
-        output_schema_fields=output_schema_fields,
+        named_result_evidence=named_result_evidence,
         example_output_constraints=example_output_constraints,
         schema_direction=schema_direction,
         secondary_obligations=secondary_obligations,
@@ -447,44 +445,40 @@ def _slot_classification_top_level_contract_is_valid(
     return True
 
 
-class _MalformedOutputSchemaFieldDelta(Exception):
-    """A present output_schema_fields delta violated its structure."""
+class _MalformedNamedResultDelta(Exception):
+    """A present named-result delta violated its structure."""
 
 
-def _parse_output_schema_fields(
+def _parse_named_result_evidence(
     raw_value: object,
     *,
     classification_input: SlotClassificationInput,
-) -> ClassifiedOutputSchemaFieldDelta | None:
+) -> ClassifiedNamedResultDelta | None:
     if raw_value is None:
         return None
     if not isinstance(raw_value, dict):
-        raise _MalformedOutputSchemaFieldDelta
+        raise _MalformedNamedResultDelta
     item = cast(dict[str, Any], raw_value)
     operation = item.get("operation")
     if operation not in {"update", "clear"}:
-        raise _MalformedOutputSchemaFieldDelta
-    raw_field_names = item.get("field_names")
-    raw_removed_field_names = item.get("removed_field_names")
-    if not isinstance(raw_field_names, list) or not isinstance(
-        raw_removed_field_names, list
-    ):
-        raise _MalformedOutputSchemaFieldDelta
-    raw_field_name_items = cast(list[object], raw_field_names)
-    raw_removed_field_name_items = cast(list[object], raw_removed_field_names)
-    if operation == "update" and not (
-        raw_field_name_items or raw_removed_field_name_items
-    ):
-        raise _MalformedOutputSchemaFieldDelta
-    if operation == "clear" and (raw_field_name_items or raw_removed_field_name_items):
-        raise _MalformedOutputSchemaFieldDelta
+        raise _MalformedNamedResultDelta
+    raw_names = item.get("names")
+    raw_removed_names = item.get("removed_names")
+    if not isinstance(raw_names, list) or not isinstance(raw_removed_names, list):
+        raise _MalformedNamedResultDelta
+    raw_name_items = cast(list[object], raw_names)
+    raw_removed_name_items = cast(list[object], raw_removed_names)
+    if operation == "update" and not (raw_name_items or raw_removed_name_items):
+        raise _MalformedNamedResultDelta
+    if operation == "clear" and (raw_name_items or raw_removed_name_items):
+        raise _MalformedNamedResultDelta
     confidence = item.get("confidence")
     if confidence not in {"high", "medium", "low"}:
-        raise _MalformedOutputSchemaFieldDelta
+        raise _MalformedNamedResultDelta
     evidence = _parse_classification_evidence(
         item.get("evidence", []),
         classification_input=classification_input,
-        max_items=OUTPUT_SCHEMA_FIELD_EVIDENCE_MAX_ITEMS,
+        max_items=NAMED_RESULT_CITATION_MAX_ITEMS,
     )
     source_kinds = {
         source.source_id: source.kind for source in classification_input.sources
@@ -506,43 +500,36 @@ def _parse_output_schema_fields(
     )
     if not user_owned_evidence:
         return None
-    field_names = _parse_cited_output_schema_field_names(
-        raw_field_name_items,
+    names = _parse_cited_named_result_names(
+        raw_name_items,
         evidence=user_owned_evidence,
         source_texts=source_texts,
     )
-    removed_field_names = _parse_cited_output_schema_field_names(
-        raw_removed_field_name_items,
+    removed_names = _parse_cited_named_result_names(
+        raw_removed_name_items,
         evidence=user_owned_evidence,
         source_texts=source_texts,
     )
-    if field_names is None or removed_field_names is None:
+    if names is None or removed_names is None:
         return None
-    if set(field_names).intersection(removed_field_names):
+    folded_names = [fold_result_field_name(name) for name in (*names, *removed_names)]
+    if (
+        any(not name for name in folded_names)
+        or len(folded_names) != len(set(folded_names))
+        or len(folded_names) > NAMED_RESULT_EVIDENCE_MAX_ITEMS
+    ):
         return None
-    if operation == "update":
-        try:
-            canonical_schema_bytes(
-                {
-                    "type": "object",
-                    "properties": {
-                        name: {} for name in (*field_names, *removed_field_names)
-                    },
-                }
-            )
-        except (SchemaLimitExceeded, ValueError):
-            return None
     reason = item.get("reason")
-    return ClassifiedOutputSchemaFieldDelta(
+    return ClassifiedNamedResultDelta(
         operation=cast(Literal["update", "clear"], operation),
-        field_names=field_names,
+        names=names,
         confidence=cast(SlotClassificationConfidence, confidence),
         reason=(
             reason.strip()
             if isinstance(reason, str) and reason.strip()
-            else "output schema field classification"
+            else "named-result classification"
         ),
-        removed_field_names=removed_field_names,
+        removed_names=removed_names,
         evidence=user_owned_evidence,
     )
 
@@ -618,7 +605,7 @@ def _parse_checkpoint_updates(
     return tuple(updates)
 
 
-def _parse_cited_output_schema_field_names(
+def _parse_cited_named_result_names(
     raw_names: list[object],
     *,
     evidence: tuple[ClassifiedEvidence, ...],
@@ -628,7 +615,7 @@ def _parse_cited_output_schema_field_names(
     for raw_name in raw_names:
         if not isinstance(raw_name, str) or not raw_name:
             return None
-        name = _cited_output_schema_field_name(
+        name = _cited_named_result_name(
             raw_name,
             evidence=evidence,
             source_texts=source_texts,
@@ -639,7 +626,7 @@ def _parse_cited_output_schema_field_names(
     return tuple(names)
 
 
-def _cited_output_schema_field_name(
+def _cited_named_result_name(
     raw_name: str,
     *,
     evidence: tuple[ClassifiedEvidence, ...],
@@ -661,10 +648,10 @@ def _cited_output_schema_field_name(
     phrase = raw_name
     while phrase.endswith(("[]", "{}")):
         phrase = phrase[:-2]
-    return _normalize_unquoted_output_schema_field_name(phrase)
+    return _normalize_unquoted_named_result_name(phrase)
 
 
-def _normalize_unquoted_output_schema_field_name(phrase: str) -> str | None:
+def _normalize_unquoted_named_result_name(phrase: str) -> str | None:
     normalized = unicodedata.normalize("NFKD", phrase).casefold()
     field_name_parts: list[str] = []
     separating = False
@@ -1307,9 +1294,9 @@ def _slot_classification_top_level_properties(
                 {"type": "null"},
             ],
         },
-        "output_schema_fields": {
+        "named_result_evidence": {
             "anyOf": [
-                _classified_output_schema_fields_schema(),
+                _classified_named_result_evidence_schema(),
                 {"type": "null"},
             ],
         },
@@ -1339,30 +1326,32 @@ def _slot_classification_top_level_properties(
     }
 
 
-def _classified_output_schema_fields_schema() -> dict[str, object]:
+def _classified_named_result_evidence_schema() -> dict[str, object]:
     return {
         "type": "object",
         "additionalProperties": False,
         "required": [
             "operation",
-            "field_names",
-            "removed_field_names",
+            "names",
+            "removed_names",
             "confidence",
             "reason",
             "evidence",
         ],
         "properties": {
             "operation": {"type": "string", "enum": ["update", "clear"]},
-            "field_names": {
+            "names": {
                 "type": "array",
+                "maxItems": NAMED_RESULT_EVIDENCE_MAX_ITEMS,
                 "items": {
                     "type": "string",
                     "minLength": 1,
                     "maxLength": CLASSIFICATION_EVIDENCE_MAX_LENGTH,
                 },
             },
-            "removed_field_names": {
+            "removed_names": {
                 "type": "array",
+                "maxItems": NAMED_RESULT_EVIDENCE_MAX_ITEMS,
                 "items": {
                     "type": "string",
                     "minLength": 1,
@@ -1372,7 +1361,7 @@ def _classified_output_schema_fields_schema() -> dict[str, object]:
             "confidence": _classification_confidence_schema(),
             "reason": _classification_reason_schema(),
             "evidence": _classification_evidence_array_schema(
-                max_items=OUTPUT_SCHEMA_FIELD_EVIDENCE_MAX_ITEMS
+                max_items=NAMED_RESULT_CITATION_MAX_ITEMS
             ),
         },
     }

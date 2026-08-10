@@ -32,6 +32,7 @@ from eneo.flows.ai_builder.planning_state import (
     FCM_VERSION,
     PLANNER_CONTRACT_VERSION,
     CheckpointIntent,
+    NamedResultEvidence,
     PlanningSignal,
     PlanningState,
     ResolvedSlot,
@@ -74,7 +75,7 @@ EXPECTED_CRITIC_INVARIANT_KINDS = {
     "standalone_audio_requires_transcription_step": "architecture",
     "source_reader_required_fields_must_be_captured": "architecture",
     "action_followup_requires_followup_fields": "semantic",
-    "prose_output_field_names_must_survive": "semantic",
+    "named_result_obligations_must_survive": "semantic",
     "field_reuse_requires_input_bindings": "semantic",
     "multi_document_compare_requires_all_previous_steps": "architecture",
     "simple_text_transform_must_remain_single_step": "semantic",
@@ -5386,7 +5387,7 @@ class TestCriticInvariantRegistry:
             "standalone_audio_requires_transcription_step",
             "source_reader_required_fields_must_be_captured",
             "action_followup_requires_followup_fields",
-            "prose_output_field_names_must_survive",
+            "named_result_obligations_must_survive",
             "field_reuse_requires_input_bindings",
             "multi_document_compare_requires_all_previous_steps",
             "simple_text_transform_must_remain_single_step",
@@ -6156,9 +6157,9 @@ def test_action_followup_critic_rejects_lookalike_field_names() -> None:
     assert "action_followup_requires_followup_fields" in {issue.id for issue in issues}
 
 
-def test_prose_name_evidence_does_not_exempt_the_followup_critic() -> None:
-    # Only a user-DECLARED exact schema wins over the follow-up roles. Prose
-    # field names are hints, not a user-owned contract — they must not
+def test_named_result_evidence_does_not_exempt_the_followup_critic() -> None:
+    # Only a user-DECLARED exact schema wins over the follow-up roles. Named
+    # result evidence is not a closed contract, so it must not
     # silence the obligation.
     planning_state = PlanningState.empty()
     planning_state.resolved_slots["post_processing_goal"] = ResolvedSlot(
@@ -6168,15 +6169,13 @@ def test_prose_name_evidence_does_not_exempt_the_followup_critic() -> None:
         confidence="high",
         evidence=["question_answer:post_processing_goal"],
     )
-    planning_state.output_schema_evidence = build_schema_evidence(
-        json_schema={
-            "type": "object",
-            "properties": {"beslut": {}},
-        },
-        source="prose_field_names",
-        confidence="high",
-        evidence=["user_message:prose-names"],
-    )
+    planning_state.named_result_evidence = [
+        NamedResultEvidence(
+            name="beslut",
+            confidence="high",
+            evidence=["quote:user_message:user-1:beslut"],
+        )
+    ]
     spec = FlowDraftSpecCore(
         flow_name="Prosahintar",
         steps=[
@@ -6204,7 +6203,7 @@ def test_prose_name_evidence_does_not_exempt_the_followup_critic() -> None:
     assert "action_followup_requires_followup_fields" in {issue.id for issue in issues}
 
 
-def _prose_names_state(*names: str) -> PlanningState:
+def _named_result_state(*names: str) -> PlanningState:
     planning_state = PlanningState.empty()
     planning_state.resolved_slots["terminal_output"] = ResolvedSlot(
         name="terminal_output",
@@ -6213,24 +6212,23 @@ def _prose_names_state(*names: str) -> PlanningState:
         confidence="high",
         evidence=["question_answer:terminal_output"],
     )
-    planning_state.output_schema_evidence = build_schema_evidence(
-        json_schema={
-            "type": "object",
-            "properties": {name: {} for name in names},
-        },
-        source="prose_field_names",
-        confidence="high",
-        evidence=["user_message:prose-names"],
-    )
+    planning_state.named_result_evidence = [
+        NamedResultEvidence(
+            name=name,
+            confidence="high",
+            evidence=[f"quote:user_message:user-1:{name}"],
+        )
+        for name in names
+    ]
     return planning_state
 
 
-def test_prose_named_fields_must_survive_into_the_outcome_contract() -> None:
-    # Prose names no longer pin the compiled schema; the critic owns their
+def test_named_result_obligations_must_survive_into_the_outcome_contract() -> None:
+    # Named-result evidence does not pin the compiled schema; the critic owns its
     # survival instead. A contract that drops a user-named field fails with
     # repairable feedback; covering all names (any depth, any casing fold)
     # passes.
-    planning_state = _prose_names_state("service_reference", "applicant_channels")
+    planning_state = _named_result_state("service_reference", "applicant_channels")
     dropped_spec = FlowDraftSpecCore(
         flow_name="Mappning",
         steps=[
@@ -6253,7 +6251,7 @@ def test_prose_named_fields_must_survive_into_the_outcome_contract() -> None:
             planning_state=planning_state,
         )
     )
-    assert "prose_output_field_names_must_survive" in {issue.id for issue in issues}
+    assert "named_result_obligations_must_survive" in {issue.id for issue in issues}
 
     covered_step = dropped_spec.steps[0].model_copy(
         update={
@@ -6277,7 +6275,7 @@ def test_prose_named_fields_must_survive_into_the_outcome_contract() -> None:
             planning_state=planning_state,
         )
     )
-    assert "prose_output_field_names_must_survive" not in {issue.id for issue in issues}
+    assert "named_result_obligations_must_survive" not in {issue.id for issue in issues}
 
 
 class TestSourceReaderRequiredFieldsCaptured:

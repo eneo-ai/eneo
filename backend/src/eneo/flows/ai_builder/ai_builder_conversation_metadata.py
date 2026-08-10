@@ -33,6 +33,7 @@ from eneo.flows.ai_builder.ai_builder_event_models import (
     RequirementsSummaryPayload,
     StructuredQuestionPayload,
 )
+from eneo.flows.ai_builder.ai_builder_field_identity import fold_result_field_name
 from eneo.flows.ai_builder.ai_builder_plan_edit_context import (
     AIBuilderPlanEditContext,
 )
@@ -41,14 +42,13 @@ from eneo.flows.ai_builder.ai_builder_result_contract import (
     RESULT_OBLIGATION_VALUES,
     ResultObligation,
 )
-from eneo.flows.ai_builder.ai_builder_schema_evidence import canonical_schema_bytes
 from eneo.flows.ai_builder.ai_builder_slot_classification_contract import (
     CLASSIFICATION_EVIDENCE_MAX_ITEMS,
     CLASSIFICATION_EVIDENCE_MAX_LENGTH,
     CLASSIFICATION_NOTE_MAX_LENGTH,
     CLASSIFICATION_NOTES_MAX_ITEMS,
     CLASSIFICATION_REASON_MAX_LENGTH,
-    OUTPUT_SCHEMA_FIELD_EVIDENCE_MAX_ITEMS,
+    NAMED_RESULT_CITATION_MAX_ITEMS,
     SLOT_CLASSIFICATION_SCHEMA_VERSION,
     UNKNOWN_SLOT_VALUE,
     CheckpointUpdateOperation,
@@ -72,10 +72,12 @@ from eneo.flows.ai_builder.ai_builder_slot_vocabulary import (
     LLM_RESOLVABLE_SLOT_NAMES,
 )
 from eneo.flows.ai_builder.planning_state import (
+    NAMED_RESULT_EVIDENCE_MAX_ITEMS,
     AttachmentCoverage,
     CheckpointProducerKind,
     ExampleOutputConstraintEvidence,
     FileRole,
+    NamedResultEvidence,
 )
 from eneo.flows.ai_builder.question_catalog import legal_slot_values
 from eneo.flows.domain.flow import FlowPersistedJsonObject
@@ -116,7 +118,7 @@ ClassifierRetentionClass: TypeAlias = Literal[
     "file_role",
     "checkpoint_update",
     "form_intake",
-    "output_schema_fields",
+    "named_result_evidence",
     "example_output_constraint",
     "secondary_obligation",
     "schema_direction",
@@ -128,7 +130,7 @@ CLASSIFIER_RETENTION_CLASSES: frozenset[ClassifierRetentionClass] = frozenset(
         "file_role",
         "checkpoint_update",
         "form_intake",
-        "output_schema_fields",
+        "named_result_evidence",
         "example_output_constraint",
         "secondary_obligation",
         "schema_direction",
@@ -320,40 +322,37 @@ class SlotClassificationFormIntakeMetadata(BaseModel):
         )
 
 
-class SlotClassificationOutputSchemaFieldsMetadata(BaseModel):
+class SlotClassificationNamedResultEvidenceMetadata(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     operation: Literal["replace", "clear"]
-    field_names: list[str]
+    named_results: list[NamedResultEvidence] = Field(
+        max_length=NAMED_RESULT_EVIDENCE_MAX_ITEMS
+    )
     confidence: SlotClassificationConfidence
     reason: str = Field(min_length=1, max_length=CLASSIFICATION_REASON_MAX_LENGTH)
     evidence: list[SlotClassificationEvidence] = Field(
         min_length=1,
-        max_length=OUTPUT_SCHEMA_FIELD_EVIDENCE_MAX_ITEMS,
+        max_length=NAMED_RESULT_CITATION_MAX_ITEMS,
     )
 
-    @field_validator("field_names")
-    @classmethod
-    def require_unique_nonempty_names(cls, field_names: list[str]) -> list[str]:
-        if any(not name for name in field_names):
-            raise ValueError("output schema field names must be non-empty")
-        if len(field_names) != len(set(field_names)):
-            raise ValueError("output schema field names must be unique")
-        return field_names
-
     @model_validator(mode="after")
-    def require_operation_shape(self) -> "SlotClassificationOutputSchemaFieldsMetadata":
-        if self.operation == "replace" and not self.field_names:
-            raise ValueError("replace output schema fields requires field names")
-        if self.operation == "clear" and self.field_names:
-            raise ValueError("clear output schema fields must not contain field names")
-        if self.operation == "replace":
-            canonical_schema_bytes(
-                {
-                    "type": "object",
-                    "properties": {name: {} for name in self.field_names},
-                }
+    def require_operation_shape(
+        self,
+    ) -> "SlotClassificationNamedResultEvidenceMetadata":
+        if self.operation == "replace" and not self.named_results:
+            raise ValueError("replace named-result evidence requires named results")
+        if self.operation == "clear" and self.named_results:
+            raise ValueError(
+                "clear named-result evidence must not contain named results"
             )
+        folded_names = [
+            fold_result_field_name(item.name) for item in self.named_results
+        ]
+        if any(not name for name in folded_names) or len(folded_names) != len(
+            set(folded_names)
+        ):
+            raise ValueError("named-result evidence names must be uniquely foldable")
         return self
 
     @classmethod
@@ -361,18 +360,18 @@ class SlotClassificationOutputSchemaFieldsMetadata(BaseModel):
         cls,
         *,
         operation: Literal["replace", "clear"],
-        field_names: Sequence[str],
+        named_results: Sequence[NamedResultEvidence],
         confidence: SlotClassificationConfidence,
         reason: str,
         evidence: Sequence[ClassifiedEvidence],
-    ) -> "SlotClassificationOutputSchemaFieldsMetadata":
+    ) -> "SlotClassificationNamedResultEvidenceMetadata":
         return cls(
             operation=operation,
-            field_names=list(field_names),
+            named_results=list(named_results),
             confidence=confidence,
             reason=_bounded_metadata_text(
                 reason,
-                fallback="output schema field classification",
+                fallback="named-result classification",
             ),
             evidence=[
                 SlotClassificationEvidence(
@@ -502,7 +501,7 @@ class SlotClassificationMetadata(BaseModel):
         max_length=_MAX_RESULT_OBLIGATIONS,
     )
     form_intake: SlotClassificationFormIntakeMetadata | None = None
-    output_schema_fields: SlotClassificationOutputSchemaFieldsMetadata | None = None
+    named_result_evidence: SlotClassificationNamedResultEvidenceMetadata | None = None
     example_output_constraints: ExampleOutputConstraintEvidence | None = None
     schema_direction: SlotClassificationSchemaDirectionMetadata | None = None
     assumptions: list[SlotClassificationNote] = Field(
@@ -590,7 +589,7 @@ class SlotClassificationMetadata(BaseModel):
                 self.checkpoint_updates,
                 self.secondary_obligations,
                 self.form_intake is not None,
-                self.output_schema_fields is not None,
+                self.named_result_evidence is not None,
                 self.example_output_constraints is not None,
                 self.schema_direction is not None,
                 self.assumptions,
@@ -613,8 +612,8 @@ class SlotClassificationMetadata(BaseModel):
         )
         if self.form_intake is not None:
             evidence_items.extend(self.form_intake.evidence)
-        if self.output_schema_fields is not None:
-            evidence_items.extend(self.output_schema_fields.evidence)
+        if self.named_result_evidence is not None:
+            evidence_items.extend(self.named_result_evidence.evidence)
         if self.schema_direction is not None:
             evidence_items.extend(self.schema_direction.evidence)
         if any(evidence.source_id not in source_ids for evidence in evidence_items):
@@ -651,13 +650,16 @@ class SlotClassificationMetadata(BaseModel):
         ):
             raise ValueError("schema direction requires user-owned evidence")
         if (
-            self.output_schema_fields is not None
+            self.named_result_evidence is not None
             and not classification_evidence_has_user_owned_source(
-                (evidence.source_id for evidence in self.output_schema_fields.evidence),
+                (
+                    evidence.source_id
+                    for evidence in self.named_result_evidence.evidence
+                ),
                 source_kinds_by_id=source_kinds_by_id,
             )
         ):
-            raise ValueError("output schema fields require user-owned evidence")
+            raise ValueError("named-result evidence requires user-owned evidence")
         file_ids = {
             source.file_id
             for source in self.source_inventory
@@ -769,11 +771,11 @@ class SlotClassificationMetadata(BaseModel):
         ):
             identities.add(("example_output_constraint", "current"))
         if (
-            self.output_schema_fields is not None
-            and self.output_schema_fields.confidence != "low"
-            and self.output_schema_fields.evidence
+            self.named_result_evidence is not None
+            and self.named_result_evidence.confidence != "low"
+            and self.named_result_evidence.evidence
         ):
-            identities.add(("output_schema_fields", "current"))
+            identities.add(("named_result_evidence", "current"))
         identities.update(
             ("secondary_obligation", obligation)
             for obligation in self.secondary_obligations
@@ -803,9 +805,9 @@ class SlotClassificationMetadata(BaseModel):
         form_intake = (
             self.form_intake if ("form_intake", "form_intake") in identities else None
         )
-        output_schema_fields = (
-            self.output_schema_fields
-            if ("output_schema_fields", "current") in identities
+        named_result_evidence = (
+            self.named_result_evidence
+            if ("named_result_evidence", "current") in identities
             else None
         )
         example_output_constraints = (
@@ -840,8 +842,8 @@ class SlotClassificationMetadata(BaseModel):
                 *([] if form_intake is None else form_intake.evidence),
                 *(
                     []
-                    if output_schema_fields is None
-                    else output_schema_fields.evidence
+                    if named_result_evidence is None
+                    else named_result_evidence.evidence
                 ),
                 *(
                     []
@@ -883,7 +885,7 @@ class SlotClassificationMetadata(BaseModel):
                 "checkpoint_updates": checkpoint_updates,
                 "secondary_obligations": secondary_obligations,
                 "form_intake": form_intake,
-                "output_schema_fields": output_schema_fields,
+                "named_result_evidence": named_result_evidence,
                 "example_output_constraints": example_output_constraints,
                 "schema_direction": schema_direction,
                 # Free-form model notes are diagnostics, not rebuild facts. Compaction
@@ -1275,16 +1277,16 @@ def slot_classification_metadata_from_attempt(
     model: str,
     provider: str,
     retained_source_inventory: Sequence[SlotClassificationSourceMetadata] = (),
-    output_schema_fields_snapshot: SlotClassificationOutputSchemaFieldsMetadata
+    named_result_evidence_snapshot: SlotClassificationNamedResultEvidenceMetadata
     | None = None,
 ) -> SlotClassificationMetadata:
     result = attempt.result or SlotClassificationResult()
     if (
-        result.output_schema_fields is not None
-        and output_schema_fields_snapshot is None
+        result.named_result_evidence is not None
+        and named_result_evidence_snapshot is None
     ):
         raise ValueError(
-            "Live output schema field deltas require a materialized replay snapshot"
+            "Live named-result deltas require a materialized replay snapshot"
         )
     slot_payloads: list[dict[str, object]] = []
     seen_slot_names: set[str] = set()
@@ -1314,8 +1316,8 @@ def slot_classification_metadata_from_attempt(
     retained_source_ids = {
         item.source_id
         for item in (
-            output_schema_fields_snapshot.evidence
-            if output_schema_fields_snapshot is not None
+            named_result_evidence_snapshot.evidence
+            if named_result_evidence_snapshot is not None
             else ()
         )
     }
@@ -1343,9 +1345,9 @@ def slot_classification_metadata_from_attempt(
             "checkpoint_updates": checkpoint_update_payloads,
             "secondary_obligations": secondary_obligations,
             "form_intake": form_intake_payload,
-            "output_schema_fields": (
-                output_schema_fields_snapshot.model_dump(mode="python")
-                if output_schema_fields_snapshot is not None
+            "named_result_evidence": (
+                named_result_evidence_snapshot.model_dump(mode="python")
+                if named_result_evidence_snapshot is not None
                 else None
             ),
             "example_output_constraints": (

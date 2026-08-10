@@ -35,7 +35,7 @@ from eneo.flows.ai_builder.ai_builder_schema_evidence import (
 from eneo.flows.ai_builder.ai_builder_slot_classification_contract import (
     CLASSIFICATION_EVIDENCE_MAX_ITEMS,
     CLASSIFICATION_EVIDENCE_MAX_LENGTH,
-    OUTPUT_SCHEMA_FIELD_EVIDENCE_MAX_ITEMS,
+    NAMED_RESULT_EVIDENCE_MAX_ITEMS,
     SLOT_CLASSIFICATION_SCHEMA_VERSION,
     SlotClassificationAttempt,
     SlotClassificationBias,
@@ -725,17 +725,17 @@ def _build_slot_classification_prompt(
         "on meaning in exact user_message or structured_answer quotes. Uploaded-file "
         "content proves schema shape, never direction. Return null when direction is "
         "unresolved. "
-        "For output_schema_fields, return only cited changes to open-vocabulary "
-        "JSON property names or noun phrases for the final machine-readable JSON "
-        "result. Use update "
-        "with field_names for additions and removed_field_names for removals. Cite "
+        "For named_result_evidence, return only cited changes to open-vocabulary "
+        "names or noun phrases the user explicitly requires the final result to "
+        "contain, for every terminal output type. Use update "
+        "with names for additions and removed_names for removals. Cite "
         "current user_message or structured_answer evidence containing every changed "
-        f"name using up to {OUTPUT_SCHEMA_FIELD_EVIDENCE_MAX_ITEMS} exact evidence "
+        f"name using up to {NAMED_RESULT_EVIDENCE_MAX_ITEMS} exact evidence "
         "quotes, and use only as many quotes as needed. "
         "Report only additions or removals explicitly requested in the cited "
         "current evidence; do not attempt to reconstruct a complete field snapshot. "
-        "When the user enumerates what the machine-readable result shall "
-        "contain (for example 'JSON med sökta insatser, mottagna uppgifter och "
+        "When the user enumerates what the final result shall "
+        "contain (for example 'rapport med sökta insatser, mottagna uppgifter och "
         "vad som saknas'), that enumeration IS the field list: emit update with "
         "one field name per enumerated item. "
         "For unquoted names, emit the exact cited phrase and let the server normalize "
@@ -745,9 +745,9 @@ def _build_slot_classification_prompt(
         "user quotes or backticks it as part of the literal property name. Return a "
         "clear operation with both arrays empty only when current user-owned evidence "
         "explicitly removes every previously named field constraint. Return null "
-        "for report headings, document sections, runtime form/input fields, "
-        "examples, lists that do not describe the JSON result's contents, "
-        "implied fields the user never stated, or non-JSON final outputs. Do "
+        "for runtime form/input fields, examples, intermediate-only data, lists "
+        "that do not describe the final result's contents, or implied names the "
+        "user never stated. Do "
         "not infer types, nesting, renamed identifiers, or additional fields. "
         "An example guides structure and style but does not promise exact visual "
         "layout. Return null when no supported example constraint exists. "
@@ -845,7 +845,7 @@ def _build_slot_classification_prompt(
         '"file_roles": [{"file_id": str, "role": str, "confidence": "high"|"medium"|"low", "reason": str, "evidence": [{"source_id": str, "quote": exact_quote_str}], "evidence_level": "explicit"|"inferred"}], '
         '"checkpoint_updates": [{"operation": "update"|"clear", "producer_kind": "transcript"|"structured_result"|"report_text", "mode": "view"|"edit"|null, "confidence": "high"|"medium", "reason": str, "evidence": [{"source_id": str, "quote": exact_quote_str}]}], '
         '"form_intake": {"needs_form_fields": bool, "sectioned_form_intake": bool, "confidence": "high"|"medium"|"low", "reason": str, "evidence": [{"source_id": str, "quote": exact_quote_str}], "evidence_level": "explicit"|"inferred"} | null, '
-        '"output_schema_fields": {"operation": "update"|"clear", "field_names": [str], "removed_field_names": [str], "confidence": "high"|"medium"|"low", "reason": str, "evidence": [{"source_id": str, "quote": exact_quote_str}]} | null, '
+        '"named_result_evidence": {"operation": "update"|"clear", "names": [str], "removed_names": [str], "confidence": "high"|"medium"|"low", "reason": str, "evidence": [{"source_id": str, "quote": exact_quote_str}]} | null, '
         '"example_output_constraints": {"source_file_ids": [str], "headings": [str], "style_constraints": [{"category": "tone"|"detail_level"|"organization"|"formatting"|"audience", "description": str}], "confidence": "high"|"medium"|"low", "evidence": [{"source_id": str, "quote": exact_quote_str}]} | null, '
         '"schema_direction": {"input_fingerprint": str|null, "output_fingerprint": str|null, "reference_only": bool, "confidence": "high"|"medium"|"low", "reason": str, "evidence": [{"source_id": str, "quote": exact_quote_str}]} | null, '
         '"secondary_obligations": [str], '

@@ -46,9 +46,9 @@ _VALID_ARCH_HASH = "a" * ARCHITECTURE_HASH_HEX_LENGTH
 
 
 class TestModuleConstants:
-    def test_builder_schema_version_is_sixteen(self) -> None:
-        # v16: FileRoleEvidence carries classifier evidence_level.
-        assert BUILDER_SCHEMA_VERSION == 16
+    def test_builder_schema_version_is_seventeen(self) -> None:
+        # v17: named-result evidence is distinct from schema resolution.
+        assert BUILDER_SCHEMA_VERSION == 17
 
     def test_payload_cap_is_512_kibibytes(self) -> None:
         assert PLANNING_STATE_PAYLOAD_CAP_BYTES == 512 * 1024

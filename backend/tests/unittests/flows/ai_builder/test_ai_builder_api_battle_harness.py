@@ -539,7 +539,7 @@ def _classifier_diagnostics() -> dict[str, object]:
         "classifier_runs": [
             {
                 "message_id": "assistant-1",
-                "schema_version": 19,
+                "schema_version": 20,
                 "outcome": "resolved",
                 "prompt_hash": "a" * 64,
                 "model": "openai/gpt-test",
@@ -804,7 +804,7 @@ def _complete_reanalysis_bundle(
             "classifier_runs": [
                 {
                     "message_id": "assistant-1",
-                    "schema_version": 19,
+                    "schema_version": 20,
                     "outcome": "resolved",
                     "prompt_hash": "d" * 64,
                     "model": "gpt-a",

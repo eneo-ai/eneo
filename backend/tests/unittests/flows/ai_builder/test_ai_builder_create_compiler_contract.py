@@ -71,6 +71,7 @@ from eneo.flows.ai_builder.planning_state import (
     ExampleOutputSourceCoverage,
     FileRoleEvidence,
     MappedFileLimit,
+    NamedResultEvidence,
     PlanningSignal,
     PlanningState,
     ReportDisposition,
@@ -469,15 +470,7 @@ def test_compiler_applies_distinct_input_and_output_schema_evidence() -> None:
     assert validation.valid, validation.errors
 
 
-def test_related_document_package_keeps_prose_names_as_hints() -> None:
-    output_schema: JsonObject = {
-        "type": "object",
-        "properties": {
-            "candidate_name": {"type": "string"},
-            "qualification_summary": {"type": "string"},
-        },
-        "required": ["candidate_name", "qualification_summary"],
-    }
+def test_related_document_package_keeps_named_results_as_hints() -> None:
     state = PlanningState.empty()
     state.resolved_slots = {
         "primary_runtime_input": _slot("primary_runtime_input", "documents"),
@@ -488,16 +481,14 @@ def test_related_document_package_keeps_prose_names_as_hints() -> None:
         "terminal_output": _slot("terminal_output", "structured_json"),
     }
     _commit_architecture(state)
-    state.output_schema_evidence = build_schema_evidence(
-        json_schema=output_schema,
-        source="prose_field_names",
-        source_file_ids=(),
-        confidence="high",
-        evidence=[
-            "quote:user_message:application:field:candidate_name",
-            "quote:user_message:application:field:qualification_summary",
-        ],
-    )
+    state.named_result_evidence = [
+        NamedResultEvidence(
+            name=name,
+            confidence="high",
+            evidence=[f"quote:user_message:application:field:{name}"],
+        )
+        for name in ("candidate_name", "qualification_summary")
+    ]
     intent = parse_create_flow_intent_arguments(
         {
             "flow_name": "Application summary",
@@ -531,7 +522,7 @@ def test_related_document_package_keeps_prose_names_as_hints() -> None:
     context = create_compile_context_from_planning_state(state)
     assert context is not None
     assert context.aggregation_intent == "linear"
-    # Prose names are hints: the proposal owns types; nothing is pinned.
+    # Named results are hints: the proposal owns types; nothing is pinned.
     assert context.terminal_output_schema is None
 
     compiled = compile_create_intent_to_spec(intent, context=context)
@@ -6762,11 +6753,9 @@ def test_secondary_open_questions_alone_does_not_insert_extraction_step() -> Non
 
 
 def test_only_declared_schema_evidence_pins_the_terminal_contract() -> None:
-    # Prose field names and inferred examples are hints, not user-owned
-    # contracts: pinning them verbatim overwrote the model's typed fields
-    # with a flat name-only schema and forced repair loops (raw capture
-    # 2026-08-06). Only a declared schema carries pinning authority.
-    prose_schema = cast(
+    # Named-result evidence and inferred examples are hints, not complete
+    # schemas. Only a declared schema carries pinning authority.
+    declared_schema_shape = cast(
         JsonObject,
         {
             "type": "object",
@@ -6788,25 +6777,103 @@ def test_only_declared_schema_evidence_pins_the_terminal_contract() -> None:
         ),
     }
     _commit_architecture(state)
-    state.output_schema_evidence = build_schema_evidence(
-        json_schema=prose_schema,
-        source="prose_field_names",
-        confidence="high",
-        evidence=["user_message:prose"],
-    )
-    prose_context = create_compile_context_from_planning_state(state)
-    assert prose_context is not None
-    assert prose_context.terminal_output_schema is None
+    state.named_result_evidence = [
+        NamedResultEvidence(
+            name=name,
+            confidence="high",
+            evidence=[f"quote:user_message:user-1:{name}"],
+        )
+        for name in ("service_reference", "applicant_channels")
+    ]
+    named_result_context = create_compile_context_from_planning_state(state)
+    assert named_result_context is not None
+    assert named_result_context.terminal_output_schema is None
 
     state.output_schema_evidence = build_schema_evidence(
-        json_schema=prose_schema,
+        json_schema=declared_schema_shape,
         source="declared_schema",
         confidence="high",
         evidence=["user_message:declared"],
     )
     declared_context = create_compile_context_from_planning_state(state)
     assert declared_context is not None
-    assert declared_context.terminal_output_schema == prose_schema
+    assert declared_context.terminal_output_schema == declared_schema_shape
+
+
+@pytest.mark.parametrize(
+    ("terminal_output", "mode_slot", "mode_value"),
+    [
+        ("structured_text", None, None),
+        ("pdf_document", "pdf_generation_mode", "generated_pdf"),
+        ("docx_document", "docx_output_mode", "generated_docx"),
+    ],
+)
+def test_non_json_named_result_evidence_cannot_change_public_plan_shape(
+    terminal_output: str,
+    mode_slot: str | None,
+    mode_value: str | None,
+) -> None:
+    state = PlanningState.empty()
+    state.resolved_slots = {
+        "primary_runtime_input": _slot("primary_runtime_input", "text"),
+        "terminal_output": _slot("terminal_output", terminal_output),
+    }
+    if mode_slot is not None and mode_value is not None:
+        state.resolved_slots[mode_slot] = _slot(mode_slot, mode_value)
+    _commit_architecture(state)
+    baseline_state = state.model_copy(deep=True)
+    state.named_result_evidence = [
+        NamedResultEvidence(
+            name="case_summary",
+            confidence="high",
+            evidence=["quote:user_message:user-1:case summary"],
+        )
+    ]
+    intent = parse_create_flow_intent_arguments(
+        {
+            "flow_name": "Case summary",
+            "plan_rationale": "Summarize the submitted case.",
+            "steps": [
+                {
+                    "name": "Summarize case",
+                    "instructions": "Write a clear case summary.",
+                    "output_type": "text",
+                }
+            ],
+        }
+    )
+    baseline_context = create_compile_context_from_planning_state(baseline_state)
+    named_context = create_compile_context_from_planning_state(state)
+    assert baseline_context is not None
+    assert named_context == baseline_context
+
+    baseline_spec = compile_create_intent_to_spec(intent, context=baseline_context)
+    named_spec = compile_create_intent_to_spec(intent, context=named_context)
+
+    assert named_spec == baseline_spec
+    assert state.output_schema_evidence is None
+    assert state.named_result_evidence[0].model_dump() == {
+        "name": "case_summary",
+        "evidence": ["quote:user_message:user-1:case summary"],
+        "confidence": "high",
+    }
+    baseline_issues = evaluate_critic_invariants(
+        build_conversation_critic_context(
+            [{"role": "user", "content": "Write a case summary."}],
+            baseline_spec,
+            planning_state=baseline_state,
+        )
+    )
+    named_issues = evaluate_critic_invariants(
+        build_conversation_critic_context(
+            [{"role": "user", "content": "Write a case summary."}],
+            named_spec,
+            planning_state=state,
+        )
+    )
+    assert [issue.id for issue in named_issues] == [
+        issue.id for issue in baseline_issues
+    ]
 
 
 def test_localized_keys_are_admitted_without_a_lexicon() -> None:
@@ -6829,15 +6896,14 @@ def test_localized_keys_are_admitted_without_a_lexicon() -> None:
         ),
     }
     _commit_architecture(state)
-    state.output_schema_evidence = build_schema_evidence(
-        json_schema={
-            "type": "object",
-            "properties": {"sammanfattning": {}, "dokumenttyp": {}},
-        },
-        source="prose_field_names",
-        confidence="high",
-        evidence=["user_message:prose"],
-    )
+    state.named_result_evidence = [
+        NamedResultEvidence(
+            name=name,
+            confidence="high",
+            evidence=[f"quote:user_message:user-1:{name}"],
+        )
+        for name in ("sammanfattning", "dokumenttyp")
+    ]
     context = create_compile_context_from_planning_state(state)
     assert context is not None
 
@@ -6873,12 +6939,13 @@ def test_localized_keys_are_admitted_without_a_lexicon() -> None:
     assert {"sammanfattning", "dokumenttyp"} <= contract_names
 
     # A localized key the user never named survives just the same.
-    state.output_schema_evidence = build_schema_evidence(
-        json_schema={"type": "object", "properties": {"dokumenttyp": {}}},
-        source="prose_field_names",
-        confidence="high",
-        evidence=["user_message:prose"],
-    )
+    state.named_result_evidence = [
+        NamedResultEvidence(
+            name="dokumenttyp",
+            confidence="high",
+            evidence=["quote:user_message:user-1:dokumenttyp"],
+        )
+    ]
     unhinted_context = create_compile_context_from_planning_state(state)
     assert unhinted_context is not None
     compiled = compile_create_intent_to_spec(

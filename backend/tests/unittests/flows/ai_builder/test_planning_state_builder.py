@@ -15,7 +15,6 @@ from uuid import UUID, uuid4
 
 import pytest
 
-from eneo.flows.ai_builder import ai_builder_schema_evidence as schema_evidence_module
 from eneo.flows.ai_builder.ai_builder_action_policy import (
     build_planner_action_policy,
 )
@@ -23,7 +22,7 @@ from eneo.flows.ai_builder.ai_builder_architecture_derivation import (
     derive_architecture_commit_draft,
 )
 from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
-    SlotClassificationOutputSchemaFieldsMetadata,
+    SlotClassificationNamedResultEvidenceMetadata,
     metadata_with_slot_classification,
     slot_classification_metadata_from_attempt,
 )
@@ -43,7 +42,6 @@ from eneo.flows.ai_builder.ai_builder_requirements_state import (
 )
 from eneo.flows.ai_builder.ai_builder_schema_evidence import (
     build_schema_evidence,
-    canonical_schema_bytes,
     derive_freeform_schema_candidates,
 )
 from eneo.flows.ai_builder.ai_builder_slot_classification_contract import (
@@ -52,7 +50,7 @@ from eneo.flows.ai_builder.ai_builder_slot_classification_contract import (
     ClassifiedEvidence,
     ClassifiedFileRole,
     ClassifiedFormIntake,
-    ClassifiedOutputSchemaFieldDelta,
+    ClassifiedNamedResultDelta,
     ClassifiedSlot,
     SlotClassificationAttempt,
     SlotClassificationConfidence,
@@ -65,6 +63,7 @@ from eneo.flows.ai_builder.ai_builder_slot_classification_contract import (
 from eneo.flows.ai_builder.planning_state import (
     BUILDER_SCHEMA_VERSION,
     FCM_VERSION,
+    NAMED_RESULT_EVIDENCE_MAX_ITEMS,
     PLANNER_CONTRACT_VERSION,
     ArchitectureCommit,
     AttachmentCoverage,
@@ -77,6 +76,7 @@ from eneo.flows.ai_builder.planning_state import (
     FileRole,
     FileRoleEvidence,
     MappedFileLimit,
+    NamedResultEvidence,
     PlanningState,
     ResolvedSlot,
     SchemaEvidence,
@@ -2418,10 +2418,10 @@ class TestModelSlotMerge:
                     "file_roles": [],
                     "checkpoint_updates": [],
                     "form_intake": None,
-                    "output_schema_fields": {
+                    "named_result_evidence": {
                         "operation": "update",
-                        "field_names": ["case_id"],
-                        "removed_field_names": [],
+                        "names": ["case_id"],
+                        "removed_names": [],
                         "confidence": "high",
                         "reason": "The user explicitly named the JSON field.",
                         "evidence": [
@@ -2449,8 +2449,8 @@ class TestModelSlotMerge:
             ),
         )
         assert parsed is not None
-        assert parsed.output_schema_fields is not None
-        assert parsed.output_schema_fields.evidence == (
+        assert parsed.named_result_evidence is not None
+        assert parsed.named_result_evidence.evidence == (
             ClassifiedEvidence(
                 source_id=user_source.source_id,
                 quote=user_source.text,
@@ -2470,13 +2470,18 @@ class TestModelSlotMerge:
             freeform_text=user_source.text,
         )
 
-        evidence = state.output_schema_evidence
-        assert evidence is not None
-        assert evidence.evidence == [
-            "quote:user_message:user-1:JSON output field: case_id."
+        assert state.output_schema_evidence is None
+        assert state.named_result_evidence == [
+            NamedResultEvidence(
+                name="case_id",
+                confidence="high",
+                evidence=["quote:user_message:user-1:JSON output field: case_id."],
+            )
         ]
 
-    def test_cited_output_fields_survive_replay_and_declared_schema_wins(self) -> None:
+    def test_named_result_evidence_survives_replay_and_coexists_with_schema(
+        self,
+    ) -> None:
         state = _state()
         state.resolved_slots["terminal_output"] = _slot(
             name="terminal_output",
@@ -2487,9 +2492,9 @@ class TestModelSlotMerge:
         merge_llm_resolved_slots(
             state,
             SlotClassificationResult(
-                output_schema_fields=ClassifiedOutputSchemaFieldDelta(
+                named_result_evidence=ClassifiedNamedResultDelta(
                     operation="update",
-                    field_names=("case_id", "status"),
+                    names=("case_id", "status"),
                     confidence="high",
                     reason="The user explicitly named the JSON result fields.",
                     evidence=_model_evidence(
@@ -2501,17 +2506,17 @@ class TestModelSlotMerge:
             freeform_text="JSON-resultatet ska innehålla case_id och status.",
         )
 
-        evidence = state.output_schema_evidence
-        assert evidence is not None
-        assert evidence.source == "prose_field_names"
-        assert evidence.strength == "explicit"
-        assert evidence.json_schema == {
-            "type": "object",
-            "properties": {"case_id": {}, "status": {}},
-        }
-        assert evidence.evidence == [
-            "quote:user_message:test-source:JSON-resultatet ska innehålla "
-            "case_id och status."
+        assert state.output_schema_evidence is None
+        assert state.named_result_evidence == [
+            NamedResultEvidence(
+                name=name,
+                confidence="high",
+                evidence=[
+                    "quote:user_message:test-source:JSON-resultatet ska innehålla "
+                    "case_id och status."
+                ],
+            )
+            for name in ("case_id", "status")
         ]
 
         source = SlotClassificationSource(
@@ -2520,12 +2525,14 @@ class TestModelSlotMerge:
             text="JSON-resultatet ska innehålla case_id och status.",
             message_id="test-source",
         )
-        snapshot = SlotClassificationOutputSchemaFieldsMetadata.from_materialized_state(
-            operation="replace",
-            field_names=("case_id", "status"),
-            confidence="high",
-            reason="The current complete user-named field snapshot.",
-            evidence=_model_evidence(source.text),
+        snapshot = (
+            SlotClassificationNamedResultEvidenceMetadata.from_materialized_state(
+                operation="replace",
+                named_results=state.named_result_evidence,
+                confidence="high",
+                reason="The current complete user-named field snapshot.",
+                evidence=_model_evidence(source.text),
+            )
         )
         classification = slot_classification_metadata_from_attempt(
             SlotClassificationAttempt(
@@ -2547,7 +2554,7 @@ class TestModelSlotMerge:
             classification_input=SlotClassificationInput(sources=(source,)),
             model="openai/gpt-test",
             provider="openai",
-            output_schema_fields_snapshot=snapshot,
+            named_result_evidence_snapshot=snapshot,
         )
         metadata = metadata_with_slot_classification(None, classification)
         assert metadata is not None
@@ -2561,9 +2568,8 @@ class TestModelSlotMerge:
                 )
             ]
         )
-        replayed_evidence = replayed.output_schema_evidence
-        assert replayed_evidence is not None
-        assert replayed_evidence.json_schema == evidence.json_schema
+        assert replayed.output_schema_evidence is None
+        assert replayed.named_result_evidence == state.named_result_evidence
 
         declared = build_schema_evidence(
             json_schema={
@@ -2582,9 +2588,9 @@ class TestModelSlotMerge:
         merge_llm_resolved_slots(
             replayed,
             SlotClassificationResult(
-                output_schema_fields=ClassifiedOutputSchemaFieldDelta(
+                named_result_evidence=ClassifiedNamedResultDelta(
                     operation="update",
-                    field_names=("priority",),
+                    names=("priority",),
                     confidence="high",
                     reason="The user named another field.",
                     evidence=_model_evidence("Lägg även till priority."),
@@ -2594,41 +2600,92 @@ class TestModelSlotMerge:
             freeform_text="Lägg även till priority.",
         )
         assert replayed.output_schema_evidence == declared
+        assert replayed.named_result_obligations == ("case_id", "status", "priority")
 
-    def test_accumulated_output_fields_report_typed_schema_limit(
-        self,
-        monkeypatch: pytest.MonkeyPatch,
-    ) -> None:
+        clear_source = SlotClassificationSource(
+            source_id="user_message:clear-source",
+            kind="user_message",
+            text="Remove every named result.",
+            message_id="clear-source",
+        )
+        clear_evidence = (
+            ClassifiedEvidence(
+                source_id=clear_source.source_id,
+                quote=clear_source.text,
+            ),
+        )
+        clear_delta = ClassifiedNamedResultDelta(
+            operation="clear",
+            names=(),
+            confidence="high",
+            reason="The user removed all named results.",
+            evidence=clear_evidence,
+        )
+        clear_classification = slot_classification_metadata_from_attempt(
+            SlotClassificationAttempt(
+                outcome="resolved",
+                result=SlotClassificationResult(named_result_evidence=clear_delta),
+            ),
+            prompt_hash="d" * 64,
+            classification_input=SlotClassificationInput(
+                sources=(clear_source,),
+                current_user_message_id="clear-source",
+            ),
+            model="openai/gpt-test",
+            provider="openai",
+            named_result_evidence_snapshot=(
+                SlotClassificationNamedResultEvidenceMetadata.from_materialized_state(
+                    operation="clear",
+                    named_results=(),
+                    confidence="high",
+                    reason=clear_delta.reason,
+                    evidence=clear_evidence,
+                )
+            ),
+        )
+        clear_metadata = metadata_with_slot_classification(None, clear_classification)
+        assert clear_metadata is not None
+        cleared = build_planning_state_from_conversation(
+            [
+                ConversationMessage(
+                    message_id="test-source",
+                    role="user",
+                    content=source.text,
+                    metadata=metadata,
+                ),
+                ConversationMessage(
+                    message_id="clear-source",
+                    role="user",
+                    content=clear_source.text,
+                    metadata=clear_metadata,
+                ),
+            ]
+        )
+        assert cleared.named_result_evidence == []
+
+    def test_named_result_evidence_enforces_existing_field_count_bound(self) -> None:
         state = _state()
         state.resolved_slots["terminal_output"] = _slot(
             name="terminal_output",
             value="structured_json",
             source="structured_answer",
         )
-        current_schema = {
-            "type": "object",
-            "properties": {"case_id": {}},
-        }
-        state.output_schema_evidence = build_schema_evidence(
-            json_schema=current_schema,
-            source="prose_field_names",
-            confidence="high",
-            evidence=("quote:user_message:user-1:case_id",),
-        )
-        current_size = len(canonical_schema_bytes(current_schema))
-        monkeypatch.setattr(
-            schema_evidence_module,
-            "SCHEMA_MAX_JSON_BYTES",
-            current_size,
-        )
+        state.named_result_evidence = [
+            NamedResultEvidence(
+                name=f"field_{index}",
+                confidence="high",
+                evidence=[f"quote:user_message:user-1:field_{index}"],
+            )
+            for index in range(NAMED_RESULT_EVIDENCE_MAX_ITEMS)
+        ]
 
         with pytest.raises(AIBuilderBadRequestException) as exc_info:
             merge_llm_resolved_slots(
                 state,
                 SlotClassificationResult(
-                    output_schema_fields=ClassifiedOutputSchemaFieldDelta(
+                    named_result_evidence=ClassifiedNamedResultDelta(
                         operation="update",
-                        field_names=("status",),
+                        names=("overflow",),
                         confidence="high",
                         reason="The user added a field.",
                         evidence=_model_evidence("Add status."),
@@ -2640,13 +2697,39 @@ class TestModelSlotMerge:
 
         assert exc_info.value.code is AIBuilderErrorCode.SCHEMA_LIMIT_EXCEEDED
         assert exc_info.value.context == {
-            "reason": "canonical_bytes",
-            "max_value": current_size,
-            "actual_value": exc_info.value.context["actual_value"],
+            "reason": "named_result_count",
+            "max_value": NAMED_RESULT_EVIDENCE_MAX_ITEMS,
+            "actual_value": NAMED_RESULT_EVIDENCE_MAX_ITEMS + 1,
         }
-        assert exc_info.value.context["actual_value"] > current_size
 
-    def test_cited_output_field_names_do_not_replace_declared_schema(self) -> None:
+    def test_named_result_evidence_deduplicates_folded_name_collisions(self) -> None:
+        state = _state()
+        state.named_result_evidence = [
+            NamedResultEvidence(
+                name="case-id",
+                confidence="high",
+                evidence=["quote:user_message:user-1:case-id"],
+            )
+        ]
+
+        merge_llm_resolved_slots(
+            state,
+            SlotClassificationResult(
+                named_result_evidence=ClassifiedNamedResultDelta(
+                    operation="update",
+                    names=("Case ID",),
+                    confidence="high",
+                    reason="The user repeated the same result name.",
+                    evidence=_model_evidence("Case ID"),
+                )
+            ),
+            prompt_hash="f" * 64,
+            freeform_text="Case ID",
+        )
+
+        assert state.named_result_obligations == ("case-id",)
+
+    def test_cited_output_names_do_not_replace_declared_schema(self) -> None:
         state = _state()
         state.resolved_slots["terminal_output"] = _slot(
             name="terminal_output",
@@ -2671,9 +2754,9 @@ class TestModelSlotMerge:
         merge_llm_resolved_slots(
             state,
             SlotClassificationResult(
-                output_schema_fields=ClassifiedOutputSchemaFieldDelta(
+                named_result_evidence=ClassifiedNamedResultDelta(
                     operation="update",
-                    field_names=("case_id", "status"),
+                    names=("case_id", "status"),
                     confidence="high",
                     reason="The user also mentioned field names in prose.",
                     evidence=_model_evidence("case_id och status"),
@@ -2684,30 +2767,30 @@ class TestModelSlotMerge:
         )
 
         assert state.output_schema_evidence == declared
+        assert state.named_result_obligations == ("case_id", "status")
 
-    def test_explicit_clear_removes_only_prose_field_schema(self) -> None:
+    def test_explicit_clear_removes_only_named_result_evidence(self) -> None:
         state = _state()
         state.resolved_slots["terminal_output"] = _slot(
             name="terminal_output",
             value="structured_json",
             source="structured_answer",
         )
-        state.output_schema_evidence = build_schema_evidence(
-            json_schema={
-                "type": "object",
-                "properties": {"case_id": {}, "status": {}},
-            },
-            source="prose_field_names",
-            confidence="high",
-            evidence=("quote:user_message:user-1:case_id and status",),
-        )
+        state.named_result_evidence = [
+            NamedResultEvidence(
+                name=name,
+                confidence="high",
+                evidence=["quote:user_message:user-1:case_id and status"],
+            )
+            for name in ("case_id", "status")
+        ]
 
         merge_llm_resolved_slots(
             state,
             SlotClassificationResult(
-                output_schema_fields=ClassifiedOutputSchemaFieldDelta(
+                named_result_evidence=ClassifiedNamedResultDelta(
                     operation="clear",
-                    field_names=(),
+                    names=(),
                     confidence="high",
                     reason="The user removed all named field constraints.",
                     evidence=_model_evidence(
@@ -2719,24 +2802,24 @@ class TestModelSlotMerge:
             freeform_text="Ta bort alla särskilt namngivna JSON-fält.",
         )
 
+        assert state.named_result_evidence == []
         assert state.output_schema_evidence is None
 
-    def test_terminal_transition_clears_prose_schema_without_resurrection(self) -> None:
+    def test_terminal_transition_retains_named_result_evidence(self) -> None:
         state = _state()
         state.resolved_slots["terminal_output"] = _slot(
             name="terminal_output",
             value="structured_json",
             source="model",
         )
-        state.output_schema_evidence = build_schema_evidence(
-            json_schema={
-                "type": "object",
-                "properties": {"case_id": {}, "status": {}},
-            },
-            source="prose_field_names",
-            confidence="high",
-            evidence=("quote:user_message:user-1:case_id and status",),
-        )
+        state.named_result_evidence = [
+            NamedResultEvidence(
+                name=name,
+                confidence="high",
+                evidence=["quote:user_message:user-1:case_id and status"],
+            )
+            for name in ("case_id", "status")
+        ]
 
         merge_llm_resolved_slots(
             state,
@@ -2748,6 +2831,10 @@ class TestModelSlotMerge:
         )
 
         assert state.resolved_slots["terminal_output"].value == "pdf_document"
+        assert [item.name for item in getattr(state, "named_result_evidence", ())] == [
+            "case_id",
+            "status",
+        ]
         assert state.output_schema_evidence is None
 
         merge_llm_resolved_slots(
@@ -2760,6 +2847,10 @@ class TestModelSlotMerge:
         )
 
         assert state.resolved_slots["terminal_output"].value == "structured_json"
+        assert [item.name for item in getattr(state, "named_result_evidence", ())] == [
+            "case_id",
+            "status",
+        ]
         assert state.output_schema_evidence is None
 
     def test_explicit_medium_core_slots_are_admitted_without_redundant_questions(
@@ -2811,7 +2902,7 @@ class TestModelSlotMerge:
                     "file_roles": [],
                     "checkpoint_updates": [],
                     "form_intake": None,
-                    "output_schema_fields": None,
+                    "named_result_evidence": None,
                     "example_output_constraints": None,
                     "schema_direction": None,
                     "secondary_obligations": [],
@@ -2875,7 +2966,7 @@ class TestModelSlotMerge:
                     "file_roles": [],
                     "checkpoint_updates": [],
                     "form_intake": None,
-                    "output_schema_fields": None,
+                    "named_result_evidence": None,
                     "example_output_constraints": None,
                     "schema_direction": None,
                     "secondary_obligations": [],

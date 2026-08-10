@@ -44,6 +44,7 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from eneo.files.file_models import FileType
+from eneo.flows.ai_builder.ai_builder_field_identity import fold_result_field_name
 from eneo.flows.ai_builder.ai_builder_proposal_intent import FlowInputFieldIntent
 from eneo.flows.enums import (
     FlowAuthoringInputType,
@@ -55,7 +56,7 @@ from eneo.flows.flow_review_policy import FlowStepReviewMode
 from eneo.json_types import JsonObject
 
 PLANNER_CONTRACT_VERSION: int = 1
-BUILDER_SCHEMA_VERSION: int = 16
+BUILDER_SCHEMA_VERSION: int = 17
 # One state can retain two independently assigned 128-KiB schemas. The persisted
 # envelope leaves the other half for provenance, file roles, slots, and future
 # state growth without coupling the per-schema ceiling to the state ceiling.
@@ -117,7 +118,6 @@ AttachmentCoverage = Literal[
 ]
 SchemaEvidenceSource = Literal[
     "declared_schema",
-    "prose_field_names",
     "template_placeholders",
     "inferred_example",
 ]
@@ -418,9 +418,7 @@ class SchemaEvidence(_PlanningModel):
         if self.fingerprint != expected_fingerprint:
             raise ValueError("schema fingerprint must match json_schema")
         expected_strength: SchemaEvidenceStrength = (
-            "explicit"
-            if self.source in {"declared_schema", "prose_field_names"}
-            else "inferred"
+            "explicit" if self.source == "declared_schema" else "inferred"
         )
         if self.strength != expected_strength:
             raise ValueError("schema strength must match its source")
@@ -682,6 +680,22 @@ class MappedFileLimit(_PlanningModel):
         return self
 
 
+NAMED_RESULT_EVIDENCE_MAX_ITEMS = 100
+
+
+class NamedResultEvidence(_PlanningModel):
+    name: str = Field(min_length=1, max_length=240)
+    evidence: list[str] = Field(min_length=1, max_length=200)
+    confidence: SignalConfidence
+
+    @field_validator("name")
+    @classmethod
+    def require_bounded_name(cls, name: str) -> str:
+        if not name.strip():
+            raise ValueError("named result evidence name must be non-empty")
+        return name
+
+
 class PlanningState(_PlanningModel):
     fcm_version: int
     planner_contract_version: int
@@ -695,6 +709,10 @@ class PlanningState(_PlanningModel):
         default_factory=list[CheckpointIntent]
     )
     schema_resolution: SchemaResolution = Field(default_factory=SchemaResolution)
+    named_result_evidence: list[NamedResultEvidence] = Field(
+        default_factory=list[NamedResultEvidence],
+        max_length=NAMED_RESULT_EVIDENCE_MAX_ITEMS,
+    )
     example_output_constraints: ExampleOutputConstraintEvidence | None = None
     example_output_schema_inference: ExampleOutputSchemaInferenceOutcome | None = None
     input_fields: list[FlowInputFieldIntent] = Field(
@@ -716,6 +734,10 @@ class PlanningState(_PlanningModel):
         if slot is None or not slot.is_commit_grade:
             return None
         return slot.value
+
+    @property
+    def named_result_obligations(self) -> tuple[str, ...]:
+        return tuple(item.name for item in self.named_result_evidence)
 
     @property
     def input_schema_evidence(self) -> SchemaEvidence | None:
@@ -743,6 +765,15 @@ class PlanningState(_PlanningModel):
 
     @model_validator(mode="after")
     def _owned_collections_are_valid(self) -> PlanningState:
+        folded_names = [
+            fold_result_field_name(item.name) for item in self.named_result_evidence
+        ]
+        if any(not name for name in folded_names) or len(folded_names) != len(
+            set(folded_names)
+        ):
+            raise ValueError(
+                "named_result_evidence must contain unique foldable result names"
+            )
         checkpoint_producers = [
             intent.producer_kind for intent in self.checkpoint_intents
         ]

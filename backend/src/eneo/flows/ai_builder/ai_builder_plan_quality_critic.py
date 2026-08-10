@@ -211,6 +211,11 @@ def build_conversation_critic_context(
         resolved_slots=(
             planning_state.resolved_slots if planning_state is not None else {}
         ),
+        named_result_obligations=(
+            planning_state.named_result_obligations
+            if planning_state is not None
+            else ()
+        ),
         output_schema_evidence=(
             planning_state.output_schema_evidence
             if planning_state is not None

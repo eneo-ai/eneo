@@ -13,6 +13,7 @@ from uuid import UUID
 from pydantic import TypeAdapter, ValidationError
 
 from eneo.flows.ai_builder.planning_state import (
+    NAMED_RESULT_EVIDENCE_MAX_ITEMS,
     ExampleOutputSchemaInferenceOutcome,
     ExampleOutputSchemaInferenceReason,
     SchemaEvidence,
@@ -43,7 +44,7 @@ SCHEMA_FIELD_NAME_MAX_JSON_BYTES = 80
 SCHEMA_PROVENANCE_MAX_ITEMS = 200
 SCHEMA_CANDIDATE_MAX_ITEMS = 100
 EXAMPLE_OUTPUT_MAX_JSON_BYTES = 16 * 1024
-EXAMPLE_OUTPUT_MAX_FIELDS = 100
+EXAMPLE_OUTPUT_MAX_FIELDS = NAMED_RESULT_EVIDENCE_MAX_ITEMS
 EXAMPLE_OUTPUT_MAX_DEPTH = 5
 
 _JSON_OBJECT_ADAPTER = TypeAdapter(JsonObject)
@@ -275,11 +276,7 @@ def build_schema_evidence(
         json_schema=json_schema,
         fingerprint=schema_fingerprint(json_schema),
         source=source,
-        strength=(
-            "explicit"
-            if source in {"declared_schema", "prose_field_names"}
-            else "inferred"
-        ),
+        strength="explicit" if source == "declared_schema" else "inferred",
         source_file_ids=list(sorted(set(source_file_ids), key=str)),
         confidence=confidence,
         evidence=list(evidence),

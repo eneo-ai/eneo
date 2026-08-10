@@ -13,7 +13,7 @@ from eneo.flows.ai_builder.ai_builder_conversation_compaction import (
     conversation_serialized_size_bytes,
 )
 from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
-    SlotClassificationOutputSchemaFieldsMetadata,
+    SlotClassificationNamedResultEvidenceMetadata,
     SlotClassificationSourceMetadata,
     metadata_with_slot_classification,
     question_response_from_metadata,
@@ -52,6 +52,7 @@ from eneo.flows.ai_builder.planning_state import (
     ExampleOutputSourceCoverage,
     ExampleOutputStyleConstraint,
     FileRoleEvidence,
+    NamedResultEvidence,
 )
 from eneo.flows.ai_builder.planning_state_builder import (
     build_planning_state_from_conversation,
@@ -123,7 +124,7 @@ def _classifier_result_msg(
     *,
     uploaded_file_id: UUID | None = None,
     retained_source_inventory: tuple[SlotClassificationSourceMetadata, ...] = (),
-    output_schema_fields_snapshot: SlotClassificationOutputSchemaFieldsMetadata
+    named_result_evidence_snapshot: SlotClassificationNamedResultEvidenceMetadata
     | None = None,
 ) -> ConversationMessage:
     source_id = (
@@ -148,10 +149,10 @@ def _classifier_result_msg(
             *([] if result.form_intake is None else result.form_intake.evidence),
             *(
                 []
-                if output_schema_fields_snapshot is None
+                if named_result_evidence_snapshot is None
                 else [
                     item.to_classified_evidence()
-                    for item in output_schema_fields_snapshot.evidence
+                    for item in named_result_evidence_snapshot.evidence
                 ]
             ),
             *(
@@ -185,7 +186,7 @@ def _classifier_result_msg(
         model="openai/gpt-test",
         provider="openai",
         retained_source_inventory=retained_source_inventory,
-        output_schema_fields_snapshot=output_schema_fields_snapshot,
+        named_result_evidence_snapshot=named_result_evidence_snapshot,
     )
     assert classification is not None
     metadata = metadata_with_slot_classification(None, classification)
@@ -629,7 +630,7 @@ def test_compaction_retains_checkpoint_revocation_for_rebuild() -> None:
     assert compacted_intents == full_intents
 
 
-def test_compaction_preserves_latest_complete_json_field_snapshot() -> None:
+def test_compaction_preserves_latest_complete_named_result_snapshot() -> None:
     first_source = "user_message:json-fields-old"
     latest_source = "user_message:json-fields-new"
     first_quote = "Create a machine-readable report containing case_id."
@@ -663,10 +664,16 @@ def test_compaction_preserves_latest_complete_json_field_snapshot() -> None:
                 ),
             ),
         ),
-        output_schema_fields_snapshot=(
-            SlotClassificationOutputSchemaFieldsMetadata.from_materialized_state(
+        named_result_evidence_snapshot=(
+            SlotClassificationNamedResultEvidenceMetadata.from_materialized_state(
                 operation="replace",
-                field_names=("case_id",),
+                named_results=(
+                    NamedResultEvidence(
+                        name="case_id",
+                        confidence="high",
+                        evidence=["quote:user_message:user-1:case_id"],
+                    ),
+                ),
                 confidence="high",
                 reason="Initial complete field snapshot.",
                 evidence=(
@@ -696,10 +703,19 @@ def test_compaction_preserves_latest_complete_json_field_snapshot() -> None:
                 "json-fields-new",
                 SlotClassificationResult(),
                 retained_source_inventory=tuple(first_classification.source_inventory),
-                output_schema_fields_snapshot=(
-                    SlotClassificationOutputSchemaFieldsMetadata.from_materialized_state(
+                named_result_evidence_snapshot=(
+                    SlotClassificationNamedResultEvidenceMetadata.from_materialized_state(
                         operation="replace",
-                        field_names=("case_id", "status"),
+                        named_results=(
+                            NamedResultEvidence(
+                                name=name,
+                                confidence="high",
+                                evidence=[
+                                    "quote:user_message:user-2:case_id and status"
+                                ],
+                            )
+                            for name in ("case_id", "status")
+                        ),
                         confidence="high",
                         reason="Current complete field snapshot.",
                         evidence=(
@@ -732,13 +748,9 @@ def test_compaction_preserves_latest_complete_json_field_snapshot() -> None:
         tail_messages=3,
     )
 
-    evidence = expected.output_schema_evidence
-    assert evidence is not None
-    assert evidence.json_schema["properties"] == {"case_id": {}, "status": {}}
-    assert evidence.evidence == [
-        f"quote:user_message:json-fields-old:{first_quote}",
-        "quote:user_message:json-fields-new:Keep case_id and add status.",
-    ]
+    assert expected.output_schema_evidence is None
+    assert expected.named_result_obligations == ("case_id", "status")
+    assert all(item.evidence for item in expected.named_result_evidence)
     assert build_planning_state_from_conversation(compacted) == expected
 
 

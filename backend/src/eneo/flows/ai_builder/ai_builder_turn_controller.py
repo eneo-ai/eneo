@@ -651,10 +651,36 @@ def _schema_summary_lines(
                 f"Selected fields: {field_text}."
             )
         )
+    named_result_line = _named_result_summary_line(session_state, locale)
+    if named_result_line is not None:
+        lines.append(named_result_line)
     output_line = _output_schema_summary_line(session_state, locale)
     if output_line is not None:
         lines.append(output_line)
     return lines
+
+
+def _named_result_summary_line(
+    session_state: PlanningState,
+    locale: Locale,
+) -> str | None:
+    obligations = session_state.named_result_obligations
+    if not obligations:
+        return None
+    visible = obligations[:8]
+    names = _bounded_projection_text(visible, locale=locale)
+    omitted = len(obligations) - len(visible)
+    if omitted:
+        names = f"{names} (+{omitted})"
+    if locale == "sv":
+        return (
+            "Användaren har namngett innehåll som slutresultatet ska bevara: "
+            f"{names}. Typer, struktur och obligatoriska fält är inte fastställda."
+        )
+    return (
+        "The user named content that the final result must preserve: "
+        f"{names}. Types, structure, and required fields are not fixed."
+    )
 
 
 def _output_schema_summary_line(
@@ -682,34 +708,6 @@ def _output_schema_summary_line(
     terminal_output = session_state.resolved_slots.get("terminal_output")
     if terminal_output is None or terminal_output.value != "structured_json":
         return None
-    if evidence.source == "prose_field_names":
-        if projection.lossy:
-            visible_count = len(projection.fields)
-            if locale == "sv":
-                return (
-                    "Förhandsvisning av JSON-nycklar som normaliserats från citerade "
-                    "fält som användaren namngett "
-                    f"(visar {visible_count} av {projection.total_count}): "
-                    f"{field_text}. Nycklar inom citattecken eller backticks bevaras "
-                    "ordagrant i schemat. Fälttyper och struktur är inte fastställda."
-                )
-            return (
-                "JSON key preview normalized from cited user-named fields "
-                f"(showing {visible_count} of {projection.total_count}): "
-                f"{field_text}. Quoted or backticked keys remain literal in the schema. "
-                "Field types and structure are not yet fixed."
-            )
-        if locale == "sv":
-            return (
-                "JSON-nycklarna har normaliserats från citerade fält som användaren "
-                f"namngett: {field_text}. Nycklar inom citattecken eller backticks "
-                "bevaras ordagrant. Fälttyper och struktur är inte fastställda."
-            )
-        return (
-            "The JSON keys were normalized from cited user-named fields: "
-            f"{field_text}. Quoted or backticked keys remain literal. Field types and "
-            "structure are not yet fixed."
-        )
     if evidence.strength == "explicit":
         if locale == "sv":
             return (

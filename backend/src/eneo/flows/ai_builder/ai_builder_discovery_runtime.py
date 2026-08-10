@@ -16,7 +16,7 @@ from eneo.flows.ai_builder.ai_builder_attachment_context import (
 )
 from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
     SlotClassificationMetadata,
-    SlotClassificationOutputSchemaFieldsMetadata,
+    SlotClassificationNamedResultEvidenceMetadata,
     StructuredQuestionAnswerMetadata,
     question_answer_from_metadata,
     question_answer_values,
@@ -39,9 +39,6 @@ from eneo.flows.ai_builder.ai_builder_framework_policy import (
     aggregate_unprompted_user_text,
     slot_names_blocked_by_explicit_uncertainty,
 )
-from eneo.flows.ai_builder.ai_builder_json_schema_paths import (
-    top_level_schema_property_names,
-)
 from eneo.flows.ai_builder.ai_builder_proposal_telemetry import ProposalTurnTelemetry
 from eneo.flows.ai_builder.ai_builder_question_state import (
     assistant_question_id,
@@ -58,7 +55,7 @@ from eneo.flows.ai_builder.ai_builder_schema_evidence import (
     resolve_structured_schema_direction,
 )
 from eneo.flows.ai_builder.ai_builder_slot_classification_contract import (
-    ClassifiedOutputSchemaFieldDelta,
+    ClassifiedNamedResultDelta,
     ClassifiedSchemaDirection,
     SlotClassificationAttempt,
     SlotClassificationBias,
@@ -581,9 +578,7 @@ async def build_runtime_discovery_context(
             for slot_name, values in allowed_values.items()
             if slot_name not in model_blocked_slots
         }
-    output_schema_fields_relevant = _output_schema_field_classification_is_relevant(
-        state
-    )
+    named_result_evidence_relevant = _named_result_classification_is_relevant(state)
     checkpoint_updates_relevant = any(
         source.kind in {"user_message", "structured_answer"}
         and source.message_id == classification_input.current_user_message_id
@@ -596,7 +591,7 @@ async def build_runtime_discovery_context(
     if (
         not allowed_values
         and not schema_direction_pending
-        and not output_schema_fields_relevant
+        and not named_result_evidence_relevant
         and not checkpoint_updates_relevant
     ):
         skipped_attempt = SlotClassificationAttempt(
@@ -647,7 +642,7 @@ async def build_runtime_discovery_context(
                 provider=provider,
             ),
         )
-    prior_output_schema_classification = _latest_matching_output_schema_classification(
+    prior_named_result_classification = _latest_matching_named_result_classification(
         conversation,
         state=state,
     )
@@ -705,20 +700,20 @@ async def build_runtime_discovery_context(
         model_blocked_slots=model_blocked_slots,
     )
     if (
-        not _output_schema_field_classification_is_relevant(candidate_state)
-        and result.output_schema_fields is not None
+        not _named_result_classification_is_relevant(candidate_state)
+        and result.named_result_evidence is not None
     ):
-        result = replace(result, output_schema_fields=None)
-    output_schema_fields_snapshot = _materialized_output_schema_field_snapshot(
+        result = replace(result, named_result_evidence=None)
+    named_result_evidence_snapshot = _materialized_named_result_snapshot(
         candidate_state,
-        classified_fields=result.output_schema_fields,
-        prior_classification=prior_output_schema_classification,
+        classified_evidence=result.named_result_evidence,
+        prior_classification=prior_named_result_classification,
     )
     if (
-        result.output_schema_fields is not None
-        and output_schema_fields_snapshot is None
+        result.named_result_evidence is not None
+        and named_result_evidence_snapshot is None
     ):
-        result = replace(result, output_schema_fields=None)
+        result = replace(result, named_result_evidence=None)
     admitted_metadata = slot_classification_metadata_from_attempt(
         replace(attempt, result=result),
         prompt_hash=prompt_hash,
@@ -726,17 +721,17 @@ async def build_runtime_discovery_context(
         model=completion_model_route.litellm_model,
         provider=provider,
         retained_source_inventory=(
-            prior_output_schema_classification.source_inventory
-            if prior_output_schema_classification is not None
-            and output_schema_fields_snapshot is not None
-            and output_schema_fields_snapshot.operation == "replace"
+            prior_named_result_classification.source_inventory
+            if prior_named_result_classification is not None
+            and named_result_evidence_snapshot is not None
+            and named_result_evidence_snapshot.operation == "replace"
             else ()
         ),
-        output_schema_fields_snapshot=output_schema_fields_snapshot,
+        named_result_evidence_snapshot=named_result_evidence_snapshot,
     )
     admitted_result = replace(
         admitted_metadata.to_result(),
-        output_schema_fields=result.output_schema_fields,
+        named_result_evidence=result.named_result_evidence,
     )
     merge_llm_resolved_slots(
         state,
@@ -768,88 +763,81 @@ async def build_runtime_discovery_context(
     )
 
 
-def _output_schema_field_classification_is_relevant(state: PlanningState) -> bool:
-    terminal_output = state.resolved_slots.get("terminal_output")
-    if terminal_output is None or terminal_output.value != "structured_json":
-        return False
-    evidence = state.output_schema_evidence
-    return evidence is None or evidence.source != "declared_schema"
+def _named_result_classification_is_relevant(state: PlanningState) -> bool:
+    return state.resolved_slots.get("terminal_output") is not None
 
 
-def _current_prose_output_schema_field_names(
+def _current_named_result_names(
     state: PlanningState,
 ) -> tuple[str, ...]:
-    if not _output_schema_field_classification_is_relevant(state):
+    if not _named_result_classification_is_relevant(state):
         return ()
-    evidence = state.output_schema_evidence
-    if evidence is None or evidence.source != "prose_field_names":
-        return ()
-    return tuple(top_level_schema_property_names(evidence.json_schema))
+    return state.named_result_obligations
 
 
-def _latest_matching_output_schema_classification(
+def _latest_matching_named_result_classification(
     conversation: list[ConversationMessage],
     *,
     state: PlanningState,
 ) -> SlotClassificationMetadata | None:
-    current_field_names = _current_prose_output_schema_field_names(state)
-    if not current_field_names:
+    current_names = _current_named_result_names(state)
+    if not current_names:
         return None
     for message in reversed(conversation):
         classification = slot_classification_from_metadata(message.metadata)
         fields = (
-            classification.output_schema_fields if classification is not None else None
+            classification.named_result_evidence if classification is not None else None
         )
         if (
             fields is not None
             and fields.operation == "replace"
             and fields.confidence != "low"
-            and tuple(fields.field_names) == current_field_names
+            and tuple(item.name for item in fields.named_results) == current_names
         ):
             return classification
     return None
 
 
-def _materialized_output_schema_field_snapshot(
+def _materialized_named_result_snapshot(
     state: PlanningState,
     *,
-    classified_fields: ClassifiedOutputSchemaFieldDelta | None,
+    classified_evidence: ClassifiedNamedResultDelta | None,
     prior_classification: SlotClassificationMetadata | None,
-) -> SlotClassificationOutputSchemaFieldsMetadata | None:
-    if classified_fields is None or classified_fields.confidence == "low":
+) -> SlotClassificationNamedResultEvidenceMetadata | None:
+    if classified_evidence is None or classified_evidence.confidence == "low":
         return None
-    if classified_fields.operation == "clear":
-        return SlotClassificationOutputSchemaFieldsMetadata.from_materialized_state(
+    if classified_evidence.operation == "clear":
+        return SlotClassificationNamedResultEvidenceMetadata.from_materialized_state(
             operation="clear",
-            field_names=(),
-            confidence=classified_fields.confidence,
-            reason=classified_fields.reason,
-            evidence=classified_fields.evidence,
+            named_results=(),
+            confidence=classified_evidence.confidence,
+            reason=classified_evidence.reason,
+            evidence=classified_evidence.evidence,
         )
     prior_evidence = (
         tuple(
             item.to_classified_evidence()
-            for item in prior_classification.output_schema_fields.evidence
+            for item in prior_classification.named_result_evidence.evidence
         )
         if prior_classification is not None
-        and prior_classification.output_schema_fields is not None
+        and prior_classification.named_result_evidence is not None
         else ()
     )
-    evidence = tuple(dict.fromkeys((*prior_evidence, *classified_fields.evidence)))
-    field_names = _current_prose_output_schema_field_names(state)
-    if not field_names:
-        return SlotClassificationOutputSchemaFieldsMetadata.from_materialized_state(
+    evidence = tuple(dict.fromkeys((*prior_evidence, *classified_evidence.evidence)))
+    named_results = state.named_result_evidence
+    if not named_results:
+        return SlotClassificationNamedResultEvidenceMetadata.from_materialized_state(
             operation="clear",
-            field_names=(),
-            confidence=classified_fields.confidence,
-            reason=classified_fields.reason,
-            evidence=classified_fields.evidence,
+            named_results=(),
+            confidence=classified_evidence.confidence,
+            reason=classified_evidence.reason,
+            evidence=classified_evidence.evidence,
         )
-    return SlotClassificationOutputSchemaFieldsMetadata.from_materialized_state(
+    return SlotClassificationNamedResultEvidenceMetadata.from_materialized_state(
         operation="replace",
-        field_names=field_names,
-        confidence=classified_fields.confidence,
-        reason=classified_fields.reason,
+        named_results=named_results,
+        confidence=classified_evidence.confidence,
+        reason=classified_evidence.reason,
         evidence=evidence,
     )
 

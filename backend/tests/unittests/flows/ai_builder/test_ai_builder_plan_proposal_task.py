@@ -29,6 +29,7 @@ from eneo.flows.ai_builder.planning_state import (
     ExampleOutputSourceCoverage,
     ExampleOutputStyleConstraint,
     FileRoleEvidence,
+    NamedResultEvidence,
     PlanningState,
     ResolvedSlot,
     SchemaResolution,
@@ -313,15 +314,14 @@ def test_plan_proposal_prompt_renders_output_schema_evidence_compactly() -> None
 
 def test_plan_proposal_prompt_preserves_named_fields_without_inventing_types() -> None:
     state = _state_with_slot("terminal_output", "structured_json")
-    state.output_schema_evidence = build_schema_evidence(
-        json_schema={
-            "type": "object",
-            "properties": {"case_id": {}, "status": {}},
-        },
-        source="prose_field_names",
-        confidence="high",
-        evidence=["quote:user_message:user-1:case_id and status"],
-    )
+    state.named_result_evidence = [
+        NamedResultEvidence(
+            name=name,
+            confidence="high",
+            evidence=["quote:user_message:user-1:case_id and status"],
+        )
+        for name in ("case_id", "status")
+    ]
 
     prompt = build_plan_proposal_system_prompt(
         planning_state=state,
@@ -332,22 +332,21 @@ def test_plan_proposal_prompt_preserves_named_fields_without_inventing_types() -
         resource_catalog=_empty_catalog(),
     )
 
-    assert (
-        "top-level keys normalized from cited user-named fields: case_id, status"
-        in prompt
-    )
+    assert "Named result obligations:" in prompt
+    assert "user-named result keys: case_id, status" in prompt
     assert "Types, nesting, requiredness" in prompt
 
 
-def test_plan_proposal_prompt_labels_lossy_named_field_projection_as_preview() -> None:
-    exact_name = "municipal_case_" + "x" * 100
+def test_plan_proposal_prompt_includes_complete_bounded_named_result() -> None:
+    exact_name = "municipal_case_reference"
     state = _state_with_slot("terminal_output", "structured_json")
-    state.output_schema_evidence = build_schema_evidence(
-        json_schema={"type": "object", "properties": {exact_name: {}}},
-        source="prose_field_names",
-        confidence="high",
-        evidence=[f"quote:user_message:user-1:{exact_name}"],
-    )
+    state.named_result_evidence = [
+        NamedResultEvidence(
+            name=exact_name,
+            confidence="high",
+            evidence=[f"quote:user_message:user-1:{exact_name}"],
+        )
+    ]
 
     prompt = build_plan_proposal_system_prompt(
         planning_state=state,
@@ -358,9 +357,31 @@ def test_plan_proposal_prompt_labels_lossy_named_field_projection_as_preview() -
         resource_catalog=_empty_catalog(),
     )
 
-    assert "top-level key preview normalized from cited user-named fields" in prompt
-    assert "canonical schema retains the normalized keys" in prompt
-    assert exact_name not in prompt
+    assert "Named result obligations:" in prompt
+    assert exact_name in prompt
+
+
+def test_plan_proposal_prompt_does_not_project_non_json_named_results() -> None:
+    state = _state_with_slot("terminal_output", "pdf_document")
+    state.named_result_evidence = [
+        NamedResultEvidence(
+            name="case_summary",
+            confidence="high",
+            evidence=["quote:user_message:user-1:case summary"],
+        )
+    ]
+
+    prompt = build_plan_proposal_system_prompt(
+        planning_state=state,
+        confirmed_requirements=_requirements(summary="Return a PDF report."),
+        attachment_context=None,
+        flow_context=None,
+        is_edit_mode=False,
+        resource_catalog=_empty_catalog(),
+    )
+
+    assert "Named result obligations:" not in prompt
+    assert "case_summary" not in prompt
 
 
 def test_plan_proposal_prompt_describes_input_schema_without_directing_docx_output() -> (
