@@ -33,6 +33,7 @@ from eneo.object_content.content import (
 )
 from eneo.object_content.content_repository import ObjectContentRepository
 from eneo.object_content.content_service import ObjectContentService
+from eneo.object_content.object_store_connection import ObjectStoreConnectionActor
 from eneo.object_content.object_store_provider import ObjectStoreProvider
 from eneo.object_content.reconciliation import ObjectContentReconciler
 from eneo.object_content.s3_object_store import new_object_key
@@ -58,11 +59,14 @@ async def _advance_connection_revision(
                 VALUES
                     (1, :revision, 'https://rotated.example.test', 'local',
                      'rotated-bucket', 'encrypted-access', 'encrypted-secret',
-                     gen_random_uuid(), 'path', 'platform_admin')
+                     gen_random_uuid(), 'path', :updated_by_actor)
                 ON CONFLICT (id) DO UPDATE SET revision = :revision
                 """
             ),
-            {"revision": revision},
+            {
+                "revision": revision,
+                "updated_by_actor": ObjectStoreConnectionActor.STORAGE_ADMIN.value,
+            },
         )
 
 

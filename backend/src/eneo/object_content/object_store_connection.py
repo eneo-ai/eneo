@@ -1727,7 +1727,15 @@ class ObjectStoreConnectionService:
             )
 
         try:
-            await self._create_switch_marker(probe_settings, binding_id=binding_id)
+            if candidate_revision is None:
+                await self._create_switch_marker(probe_settings, binding_id=binding_id)
+            else:
+                await self._publish_candidate_marker(
+                    settings,
+                    probe_settings,
+                    binding_id=binding_id,
+                    candidate_revision=candidate_revision,
+                )
         except ObjectStoreProbeBindingMismatch:
             # Another installation won the conditional marker creation, so
             # nothing of ours was written and the recorded claim and
@@ -1762,6 +1770,40 @@ class ObjectStoreConnectionService:
                         await session.delete(row)
             raise
         return True, candidate_revision
+
+    async def _publish_candidate_marker(
+        self,
+        settings: ObjectContentSettings,
+        probe_settings: ObjectContentSettings,
+        *,
+        binding_id: UUID,
+        candidate_revision: int,
+    ) -> None:
+        async with self._transaction(mutation=True) as session:
+            candidate = await session.scalar(
+                select(ObjectStoreConnections)
+                .where(ObjectStoreConnections.id == TEMPORARY_DESTINATION_SLOT)
+                .with_for_update()
+            )
+            if (
+                candidate is None
+                or candidate.role != "candidate"
+                or candidate.revision != candidate_revision
+                or not self._same_place(settings, _stored(candidate))
+            ):
+                raise ObjectStoreConnectionConflict(
+                    "The pending destination attempt was abandoned or "
+                    "claimed by another change while it was being tested"
+                )
+            # Abandon, adoption, and replacement take this same row lock.
+            # They therefore finish before this write, which refuses stale
+            # ownership, or start afterwards and handle the visible marker.
+            # A crash releases the lock while the durable row and claim keep
+            # the published marker recoverable as an interrupted switch.
+            await self._create_switch_marker(
+                probe_settings,
+                binding_id=binding_id,
+            )
 
     async def _create_switch_marker(
         self,

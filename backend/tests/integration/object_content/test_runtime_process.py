@@ -38,6 +38,7 @@ from eneo.object_content.content import (
     StorageKind,
 )
 from eneo.object_content.content_service import ObjectContentService
+from eneo.object_content.object_store_connection import ObjectStoreConnectionActor
 from eneo.object_content.object_store_provider import ObjectStoreProvider
 from eneo.object_content.runtime import (
     ObjectContentReadinessCode,
@@ -806,13 +807,14 @@ async def test_admin_managed_confirmed_binding_reasserts_a_lost_marker(
                 "deployment_id, addressing_style, updated_by_actor) "
                 "VALUES (1, 1, 'active', :endpoint_url, :region, :bucket, "
                 "'encrypted', 'encrypted', :deployment_id, 'path', "
-                "'platform_admin')"
+                ":updated_by_actor)"
             ),
             {
                 "endpoint_url": real_object_store.settings.endpoint_url,
                 "region": real_object_store.settings.region,
                 "bucket": real_object_store.settings.bucket,
                 "deployment_id": real_object_store.settings.deployment_id,
+                "updated_by_actor": ObjectStoreConnectionActor.STORAGE_ADMIN.value,
             },
         )
 

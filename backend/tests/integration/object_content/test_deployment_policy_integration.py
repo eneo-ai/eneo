@@ -77,7 +77,7 @@ async def test_policy_put_returns_the_committed_projection(
     assert policy["session_image_limit_bytes"] == 102
     assert policy["knowledge_file_limit_bytes"] == 103
     assert policy["transcription_audio_limit_bytes"] == 104
-    assert policy["updated_by_actor"] == "platform_admin"
+    assert policy["updated_by_actor"] == "storage_admin"
 
 
 @pytest.mark.integration

@@ -8,6 +8,7 @@ fenced transaction that archives the previous destination for switch-back,
 and the existing read/inventory verification afterwards.
 """
 
+import asyncio
 from collections.abc import AsyncGenerator
 from datetime import UTC, datetime
 from uuid import uuid4
@@ -28,6 +29,7 @@ from eneo.object_content.configuration import (
 )
 from eneo.object_content.content import StorageKind
 from eneo.object_content.object_store_connection import (
+    ObjectStoreConnectionActor,
     ObjectStoreConnectionConflict,
     ObjectStoreConnectionError,
     ObjectStoreConnectionInput,
@@ -907,22 +909,48 @@ async def test_mismatch_cleanup_yields_to_an_adopted_candidate(
     )
     await _select_inline_writes(object_content_database)
 
-    async def adopt_then_lose_the_marker(self, creation):  # type: ignore[no-untyped-def]
-        # A concurrent same-target attempt adopts the candidate row just as
-        # this attempt loses the marker race to a foreign installation.
-        async with object_content_database.session() as session, session.begin():
-            await session.execute(
-                text(
-                    "UPDATE object_store_connections "
-                    "SET revision = revision + 1 "
-                    "WHERE id = 2 AND role = 'candidate'"
-                )
-            )
+    async def lose_the_marker(self, creation):  # type: ignore[no-untyped-def]
         raise ObjectStoreBindingError(
             "Object content storage is paired with another database"
         )
 
-    monkeypatch.setattr(S3ObjectStore, "create_binding", adopt_then_lose_the_marker)
+    original_publish_marker = ObjectStoreConnectionService._publish_candidate_marker
+
+    async def adopt_after_mismatch(
+        self,
+        settings,
+        probe_settings,
+        *,
+        binding_id,
+        candidate_revision,
+    ):  # type: ignore[no-untyped-def]
+        try:
+            await original_publish_marker(
+                self,
+                settings,
+                probe_settings,
+                binding_id=binding_id,
+                candidate_revision=candidate_revision,
+            )
+        except ObjectStoreProbeBindingMismatch:
+            # The publishing transaction has rolled back and released its row
+            # lock before the caller starts ownership-checked cleanup.
+            async with object_content_database.session() as session, session.begin():
+                await session.execute(
+                    text(
+                        "UPDATE object_store_connections "
+                        "SET revision = revision + 1 "
+                        "WHERE id = 2 AND role = 'candidate'"
+                    )
+                )
+            raise
+
+    monkeypatch.setattr(S3ObjectStore, "create_binding", lose_the_marker)
+    monkeypatch.setattr(
+        ObjectStoreConnectionService,
+        "_publish_candidate_marker",
+        adopt_after_mismatch,
+    )
     with pytest.raises(ObjectStoreProbeBindingMismatch):
         await service.replace_destination(
             _connection_input(real_unpaired_object_store),
@@ -976,11 +1004,9 @@ async def test_a_stale_release_retires_a_foreign_marked_candidate(
     original_create = S3ObjectStore.create_binding
     foreign_binding_id = uuid4()
 
-    async def foreign_wins_then_adoption_moves_on(self, creation):  # type: ignore[no-untyped-def]
-        # A foreign installation's marker lands first (a REAL marker with a
-        # different binding identity), and a concurrent adoption moves the
-        # candidate revision so this attempt's own cleanup no longer owns
-        # the row.
+    async def foreign_wins_the_marker(self, creation):  # type: ignore[no-untyped-def]
+        # A foreign installation's REAL marker lands first with a different
+        # binding identity.
         foreign_writer = S3ObjectStore(
             real_unpaired_object_store.settings.model_copy(
                 update={"deployment_id": created.deployment_id}
@@ -994,20 +1020,44 @@ async def test_a_stale_release_retires_a_foreign_marked_candidate(
             await original_create(foreign_writer, foreign_creation)
         finally:
             await foreign_writer.close()
-        async with object_content_database.session() as session, session.begin():
-            await session.execute(
-                text(
-                    "UPDATE object_store_connections "
-                    "SET revision = revision + 1 "
-                    "WHERE id = 2 AND role = 'candidate'"
-                )
-            )
         # This attempt's own conditional creation now loses to the foreign
         # marker through the real adapter path.
         return await original_create(self, creation)
 
+    original_publish_marker = ObjectStoreConnectionService._publish_candidate_marker
+
+    async def adopt_after_mismatch(
+        self,
+        settings,
+        probe_settings,
+        *,
+        binding_id,
+        candidate_revision,
+    ):  # type: ignore[no-untyped-def]
+        try:
+            await original_publish_marker(
+                self,
+                settings,
+                probe_settings,
+                binding_id=binding_id,
+                candidate_revision=candidate_revision,
+            )
+        except ObjectStoreProbeBindingMismatch:
+            async with object_content_database.session() as session, session.begin():
+                await session.execute(
+                    text(
+                        "UPDATE object_store_connections "
+                        "SET revision = revision + 1 "
+                        "WHERE id = 2 AND role = 'candidate'"
+                    )
+                )
+            raise
+
+    monkeypatch.setattr(S3ObjectStore, "create_binding", foreign_wins_the_marker)
     monkeypatch.setattr(
-        S3ObjectStore, "create_binding", foreign_wins_then_adoption_moves_on
+        ObjectStoreConnectionService,
+        "_publish_candidate_marker",
+        adopt_after_mismatch,
     )
     with pytest.raises(ObjectStoreProbeBindingMismatch):
         await service.replace_destination(
@@ -1897,6 +1947,305 @@ async def test_an_administrator_can_abandon_an_interrupted_candidate(
     current = await service.get()
     assert current is not None
     assert current.bucket == real_object_store.settings.bucket
+
+
+async def test_abandon_before_marker_creation_does_not_orphan_marker(
+    object_content_database: DatabaseSessionManager,
+    real_object_store: RealObjectStore,
+    real_unpaired_object_store: RealObjectStore,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Abandoning admission before its marker write cannot orphan the marker."""
+    from eneo.database.tables.object_store_binding_table import ObjectStoreBindings
+
+    service = _service(object_content_database, real_object_store)
+    actor = await _any_user_id(object_content_database)
+    created = await service.create(
+        _connection_input(real_object_store), actor_user_id=actor
+    )
+    await ensure_store_binding_ready(
+        object_content_database,
+        service.settings_for(created),
+        real_object_store.store,
+    )
+    await _select_inline_writes(object_content_database)
+    binding_id = await _binding_id(object_content_database)
+
+    original_publish_marker = ObjectStoreConnectionService._publish_candidate_marker
+
+    async def abandon_before_marker(
+        self,
+        settings,
+        probe_settings,
+        *,
+        binding_id,
+        candidate_revision,
+    ):  # type: ignore[no-untyped-def]
+        pending = await service.get_candidate()
+        assert pending is not None
+        await service.abandon_switch_candidate(
+            actor_user_id=actor,
+            expected_revision=pending.revision,
+        )
+        await original_publish_marker(
+            self,
+            settings,
+            probe_settings,
+            binding_id=binding_id,
+            candidate_revision=candidate_revision,
+        )
+
+    monkeypatch.setattr(
+        ObjectStoreConnectionService,
+        "_publish_candidate_marker",
+        abandon_before_marker,
+    )
+    with pytest.raises(ObjectStoreConnectionConflict):
+        await service.replace_destination(
+            _connection_input(real_unpaired_object_store),
+            actor_user_id=actor,
+        )
+    monkeypatch.undo()
+
+    target = S3ObjectStore(
+        real_unpaired_object_store.settings.model_copy(
+            update={"deployment_id": created.deployment_id}
+        )
+    )
+    try:
+        assert not await target.verify_binding(binding_id)
+    finally:
+        await target.close()
+
+    async with object_content_database.session() as session, session.begin():
+        remaining_connection = await session.get(
+            ObjectStoreConnections, TEMPORARY_DESTINATION_SLOT
+        )
+        remaining_binding = await session.scalar(
+            select(ObjectStoreBindings).where(
+                ObjectStoreBindings.slot == TEMPORARY_DESTINATION_SLOT
+            )
+        )
+    assert remaining_connection is None
+    assert remaining_binding is None
+
+    current = await service.get()
+    assert current is not None
+    assert current.bucket == real_object_store.settings.bucket
+
+    switched = await service.replace_destination(
+        _connection_input(real_unpaired_object_store),
+        actor_user_id=actor,
+    )
+    assert switched.active.bucket == real_unpaired_object_store.settings.bucket
+
+
+async def test_marker_publication_serializes_concurrent_abandon(
+    object_content_database: DatabaseSessionManager,
+    real_object_store: RealObjectStore,
+    real_unpaired_object_store: RealObjectStore,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Marker publication holds the candidate lock through the remote write."""
+    from eneo.database.tables.object_store_binding_table import ObjectStoreBindings
+
+    service = _service(object_content_database, real_object_store)
+    actor = await _any_user_id(object_content_database)
+    created = await service.create(
+        _connection_input(real_object_store), actor_user_id=actor
+    )
+    await ensure_store_binding_ready(
+        object_content_database,
+        service.settings_for(created),
+        real_object_store.store,
+    )
+    await _select_inline_writes(object_content_database)
+    binding_id = await _binding_id(object_content_database)
+    original_create_binding = S3ObjectStore.create_binding
+    abandon_task: asyncio.Task[None] | None = None
+
+    async def wait_for_abandon_row_lock() -> None:
+        async with object_content_database.session() as session, session.begin():
+            while not await session.scalar(
+                text(
+                    """
+                    SELECT EXISTS (
+                        SELECT 1
+                        FROM pg_stat_activity
+                        WHERE datname = current_database()
+                          AND pid <> pg_backend_pid()
+                          AND wait_event_type = 'Lock'
+                          AND query ILIKE '%object_store_connections%'
+                          AND query ILIKE '%FOR UPDATE%'
+                    )
+                    """
+                )
+            ):
+                pass
+
+    async def create_after_abandon_blocks(self, creation):  # type: ignore[no-untyped-def]
+        nonlocal abandon_task
+        pending = await service.get_candidate()
+        assert pending is not None
+        abandon_task = asyncio.create_task(
+            service.abandon_switch_candidate(
+                actor_user_id=actor,
+                expected_revision=pending.revision,
+            )
+        )
+        try:
+            await asyncio.wait_for(wait_for_abandon_row_lock(), timeout=10)
+        except TimeoutError as error:
+            raise AssertionError(
+                "concurrent abandon never blocked on the candidate row lock"
+            ) from error
+        assert not abandon_task.done()
+        await original_create_binding(self, creation)
+
+    monkeypatch.setattr(
+        S3ObjectStore,
+        "create_binding",
+        create_after_abandon_blocks,
+    )
+    try:
+        with pytest.raises(ObjectStoreConnectionConflict):
+            await service.replace_destination(
+                _connection_input(real_unpaired_object_store),
+                actor_user_id=actor,
+            )
+    finally:
+        if abandon_task is not None:
+            await asyncio.wait_for(abandon_task, timeout=10)
+    monkeypatch.undo()
+    assert abandon_task is not None
+
+    target = S3ObjectStore(
+        real_unpaired_object_store.settings.model_copy(
+            update={"deployment_id": created.deployment_id}
+        )
+    )
+    try:
+        assert not await target.verify_binding(binding_id)
+    finally:
+        await target.close()
+
+    async with object_content_database.session() as session, session.begin():
+        remaining_connection = await session.get(
+            ObjectStoreConnections, TEMPORARY_DESTINATION_SLOT
+        )
+        remaining_binding = await session.scalar(
+            select(ObjectStoreBindings).where(
+                ObjectStoreBindings.slot == TEMPORARY_DESTINATION_SLOT
+            )
+        )
+    assert remaining_connection is None
+    assert remaining_binding is None
+
+    current = await service.get()
+    assert current is not None
+    assert current.bucket == real_object_store.settings.bucket
+
+
+async def test_reused_candidate_revision_cannot_publish_for_another_destination(
+    object_content_database: DatabaseSessionManager,
+    real_object_store: RealObjectStore,
+    real_unpaired_object_store: RealObjectStore,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A recycled revision cannot authorize a marker for another candidate."""
+    service = _service(object_content_database, real_object_store)
+    actor = await _any_user_id(object_content_database)
+    created = await service.create(
+        _connection_input(real_object_store), actor_user_id=actor
+    )
+    await ensure_store_binding_ready(
+        object_content_database,
+        service.settings_for(created),
+        real_object_store.store,
+    )
+    await _select_inline_writes(object_content_database)
+    binding_id = await _binding_id(object_content_database)
+    foreign_bucket = f"foreign-{uuid4().hex}"
+
+    original_publish_marker = ObjectStoreConnectionService._publish_candidate_marker
+
+    async def replace_candidate_before_marker(
+        self,
+        settings,
+        probe_settings,
+        *,
+        binding_id,
+        candidate_revision,
+    ):  # type: ignore[no-untyped-def]
+        pending = await service.get_candidate()
+        assert pending is not None
+        assert pending.revision == candidate_revision == 1
+        await service.abandon_switch_candidate(
+            actor_user_id=actor,
+            expected_revision=pending.revision,
+        )
+        async with object_content_database.session() as session, session.begin():
+            await session.execute(
+                text(
+                    """
+                    INSERT INTO object_store_connections
+                        (id, revision, role, endpoint_url, region, bucket,
+                         access_key_id_encrypted, secret_access_key_encrypted,
+                         deployment_id, addressing_style, updated_by_actor)
+                    VALUES
+                        (2, 1, 'candidate', :endpoint_url, :region, :bucket,
+                         'encrypted-access', 'encrypted-secret',
+                         gen_random_uuid(), :addressing_style, :updated_by_actor)
+                    """
+                ),
+                {
+                    "endpoint_url": real_unpaired_object_store.settings.endpoint_url,
+                    "region": real_unpaired_object_store.settings.region,
+                    "bucket": foreign_bucket,
+                    "addressing_style": (
+                        real_unpaired_object_store.settings.addressing_style
+                    ),
+                    "updated_by_actor": (
+                        ObjectStoreConnectionActor.STORAGE_ADMIN.value
+                    ),
+                },
+            )
+        await original_publish_marker(
+            self,
+            settings,
+            probe_settings,
+            binding_id=binding_id,
+            candidate_revision=candidate_revision,
+        )
+
+    monkeypatch.setattr(
+        ObjectStoreConnectionService,
+        "_publish_candidate_marker",
+        replace_candidate_before_marker,
+    )
+    with pytest.raises(ObjectStoreConnectionConflict):
+        await service.replace_destination(
+            _connection_input(real_unpaired_object_store),
+            actor_user_id=actor,
+        )
+    monkeypatch.undo()
+
+    target = S3ObjectStore(
+        real_unpaired_object_store.settings.model_copy(
+            update={"deployment_id": created.deployment_id}
+        )
+    )
+    try:
+        assert not await target.verify_binding(binding_id)
+    finally:
+        await target.close()
+
+    async with object_content_database.session() as session, session.begin():
+        foreign = await session.get(ObjectStoreConnections, TEMPORARY_DESTINATION_SLOT)
+        assert foreign is not None
+        assert foreign.role == "candidate"
+        assert foreign.revision == 1
+        assert foreign.bucket == foreign_bucket
 
 
 async def test_an_abandoned_candidate_cannot_commit(
