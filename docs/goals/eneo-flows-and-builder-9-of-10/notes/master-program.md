@@ -18,7 +18,8 @@ clean single-owner architecture. Evidence-first: no fix without an
 attributed mechanism; no claim without receipts; the 155-case suite
 (3 repetitions, margin 5, rescored-case discipline) is the instrument.
 
-## Where we are (2026-08-10 afternoon, HEAD ≈ `2e0a4dced`)
+## Where we are (2026-08-10; product-code baseline `2e0a4dced` — this
+## document evolves past it, see git log for the doc HEAD)
 
 - Three checkpoints: deaths 50→30→27; architecture kills 13→10→2;
   provider wedges 22→6→2; conformance 149→162→170 of 465 (formally
@@ -84,7 +85,7 @@ from semantic decisions still model-owned. Therefore:
 - [ ] Program convergence (iteration 32+ running, min-score 9)
 - [ ] User sign-off on the converged program
 
-## The Ranked Program (v3 — after iteration 33; under adjudication)
+## The Ranked Program (v5 — after iteration 35; under adjudication)
 
 ### Completion contract (attempt-level; no accepted-plan denominators)
 Every eligible create attempt lands in ONE bucket of an exhaustive
@@ -106,9 +107,11 @@ accepted plan (a death before acceptance must count against us):
 - Bounded p95 provider calls, tokens, and planning latency — CP0
   freezes LIMITS (not just baselines) from the clean-checkpoint
   distribution.
-- Fallback quality floor: the ≤10% fallback cohort carries its own
-  conformance floor (CP0 sets the number from baseline) so accepted
-  fallback plans cannot hide non-conformance.
+- OVERALL conformance ≥90% across ALL eligible attempts, independent
+  of the supported/fallback split (90% coverage × 90% supported
+  conformance alone would allow 81% overall — not excellent). The
+  fallback cohort keeps its own floor as a DIAGNOSTIC metric (CP0
+  sets it), but the overall floor is absolute.
 - Release verdict from a powered sample: CP0 freezes the power
   calculation and release sample size; 3 repetitions stay
   exploratory. The two full runs are planned MINIMUMS — the release
@@ -222,9 +225,10 @@ the migration seam.
     classifying that shape as observable fallback. The critic may
     survive only as a compiler POSTCONDITION (defect detector), never
     as a normal repair owner on a supported archetype.
-- [ ] Ownership-tranche gate: full 155×3 after CP1–CP3 land (one of
-    exactly TWO full runs; the other is the powered release
-    candidate).
+- [ ] Ownership-tranche gate: exploratory 155×3 checkpoint after
+    CP1–CP3 land. The release gate is a separate POWERED 155×N run
+    (N from CP0's MDE calculation), repeated after every material
+    post-gate change.
 - [ ] Post-CP5 re-attribution loop: rerun attribution and continue
     ownership transfers until the completion contract passes — the
     five slices are a starting set, not assumed sufficient (31
@@ -237,10 +241,10 @@ the migration seam.
     owns the three roles (execute, maintenance with
     `FLOW_CELERY_WORKER_QUEUES=flows.maintenance`, beat) with
     `restart: unless-stopped` — verify rather than build. Remaining
-    deltas only: native healthchecks for the celery services, beat
-    singleton by construction, one source of truth for queue names
-    shared by producer and consumer config (the orphan incident was
-    consumer-topology drift). Health SURFACES belong to L3 alone.
+    deltas only: beat singleton by construction and one source of
+    truth for queue names shared by producer and consumer config (the
+    orphan incident was consumer-topology drift). ALL healthchecks —
+    container-native and operator surfaces — belong to L3 alone.
     Devcontainer parity (three roles instead of `sleep infinity`) is
     developer ergonomics under the scoped 2026-08-10 permission — off
     the release critical path.
@@ -272,9 +276,11 @@ the migration seam.
     L5 verifies this calculated envelope, not a folk number.
 - [ ] L2 Provider throttling: fail-fast + typed provider-throttled
     diagnosis + operator/user guidance (NO flow-level retry loop).
-- [ ] L3 Health: execution-consumer presence + beat freshness on the
-    existing operator surface; deployment-native healthchecks. No new
-    public liveness endpoint.
+- [ ] L3 Health (SOLE healthcheck owner, iteration 35):
+    execution-consumer presence + beat freshness on the existing
+    operator surface, plus every deployment-native container
+    healthcheck for the celery roles. No new public liveness
+    endpoint.
 - [ ] L4 Object-content scope (DEFAULT OUT, iteration 33): the tracked
     deployment default keeps bounded durable content in PostgreSQL
     with no separate object store (`docs/deployment/README.md:68`),
@@ -334,9 +340,10 @@ after CP1–CP3 land. One live worker per session name; the
 orchestrator judges every diff and owns all git.
 
 ### Measurement cadence
-Cohort probes (3 reps, named cohorts) per slice; full 155×3 at
-exactly two points (tranche gate, powered release candidate); suite
-runs ≥45 min apart (provider limits).
+Cohort probes (3 reps, named cohorts) per slice; exploratory 155×3 at
+the tranche gate; POWERED 155×N (N from CP0) at the release gate,
+repeated after every material post-gate change; suite runs ≥45 min
+apart (provider limits).
 
 ## Operating protocol (for any agent continuing this)
 
