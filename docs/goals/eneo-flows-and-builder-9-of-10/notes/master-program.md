@@ -429,42 +429,23 @@ tests die with their owners, no splits for their own sake.
     was a dev-incident value, not policy — the configured envelope is
     already 3 HTTP workers × 30 pool (`run.sh:39`,
     `main/config.py:271`) + 2 celery roles × 4 processes × 30
-    (`flows/runtime/cli.py:23`) = 330 before ARQ, beat, init, and
-    reserved capacity. Derive the reference-deployment budget, tune
-    per-role pool sizes AND max_connections together with explicit
-    headroom, and track the result in deployment config (never a
-    volume-local ALTER SYSTEM); prove with a clean-volume rebuild
-    in an ISOLATED disposable compose project (temporary project name
-    + newly created test volumes, validated then deleted) — never
-    against production or existing development volumes. L5 verifies
-    this calculated envelope, not a folk number.
-    DERIVED DESIGN (v9.1, corrected against source — beat opens NO
-    database pool: initialization is attached to `worker_process_init`
-    only (`runtime/celery_app.py:159`), and `db-init` opens a single
-    transient psycopg2 connection at startup (`init_db.py:249`),
-    counted separately as startup-only:
-      backend       NUM_WORKERS=3 × (20+10) = 90
-      ARQ worker    1 × (20+10)             = 30
-      celery execute      4 × (5+2)         = 28  (per-service pool
-                                                   override)
-      celery maintenance  2 × (5+2)         = 14  (concurrency 2)
-      celery beat                            =  0  (no pool)
-      steady-state sum                      = 162
-      + superuser_reserved_connections       =  3  (PostgreSQL default,
-                                                    verified at L5)
-      + operator headroom (psql, backup,
-        monitoring, db-init transient)       = 35
-      → max_connections=200 via the db service command.
-    The celery 5+2 pool sizes are a design estimate pending checkout-
-    demand evidence: L5's launch-concurrency smoke captures peak
-    concurrent checkouts and pool timeouts and may revise them. L5
-    FAILS when the recomputed steady-state sum exceeds the budgeted
-    162 — that is, max_connections − reserved − headroom — so the
-    35-connection operator headroom is enforced, not merely promised;
-    the aggregate-budget table in
-    `env_backend.template` documents the formula, and the sum is
-    derived from the RENDERED compose (docker compose config), not
-    from prose.
+    (`flows/runtime/cli.py:23`). Set max_connections in tracked deployment
+    config (never a volume-local ALTER SYSTEM) to cover the shipped
+    configured maximum with headroom; prove with a clean-volume rebuild
+    in an ISOLATED disposable compose project (temporary project name +
+    fresh volumes, validated then deleted) — never against production
+    or development volumes. L5 verifies the envelope under load.
+    DESIGN OF RECORD: each backend, ARQ and Celery WORKER process owns
+    an independent pool (beat opens none; db-init uses one transient
+    connection), so demand is the sum across roles, and every role
+    reads `env_backend.env` so a tuning profile raises the celery pools
+    too. The aggregate budget TABLE has one owner —
+    `docs/deployment/env_backend.template` — and is not duplicated
+    here: the shipped default configures a maximum of 360, so
+    `max_connections=400` covers it plus 3 reserved slots and headroom;
+    Large (600) is deliberately not covered and belongs behind a
+    pooler. Pool right-sizing waits for L5's measured peak checkouts.
+    The slice changes no pool, no concurrency and no code path.
 - [ ] L2 Provider throttling: fail-fast + typed provider-throttled
     diagnosis + operator/user guidance (NO flow-level retry loop).
 - [ ] L3 Health (SOLE healthcheck owner, iteration 35):

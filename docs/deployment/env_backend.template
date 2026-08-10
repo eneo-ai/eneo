@@ -256,7 +256,10 @@ OBJECT_CONTENT_PENDING_STALE_SECONDS=300
 # ----------------------------------------------------------------------------
 # Database Connection Pool Configuration
 # ----------------------------------------------------------------------------
-# Controls PostgreSQL connection pooling. Each container has its own pool.
+# Controls PostgreSQL connection pooling. Each backend, ARQ and Celery WORKER
+# process owns an independent pool (beat opens none; db-init uses one transient
+# connection). These values apply to EVERY role that reads this file - see the
+# aggregate budget below before changing them.
 #
 # ⚠️  API STARVATION PREVENTION
 # Reserve ≥40% of DB connections for API: WORKER_MAX_JOBS ≤ 0.6 × pool_max
@@ -281,6 +284,64 @@ DB_POOL_PRE_PING=true
 # DB_POOL_RECYCLE=-1
 # Log connections held >60s - use for debugging pool exhaustion only
 # DB_POOL_DEBUG=false
+
+# ----------------------------------------------------------------------------
+# ⚠️  AGGREGATE CONNECTION BUDGET (the whole stack, not one role)
+# ----------------------------------------------------------------------------
+# The values above size ONE role. Each backend, ARQ and Celery WORKER process
+# owns an independent pool (beat opens none; db-init uses one transient
+# connection), so the deployment's maximum demand is the SUM across those
+# processes. A per-role setting that looks safe can still exhaust the database.
+#
+#   role demand = processes x (DB_POOL_SIZE + DB_POOL_MAX_OVERFLOW)
+#
+#   backend             NUM_WORKERS (default 3) gunicorn workers
+#   worker (ARQ)        1 process (WORKER_MAX_JOBS jobs share its pool)
+#   celery execute      FLOW_CELERY_WORKER_CONCURRENCY prefork children
+#   celery maintenance  FLOW_CELERY_WORKER_CONCURRENCY prefork children
+#   celery beat         none - beat opens no pool (init is attached to
+#                       worker_process_init, which beat does not run)
+#   db-init             one transient connection at startup only
+#
+# MAXIMUM DEMAND by the tuning profile chosen above (celery concurrency 4):
+#
+# EVERY role reads this file, so a profile change raises the celery pools too:
+#
+#   profile        per-proc  backend  ARQ  execute  maintenance  beat  total
+#   Small  (8GB)         15       45   15       60           60     0    180
+#   Medium (16GB)        30       90   30      120          120     0    360  <- default
+#   Large  (32GB+)       50      150   50      200          200     0    600
+#
+# max_connections=400 (set on the db service in docker-compose.yml) covers the
+# SHIPPED DEFAULT profile (360) plus 3 reserved superuser slots and headroom.
+# It is deliberately NOT sized for Large (600): that many backend processes
+# belongs behind a connection pooler. A Large deployment should give the celery
+# roles smaller per-service pools (docker-compose.yml environment overrides)
+# and/or run a pooler; sizing a pooled deployment is beyond this template.
+# The ceiling bounds the worst case rather than preallocating it, but note that
+# a role which has handled load keeps up to DB_POOL_SIZE connections per
+# process until they are recycled - it does not return to near-zero when idle.
+#
+# If you need a smaller ceiling than your profile implies, give the celery
+# roles their own smaller pools via per-service environment overrides in
+# docker-compose.yml. Never leave the ceiling below the configured maximum.
+#
+# WHY THE POOLS ARE LEFT AT THEIR DEFAULTS HERE: the numbers above are the
+# CONFIGURED MAXIMUM, not observed usage. A pool checks a connection out per
+# transaction and returns it at commit - a long-lived session does NOT hold a
+# connection for its lifetime (e.g. webhook delivery commits its preparation
+# transaction before the outbound HTTP call). Real peak checkout per role is
+# therefore unmeasured, and shrinking a pool without that measurement risks
+# stalling work on checkout. Right-sizing is deferred to the launch-load
+# measurement (L5), which records peak concurrent checkouts and pool timeouts;
+# until then the ceiling is set to cover the configured maximum.
+#
+# RULE: if you raise any pool, worker count or celery concurrency, recompute
+# this sum and raise max_connections with it. The backend logs its own
+# per-process budget at startup; compare that against SHOW max_connections.
+# Beyond a few hundred connections, put a pooler in front of PostgreSQL
+# rather than raising this ceiling further.
+# ----------------------------------------------------------------------------
 
 # ----------------------------------------------------------------------------
 # Background Worker Configuration

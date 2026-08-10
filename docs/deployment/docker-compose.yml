@@ -238,8 +238,10 @@ services:
       - eneo_backend_data:/app/data
       - eneo_temp_files:/tmp
     networks:
-      # Beat only schedules over the broker and reads the DB; it makes no
-      # outbound calls, so data_net alone is correct.
+      # Beat only enqueues due schedules over the broker; it opens no
+      # database pool of its own (see the ceiling note on the db
+      # service) and makes no outbound model calls, so data_net alone
+      # is correct.
       - data_net
     depends_on:
       - backend
@@ -249,6 +251,25 @@ services:
     image: pgvector/pgvector:pg16
     container_name: eneo_db
     restart: unless-stopped
+    # CONNECTION CEILING. PostgreSQL defaults to 100, which this stack
+    # exceeds before any tuning. Each backend, ARQ and Celery WORKER
+    # process owns an independent pool (beat opens none; db-init uses
+    # one transient connection), so the deployment's maximum demand is
+    # the SUM across roles — and every role reads env_backend.env, so a
+    # tuning profile raises the celery pools too.
+    #
+    # THE AGGREGATE BUDGET TABLE LIVES IN env_backend.template and is
+    # the single owner of this arithmetic. In short: the shipped
+    # default profile configures a maximum of 360, so 400 covers it
+    # plus the 3 reserved superuser slots and headroom. The Large
+    # profile (600) is deliberately NOT covered — that many backend
+    # processes belongs behind a connection pooler.
+    #
+    # These are CONFIGURED MAXIMA, not observed usage. Pool
+    # right-sizing needs measured peak checkouts and is deferred to the
+    # launch-load measurement (L5); this slice only removes the
+    # contradiction between the shipped defaults and the stock ceiling.
+    command: ["postgres", "-c", "max_connections=400"]
     env_file:
       - env_db.env
     volumes:
