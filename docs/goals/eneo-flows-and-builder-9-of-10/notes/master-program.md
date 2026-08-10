@@ -1,9 +1,9 @@
 # Eneo Flows + Flow AI Builder — Master Program (living document)
 
-Status: CONVERGING — iterations 32 (7), 33 (8), 34 (8), 35 (8, all
-max effort) returned changes_required; every finding was source-verified
-locally and absorbed, as were iteration 35's. This file is now
-program v5; iteration 36 (max effort, min-score 9) adjudicates it. No implementation until
+Status: CONVERGING — iterations 32 (7), 33 (8), 34 (8), 35 (8), 36 (8,
+all max effort) returned changes_required; every finding was source-verified
+locally and absorbed through iteration 36. This file is now
+program v6; iteration 37 (max effort, min-score 9) adjudicates it. No implementation until
 convergence, then user sign-off. This file is self-contained so ANY
 coding agent can continue the program. Sibling context:
 `conformance-program-plan.md` (the detailed slice protocol and the
@@ -85,7 +85,7 @@ from semantic decisions still model-owned. Therefore:
 - [ ] Program convergence (iteration 32+ running, min-score 9)
 - [ ] User sign-off on the converged program
 
-## The Ranked Program (v5 — after iteration 35; under adjudication)
+## The Ranked Program (v6 — after iteration 36; under adjudication)
 
 ### Completion contract (attempt-level; no accepted-plan denominators)
 Every eligible create attempt lands in ONE bucket of an exhaustive
@@ -222,8 +222,9 @@ the migration seam.
     (`ai_builder_proposal_submission.py:171`) — with obligations
     reaching neither. Design gate decides: top-level placement as a
     canonical product rule OR a bounded per-name design map with a
-    defined compiler projection; then materialize ONE schema reused
-    by both budgeting and submission; then one provider strict-tool
+    defined compiler projection; then EXTEND the CP3-owned schema
+    materializer (no second materialization site); then one
+    provider strict-tool
     probe with a nested obligated field. No recursive schema DSL.
     NO ESCAPE HATCH (iteration 34): if the provider cannot express
     the contract, the design gate picks one of two closed outcomes —
@@ -265,9 +266,13 @@ the migration seam.
 - [ ] L1b Immutable release identity (NEW, iteration 34): production
     reads the baked release manifest first — `GIT_COMMIT` is only a
     fallback (`main/config.py:193`) — while every deployment role
-    ships mutable `:latest` images. Pin ONE immutable SHA tag/digest
-    across backend, workers, beat, and init; verify the baked
-    version; record the digest for rollback. Runtime `GIT_COMMIT`
+    ships mutable `:latest` images. Pin the COMPLETE base-stack
+    image set by immutable digest — backend roles AND traefik,
+    frontend, pgvector, redis, init (the deployment compose still
+    carries `traefik:v3`, `:latest`, `pgvector:pg16` mutable tags) —
+    plain digest-pinned compose variables, no release-manifest
+    framework; verify the baked version; L5 records the full resolved
+    digest set for rollback. Runtime `GIT_COMMIT`
     stamping remains a DEVCONTAINER-ONLY mechanism and is deleted
     from the production plan.
 - [ ] L1c Capacity envelope (NEW, iteration 34): max_connections=300
@@ -278,8 +283,11 @@ the migration seam.
     reserved capacity. Derive the reference-deployment budget, tune
     per-role pool sizes AND max_connections together with explicit
     headroom, and track the result in deployment config (never a
-    volume-local ALTER SYSTEM); prove with a clean-volume rebuild.
-    L5 verifies this calculated envelope, not a folk number.
+    volume-local ALTER SYSTEM); prove with a clean-volume rebuild
+    in an ISOLATED disposable compose project (temporary project name
+    + newly created test volumes, validated then deleted) — never
+    against production or existing development volumes. L5 verifies
+    this calculated envelope, not a folk number.
 - [ ] L2 Provider throttling: fail-fast + typed provider-throttled
     diagnosis + operator/user guidance (NO flow-level retry loop).
 - [ ] L3 Health (SOLE healthcheck owner, iteration 35):
@@ -342,16 +350,20 @@ analysis overlap. Lanes that can run AT THE SAME TIME:
 - Lane B (builder code): CP1 (owner: `planning_state_builder.py`
   merge guard) and CP2 step 2 (owners: create proposal/preparation)
   touch DISJOINT files — separate worker worktrees in parallel once
-  their design gates pass; land in sequence.
+  their design gates pass; land in sequence. HARD BARRIER (iteration
+  36): NO CP1–CP5 product code starts until CP0 is frozen — the
+  success criteria are pre-registered before implementation, never
+  after. Analysis (Lane A) and runtime (Lane D) run during CP0.
 - Lane C (early design gates): CP5's provider strict-tool probe and
   placement decision need no code and can be adjudicated while Lane B
   implements; CP3's delta-envelope design gate needs only CP0's
   archetype placement rows.
-- Lane D (runtime stream): L1–L5 are fully parallel with ALL builder
+- Lane D (runtime stream): L1a–L1c and L2–L5 are fully parallel with ALL builder
   work — different files, own peer session
   (`flows-runtime-readiness`), own worker worktrees.
-Dependencies that stay hard: CP0 before CP3 implementation (placement
-rows) and before the completion-contract verdicts; CP2 step 1 before
+Dependencies that stay hard: CP0 frozen before ANY CP1–CP5 product
+code (pre-registration integrity) and before the completion-contract
+verdicts; CP2 step 1 before
 CP2 step 2; CP4 attribution before any CP4 fix; the tranche 155×3
 after CP1–CP3 land. One live worker per session name; the
 orchestrator judges every diff and owns all git.
