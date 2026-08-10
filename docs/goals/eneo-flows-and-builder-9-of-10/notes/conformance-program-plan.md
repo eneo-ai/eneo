@@ -352,6 +352,28 @@ determined cluster names one owner (the cases JSON), satisfying the
 slice's done-condition; Slice 3 execution and the Slice 5 seam protocol
 are gated on the next peer pass.
 
+**Slice 2 hardened + Slice 3 executed (2026-08-10 morning, Passes
+16–17).** The attribution was rebuilt at unique (case, leaf-group)
+grain with stability as its own fact: **242 always-satisfied / 122
+unstable (excluded from product ranking) / 72 stable failures.**
+Stable core: prose_only_never_typed 35 groups / 25 cases (34
+user-named), present_intermediate_not_terminal 15/12,
+absent_everywhere 15/9 (0 user-named),
+in_terminal_contract_evaluator_unsatisfied 6/3,
+lost_planning_to_proposal 1/1. Matching is typed-source token-boundary
+with Swedish compound-prefix discovery (evaluator matching stays exact;
+compound discovery is for human review only, per Pass 17). Every
+absent-everywhere candidate got a manual semantic ruling with
+prompt-based justification. `7ed107d0f` lands the adjudicated rubric
+corrections: 11 author-inferred group deletions and 20
+concept-equivalent alias extensions (keyed justifications in
+`slice2-evidence-manifest-20260810/slice3_semantic_review.json`).
+Every edited case must appear in `rescored_cases` on the next
+comparison. Next per Pass 17: the json_schema_loss +
+planning_to_proposal_loss planning-evidence lifecycle investigation
+over the stable core, with the runtime-metadata materialization ranked
+by the same stability cross-tab.
+
 **Instability posture (Pass 6):** the pilot's 68/155 joint-state
 instability is a diagnostic, not a stabilization target — 23/155 (~15%)
 flip pass↔fail; much of the rest alternates first-pass vs repaired. No
