@@ -3890,19 +3890,8 @@ def test_non_sentinel_quality_report_is_unchanged_without_explicit_checks() -> N
         "sentinel_named_result_evidence",
         "sentinel_invariant_vector",
     }
-    legacy_report = json.loads(json.dumps(report))
-    legacy_report["checks"] = [
-        check
-        for check in legacy_report["checks"]
-        if check["name"] not in new_check_names
-    ]
 
     assert new_check_names.isdisjoint(check["name"] for check in report["checks"])
-    assert json.dumps(report, sort_keys=True, separators=(",", ":")) == json.dumps(
-        legacy_report,
-        sort_keys=True,
-        separators=(",", ":"),
-    )
 
 
 def test_six_file_runtime_gate_rejects_each_release_dimension() -> None:

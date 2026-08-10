@@ -282,10 +282,10 @@ def _identity(summary: dict[str, Any]) -> dict[str, Any]:
 # Identity fields that change what a score *means*. Two receipts that differ
 # on any of these are different experiments, so comparing them is refused.
 # The instrument (`harness_sha256`) is gated too: a harness edit can change
-# how expectations are evaluated without touching either semantics version,
-# and reporting the hash would leave that to manual discipline. Declaring an
-# edit scoring-neutral is a deliberate act — `--allow-harness-change` — not
-# a default.
+# how expectations are evaluated without touching either semantics version.
+# `--allow-harness-change` waives only that hash identity when scoring changes
+# are confined to cases whose contract hashes also changed; those rescored
+# cases are excluded from direction counts.
 #
 # Deliberately excluded, with evidence: `target_sha256` embeds the deployed
 # app version and so differs between every pair of builds — the exact axis
@@ -438,8 +438,8 @@ def compare(
         raise SystemExit(
             "Refusing to compare receipts whose evaluator identity differs on "
             f"{', '.join(incompatible)}; they do not measure the same thing. "
-            "Pass --allow-harness-change only to declare a harness edit "
-            "scoring-neutral. "
+            "Pass --allow-harness-change only when scoring-affecting harness "
+            "edits are confined to cases with changed contract hashes. "
             f"baseline={_identity_marker(baseline_summary)!r} "
             f"current={_identity_marker(current_summary)!r}"
         )
@@ -881,9 +881,9 @@ def main() -> None:
         "--allow-harness-change",
         action="store_true",
         help=(
-            "Declare a harness edit scoring-neutral and compare anyway. "
-            "Only valid when the edit cannot change how expectations are "
-            "evaluated; otherwise bump the semantics version instead."
+            "Waive harness-hash identity when scoring-affecting edits are "
+            "confined to cases with changed contract hashes; those rescored "
+            "cases are excluded from direction counts."
         ),
     )
     parser.add_argument(

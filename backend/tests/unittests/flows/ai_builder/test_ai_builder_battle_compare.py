@@ -448,53 +448,47 @@ def test_changed_environment_refuses_comparison(tmp_path: Path) -> None:
     assert "base_url" in str(excinfo.value)
 
 
-def test_declared_scoring_neutral_harness_edit_may_compare(tmp_path: Path) -> None:
-    module = _compare_module()
-    baseline_path = tmp_path / "base.json"
-    payload = _summary([_row("case-a", "plan_first_pass")])
-    payload["evaluator_identity"]["harness_sha256"] = "9" * 64
-    baseline_path.write_text(json.dumps(payload), encoding="utf-8")
-    current = _write(tmp_path, "cur.json", [_row("case-a", "plan_first_pass")])
-
-    report = module.compare(baseline_path, current, allow_harness_change=True)
-
-    assert report["direction_counts"] == {"unchanged": 1}
-
-
-def test_rescored_case_is_excluded_from_direction_counts(tmp_path: Path) -> None:
-    # A case whose expectations were edited moved because the question
-    # changed, not because the product did.
+def test_harness_change_counts_only_cases_with_unchanged_contracts(
+    tmp_path: Path,
+) -> None:
     module = _compare_module()
     baseline_path = tmp_path / "base.json"
     payload = _summary(
         [
-            _row("case-a", "plan_first_pass", verdict="fail"),
-            _row("case-b", "plan_first_pass", verdict="fail"),
+            _row("unchanged-case", "plan_first_pass", verdict="fail"),
+            _row("sentinel", "plan_first_pass", verdict="fail"),
         ]
     )
+    payload["evaluator_identity"]["harness_sha256"] = "9" * 64
     payload["evaluator_identity"]["case_contract_sha256_by_id"] = {
-        "case-a": "1" * 64,
-        "case-b": "2" * 64,
+        "unchanged-case": "1" * 64,
+        "sentinel": "2" * 64,
     }
     baseline_path.write_text(json.dumps(payload), encoding="utf-8")
 
     current_path = tmp_path / "cur.json"
     current_payload = _summary(
         [
-            _row("case-a", "plan_first_pass", verdict="pass"),
-            _row("case-b", "plan_first_pass", verdict="pass"),
+            _row("unchanged-case", "plan_first_pass", verdict="pass"),
+            _row("sentinel", "plan_first_pass", verdict="pass"),
         ]
     )
     current_payload["evaluator_identity"]["case_contract_sha256_by_id"] = {
-        "case-a": "1" * 64,
-        "case-b": "9" * 64,
+        "unchanged-case": "1" * 64,
+        "sentinel": "9" * 64,
     }
     current_path.write_text(json.dumps(current_payload), encoding="utf-8")
 
-    report = module.compare(baseline_path, current_path)
+    report = module.compare(
+        baseline_path,
+        current_path,
+        allow_harness_change=True,
+    )
 
-    assert report["rescored_cases"] == ["case-b"]
+    assert report["rescored_cases"] == ["sentinel"]
     assert report["direction_counts"] == {"improved": 1}
+    assert _case(report, "sentinel")["direction"] == "improved"
+    assert _case(report, "unchanged-case")["direction"] == "improved"
 
 
 def test_public_error_codes_count_as_blockers(tmp_path: Path) -> None:
