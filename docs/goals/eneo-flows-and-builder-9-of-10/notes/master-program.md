@@ -1,7 +1,9 @@
 # Eneo Flows + Flow AI Builder — Master Program (living document)
 
-Status: CONVERGING — peer iteration 32+ is refining the ranked program
-at min-score 9; no implementation until convergence, then user
+Status: CONVERGING — iteration 32 (max effort) returned
+changes_required at 7; all findings source-verified and absorbed into
+the v2 program below; iteration 33 (max effort, min-score 9) is
+adjudicating v2. No implementation until convergence, then user
 sign-off. This file is self-contained so ANY coding agent can continue
 the program. Sibling context: `conformance-program-plan.md` (the
 detailed slice protocol and the full verdict ledger, same directory).
@@ -81,73 +83,103 @@ from semantic decisions still model-owned. Therefore:
 - [ ] Program convergence (iteration 32+ running, min-score 9)
 - [ ] User sign-off on the converged program
 
-## The Ranked Program (v1 — being converged; update on each pass)
+## The Ranked Program (v2 — after iteration 32; under adjudication)
 
-### Tier 1 — Ownership transfers (quality + architecture)
-- [ ] 1.1 Runtime-input-field contract compilation. Typed field declarations
-    + semantic consumer in the classifier/metadata contract (never
-    prose parsing) → existing hints path
-    (`ai_builder_create_compiler.py:940,1100`) → delete the prompt
-    block + create-repair ownership → retires create-mode
-    responsibility of the four form-field invariants. FREEZE THE TYPED
-    CONTRACT FIRST; design-gate before code.
-- [ ] 1.2 Terminal-shape ownership. terminal_output_type_mismatch (6 obs)
-    despite a committed terminal slot — attribute why proposals can
-    mismatch, then make it inexpressible (intent schema) or
-    compile-time-corrected (assembly).
-- [ ] 1.3 Named-result completion for JSON terminals (the 9/9 failing
-    probes): compiled terminal contract consumes
-    `named_result_obligations` where no declared schema owns the
-    terminal; via the existing projection; after 2.1.
+### Completion contract (proposed; iteration 33 adjudicating)
+One matrix row per supported archetype (json-terminal,
+document-report, text-terminal, template-fill — ~90% of usage):
+admission predicate → canonical compiler owner → model-owned creative
+fields → retired create invariants → explicit fallback behavior →
+deterministic compile test + publish/run sentinel. Everything
+unmatched routes to the observable free-proposal fallback
+(`ai_builder_architecture_derivation.py:40`).
+Numeric exit thresholds (proposed): first-pass acceptance ≥90% on
+supported archetypes (now ~79%); normal-path semantic critic hits on
+supported archetypes 0; repairs per accepted create plan ≤0.05;
+deterministic deaths on stable cohort 0, total builder_error ≤10/465
+(now 27); model-authored mechanical fields monotone non-increasing.
+Scope: EXCELLENT CREATE MODE + runtime launch. Edit mode keeps its
+guards; edit excellence is a later program (explicitly out of scope).
 
-### Tier 2 — Classifier correctness (runs FIRST; foundation)
-- [ ] 2.1 Diagnostics tranche: (a) partial named-result emission (4 JSON
-    cases); (b) file-role flip regression — re-classification
-    downgrades an explicit-quote-backed role 3/3 (candidate invariant:
+### Critical path (builder stream; each slice design-gated → worker →
+### commit-gated → cohort probe)
+- [ ] CP1 File-role flip closure. The margin regression IS the task-14
+    case (same mechanism, confirmed). Owner:
+    `_merged_model_file_roles` / `_model_file_role_can_replace`
+    (`planning_state_builder.py:896`). Candidate invariant:
     explicit-evidence roles are sticky absent new contradicting
-    evidence; kin of the fc82f0b91 evidence-churn family); (c) the
-    added question round in the same case.
+    evidence (kin of the evidence-churn family). The extra question
+    round is attributed inside this same case study.
+- [ ] CP2 Terminal ownership consolidation (premise CORRECTED in
+    iteration 32, source-verified): the mismatch is SERVER-vs-SERVER
+    dual ownership — compile derives the terminal from
+    `architecture_commit` (`ai_builder_create_compiler.py:710`) while
+    create preparation re-derives it from conversation text
+    (`ai_builder_create_proposal.py:190` →
+    `terminal_output_type_for_conversation`,
+    `ai_builder_proposal_policy.py:259`) and a guard compares the two
+    (`ai_builder_compiled_spec_preparation.py:70`). Ninth
+    dual-ownership family. Step 1: attribution table with BOTH
+    derivations per observation (re-derive offline from persisted
+    planning state + conversation). Step 2 if confirmed: committed
+    terminal becomes the single create-path owner; conversation
+    derivation survives only for edit semantics; delete the alignment
+    guard + create-side mismatch repair. `flow_step_invalid` stays a
+    separate heterogeneous family (`flow_validators.py:227`).
+- [ ] CP3 Runtime-input-field contract. Classifier output persists into
+    the EXISTING typed owner `FlowInputFieldIntent`
+    (`planning_state_builder.py:267`) through the existing hints path
+    (`ai_builder_create_compiler.py:940,1100`) — no parallel
+    declaration; at most a bounded consumer-role field on the
+    existing type. Then delete the prompt's mechanical form-field
+    block, the create repair mapping, and create-mode responsibility
+    of the four form-field invariants (edit guards stay).
+- [ ] CP4 JSON partial-emission diagnosis: why OSE captures some
+    user-named fields and misses others (4 JSON cases). Diagnosis
+    first; bounded fix gated on attributed mechanism.
+- [ ] CP5 Named-result completion, redesigned: named evidence owns
+    PRESENCE, never design. Bounded proposal interface where
+    obligated names are inexpressibly present as keys while the model
+    authors each field's type/nesting (candidate: tool-schema
+    `required` + open per-key subschema; prove provider support
+    first). No new store; no synthesized types; the critic stays
+    until the interface makes it unreachable, then dies.
+- [ ] Ownership-tranche gate: full 155×3 after CP1–CP3 land (one of
+    exactly TWO full runs; the other is the release candidate).
 
-### Tier 3 — Launch operability (runtime stream, parallel)
-- [ ] 3.1 Durable topology: `.devcontainer` three-role compose + tracked
-    max_connections (USER PERMISSION PENDING — path is on the user's
-    protected list) + clean-volume recreation proof.
-- [ ] 3.2 Provider throttling: fail-fast + typed provider-throttled
-    diagnosis + operator/user guidance (adjudicated; NO flow-level
-    retry loop).
-- [ ] 3.3 Health: execution-consumer presence + beat freshness on the
-    existing operator surface; deployment-native healthchecks for
-    celery services. No new public liveness endpoint.
-- [ ] 3.4 Object-content scope (USER DECISION): if bundled storage is in
-    launch scope, attach celery-worker-flows to object_content_net +
-    prove one read/write journey.
-- [ ] 3.5 Launch receipt: pool-budget arithmetic vs SHOW max_connections
+### Launch stream (parallel; a RELEASE GATE, not a lower tier)
+- [ ] L1 Durable topology: `.devcontainer` three-role compose + tracked
+    max_connections (USER PERMISSION PENDING — protected path) +
+    clean-volume recreation proof.
+- [ ] L2 Provider throttling: fail-fast + typed provider-throttled
+    diagnosis + operator/user guidance (NO flow-level retry loop).
+- [ ] L3 Health: execution-consumer presence + beat freshness on the
+    existing operator surface; deployment-native healthchecks. No new
+    public liveness endpoint.
+- [ ] L4 Object-content scope (USER DECISION): if in launch scope,
+    attach celery-worker-flows to object_content_net + prove one
+    read/write journey.
+- [ ] L5 Launch receipt: pool-budget arithmetic vs SHOW max_connections
     under bounded load + one queue-recovery smoke at launch
     concurrency.
+Release requires L1–L5 resolved or explicitly descoped by the user.
 
-### Tier 4 — Maintainability / clean architecture (split-when-touched)
-Adjudicated rulings (runtime pass 2 + builder passes 24/30/31):
-- [ ] 4.1 `planning_state_builder.py` split (3 owners + facade) AFTER Tier 1
-    settles — Tier 1 rewrites its evidence lifecycle again.
-- [ ] 4.2 `step_input_resolution.py` split when 1.3/Slice-6 touches it
-    (seams: orchestration / source-ref projection / file extraction /
-    overflow rules; its deps object erases owners to Any — fix then).
-- [ ] 4.3 `step_execution_runtime.py` provider-call seam only if 3.2 changes
-    provider behavior.
-- [ ] 4.4 `executor.py`: DO NOT SPLIT (cohesive around one run transaction).
-- [ ] 4.5 `flow_run_repo.py`: future read-only evidence repository seam;
-    wait. `flow_models.py`: local fixes only; no 24-importer split.
-- [ ] 4.6 `field_diagnostics` → `compile_diagnostics` rename at next touch.
-- [ ] 4.7 Slice-5 commit 2 (non-JSON seam completion; 10-obs cohort) —
-    re-verify cohort post-commit-1; may fold into 1.3's shadow.
-- [ ] 4.8 JSON fan-in (reworked template-fill route) after 1.2.
+### Standing rulings — NOT slices (adjudicated; apply when touched)
+- `planning_state_builder.py` split (3 owners + facade) only AFTER the
+  ownership tranche settles. `step_input_resolution.py` splits when
+  CP5 touches it. `step_execution_runtime.py` provider seam only if
+  L2 changes provider behavior. `executor.py`: never split.
+  `flow_run_repo.py` / `flow_models.py`: wait.
+- `field_diagnostics`→`compile_diagnostics` rename, Slice-5 commit 2,
+  and JSON fan-in: RE-ATTRIBUTE after CP1–CP3 (their cohorts may
+  dissolve); implement only what survives re-attribution.
+- Edit guards and compiler postconditions stay until their owner makes
+  them unreachable; each CP names its deletions in advance.
 
-### Sequencing
-- [ ] 2.1 → 1.1 → 1.2 → 1.3 (builder stream, each design-gated then
-commit-gated), Tier 3 parallel (runtime stream, own peer session),
-Tier 4 rides whichever slice touches its file. Cohort probes (3 reps)
-per slice; full 155×3 at tier boundaries; suite runs ≥45 min apart
-(provider limits).
+### Measurement cadence
+Cohort probes (3 reps, named cohorts) per slice; full 155×3 at
+exactly two points (tranche gate, release candidate); suite runs
+≥45 min apart (provider limits).
 
 ## Operating protocol (for any agent continuing this)
 
