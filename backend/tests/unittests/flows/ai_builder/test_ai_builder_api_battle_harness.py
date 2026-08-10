@@ -3778,12 +3778,34 @@ def test_runtime_sentinel_checks_persisted_named_results_and_plan_invariants() -
             }
         ],
     }
+
+    later_clear = json.loads(json.dumps(diagnostics))
+    later_clear_runs = later_clear["classifier_runs"]
+    assert isinstance(later_clear_runs, list)
+    later_clear_runs.append(
+        {
+            "named_result_evidence": {
+                "operation": "clear",
+                "named_results": [],
+            }
+        }
+    )
+    assert harness._persisted_named_result_names(later_clear) == []
+
+    later_no_change = json.loads(json.dumps(diagnostics))
+    later_no_change_runs = later_no_change["classifier_runs"]
+    assert isinstance(later_no_change_runs, list)
+    later_no_change_runs.append({})
+    assert harness._persisted_named_result_names(later_no_change) == ["summary"]
+
     expected = {
         "min_steps": 2,
         "max_steps": 2,
         "terminal_output_type": "pdf",
         "terminal_document_output_mode": "render_verbatim",
         "expected_leaf_output_field_groups": [["summary"]],
+        "expected_persisted_named_results": True,
+        "expected_plan_invariant_vector": True,
         "expected_runtime_evidence": {},
     }
 
@@ -3832,6 +3854,55 @@ def test_runtime_sentinel_checks_persisted_named_results_and_plan_invariants() -
     )["sentinel_invariant_vector"]
     assert invariant_check["passed"] is False
     assert invariant_check["actual"]["per_source_reader_present"] is False
+
+
+def test_non_sentinel_quality_report_is_unchanged_without_explicit_checks() -> None:
+    harness = _battle_harness()
+    plan = _document_plan(
+        terminal_mode="render_verbatim",
+        terminal_input_source="previous_step",
+    )
+    expected = {
+        "min_steps": 2,
+        "max_steps": 2,
+        "terminal_output_type": "pdf",
+        "terminal_document_output_mode": "render_verbatim",
+        "expected_leaf_output_field_groups": [["summary"]],
+        "expected_runtime_evidence": {
+            "source_file_count": 6,
+            "source_record_count": 6,
+            "required_final_field_label_groups": [["summary"]],
+            "required_visible_degradation_markers": [["framgår ej"]],
+            "source_display_count": 6,
+            "model_call_count": 7,
+            "max_total_tokens": 250000,
+        },
+    }
+    report = harness._quality_report(
+        plan=plan,
+        summary=harness._summarize_plan(plan),
+        expected=expected,
+        event_summary={},
+        classifier_diagnostics=_classifier_diagnostics(),
+        runtime_evidence=_six_file_runtime_evidence(),
+    )
+    new_check_names = {
+        "sentinel_named_result_evidence",
+        "sentinel_invariant_vector",
+    }
+    legacy_report = json.loads(json.dumps(report))
+    legacy_report["checks"] = [
+        check
+        for check in legacy_report["checks"]
+        if check["name"] not in new_check_names
+    ]
+
+    assert new_check_names.isdisjoint(check["name"] for check in report["checks"])
+    assert json.dumps(report, sort_keys=True, separators=(",", ":")) == json.dumps(
+        legacy_report,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
 
 
 def test_six_file_runtime_gate_rejects_each_release_dimension() -> None:
@@ -4148,6 +4219,8 @@ def test_release_inventory_owns_required_dimensions_and_named_cases() -> None:
     assert len(six_file_case.attachments) == 6
     assert len(six_file_case.runtime_files) == 6
     assert six_file_case.expected is not None
+    assert six_file_case.expected["expected_persisted_named_results"] is True
+    assert six_file_case.expected["expected_plan_invariant_vector"] is True
     assert six_file_case.expected["expected_runtime_evidence"] == {
         "source_file_count": 6,
         "source_record_count": 6,

@@ -714,6 +714,8 @@ _EXPECTATION_KEYS = frozenset(
         "expected_leaf_output_field_groups",
         "expected_output_contract_schema",
         "expected_output_modes",
+        "expected_persisted_named_results",
+        "expected_plan_invariant_vector",
         "expected_primary_input_type",
         "expected_question_event_count",
         "expected_question_event_ids",
@@ -1131,6 +1133,12 @@ def _validate_release_expectations(
             f"{path} case {case_id}.expected_primary_input_type must be a "
             "non-empty string."
         )
+    for key in (
+        "expected_persisted_named_results",
+        "expected_plan_invariant_vector",
+    ):
+        if key in expected and expected.get(key) is not True:
+            raise ValueError(f"{path} case {case_id}.{key} must be true.")
     relevance_sets: dict[str, set[str]] = {}
     for key in (
         "preferred_question_event_ids",
@@ -5776,10 +5784,16 @@ def _persisted_named_result_names(
         if not isinstance(snapshot, Mapping):
             continue
         snapshot = cast(Mapping[str, object], snapshot)
-        for named_result in _mapping_list(snapshot.get("named_results")):
-            name = named_result.get("name")
-            if isinstance(name, str) and name:
-                names.append(name)
+        operation = snapshot.get("operation")
+        if operation == "clear":
+            names = []
+        elif operation == "replace":
+            names = [
+                name
+                for named_result in _mapping_list(snapshot.get("named_results"))
+                for name in [named_result.get("name")]
+                if isinstance(name, str) and name
+            ]
     return names
 
 
@@ -6420,17 +6434,16 @@ def _quality_report(
                 expected=expected_runtime_evidence,
             )
         )
-        if _field_expectation_groups(expected):
-            persisted_named_results = _persisted_named_result_names(
-                classifier_diagnostics
-            )
-            add_check(
-                "sentinel_named_result_evidence",
-                bool(persisted_named_results),
-                persisted_named_results,
-                "at least one persisted named result",
-            )
+    if expected.get("expected_persisted_named_results") is True:
+        persisted_named_results = _persisted_named_result_names(classifier_diagnostics)
+        add_check(
+            "sentinel_named_result_evidence",
+            bool(persisted_named_results),
+            persisted_named_results,
+            "at least one persisted named result",
+        )
 
+    if expected.get("expected_plan_invariant_vector") is True:
         steps = _step_summaries(summary)
         minimum_steps = _int_value(expected.get("min_steps"))
         maximum_steps = _int_value(expected.get("max_steps"))

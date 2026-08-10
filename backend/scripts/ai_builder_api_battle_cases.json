@@ -2327,6 +2327,8 @@
             "source_file_id"
           ]
         ],
+        "expected_persisted_named_results": true,
+        "expected_plan_invariant_vector": true,
         "expected_runtime_evidence": {
           "source_file_count": 6,
           "source_record_count": 6,
