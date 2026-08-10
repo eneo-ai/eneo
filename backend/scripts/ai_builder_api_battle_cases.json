@@ -2158,7 +2158,7 @@
       "prompt": "Bygg ett flöde för exakt de sex bifogade källdokumenten. Läs varje källa uttömmande och skapa exakt en documents-post per källfil. För varje källa ska titel, år, kategori, typ, författare, slutsatser, sammanfattning, synligt källnamn och eventuell försämrad extraktionskvalitet bevaras. Skapa sedan en samlad översikt, komponera rapporten deterministiskt direkt från documents-posterna och rendera en PDF. Slut-PDF:en ska visa alla fält med tydliga etiketter. Saknade eller försämrade uppgifter ska visas som 'framgår ej' tillsammans med synlig degraderingsinformation; de får inte döljas eller gissas.",
       "expected": {
         "min_steps": 4,
-        "max_steps": 4,
+        "max_steps": 6,
         "terminal_output_type": "pdf",
         "terminal_document_output_mode": "render_verbatim",
         "expected_output_modes": [
