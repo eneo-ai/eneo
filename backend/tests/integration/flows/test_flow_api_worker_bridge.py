@@ -1,17 +1,18 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from uuid import UUID, uuid4
 
 import pytest
 import sqlalchemy as sa
 from httpx import AsyncClient
 
-from eneo.audit.domain.action_types import ActionType
-from eneo.database.tables.audit_log_table import AuditLog as AuditLogTable
 from eneo.database.tables.flow_tables import FlowRunAuditOutbox, FlowRuns
-from eneo.flows.domain.flow_run_recovery_policy import FLOW_DISPATCH_MAX_ATTEMPTS
+from eneo.flows.domain.flow_run_recovery_policy import (
+    FLOW_DISPATCH_MAX_ATTEMPTS,
+    FLOW_QUEUED_REDISPATCH_AFTER_SECONDS,
+)
 from eneo.flows.enums import FlowRunLifecycleSource
 from eneo.main.config import Settings
 from tests.integration.flows.conftest import (
@@ -233,7 +234,7 @@ async def test_broker_accepted_delivery_executes_after_dispatch_budget_exhaustio
 
 @pytest.mark.asyncio
 @pytest.mark.integration
-async def test_broker_accepted_delivery_loss_recovers_through_public_redispatch(
+async def test_broker_accepted_delivery_loss_recovers_through_scheduled_redispatch(
     client: AsyncClient,
     db_container,
     flow_process_auth_headers: Mapping[str, str],
@@ -272,43 +273,29 @@ async def test_broker_accepted_delivery_loss_recovers_through_public_redispatch(
     assert queued_run["dispatch_next_attempt_at"] is not None
 
     await flow_broker_worker_seam.discard_single_queued_delivery()
-    exhausted_at = datetime.now(timezone.utc)
+    last_attempt_at = datetime.now(timezone.utc) - timedelta(
+        seconds=FLOW_QUEUED_REDISPATCH_AFTER_SECONDS
+    )
     async with db_container() as container:
         await container.session().execute(
             sa.update(FlowRuns)
             .where(FlowRuns.id == UUID(run_id))
             .values(
-                dispatch_attempt_count=FLOW_DISPATCH_MAX_ATTEMPTS,
-                dispatch_next_attempt_at=None,
-                dispatch_exhausted_at=exhausted_at,
+                dispatch_attempt_count=FLOW_DISPATCH_MAX_ATTEMPTS - 1,
+                dispatch_last_attempt_at=last_attempt_at,
+                dispatch_next_attempt_at=last_attempt_at
+                + timedelta(seconds=FLOW_QUEUED_REDISPATCH_AFTER_SECONDS),
             )
         )
         await container.session().commit()
 
-    redispatch_response = await client.post(
-        f"/api/v1/flows/{flow.flow_id}/runs/{run_id}/redispatch/",
-        headers=flow_process_auth_headers,
-        json={"expected_dispatch_exhausted_at": exhausted_at.isoformat()},
-    )
-    assert redispatch_response.status_code == 200, redispatch_response.text
-    redispatch_payload = redispatch_response.json()
-    assert redispatch_payload["redispatched_count"] == 1
-    redispatched_run = redispatch_payload["run"]
-    assert redispatched_run["status"] == "queued"
-    assert redispatched_run["dispatch_attempt_count"] == 1
-    assert redispatched_run["dispatched_at"] is not None
-    assert redispatched_run["dispatch_next_attempt_at"] is not None
-
-    async with db_container() as container:
-        durable_redrive_audit_count = await container.session().scalar(
-            sa.select(sa.func.count())
-            .select_from(AuditLogTable)
-            .where(AuditLogTable.entity_id == UUID(run_id))
-            .where(AuditLogTable.action == ActionType.FLOW_RUN_REDISPATCHED.value)
-        )
-    assert durable_redrive_audit_count == 1
-
     await flow_broker_worker_seam.start_worker()
+    redispatch_result = await flow_broker_worker_seam.send_task_and_wait(
+        task_name="flows.redispatch_stale_queued",
+        timeout_seconds=30,
+    )
+    assert redispatch_result == {"status": "ok", "redispatched": 1}
+
     (
         completed_run,
         observed_statuses,
@@ -325,14 +312,31 @@ async def test_broker_accepted_delivery_loss_recovers_through_public_redispatch(
         "kind": "inline_text",
         "text": submitted_text,
     }
-    assert completed_run["dispatch_attempt_count"] == 1
+    assert completed_run["dispatch_attempt_count"] == FLOW_DISPATCH_MAX_ATTEMPTS
     assert completed_run["dispatch_next_attempt_at"] is None
 
+    second_redispatch_result = await flow_broker_worker_seam.send_task_and_wait(
+        task_name="flows.redispatch_stale_queued",
+        timeout_seconds=30,
+    )
+    assert second_redispatch_result == {"status": "ok", "redispatched": 0}
+
+    evidence_response = await client.get(
+        f"/api/v1/flows/{flow.flow_id}/runs/{run_id}/evidence/",
+        headers=flow_process_auth_headers,
+    )
+    assert evidence_response.status_code == 200, evidence_response.text
+    evidence = evidence_response.json()
+    assert len(evidence["step_attempts"]) == 1
+    assert evidence["step_attempts"][0]["status"] == "completed"
+
     async with db_container() as container:
-        terminal_audit_count = await container.session().scalar(
-            sa.select(sa.func.count())
-            .select_from(FlowRunAuditOutbox)
-            .where(FlowRunAuditOutbox.flow_run_id == UUID(run_id))
-            .where(FlowRunAuditOutbox.action == "flow_run_completed")
-        )
-    assert terminal_audit_count == 1
+        terminal_audit_rows = (
+            await container.session().execute(
+                sa.select(
+                    FlowRunAuditOutbox.action,
+                    FlowRunAuditOutbox.target_status,
+                ).where(FlowRunAuditOutbox.flow_run_id == UUID(run_id))
+            )
+        ).all()
+    assert terminal_audit_rows == [("flow_run_completed", "completed")]
