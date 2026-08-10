@@ -671,7 +671,7 @@ def test_compaction_preserves_latest_complete_named_result_snapshot() -> None:
                     NamedResultEvidence(
                         name="case_id",
                         confidence="high",
-                        evidence=["quote:user_message:user-1:case_id"],
+                        evidence=[f"quote:{first_source}:{first_quote}"],
                     ),
                 ),
                 confidence="high",
@@ -708,13 +708,18 @@ def test_compaction_preserves_latest_complete_named_result_snapshot() -> None:
                         operation="replace",
                         named_results=(
                             NamedResultEvidence(
-                                name=name,
+                                name="case_id",
+                                confidence="high",
+                                evidence=[f"quote:{first_source}:{first_quote}"],
+                            ),
+                            NamedResultEvidence(
+                                name="status",
                                 confidence="high",
                                 evidence=[
-                                    "quote:user_message:user-2:case_id and status"
+                                    "quote:user_message:json-fields-new:Keep case_id "
+                                    "and add status."
                                 ],
-                            )
-                            for name in ("case_id", "status")
+                            ),
                         ),
                         confidence="high",
                         reason="Current complete field snapshot.",

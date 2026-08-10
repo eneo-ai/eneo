@@ -681,11 +681,15 @@ class MappedFileLimit(_PlanningModel):
 
 
 NAMED_RESULT_EVIDENCE_MAX_ITEMS = 100
+NAMED_RESULT_EVIDENCE_MAX_CITATIONS = 3
 
 
 class NamedResultEvidence(_PlanningModel):
     name: str = Field(min_length=1, max_length=240)
-    evidence: list[str] = Field(min_length=1, max_length=200)
+    evidence: list[str] = Field(
+        min_length=1,
+        max_length=NAMED_RESULT_EVIDENCE_MAX_CITATIONS,
+    )
     confidence: SignalConfidence
 
     @field_validator("name")

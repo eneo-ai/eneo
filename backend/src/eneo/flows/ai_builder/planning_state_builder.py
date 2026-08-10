@@ -85,6 +85,7 @@ from eneo.flows.ai_builder.ai_builder_slot_vocabulary import (
 from eneo.flows.ai_builder.planning_state import (
     BUILDER_SCHEMA_VERSION,
     FCM_VERSION,
+    NAMED_RESULT_EVIDENCE_MAX_CITATIONS,
     NAMED_RESULT_EVIDENCE_MAX_ITEMS,
     PLANNER_CONTRACT_VERSION,
     TEMPLATE_PLACEHOLDER_EVIDENCE_PREFIX,
@@ -790,7 +791,10 @@ def _merge_model_named_result_evidence(
         if fold_result_field_name(item.name) not in removed
     ]
     existing = {fold_result_field_name(item.name) for item in retained}
-    provenance = [item.planning_reference() for item in classified_evidence.evidence]
+    provenance = [
+        item.planning_reference()
+        for item in classified_evidence.evidence[:NAMED_RESULT_EVIDENCE_MAX_CITATIONS]
+    ]
     additions = [
         NamedResultEvidence(
             name=name,

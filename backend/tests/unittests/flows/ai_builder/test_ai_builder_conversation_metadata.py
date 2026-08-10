@@ -911,6 +911,39 @@ def test_slot_classification_metadata_rejects_overlong_reason() -> None:
     )
 
 
+def test_slot_classification_metadata_rejects_uncited_named_result_evidence() -> None:
+    quote = "JSON output field: case_id."
+
+    assert (
+        slot_classification_from_metadata(
+            {
+                "slot_classification": {
+                    **_persisted_classification_header(),
+                    "named_result_evidence": {
+                        "operation": "replace",
+                        "named_results": [
+                            {
+                                "name": "case_id",
+                                "confidence": "high",
+                                "evidence": ["not-a-citation"],
+                            }
+                        ],
+                        "confidence": "high",
+                        "reason": "The user explicitly named the JSON field.",
+                        "evidence": [
+                            {
+                                "source_id": _CLASSIFICATION_SOURCE_ID,
+                                "quote": quote,
+                            }
+                        ],
+                    },
+                }
+            }
+        )
+        is None
+    )
+
+
 def test_slot_classification_metadata_logs_invalid_persisted_shape(monkeypatch) -> None:
     warnings = _capture_metadata_warnings(monkeypatch)
 

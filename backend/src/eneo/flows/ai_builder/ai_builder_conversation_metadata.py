@@ -48,7 +48,7 @@ from eneo.flows.ai_builder.ai_builder_slot_classification_contract import (
     CLASSIFICATION_NOTE_MAX_LENGTH,
     CLASSIFICATION_NOTES_MAX_ITEMS,
     CLASSIFICATION_REASON_MAX_LENGTH,
-    NAMED_RESULT_CITATION_MAX_ITEMS,
+    NAMED_RESULT_SNAPSHOT_CITATION_MAX_ITEMS,
     SLOT_CLASSIFICATION_SCHEMA_VERSION,
     UNKNOWN_SLOT_VALUE,
     CheckpointUpdateOperation,
@@ -333,7 +333,7 @@ class SlotClassificationNamedResultEvidenceMetadata(BaseModel):
     reason: str = Field(min_length=1, max_length=CLASSIFICATION_REASON_MAX_LENGTH)
     evidence: list[SlotClassificationEvidence] = Field(
         min_length=1,
-        max_length=NAMED_RESULT_CITATION_MAX_ITEMS,
+        max_length=NAMED_RESULT_SNAPSHOT_CITATION_MAX_ITEMS,
     )
 
     @model_validator(mode="after")
@@ -353,6 +353,17 @@ class SlotClassificationNamedResultEvidenceMetadata(BaseModel):
             set(folded_names)
         ):
             raise ValueError("named-result evidence names must be uniquely foldable")
+        planning_references = {
+            item.to_classified_evidence().planning_reference() for item in self.evidence
+        }
+        if any(
+            reference not in planning_references
+            for item in self.named_results
+            for reference in item.evidence
+        ):
+            raise ValueError(
+                "named-result evidence must cite snapshot planning references"
+            )
         return self
 
     @classmethod

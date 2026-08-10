@@ -45,6 +45,8 @@ from eneo.flows.ai_builder.ai_builder_schema_evidence import (
     derive_freeform_schema_candidates,
 )
 from eneo.flows.ai_builder.ai_builder_slot_classification_contract import (
+    CLASSIFICATION_EVIDENCE_MAX_LENGTH,
+    NAMED_RESULT_SNAPSHOT_CITATION_MAX_ITEMS,
     CheckpointUpdateOperation,
     ClassifiedCheckpointUpdate,
     ClassifiedEvidence,
@@ -63,8 +65,10 @@ from eneo.flows.ai_builder.ai_builder_slot_classification_contract import (
 from eneo.flows.ai_builder.planning_state import (
     BUILDER_SCHEMA_VERSION,
     FCM_VERSION,
+    NAMED_RESULT_EVIDENCE_MAX_CITATIONS,
     NAMED_RESULT_EVIDENCE_MAX_ITEMS,
     PLANNER_CONTRACT_VERSION,
+    PLANNING_STATE_PAYLOAD_CAP_BYTES,
     ArchitectureCommit,
     AttachmentCoverage,
     CheckpointProducerKind,
@@ -2701,6 +2705,48 @@ class TestModelSlotMerge:
             "max_value": NAMED_RESULT_EVIDENCE_MAX_ITEMS,
             "actual_value": NAMED_RESULT_EVIDENCE_MAX_ITEMS + 1,
         }
+
+    def test_maximum_named_result_evidence_stays_below_payload_cap(self) -> None:
+        state = _state()
+        names = tuple(
+            f"field_{index:03d}_" + "n" * (240 - len(f"field_{index:03d}_"))
+            for index in range(NAMED_RESULT_EVIDENCE_MAX_ITEMS)
+        )
+        evidence = tuple(
+            ClassifiedEvidence(
+                source_id="user_message:test-source",
+                quote=f"{index:03d}" + "q" * (CLASSIFICATION_EVIDENCE_MAX_LENGTH - 3),
+            )
+            for index in range(NAMED_RESULT_SNAPSHOT_CITATION_MAX_ITEMS)
+        )
+
+        merge_llm_resolved_slots(
+            state,
+            SlotClassificationResult(
+                named_result_evidence=ClassifiedNamedResultDelta(
+                    operation="update",
+                    names=names,
+                    confidence="high",
+                    reason="The user named the maximum supported result fields.",
+                    evidence=evidence,
+                )
+            ),
+            prompt_hash="a" * 64,
+            freeform_text="Maximum named result evidence.",
+        )
+
+        assert all(
+            len(item.evidence) <= NAMED_RESULT_EVIDENCE_MAX_CITATIONS
+            for item in state.named_result_evidence
+        )
+        payload_bytes = len(
+            json.dumps(
+                state.model_dump(mode="json"),
+                ensure_ascii=False,
+                separators=(",", ":"),
+            ).encode("utf-8")
+        )
+        assert payload_bytes < PLANNING_STATE_PAYLOAD_CAP_BYTES
 
     def test_named_result_evidence_deduplicates_folded_name_collisions(self) -> None:
         state = _state()

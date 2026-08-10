@@ -19,6 +19,7 @@ from eneo.flows.ai_builder.ai_builder_result_contract import (
 )
 from eneo.flows.ai_builder.ai_builder_schema_evidence import SCHEMA_PROVENANCE_MAX_ITEMS
 from eneo.flows.ai_builder.planning_state import (
+    NAMED_RESULT_EVIDENCE_MAX_CITATIONS,
     NAMED_RESULT_EVIDENCE_MAX_ITEMS,
     AttachmentCoverage,
     CheckpointProducerKind,
@@ -55,7 +56,8 @@ SLOT_CLASSIFICATION_SCHEMA_VERSION = 20
 CLASSIFICATION_EVIDENCE_MAX_ITEMS = 3
 CLASSIFICATION_EVIDENCE_MAX_LENGTH = 240
 CLASSIFICATION_REASON_MAX_LENGTH = 500
-NAMED_RESULT_CITATION_MAX_ITEMS = SCHEMA_PROVENANCE_MAX_ITEMS
+NAMED_RESULT_DELTA_CITATION_MAX_ITEMS = NAMED_RESULT_EVIDENCE_MAX_CITATIONS
+NAMED_RESULT_SNAPSHOT_CITATION_MAX_ITEMS = SCHEMA_PROVENANCE_MAX_ITEMS
 CLASSIFICATION_NOTE_MAX_LENGTH = 500
 CLASSIFICATION_NOTES_MAX_ITEMS = 10
 EXAMPLE_OUTPUT_HEADINGS_MAX_ITEMS = 20
@@ -478,7 +480,7 @@ def _parse_named_result_evidence(
     evidence = _parse_classification_evidence(
         item.get("evidence", []),
         classification_input=classification_input,
-        max_items=NAMED_RESULT_CITATION_MAX_ITEMS,
+        max_items=NAMED_RESULT_DELTA_CITATION_MAX_ITEMS,
     )
     source_kinds = {
         source.source_id: source.kind for source in classification_input.sources
@@ -1361,7 +1363,7 @@ def _classified_named_result_evidence_schema() -> dict[str, object]:
             "confidence": _classification_confidence_schema(),
             "reason": _classification_reason_schema(),
             "evidence": _classification_evidence_array_schema(
-                max_items=NAMED_RESULT_CITATION_MAX_ITEMS
+                max_items=NAMED_RESULT_DELTA_CITATION_MAX_ITEMS
             ),
         },
     }
