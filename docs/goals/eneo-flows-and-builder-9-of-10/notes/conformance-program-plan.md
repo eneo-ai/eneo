@@ -416,6 +416,36 @@ silently. Probes: the 3 JSON prose-loss cases still fail leaf checks
 invariant-vector failures were a pre-existing rubric bound
 (min=max=4 vs the owned 5–6 step topology), corrected in `342dc7ec9`.
 
+**ARCHITECTURE VERDICT (Pass 31, max effort, 2026-08-10): direction C,
+amended — the design is sound and mid-migration, not misdesigned.**
+Create mode already separates semantic intent from mechanics
+(`CreateFlowIntent` strips runtime mechanics; assembly derives
+sources, types, bindings, topology). The repair tax (~21% of accepted
+plans) comes from semantic decisions still model-owned. Adopted
+contract going forward: (1) NO second skeleton compiler ever — deepen
+`CreateCompileContext` + `ai_builder_assembly`; `Pattern` stays
+selection metadata, never executable topology. (2) Success metrics
+replace raw invariant count: supported create archetypes must reach
+ZERO normal-path semantic critic hits; repair attempts and provider
+calls per accepted proposal must fall; model-authored mechanical
+fields never increase; edit guards and compiler assertions stay until
+their owner makes them unreachable. (3) First post-launch ownership
+transfer: server-owned runtime-input-field contract compilation —
+typed field declarations + semantic consumer in the classifier/
+metadata contract (never prose parsing), compiled through the existing
+hints path, deleting the prompt block and create-repair ownership;
+retires the create-mode responsibility of four form-field invariants.
+(4) Broad document-report skeleton compilation deferred until the
+semantic stage sequence has a typed owner. (5) The free semantic
+proposal path stays for unmatched workflows with explicit
+observability. (6) Honest A-alone ceiling recorded: conformance
+plateaus ~45–55%, leaf instability 20–30% — the ownership-transfer
+phases are how we exceed it. Prerequisite before the first slice:
+inner-code cross-tab of the 9 invalid-plan + 7 quality-failure
+wrappers. Shape coverage measured (r01, clean checkpoint): json 36%,
+document-report 22%, text 14%, template 3% — supported-archetype
+routing covers ~90% of plan-producing usage.
+
 **Instability posture (Pass 6):** the pilot's 68/155 joint-state
 instability is a diagnostic, not a stabilization target — 23/155 (~15%)
 flip pass↔fail; much of the rest alternates first-pass vs repaired. No
