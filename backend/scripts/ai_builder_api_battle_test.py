@@ -35,7 +35,7 @@ FIXTURE_MANIFEST_FILE = FIXTURE_DIR / "manifest.json"
 SUPPORTED_FIXTURE_MANIFEST_VERSION = 1
 DEFAULT_CONFIRM_MESSAGE = "Ja, det stämmer. Bygg planen."
 MAX_INTERACTIONS_PER_CASE = 6
-SUPPORTED_CASES_FILE_VERSION = 6
+SUPPORTED_CASES_FILE_VERSION = 7
 # Bump when the meaning of question-relevance checks changes; receipts
 # across different semantics versions must never be compared.
 QUESTION_RELEVANCE_SEMANTICS_VERSION = 2
@@ -47,7 +47,7 @@ QUESTION_RELEVANCE_SEMANTICS_VERSION = 2
 # not export an environment variable — the flagship runtime sentinel skipped
 # itself that way through six full suite runs.
 OUTCOME_CLASSIFICATION_SEMANTICS_VERSION = 3
-SUPPORTED_RECEIPT_ARTIFACT_VERSION = "ai-builder-live-release.v3"
+SUPPORTED_RECEIPT_ARTIFACT_VERSION = "ai-builder-live-release.v4"
 
 
 def _local_app_version() -> str:
@@ -305,22 +305,15 @@ def _fixture_file_ids(
 
 
 @dataclass(frozen=True, slots=True)
-class ReleaseThresholds:
-    max_required_case_errors: int
-    max_required_quality_failures: int
-
-
-@dataclass(frozen=True, slots=True)
-class ReleaseGate:
+class AcquisitionContract:
     required_case_ids: tuple[str, ...]
-    thresholds: ReleaseThresholds
     artifact_schema_version: str = SUPPORTED_RECEIPT_ARTIFACT_VERSION
     require_clean_source: bool = False
 
     def __post_init__(self) -> None:
         if self.artifact_schema_version != SUPPORTED_RECEIPT_ARTIFACT_VERSION:
             raise ValueError(
-                "release_gate.artifact_schema_version must be "
+                "acquisition_contract.artifact_schema_version must be "
                 f"{SUPPORTED_RECEIPT_ARTIFACT_VERSION}; got "
                 f"{self.artifact_schema_version!r}."
             )
@@ -363,8 +356,8 @@ def main() -> int:
                 config=config,
                 args=args,
                 output_dir=output_dir,
-                release_gate=(
-                    _release_gate_from_args(args) if args.run_suite else None
+                acquisition_contract=(
+                    _acquisition_contract_from_args(args) if args.run_suite else None
                 ),
             )
         case = cases[0]
@@ -1054,60 +1047,46 @@ def _validate_question_answers(
             )
 
 
-def _release_gate_from_args(args: argparse.Namespace) -> ReleaseGate:
+def _acquisition_contract_from_args(args: argparse.Namespace) -> AcquisitionContract:
     path = Path(args.cases_file) if args.cases_file else DEFAULT_CASES_FILE
-    return _read_release_gate(path, cases=_read_cases_file(path))
+    return _read_acquisition_contract(path, cases=_read_cases_file(path))
 
 
-def _read_release_gate(path: Path, *, cases: list[BattleCase]) -> ReleaseGate:
+def _read_acquisition_contract(
+    path: Path, *, cases: list[BattleCase]
+) -> AcquisitionContract:
     payload = json.loads(path.read_text(encoding="utf-8"))
-    raw_gate = payload.get("release_gate") if isinstance(payload, Mapping) else None
+    raw_gate = (
+        payload.get("acquisition_contract") if isinstance(payload, Mapping) else None
+    )
     if not isinstance(raw_gate, Mapping):
-        raise ValueError(f"{path} must contain a top-level 'release_gate' object.")
+        raise ValueError(
+            f"{path} must contain a top-level 'acquisition_contract' object."
+        )
     expected_gate_keys = {
         "artifact_schema_version",
         "require_clean_source",
-        "thresholds",
     }
     if set(raw_gate) != expected_gate_keys:
         raise ValueError(
-            f"{path} release_gate must contain exactly: "
+            f"{path} acquisition_contract must contain exactly: "
             + ", ".join(sorted(expected_gate_keys))
         )
     artifact_schema_version = raw_gate.get("artifact_schema_version")
     if not isinstance(artifact_schema_version, str) or not artifact_schema_version:
         raise ValueError(
-            f"{path} release_gate.artifact_schema_version must be a string."
+            f"{path} acquisition_contract.artifact_schema_version must be a string."
         )
     require_clean_source = raw_gate.get("require_clean_source")
     if not isinstance(require_clean_source, bool):
-        raise ValueError(f"{path} release_gate.require_clean_source must be a boolean.")
+        raise ValueError(
+            f"{path} acquisition_contract.require_clean_source must be a boolean."
+        )
     required_case_ids = tuple(case.case_id for case in cases if case.required)
     if not required_case_ids:
         raise ValueError(f"{path} must mark at least one case as required.")
-    raw_thresholds = raw_gate.get("thresholds")
-    expected_threshold_keys = {
-        "max_required_case_errors",
-        "max_required_quality_failures",
-    }
-    if not isinstance(raw_thresholds, Mapping) or set(raw_thresholds) != (
-        expected_threshold_keys
-    ):
-        raise ValueError(
-            f"{path} release_gate.thresholds must contain exactly: "
-            + ", ".join(sorted(expected_threshold_keys))
-        )
-    threshold_values: dict[str, int] = {}
-    for key in sorted(expected_threshold_keys):
-        value = raw_thresholds[key]
-        if not isinstance(value, int) or isinstance(value, bool) or value < 0:
-            raise ValueError(
-                f"{path} release_gate.thresholds.{key} must be a non-negative integer."
-            )
-        threshold_values[key] = value
-    return ReleaseGate(
+    return AcquisitionContract(
         required_case_ids=required_case_ids,
-        thresholds=ReleaseThresholds(**threshold_values),
         artifact_schema_version=artifact_schema_version,
         require_clean_source=require_clean_source,
     )
@@ -1546,21 +1525,21 @@ def _run_suite(
     config: ApiConfig,
     args: argparse.Namespace,
     output_dir: Path,
-    release_gate: ReleaseGate | None = None,
+    acquisition_contract: AcquisitionContract | None = None,
 ) -> int:
     if args.repetitions < 1:
         raise ValueError("--repetitions must be >= 1.")
-    release_gate_supplied = release_gate is not None
-    release_gate = release_gate or ReleaseGate(
+    acquisition_contract_supplied = acquisition_contract is not None
+    acquisition_contract = acquisition_contract or AcquisitionContract(
         required_case_ids=tuple(case.case_id for case in cases if case.required),
-        thresholds=ReleaseThresholds(
-            max_required_case_errors=0,
-            max_required_quality_failures=0,
-        ),
     )
-    is_release_run = release_gate_supplied and bool(release_gate.required_case_ids)
+    is_release_run = acquisition_contract_supplied and bool(
+        acquisition_contract.required_case_ids
+    )
     selected_case_ids = {case.case_id for case in cases}
-    missing_required_cases = set(release_gate.required_case_ids) - selected_case_ids
+    missing_required_cases = (
+        set(acquisition_contract.required_case_ids) - selected_case_ids
+    )
     if missing_required_cases:
         raise ValueError(
             "Release suite omitted required case(s): "
@@ -1576,7 +1555,7 @@ def _run_suite(
         cases=cases,
         cases_path=cases_path,
         requested_model_id=requested_model_id,
-        require_clean_source=release_gate.require_clean_source,
+        require_clean_source=acquisition_contract.require_clean_source,
         config=config if is_release_run else None,
     )
     provisioned_fixtures = _provision_fixtures(config=config, cases=cases)
@@ -1594,22 +1573,14 @@ def _run_suite(
     _write_json_exclusive(
         suite_dir / "release-manifest.json",
         {
-            "artifact_schema_version": release_gate.artifact_schema_version,
+            "artifact_schema_version": acquisition_contract.artifact_schema_version,
             "artifact_mode": "live_execution_manifest",
             "created_at": started_at,
             "release_identity": release_identity,
             "evaluator_identity": evaluator_identity,
             "run_context": run_context,
             "expected_observations": expected_observations,
-            "required_case_ids": list(release_gate.required_case_ids),
-            "thresholds": {
-                "max_required_case_errors": (
-                    release_gate.thresholds.max_required_case_errors
-                ),
-                "max_required_quality_failures": (
-                    release_gate.thresholds.max_required_quality_failures
-                ),
-            },
+            "required_case_ids": list(acquisition_contract.required_case_ids),
             "selected_cases": [
                 {
                     "case_identity": _case_identity(case),
@@ -1653,7 +1624,9 @@ def _run_suite(
             bundle["case_identity"] = _case_identity(case)
             bundle["case_contract"] = _case_contract_payload(case)
             bundle["case_contract_sha256"] = _case_contract_sha256(case)
-            bundle["artifact_schema_version"] = release_gate.artifact_schema_version
+            bundle["artifact_schema_version"] = (
+                acquisition_contract.artifact_schema_version
+            )
             bundle["repetition"] = repetition
             if case.required:
                 provenance = bundle.get("live_execution_provenance")
@@ -1688,7 +1661,7 @@ def _run_suite(
             return result
         except (HTTPError, URLError, TimeoutError, ValueError) as error:
             failure = {
-                "artifact_schema_version": release_gate.artifact_schema_version,
+                "artifact_schema_version": acquisition_contract.artifact_schema_version,
                 "artifact_mode": "live_execution_failure",
                 "created_at": time.strftime("%Y%m%dT%H%M%S"),
                 "app_version": LOCAL_APP_VERSION,
@@ -1730,13 +1703,21 @@ def _run_suite(
         if result.get("observation_status") == "execution_failure"
         and result.get("required") is True
     )
-    evidence_failure_run_count = sum(
-        1 for result in results if result.get("evidence_valid") is False
-    )
-    required_evidence_failure_run_count = sum(
+    # Acquisition faults are STATUS-based, over every selected observation.
+    # `evidence_valid is False` is the wrong predicate: an error_terminated
+    # observation (builder_error / provider_outcome_unknown) deliberately has
+    # no provenance to validate and is a PRODUCT outcome the release
+    # evaluator must score, not a corrupt receipt.
+    invalid_evidence_observation_count = sum(
         1
         for result in results
-        if result.get("evidence_valid") is False and result.get("required") is True
+        if result.get("observation_status") == "invalid_evidence"
+    )
+    required_invalid_evidence_observation_count = sum(
+        1
+        for result in results
+        if result.get("observation_status") == "invalid_evidence"
+        and result.get("required") is True
     )
     quality_failure_run_count = sum(
         1
@@ -1755,7 +1736,7 @@ def _run_suite(
             cases=cases,
             cases_path=cases_path,
             requested_model_id=requested_model_id,
-            require_clean_source=release_gate.require_clean_source,
+            require_clean_source=acquisition_contract.require_clean_source,
             config=config if is_release_run else None,
         )
         release_identity_recheck_checks = _release_identity_recheck_checks(
@@ -1792,10 +1773,9 @@ def _run_suite(
     identity_failure_count = (
         suite_identity_failure_count + observation_identity_failure_count
     )
-    threshold_checks = _evaluate_release_thresholds(
-        release_gate.thresholds,
-        required_case_error_count=required_case_error_count,
-        required_quality_failure_run_count=required_quality_failure_run_count,
+    acquisition_checks = _evaluate_acquisition_validity(
+        execution_failure_observation_count=case_error_count,
+        invalid_evidence_observation_count=invalid_evidence_observation_count,
     )
     receipt_integrity = _suite_receipt_integrity(
         expected_observations=expected_observations,
@@ -1805,8 +1785,15 @@ def _run_suite(
     receipt_complete = receipt_integrity["status"] == "complete"
     sentinel_checks_pass = (
         identity_failure_count == 0
-        and required_evidence_failure_run_count == 0
-        and all(check["passed"] is True for check in threshold_checks)
+        # `_evaluate_acquisition_validity` owns the two observation-status
+        # checks; identity and receipt completeness are gated separately.
+        # An exploratory probe may legitimately contain an execution
+        # failure or invalid evidence - that is often what is being probed -
+        # so it must not fail the run.
+        and (
+            not is_release_run
+            or all(check["passed"] is True for check in acquisition_checks)
+        )
     )
     sentinel_verdict = (
         ("pass" if sentinel_checks_pass else "fail")
@@ -1814,14 +1801,15 @@ def _run_suite(
         else None
     )
     sentinel_gate_scope = {
-        "case_count": len(release_gate.required_case_ids),
+        "case_count": len(acquisition_contract.required_case_ids),
         "selected_case_count": len(cases),
-        "observation_count": len(release_gate.required_case_ids) * args.repetitions,
+        "observation_count": len(acquisition_contract.required_case_ids)
+        * args.repetitions,
         "selected_observation_count": total_runs,
-        "case_ids": list(release_gate.required_case_ids),
+        "case_ids": list(acquisition_contract.required_case_ids),
     }
     suite_summary: JsonObject = {
-        "artifact_schema_version": release_gate.artifact_schema_version,
+        "artifact_schema_version": acquisition_contract.artifact_schema_version,
         "artifact_mode": (
             "live_execution_partial_summary"
             if not receipt_complete
@@ -1842,11 +1830,11 @@ def _run_suite(
         "sentinel_gate_scope": sentinel_gate_scope,
         "receipt_integrity": receipt_integrity,
         "execution_failure_observation_count": case_error_count,
-        "invalid_evidence_observation_count": evidence_failure_run_count,
+        "invalid_evidence_observation_count": invalid_evidence_observation_count,
         "expectation_failed_observation_count": quality_failure_run_count,
         "required_execution_failure_observation_count": required_case_error_count,
         "required_invalid_evidence_observation_count": (
-            required_evidence_failure_run_count
+            required_invalid_evidence_observation_count
         ),
         "required_expectation_failed_observation_count": (
             required_quality_failure_run_count
@@ -1854,7 +1842,7 @@ def _run_suite(
         "identity_failed_check_count": identity_failure_count,
         "observation_identity_failed_check_count": (observation_identity_failure_count),
         "suite_identity_failed_check_count": suite_identity_failure_count,
-        "sentinel_threshold_checks": threshold_checks,
+        "sentinel_acquisition_checks": acquisition_checks,
         "release_identity": release_identity,
         "release_identity_recheck": release_identity_recheck,
         "release_identity_recheck_checks": release_identity_recheck_checks,
@@ -2139,27 +2127,38 @@ def _release_identity_recheck_checks(
     return checks
 
 
-def _evaluate_release_thresholds(
-    thresholds: ReleaseThresholds,
+def _evaluate_acquisition_validity(
     *,
-    required_case_error_count: int,
-    required_quality_failure_run_count: int,
+    execution_failure_observation_count: int,
+    invalid_evidence_observation_count: int,
 ) -> list[JsonObject]:
+    """Acquisition validity only: did we MEASURE cleanly, not did the product win.
+
+    Both invariants are status-based and span EVERY selected observation, so a
+    corrupt observation cannot ride through on a non-required case:
+
+    * `execution_failure` - a caught HTTP, timeout or harness error written as
+      a `live_execution_failure` bundle. It can still satisfy bundle-count and
+      hash completeness and leaves `evidence_valid` unset, so completeness
+      alone would not catch it.
+    * `invalid_evidence` - provenance that failed its own checks.
+
+    Deliberately absent: product expectation failures (the release evaluator
+    scores those), and `error_terminated` observations, whose journey outcome
+    IS the product truth and which have no provenance to validate.
+    """
     return [
         {
-            "name": "max_required_case_errors",
-            "passed": (
-                required_case_error_count <= thresholds.max_required_case_errors
-            ),
-            "actual": required_case_error_count,
-            "threshold": thresholds.max_required_case_errors,
+            "name": "execution_failure_observations",
+            "passed": execution_failure_observation_count == 0,
+            "actual": execution_failure_observation_count,
+            "threshold": 0,
         },
         {
-            "name": "max_required_quality_failures",
-            "passed": required_quality_failure_run_count
-            <= thresholds.max_required_quality_failures,
-            "actual": required_quality_failure_run_count,
-            "threshold": thresholds.max_required_quality_failures,
+            "name": "invalid_evidence_observations",
+            "passed": invalid_evidence_observation_count == 0,
+            "actual": invalid_evidence_observation_count,
+            "threshold": 0,
         },
     ]
 

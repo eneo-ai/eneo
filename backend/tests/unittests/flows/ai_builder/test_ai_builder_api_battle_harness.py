@@ -892,7 +892,7 @@ def test_cases_file_rejects_misspelled_classifier_expectation(tmp_path: Path) ->
     cases_path.write_text(
         json.dumps(
             {
-                "version": 6,
+                "version": 7,
                 "cases": [
                     {
                         "id": "bad-classifier-expectation",
@@ -923,7 +923,7 @@ def test_cases_file_rejects_unsupported_version(tmp_path: Path) -> None:
         encoding="utf-8",
     )
 
-    with raises(ValueError, match="version must be 6"):
+    with raises(ValueError, match="version must be 7"):
         _battle_harness()._read_cases_file(cases_path)
 
 
@@ -935,7 +935,7 @@ def test_cases_file_rejects_duplicate_case_ids_and_prompts(tmp_path: Path) -> No
     ]
     cases_path = tmp_path / "cases.json"
     cases_path.write_text(
-        json.dumps({"version": 6, "cases": duplicate_cases}), encoding="utf-8"
+        json.dumps({"version": 7, "cases": duplicate_cases}), encoding="utf-8"
     )
 
     with raises(ValueError, match="duplicate prompt"):
@@ -943,7 +943,7 @@ def test_cases_file_rejects_duplicate_case_ids_and_prompts(tmp_path: Path) -> No
 
     duplicate_cases[1] = {"id": "case-a", "prompt": "Build another report."}
     cases_path.write_text(
-        json.dumps({"version": 6, "cases": duplicate_cases}), encoding="utf-8"
+        json.dumps({"version": 7, "cases": duplicate_cases}), encoding="utf-8"
     )
 
     with raises(ValueError, match="duplicate case id"):
@@ -955,7 +955,7 @@ def test_cases_file_rejects_misspelled_evidence_posture_key(tmp_path: Path) -> N
     cases_path.write_text(
         json.dumps(
             {
-                "version": 6,
+                "version": 7,
                 "cases": [
                     {
                         "id": "bad-posture-key",
@@ -1916,17 +1916,51 @@ def test_suite_result_keeps_error_terminated_journey_outcome(
     assert result["expectation_verdict"] == "not_evaluated"
 
 
-def test_release_thresholds_are_predeclared_and_compared(
+def test_acquisition_validity_ignores_product_failures_and_catches_execution_failures() -> (
+    None
+):
+    """The instrument judges measurement, never the product.
+
+    A product expectation failure must not invalidate a receipt - that is the
+    release evaluator's call - while an execution failure must, because it
+    means the observation was never measured cleanly.
+    """
+    harness = _battle_harness()
+
+    clean = harness._evaluate_acquisition_validity(
+        execution_failure_observation_count=0,
+        invalid_evidence_observation_count=0,
+    )
+    assert all(check["passed"] for check in clean)
+    assert not any("expectation" in check["name"] for check in clean)
+    assert not any("quality" in check["name"] for check in clean)
+
+    dirty = harness._evaluate_acquisition_validity(
+        execution_failure_observation_count=1,
+        invalid_evidence_observation_count=2,
+    )
+    assert (
+        next(
+            check
+            for check in dirty
+            if check["name"] == "execution_failure_observations"
+        )["passed"]
+        is False
+    )
+    invalid_evidence = next(
+        check for check in dirty if check["name"] == "invalid_evidence_observations"
+    )
+    assert invalid_evidence["passed"] is False
+    assert invalid_evidence["actual"] == 2
+
+
+def test_acquisition_contract_is_non_configurable_and_reported(
     tmp_path: Path,
     monkeypatch: MonkeyPatch,
 ) -> None:
     harness = _battle_harness()
-    gate = harness.ReleaseGate(
+    gate = harness.AcquisitionContract(
         required_case_ids=("required-positive",),
-        thresholds=harness.ReleaseThresholds(
-            max_required_case_errors=0,
-            max_required_quality_failures=0,
-        ),
     )
     case = harness.BattleCase(
         case_id="required-positive",
@@ -1951,10 +1985,115 @@ def test_release_thresholds_are_predeclared_and_compared(
     def execute_case(**kwargs: object) -> dict[str, object]:
         selected_case = kwargs["case"]
         assert isinstance(selected_case, harness.BattleCase)
-        bundle = _complete_live_case_bundle(
+        # The REQUIRED observation FAILS a product expectation. The
+        # instrument must still exit 0: judging the product is the release
+        # evaluator's job, and acquisition here is clean. The deleted
+        # `max_required_quality_failures` gate failed exactly this run.
+        return _complete_live_case_bundle(
             harness,
             selected_case,
+            quality_checks=(
+                [
+                    {
+                        "name": "expected_step_count",
+                        "passed": False,
+                        "expected": 2,
+                        "actual": 1,
+                    }
+                ]
+                if selected_case.required
+                else []
+            ),
         )
+
+    monkeypatch.setattr(harness, "_run_case", execute_case)
+    release_args = type(
+        "Args",
+        (),
+        {"repetitions": 1, "space_id": "space-1", "model_id": "model-a"},
+    )()
+    exit_code = harness._run_suite(
+        cases=[case, benchmark_case],
+        config=harness.ApiConfig(
+            base_url="http://localhost:8123/api/v1",
+            api_key="test-key",
+            timeout_seconds=1,
+        ),
+        args=release_args,
+        output_dir=tmp_path,
+        acquisition_contract=gate,
+    )
+
+    assert exit_code == 0
+    suite_dir = next(tmp_path.glob("ai-builder-api-battle-suite-*"))
+    assert suite_dir.stat().st_mode & 0o777 == 0o700
+    manifest = json.loads((suite_dir / "release-manifest.json").read_text())
+    # The acquisition contract is non-configurable, so the manifest declares
+    # no thresholds: there is nothing an operator could have set.
+    assert "thresholds" not in manifest
+    summary = json.loads((suite_dir / "suite-summary.json").read_text())
+    assert all(check["passed"] for check in summary["sentinel_acquisition_checks"])
+    assert summary["sentinel_verdict"] == "pass"
+    assert "release_verdict" not in summary
+    assert summary["expectation_failed_observation_count"] == 1
+    assert summary["required_expectation_failed_observation_count"] == 1
+    assert summary["invalid_evidence_observation_count"] == 0
+    assert summary["required_invalid_evidence_observation_count"] == 0
+    required_result = next(
+        result
+        for result in summary["results"]
+        if result["case_id"] == "required-positive"
+    )
+    assert required_result["observation_status"] == "completed"
+    assert required_result["expectation_verdict"] == "fail"
+    assert summary["sentinel_gate_scope"] == {
+        "case_count": 1,
+        "selected_case_count": 2,
+        "observation_count": 1,
+        "selected_observation_count": 2,
+        "case_ids": ["required-positive"],
+    }
+    assert summary["artifact_mode"] == "live_execution_summary"
+
+
+def test_release_run_fails_on_invalid_evidence_even_for_benchmark_cases(
+    tmp_path: Path,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    """Acquisition validity spans every SELECTED observation.
+
+    A corrupt observation on a non-required benchmark case invalidates the
+    whole release receipt: the instrument cannot certify a measurement it
+    did not acquire cleanly, regardless of which case broke.
+    """
+    harness = _battle_harness()
+    gate = harness.AcquisitionContract(
+        required_case_ids=("required-positive",),
+    )
+    case = harness.BattleCase(
+        case_id="required-positive",
+        prompt="Build the required positive case.",
+        required=True,
+    )
+    benchmark_case = harness.BattleCase(
+        case_id="benchmark-negative",
+        prompt="Build a non-sentinel benchmark case.",
+    )
+    release_identity = _release_identity_fixture(
+        harness,
+        case_id=case.case_id,
+        prompt=case.prompt,
+    )
+    monkeypatch.setattr(
+        harness,
+        "_release_run_identity",
+        lambda **_: release_identity,
+    )
+
+    def execute_case(**kwargs: object) -> dict[str, object]:
+        selected_case = kwargs["case"]
+        assert isinstance(selected_case, harness.BattleCase)
+        bundle = _complete_live_case_bundle(harness, selected_case)
         if not selected_case.required:
             bundle["observation_input_identity"]["sha256"] = "f" * 64
         return bundle
@@ -1974,43 +2113,166 @@ def test_release_thresholds_are_predeclared_and_compared(
         ),
         args=release_args,
         output_dir=tmp_path,
-        release_gate=gate,
+        acquisition_contract=gate,
+    )
+
+    assert exit_code == 1
+    suite_dir = next(tmp_path.glob("ai-builder-api-battle-suite-*"))
+    summary = json.loads((suite_dir / "suite-summary.json").read_text())
+    assert summary["sentinel_verdict"] == "fail"
+    assert summary["invalid_evidence_observation_count"] == 1
+    assert summary["required_invalid_evidence_observation_count"] == 0
+    failed_check = next(
+        check
+        for check in summary["sentinel_acquisition_checks"]
+        if check["name"] == "invalid_evidence_observations"
+    )
+    assert failed_check["passed"] is False
+    assert failed_check["actual"] == 1
+
+
+def test_release_run_fails_on_benchmark_execution_failure(
+    tmp_path: Path,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    """An execution failure on a NON-required case fails acquisition."""
+    harness = _battle_harness()
+    gate = harness.AcquisitionContract(
+        required_case_ids=("required-positive",),
+    )
+    case = harness.BattleCase(
+        case_id="required-positive",
+        prompt="Build the required positive case.",
+        required=True,
+    )
+    benchmark_case = harness.BattleCase(
+        case_id="benchmark-negative",
+        prompt="Build a non-sentinel benchmark case.",
+    )
+    release_identity = _release_identity_fixture(
+        harness,
+        case_id=case.case_id,
+        prompt=case.prompt,
+    )
+    monkeypatch.setattr(
+        harness,
+        "_release_run_identity",
+        lambda **_: release_identity,
+    )
+
+    def execute_case(**kwargs: object) -> dict[str, object]:
+        selected_case = kwargs["case"]
+        assert isinstance(selected_case, harness.BattleCase)
+        bundle = _complete_live_case_bundle(harness, selected_case)
+        if not selected_case.required:
+            bundle["artifact_mode"] = "live_execution_failure"
+            bundle["error"] = "HTTP 500 from POST /sessions"
+        return bundle
+
+    monkeypatch.setattr(harness, "_run_case", execute_case)
+    release_args = type(
+        "Args",
+        (),
+        {"repetitions": 1, "space_id": "space-1", "model_id": "model-a"},
+    )()
+    exit_code = harness._run_suite(
+        cases=[case, benchmark_case],
+        config=harness.ApiConfig(
+            base_url="http://localhost:8123/api/v1",
+            api_key="test-key",
+            timeout_seconds=1,
+        ),
+        args=release_args,
+        output_dir=tmp_path,
+        acquisition_contract=gate,
+    )
+
+    assert exit_code == 1
+    suite_dir = next(tmp_path.glob("ai-builder-api-battle-suite-*"))
+    summary = json.loads((suite_dir / "suite-summary.json").read_text())
+    assert summary["sentinel_verdict"] == "fail"
+    assert summary["execution_failure_observation_count"] == 1
+    failed_check = next(
+        check
+        for check in summary["sentinel_acquisition_checks"]
+        if check["name"] == "execution_failure_observations"
+    )
+    assert failed_check["passed"] is False
+
+
+def test_release_run_passes_when_a_required_case_dies_in_the_product(
+    tmp_path: Path,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    """An error-terminated observation is a PRODUCT outcome, not a fault.
+
+    The builder dying on a required case is exactly what a release run must
+    be able to measure and report. The old `evidence_valid is False`
+    predicate failed the whole receipt here; the status-based contract
+    scores it.
+    """
+    harness = _battle_harness()
+    gate = harness.AcquisitionContract(
+        required_case_ids=("required-positive",),
+    )
+    case = harness.BattleCase(
+        case_id="required-positive",
+        prompt="Build the required positive case.",
+        required=True,
+    )
+    release_identity = _release_identity_fixture(
+        harness,
+        case_id=case.case_id,
+        prompt=case.prompt,
+    )
+    monkeypatch.setattr(
+        harness,
+        "_release_run_identity",
+        lambda **_: release_identity,
+    )
+
+    def execute_case(**kwargs: object) -> dict[str, object]:
+        selected_case = kwargs["case"]
+        assert isinstance(selected_case, harness.BattleCase)
+        bundle = _complete_live_case_bundle(harness, selected_case)
+        # No provenance to validate on an error-terminated turn.
+        bundle["observation_input_identity"]["sha256"] = "f" * 64
+        journey = bundle.setdefault("journey", {})
+        assert isinstance(journey, dict)
+        journey["outcome_class"] = "builder_error"
+        return bundle
+
+    monkeypatch.setattr(harness, "_run_case", execute_case)
+    release_args = type(
+        "Args",
+        (),
+        {"repetitions": 1, "space_id": "space-1", "model_id": "model-a"},
+    )()
+    exit_code = harness._run_suite(
+        cases=[case],
+        config=harness.ApiConfig(
+            base_url="http://localhost:8123/api/v1",
+            api_key="test-key",
+            timeout_seconds=1,
+        ),
+        args=release_args,
+        output_dir=tmp_path,
+        acquisition_contract=gate,
     )
 
     assert exit_code == 0
     suite_dir = next(tmp_path.glob("ai-builder-api-battle-suite-*"))
-    assert suite_dir.stat().st_mode & 0o777 == 0o700
-    manifest = json.loads((suite_dir / "release-manifest.json").read_text())
-    assert manifest["thresholds"] == {
-        "max_required_case_errors": 0,
-        "max_required_quality_failures": 0,
-    }
     summary = json.loads((suite_dir / "suite-summary.json").read_text())
-    assert all(check["passed"] for check in summary["sentinel_threshold_checks"])
     assert summary["sentinel_verdict"] == "pass"
-    assert "release_verdict" not in summary
-    assert summary["expectation_failed_observation_count"] == 0
-    assert summary["required_expectation_failed_observation_count"] == 0
-    assert summary["invalid_evidence_observation_count"] == 1
+    assert summary["invalid_evidence_observation_count"] == 0
     assert summary["required_invalid_evidence_observation_count"] == 0
-    benchmark_result = next(
-        result
-        for result in summary["results"]
-        if result["case_id"] == "benchmark-negative"
-    )
-    assert benchmark_result["observation_status"] == "invalid_evidence"
-    assert benchmark_result["expectation_verdict"] == "not_evaluated"
-    assert summary["sentinel_gate_scope"] == {
-        "case_count": 1,
-        "selected_case_count": 2,
-        "observation_count": 1,
-        "selected_observation_count": 2,
-        "case_ids": ["required-positive"],
-    }
-    assert summary["artifact_mode"] == "live_execution_summary"
+    result = summary["results"][0]
+    assert result["observation_status"] == "error_terminated"
+    assert result["outcome_class"] == "builder_error"
+    assert result["evidence_valid"] is False
 
 
-def test_release_gate_requires_explicit_model_before_execution(
+def test_release_run_requires_explicit_model_before_execution(
     tmp_path: Path,
     monkeypatch: MonkeyPatch,
 ) -> None:
@@ -2020,12 +2282,8 @@ def test_release_gate_requires_explicit_model_before_execution(
         prompt="Build it.",
         required=True,
     )
-    gate = harness.ReleaseGate(
+    gate = harness.AcquisitionContract(
         required_case_ids=(case.case_id,),
-        thresholds=harness.ReleaseThresholds(
-            max_required_case_errors=0,
-            max_required_quality_failures=0,
-        ),
     )
     executed = False
 
@@ -2050,56 +2308,54 @@ def test_release_gate_requires_explicit_model_before_execution(
                 model_id=None,
             ),
             output_dir=tmp_path,
-            release_gate=gate,
+            acquisition_contract=gate,
         )
 
     assert executed is False
     assert list(tmp_path.iterdir()) == []
 
-    failed_checks = harness._evaluate_release_thresholds(
-        gate.thresholds,
-        required_case_error_count=0,
-        required_quality_failure_run_count=1,
+    # Acquisition validity is measurement quality only: a product
+    # expectation failure must NOT fail it, an execution failure must.
+    assert all(
+        check["passed"]
+        for check in harness._evaluate_acquisition_validity(
+            execution_failure_observation_count=0,
+            invalid_evidence_observation_count=0,
+        )
     )
     assert (
         next(
             check
-            for check in failed_checks
-            if check["name"] == "max_required_quality_failures"
+            for check in harness._evaluate_acquisition_validity(
+                execution_failure_observation_count=1,
+                invalid_evidence_observation_count=0,
+            )
+            if check["name"] == "execution_failure_observations"
         )["passed"]
         is False
     )
 
 
-def test_release_receipt_version_defaults_to_v3_and_rejects_other_versions(
+def test_release_receipt_version_defaults_to_v4_and_rejects_other_versions(
     tmp_path: Path,
 ) -> None:
     harness = _battle_harness()
-    thresholds = harness.ReleaseThresholds(
-        max_required_case_errors=0,
-        max_required_quality_failures=0,
-    )
 
-    gate = harness.ReleaseGate(
+    gate = harness.AcquisitionContract(
         required_case_ids=("required-case",),
-        thresholds=thresholds,
     )
 
-    assert gate.artifact_schema_version == "ai-builder-live-release.v3"
+    assert gate.artifact_schema_version == "ai-builder-live-release.v4"
     assert gate.artifact_schema_version == harness.SUPPORTED_RECEIPT_ARTIFACT_VERSION
 
     cases_path = tmp_path / "cases.json"
     cases_path.write_text(
         json.dumps(
             {
-                "version": 6,
-                "release_gate": {
+                "version": 7,
+                "acquisition_contract": {
                     "artifact_schema_version": "ai-builder-live-release.unsupported",
                     "require_clean_source": False,
-                    "thresholds": {
-                        "max_required_case_errors": 0,
-                        "max_required_quality_failures": 0,
-                    },
                 },
                 "cases": [
                     {
@@ -2115,7 +2371,7 @@ def test_release_receipt_version_defaults_to_v3_and_rejects_other_versions(
 
     cases = harness._read_cases_file(cases_path)
     with raises(ValueError, match="artifact_schema_version must be"):
-        harness._read_release_gate(cases_path, cases=cases)
+        harness._read_acquisition_contract(cases_path, cases=cases)
 
 
 def test_suite_receipts_preserve_canonical_case_identity_for_every_outcome(
@@ -2400,12 +2656,8 @@ def test_suite_identity_rechecks_a_to_b_before_green_summary(
         }
 
     monkeypatch.setattr(harness, "_run_case", successful_case)
-    release_gate = harness.ReleaseGate(
+    acquisition_contract = harness.AcquisitionContract(
         required_case_ids=(case.case_id,),
-        thresholds=harness.ReleaseThresholds(
-            max_required_case_errors=0,
-            max_required_quality_failures=0,
-        ),
     )
 
     exit_code = harness._run_suite(
@@ -2425,7 +2677,7 @@ def test_suite_identity_rechecks_a_to_b_before_green_summary(
             },
         )(),
         output_dir=tmp_path,
-        release_gate=release_gate,
+        acquisition_contract=acquisition_contract,
     )
 
     assert exit_code == 1
@@ -2501,12 +2753,8 @@ def test_final_identity_probe_failure_still_writes_failed_summary(
             "quality_report": {"checks": [], "warnings": [], "metrics": {}},
         },
     )
-    gate = harness.ReleaseGate(
+    gate = harness.AcquisitionContract(
         required_case_ids=(case.case_id,),
-        thresholds=harness.ReleaseThresholds(
-            max_required_case_errors=0,
-            max_required_quality_failures=0,
-        ),
     )
 
     exit_code = harness._run_suite(
@@ -2522,7 +2770,7 @@ def test_final_identity_probe_failure_still_writes_failed_summary(
             model_id="model-a",
         ),
         output_dir=tmp_path,
-        release_gate=gate,
+        acquisition_contract=gate,
     )
 
     assert exit_code == 1
@@ -2568,12 +2816,8 @@ def test_required_identity_drift_does_not_become_builder_expectation_failure(
         )
 
     monkeypatch.setattr(harness, "_run_case", successful_case)
-    release_gate = harness.ReleaseGate(
+    acquisition_contract = harness.AcquisitionContract(
         required_case_ids=(case.case_id,),
-        thresholds=harness.ReleaseThresholds(
-            max_required_case_errors=0,
-            max_required_quality_failures=0,
-        ),
     )
 
     exit_code = harness._run_suite(
@@ -2589,7 +2833,7 @@ def test_required_identity_drift_does_not_become_builder_expectation_failure(
             {"repetitions": 1, "space_id": "space-1", "model_id": "model-a"},
         )(),
         output_dir=tmp_path,
-        release_gate=release_gate,
+        acquisition_contract=acquisition_contract,
     )
 
     assert exit_code == 1
@@ -2609,17 +2853,13 @@ def test_required_identity_drift_does_not_become_builder_expectation_failure(
     )
 
 
-def test_release_gate_rejects_dirty_source_before_creating_output(
+def test_release_run_rejects_dirty_source_before_creating_output(
     tmp_path: Path,
     monkeypatch: MonkeyPatch,
 ) -> None:
     harness = _battle_harness()
-    gate = harness.ReleaseGate(
+    gate = harness.AcquisitionContract(
         required_case_ids=("required-positive",),
-        thresholds=harness.ReleaseThresholds(
-            max_required_case_errors=0,
-            max_required_quality_failures=0,
-        ),
         require_clean_source=True,
     )
 
@@ -2655,7 +2895,7 @@ def test_release_gate_rejects_dirty_source_before_creating_output(
                 },
             )(),
             output_dir=tmp_path,
-            release_gate=gate,
+            acquisition_contract=gate,
         )
 
     assert list(tmp_path.iterdir()) == []
@@ -4169,18 +4409,15 @@ def test_release_inventory_owns_required_dimensions_and_named_cases() -> None:
         / "ai_builder_api_battle_cases.json"
     )
     cases = harness._read_cases_file(cases_path)
-    release_gate = harness._read_release_gate(cases_path, cases=cases)
+    acquisition_contract = harness._read_acquisition_contract(cases_path, cases=cases)
     by_id = {case.case_id: case for case in cases}
 
-    assert release_gate.artifact_schema_version == "ai-builder-live-release.v3"
-    assert release_gate.require_clean_source is True
-    assert release_gate.thresholds == harness.ReleaseThresholds(
-        max_required_case_errors=0,
-        max_required_quality_failures=0,
-    )
+    assert acquisition_contract.artifact_schema_version == "ai-builder-live-release.v4"
+    assert acquisition_contract.require_clean_source is True
+    assert not hasattr(acquisition_contract, "thresholds")
     required_dimensions = {
         dimension
-        for case_id in release_gate.required_case_ids
+        for case_id in acquisition_contract.required_case_ids
         for dimension in by_id[case_id].release_dimensions
     }
     assert {
@@ -4193,8 +4430,10 @@ def test_release_inventory_owns_required_dimensions_and_named_cases() -> None:
         "six_file_document_report",
         "first_pass_semantic",
     } <= required_dimensions
-    assert all(by_id[case_id].required for case_id in release_gate.required_case_ids)
-    assert "complex_authoring_spec_first_pass" in release_gate.required_case_ids
+    assert all(
+        by_id[case_id].required for case_id in acquisition_contract.required_case_ids
+    )
+    assert "complex_authoring_spec_first_pass" in acquisition_contract.required_case_ids
 
     review_case = by_id["ordinary_language_human_review_policy"]
     assert review_case.apply_plan is True
@@ -4404,7 +4643,7 @@ def test_release_expectation_typos_fail_closed(tmp_path: Path) -> None:
     cases_path.write_text(
         json.dumps(
             {
-                "version": 6,
+                "version": 7,
                 "cases": [
                     {
                         "id": "typo",
@@ -4919,7 +5158,7 @@ def test_benchmark_quality_failure_is_reported_without_failing_required_gate(
     assert summary["sentinel_verdict"] is None
     assert summary["artifact_mode"] == "live_execution_exploratory_summary"
     assert summary["results"][0]["failed_expectation_check_count"] == 1
-    assert all(check["passed"] for check in summary["sentinel_threshold_checks"])
+    assert all(check["passed"] for check in summary["sentinel_acquisition_checks"])
 
 
 def test_reanalysis_can_use_current_case_expectations(tmp_path: Path) -> None:
@@ -5055,7 +5294,7 @@ def test_case_loader_merges_synthetic_user_profile_with_case_overrides(
     cases_path.write_text(
         json.dumps(
             {
-                "version": 6,
+                "version": 7,
                 "synthetic_user_profiles": {
                     "document_report_owner": {
                         "description": "Owner building a report from documents.",
@@ -5124,7 +5363,7 @@ def test_case_loader_requires_answers_for_plan_required_question_paths(
     harness = _battle_harness()
     cases_path = tmp_path / "cases.json"
     payload = {
-        "version": 6,
+        "version": 7,
         "synthetic_user_profiles": {
             "document_owner": {
                 "description": "Owner who uploads source documents.",
@@ -5490,7 +5729,7 @@ def test_first_question_forbidden_and_unclassified_always_fail() -> None:
 def test_evaluator_identity_carries_relevance_semantics_version() -> None:
     harness = _battle_harness()
     assert harness.QUESTION_RELEVANCE_SEMANTICS_VERSION == 2
-    assert harness.SUPPORTED_CASES_FILE_VERSION == 6
+    assert harness.SUPPORTED_CASES_FILE_VERSION == 7
     identity = harness._suite_evaluator_identity(
         release_identity={},
         run_context={},
