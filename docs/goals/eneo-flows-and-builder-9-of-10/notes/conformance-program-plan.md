@@ -508,6 +508,18 @@ without recording why.
 **Rationale:** Slice 5 changes cross-step runtime behavior, and compiled
 shape alone cannot prove that. Today 5 of 122 cases apply and 1 executes.
 
+**Adopted sentinel assertions (Pass 25, recorded Pass 26):** every
+sentinel repetition after Slice 5 commit 1 must additionally assert
+(a) cited named-result evidence persisted in the session's planning
+state, and (b) the compiled/public plan shape is unchanged against the
+frozen baseline receipts (`sentinel-baseline-c71fa78-v3`,
+`SENTINEL_BASELINE_SHA256SUMS`). Runtime delivery alone does not prove
+the representation behavior. All three-repetition runs — sentinel,
+targeted probes, and the full 155×3 checkpoint — are exploratory /
+checkpoint-grade evidence per this plan's verification protocol; no
+incidence claim graduates beyond that without an interval able to
+resolve the predeclared MDE.
+
 ---
 
 ## Slice 5 — Typed cross-step content obligations for non-JSON terminals
