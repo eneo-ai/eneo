@@ -14,6 +14,7 @@ import importlib.util
 import json
 import subprocess
 import sys
+from collections.abc import Callable
 from pathlib import Path
 from types import ModuleType
 from typing import Any
@@ -306,6 +307,58 @@ def _suite_dir(
     return suite_dir
 
 
+def _write_replacements(
+    suite_dir: Path,
+    replacements: list[tuple[dict[str, Any], dict[str, Any]]],
+    *,
+    revision: str = _REVISION,
+) -> None:
+    summary = json.loads((suite_dir / "suite-summary.json").read_text())
+    original_by_slot = {
+        (row["case_id"], row["repetition"]): row for row in summary["results"]
+    }
+    descriptors: list[dict[str, Any]] = []
+    for position, (replacement_row, overrides) in enumerate(replacements, start=1):
+        case_id = str(replacement_row["case_id"])
+        repetition = int(replacement_row["repetition"])
+        bundle_path = suite_dir / f"replacement-{position}-{case_id}-r{repetition}.json"
+        bundle = _bundle_for(replacement_row, revision=revision)
+        bundle["artifact_schema_version"] = _RECEIPTS.SUPPORTED_RECEIPT_ARTIFACT_VERSION
+        bundle_path.write_text(json.dumps(bundle), encoding="utf-8")
+        original = original_by_slot[(case_id, repetition)]
+        descriptors.append(
+            {
+                "case_id": case_id,
+                "repetition": repetition,
+                "reason": "provider disposition in original observation",
+                "original_bundle_sha256": original["bundle_sha256"],
+                "replacement_bundle_sha256": hashlib.sha256(
+                    bundle_path.read_bytes()
+                ).hexdigest(),
+                **overrides,
+            }
+        )
+    (suite_dir / "replacements.json").write_text(
+        json.dumps(descriptors), encoding="utf-8"
+    )
+
+
+def _rewrite_replacement_bundle(
+    suite_dir: Path, mutate: Callable[[dict[str, Any]], None]
+) -> None:
+    bundle_path = next(suite_dir.glob("replacement-*.json"))
+    bundle = json.loads(bundle_path.read_text())
+    mutate(bundle)
+    bundle_path.write_text(json.dumps(bundle), encoding="utf-8")
+    descriptors = json.loads((suite_dir / "replacements.json").read_text())
+    descriptors[0]["replacement_bundle_sha256"] = hashlib.sha256(
+        bundle_path.read_bytes()
+    ).hexdigest()
+    (suite_dir / "replacements.json").write_text(
+        json.dumps(descriptors), encoding="utf-8"
+    )
+
+
 def _matrix(
     gate: ModuleType,
     rows: dict[str, str] | None = None,
@@ -429,6 +482,322 @@ def test_a_provider_marked_receipt_is_not_scored(
     assert verdict.release == "invalid"
     assert verdict.rows == ()
     assert any("provider disposition" in reason for reason in verdict.invalidity)
+
+
+def test_a_valid_provider_slot_replacement_is_merged_and_counted(
+    gate: ModuleType, receipts: ModuleType, tmp_path: Path
+) -> None:
+    rows = _perfect_rows(4)
+    rows[0] = _observation(
+        "case_0",
+        1,
+        outcome="provider_outcome_unknown",
+        verdict="not_evaluated",
+        provider_disposition="provider_outcome_unknown",
+        status="error_terminated",
+    )
+    suite_dir = _suite_dir(tmp_path, rows)
+    replacement = _observation("case_0", 1)
+    _write_replacements(suite_dir, [(replacement, {})])
+
+    receipt = receipts.load_release_receipt(suite_dir)
+    verdict = gate.evaluate(receipt, _matrix(gate), _pin(gate))
+
+    assert receipt.replaced_slots == (("case_0", 1),)
+    assert receipt.observations[0].outcome_class == "plan_first_pass"
+    assert verdict.receipt_valid
+    assert verdict.diagnostics["replacement_count"] == 1
+    assert verdict.diagnostics["replacement_limit"] == 1
+
+
+def test_a_replacement_from_another_revision_is_refused(
+    receipts: ModuleType, tmp_path: Path
+) -> None:
+    rows = _perfect_rows(4)
+    rows[0] = _observation(
+        "case_0",
+        1,
+        outcome="provider_outcome_unknown",
+        verdict="not_evaluated",
+        provider_disposition="provider_outcome_unknown",
+        status="error_terminated",
+    )
+    suite_dir = _suite_dir(tmp_path, rows)
+    _write_replacements(
+        suite_dir,
+        [(_observation("case_0", 1), {})],
+        revision="e" * 40,
+    )
+
+    with pytest.raises(receipts.ReceiptError, match="was produced at"):
+        receipts.load_release_receipt(suite_dir)
+
+
+def test_a_replacement_measured_against_another_model_is_refused(
+    receipts: ModuleType, tmp_path: Path
+) -> None:
+    rows = _perfect_rows(4)
+    rows[0] = _observation(
+        "case_0",
+        1,
+        outcome="provider_outcome_unknown",
+        verdict="not_evaluated",
+        provider_disposition="provider_outcome_unknown",
+        status="error_terminated",
+    )
+    suite_dir = _suite_dir(tmp_path, rows)
+    _write_replacements(suite_dir, [(_observation("case_0", 1), {})])
+
+    def change_model(bundle: dict[str, Any]) -> None:
+        model = {"requested_id": "some-other-model", "resolved_id": "other-model"}
+        bundle["live_execution_provenance"]["model"] = {
+            **model,
+            "sha256": receipts.canonical_sha256(model),
+        }
+
+    _rewrite_replacement_bundle(suite_dir, change_model)
+
+    with pytest.raises(receipts.ReceiptError, match="but the run declares"):
+        receipts.load_release_receipt(suite_dir)
+
+
+def test_replacing_more_than_five_percent_invalidates_the_receipt(
+    gate: ModuleType, receipts: ModuleType, tmp_path: Path
+) -> None:
+    rows = _perfect_rows(4)
+    for index in range(2):
+        rows[index] = _observation(
+            "case_0",
+            index + 1,
+            outcome="provider_outcome_unknown",
+            verdict="not_evaluated",
+            provider_disposition="provider_outcome_unknown",
+            status="error_terminated",
+        )
+    suite_dir = _suite_dir(tmp_path, rows)
+    _write_replacements(
+        suite_dir,
+        [(_observation("case_0", repetition), {}) for repetition in (1, 2)],
+    )
+
+    receipt = receipts.load_release_receipt(suite_dir)
+    verdict = gate.evaluate(receipt, _matrix(gate), _pin(gate))
+
+    assert verdict.release == "invalid"
+    assert verdict.rows == ()
+    assert verdict.diagnostics["replacement_count"] == 2
+    assert verdict.diagnostics["replacement_limit"] == 1
+    assert any("replacement" in reason for reason in verdict.invalidity)
+
+
+def test_a_product_failure_cannot_be_rerolled_as_a_replacement(
+    receipts: ModuleType, tmp_path: Path
+) -> None:
+    rows = _perfect_rows(4)
+    rows[0] = _observation("case_0", 1, outcome="builder_error", verdict="fail")
+    suite_dir = _suite_dir(tmp_path, rows)
+    _write_replacements(suite_dir, [(_observation("case_0", 1), {})])
+
+    with pytest.raises(receipts.ReceiptError, match="provider disposition"):
+        receipts.load_release_receipt(suite_dir)
+
+
+def test_a_replacement_with_a_sealed_identity_failure_is_refused(
+    receipts: ModuleType, tmp_path: Path
+) -> None:
+    rows = _perfect_rows(4)
+    rows[0] = _observation(
+        "case_0",
+        1,
+        outcome="provider_outcome_unknown",
+        verdict="not_evaluated",
+        provider_disposition="provider_outcome_unknown",
+        status="error_terminated",
+    )
+    suite_dir = _suite_dir(tmp_path, rows)
+    replacement = _observation("case_0", 1)
+    replacement["identity_failed_check_count"] = 1
+    replacement["identity_failed_checks"] = [
+        {
+            "name": "suite_requested_model_identity",
+            "passed": False,
+            "actual": "other-model",
+            "expected": "model-under-test",
+        }
+    ]
+    _write_replacements(suite_dir, [(replacement, {})])
+
+    with pytest.raises(receipts.ReceiptError, match="identity check"):
+        receipts.load_release_receipt(suite_dir)
+
+
+def test_a_replacement_acquisition_fault_is_not_scored(
+    gate: ModuleType, receipts: ModuleType, tmp_path: Path
+) -> None:
+    rows = _perfect_rows(4)
+    rows[0] = _observation(
+        "case_0",
+        1,
+        outcome="provider_outcome_unknown",
+        verdict="not_evaluated",
+        provider_disposition="provider_outcome_unknown",
+        status="error_terminated",
+    )
+    suite_dir = _suite_dir(tmp_path, rows)
+    _write_replacements(
+        suite_dir,
+        [(_observation("case_0", 1, status="execution_failure"), {})],
+    )
+
+    receipt = receipts.load_release_receipt(suite_dir)
+    verdict = gate.evaluate(receipt, _matrix(gate), _pin(gate))
+
+    assert verdict.release == "invalid"
+    assert verdict.rows == ()
+    assert any("acquisition fault" in reason for reason in verdict.invalidity)
+
+
+def test_a_replacement_must_seal_the_original_repetition(
+    receipts: ModuleType, tmp_path: Path
+) -> None:
+    rows = _perfect_rows(4)
+    rows[0] = _observation(
+        "case_0",
+        1,
+        outcome="provider_outcome_unknown",
+        verdict="not_evaluated",
+        provider_disposition="provider_outcome_unknown",
+        status="error_terminated",
+    )
+    suite_dir = _suite_dir(tmp_path, rows)
+    _write_replacements(suite_dir, [(_observation("case_0", 1), {})])
+
+    def change_repetition(bundle: dict[str, Any]) -> None:
+        bundle["repetition"] = 2
+        bundle["observation"]["repetition"] = 2
+
+    _rewrite_replacement_bundle(suite_dir, change_repetition)
+
+    with pytest.raises(receipts.ReceiptError, match="seals slot"):
+        receipts.load_release_receipt(suite_dir)
+
+
+def test_a_replacement_must_match_the_original_case_contract(
+    receipts: ModuleType, tmp_path: Path
+) -> None:
+    rows = _perfect_rows(4)
+    rows[0] = _observation(
+        "case_0",
+        1,
+        outcome="provider_outcome_unknown",
+        verdict="not_evaluated",
+        provider_disposition="provider_outcome_unknown",
+        status="error_terminated",
+    )
+    suite_dir = _suite_dir(tmp_path, rows)
+    _write_replacements(suite_dir, [(_observation("case_0", 1), {})])
+
+    def change_contract(bundle: dict[str, Any]) -> None:
+        contract = {"id": "case_0", "required": True, "prompt": "changed"}
+        digest = receipts.canonical_sha256(contract)
+        bundle["case_contract"] = contract
+        bundle["case_contract_sha256"] = digest
+        bundle["observation"]["case_contract_sha256"] = digest
+
+    _rewrite_replacement_bundle(suite_dir, change_contract)
+
+    with pytest.raises(receipts.ReceiptError, match="case contract differs"):
+        receipts.load_release_receipt(suite_dir)
+
+
+def test_a_replacement_bundle_must_declare_the_v5_schema(
+    receipts: ModuleType, tmp_path: Path
+) -> None:
+    rows = _perfect_rows(4)
+    rows[0] = _observation(
+        "case_0",
+        1,
+        outcome="provider_outcome_unknown",
+        verdict="not_evaluated",
+        provider_disposition="provider_outcome_unknown",
+        status="error_terminated",
+    )
+    suite_dir = _suite_dir(tmp_path, rows)
+    _write_replacements(suite_dir, [(_observation("case_0", 1), {})])
+    _rewrite_replacement_bundle(
+        suite_dir,
+        lambda bundle: bundle.__setitem__(
+            "artifact_schema_version", "ai-builder-live-release.v4"
+        ),
+    )
+
+    with pytest.raises(receipts.ReceiptError, match="bundle schema"):
+        receipts.load_release_receipt(suite_dir)
+
+
+def test_duplicate_replacements_for_one_slot_are_invalid(
+    receipts: ModuleType, tmp_path: Path
+) -> None:
+    rows = _perfect_rows(4)
+    rows[0] = _observation(
+        "case_0",
+        1,
+        outcome="provider_outcome_unknown",
+        verdict="not_evaluated",
+        provider_disposition="provider_outcome_unknown",
+        status="error_terminated",
+    )
+    suite_dir = _suite_dir(tmp_path, rows)
+    _write_replacements(suite_dir, [(_observation("case_0", 1), {})])
+    path = suite_dir / "replacements.json"
+    descriptors = json.loads(path.read_text())
+    path.write_text(json.dumps([descriptors[0], descriptors[0]]), encoding="utf-8")
+
+    with pytest.raises(receipts.ReceiptError, match="duplicate replacement"):
+        receipts.load_release_receipt(suite_dir)
+
+
+def test_a_replacement_reason_must_explain_the_operator_action(
+    receipts: ModuleType, tmp_path: Path
+) -> None:
+    rows = _perfect_rows(4)
+    rows[0] = _observation(
+        "case_0",
+        1,
+        outcome="provider_outcome_unknown",
+        verdict="not_evaluated",
+        provider_disposition="provider_outcome_unknown",
+        status="error_terminated",
+    )
+    suite_dir = _suite_dir(tmp_path, rows)
+    _write_replacements(
+        suite_dir,
+        [(_observation("case_0", 1), {"reason": "   "})],
+    )
+
+    with pytest.raises(receipts.ReceiptError, match="reason must contain"):
+        receipts.load_release_receipt(suite_dir)
+
+
+def test_a_replacement_digest_must_resolve_to_one_unclaimed_sibling(
+    receipts: ModuleType, tmp_path: Path
+) -> None:
+    rows = _perfect_rows(4)
+    rows[0] = _observation(
+        "case_0",
+        1,
+        outcome="provider_outcome_unknown",
+        verdict="not_evaluated",
+        provider_disposition="provider_outcome_unknown",
+        status="error_terminated",
+    )
+    suite_dir = _suite_dir(tmp_path, rows)
+    _write_replacements(suite_dir, [(_observation("case_0", 1), {})])
+    bundle_path = next(suite_dir.glob("replacement-*.json"))
+    (suite_dir / "duplicate-replacement.json").write_bytes(bundle_path.read_bytes())
+
+    with pytest.raises(receipts.ReceiptError, match="2 unclaimed sibling files"):
+        receipts.load_release_receipt(suite_dir)
 
 
 def test_an_undeclared_pattern_id_is_not_guessed(

@@ -112,6 +112,9 @@ CONFORMANCE_TARGET = 0.90
 REPAIR_BUDGET_FRACTION = 0.05
 MIXED_ACCEPTED_FRACTION = 0.03
 MIXED_FIRST_PASS_FRACTION = 0.10
+# CP8c's five-percent operator overlay, expressed as exact integer arithmetic.
+# One owner avoids a producer and evaluator rounding the same policy differently.
+REPLACEMENT_LIMIT_DENOMINATOR = 20
 
 # Cost limits, nearest-rank p95 (CP0 §7).
 ELIGIBLE_COST_LIMITS = {"model_calls": 8, "total_tokens": 39_000, "elapsed_ms": 50_000}
@@ -333,6 +336,12 @@ def _by_case(observations: Iterable[Observation]) -> dict[str, list[Observation]
     return grouped
 
 
+def replacement_limit(observation_count: int) -> int:
+    if isinstance(observation_count, bool) or observation_count < 0:
+        raise ReleaseGateError("observation_count must be a non-negative integer.")
+    return observation_count // REPLACEMENT_LIMIT_DENOMINATOR
+
+
 def receipt_invalidity(receipt: Receipt, matrix: MatrixState) -> tuple[str, ...]:
     """Every reason this receipt may not be scored at all.
 
@@ -352,6 +361,13 @@ def receipt_invalidity(receipt: Receipt, matrix: MatrixState) -> tuple[str, ...]
         reasons.append(
             f"receipt ran {receipt.repetitions} repetitions; a release run is "
             f"{RELEASE_REPETITIONS}."
+        )
+    allowed_replacements = replacement_limit(len(receipt.observations))
+    if len(receipt.replacements) > allowed_replacements:
+        reasons.append(
+            f"receipt has {len(receipt.replacements)} operator replacements; at most "
+            f"{allowed_replacements} of {len(receipt.observations)} may be "
+            "operator re-measurements."
         )
     for observation in receipt.observations:
         unknown_patterns = observation.chosen_patterns - matrix.known_rows
@@ -812,6 +828,7 @@ def evaluate(
     receipt: Receipt, matrix: MatrixState, pin: EvaluatorPin
 ) -> ReleaseVerdict:
     invalidity = receipt_invalidity(receipt, matrix)
+    diagnostics = _receipt_diagnostics(receipt)
     if invalidity:
         return ReleaseVerdict(
             receipt_valid=False,
@@ -819,7 +836,7 @@ def evaluate(
             rows=(),
             release="invalid",
             trajectory={},
-            diagnostics={},
+            diagnostics=diagnostics,
         )
     rows = evaluate_rows(receipt, matrix, pin)
     gating = [row for row in rows if row.gating]
@@ -837,12 +854,22 @@ def evaluate(
             "complete": conformance_row.verdict == "pass"
             and bool(instability["within_ceiling"]),
         },
-        diagnostics={
-            "observations": len(receipt.observations),
-            "cases": len(receipt.case_ids),
-            "source_revision": receipt.source_revision,
-        },
+        diagnostics=diagnostics,
     )
+
+
+def _receipt_diagnostics(receipt: Receipt) -> JsonObject:
+    return {
+        "observations": len(receipt.observations),
+        "cases": len(receipt.case_ids),
+        "source_revision": receipt.source_revision,
+        "replacement_count": len(receipt.replacements),
+        "replacement_limit": replacement_limit(len(receipt.observations)),
+        "replaced_slots": [
+            {"case_id": case_id, "repetition": repetition}
+            for case_id, repetition in receipt.replaced_slots
+        ],
+    }
 
 
 def perfect_receipt(receipt: Receipt) -> Receipt:
@@ -877,6 +904,8 @@ def perfect_receipt(receipt: Receipt) -> Receipt:
             model_calls=0,
             total_tokens=0,
             elapsed_ms=0,
+            # Feasibility reads typed fields only. Keeping the measured seal
+            # avoids manufacturing a second owner for the observation shape.
             row=observation.row,
         )
         for observation in receipt.observations
@@ -889,6 +918,7 @@ def perfect_receipt(receipt: Receipt) -> Receipt:
         observations=observations,
         integrity_verified=receipt.integrity_verified,
         summary=receipt.summary,
+        replacements=receipt.replacements,
     )
 
 

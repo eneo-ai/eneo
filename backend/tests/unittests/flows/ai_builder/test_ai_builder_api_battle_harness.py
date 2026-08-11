@@ -11,7 +11,7 @@ from types import ModuleType, SimpleNamespace
 from typing import Any
 from uuid import UUID
 
-from pytest import CaptureFixture, MonkeyPatch, raises
+from pytest import CaptureFixture, MonkeyPatch, mark, raises
 
 
 def _battle_harness() -> ModuleType:
@@ -2802,6 +2802,218 @@ def test_final_identity_probe_failure_still_writes_failed_summary(
     assert all(
         check["passed"] is False for check in summary["release_identity_recheck_checks"]
     )
+
+
+@mark.parametrize(
+    "scenario",
+    ["success", "confirmation-drift", "target-collision"],
+)
+def test_replacement_batch_reuses_context_and_preflights_publication(
+    scenario: str,
+    tmp_path: Path,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    harness = _battle_harness()
+    suite_dir = tmp_path / "release-suite"
+    suite_dir.mkdir()
+    output_dir = tmp_path / "replacement-output"
+    cases = [
+        harness.BattleCase(
+            case_id="provider-a",
+            prompt="Build A.",
+            attachments=("01_protokoll_bun_2026_02_25.pdf",),
+        ),
+        harness.BattleCase(case_id="provider-b", prompt="Build B."),
+    ]
+    release_identity = _release_identity_fixture(
+        harness, case_id=cases[0].case_id, prompt=cases[0].prompt
+    )
+    release_identity["target"] = {
+        "expected_source_revision": "a" * 40,
+        "verified": True,
+    }
+    provider_slots = {
+        ("provider-a", 4): SimpleNamespace(
+            slot=("provider-a", 4),
+            provider_dispositions=("provider_outcome_unknown",),
+            bundle_sha256="1" * 64,
+            case_contract_sha256=harness._case_contract_sha256(cases[0]),
+        ),
+        ("provider-b", 2): SimpleNamespace(
+            slot=("provider-b", 2),
+            provider_dispositions=("provider_outcome_unknown",),
+            bundle_sha256="2" * 64,
+            case_contract_sha256=harness._case_contract_sha256(cases[1]),
+        ),
+    }
+    observations = tuple(provider_slots.values()) + tuple(
+        SimpleNamespace(slot=(f"clean-{index}", 1), provider_dispositions=())
+        for index in range(38)
+    )
+    receipt = SimpleNamespace(
+        observations=observations,
+        artifact_schema_version=harness.SUPPORTED_RECEIPT_ARTIFACT_VERSION,
+        repetitions=5,
+        summary={
+            "base_url": "http://localhost:8123/api/v1",
+            "space_id": "space-1",
+            "release_identity": release_identity,
+            "run_context": {
+                "ui_language": "sv",
+                "auto_confirm_requirements": True,
+                "confirm_message_sha256": hashlib.sha256(
+                    harness.DEFAULT_CONFIRM_MESSAGE.encode()
+                ).hexdigest(),
+                "repetitions": 5,
+                "max_concurrency": 2,
+            },
+        },
+    )
+    monkeypatch.setattr(harness, "load_release_receipt", lambda _: receipt)
+    monkeypatch.setattr(harness, "_read_cases_file", lambda _: cases)
+    monkeypatch.setattr(harness, "_release_run_identity", lambda **_: release_identity)
+    monkeypatch.setattr(
+        harness,
+        "_release_identity_recheck_checks",
+        lambda **_: [{"name": "identity", "passed": True}],
+    )
+    provisioned = {"fixture": {"file_id": "file-1"}}
+    provisioned_cases: list[list[Any]] = []
+
+    def provision(**kwargs: Any) -> dict[str, dict[str, str]]:
+        provisioned_cases.append(kwargs["cases"])
+        assert kwargs["cases"][0].attachments == ("01_protokoll_bun_2026_02_25.pdf",)
+        return provisioned
+
+    monkeypatch.setattr(harness, "_provision_fixtures", provision)
+    acquired: list[tuple[str, int, object]] = []
+
+    def acquire(**kwargs: Any) -> dict[str, Any]:
+        case = kwargs["case"]
+        repetition = kwargs["repetition"]
+        staging_dir = kwargs["artifact_output_dir"]
+        assert isinstance(case, harness.BattleCase)
+        assert isinstance(staging_dir, Path)
+        acquired.append((case.case_id, repetition, kwargs["provisioned_fixtures"]))
+        bundle_path = staging_dir / f"{case.case_id}-r{repetition}.json"
+        bundle_path.write_text(
+            json.dumps({"case_id": case.case_id, "repetition": repetition})
+        )
+        digest = hashlib.sha256(bundle_path.read_bytes()).hexdigest()
+        return {
+            "case_id": case.case_id,
+            "repetition": repetition,
+            "required": False,
+            "artifact_mode": "live_execution",
+            "observation_status": "completed",
+            "outcome_class": "plan_first_pass",
+            "expectation_verdict": "pass",
+            "case_contract_sha256": harness._case_contract_sha256(case),
+            "bundle_file": bundle_path.name,
+            "bundle_sha256": digest,
+            "failed_checks": [],
+            "failure_summary": {"failure_codes": [], "error_details": []},
+            "journey": {
+                "outcome_class": "plan_first_pass",
+                "architecture": {"chosen_patterns": ["document_to_structured_report"]},
+                "plan_outcome": {
+                    "repair_attempts": 0,
+                    "attempt_failure_ladder": [],
+                },
+            },
+            "authoring_usage": {
+                "model_calls": 1,
+                "total_tokens": 100,
+                "elapsed_ms": 100,
+            },
+            "evidence_valid": True,
+            "evidence_failed_check_count": 0,
+            "identity_failed_check_count": 0,
+            "identity_failed_checks": [],
+        }
+
+    monkeypatch.setattr(harness, "_acquire_suite_observation", acquire)
+    worker_counts: list[int] = []
+
+    class ImmediateExecutor:
+        def __init__(self, *, max_workers: int) -> None:
+            worker_counts.append(max_workers)
+
+        def __enter__(self) -> ImmediateExecutor:
+            return self
+
+        def __exit__(self, *_: object) -> None:
+            return None
+
+        def map(self, function: Any, items: Any) -> list[Any]:
+            return [function(item) for item in items]
+
+    monkeypatch.setattr(harness, "ThreadPoolExecutor", ImmediateExecutor)
+    args = SimpleNamespace(
+        replacement_suite_dir=str(suite_dir),
+        replacement_slot=["provider-a:4", "provider-b:2"],
+        replacement_reason="provider disposition in original receipt",
+        output_dir=str(output_dir),
+        cases_file=None,
+        confirm_message=(
+            "Different confirmation"
+            if scenario == "confirmation-drift"
+            else harness.DEFAULT_CONFIRM_MESSAGE
+        ),
+        timeout_seconds=1,
+    )
+    collision_path = suite_dir / "replacement-provider-b-r2.json"
+    if scenario == "target-collision":
+        collision_path.write_text("occupied", encoding="utf-8")
+
+    if scenario != "success":
+        match = (
+            "confirm-message does not match"
+            if scenario == "confirmation-drift"
+            else "target already exists"
+        )
+        with raises(ValueError, match=match):
+            harness._run_replacement_batch(
+                args=args,
+                api_key="test-key",
+                output_dir=output_dir,
+            )
+
+        assert not (suite_dir / "replacements.json").exists()
+        assert not (suite_dir / "replacement-provider-a-r4.json").exists()
+        if scenario == "confirmation-drift":
+            assert provisioned_cases == []
+            assert acquired == []
+        else:
+            assert collision_path.read_text(encoding="utf-8") == "occupied"
+        return
+
+    exit_code = harness._run_replacement_batch(
+        args=args,
+        api_key="test-key",
+        output_dir=output_dir,
+    )
+
+    assert exit_code == 0
+    assert worker_counts == [2]
+    assert len(provisioned_cases) == 1
+    assert acquired == [
+        ("provider-a", 4, provisioned),
+        ("provider-b", 2, provisioned),
+    ]
+    descriptors = json.loads((suite_dir / "replacements.json").read_text())
+    assert [(item["case_id"], item["repetition"]) for item in descriptors] == [
+        ("provider-a", 4),
+        ("provider-b", 2),
+    ]
+    for descriptor in descriptors:
+        replacement_files = [
+            path
+            for path in suite_dir.glob("replacement-*.json")
+            if hashlib.sha256(path.read_bytes()).hexdigest()
+            == descriptor["replacement_bundle_sha256"]
+        ]
+        assert len(replacement_files) == 1
 
 
 def test_required_identity_drift_does_not_become_builder_expectation_failure(

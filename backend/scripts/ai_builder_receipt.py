@@ -29,7 +29,7 @@ from __future__ import annotations
 import hashlib
 import json
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, cast
 
@@ -37,6 +37,7 @@ JsonObject = dict[str, Any]
 
 SUITE_SUMMARY_FILE = "suite-summary.json"
 RELEASE_MANIFEST_FILE = "release-manifest.json"
+REPLACEMENTS_FILE = "replacements.json"
 # The artifact contract every consumer of these receipts speaks. It lives here
 # because the harness writes it and the release reader refuses anything else;
 # two copies of a schema version is how a reader ends up scoring a shape it
@@ -54,6 +55,15 @@ BUNDLE_SHA256_FIELD = "bundle_sha256"
 # These describe the bundle artifact itself, so they cannot be sealed inside
 # the bundle before its filename and digest exist.
 BUNDLE_REFERENCE_FIELDS = frozenset({BUNDLE_FILE_FIELD, BUNDLE_SHA256_FIELD})
+_REPLACEMENT_FIELDS = frozenset(
+    {
+        "case_id",
+        "repetition",
+        "reason",
+        "original_bundle_sha256",
+        "replacement_bundle_sha256",
+    }
+)
 
 
 class ReceiptError(ValueError):
@@ -145,6 +155,30 @@ class Observation:
 
 
 @dataclass(frozen=True, slots=True)
+class ReplacementDescriptor:
+    """One operator-directed substitution of a provider-faulted slot."""
+
+    case_id: str
+    repetition: int
+    reason: str
+    original_bundle_sha256: str
+    replacement_bundle_sha256: str
+
+    @property
+    def slot(self) -> tuple[str, int]:
+        return (self.case_id, self.repetition)
+
+    def as_json(self) -> JsonObject:
+        return {
+            "case_id": self.case_id,
+            "repetition": self.repetition,
+            "reason": self.reason,
+            "original_bundle_sha256": self.original_bundle_sha256,
+            "replacement_bundle_sha256": self.replacement_bundle_sha256,
+        }
+
+
+@dataclass(frozen=True, slots=True)
 class Receipt:
     """A suite receipt parsed into the facts a verdict may be built from."""
 
@@ -158,14 +192,21 @@ class Receipt:
     # The decoded receipt, for consumers that report on identity and run
     # context rather than on observations.
     summary: Mapping[str, Any]
+    # The base summary remains an immutable historical projection. The typed
+    # observations above carry the applied overlay; keeping its descriptors
+    # here makes the substitution explicit without manufacturing a new summary.
+    replacements: tuple[ReplacementDescriptor, ...] = ()
 
     @property
     def case_ids(self) -> frozenset[str]:
         return frozenset(observation.case_id for observation in self.observations)
 
+    @property
+    def replaced_slots(self) -> tuple[tuple[str, int], ...]:
+        return tuple(replacement.slot for replacement in self.replacements)
 
-def _observation_from_row(raw_row: Any, *, index: int) -> Observation:
-    where = f"results[{index}]"
+
+def observation_from_row(raw_row: Any, *, where: str) -> Observation:
     if not isinstance(raw_row, Mapping):
         raise ReceiptError(f"{where} must be an object; got {type(raw_row).__name__}.")
     row = cast(Mapping[str, Any], raw_row)
@@ -279,7 +320,8 @@ def receipt_from_summary(
     if not rows:
         raise ReceiptError(f"{where}: results must be a non-empty array.")
     observations = tuple(
-        _observation_from_row(row, index=index) for index, row in enumerate(rows)
+        observation_from_row(row, where=f"results[{index}]")
+        for index, row in enumerate(rows)
     )
     seen: set[tuple[str, int]] = set()
     for observation in observations:
@@ -397,7 +439,183 @@ def load_release_receipt(suite_dir: Path) -> Receipt:
         manifest=cast(Mapping[str, Any], manifest),
         where=str(manifest_path),
     )
-    return receipt
+    return _apply_replacements(receipt, suite_dir=suite_dir)
+
+
+def replacement_descriptors_from_payload(
+    payload: Any, *, where: str
+) -> tuple[ReplacementDescriptor, ...]:
+    raw_descriptors = _sequence(payload, where=where, key="replacements")
+    if not raw_descriptors:
+        raise ReceiptError(f"{where}: replacements must not be empty.")
+    descriptors: list[ReplacementDescriptor] = []
+    seen: set[tuple[str, int]] = set()
+    for index, raw_descriptor in enumerate(raw_descriptors):
+        item_where = f"{where}[{index}]"
+        descriptor = _mapping(raw_descriptor, where=item_where, key="replacement")
+        if frozenset(descriptor) != _REPLACEMENT_FIELDS:
+            raise ReceiptError(
+                f"{item_where}: replacement fields must be exactly "
+                f"{sorted(_REPLACEMENT_FIELDS)}."
+            )
+        repetition = _optional_int(
+            descriptor.get("repetition"),
+            where=item_where,
+            key="repetition",
+        )
+        if repetition is None or repetition < 1:
+            raise ReceiptError(f"{item_where}: repetition must be an integer >= 1.")
+        replacement = ReplacementDescriptor(
+            case_id=_required_str(descriptor, "case_id", where=item_where),
+            repetition=repetition,
+            reason=_required_str(descriptor, "reason", where=item_where),
+            original_bundle_sha256=_required_str(
+                descriptor, "original_bundle_sha256", where=item_where
+            ),
+            replacement_bundle_sha256=_required_str(
+                descriptor, "replacement_bundle_sha256", where=item_where
+            ),
+        )
+        if not replacement.reason.strip():
+            raise ReceiptError(
+                f"{item_where}: reason must contain non-whitespace text."
+            )
+        for field, digest in (
+            ("original_bundle_sha256", replacement.original_bundle_sha256),
+            ("replacement_bundle_sha256", replacement.replacement_bundle_sha256),
+        ):
+            if not is_sha256(digest):
+                raise ReceiptError(f"{item_where}: {field} must be a SHA-256 digest.")
+        if replacement.slot in seen:
+            raise ReceiptError(
+                f"{where}: duplicate replacement for {replacement.case_id!r} "
+                f"repetition {replacement.repetition}."
+            )
+        seen.add(replacement.slot)
+        descriptors.append(replacement)
+    return tuple(descriptors)
+
+
+def _replacement_files_by_digest(
+    suite_dir: Path, *, claimed_bundle_files: frozenset[str]
+) -> Mapping[str, tuple[Path, ...]]:
+    excluded = claimed_bundle_files | frozenset(
+        {SUITE_SUMMARY_FILE, RELEASE_MANIFEST_FILE, REPLACEMENTS_FILE}
+    )
+    indexed: dict[str, list[Path]] = {}
+    try:
+        candidates = tuple(suite_dir.iterdir())
+    except OSError as error:
+        raise ReceiptError(f"{suite_dir} could not be listed: {error}") from error
+    for path in candidates:
+        if (
+            path.name in excluded
+            or path.suffix != ".json"
+            or path.is_symlink()
+            or not path.is_file()
+        ):
+            continue
+        try:
+            digest = hashlib.sha256(path.read_bytes()).hexdigest()
+        except OSError as error:
+            raise ReceiptError(f"{path} could not be read: {error}") from error
+        indexed.setdefault(digest, []).append(path)
+    return {digest: tuple(sorted(paths)) for digest, paths in indexed.items()}
+
+
+def _apply_replacements(receipt: Receipt, *, suite_dir: Path) -> Receipt:
+    replacements_path = suite_dir / REPLACEMENTS_FILE
+    if not replacements_path.exists():
+        return receipt
+    descriptors = replacement_descriptors_from_payload(
+        _read_json(replacements_path), where=str(replacements_path)
+    )
+    base_by_slot = {
+        observation.slot: observation for observation in receipt.observations
+    }
+    files_by_digest = _replacement_files_by_digest(
+        suite_dir,
+        claimed_bundle_files=frozenset(
+            observation.bundle_file for observation in receipt.observations
+        ),
+    )
+    identity = _mapping(
+        receipt.summary.get("release_identity"),
+        where=str(replacements_path),
+        key="release_identity",
+    )
+    overlaid: dict[tuple[str, int], Observation] = {}
+    for descriptor in descriptors:
+        where = (
+            f"{replacements_path}: {descriptor.case_id!r} "
+            f"repetition {descriptor.repetition}"
+        )
+        original = base_by_slot.get(descriptor.slot)
+        if original is None:
+            raise ReceiptError(f"{where}: no original observation occupies this slot.")
+        if not original.provider_dispositions:
+            raise ReceiptError(
+                f"{where}: the original observation has no provider disposition "
+                "and may not be re-measured."
+            )
+        if original.bundle_sha256 != descriptor.original_bundle_sha256:
+            raise ReceiptError(
+                f"{where}: original_bundle_sha256 does not match the base slot."
+            )
+        matching_paths = files_by_digest.get(descriptor.replacement_bundle_sha256, ())
+        if len(matching_paths) != 1:
+            raise ReceiptError(
+                f"{where}: replacement_bundle_sha256 resolves to "
+                f"{len(matching_paths)} unclaimed sibling files; expected exactly one."
+            )
+        bundle_path = matching_paths[0]
+        bundle = _mapping(_read_json(bundle_path), where=str(bundle_path), key="bundle")
+        if bundle.get("artifact_schema_version") != SUPPORTED_RECEIPT_ARTIFACT_VERSION:
+            raise ReceiptError(
+                f"{where}: replacement bundle schema must be "
+                f"{SUPPORTED_RECEIPT_ARTIFACT_VERSION}."
+            )
+        sealed = _mapping(
+            bundle.get("observation"), where=str(bundle_path), key="observation"
+        )
+        if not sealed:
+            raise ReceiptError(f"{where}: the replacement bundle seals no observation.")
+        replacement_row = {
+            **dict(sealed),
+            BUNDLE_FILE_FIELD: bundle_path.name,
+            BUNDLE_SHA256_FIELD: descriptor.replacement_bundle_sha256,
+        }
+        replacement_observation = observation_from_row(
+            replacement_row, where=f"{where} replacement observation"
+        )
+        if replacement_observation.slot != descriptor.slot:
+            raise ReceiptError(
+                f"{where}: replacement seals slot {replacement_observation.slot}."
+            )
+        if (
+            replacement_observation.case_contract_sha256
+            != original.case_contract_sha256
+        ):
+            raise ReceiptError(
+                f"{where}: replacement case contract differs from the original."
+            )
+        _require_row_matches_bundle(
+            replacement_observation,
+            bundle=bundle,
+            where=where,
+            identity=identity,
+        )
+        if observation_identity_failure_count(replacement_observation, where=where):
+            raise ReceiptError(f"{where}: replacement has a failed identity check.")
+        overlaid[descriptor.slot] = replacement_observation
+    return replace(
+        receipt,
+        observations=tuple(
+            overlaid.get(observation.slot, observation)
+            for observation in receipt.observations
+        ),
+        replacements=descriptors,
+    )
 
 
 def release_identity_recheck_checks(
@@ -539,43 +757,26 @@ def _require_release_identity(
             "observation statuses."
         )
 
-    observation_identity_failure_count = 0
-    for observation in receipt.observations:
-        row_where = f"{where}: observation {observation.slot}"
-        identity_checks = [
-            _mapping(check, where=row_where, key="identity_failed_checks")
-            for check in _sequence(
-                observation.row.get("identity_failed_checks"),
-                where=row_where,
-                key="identity_failed_checks",
-            )
-        ]
-        derived_count = sum(
-            check.get("passed") is not True for check in identity_checks
+    derived_observation_identity_failure_count = sum(
+        observation_identity_failure_count(
+            observation, where=f"{where}: observation {observation.slot}"
         )
-        reported_count = _optional_int(
-            observation.row.get("identity_failed_check_count"),
-            where=row_where,
-            key="identity_failed_check_count",
-        )
-        if reported_count != derived_count:
-            raise ReceiptError(
-                f"{row_where}: identity_failed_check_count is {reported_count}, "
-                f"but the sealed checks contain {derived_count} failures."
-            )
-        observation_identity_failure_count += derived_count
+        for observation in receipt.observations
+    )
 
     suite_identity_failure_count = sum(
         check["passed"] is not True for check in expected_recheck_checks
     )
     identity_failure_count = (
-        suite_identity_failure_count + observation_identity_failure_count
+        suite_identity_failure_count + derived_observation_identity_failure_count
     )
     expected_counters = {
         "execution_failure_observation_count": execution_failure_count,
         "invalid_evidence_observation_count": invalid_evidence_count,
         "suite_identity_failed_check_count": suite_identity_failure_count,
-        "observation_identity_failed_check_count": (observation_identity_failure_count),
+        "observation_identity_failed_check_count": (
+            derived_observation_identity_failure_count
+        ),
         "identity_failed_check_count": identity_failure_count,
     }
     for counter, expected_count in expected_counters.items():
@@ -626,6 +827,29 @@ def _require_release_identity(
                 f"{path.name} hashes to {actual}. The receipt was produced by a "
                 "different instrument or corpus than the one judging it."
             )
+
+
+def observation_identity_failure_count(observation: Observation, *, where: str) -> int:
+    identity_checks = [
+        _mapping(check, where=where, key="identity_failed_checks")
+        for check in _sequence(
+            observation.row.get("identity_failed_checks"),
+            where=where,
+            key="identity_failed_checks",
+        )
+    ]
+    derived_count = sum(check.get("passed") is not True for check in identity_checks)
+    reported_count = _optional_int(
+        observation.row.get("identity_failed_check_count"),
+        where=where,
+        key="identity_failed_check_count",
+    )
+    if reported_count != derived_count:
+        raise ReceiptError(
+            f"{where}: identity_failed_check_count is {reported_count}, "
+            f"but the sealed checks contain {derived_count} failures."
+        )
+    return derived_count
 
 
 def _require_row_matches_bundle(

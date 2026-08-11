@@ -960,6 +960,15 @@ def release_verdict_report(
 def _render_release_markdown(report: dict[str, Any]) -> str:
     release = cast(str, report["release"])
     lines = [f"# Release verdict: **{release.upper()}**", ""]
+    diagnostics = cast(dict[str, Any], report.get("diagnostics") or {})
+    replacement_count = diagnostics.get("replacement_count")
+    replacement_limit_value = diagnostics.get("replacement_limit")
+    if isinstance(replacement_count, int) and isinstance(replacement_limit_value, int):
+        lines.append(
+            f"Operator re-measurements: {replacement_count} / "
+            f"{replacement_limit_value} allowed slots."
+        )
+        lines.append("")
     invalidity = cast(list[str], report["invalidity"])
     if invalidity:
         lines.append(

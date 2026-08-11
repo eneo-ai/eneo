@@ -39,8 +39,15 @@ from ai_builder_receipt import (  # noqa: E402
     BUNDLE_FILE_FIELD,
     BUNDLE_REFERENCE_FIELDS,
     BUNDLE_SHA256_FIELD,
+    REPLACEMENTS_FILE,
     SUPPORTED_RECEIPT_ARTIFACT_VERSION,
+    Observation,
+    ReceiptError,
+    ReplacementDescriptor,
     acquisition_validity_checks,
+    load_release_receipt,
+    observation_from_row,
+    observation_identity_failure_count,
 )
 from ai_builder_receipt import canonical_sha256 as _canonical_sha256  # noqa: E402
 from ai_builder_receipt import (  # noqa: E402
@@ -90,6 +97,11 @@ def _local_app_version() -> str:
 
 
 LOCAL_APP_VERSION = os.getenv("ENEO_APP_VERSION") or _local_app_version()
+
+# Import after `_local_app_version`: that path initializes the `eneo` package
+# for standalone script execution, while the pure gate imports its leaf kind
+# catalog through that namespace.
+from ai_builder_release_gate import replacement_limit  # noqa: E402
 
 
 @dataclass(frozen=True, slots=True)
@@ -360,6 +372,19 @@ def main() -> int:
     if not api_key:
         print("ENEO_API_KEY or --api-key is required.", file=sys.stderr)
         return 2
+    output_dir = Path(args.output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    os.chmod(output_dir, 0o700)
+    if args.replacement_suite_dir:
+        try:
+            return _run_replacement_batch(
+                args=args,
+                api_key=api_key,
+                output_dir=output_dir,
+            )
+        except (ReceiptError, HTTPError, URLError, TimeoutError, ValueError) as error:
+            print(f"replacement batch refused: {error}", file=sys.stderr)
+            return 2
     if not args.space_id:
         print("ENEO_SPACE_ID or --space-id is required.", file=sys.stderr)
         return 2
@@ -369,10 +394,6 @@ def main() -> int:
         api_key=api_key,
         timeout_seconds=args.timeout_seconds,
     )
-    output_dir = Path(args.output_dir)
-    output_dir.mkdir(parents=True, exist_ok=True)
-    os.chmod(output_dir, 0o700)
-
     try:
         cases = _cases_from_args(args)
         if args.run_suite or len(cases) > 1:
@@ -474,6 +495,22 @@ def _parse_args() -> argparse.Namespace:
         "--run-suite",
         action="store_true",
         help="Run all selected cases from --cases-file.",
+    )
+    parser.add_argument(
+        "--replacement-suite-dir",
+        default=None,
+        help="Release suite whose provider-marked slots will be re-measured.",
+    )
+    parser.add_argument(
+        "--replacement-slot",
+        action="append",
+        default=None,
+        help="Provider-marked slot as CASE_ID:REPETITION. Repeat for a batch.",
+    )
+    parser.add_argument(
+        "--replacement-reason",
+        default=None,
+        help="Operator reason recorded on every slot in this replacement batch.",
     )
     parser.add_argument(
         "--reanalyze-bundle",
@@ -1544,6 +1581,97 @@ def _suite_evaluator_identity(
     return {**payload, "sha256": _canonical_sha256(payload)}
 
 
+def _acquire_suite_observation(
+    *,
+    repetition: int,
+    case_index: int,
+    case: BattleCase,
+    case_count: int,
+    total_repetitions: int,
+    config: ApiConfig,
+    args: argparse.Namespace,
+    artifact_output_dir: Path,
+    cases_path: Path,
+    provisioned_fixtures: Mapping[str, JsonObject],
+    acquisition_contract: AcquisitionContract,
+    release_identity: Mapping[str, object],
+) -> JsonObject:
+    """Acquire, seal and reference one observation for every suite-shaped run."""
+
+    repetition_suffix = f"-r{repetition:02d}" if total_repetitions > 1 else ""
+    label = (
+        f"case {case_index}/{case_count}: {case.case_id} ({case.complexity}) "
+        f"repetition {repetition}/{total_repetitions}"
+    )
+    try:
+        bundle = _run_case(
+            case=case,
+            config=config,
+            args=args,
+            existing_session_id=None,
+            artifact_output_dir=artifact_output_dir,
+            cases_path=cases_path,
+            provisioned_fixtures=provisioned_fixtures,
+        )
+        bundle["case_identity"] = _case_identity(case)
+        bundle["case_contract"] = _case_contract_payload(case)
+        bundle["case_contract_sha256"] = _case_contract_sha256(case)
+        bundle["artifact_schema_version"] = acquisition_contract.artifact_schema_version
+        bundle["repetition"] = repetition
+        if case.required:
+            provenance = bundle.get("live_execution_provenance")
+            quality_report = bundle.get("quality_report")
+            checks = (
+                quality_report.get("checks")
+                if isinstance(quality_report, Mapping)
+                else None
+            )
+            if not isinstance(provenance, Mapping) or not isinstance(checks, list):
+                raise ValueError(
+                    f"required case {case.case_id} has no evaluable evidence."
+                )
+            bundle["release_identity_checks"] = _required_case_identity_checks(
+                case=case,
+                release_identity=release_identity,
+                provenance=provenance,
+                observation_input_identity=(
+                    bundle.get("observation_input_identity")
+                    if isinstance(bundle.get("observation_input_identity"), Mapping)
+                    else None
+                ),
+            )
+            bundle["release_identity"] = dict(release_identity)
+        bundle_path = _write_bundle(
+            artifact_output_dir,
+            seal_observation(bundle),
+            suffix=f"{case.case_id}{repetition_suffix}",
+        )
+        result = _suite_result(bundle, bundle_path)
+        _print_observation(label=label, result=result, bundle_path=bundle_path)
+        return result
+    except (HTTPError, URLError, TimeoutError, ValueError) as error:
+        failure: JsonObject = {
+            "artifact_schema_version": acquisition_contract.artifact_schema_version,
+            "artifact_mode": "live_execution_failure",
+            "created_at": time.strftime("%Y%m%dT%H%M%S"),
+            "app_version": LOCAL_APP_VERSION,
+            "case_identity": _case_identity(case),
+            "case_contract": _case_contract_payload(case),
+            "case_contract_sha256": _case_contract_sha256(case),
+            "repetition": repetition,
+            **_failure_error_fields(error),
+            "release_identity": dict(release_identity),
+        }
+        failure_path = _write_bundle(
+            artifact_output_dir,
+            seal_observation(failure),
+            suffix=f"{case.case_id}{repetition_suffix}-failure",
+        )
+        print(f"\n=== {label} ===\ncase failed: {error}", file=sys.stderr)
+        print(f"failure bundle: {failure_path}", file=sys.stderr)
+        return _suite_result(failure, failure_path)
+
+
 def _run_suite(
     *,
     cases: list[BattleCase],
@@ -1631,80 +1759,20 @@ def _run_suite(
         item: tuple[int, int, BattleCase],
     ) -> JsonObject:
         repetition, case_index, case = item
-        repetition_suffix = f"-r{repetition:02d}" if args.repetitions > 1 else ""
-        label = (
-            f"case {case_index}/{len(cases)}: {case.case_id} ({case.complexity}) "
-            f"repetition {repetition}/{args.repetitions}"
+        return _acquire_suite_observation(
+            repetition=repetition,
+            case_index=case_index,
+            case=case,
+            case_count=len(cases),
+            total_repetitions=args.repetitions,
+            config=config,
+            args=args,
+            artifact_output_dir=suite_dir,
+            cases_path=cases_path,
+            provisioned_fixtures=provisioned_fixtures,
+            acquisition_contract=acquisition_contract,
+            release_identity=release_identity,
         )
-        try:
-            bundle = _run_case(
-                case=case,
-                config=config,
-                args=args,
-                existing_session_id=None,
-                artifact_output_dir=suite_dir,
-                cases_path=cases_path,
-                provisioned_fixtures=provisioned_fixtures,
-            )
-            bundle["case_identity"] = _case_identity(case)
-            bundle["case_contract"] = _case_contract_payload(case)
-            bundle["case_contract_sha256"] = _case_contract_sha256(case)
-            bundle["artifact_schema_version"] = (
-                acquisition_contract.artifact_schema_version
-            )
-            bundle["repetition"] = repetition
-            if case.required:
-                provenance = bundle.get("live_execution_provenance")
-                quality_report = bundle.get("quality_report")
-                checks = (
-                    quality_report.get("checks")
-                    if isinstance(quality_report, Mapping)
-                    else None
-                )
-                if not isinstance(provenance, Mapping) or not isinstance(checks, list):
-                    raise ValueError(
-                        f"required case {case.case_id} has no evaluable evidence."
-                    )
-                bundle["release_identity_checks"] = _required_case_identity_checks(
-                    case=case,
-                    release_identity=release_identity,
-                    provenance=provenance,
-                    observation_input_identity=(
-                        bundle.get("observation_input_identity")
-                        if isinstance(bundle.get("observation_input_identity"), Mapping)
-                        else None
-                    ),
-                )
-                bundle["release_identity"] = release_identity
-            bundle_path = _write_bundle(
-                suite_dir,
-                seal_observation(bundle),
-                suffix=f"{case.case_id}{repetition_suffix}",
-            )
-            result = _suite_result(bundle, bundle_path)
-            _print_observation(label=label, result=result, bundle_path=bundle_path)
-            return result
-        except (HTTPError, URLError, TimeoutError, ValueError) as error:
-            failure = {
-                "artifact_schema_version": acquisition_contract.artifact_schema_version,
-                "artifact_mode": "live_execution_failure",
-                "created_at": time.strftime("%Y%m%dT%H%M%S"),
-                "app_version": LOCAL_APP_VERSION,
-                "case_identity": _case_identity(case),
-                "case_contract": _case_contract_payload(case),
-                "case_contract_sha256": _case_contract_sha256(case),
-                "repetition": repetition,
-                **_failure_error_fields(error),
-                "release_identity": release_identity,
-            }
-            failure_path = _write_bundle(
-                suite_dir,
-                seal_observation(failure),
-                suffix=f"{case.case_id}{repetition_suffix}-failure",
-            )
-            print(f"\n=== {label} ===\ncase failed: {error}", file=sys.stderr)
-            print(f"failure bundle: {failure_path}", file=sys.stderr)
-            return _suite_result(failure, failure_path)
 
     print(f"\nrunning {total_runs} observation(s) with concurrency {max_concurrency}")
     if max_concurrency == 1:
@@ -1788,11 +1856,11 @@ def _run_suite(
         for check in release_identity_recheck_checks
         if check.get("passed") is not True
     )
-    observation_identity_failure_count = sum(
+    derived_observation_identity_failure_count = sum(
         _int_value(result.get("identity_failed_check_count")) or 0 for result in results
     )
     identity_failure_count = (
-        suite_identity_failure_count + observation_identity_failure_count
+        suite_identity_failure_count + derived_observation_identity_failure_count
     )
     acquisition_checks = acquisition_validity_checks(
         execution_failure_observation_count=case_error_count,
@@ -1861,7 +1929,9 @@ def _run_suite(
             required_quality_failure_run_count
         ),
         "identity_failed_check_count": identity_failure_count,
-        "observation_identity_failed_check_count": (observation_identity_failure_count),
+        "observation_identity_failed_check_count": (
+            derived_observation_identity_failure_count
+        ),
         "suite_identity_failed_check_count": suite_identity_failure_count,
         "sentinel_acquisition_checks": acquisition_checks,
         "release_identity": release_identity,
@@ -1878,6 +1948,274 @@ def _run_suite(
     _write_json_exclusive(summary_path, suite_summary)
     print(f"\nsuite summary: {summary_path}")
     return 1 if not receipt_complete or not sentinel_checks_pass else 0
+
+
+def _replacement_slots(values: list[str] | None) -> tuple[tuple[str, int], ...]:
+    if not values:
+        raise ValueError("--replacement-slot is required in replacement mode.")
+    slots: list[tuple[str, int]] = []
+    seen: set[tuple[str, int]] = set()
+    for value in values:
+        case_id, separator, raw_repetition = value.rpartition(":")
+        if not separator or not case_id:
+            raise ValueError(
+                f"replacement slot {value!r} must have the form CASE_ID:REPETITION."
+            )
+        try:
+            repetition = int(raw_repetition)
+        except ValueError as error:
+            raise ValueError(
+                f"replacement slot {value!r} has a non-integer repetition."
+            ) from error
+        if repetition < 1:
+            raise ValueError(f"replacement slot {value!r} must use a repetition >= 1.")
+        slot = (case_id, repetition)
+        if slot in seen:
+            raise ValueError(f"duplicate replacement slot {value!r}.")
+        seen.add(slot)
+        slots.append(slot)
+    return tuple(slots)
+
+
+def _replacement_summary_value(summary: Mapping[str, object], key: str) -> str:
+    value = summary.get(key)
+    if not isinstance(value, str) or not value:
+        raise ValueError(f"base receipt has no {key}.")
+    return value
+
+
+def _run_replacement_batch(
+    *,
+    args: argparse.Namespace,
+    api_key: str,
+    output_dir: Path,
+) -> int:
+    """Re-measure exactly the provider-marked slots an operator names."""
+
+    suite_dir = Path(args.replacement_suite_dir)
+    replacements_path = suite_dir / REPLACEMENTS_FILE
+    if replacements_path.exists():
+        raise ValueError(
+            f"{replacements_path} already exists. Start from a fresh copy of "
+            "the original base suite and submit the complete replacement batch."
+        )
+    slots = _replacement_slots(args.replacement_slot)
+    reason = getattr(args, "replacement_reason", None)
+    if not isinstance(reason, str) or not reason.strip():
+        raise ValueError("--replacement-reason is required in replacement mode.")
+
+    receipt = load_release_receipt(suite_dir)
+    if len(slots) > replacement_limit(len(receipt.observations)):
+        raise ValueError(
+            f"replacement batch has {len(slots)} slots; this receipt allows "
+            f"{replacement_limit(len(receipt.observations))}."
+        )
+    summary = receipt.summary
+    release_identity = summary.get("release_identity")
+    if not isinstance(release_identity, Mapping):
+        raise ValueError("base receipt has no release_identity.")
+    run_context = summary.get("run_context")
+    if not isinstance(run_context, Mapping):
+        raise ValueError("base receipt has no run_context.")
+    expected_confirmation_hash = run_context.get("confirm_message_sha256")
+    actual_confirmation_hash = hashlib.sha256(
+        str(args.confirm_message).encode("utf-8")
+    ).hexdigest()
+    if expected_confirmation_hash != actual_confirmation_hash:
+        raise ValueError(
+            "--confirm-message does not match the base receipt's run context."
+        )
+    max_concurrency = run_context.get("max_concurrency")
+    if (
+        isinstance(max_concurrency, bool)
+        or not isinstance(max_concurrency, int)
+        or max_concurrency < 1
+    ):
+        raise ValueError("base receipt max_concurrency must be a positive integer.")
+    ui_language = run_context.get("ui_language")
+    auto_confirm = run_context.get("auto_confirm_requirements")
+    if not isinstance(ui_language, str) or not isinstance(auto_confirm, bool):
+        raise ValueError("base receipt has an invalid authoring run context.")
+    repetitions = run_context.get("repetitions")
+    if repetitions != receipt.repetitions:
+        raise ValueError("base receipt repetitions disagree with its run context.")
+
+    model = release_identity.get("model")
+    if not isinstance(model, Mapping):
+        raise ValueError("base receipt has no model identity.")
+    requested_model_id = model.get("requested_id")
+    if not isinstance(requested_model_id, str) or not requested_model_id:
+        raise ValueError("base receipt has no requested model id.")
+    config = ApiConfig(
+        base_url=_replacement_summary_value(summary, "base_url").rstrip("/"),
+        api_key=api_key,
+        timeout_seconds=args.timeout_seconds,
+    )
+    # Replacement acquisition must replay the base run's authoring context;
+    # command-line defaults are not evidence that the operator chose the same run.
+    args.space_id = _replacement_summary_value(summary, "space_id")
+    args.model_id = requested_model_id
+    args.ui_language = ui_language
+    args.auto_confirm_requirements = auto_confirm
+    args.repetitions = receipt.repetitions
+    args.concurrency = max_concurrency
+
+    cases_path = Path(args.cases_file) if args.cases_file else DEFAULT_CASES_FILE
+    all_cases = _read_cases_file(cases_path)
+    cases_by_id = {case.case_id: case for case in all_cases}
+    base_by_slot = {
+        observation.slot: observation for observation in receipt.observations
+    }
+    requested: list[tuple[int, int, BattleCase]] = []
+    for index, (case_id, repetition) in enumerate(slots, start=1):
+        original = base_by_slot.get((case_id, repetition))
+        if original is None:
+            raise ValueError(
+                f"base receipt has no {case_id!r} repetition {repetition}."
+            )
+        if not original.provider_dispositions:
+            raise ValueError(
+                f"{case_id!r} repetition {repetition} has no provider disposition."
+            )
+        case = cases_by_id.get(case_id)
+        if case is None:
+            raise ValueError(f"current cases file has no case {case_id!r}.")
+        if _case_contract_sha256(case) != original.case_contract_sha256:
+            raise ValueError(
+                f"current contract for {case_id!r} differs from the base receipt."
+            )
+        requested.append((repetition, index, case))
+
+    current_identity = _release_run_identity(
+        cases=all_cases,
+        cases_path=cases_path,
+        requested_model_id=requested_model_id,
+        require_clean_source=True,
+        config=config,
+    )
+    preflight_checks = _release_identity_recheck_checks(
+        expected=release_identity,
+        actual=current_identity,
+        require_verified_target=True,
+    )
+    if any(check["passed"] is not True for check in preflight_checks):
+        raise ValueError(
+            "current source, target or model differs from the base receipt."
+        )
+
+    requested_cases = [case for _, _, case in requested]
+    provisioned_fixtures = _provision_fixtures(config=config, cases=requested_cases)
+    acquisition_contract = AcquisitionContract(
+        required_case_ids=tuple(
+            case.case_id for case in requested_cases if case.required
+        ),
+        artifact_schema_version=receipt.artifact_schema_version,
+        require_clean_source=True,
+    )
+    started_at = time.strftime("%Y%m%dT%H%M%S")
+    staging_dir = output_dir / f"ai-builder-api-battle-replacements-{started_at}"
+    staging_dir.mkdir(mode=0o700, parents=True, exist_ok=False)
+
+    def acquire(item: tuple[int, int, BattleCase]) -> JsonObject:
+        repetition, case_index, case = item
+        return _acquire_suite_observation(
+            repetition=repetition,
+            case_index=case_index,
+            case=case,
+            case_count=len(requested),
+            total_repetitions=receipt.repetitions,
+            config=config,
+            args=args,
+            artifact_output_dir=staging_dir,
+            cases_path=cases_path,
+            provisioned_fixtures=provisioned_fixtures,
+            acquisition_contract=acquisition_contract,
+            release_identity=release_identity,
+        )
+
+    if max_concurrency == 1:
+        results = [acquire(item) for item in requested]
+    else:
+        with ThreadPoolExecutor(max_workers=max_concurrency) as executor:
+            results = list(executor.map(acquire, requested))
+
+    replacement_observations = [
+        observation_from_row(result, where=f"replacement result {index}")
+        for index, result in enumerate(results)
+    ]
+    if any(
+        observation.observation_status in {"execution_failure", "invalid_evidence"}
+        or observation.provider_dispositions
+        for observation in replacement_observations
+    ):
+        raise ValueError(
+            f"replacement batch failed acquisition; diagnostics remain in {staging_dir}."
+        )
+    for index, observation in enumerate(replacement_observations):
+        if observation_identity_failure_count(
+            observation, where=f"replacement result {index}"
+        ):
+            raise ValueError("replacement batch failed observation identity checks.")
+
+    final_identity = _release_run_identity(
+        cases=all_cases,
+        cases_path=cases_path,
+        requested_model_id=requested_model_id,
+        require_clean_source=True,
+        config=config,
+    )
+    final_checks = _release_identity_recheck_checks(
+        expected=release_identity,
+        actual=final_identity,
+        require_verified_target=True,
+    )
+    if any(check["passed"] is not True for check in final_checks):
+        raise ValueError(
+            "source, target or model changed during replacement acquisition."
+        )
+
+    publications: list[tuple[Observation, Path, bytes, str]] = []
+    for observation in replacement_observations:
+        source_path = staging_dir / observation.bundle_file
+        if source_path.name != observation.bundle_file or not source_path.is_file():
+            raise ValueError("replacement result has an invalid bundle reference.")
+        payload = source_path.read_bytes()
+        digest = hashlib.sha256(payload).hexdigest()
+        if digest != observation.bundle_sha256:
+            raise ValueError(
+                "staged replacement bundle digest changed after acquisition."
+            )
+        target_path = suite_dir / f"replacement-{source_path.name}"
+        publications.append((observation, target_path, payload, digest))
+    collisions = [
+        target
+        for _, target, _, _ in publications
+        if target.exists() or target.is_symlink()
+    ]
+    if collisions:
+        raise ValueError(
+            "replacement bundle target already exists: "
+            + ", ".join(str(path) for path in collisions)
+        )
+
+    descriptors: list[ReplacementDescriptor] = []
+    for observation, target_path, payload, digest in publications:
+        _write_bytes_exclusive(target_path, payload)
+        original = base_by_slot[observation.slot]
+        descriptors.append(
+            ReplacementDescriptor(
+                case_id=observation.case_id,
+                repetition=observation.repetition,
+                reason=reason.strip(),
+                original_bundle_sha256=original.bundle_sha256,
+                replacement_bundle_sha256=digest,
+            )
+        )
+    _write_json_exclusive(
+        replacements_path, [descriptor.as_json() for descriptor in descriptors]
+    )
+    print(f"replacement overlay: {replacements_path}")
+    return 0
 
 
 def _release_run_identity(
@@ -4056,7 +4394,9 @@ def _git_output(*args: str) -> str:
     return result.stdout.strip()
 
 
-def _write_json_exclusive(path: Path, payload: Mapping[str, object]) -> None:
+def _write_json_exclusive(
+    path: Path, payload: Mapping[str, object] | list[JsonObject]
+) -> None:
     descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
     with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
         json.dump(payload, handle, ensure_ascii=False, indent=2, sort_keys=True)
