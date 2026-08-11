@@ -10832,6 +10832,11 @@ export interface components {
      */
     ContentMoveState: "pending" | "target_verified" | "failed";
     /**
+     * ContentOwner
+     * @enum {string}
+     */
+    ContentOwner: "file_content" | "icon" | "knowledge_file" | "other";
+    /**
      * ContentState
      * @enum {string}
      */
@@ -13160,6 +13165,7 @@ export interface components {
     IntegrationType: "confluence" | "sharepoint";
     /** InventoryPublic */
     InventoryPublic: {
+      owner: components["schemas"]["ContentOwner"];
       target: components["schemas"]["StorageKind"];
       state: components["schemas"]["ContentState"];
       /** Count */
@@ -14392,6 +14398,7 @@ export interface components {
     ObjectContentInventoryPublic: {
       /** Inventory */
       inventory: components["schemas"]["InventoryPublic"][];
+      postgresql_allocation: components["schemas"]["PostgresqlAllocationPublic"] | null;
     };
     /** ObjectContentMovesPublic */
     ObjectContentMovesPublic: {
@@ -15803,6 +15810,17 @@ export interface components {
       mcp_server_id: string;
       /** Is Default Enabled */
       is_default_enabled: boolean;
+    };
+    /** PostgresqlAllocationPublic */
+    PostgresqlAllocationPublic: {
+      /** Total Bytes */
+      total_bytes: number;
+      /** Inline Content Bytes */
+      inline_content_bytes: number;
+      /** Searchable Knowledge Bytes */
+      searchable_knowledge_bytes: number;
+      /** Other Bytes */
+      other_bytes: number;
     };
     /**
      * PreflightRequest

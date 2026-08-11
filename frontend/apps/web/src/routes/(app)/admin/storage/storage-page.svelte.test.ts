@@ -1,4 +1,4 @@
-import { page } from "@vitest/browser/context";
+import { page, userEvent } from "@vitest/browser/context";
 import { EneoError } from "@eneo/eneo-js";
 import { render } from "vitest-browser-svelte";
 import { beforeEach, describe, expect, test, vi } from "vitest";
@@ -174,13 +174,36 @@ function inventory() {
   return {
     inventory: [
       {
+        owner: "file_content",
         target: "postgres_inline",
         state: "available",
         count: 3,
         bytes: 4096,
         oldest_created_at: "2026-07-20T10:00:00Z"
+      },
+      {
+        owner: "knowledge_file",
+        target: "object_store",
+        state: "available",
+        count: 4,
+        bytes: 8 * 1024,
+        oldest_created_at: "2026-07-19T10:00:00Z"
+      },
+      {
+        owner: "knowledge_file",
+        target: "object_store",
+        state: "tombstoned",
+        count: 2,
+        bytes: 16 * 1024,
+        oldest_created_at: "2026-07-18T10:00:00Z"
       }
-    ]
+    ],
+    postgresql_allocation: {
+      total_bytes: 32 * 1024 * 1024,
+      inline_content_bytes: 8 * 1024 * 1024,
+      searchable_knowledge_bytes: 12 * 1024 * 1024,
+      other_bytes: 12 * 1024 * 1024
+    }
   };
 }
 
@@ -200,6 +223,35 @@ function moves(overrides: Record<string, unknown> = {}) {
     ],
     ...overrides
   };
+}
+
+function focusElement(element: Element): void {
+  if (!(element instanceof HTMLElement)) throw new TypeError("Expected a focusable HTML element");
+  element.focus();
+}
+
+async function openPreviousDestination(): Promise<void> {
+  await page.getByRole("button", { name: "storage_switch_previous_title" }).click();
+}
+
+async function openEffectiveLimits(): Promise<void> {
+  await page.getByRole("button", { name: "storage_settings_limits_show_technical" }).click();
+}
+
+async function openMoveAdvancedSettings(): Promise<void> {
+  await page.getByRole("button", { name: "storage_moves_advanced" }).click();
+}
+
+async function confirmMoveStart(): Promise<void> {
+  await page.getByRole("button", { name: "storage_moves_confirm_action" }).click();
+}
+
+async function confirmStorageTargetChange(): Promise<void> {
+  await page
+    .getByRole("button", {
+      name: /storage_settings_confirm_(object_store|postgres)/
+    })
+    .click();
 }
 
 describe("admin storage settings page", () => {
@@ -244,7 +296,7 @@ describe("admin storage settings page", () => {
     await expect
       .element(page.getByRole("heading", { name: "storage_settings_title" }))
       .toBeVisible();
-    await expect.element(page.getByText("storage_inventory_title")).not.toBeInTheDocument();
+    await expect.element(page.getByText("storage_overview_title")).not.toBeInTheDocument();
   });
 
   test("shows a failed initial read and retries through the same policy owner", async () => {
@@ -316,6 +368,7 @@ describe("admin storage settings page", () => {
     await expect
       .element(limitsSection.getByText("1,025 storage_unit_b", { exact: true }).first())
       .toBeVisible();
+    await openEffectiveLimits();
     await expect
       .element(
         page
@@ -331,13 +384,8 @@ describe("admin storage settings page", () => {
 
     render(StoragePage);
 
-    await expect
-      .element(
-        page.getByText(
-          "Applies to new file and icon content and to originals from new knowledge file and audio uploads. Searchable knowledge stays in PostgreSQL. Existing content stays where it is; nothing moves automatically."
-        )
-      )
-      .toBeVisible();
+    await expect.element(page.getByText(/Searchable knowledge stays in PostgreSQL/)).toBeVisible();
+    await openEffectiveLimits();
     const limitsTable = page.getByRole("table", {
       name: "storage_effective_limits_caption"
     });
@@ -360,13 +408,7 @@ describe("admin storage settings page", () => {
 
     render(StoragePage);
 
-    await expect
-      .element(
-        page.getByText(
-          'storage_settings_last_changed {"date":"Jul 25, 2026","actor":"storage_policy_actor_storage_admin","revision":4}'
-        )
-      )
-      .toBeVisible();
+    await expect.element(page.getByText(/^storage_settings_last_changed/)).toBeVisible();
     await expect
       .element(page.getByRole("link", { name: "storage_settings_object_store_docs" }))
       .toHaveAttribute("href", "https://docs.eneo.ai/guides/object-content-storage");
@@ -469,6 +511,7 @@ describe("admin storage settings page", () => {
     });
     await expect.element(page.getByText("storage_switch_done_title")).toBeVisible();
     await expect.element(page.getByText("storage_switch_previous_title")).toBeVisible();
+    await openPreviousDestination();
     await expect
       .element(page.getByRole("button", { name: "storage_switch_back_action" }))
       .toBeVisible();
@@ -547,6 +590,7 @@ describe("admin storage settings page", () => {
 
     render(StoragePage);
 
+    await openPreviousDestination();
     await page.getByRole("button", { name: "storage_switch_back_action" }).click();
 
     // The reason has to be readable on the page: this action never opens the
@@ -589,6 +633,7 @@ describe("admin storage settings page", () => {
 
     render(StoragePage);
 
+    await openPreviousDestination();
     await page.getByRole("button", { name: "storage_switch_forget_action" }).click();
 
     await expect
@@ -654,6 +699,7 @@ describe("admin storage settings page", () => {
 
     render(StoragePage);
 
+    await openPreviousDestination();
     await page.getByRole("button", { name: "storage_switch_back_action" }).click();
 
     // The committed cutover must render as done, not as a retryable failure
@@ -699,6 +745,7 @@ describe("admin storage settings page", () => {
 
     render(StoragePage);
 
+    await openPreviousDestination();
     await page.getByRole("button", { name: "storage_switch_back_action" }).click();
 
     await expect.element(page.getByText("storage_switch_outcome_not_applied_title")).toBeVisible();
@@ -760,6 +807,7 @@ describe("admin storage settings page", () => {
 
     render(StoragePage);
 
+    await openPreviousDestination();
     await page.getByRole("button", { name: "storage_switch_back_action" }).click();
 
     // The refresh proves the cutover committed; it must not be offered as a
@@ -828,6 +876,7 @@ describe("admin storage settings page", () => {
 
     render(StoragePage);
 
+    await openPreviousDestination();
     await page.getByRole("button", { name: "storage_switch_back_action" }).click();
 
     await expect.element(page.getByText("storage_connection_error_conflict_title")).toBeVisible();
@@ -994,6 +1043,7 @@ describe("admin storage settings page", () => {
 
     render(StoragePage);
 
+    await openPreviousDestination();
     await page.getByRole("button", { name: "storage_switch_forget_action" }).click();
 
     await expect
@@ -1106,6 +1156,7 @@ describe("admin storage settings page", () => {
     await page.getByRole("button", { name: "storage_connection_test_and_rotate" }).click();
 
     await expect.element(page.getByText("storage_connection_rotated_title")).toBeVisible();
+    await openPreviousDestination();
     // The recovery controls must survive a rotation: the page does not
     // reload the connection after a successful save.
     await expect
@@ -1216,9 +1267,6 @@ describe("admin storage settings page", () => {
     await page.getByRole("button", { name: "retry" }).click();
 
     await expect.element(page.getByText("storage_connection_error_conflict_title")).toBeVisible();
-    await expect
-      .element(page.getByText('storage_connection_revision {"revision":4}'))
-      .toBeVisible();
 
     await page.getByRole("button", { name: "storage_connection_rotate_action" }).click();
     await expect.element(page.getByLabelText("storage_connection_access_key")).toHaveValue("");
@@ -1283,90 +1331,181 @@ describe("admin storage settings page", () => {
     await page.getByRole("button", { name: "retry" }).click();
 
     await expect
-      .element(page.getByText('storage_connection_revision {"revision":4}'))
+      .element(page.getByText("https://objects.example.test", { exact: true }))
       .toBeVisible();
     expect(getObjectStoreConnection).toHaveBeenCalledTimes(3);
     expect(getPolicy).toHaveBeenCalledTimes(2);
   });
 
-  test("refreshes move progress and inventory independently without reloading policy", async () => {
+  test("refreshes policy, move progress, and inventory from the page status action", async () => {
     testUser.canAdministerStorage = true;
     getPolicy.mockResolvedValue(policy());
 
     render(StoragePage);
 
     await expect.element(page.getByText("storage_move_state_pending")).toBeVisible();
-    await page.getByRole("button", { name: "storage_moves_refresh" }).click();
-    await page.getByRole("button", { name: "storage_inventory_refresh" }).click();
+    const refreshButton = page.getByRole("button", { name: "storage_settings_refresh_status" });
+    await refreshButton.click();
 
-    expect(getPolicy).toHaveBeenCalledTimes(1);
+    expect(getPolicy).toHaveBeenCalledTimes(2);
     expect(getMoves).toHaveBeenCalledTimes(2);
     expect(getInventory).toHaveBeenCalledTimes(2);
+    await expect.element(refreshButton).toHaveFocus();
   });
 
-  test("keeps focus on the move refresh button through a completed refresh", async () => {
+  test("locks policy inputs while a refresh is awaiting its response", async () => {
     testUser.canAdministerStorage = true;
-    getPolicy.mockResolvedValue(policy());
-    let resolveMoves!: (value: ReturnType<typeof moves>) => void;
-    getMoves.mockResolvedValueOnce(moves()).mockImplementationOnce(
-      () =>
-        new Promise<ReturnType<typeof moves>>((resolve) => {
-          resolveMoves = resolve;
-        })
+    const initial = policy();
+    let resolveRefresh!: (value: ReturnType<typeof policy>) => void;
+    getPolicy
+      .mockResolvedValueOnce(initial)
+      .mockImplementationOnce(
+        () => new Promise<ReturnType<typeof policy>>((resolve) => (resolveRefresh = resolve))
+      );
+
+    render(StoragePage);
+
+    const target = page.getByRole("radio", { name: /storage_target_postgres_inline/ });
+    const limitInput = page.getByLabelText("storage_limit_session_file", { exact: true });
+    const refreshClick = (async () => {
+      await page.getByRole("button", { name: "storage_settings_refresh_status" }).click();
+    })();
+
+    await expect.element(target).toBeDisabled();
+    await expect.element(limitInput).toBeDisabled();
+    await expect.element(limitInput).toHaveValue(20);
+
+    resolveRefresh(initial);
+    await refreshClick;
+
+    await expect.element(target).toBeEnabled();
+    await expect.element(limitInput).toBeEnabled();
+    await expect.element(limitInput).toHaveValue(20);
+    await expect.element(page.getByText("storage_settings_stale_title")).not.toBeInTheDocument();
+  });
+
+  test("blocks policy mutations while preserving a draft during refresh", async () => {
+    testUser.canAdministerStorage = true;
+    const initial = policy();
+    let resolveRefresh!: (value: ReturnType<typeof policy>) => void;
+    getPolicy
+      .mockResolvedValueOnce(initial)
+      .mockImplementationOnce(
+        () => new Promise<ReturnType<typeof policy>>((resolve) => (resolveRefresh = resolve))
+      );
+
+    render(StoragePage);
+
+    const limitInput = page.getByLabelText("storage_limit_session_file", { exact: true });
+    await limitInput.fill("30");
+    const refreshClick = (async () => {
+      await page.getByRole("button", { name: "storage_settings_refresh_status" }).click();
+    })();
+
+    const saveButton = page.getByRole("button", { name: "storage_settings_save" });
+    const discardButton = page.getByRole("button", { name: "discard_changes" });
+    const pauseButton = page.getByRole("button", { name: "storage_moves_pause" });
+    await expect.element(limitInput).toBeDisabled();
+    await expect.element(saveButton).toBeDisabled();
+    await expect.element(discardButton).toBeDisabled();
+    await expect.element(pauseButton).toBeDisabled();
+    for (const control of [saveButton, pauseButton]) {
+      const element = control.element();
+      if (!(element instanceof HTMLButtonElement)) {
+        throw new TypeError("Expected policy mutation control to be a button");
+      }
+      element.click();
+    }
+    expect(replacePolicy).not.toHaveBeenCalled();
+    expect(setMovesPaused).not.toHaveBeenCalled();
+
+    resolveRefresh(initial);
+    await refreshClick;
+
+    await expect.element(limitInput).toBeEnabled();
+    await expect.element(limitInput).toHaveValue(30);
+    await expect.element(saveButton).toBeEnabled();
+    await expect.element(pauseButton).toBeEnabled();
+    await expect.element(page.getByText("storage_settings_stale_title")).not.toBeInTheDocument();
+  });
+
+  test("does not refresh policy while a limit save is awaiting its response", async () => {
+    testUser.canAdministerStorage = true;
+    const initial = policy();
+    const committed = policy({
+      policy: {
+        ...initial.policy,
+        revision: 5,
+        session_file_limit_bytes: 30 * 1024 * 1024
+      }
+    });
+    getPolicy.mockResolvedValueOnce(initial).mockResolvedValueOnce(committed);
+    let resolveReplacement!: (value: ReturnType<typeof policy>) => void;
+    replacePolicy.mockImplementation(
+      () => new Promise<ReturnType<typeof policy>>((resolve) => (resolveReplacement = resolve))
     );
 
     render(StoragePage);
 
-    await expect.element(page.getByText("storage_move_state_pending")).toBeVisible();
-    const movesSection = page.getByRole("region", { name: "storage_moves_title" });
-    await expect.element(movesSection.getByText(/^storage_last_refreshed/)).toBeVisible();
-    const refreshButton = movesSection.getByRole("button", { name: "storage_moves_refresh" });
-    const refresh = (async () => {
-      await refreshButton.click();
-    })();
+    await page.getByLabelText("storage_limit_session_file", { exact: true }).fill("30");
+    await page.getByRole("button", { name: "storage_settings_save" }).click();
 
-    await expect.element(refreshButton).toHaveAttribute("aria-busy", "true");
-    await expect.element(page.getByText("storage_move_state_pending")).toBeVisible();
-    resolveMoves(moves());
-    await refresh;
-    await expect.element(refreshButton).toHaveAttribute("aria-busy", "false");
-    await expect.element(refreshButton).toHaveFocus();
+    const refreshButton = page.getByRole("button", { name: "storage_settings_refresh_status" });
+    await expect.element(refreshButton).toHaveAttribute("aria-disabled", "true");
+    const refreshElement = refreshButton.element();
+    if (!(refreshElement instanceof HTMLButtonElement)) {
+      throw new TypeError("Expected the refresh control to be a button");
+    }
+    refreshElement.click();
+    expect(getPolicy).toHaveBeenCalledTimes(1);
+
+    resolveReplacement(committed);
+
+    await expect.element(page.getByText("storage_settings_no_changes")).toBeVisible();
+    await expect.element(page.getByText("storage_settings_stale_title")).not.toBeInTheDocument();
   });
 
-  test("keeps focus on the inventory refresh button through a completed refresh", async () => {
+  test("does not refresh policy while a pause is awaiting its response", async () => {
     testUser.canAdministerStorage = true;
-    getPolicy.mockResolvedValue(policy());
-    let resolveInventory!: (value: ReturnType<typeof inventory>) => void;
-    getInventory.mockResolvedValueOnce(inventory()).mockImplementationOnce(
+    const initial = policy();
+    const committed = policy({
+      policy: {
+        ...initial.policy,
+        revision: 5,
+        moves_paused: true
+      }
+    });
+    getPolicy.mockResolvedValueOnce(initial).mockResolvedValueOnce(committed);
+    let resolvePause!: (value: { policy_revision: number; paused: boolean }) => void;
+    setMovesPaused.mockImplementation(
       () =>
-        new Promise<ReturnType<typeof inventory>>((resolve) => {
-          resolveInventory = resolve;
-        })
+        new Promise<{ policy_revision: number; paused: boolean }>(
+          (resolve) => (resolvePause = resolve)
+        )
     );
 
     render(StoragePage);
 
-    const inventorySection = page.getByRole("region", { name: "storage_inventory_title" });
-    await expect.element(inventorySection.getByText(/^storage_last_refreshed/)).toBeVisible();
-    await inventorySection.getByRole("button", { name: "storage_inventory_caption" }).click();
-    const inventoryTable = inventorySection.getByRole("table", {
-      name: "storage_inventory_caption"
-    });
-    await expect.element(inventoryTable).toBeVisible();
-    const refreshButton = inventorySection.getByRole("button", {
-      name: "storage_inventory_refresh"
-    });
-    await expect.element(refreshButton).toBeVisible();
-    const refresh = (async () => {
-      await refreshButton.click();
+    const limitInput = page.getByLabelText("storage_limit_session_file", { exact: true });
+    await limitInput.fill("30");
+    const pauseClick = (async () => {
+      await page.getByRole("button", { name: "storage_moves_pause" }).click();
     })();
 
-    await expect.element(refreshButton).toHaveAttribute("aria-busy", "true");
-    await expect.element(inventoryTable).toBeVisible();
-    resolveInventory(inventory());
-    await refresh;
-    await expect.element(refreshButton).toHaveAttribute("aria-busy", "false");
-    await expect.element(refreshButton).toHaveFocus();
+    const refreshButton = page.getByRole("button", { name: "storage_settings_refresh_status" });
+    await expect.element(refreshButton).toHaveAttribute("aria-disabled", "true");
+    const refreshElement = refreshButton.element();
+    if (!(refreshElement instanceof HTMLButtonElement)) {
+      throw new TypeError("Expected the refresh control to be a button");
+    }
+    refreshElement.click();
+    expect(getPolicy).toHaveBeenCalledTimes(1);
+
+    resolvePause({ policy_revision: 5, paused: true });
+    await pauseClick;
+
+    await expect.element(limitInput).toHaveValue(30);
+    await expect.element(page.getByText("storage_settings_stale_title")).not.toBeInTheDocument();
   });
 
   test("formats storage counts and binary byte units with the active locale", async () => {
@@ -1431,9 +1570,11 @@ describe("admin storage settings page", () => {
     await expect
       .element(page.getByLabelText("storage_moves_target"))
       .toHaveTextContent("storage_target_object_store");
+    await openMoveAdvancedSettings();
     await page.getByLabelText("storage_moves_limit").fill("7");
     const queueButton = page.getByRole("button", { name: "storage_moves_queue" });
     await queueButton.click();
+    await confirmMoveStart();
 
     expect(queueMoves).toHaveBeenCalledWith({ target: "object_store", limit: 7 });
     await expect.element(page.getByText(/storage_moves_queue_result/)).toBeVisible();
@@ -1444,6 +1585,29 @@ describe("admin storage settings page", () => {
       expected_revision: 4,
       moves_paused: true
     });
+    await page.getByRole("button", { name: "storage_moves_resume" }).click();
+    expect(setMovesPaused).toHaveBeenNthCalledWith(2, {
+      expected_revision: 5,
+      moves_paused: false
+    });
+  });
+
+  test("pauses and resumes moves when the queue is empty", async () => {
+    testUser.canAdministerStorage = true;
+    getPolicy.mockResolvedValue(policy());
+    getMoves.mockResolvedValue(moves({ moves: [] }));
+    setMovesPaused
+      .mockResolvedValueOnce({ policy_revision: 5, paused: true })
+      .mockResolvedValueOnce({ policy_revision: 6, paused: false });
+
+    render(StoragePage);
+
+    await page.getByRole("button", { name: "storage_moves_pause" }).click();
+    expect(setMovesPaused).toHaveBeenNthCalledWith(1, {
+      expected_revision: 4,
+      moves_paused: true
+    });
+
     await page.getByRole("button", { name: "storage_moves_resume" }).click();
     expect(setMovesPaused).toHaveBeenNthCalledWith(2, {
       expected_revision: 5,
@@ -1463,6 +1627,7 @@ describe("admin storage settings page", () => {
     const queueButton = page.getByRole("button", { name: "storage_moves_queue" });
     await expect.element(queueButton).toBeEnabled();
     await queueButton.click();
+    await confirmMoveStart();
 
     expect(queueMoves).toHaveBeenCalledWith({ target: "postgres_inline", limit: 25 });
   });
@@ -1609,13 +1774,18 @@ describe("admin storage settings page", () => {
     render(StoragePage);
 
     const target = page.getByLabelText("storage_moves_target");
+    await openMoveAdvancedSettings();
     const limit = page.getByLabelText("storage_moves_limit");
     await limit.fill("7");
     await page.getByRole("button", { name: "storage_moves_queue" }).click();
+    await confirmMoveStart();
 
     await expect.element(page.getByText("storage_moves_action_error_title")).toBeVisible();
+    await expect.element(page.getByRole("alertdialog")).not.toBeInTheDocument();
+    await expect.element(page.getByTestId("move-recovery-alert")).toHaveFocus();
     await expect.element(target).toHaveTextContent("storage_target_object_store");
     await expect.element(limit).toHaveValue(7);
+    expect(queueMoves).toHaveBeenCalledTimes(1);
   });
 
   test("reloads committed queue progress when the command outcome is unknown", async () => {
@@ -1651,8 +1821,9 @@ describe("admin storage settings page", () => {
     const queueButton = page.getByRole("button", { name: "storage_moves_queue" });
     const pauseButton = page.getByRole("button", { name: "storage_moves_pause" });
     await expect.element(page.getByText("storage_move_state_pending")).toBeVisible();
+    await queueButton.click();
     const clickQueue = (async () => {
-      await queueButton.click();
+      await page.getByRole("button", { name: "storage_moves_confirm_action" }).click();
     })();
 
     await expect.element(page.getByText("storage_move_state_pending")).toBeVisible();
@@ -1676,7 +1847,11 @@ describe("admin storage settings page", () => {
     await clickQueue;
 
     await expect.element(page.getByText("storage_moves_outcome_unknown_title")).toBeVisible();
-    await expect.element(page.getByText("4", { exact: true })).toBeVisible();
+    await expect
+      .element(
+        page.getByRole("region", { name: "storage_moves_title" }).getByText("4", { exact: true })
+      )
+      .toBeVisible();
   });
 
   test("keeps a dirty draft on its old baseline after a committed pause response is lost", async () => {
@@ -1895,6 +2070,7 @@ describe("admin storage settings page", () => {
     })();
     await expect.element(page.getByRole("button", { name: "storage_moves_pause" })).toBeDisabled();
     await page.getByRole("button", { name: "storage_moves_queue" }).click();
+    await confirmMoveStart();
     resolveSave(
       policy({
         policy: {
@@ -1981,7 +2157,7 @@ describe("admin storage settings page", () => {
       .element(page.getByRole("heading", { name: "storage_settings_target_title" }))
       .toBeVisible();
     await expect.element(page.getByText("storage_settings_read_only_title")).toBeVisible();
-    await expect.element(page.getByText("storage_inventory_title")).not.toBeInTheDocument();
+    await expect.element(page.getByText("storage_overview_title")).not.toBeInTheDocument();
     await expect.element(page.getByText("storage_inventory_error_title")).not.toBeInTheDocument();
     expect(getPolicy).toHaveBeenCalledTimes(1);
     expect(getInventory).toHaveBeenCalledTimes(1);
@@ -2005,9 +2181,30 @@ describe("admin storage settings page", () => {
     await page.getByRole("button", { name: "retry" }).click();
     await page.getByRole("button", { name: "storage_inventory_caption" }).click();
 
-    await expect.element(page.getByText("storage_content_state_available")).toBeVisible();
+    await expect.element(page.getByText("storage_content_state_available").first()).toBeVisible();
     await expect.element(page.getByText("storage_inventory_error_title")).not.toBeInTheDocument();
     expect(getPolicy).toHaveBeenCalledTimes(1);
+    expect(getInventory).toHaveBeenCalledTimes(2);
+  });
+
+  test("removes stale storage totals when a refresh fails", async () => {
+    testUser.canAdministerStorage = true;
+    getPolicy.mockResolvedValue(policy());
+    getInventory.mockResolvedValueOnce(inventory()).mockRejectedValueOnce(new Error("unavailable"));
+
+    render(StoragePage);
+
+    const overview = page.getByRole("region", { name: "storage_overview_title" });
+    await expect
+      .element(overview.getByText("12 storage_unit_kb", { exact: true }).first())
+      .toBeVisible();
+
+    await page.getByRole("button", { name: "storage_settings_refresh_status" }).click();
+
+    await expect.element(page.getByText("storage_inventory_error_title")).toBeVisible();
+    await expect
+      .element(overview.getByText("12 storage_unit_kb", { exact: true }))
+      .not.toBeInTheDocument();
     expect(getInventory).toHaveBeenCalledTimes(2);
   });
 
@@ -2032,9 +2229,7 @@ describe("admin storage settings page", () => {
     await sessionFileUnit.click();
     await page.getByRole("option", { name: "storage_unit_mb" }).click();
     await expect.element(sessionFileInput).toHaveValue(20);
-    await expect
-      .element(page.getByRole("button", { name: "storage_settings_save" }))
-      .toBeDisabled();
+    await expect.element(page.getByText("storage_settings_no_changes")).toBeVisible();
   });
 
   test("falls back to bytes for a stored limit that is not divisible by a larger unit", async () => {
@@ -2088,11 +2283,15 @@ describe("admin storage settings page", () => {
     await page.getByRole("radio", { name: /storage_target_object_store/ }).click();
     await page.getByLabelText("storage_limit_session_file", { exact: true }).fill("30");
     const saveButton = page.getByRole("button", { name: "storage_settings_save" });
-    await saveButton.click();
+    focusElement(saveButton.element());
+    await userEvent.keyboard("{Enter}");
+    await confirmStorageTargetChange();
 
     await expect
-      .element(page.getByRole("button", { name: "storage_settings_saving" }))
-      .toHaveAttribute("aria-disabled", "true");
+      .element(
+        page.getByRole("alertdialog").getByRole("button", { name: "storage_settings_saving" })
+      )
+      .toBeDisabled();
     expect(replacePolicy).toHaveBeenCalledWith({
       expected_revision: 4,
       new_write_storage_target: "object_store",
@@ -2114,9 +2313,9 @@ describe("admin storage settings page", () => {
       })
     );
 
-    await expect.element(page.getByText("storage_settings_save_success")).toBeVisible();
-    await expect.element(saveButton).toHaveAttribute("aria-disabled", "true");
-    await expect.element(saveButton).toHaveFocus();
+    await expect.element(page.getByText("storage_settings_no_changes")).toBeVisible();
+    await expect.element(page.getByTestId("policy-save-status")).toHaveFocus();
+    await expect.element(saveButton).not.toBeInTheDocument();
   });
 
   test("discards an unsaved policy draft through the shared settings row", async () => {
@@ -2127,25 +2326,45 @@ describe("admin storage settings page", () => {
 
     const sessionFileInput = page.getByLabelText("storage_limit_session_file", { exact: true });
     await sessionFileInput.fill("30");
-    await page.getByRole("button", { name: "discard_changes" }).click();
+    const discardButton = page.getByRole("button", { name: "discard_changes" });
+    focusElement(discardButton.element());
+    await userEvent.keyboard("{Enter}");
 
     await expect.element(sessionFileInput).toHaveValue(20);
+    await expect.element(page.getByText("storage_settings_no_changes")).toBeVisible();
+    await expect.element(page.getByTestId("policy-save-status")).toHaveFocus();
     await expect
       .element(page.getByRole("button", { name: "storage_settings_save" }))
-      .toBeDisabled();
+      .not.toBeInTheDocument();
     expect(replacePolicy).not.toHaveBeenCalled();
   });
 
   test("requires a reload when a generic save failure has an unknown outcome", async () => {
     testUser.canAdministerStorage = true;
-    const initial = policy();
+    const initial = policy({
+      capabilities: [
+        {
+          target: "postgres_inline",
+          configured: true,
+          selectable: true,
+          readiness_code: "ready"
+        },
+        {
+          target: "object_store",
+          configured: true,
+          selectable: true,
+          readiness_code: "ready"
+        }
+      ]
+    });
     const committed = policy({
       policy: {
         ...initial.policy,
         revision: 5,
         new_write_storage_target: "object_store",
         session_file_limit_bytes: 40 * 1024 * 1024
-      }
+      },
+      capabilities: initial.capabilities
     });
     getPolicy.mockResolvedValueOnce(initial).mockResolvedValueOnce(committed);
     replacePolicy.mockRejectedValue(new Error("failed"));
@@ -2153,12 +2372,16 @@ describe("admin storage settings page", () => {
     render(StoragePage);
 
     const sessionFileInput = page.getByLabelText("storage_limit_session_file", { exact: true });
+    await page.getByRole("radio", { name: /storage_target_object_store/ }).click();
     await sessionFileInput.fill("31");
     await page.getByRole("button", { name: "storage_settings_save" }).click();
+    await confirmStorageTargetChange();
 
     await expect
       .element(page.getByText("storage_settings_save_outcome_unknown_title"))
       .toBeVisible();
+    await expect.element(page.getByRole("alertdialog")).not.toBeInTheDocument();
+    await expect.element(page.getByTestId("policy-recovery-alert")).toHaveFocus();
     await expect.element(sessionFileInput).toHaveValue(31);
     await expect
       .element(page.getByRole("button", { name: "storage_settings_save" }))
@@ -2198,9 +2421,10 @@ describe("admin storage settings page", () => {
     await page.getByRole("radio", { name: /storage_target_object_store/ }).click();
     await page.getByLabelText("storage_limit_session_file", { exact: true }).fill("31");
     await page.getByRole("button", { name: "storage_settings_save" }).click();
+    await confirmStorageTargetChange();
 
     await expect.element(page.getByText("storage_settings_read_only_title")).toBeVisible();
-    await expect.element(page.getByText("storage_inventory_title")).not.toBeInTheDocument();
+    await expect.element(page.getByText("storage_overview_title")).not.toBeInTheDocument();
     await expect
       .element(page.getByLabelText("storage_limit_session_file", { exact: true }))
       .not.toBeInTheDocument();
@@ -2324,6 +2548,39 @@ describe("admin storage settings page", () => {
     await expect.element(page.getByText("storage_readiness_store_degraded").first()).toBeVisible();
   });
 
+  test("shows an unconfigured object-store runtime failure as an error", async () => {
+    testUser.canAdministerStorage = true;
+    getPolicy.mockResolvedValue(
+      policy({
+        capabilities: [
+          {
+            target: "postgres_inline",
+            configured: true,
+            selectable: true,
+            readiness_code: "ready"
+          },
+          {
+            target: "object_store",
+            configured: false,
+            selectable: false,
+            readiness_code: "database_unavailable"
+          }
+        ]
+      })
+    );
+
+    render(StoragePage);
+
+    const overview = page.getByRole("region", { name: "storage_overview_title" });
+    await expect.element(overview.getByText("storage_overview_attention")).toBeVisible();
+    await expect
+      .element(overview.getByText("storage_readiness_database_unavailable"))
+      .toBeVisible();
+    await expect
+      .element(overview.getByText("storage_connection_empty_title"))
+      .not.toBeInTheDocument();
+  });
+
   test("shows all five effective limits plus bounded capability and inventory facts", async () => {
     testUser.canAdministerStorage = true;
     const currentPolicy = policy();
@@ -2343,6 +2600,7 @@ describe("admin storage settings page", () => {
     );
 
     render(StoragePage);
+    await openEffectiveLimits();
 
     for (const useCase of [
       "session_file",
@@ -2360,20 +2618,94 @@ describe("admin storage settings page", () => {
     await expect
       .element(page.getByText("storage_readiness_object_store_not_configured").first())
       .toBeVisible();
+    await expect
+      .element(page.getByText("storage_inventory_managed_total", { exact: true }))
+      .toBeVisible();
+    await page.getByRole("button", { name: "storage_inventory_caption" }).click();
+    const inventorySection = page.getByRole("region", { name: "storage_overview_title" });
+    await expect
+      .element(inventorySection.getByText("12 storage_unit_kb", { exact: true }).first())
+      .toBeVisible();
+    await expect
+      .element(inventorySection.getByText("4 storage_unit_kb", { exact: true }).first())
+      .toBeVisible();
+    await expect
+      .element(inventorySection.getByText("8 storage_unit_kb", { exact: true }).first())
+      .toBeVisible();
+    await expect
+      .element(inventorySection.getByText("32 storage_unit_mb", { exact: true }).first())
+      .toBeVisible();
     const connectionSection = page.getByRole("region", { name: "storage_connection_title" });
     await expect
       .element(connectionSection.getByText("storage_connection_empty_title"))
       .toBeVisible();
-    await page.getByRole("button", { name: "storage_inventory_caption" }).click();
-    await expect.element(page.getByText("storage_content_state_available")).toBeVisible();
+    await expect.element(page.getByText("storage_content_state_available").first()).toBeVisible();
+    await expect.element(page.getByText("storage_inventory_owner_file_content")).toBeVisible();
+    await expect.element(page.getByText("storage_inventory_allocation_other")).toBeVisible();
     await expect
       .element(
         page
-          .getByRole("table", { name: "storage_inventory_caption" })
+          .getByRole("table", { name: "storage_inventory_managed_caption" })
+          .getByText("16 storage_unit_kb", { exact: true })
+      )
+      .toBeVisible();
+    await expect
+      .element(
+        page
+          .getByRole("table", { name: "storage_inventory_managed_caption" })
           .getByText("4 storage_unit_kb")
       )
       .toBeVisible();
     await expect.element(page.getByText("Jul 20, 2026")).toBeVisible();
     expect(getInventory).toHaveBeenCalledTimes(1);
+  });
+
+  test("keeps managed totals visible when PostgreSQL allocation is unavailable", async () => {
+    testUser.canAdministerStorage = true;
+    getPolicy.mockResolvedValue(policy());
+    getInventory.mockResolvedValue({
+      ...inventory(),
+      postgresql_allocation: null
+    });
+
+    render(StoragePage);
+
+    await expect
+      .element(page.getByText("storage_inventory_managed_total", { exact: true }))
+      .toBeVisible();
+    await page.getByRole("button", { name: "storage_inventory_caption" }).click();
+    await expect
+      .element(page.getByText("storage_inventory_allocation_unavailable_title"))
+      .toBeVisible();
+  });
+
+  test("counts deletion-pending content until deletion has completed", async () => {
+    testUser.canAdministerStorage = true;
+    getPolicy.mockResolvedValue(policy());
+    const currentInventory = inventory();
+    getInventory.mockResolvedValue({
+      ...currentInventory,
+      inventory: [
+        ...currentInventory.inventory,
+        {
+          owner: "file_content",
+          target: "postgres_inline",
+          state: "delete_pending",
+          count: 1,
+          bytes: 2 * 1024,
+          oldest_created_at: "2026-07-19T10:00:00Z"
+        }
+      ]
+    });
+
+    render(StoragePage);
+
+    const overview = page.getByRole("region", { name: "storage_overview_title" });
+    await expect
+      .element(overview.getByText("14 storage_unit_kb", { exact: true }).first())
+      .toBeVisible();
+    await expect
+      .element(overview.getByText("30 storage_unit_kb", { exact: true }))
+      .not.toBeInTheDocument();
   });
 });

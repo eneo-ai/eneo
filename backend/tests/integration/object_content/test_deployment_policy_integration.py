@@ -208,12 +208,20 @@ async def test_global_inventory_requires_the_storage_permission(
         headers=headers,
     )
     assert permitted.status_code == 200, permitted.text
-    inventory = permitted.json()["inventory"]
-    assert len(inventory) <= 12
+    body = permitted.json()
+    inventory = body["inventory"]
+    assert len(inventory) <= 48
     assert all(
-        set(fact) == {"target", "state", "count", "bytes", "oldest_created_at"}
+        set(fact) == {"owner", "target", "state", "count", "bytes", "oldest_created_at"}
         for fact in inventory
     )
+    allocation = body["postgresql_allocation"]
+    assert allocation is None or set(allocation) == {
+        "total_bytes",
+        "inline_content_bytes",
+        "searchable_knowledge_bytes",
+        "other_bytes",
+    }
 
 
 @pytest.mark.integration

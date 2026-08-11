@@ -19,16 +19,16 @@ import { Callout, Steps, Tabs } from "nextra/components";
 
 ## Start here
 
-| I want to…                                        | Go to                                              |
-| ------------------------------------------------- | -------------------------------------------------- |
-| Run the simplest supported deployment             | [PostgreSQL only](#set-up-your-choice)             |
-| Use the bundled private reference store           | [Bundled SeaweedFS](#set-up-your-choice)           |
-| Connect MinIO or another compatible service       | [External endpoint](#set-up-your-choice)           |
-| Understand ownership and RAG                      | [How content flows](#how-content-flows)            |
-| Download a processed file or recover its original | [Download or recover](#download-or-recover-a-file) |
+| I want to…                                        | Go to                                                        |
+| ------------------------------------------------- | ------------------------------------------------------------ |
+| Run the simplest supported deployment             | [PostgreSQL only](#set-up-your-choice)                       |
+| Use the bundled private reference store           | [Bundled SeaweedFS](#set-up-your-choice)                     |
+| Connect MinIO or another compatible service       | [External endpoint](#set-up-your-choice)                     |
+| Understand ownership and RAG                      | [How content flows](#how-content-flows)                      |
+| Download a processed file or recover its original | [Download or recover](#download-or-recover-a-file)           |
 | Move to another S3-compatible service             | [Change destination](#move-to-another-s3-compatible-service) |
-| Plan backup, recovery, and failure handling       | [Operate it safely](#operate-it-safely)            |
-| Review lifecycle and integrity implementation     | [Architecture](/docs/object-content-architecture)  |
+| Plan backup, recovery, and failure handling       | [Operate it safely](#operate-it-safely)                      |
+| Review lifecycle and integrity implementation     | [Architecture](/docs/object-content-architecture)            |
 
 ## How content flows
 
@@ -166,14 +166,18 @@ mean “more services.”
 
 ### Admin and operator responsibilities
 
-| Owner          | Responsibility                                                                                                                        |
-| -------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
-| Administrator  | Connect a destination, change or roll back it, rotate its access keys, and set the new-write target and business upload limits in **Admin > Storage** |
-| Operator       | Run PostgreSQL and any optional compatible endpoint; own TLS, certificates, capacity, backups, network reachability, and process safety tuning |
+| Owner         | Responsibility                                                                                                                                        |
+| ------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Administrator | Connect a destination, change or roll back it, rotate its access keys, and set the new-write target and business upload limits in **Admin > Storage** |
+| Operator      | Run PostgreSQL and any optional compatible endpoint; own TLS, certificates, capacity, backups, network reachability, and process safety tuning        |
 
 Administrators with the Storage permission can review policy, effective
 limits, and capability status. Deployment-wide content inventory spans tenants
-and is part of that same administrative view.
+and is part of that same administrative view. **Admin > Storage** shows the
+current target, connection health, file-content distribution, and migration
+state first. Target changes, upload limits, and existing-content moves remain
+separate actions, while detailed limits and PostgreSQL allocation are available
+under technical details.
 
 `OBJECT_CONTENT_INLINE_MAXIMUM_BYTES` remains an operator-owned ceiling for
 safe PostgreSQL rows, WAL, backups, and process memory. It is not a business
@@ -532,7 +536,7 @@ first: the switch may still have completed, and you retry only if the old
 destination is still active.
 
 If a previous destination is still archived from an earlier change, remove it
-first. Keeping it is the way back from *this* change, and a new change would
+first. Keeping it is the way back from _this_ change, and a new change would
 overwrite it.
 
 ### Confirm and finish
@@ -711,6 +715,24 @@ The `region` value is a signing scope, not a hosting decision.
 
 No. Object content preserves bytes; document processing produces searchable
 text and vectors. Both remain necessary for RAG.
+
+### What do the storage-usage figures mean?
+
+**Admin > Storage** shows related measurements that must not be added together:
+
+- **File content total** is the combined content size recorded by Eneo, excluding
+  content whose deletion has completed (`tombstoned`). The PostgreSQL and
+  object-storage figures are parts of this total.
+- **File content in PostgreSQL** counts the content bytes stored inline in the
+  database. **File content in object storage** counts the content bytes recorded
+  for the connected endpoint. Neither figure includes searchable RAG data.
+- **PostgreSQL on disk** is the size of the entire database. It includes inline
+  file content, searchable knowledge text, pgvector embeddings, tables, indexes,
+  and PostgreSQL's internal storage.
+
+These figures describe Eneo's data, not remaining capacity. Eneo does not report
+host free disk space, an object-storage provider's bucket quota, object versions,
+or billing size. Monitor those values through the host and storage provider.
 
 ### Can we stop using object storage later?
 

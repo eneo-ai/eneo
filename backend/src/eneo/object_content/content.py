@@ -24,6 +24,13 @@ class StorageKind(StrEnum):
     OBJECT_STORE = "object_store"
 
 
+class ContentOwner(StrEnum):
+    FILE_CONTENT = "file_content"
+    ICON = "icon"
+    KNOWLEDGE_FILE = "knowledge_file"
+    OTHER = "other"
+
+
 class ContentMoveState(StrEnum):
     PENDING = "pending"
     TARGET_VERIFIED = "target_verified"
