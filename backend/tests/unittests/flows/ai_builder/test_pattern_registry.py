@@ -48,7 +48,6 @@ _EXPECTED_POSITIVE_IDS: frozenset[str] = frozenset(
         "summarize_text",
         "extract_structured_fields",
         "json_to_structured_payload",
-        "json_to_text_summary",
         "json_to_artifact_report",
         "document_to_structured_report",
         "document_to_docx_template",
@@ -233,12 +232,11 @@ class TestRegistryInvariants:
         assert "primary_runtime_input" in pattern.required_architectural_slots
         assert "terminal_output" in pattern.required_architectural_slots
 
-    def test_json_source_patterns_are_seeded_as_first_class_runtime_inputs(
+    def test_supported_json_source_patterns_are_seeded_as_runtime_inputs(
         self,
     ) -> None:
         for pattern_id in (
             "json_to_structured_payload",
-            "json_to_text_summary",
             "json_to_artifact_report",
         ):
             pattern = PATTERN_REGISTRY.get(pattern_id)

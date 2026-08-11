@@ -207,17 +207,6 @@ _POSITIVE_PATTERNS: tuple[Pattern, ...] = (
         ),
     ),
     _pattern(
-        id="json_to_text_summary",
-        required_architectural_slots=(
-            "primary_runtime_input",
-            "terminal_output",
-        ),
-        question_template_ids=(
-            "primary_runtime_input",
-            "terminal_output",
-        ),
-    ),
-    _pattern(
         id="json_to_artifact_report",
         required_architectural_slots=(
             "primary_runtime_input",

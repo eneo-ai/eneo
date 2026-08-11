@@ -585,6 +585,41 @@ def test_compiler_rejects_input_schema_with_composite_flow_input_bindings() -> N
     )
 
 
+@pytest.mark.parametrize("pattern_ids", [(), ("json_to_text_summary",)])
+def test_compiler_rejects_json_to_text_architecture(
+    pattern_ids: tuple[str, ...],
+) -> None:
+    intent = parse_create_flow_intent_arguments(
+        {
+            "flow_name": "Summarize case JSON",
+            "plan_rationale": "Summarize the structured case input.",
+            "steps": [
+                {
+                    "name": "Summarize case",
+                    "instructions": "Write a concise case summary.",
+                    "output_type": "text",
+                }
+            ],
+        }
+    )
+
+    with pytest.raises(AIBuilderArchitectureError) as exc_info:
+        compile_create_intent_to_spec(
+            intent,
+            context=CreateCompileContext(
+                runtime_input_type=InputType.JSON,
+                final_output_type=OutputType.TEXT,
+                final_output_mode=OutputMode.PASS_THROUGH,
+                pattern_ids=pattern_ids,
+            ),
+        )
+
+    assert exc_info.value.public_code == "architecture_materialization_failed"
+    assert exc_info.value.log_context["failure_code"] == (
+        "assembly_unsupported_runtime_output_tuple"
+    )
+
+
 def test_compile_context_binds_inferred_example_as_an_open_json_shape() -> None:
     file_id = UUID("00000000-0000-0000-0000-000000000714")
     schema: JsonObject = {

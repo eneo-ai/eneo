@@ -10,7 +10,7 @@
     "extract_structured_fields": "supported",
     "json_to_artifact_report": "supported",
     "json_to_structured_payload": "supported",
-    "json_to_text_summary": "supported",
+    "json_to_text_summary": "removed",
     "summarize_text": "supported",
     "text_to_artifact_report": "supported"
   },

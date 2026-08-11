@@ -346,7 +346,7 @@ def test_policy_prioritizes_missing_core_without_reordering_discovery() -> None:
     )
 
 
-@pytest.mark.parametrize("primary_runtime_input", ["audio", "text", "json"])
+@pytest.mark.parametrize("primary_runtime_input", ["audio", "text"])
 def test_policy_ignores_weak_comparison_for_non_document_input(
     primary_runtime_input: str,
 ) -> None:
@@ -375,7 +375,7 @@ def test_policy_ignores_weak_comparison_for_non_document_input(
     assert policy.allowed_ask_question_targets == ()
 
 
-@pytest.mark.parametrize("primary_runtime_input", ["audio", "text", "json"])
+@pytest.mark.parametrize("primary_runtime_input", ["audio", "text"])
 def test_policy_ignores_weak_report_disposition_for_non_document_input(
     primary_runtime_input: str,
 ) -> None:
@@ -401,6 +401,26 @@ def test_policy_ignores_weak_report_disposition_for_non_document_input(
     )
 
     assert policy.allowed_action_kinds == ("commit_architecture",)
+    assert policy.allowed_ask_question_targets == ()
+
+
+def test_policy_does_not_commit_removed_json_to_text_architecture() -> None:
+    state = PlanningState.empty()
+    state.resolved_slots["primary_runtime_input"] = _slot(
+        "primary_runtime_input",
+        "json",
+    )
+    state.resolved_slots["terminal_output"] = _slot(
+        "terminal_output",
+        "structured_text",
+    )
+
+    policy = build_planner_action_policy(
+        session_state=state,
+        selected_discovery_question_ids=(),
+    )
+
+    assert policy.allowed_action_kinds == ()
     assert policy.allowed_ask_question_targets == ()
 
 

@@ -1341,10 +1341,10 @@ def test_the_feasibility_audit_rejects_a_corpus_too_small_to_pass(
     assert [row["row"] for row in audit["unpassable_rows"]] == [1, 2]
 
 
-def test_the_tracked_matrix_state_lists_exactly_the_cascade_rows(
+def test_the_tracked_matrix_state_matches_supported_cascade_rows(
     gate: ModuleType,
 ) -> None:
-    """The matrix state is the gate's only row vocabulary.
+    """Supported policy rows mirror the cascade; removed rows stay tombstoned.
 
     A cascade branch added without re-affirming this file would fail closed at
     the receipt, which is safe but late; comparing the two mechanically fails
@@ -1367,7 +1367,8 @@ def test_the_tracked_matrix_state_lists_exactly_the_cascade_rows(
     state = gate.matrix_state_from_payload(
         json.loads(_MATRIX_STATE.read_text(encoding="utf-8")), where=str(_MATRIX_STATE)
     )
-    assert set(state.rows) == cascade_rows
+    assert state.supported_rows == cascade_rows
+    assert state.rows["json_to_text_summary"] == "removed"
 
 
 def _release_verdict_cli(

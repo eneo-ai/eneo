@@ -124,7 +124,6 @@ _SUPPORTED_STRUCTURAL_PATTERN_IDS = frozenset(
         "form_field_runtime_inputs",
         "json_to_artifact_report",
         "json_to_structured_payload",
-        "json_to_text_summary",
         "summarize_text",
         "text_to_artifact_report",
     }
@@ -154,6 +153,7 @@ CreateAssemblyRejectionReason = Literal[
     "unsupported_final_output_type",
     "unsupported_output_mode",
     "unsupported_runtime_input_type",
+    "unsupported_runtime_output_tuple",
 ]
 
 _REJECTION_FEEDBACK: dict[CreateAssemblyRejectionReason, str] = {
@@ -234,6 +234,9 @@ _REJECTION_FEEDBACK: dict[CreateAssemblyRejectionReason, str] = {
     ),
     "unsupported_runtime_input_type": (
         "Create assembly supports text, JSON, audio, document, and file inputs."
+    ),
+    "unsupported_runtime_output_tuple": (
+        "Create assembly does not support JSON input with text output."
     ),
 }
 
@@ -347,6 +350,8 @@ def _assemble_create_intent(
     field_provenance: dict[str, FlowInputFieldProvenance] | None = None,
     field_diagnostics: list[LintWarning] | None = None,
 ) -> FlowAssemblyPlan | CreateAssemblyRejection:
+    if runtime_input_type == InputType.JSON and final_output_type == OutputType.TEXT:
+        return _reject("unsupported_runtime_output_tuple")
     if not _architecture_hints_are_supported(
         runtime_input_type=runtime_input_type,
         final_output_type=final_output_type,

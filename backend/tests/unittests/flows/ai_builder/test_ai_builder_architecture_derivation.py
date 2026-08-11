@@ -134,7 +134,7 @@ def test_derives_json_to_json_architecture_from_resolved_slots() -> None:
     assert draft.required_capabilities == ["input_json", "output_mode_pass_through"]
 
 
-def test_derives_json_to_text_architecture_from_resolved_slots() -> None:
+def test_json_to_text_architecture_is_not_derived() -> None:
     draft = derive_architecture_commit_draft(
         _state_with_slots(
             primary_runtime_input="json",
@@ -142,15 +142,7 @@ def test_derives_json_to_text_architecture_from_resolved_slots() -> None:
         )
     )
 
-    assert draft is not None
-    assert [triple.model_dump() for triple in draft.tuples_chain] == [
-        {
-            "input_type": "json",
-            "output_type": "text",
-            "output_mode": "pass_through",
-        }
-    ]
-    assert draft.chosen_patterns == ["json_to_text_summary"]
+    assert draft is None
 
 
 def test_derives_docx_template_architecture_from_resolved_slots() -> None:
