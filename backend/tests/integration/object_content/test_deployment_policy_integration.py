@@ -10,7 +10,6 @@ from eneo.database.tables.object_content_policy_table import (
     ObjectContentDeploymentPolicy,
 )
 from eneo.database.tables.roles_table import Roles
-from eneo.database.tables.users_table import Users
 from eneo.main.container.container import Container, SessionProxy
 from eneo.object_content.content import StorageKind
 from eneo.object_content.deployment_policy import (
@@ -50,10 +49,6 @@ async def test_policy_put_returns_the_committed_projection(
 ) -> None:
     await _seed_policy()
     async with db_container() as container:
-        session = container.session()
-        stored_user = await session.get(Users, admin_user.id)
-        assert stored_user is not None
-        stored_user.is_platform_admin = True
         token = container.auth_service().create_access_token_for_user(admin_user)
 
     response = await client.put(

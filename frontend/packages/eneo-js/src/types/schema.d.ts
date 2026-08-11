@@ -6963,26 +6963,6 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
-  "/api/v1/sysadmin/users/{user_id}/platform-admin": {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    get?: never;
-    /**
-     * Set Platform Admin
-     * @description Grant or revoke session-backed platform-administrator authority for a user. Granting requires an active tenant administrator; revoking does not.
-     */
-    put: operations["set_platform_admin_api_v1_sysadmin_users__user_id__platform_admin_put"];
-    post?: never;
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
   "/api/v1/sysadmin/users/": {
     parameters: {
       query?: never;
@@ -15773,21 +15753,6 @@ export interface components {
        */
       expected_published_revision_id: string;
     };
-    /** PlatformAdminGrantRequest */
-    PlatformAdminGrantRequest: {
-      /** Enabled */
-      enabled: boolean;
-    };
-    /** PlatformAdminGrantResponse */
-    PlatformAdminGrantResponse: {
-      /**
-       * User Id
-       * Format: uuid
-       */
-      user_id: string;
-      /** Is Platform Admin */
-      is_platform_admin: boolean;
-    };
     /**
      * PolicyActor
      * @enum {string}
@@ -19663,11 +19628,6 @@ export interface components {
        * @description Timestamp when user was soft-deleted (null for active users)
        */
       deleted_at?: string | null;
-      /**
-       * Is Platform Admin
-       * @default false
-       */
-      is_platform_admin?: boolean;
       access_token?: components["schemas"]["AccessToken"] | null;
       /** Modules */
       readonly modules: string[];
@@ -19843,11 +19803,6 @@ export interface components {
        * @description Timestamp when user was soft-deleted (null for active users)
        */
       deleted_at?: string | null;
-      /**
-       * Is Platform Admin
-       * @default false
-       */
-      is_platform_admin?: boolean;
       /** Modules */
       readonly modules: string[];
       /** User Groups Ids */
@@ -19928,11 +19883,6 @@ export interface components {
        * @default 0
        */
       quota_used?: number;
-      /**
-       * Is Platform Admin
-       * @default false
-       */
-      is_platform_admin?: boolean;
       /** Truncated Api Key */
       truncated_api_key?: string | null;
       /** Quota Limit */
@@ -44520,68 +44470,6 @@ export interface operations {
       };
       /** @description Not Found */
       404: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["GeneralError"];
-        };
-      };
-      /** @description Validation Error */
-      422: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["HTTPValidationError"];
-        };
-      };
-    };
-  };
-  set_platform_admin_api_v1_sysadmin_users__user_id__platform_admin_put: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path: {
-        user_id: string;
-      };
-      cookie?: never;
-    };
-    requestBody: {
-      content: {
-        "application/json": components["schemas"]["PlatformAdminGrantRequest"];
-      };
-    };
-    responses: {
-      /** @description Successful Response */
-      200: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["PlatformAdminGrantResponse"];
-        };
-      };
-      /** @description Unauthorized */
-      401: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["GeneralError"];
-        };
-      };
-      /** @description Not Found */
-      404: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["GeneralError"];
-        };
-      };
-      /** @description Conflict */
-      409: {
         headers: {
           [name: string]: unknown;
         };

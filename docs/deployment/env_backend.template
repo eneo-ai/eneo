@@ -431,7 +431,8 @@ DEV=false
 # ============================================================================
 # OBJECT CONTENT SAFETY AND UPLOAD BEHAVIOR
 # ============================================================================
-# Platform admins set upload limits and new-write placement in Admin > Storage.
+# Administrators with the Storage permission set upload limits and new-write
+# placement in Admin > Storage.
 # Updates take effect without restarting backend or worker processes.
 MAX_IN_QUESTION=1                           # Max file attachments per chat message
 
