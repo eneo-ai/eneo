@@ -2863,19 +2863,32 @@ class AssistantService:
                 source_labels=assistant_to_ask.knowledge_source_labels(),
             )
 
-        # URL-only attachments: when file text is withheld from the prompt in
-        # favor of signed reference URLs, attach the loopback files server so
-        # the model always has at least one tool that can read them. External
-        # servers coexist; tool descriptions steer the choice.
+        # Referenced attachments: whenever signed reference URLs render in the
+        # prompt, attach the loopback files server so the model always has at
+        # least one tool that can read them (URL-only files depend on it; for
+        # inlined files it still pages into text the window truncated).
+        # External servers coexist; tool descriptions steer the choice.
         files_mcp_server = None
         if internal_mcp.files:
+            seen_labels: set[str] = set()
+            attachment_labels: list[str] = []
+            for file in [*files, *history_files]:
+                if file.id not in internal_mcp.referenced_file_ids:
+                    continue
+                if file.name in seen_labels:
+                    continue
+                seen_labels.add(file.name)
+                attachment_labels.append(file.name)
             files_mcp_server = await build_files_mcp_server(
                 token=mint_scoped_token(),
                 tenant_id=self.user.tenant_id,
+                attachment_labels=attachment_labels,
             )
             logger.info(
-                "[FILES] assistant=%s files tool attached (%d url-only attachments)",
+                "[FILES] assistant=%s files tool attached "
+                "(%d referenced attachments, %d url-only)",
                 assistant_to_ask.id,
+                len(internal_mcp.referenced_file_ids),
                 len(internal_mcp.url_only_file_ids),
             )
         logger.info(

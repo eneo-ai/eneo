@@ -48,6 +48,25 @@ def object_store_configured() -> bool:
     return object_content_runtime.object_store_configured
 
 
+def referenced_file_ids(files: Iterable["File"]) -> set[UUID]:
+    """Ids of TEXT files a signed reference URL can actually serve.
+
+    These files get a JSON reference entry in the prompt whatever the
+    assistant's inlining mode, so the built-in ``read_file`` consumer attaches
+    whenever this set is non-empty. Empty when no reference base URL is
+    configured or no object store is connected. Images and audio never carry
+    reference URLs, and files without a stored original (rows predating
+    durable originals) only ever inline.
+    """
+    if not file_reference_base_url() or not object_store_configured():
+        return set()
+    return {
+        file.id
+        for file in files
+        if file.file_type == FileType.TEXT and file.original_available
+    }
+
+
 def url_only_file_ids(files: Iterable["File"], inline_file_text: bool) -> set[UUID]:
     """Ids of TEXT files that reach the model as a signed URL only.
 
@@ -59,12 +78,6 @@ def url_only_file_ids(files: Iterable["File"], inline_file_text: bool) -> set[UU
     it. Files without a stored original (rows predating durable originals)
     always inline so the model still sees them.
     """
-    if inline_file_text or not file_reference_base_url():
+    if inline_file_text:
         return set()
-    if not object_store_configured():
-        return set()
-    return {
-        file.id
-        for file in files
-        if file.file_type == FileType.TEXT and file.original_available
-    }
+    return referenced_file_ids(files)
