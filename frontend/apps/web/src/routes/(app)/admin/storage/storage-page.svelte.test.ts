@@ -1353,6 +1353,82 @@ describe("admin storage settings page", () => {
     await expect.element(refreshButton).toHaveFocus();
   });
 
+  test("locks policy inputs while a refresh is awaiting its response", async () => {
+    testUser.canAdministerStorage = true;
+    const initial = policy();
+    let resolveRefresh!: (value: ReturnType<typeof policy>) => void;
+    getPolicy
+      .mockResolvedValueOnce(initial)
+      .mockImplementationOnce(
+        () => new Promise<ReturnType<typeof policy>>((resolve) => (resolveRefresh = resolve))
+      );
+
+    render(StoragePage);
+
+    const target = page.getByRole("radio", { name: /storage_target_postgres_inline/ });
+    const limitInput = page.getByLabelText("storage_limit_session_file", { exact: true });
+    const refreshClick = (async () => {
+      await page.getByRole("button", { name: "storage_settings_refresh_status" }).click();
+    })();
+
+    await expect.element(target).toBeDisabled();
+    await expect.element(limitInput).toBeDisabled();
+    await expect.element(limitInput).toHaveValue(20);
+
+    resolveRefresh(initial);
+    await refreshClick;
+
+    await expect.element(target).toBeEnabled();
+    await expect.element(limitInput).toBeEnabled();
+    await expect.element(limitInput).toHaveValue(20);
+    await expect.element(page.getByText("storage_settings_stale_title")).not.toBeInTheDocument();
+  });
+
+  test("blocks policy mutations while preserving a draft during refresh", async () => {
+    testUser.canAdministerStorage = true;
+    const initial = policy();
+    let resolveRefresh!: (value: ReturnType<typeof policy>) => void;
+    getPolicy
+      .mockResolvedValueOnce(initial)
+      .mockImplementationOnce(
+        () => new Promise<ReturnType<typeof policy>>((resolve) => (resolveRefresh = resolve))
+      );
+
+    render(StoragePage);
+
+    const limitInput = page.getByLabelText("storage_limit_session_file", { exact: true });
+    await limitInput.fill("30");
+    const refreshClick = (async () => {
+      await page.getByRole("button", { name: "storage_settings_refresh_status" }).click();
+    })();
+
+    const saveButton = page.getByRole("button", { name: "storage_settings_save" });
+    const discardButton = page.getByRole("button", { name: "discard_changes" });
+    const pauseButton = page.getByRole("button", { name: "storage_moves_pause" });
+    await expect.element(limitInput).toBeDisabled();
+    await expect.element(saveButton).toBeDisabled();
+    await expect.element(discardButton).toBeDisabled();
+    await expect.element(pauseButton).toBeDisabled();
+    for (const control of [saveButton, pauseButton]) {
+      const element = control.element();
+      if (!(element instanceof HTMLButtonElement)) {
+        throw new TypeError("Expected policy mutation control to be a button");
+      }
+      element.click();
+    }
+    expect(replacePolicy).not.toHaveBeenCalled();
+    expect(setMovesPaused).not.toHaveBeenCalled();
+
+    resolveRefresh(initial);
+    await refreshClick;
+
+    await expect.element(limitInput).toBeEnabled();
+    await expect.element(limitInput).toHaveValue(30);
+    await expect.element(saveButton).toBeEnabled();
+    await expect.element(pauseButton).toBeEnabled();
+    await expect.element(page.getByText("storage_settings_stale_title")).not.toBeInTheDocument();
+  });
+
   test("does not refresh policy while a limit save is awaiting its response", async () => {
     testUser.canAdministerStorage = true;
     const initial = policy();

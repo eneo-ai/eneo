@@ -134,14 +134,14 @@
         knowledgeFileLimitBytes !== deploymentPolicy.policy.knowledge_file_limit_bytes ||
         transcriptionAudioLimitBytes !== deploymentPolicy.policy.transcription_audio_limit_bytes)
   );
-  const saveUnavailable = $derived(
-    !dirty || !validDraft || policyMutationPending || stale || saveOutcomeUnknown
-  );
-  const pauseUnavailable = $derived(moveStatus !== "idle" || policyMutationPending);
   const refreshing = $derived(
     reloading || inventoryStatus === "loading" || moveStatus === "loading"
   );
-  const refreshUnavailable = $derived(refreshing || policyMutationPending);
+  const policyInteractionUnavailable = $derived(refreshing || policyMutationPending);
+  const saveUnavailable = $derived(
+    !dirty || !validDraft || policyInteractionUnavailable || stale || saveOutcomeUnknown
+  );
+  const pauseUnavailable = $derived(moveStatus !== "idle" || policyInteractionUnavailable);
 
   function isValidByteLimit(value: number): boolean {
     return Number.isSafeInteger(value) && value > 0;
@@ -178,7 +178,7 @@
   }
 
   async function discardPolicyDraft(): Promise<void> {
-    if (deploymentPolicy === null) return;
+    if (deploymentPolicy === null || policyInteractionUnavailable) return;
     storageTarget = deploymentPolicy.policy.new_write_storage_target;
     sessionFileLimitBytes = deploymentPolicy.policy.session_file_limit_bytes;
     sessionImageLimitBytes = deploymentPolicy.policy.session_image_limit_bytes;
@@ -193,6 +193,11 @@
 
   function updateStorageTarget(value: string): void {
     if (value === "postgres_inline" || value === "object_store") storageTarget = value;
+  }
+
+  function requestPolicyRefresh(preserveDraft = false): void {
+    if (policyInteractionUnavailable) return;
+    void loadPolicy(preserveDraft);
   }
 
   async function loadPolicy(preserveDraft = false) {
@@ -607,7 +612,7 @@
             <Alert.Title>{m.storage_settings_load_error_title()}</Alert.Title>
             <Alert.Description>
               <p>{m.storage_settings_load_error_description()}</p>
-              <Button class="mt-3" variant="outline" onclick={() => loadPolicy()}>
+              <Button class="mt-3" variant="outline" onclick={() => requestPolicyRefresh()}>
                 {m.retry()}
               </Button>
             </Alert.Description>
@@ -628,11 +633,9 @@
             <Button
               variant="outline"
               aria-busy={refreshing}
-              aria-disabled={refreshUnavailable}
-              class={refreshUnavailable ? "pointer-events-none opacity-50" : undefined}
-              onclick={() => {
-                if (!refreshUnavailable) void loadPolicy(dirty);
-              }}
+              aria-disabled={policyInteractionUnavailable}
+              class={policyInteractionUnavailable ? "pointer-events-none opacity-50" : undefined}
+              onclick={() => requestPolicyRefresh(dirty)}
             >
               <RefreshCw
                 data-icon="inline-start"
@@ -718,8 +721,8 @@
                     <Button
                       class="mt-3"
                       variant="outline"
-                      disabled={reloading}
-                      onclick={() => loadPolicy()}
+                      disabled={policyInteractionUnavailable}
+                      onclick={() => requestPolicyRefresh()}
                     >
                       {#if reloading}
                         <Loader2 data-icon="inline-start" class="animate-spin" />
@@ -777,8 +780,8 @@
                     <Button
                       class="mt-3"
                       variant="outline"
-                      disabled={reloading}
-                      onclick={() => loadPolicy()}
+                      disabled={policyInteractionUnavailable}
+                      onclick={() => requestPolicyRefresh()}
                     >
                       {#if reloading}
                         <Loader2 data-icon="inline-start" class="animate-spin" />
@@ -797,7 +800,7 @@
                   <RadioGroup.Root
                     bind:value={() => storageTarget, updateStorageTarget}
                     class="grid gap-3 lg:grid-cols-2"
-                    disabled={policyMutationPending}
+                    disabled={policyInteractionUnavailable}
                     aria-invalid={storageTarget === "object_store" && objectStoreUnavailable}
                     aria-describedby="storage-target-help"
                   >
@@ -944,7 +947,7 @@
                     description={m.storage_limit_bytes_help()}
                     bind:bytes={sessionFileLimitBytes}
                     storedBytes={deploymentPolicy.policy.session_file_limit_bytes}
-                    disabled={policyMutationPending}
+                    disabled={policyInteractionUnavailable}
                   />
                   <ByteLimitField
                     id="session-image-limit"
@@ -952,7 +955,7 @@
                     description={m.storage_limit_bytes_help()}
                     bind:bytes={sessionImageLimitBytes}
                     storedBytes={deploymentPolicy.policy.session_image_limit_bytes}
-                    disabled={policyMutationPending}
+                    disabled={policyInteractionUnavailable}
                   />
                   <ByteLimitField
                     id="knowledge-file-limit"
@@ -960,7 +963,7 @@
                     description={m.storage_limit_bytes_help()}
                     bind:bytes={knowledgeFileLimitBytes}
                     storedBytes={deploymentPolicy.policy.knowledge_file_limit_bytes}
-                    disabled={policyMutationPending}
+                    disabled={policyInteractionUnavailable}
                   />
                   <ByteLimitField
                     id="transcription-audio-limit"
@@ -968,7 +971,7 @@
                     description={m.storage_limit_audio_help()}
                     bind:bytes={transcriptionAudioLimitBytes}
                     storedBytes={deploymentPolicy.policy.transcription_audio_limit_bytes}
-                    disabled={policyMutationPending}
+                    disabled={policyInteractionUnavailable}
                   />
                 </Field.Group>
               {:else}
@@ -1079,7 +1082,12 @@
                 >
                   <p class="text-sm font-medium">{m.storage_settings_unsaved_changes()}</p>
                   <div class="flex flex-wrap justify-end gap-2">
-                    <Button type="button" variant="outline" onclick={discardPolicyDraft}>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      disabled={policyInteractionUnavailable}
+                      onclick={discardPolicyDraft}
+                    >
                       {m.discard_changes()}
                     </Button>
                     <Button type="submit" disabled={saveUnavailable} aria-busy={saving}>
@@ -1128,7 +1136,12 @@
                   <Alert.Title>{m.storage_moves_stale_title()}</Alert.Title>
                   <Alert.Description>
                     <p>{m.storage_moves_stale_description()}</p>
-                    <Button class="mt-3" variant="outline" onclick={() => loadPolicy()}>
+                    <Button
+                      class="mt-3"
+                      variant="outline"
+                      disabled={policyInteractionUnavailable}
+                      onclick={() => requestPolicyRefresh()}
+                    >
                       {m.storage_settings_reload_latest()}
                     </Button>
                   </Alert.Description>
