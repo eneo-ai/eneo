@@ -502,6 +502,7 @@ const aiBuilderErrorCodes = [
   "stale_plan_revision",
   "stale_revision",
   "transcription_model_required",
+  "unsupported_architecture",
   "unsupported_revision_type"
 ] as const satisfies readonly AIBuilderPublicErrorPayload["code"][];
 const eneoErrorCodes = [

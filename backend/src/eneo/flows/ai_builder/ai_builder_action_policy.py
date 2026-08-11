@@ -34,6 +34,7 @@ PlannerActionKind = Literal[
     "ask_question",
     "confirm_requirements",
     "commit_architecture",
+    "refuse_unsupported_architecture",
     "revise_architecture",
     "propose_plan",
 ]
@@ -87,6 +88,9 @@ def build_planner_action_policy(
     if ask_targets:
         allowed.append("ask_question")
 
+    if not unresolved_core_slots and derived_commit is None:
+        allowed.append("refuse_unsupported_architecture")
+
     if (
         not architecture_committed
         and not unresolved_core_slots
@@ -136,6 +140,7 @@ def _phase_priority(candidates: list[PlannerActionKind]) -> list[PlannerActionKi
     """Expose one deterministic phase instead of a broad LLM action menu."""
 
     for action in (
+        "refuse_unsupported_architecture",
         "ask_question",
         "revise_architecture",
         "commit_architecture",

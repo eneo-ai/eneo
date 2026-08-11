@@ -1949,14 +1949,14 @@ def test_aggregate_unprompted_user_text_keeps_messages_when_question_answer_lack
     assert "word dokument" in text
 
 
-def test_aggregate_unprompted_user_text_keeps_long_freeform_message_even_with_structured_answer_metadata() -> (
+def test_aggregate_unprompted_user_text_keeps_freeform_message_with_structured_answer_metadata() -> (
     None
 ):
     text = aggregate_unprompted_user_text(
         [
             ConversationMessage(
                 role="user",
-                content="ändra så att jag får ut en word dokument istället för en pdf",
+                content="Use plain text instead.",
                 metadata={
                     "question_answer": {
                         "question_id": "terminal_output",
@@ -1967,7 +1967,7 @@ def test_aggregate_unprompted_user_text_keeps_long_freeform_message_even_with_st
         ]
     )
 
-    assert "word dokument istället för en pdf" in text
+    assert text == "use plain text instead."
 
 
 def test_aggregate_unprompted_user_text_filters_structured_answer_echo_with_terminal_punctuation() -> (

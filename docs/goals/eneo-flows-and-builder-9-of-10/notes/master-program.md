@@ -4,8 +4,9 @@ Status: EXECUTION PHASE, program **v10.3** (v10.2 architecture retained;
 post-merge order adjudicated 2026-08-11 by the separate Fable runtime
 and Builder sessions, both green at 8). LANDED: CP0 evidence, CP8a–c,
 CP6, the unsupported JSON-to-text removal, CP-D3, L1a, L1c, and the
-develop-to-Flows integration at `b9c0aa238`, and FLOW-AUTH. All three
-user decisions stand (TRAJECTORY / SPLIT / BALANCED).
+develop-to-Flows integration at `b9c0aa238`, FLOW-AUTH, and
+CP-ADMIT-0. All three user decisions stand (TRAJECTORY / SPLIT /
+BALANCED).
 
 v10.2 REPLACED v9.8 after three source-verified audits — structural
 debt, a systematic dual-ownership inventory, and runtime-slice drift —
@@ -58,7 +59,10 @@ frozen manifest, never restated as a prose constant.
   and release verdicts fail closed on final identity.
 - Product changes since the barrier: authoring rejects unindexed array
   paths, the unmeasured JSON-to-text tuple rejects explicitly, and the
-  mixed-audio topology guards no longer re-infer create intent.
+  mixed-audio topology guards no longer re-infer create intent. Fully
+  resolved unsupported Builder architectures now return a typed,
+  localized terminal refusal; server-known choices consume no provider
+  call, and create mode offers the existing fresh-session recovery.
 - Platform integration: current develop storage, knowledge/internal
   tools, API, SDK and frontend work is merged without weakening Flow
   governance. Internal-tool approval now trusts runtime provenance,
@@ -66,7 +70,7 @@ frozen manifest, never restated as a prose constant.
 - Flow authorization: service-key principals remain scoped to their own
   runs and subject to explicit evidence capability even when the key
   carries the synthetic tenant-admin permission. Human tenant-admin
-  behavior is unchanged. The affected Flow suite is 6514 passed,
+  behavior is unchanged. The affected Flow suite is 6519 passed,
   10 skipped, 1 xfailed.
 
 ## THE ARCHITECTURE VERDICT (peer pass 31, max effort — adopted)
@@ -199,6 +203,11 @@ ARTIFACT re-checked per slice, not a permanent grep gate.
       principal-scoped even when the key carries tenant-admin
       permission; human tenant admins remain unchanged (Claude
       iteration 97 green 8)
+- [x] CP-ADMIT-0 typed unsupported-architecture refusal: one derivation
+      and action-policy path, one shared structured-answer echo owner,
+      no provider or planning mutation for server-known choices, and
+      fresh-session recovery in create mode (Claude iteration 100
+      green 9; Codex value gate iteration 2 green 8)
 
 ## The Ranked Program (v10.3 — execution phase; slice bodies carry
 ## their originating iteration tags)
@@ -240,17 +249,16 @@ any threshold.
     (`832095bd8`). CP8c added bounded provider-fault slot
     remeasurement without changing frozen arithmetic (`07fa4ed42`).
     The pre-registration barrier is closed.
-- [ ] CP-ADMIT-0 Unsupported-architecture refusal (Fable Builder
-    iteration 2): the existing action policy can produce no legal
-    action for a fully resolved but unsupported tuple; the turn
-    controller then raises a raw `ValueError`. Represent that state as
-    one typed refusal before planner/provider use and before any Flow
-    mutation. Reuse the derivation cascade as the supportedness owner;
-    add no table, service, framework or module. The slice includes the
-    public error-registry entry, en/sv messages, SSE error projection,
-    frontend handling, regenerated SDK, and one behavior proof of no
-    provider call and no mutation. This closes the deterministic crash
-    without replacing the later CP-ADMIT dependency-table transfer.
+- [x] CP-ADMIT-0 Unsupported-architecture refusal (Fable Builder
+    iteration 2): fully resolved unsupported tuples now produce one
+    typed, localized terminal refusal. The existing derivation cascade
+    remains the supportedness owner; action policy owns the legal
+    refusal; SSE, generated SDK and web UI reuse their existing contract
+    owners. Localized structured controls refuse before provider use or
+    planning mutation, while genuine corrective text still reaches
+    classification. Create mode reuses fresh-session recovery. No table,
+    service, framework or module was added, and the later CP-ADMIT
+    dependency-table transfer remains separate.
 - [ ] CP1 File-role flip closure (TRIMMED, iteration 33). The margin
     regression IS the task-14 case (same mechanism, confirmed).
     Deepen the EXISTING merge owner `_model_file_role_can_replace`
@@ -507,8 +515,8 @@ any threshold.
 2. **FLOW-AUTH complete** — the existing access policy now keeps
    tenant-admin service keys inside the service-principal branch for
    evidence access and run listing.
-3. **CP-ADMIT-0** — typed unsupported-architecture refusal before
-   provider use or mutation.
+3. **CP-ADMIT-0 complete** — typed unsupported-architecture refusal
+   before provider use or mutation; corrective text remains admissible.
 4. **CP2**, then **CP1** — evidence rank: CP2 has deterministic
    receipts; its cohort explicitly includes the mixed-audio and
    transcription terminal failures. CP1 carries D7 only if its receipt
@@ -703,6 +711,11 @@ user opts object storage in) or explicitly descoped by the user.
   third vocabulary — the Builder already has its own
   (`ai_builder_error_contract.py:326` region) alongside the transport's
   (`litellm_transport.py:184` region).
+- BUILDER FRESH-SESSION FENCING: backend locking already prevents
+  competing active drafts, but the frontend driver does not expose
+  session creation as pending state. If hardened, one driver-owned flag
+  must fence every fresh-session control; do not add per-button flags.
+  This non-blocking shared lifecycle P3 is not part of CP-ADMIT-0.
 - GOD MODULES — a split must earn its diff by ONE of three
   justifications, and NO standalone split slice exists in this program.
   (A) DELETION-FIRST: never restructure what a slice deletes —
@@ -836,7 +849,7 @@ apart (provider limits).
   orchestrator verifies each finding in current source, reruns decisive
   tests, and owns all git.
 - Validation: `cd backend && uv run pytest tests/unittests/flows/ -q`
-  (current baseline: 6514 passed, 10 skipped, 1 xfailed); ruff
+  (current baseline: 6519 passed, 10 skipped, 1 xfailed); ruff
   check/format + pyright
   (`--pythonpath .venv/bin/python`) on exact changed paths only.
 - Measurement: harness + protocol in `conformance-program-plan.md`.

@@ -4173,6 +4173,8 @@
   "ai_builder_dismiss": "Stäng",
   "ai_builder_turn_failed_before_provider_title": "Begäran avbröts innan AI-arbetet började",
   "ai_builder_turn_failed_before_provider_description": "Ingen AI-modell anropades. Ett nytt försök upprepar därför inget AI-arbete.",
+  "ai_builder_unsupported_architecture_title": "Den här flödeskonfigurationen stöds inte",
+  "ai_builder_unsupported_architecture_description": "Börja om och välj en annan typ av indata eller ett annat slutresultat.",
   "ai_builder_turn_retry": "Försök igen",
   "ai_builder_turn_provider_outcome_unknown_title": "Den föregående AI-begäran kan ha slutförts",
   "ai_builder_turn_provider_outcome_unknown_description": "Vi kunde inte bekräfta resultatet. Ett nytt försök kan upprepa AI-arbetet och medföra en extra kostnad.",

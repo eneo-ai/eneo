@@ -170,6 +170,7 @@ class AIBuilderErrorCode(StrEnum):
     STALE_PLAN_REVISION = "stale_plan_revision"
     STALE_REVISION = "stale_revision"
     TRANSCRIPTION_MODEL_REQUIRED = "transcription_model_required"
+    UNSUPPORTED_ARCHITECTURE = "unsupported_architecture"
     UNSUPPORTED_REVISION_TYPE = "unsupported_revision_type"
 
 
@@ -933,6 +934,12 @@ AI_BUILDER_ERROR_REGISTRY: _AIBuilderErrorRegistry = MappingProxyType(
             category=AIBuilderErrorCategory.BAD_REQUEST,
             http_status=400,
             eneo_error_code=ErrorCodes.BAD_REQUEST,
+        ),
+        AIBuilderErrorCode.UNSUPPORTED_ARCHITECTURE: _entry(
+            category=AIBuilderErrorCategory.BAD_REQUEST,
+            http_status=400,
+            eneo_error_code=ErrorCodes.BAD_REQUEST,
+            default_phase=AIBuilderErrorPhase.PLANNER,
         ),
         AIBuilderErrorCode.UNSUPPORTED_REVISION_TYPE: _entry(
             category=AIBuilderErrorCategory.BAD_REQUEST,

@@ -51,24 +51,36 @@
     service.latestTurnState === "open" || service.latestTurnState === "processing"
   );
   const turnRefreshFailed = $derived(service.authoritativeRefreshFailed && service.error !== null);
-  const turnRecoveryTitle = $derived(
-    turnRecoveryState === "failed_before_provider"
-      ? m.ai_builder_turn_failed_before_provider_title()
-      : turnRecoveryState === "provider_outcome_unknown"
-        ? m.ai_builder_turn_provider_outcome_unknown_title()
-        : turnIsActive
-          ? m.ai_builder_turn_active_title()
-          : null
+  const isUnsupportedArchitectureError = $derived(
+    service.error?.code === "unsupported_architecture"
   );
-  const turnRecoveryDescription = $derived(
-    turnRecoveryState === "failed_before_provider"
-      ? m.ai_builder_turn_failed_before_provider_description()
-      : turnRecoveryState === "provider_outcome_unknown"
-        ? m.ai_builder_turn_provider_outcome_unknown_description()
-        : turnIsActive
-          ? m.ai_builder_turn_active_description()
-          : null
-  );
+  const turnAlertCopy = $derived.by(() => {
+    if (turnRecoveryState === "failed_before_provider") {
+      return {
+        title: m.ai_builder_turn_failed_before_provider_title(),
+        description: m.ai_builder_turn_failed_before_provider_description()
+      };
+    }
+    if (turnRecoveryState === "provider_outcome_unknown") {
+      return {
+        title: m.ai_builder_turn_provider_outcome_unknown_title(),
+        description: m.ai_builder_turn_provider_outcome_unknown_description()
+      };
+    }
+    if (isUnsupportedArchitectureError) {
+      return {
+        title: m.ai_builder_unsupported_architecture_title(),
+        description: m.ai_builder_unsupported_architecture_description()
+      };
+    }
+    if (turnIsActive) {
+      return {
+        title: m.ai_builder_turn_active_title(),
+        description: m.ai_builder_turn_active_description()
+      };
+    }
+    return null;
+  });
   let isRefreshingTurn = $state(false);
 
   async function handleTurnRetry() {
@@ -88,6 +100,15 @@
       await service.refreshSession();
     } finally {
       isRefreshingTurn = false;
+    }
+  }
+
+  async function handleUnsupportedArchitectureStartFresh() {
+    clearPendingEditContext();
+    try {
+      await service.startFreshSession(targetKind);
+    } catch {
+      // The driver retains the typed create-session error for this alert.
     }
   }
 
@@ -272,17 +293,17 @@
           />
         </svg>
         <div class="min-w-0">
-          {#if turnRecoveryTitle}
-            <Alert.Title class="text-sm leading-snug">{turnRecoveryTitle}</Alert.Title>
+          {#if turnAlertCopy}
+            <Alert.Title class="text-sm leading-snug">{turnAlertCopy.title}</Alert.Title>
           {/if}
           <Alert.Description
             id="ai-builder-turn-recovery-description"
             class="text-[0.8125rem] leading-relaxed"
           >
-            {turnRecoveryDescription ?? service.error?.message ?? ""}
-            {#if turnRecoveryDescription && turnRefreshFailed}
+            {turnAlertCopy?.description ?? service.error?.message ?? ""}
+            {#if turnAlertCopy && turnRefreshFailed}
               <span class="mt-1 block">{m.ai_builder_turn_refresh_failed()}</span>
-            {:else if turnRecoveryDescription && service.error}
+            {:else if turnAlertCopy && service.error && !isUnsupportedArchitectureError}
               <span class="mt-1 block">{service.error.message}</span>
             {/if}
           </Alert.Description>
@@ -290,7 +311,18 @@
             class="mt-3 flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center"
             aria-busy={service.isStreaming || service.isRecoveringLatestTurn}
           >
-            {#if turnRecoveryState}
+            {#if isUnsupportedArchitectureError && !isEditMode}
+              <Button
+                variant="default"
+                size="sm"
+                class="w-full whitespace-normal sm:w-auto"
+                disabled={service.isCreating}
+                aria-describedby="ai-builder-turn-recovery-description"
+                onclick={handleUnsupportedArchitectureStartFresh}
+              >
+                {m.ai_builder_start_fresh()}
+              </Button>
+            {:else if turnRecoveryState}
               <Button
                 variant={turnRecoveryState === "provider_outcome_unknown"
                   ? "destructive"

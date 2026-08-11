@@ -905,7 +905,7 @@ describe("FlowAIBuilder generation wait state", () => {
   });
 });
 
-describe("FlowAIBuilder generation failure (E1)", () => {
+describe("FlowAIBuilder error presentation", () => {
   it("keeps the plan pane, shows E1 once and suppresses the chat banner", async () => {
     const draft = {
       session_id: "gen-session",
@@ -1006,6 +1006,40 @@ describe("FlowAIBuilder generation failure (E1)", () => {
     expect(await screen.findByText("The saved Builder state could not be refreshed.")).toBeTruthy();
     expect(screen.getAllByText("The saved Builder state could not be refreshed.")).toHaveLength(1);
     expect(screen.queryByText(m.ai_builder_generation_failed_title())).toBeNull();
+  });
+
+  it("offers a fresh session after an unsupported architecture", async () => {
+    let service: FlowAIBuilderService | undefined;
+
+    render(FlowAIBuilderHarness, {
+      transport: planSessionHarness(),
+      onservice: (instance: FlowAIBuilderService) => (service = instance)
+    });
+
+    await screen.findByRole("heading", { name: m.ai_builder_task_heading() });
+    const startFreshSession = vi.spyOn(service!, "startFreshSession").mockResolvedValue(undefined);
+    service!.seedState({
+      currentPlan: null,
+      streamState: "idle",
+      error: {
+        schema_version: 2,
+        code: "unsupported_architecture",
+        category: "bad_request",
+        message: "Server fallback message",
+        phase: "planner",
+        eneo_error_code: 9007,
+        request_id: "request-unsupported-architecture",
+        diagnostic_context: null,
+        details: {}
+      }
+    });
+
+    expect(await screen.findByText(m.ai_builder_unsupported_architecture_title())).toBeTruthy();
+    expect(screen.getByText(m.ai_builder_unsupported_architecture_description())).toBeTruthy();
+    expect(screen.queryByText("Server fallback message")).toBeNull();
+
+    await fireEvent.click(screen.getByRole("button", { name: m.ai_builder_start_fresh() }));
+    expect(startFreshSession).toHaveBeenCalledWith("create");
   });
 });
 

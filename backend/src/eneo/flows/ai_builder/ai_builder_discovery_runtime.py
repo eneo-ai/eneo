@@ -6,6 +6,9 @@ from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
+from eneo.flows.ai_builder.ai_builder_action_policy import (
+    build_planner_action_policy,
+)
 from eneo.flows.ai_builder.ai_builder_attachment_context import (
     AI_BUILDER_ATTACHMENT_LIMIT_MESSAGE,
     AI_BUILDER_MAX_ATTACHMENTS,
@@ -19,7 +22,6 @@ from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
     SlotClassificationNamedResultEvidenceMetadata,
     StructuredQuestionAnswerMetadata,
     question_answer_from_metadata,
-    question_answer_values,
     question_response_from_metadata,
     slot_classification_from_metadata,
     slot_classification_metadata_from_attempt,
@@ -37,6 +39,7 @@ from eneo.flows.ai_builder.ai_builder_error_contract import (
 )
 from eneo.flows.ai_builder.ai_builder_framework_policy import (
     aggregate_unprompted_user_text,
+    is_structured_answer_echo,
     slot_names_blocked_by_explicit_uncertainty,
 )
 from eneo.flows.ai_builder.ai_builder_proposal_telemetry import ProposalTurnTelemetry
@@ -264,9 +267,7 @@ def build_slot_classification_input(
         response = question_response_from_metadata(message.metadata)
         response_question_id = response.question_id if response is not None else None
         if isinstance(message.content, str) and message.content.strip():
-            if answer is None or not _is_structured_answer_echo(
-                message.content, answer
-            ):
+            if answer is None or not is_structured_answer_echo(message.content, answer):
                 transcript_sources.append(
                     SlotClassificationSource(
                         source_id=f"user_message:{message.message_id}",
@@ -359,19 +360,6 @@ def _structured_answer_values(
             option_ids.append(answer.selected_option_id)
         values.extend(value for value in option_ids if value)
     return tuple(values)
-
-
-def _is_structured_answer_echo(
-    content: str,
-    answer: StructuredQuestionAnswerMetadata,
-) -> bool:
-    normalized = content.casefold().strip().rstrip(" .?!")
-    if not normalized:
-        return True
-    return normalized in {
-        value.casefold().strip().rstrip(" .?!")
-        for value in question_answer_values(answer)
-    }
 
 
 def _current_schema_candidates(
@@ -568,6 +556,25 @@ async def build_runtime_discovery_context(
             schema_candidates=schema_candidates,
             schema_direction_pending=schema_direction_pending,
         )
+    current_user_message_id = classification_input.current_user_message_id
+    current_turn_has_semantic_text = any(
+        source.kind == "user_message" and source.message_id == current_user_message_id
+        for source in classification_input.sources
+    )
+    # User text may correct model-derived slots; structured controls and their
+    # localized labels are already authoritative server-known evidence.
+    if not current_turn_has_semantic_text:
+        action_policy = build_planner_action_policy(
+            session_state=state,
+            selected_discovery_question_ids=(),
+        )
+        if action_policy.allowed_action_kinds == ("refuse_unsupported_architecture",):
+            return _complete_runtime_discovery_context(
+                state,
+                attachment_context=attachment_context,
+                schema_candidates=schema_candidates,
+                schema_direction_pending=schema_direction_pending,
+            )
 
     allowed_values = llm_resolvable_slot_values_for_state(state)
     model_blocked_slots = slot_names_blocked_by_explicit_uncertainty(

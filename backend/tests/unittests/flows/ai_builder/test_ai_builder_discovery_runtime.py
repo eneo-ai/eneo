@@ -458,6 +458,65 @@ def test_slot_classification_input_preserves_typed_source_chronology() -> None:
     )
 
 
+@pytest.mark.asyncio
+async def test_runtime_classifies_corrective_text_sent_with_structured_answer(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    classify = AsyncMock(
+        return_value=SlotClassificationAttempt(
+            outcome="resolved",
+            result=SlotClassificationResult(),
+        )
+    )
+    monkeypatch.setattr(runtime, "classify_slots", classify)
+    conversation = [
+        ConversationMessage(
+            message_id="user-input",
+            role="user",
+            content="JSON",
+            metadata={
+                "question_answer": {
+                    "question_id": "primary_runtime_input",
+                    "selected_values": ["json"],
+                }
+            },
+        ),
+        ConversationMessage(
+            message_id="user-correction",
+            role="user",
+            content="Use text as the primary input instead.",
+            metadata={
+                "question_answer": {
+                    "question_id": "terminal_output",
+                    "selected_values": ["structured_text"],
+                }
+            },
+        ),
+    ]
+
+    await build_runtime_discovery_context(
+        conversation,
+        litellm_client=AsyncMock(),
+        completion_model_route=_route(),
+        tenant_id=uuid4(),
+        max_input_tokens=100_000,
+        max_output_tokens=2_000,
+    )
+
+    classify.assert_awaited_once()
+    classification_input = classify.await_args.kwargs["classification_input"]
+    assert isinstance(classification_input, SlotClassificationInput)
+    current_sources = [
+        source
+        for source in classification_input.sources
+        if source.message_id == "user-correction"
+    ]
+    assert [(source.kind, source.text) for source in current_sources] == [
+        ("user_message", "Use text as the primary input instead."),
+        ("structured_answer", "structured_text"),
+    ]
+
+
 def test_blank_current_turn_cannot_readmit_prior_named_json_fields() -> None:
     classification_input = _classification_input(
         [

@@ -46,6 +46,7 @@ from eneo.flows.ai_builder.ai_builder_turn_controller import (
     CommitArchitecture,
     ConfirmRequirements,
     GenerateProposal,
+    RefuseUnsupportedArchitecture,
     ReviseArchitecture,
     _slot_is_key_decision,
     resolve_turn_control,
@@ -153,6 +154,35 @@ def test_server_builds_ask_question_for_allowed_target() -> None:
 
     assert isinstance(decision, AskCanonicalQuestion)
     assert decision.slot_name == "document_material_scope"
+
+
+@pytest.mark.parametrize(
+    ("ui_language", "expected_message"),
+    [
+        (
+            "en",
+            "This combination of input and final output is not supported. Start "
+            "fresh and choose a different input or final output.",
+        ),
+        (
+            "sv",
+            "Den här kombinationen av indata och slutresultat stöds inte. Börja om "
+            "och välj en annan indata eller ett annat slutresultat.",
+        ),
+    ],
+)
+def test_unsupported_architecture_returns_localized_refusal(
+    ui_language: str,
+    expected_message: str,
+) -> None:
+    state = _state(
+        primary_runtime_input="json",
+        terminal_output="structured_text",
+    )
+
+    decision = _decision(state=state, ui_language=ui_language)
+
+    assert decision == RefuseUnsupportedArchitecture(message=expected_message)
 
 
 def test_vague_purpose_question_survives_to_the_emitted_turn_decision() -> None:

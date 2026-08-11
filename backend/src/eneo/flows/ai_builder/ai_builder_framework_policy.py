@@ -63,6 +63,7 @@ from eneo.flows.ai_builder.ai_builder_runtime_input_fields import (
 from eneo.flows.ai_builder.ai_builder_tool_names import (
     ASK_STRUCTURED_QUESTION_TOOL_NAME,
 )
+from eneo.flows.ai_builder.question_catalog import QUESTION_CATALOG
 from eneo.flows.domain.flow import Flow
 from eneo.flows.flow_authoring_spec import (
     OutputType,
@@ -84,6 +85,7 @@ __all__ = [
     "normalize_structured_question_payload",
     "has_explicit_docx_mode_text",
     "has_explicit_pdf_mode_text",
+    "is_structured_answer_echo",
     "resolve_docx_output_mode",
     "resolve_explicit_output_choice",
     "resolve_output_intent",
@@ -272,7 +274,7 @@ def extract_freeform_user_messages(
         if question_response_from_metadata(metadata) is not None:
             continue
         question_answer = question_answer_from_metadata(metadata)
-        if question_answer is not None and _looks_like_structured_answer_echo(
+        if question_answer is not None and is_structured_answer_echo(
             content,
             question_answer,
         ):
@@ -308,7 +310,7 @@ def _aggregate_user_text(
         if question_response_from_metadata(metadata) is not None:
             continue
         question_answer = question_answer_from_metadata(metadata)
-        if question_answer is not None and _looks_like_structured_answer_echo(
+        if question_answer is not None and is_structured_answer_echo(
             content, question_answer
         ):
             continue
@@ -316,34 +318,30 @@ def _aggregate_user_text(
     return "\n".join(parts)
 
 
-def _looks_like_structured_answer_echo(
+def is_structured_answer_echo(
     content: str,
     question_answer: StructuredQuestionAnswerMetadata | Mapping[str, Any],
 ) -> bool:
-    normalized_content = content.casefold().strip()
+    normalized_content = content.casefold().strip().rstrip(" .?!")
     if not normalized_content:
         return True
 
     if not question_answer_has_real_payload(question_answer):
         return False
 
-    candidates = question_answer_values(question_answer)
-
-    if normalized_content in candidates:
-        return True
-    normalized_without_terminal_punctuation = normalized_content.rstrip(" .?!")
-    if (
-        normalized_without_terminal_punctuation
-        and normalized_without_terminal_punctuation in candidates
-    ):
-        return True
-
-    return (
-        len(normalized_without_terminal_punctuation) <= 80
-        and len(normalized_without_terminal_punctuation.split()) <= 4
-        and not any(marker in normalized_content for marker in ("\n",))
-        and normalized_content == normalized_without_terminal_punctuation
+    answer_values = question_answer_values(question_answer)
+    echo_values = set(answer_values)
+    question_id = question_answer_question_id(question_answer)
+    template = QUESTION_CATALOG.get(
+        canonical_question_id(question_id) if question_id is not None else ""
     )
+    if template is not None:
+        for option in template.options:
+            if {option.id.casefold(), option.value.casefold()} & answer_values:
+                echo_values.update((option.label_sv, option.label_en))
+    return normalized_content in {
+        value.casefold().strip().rstrip(" .?!") for value in echo_values
+    }
 
 
 def extract_answer_signals(

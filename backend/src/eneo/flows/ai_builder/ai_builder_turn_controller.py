@@ -69,6 +69,14 @@ _MAX_CONFIRMATION_EXAMPLE_HEADINGS = 8
 _MAX_CONFIRMATION_STYLE_CONSTRAINTS = 6
 _ATTACHMENT_ASSUMPTION_PREFIX_EN = "Attachment evidence — "
 _ATTACHMENT_ASSUMPTION_PREFIX_SV = "Bilageunderlag – "
+_UNSUPPORTED_ARCHITECTURE_MESSAGE_EN = (
+    "This combination of input and final output is not supported. Start fresh "
+    "and choose a different input or final output."
+)
+_UNSUPPORTED_ARCHITECTURE_MESSAGE_SV = (
+    "Den här kombinationen av indata och slutresultat stöds inte. Börja om "
+    "och välj en annan indata eller ett annat slutresultat."
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -98,12 +106,18 @@ class GenerateProposal:
     pass
 
 
+@dataclass(frozen=True, slots=True)
+class RefuseUnsupportedArchitecture:
+    message: str
+
+
 BuilderTurnDecision: TypeAlias = (
     AskCanonicalQuestion
     | CommitArchitecture
     | ReviseArchitecture
     | ConfirmRequirements
     | GenerateProposal
+    | RefuseUnsupportedArchitecture
 )
 
 
@@ -123,13 +137,32 @@ def resolve_turn_control(
     schema_candidates: tuple[DeclaredSchemaCandidate, ...] = (),
     schema_direction_pending: bool = False,
 ) -> BuilderTurnControl:
+    locale = _locale(ui_language)
+    attachment_evidence_fingerprint = _attachment_evidence_fingerprint(session_state)
+    action_policy = build_planner_action_policy(
+        session_state=session_state,
+        selected_discovery_question_ids=selected_discovery_question_ids,
+        requirements_confirmed=(
+            confirmed_attachment_evidence_fingerprint == attachment_evidence_fingerprint
+        ),
+    )
+    if action_policy.allowed_action_kinds == ("refuse_unsupported_architecture",):
+        return BuilderTurnControl(
+            decision=RefuseUnsupportedArchitecture(
+                message=(
+                    _UNSUPPORTED_ARCHITECTURE_MESSAGE_SV
+                    if locale == "sv"
+                    else _UNSUPPORTED_ARCHITECTURE_MESSAGE_EN
+                )
+            )
+        )
     if schema_direction_pending:
         if not schema_candidates:
             raise ValueError("pending schema direction requires candidates")
         question = _schema_direction_question(
             schema_candidates,
             attachment_context=attachment_context,
-            locale=_locale(ui_language),
+            locale=locale,
         )
         return BuilderTurnControl(
             decision=AskCanonicalQuestion(
@@ -139,16 +172,8 @@ def resolve_turn_control(
         )
     requirements_payload = _confirm_requirements_payload(
         session_state,
-        _locale(ui_language),
+        locale,
         discovery_assumptions,
-    )
-    attachment_evidence_fingerprint = _attachment_evidence_fingerprint(session_state)
-    action_policy = build_planner_action_policy(
-        session_state=session_state,
-        selected_discovery_question_ids=selected_discovery_question_ids,
-        requirements_confirmed=(
-            confirmed_attachment_evidence_fingerprint == attachment_evidence_fingerprint
-        ),
     )
     return BuilderTurnControl(
         decision=_decision_from_policy(
@@ -1042,6 +1067,7 @@ __all__ = [
     "CommitArchitecture",
     "ConfirmRequirements",
     "GenerateProposal",
+    "RefuseUnsupportedArchitecture",
     "ReviseArchitecture",
     "resolve_turn_control",
 ]

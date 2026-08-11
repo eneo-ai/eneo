@@ -9724,6 +9724,7 @@ export interface components {
       | "stale_plan_revision"
       | "stale_revision"
       | "transcription_model_required"
+      | "unsupported_architecture"
       | "unsupported_revision_type";
     /** AIBuilderErrorEvent */
     AIBuilderErrorEvent: {

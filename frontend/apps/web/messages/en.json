@@ -4171,6 +4171,8 @@
   "ai_builder_dismiss": "Dismiss",
   "ai_builder_turn_failed_before_provider_title": "The request stopped before AI work began",
   "ai_builder_turn_failed_before_provider_description": "No AI model was called. Retrying will not duplicate AI work.",
+  "ai_builder_unsupported_architecture_title": "This flow setup is not supported",
+  "ai_builder_unsupported_architecture_description": "Start fresh and choose a different type of input or final result.",
   "ai_builder_turn_retry": "Try again",
   "ai_builder_turn_provider_outcome_unknown_title": "The previous AI request may have completed",
   "ai_builder_turn_provider_outcome_unknown_description": "We could not confirm the result. Retrying may repeat AI work and incur an additional cost.",

@@ -50,6 +50,7 @@ from eneo.flows.ai_builder.ai_builder_turn_controller import (
     CommitArchitecture,
     ConfirmRequirements,
     GenerateProposal,
+    RefuseUnsupportedArchitecture,
     ReviseArchitecture,
     resolve_turn_control,
 )
@@ -67,6 +68,7 @@ ServerDecisionKind = Literal[
     "commit_architecture",
     "revise_architecture",
     "confirm_requirements",
+    "refuse_unsupported_architecture",
 ]
 
 
@@ -128,6 +130,18 @@ async def dispatch_server_decision(
             )
         case ConfirmRequirements():
             return await _dispatch_requirements_confirmation(request, decision)
+        case RefuseUnsupportedArchitecture():
+            return ServerDecisionDispatchResult(
+                action_kind="refuse_unsupported_architecture",
+                events=(
+                    build_ai_builder_error_event(
+                        message=decision.message,
+                        code=AIBuilderErrorCode.UNSUPPORTED_ARCHITECTURE,
+                        request_id=request.telemetry.request_id,
+                    ),
+                ),
+                new_planning_state_version=request.turn.base_planning_state_version,
+            )
         case GenerateProposal() as unhandled:
             raise ValueError(
                 "GenerateProposal must be routed to the planner proposal path, "
