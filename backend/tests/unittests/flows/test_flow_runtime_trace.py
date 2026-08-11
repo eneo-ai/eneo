@@ -100,6 +100,28 @@ def test_flow_run_span_records_actor_resolution_failure_token(captured_flow_span
     assert attributes["flow.run.result.reason"] == "service_principal_disabled"
 
 
+@pytest.mark.parametrize(
+    "reason",
+    ["flow_provider_rate_limited", "flow_provider_unavailable"],
+)
+def test_flow_run_span_records_typed_provider_failure_reason(
+    captured_flow_spans,
+    reason: str,
+):
+    with trace_flow_run(
+        run_id=uuid4(),
+        flow_id=uuid4(),
+        tenant_id=uuid4(),
+        celery_task_id="task-provider",
+        retry_count=0,
+    ) as span_context:
+        span_context.set_result_from_mapping({"status": "failed", "error": reason})
+
+    attributes = captured_flow_spans.get_finished_spans()[0].attributes
+    assert attributes["flow.run.result.status"] == "failed"
+    assert attributes["flow.run.result.reason"] == reason
+
+
 def test_flow_run_span_preserves_explicit_reason_when_exception_raises(
     captured_flow_spans,
 ):

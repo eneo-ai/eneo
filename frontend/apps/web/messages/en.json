@@ -4926,6 +4926,8 @@
   "flow_error_flow_template_unsupported_extension": "Only .docx files can be used as templates. Choose a .docx file and try again.",
   "flow_error_typed_io_contract_violation": "The edited output does not match the step output contract. Fix the JSON shape and save again.",
   "flow_error_flow_llm_request_timeout": "The model request timed out, but provider work may still have completed. Check the run before retrying because a retry can duplicate provider work and spend.",
+  "flow_error_flow_provider_rate_limited": "The AI provider is temporarily rate-limiting requests. Wait before starting a new run.",
+  "flow_error_flow_provider_unavailable": "The AI provider became unavailable. Check the run before starting another because provider work may have occurred.",
   "flow_error_flow_provider_call_evidence_persistence_failed": "Provider-call evidence could not be saved reliably. Do not retry automatically; inspect the run because provider work may have occurred.",
   "flow_error_flow_evidence_export_too_large": "The run holds more evidence than one export can contain. Open the run's evidence view, which shows what fits and says exactly what it left out.",
   "flow_error_flow_runtime_input_not_consumed": "Runtime files were attached, but the step input does not reference them. Update the step to use step_input.* or remove the files.",

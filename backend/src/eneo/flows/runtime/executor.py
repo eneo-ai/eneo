@@ -201,6 +201,7 @@ from eneo.json_types import JsonObject
 from eneo.main.config import get_settings
 from eneo.main.exceptions import (
     BadRequestException,
+    OpenAIException,
     ProviderCapabilityRejectedException,
     ProviderRejectedRequestException,
     TypedIOValidationException,
@@ -247,6 +248,16 @@ def _with_provider_work_disclosure(message: str, *, step: RuntimeStep) -> str:
     if not step.may_call_completion_provider:
         return message
     return f"{message.rstrip()} {_PROVIDER_WORK_AMBIGUITY_DISCLOSURE}"
+
+
+def _flow_provider_error_code(exc: Exception | None) -> FlowApiErrorCode | None:
+    if not isinstance(exc, OpenAIException):
+        return None
+    if exc.code == "provider_rate_limited":
+        return FlowApiErrorCode.PROVIDER_RATE_LIMITED
+    if exc.code == "provider_unavailable":
+        return FlowApiErrorCode.PROVIDER_UNAVAILABLE
+    return None
 
 
 def _typed_io_failure_code(raw_code: str | None) -> FlowApiErrorCode:
@@ -1890,6 +1901,7 @@ class FlowRunExecutor:
         state: RunExecutionState | None = None,
         exc: Exception | None = None,
     ) -> dict[str, Any]:
+        provider_error_code = _flow_provider_error_code(exc)
         evidence_persistence_error = (
             exc if isinstance(exc, ProviderCallEvidencePersistenceError) else None
         )
@@ -1923,6 +1935,17 @@ class FlowRunExecutor:
                 f"Flow step {step.step_order} execution failed because the provider "
                 "rejected the request; the runtime did not repeat it."
             )
+        elif provider_error_code is FlowApiErrorCode.PROVIDER_RATE_LIMITED:
+            public_error = (
+                f"Flow step {step.step_order} was rate-limited by the provider; "
+                "wait before starting a new run."
+            )
+        elif provider_error_code is FlowApiErrorCode.PROVIDER_UNAVAILABLE:
+            public_error = _with_provider_work_disclosure(
+                f"Flow step {step.step_order} execution failed because the provider "
+                "was unavailable.",
+                step=step,
+            )
         else:
             public_error = _with_provider_work_disclosure(
                 f"Flow step {step.step_order} execution failed.",
@@ -1934,7 +1957,7 @@ class FlowRunExecutor:
             error_code=(
                 FlowApiErrorCode.PROVIDER_CALL_EVIDENCE_PERSISTENCE_FAILED
                 if evidence_persistence_error is not None
-                else FlowApiErrorCode.STEP_EXECUTION_FAILED
+                else provider_error_code or FlowApiErrorCode.STEP_EXECUTION_FAILED
             ),
         )
         await self._rollback()

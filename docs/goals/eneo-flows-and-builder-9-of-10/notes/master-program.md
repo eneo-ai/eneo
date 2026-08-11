@@ -5,7 +5,8 @@ post-merge order adjudicated 2026-08-11 by the separate Fable runtime
 and Builder sessions, both green at 8). LANDED: CP0 evidence, CP8a–c,
 CP6, the unsupported JSON-to-text removal, CP-D3, L1a, L1c, and the
 develop-to-Flows integration at `b9c0aa238`, FLOW-AUTH, and
-CP-ADMIT-0, and CP2 terminal ownership consolidation. All three user
+CP-ADMIT-0, CP1, CP2 terminal ownership consolidation, full CP-ADMIT,
+FLOW-RETENTION, the CP2b capture seam, and Runtime L2. All three user
 decisions stand (TRAJECTORY / SPLIT /
 BALANCED).
 
@@ -90,6 +91,20 @@ frozen manifest, never restated as a prose constant.
   carries the synthetic tenant-admin permission. Human tenant-admin
   behavior is unchanged. The affected Flow suite is 6519 passed,
   10 skipped, 1 xfailed.
+- Architecture admission now rejects all four server-decidable contradictions
+  before proposal generation through one typed refusal path; compiler-only
+  checks remain defensive postconditions. Debug-evidence retention is bounded
+  consistently at `1..2555` from public input through cleanup consumption.
+- CP2b instrumentation now captures initial malformed proposal arguments per
+  Builder session through the existing opt-in capture owner. The required
+  eight-case, three-repetition attribution run remains open; CP3 and CP5 stay
+  blocked until its mechanisms are recorded.
+- The 2026-08-11 broad progress smoke at `f39853daeb` produced all 158 slots but
+  is not a release receipt: the required six-file execution sentinel had no
+  applied Flow or final commit identity, so the sealed reader refused it. The
+  prior smoke also used different concurrency and observation-identity
+  semantics. Its raw N=1 movements are therefore non-comparable diagnostic
+  evidence, not proof of improvement or regression and not a repair trigger.
 
 ## THE ARCHITECTURE VERDICT (peer pass 31, max effort — adopted)
 
@@ -241,6 +256,14 @@ ARTIFACT re-checked per slice, not a permanent grep gate.
       retention range now applies at the public/update models and nested policy
       owner; corrupt persisted values fail closed before public projection or
       cleanup consumption.
+- [x] CP2b initial parse capture: initial malformed proposal arguments now use
+      the existing env-gated capture owner, and filenames bind the exact stored
+      content plus session identity (`074545546`; Claude iteration 111 green 8).
+      The live attribution half remains open in the ranked CP2b row.
+- [x] L2 provider failure typing: the executor now translates the provider
+      domain's existing rate-limit and unavailable codes into Flow's public
+      error vocabulary without adding a retry path or third disposition owner;
+      Claude gate and final validation recorded with the landing commit.
 
 ## The Ranked Program (v10.3 — execution phase; slice bodies carry
 ## their originating iteration tags)
@@ -340,12 +363,13 @@ any threshold.
     added.
 - [ ] CP2b Parse-failure attribution (GATES CP3 AND CP5, added by CP0):
     parse failures are the single largest repair driver (36 of 86) and
-    `json_to_structured_payload` is 15/15 parse. Both CP3 and CP5
-    tighten the same raw-argument seam, so neither may implement
-    before this is attributed. Instrument already exists, env-gated
-    off: set `ENEO_AI_BUILDER_REJECTED_PROPOSAL_CAPTURE_DIR`
-    (`ai_builder_proposal_capture.py:22`) and re-run the 24-obs JSON
-    cohort.
+    `json_to_structured_payload` is 15/15 parse. Both CP3 and CP5 tighten the
+    same raw-argument seam, so neither may implement before this is attributed.
+    The initial-parse gap is now closed (`074545546`): the existing env-gated
+    capture owner sees initial and repair parse failures, and identical raw
+    arguments cannot overwrite another session's evidence. Re-run the exact
+    eight-case JSON cohort for three repetitions, join captures by session id,
+    record the mechanism counts here, then clear the private capture directory.
 - [ ] CP3 Runtime-input-field contract (AMENDED, iteration 33).
     `FlowInputFieldIntent` stays the field VALUE schema, but verified
     it carries no citations/confidence
@@ -718,7 +742,8 @@ sake.
     Large (600) is deliberately not covered and belongs behind a
     pooler. Pool right-sizing waits for L5's measured peak checkouts.
     The slice changes no pool, no concurrency and no code path.
-- [ ] L2 Provider failure typing (RESCOPED, drift audit 2026-08-10 —
+- [x] L2 Provider failure typing (completed 2026-08-11; RESCOPED by the drift
+    audit —
     two of the three original sub-claims were ALREADY SHIPPED and the
     real defect is broader than throttling). Verified: fail-fast is
     already in place (`litellm_runtime_config.py:35` forces
@@ -729,14 +754,13 @@ sake.
     `litellm_transport.py:184` already raises a typed
     `provider_rate_limited`, but `executor.py:1881-1938` has no branch
     for it, so a 429 (and `provider_unavailable` alike) collapses into
-    generic `STEP_EXECUTION_FAILED`. The slice is therefore an ADAPTER
-    from the transport's typed codes into `FlowApiErrorCode` — both
-    codes together, not throttling alone. The D12 ruling binds: the
-    canonical typed disposition stays in the model-provider domain and
-    the Builder must not gain a third vocabulary. Blast radius is the
-    largest of the runtime lane: taxonomy registry (hard-fails on a
-    missing code), en+sv messages (exact key-set equality test),
-    regenerated SDK artifacts, and the error-catalog docs contract.
+    generic `STEP_EXECUTION_FAILED`. The executor's existing terminal-failure
+    owner now maps those two transport codes into `FlowApiErrorCode`: rate-limit
+    is safe only for a new logical run after waiting, while provider unavailable
+    remains non-retryable and discloses that remote work may be unknown. The
+    taxonomy, tracing, en+sv messages, SDK catalog and generated error docs use
+    their existing owners. No automatic retry, state transition, module or
+    third provider vocabulary was added.
 - [ ] L3 Health (SOLE healthcheck owner, iteration 35):
     execution-consumer presence + beat freshness on the existing
     operator surface, plus every deployment-native container
@@ -868,7 +892,7 @@ not inspect mutable candidate results:
 - Public contracts: FLOW-RETENTION and FLOW-DOC may proceed after
   FLOW-AUTH, in sequence and independently of Builder ownership work.
   BUILDER-API waits for the ownership-tranche checkpoint.
-- Runtime: L2 may overlap Builder work. L1b, L3 and L5 remain sequential
+- Runtime: L2 is complete. L1b, L3 and L5 remain sequential
   because L1b and L3 share the deployment compose and L5 consumes both
   outcomes.
 
@@ -920,7 +944,7 @@ This cadence replaces per-slice cohort ×3 by user decision on 2026-08-11.
   orchestrator verifies each finding in current source, reruns decisive
   tests, and owns all git.
 - Validation: `cd backend && uv run pytest tests/unittests/flows/ -q`
-  (current baseline: 6524 passed, 10 skipped, 1 xfailed); ruff
+  (current baseline: 6541 passed, 10 skipped, 1 xfailed); ruff
   check/format + pyright
   (`--pythonpath .venv/bin/python`) on exact changed paths only.
 - Measurement: harness + protocol in `conformance-program-plan.md`.

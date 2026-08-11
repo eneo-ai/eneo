@@ -68,6 +68,8 @@ class FlowApiErrorCode(str, Enum):
     STEP_MISSING = "flow_step_missing"
     STEP_ATTEMPT_START_FAILED = "flow_step_attempt_start_failed"
     STEP_EXECUTION_FAILED = "flow_step_execution_failed"
+    PROVIDER_RATE_LIMITED = "flow_provider_rate_limited"
+    PROVIDER_UNAVAILABLE = "flow_provider_unavailable"
     PROVIDER_CALL_EVIDENCE_PERSISTENCE_FAILED = (
         "flow_provider_call_evidence_persistence_failed"
     )
@@ -248,6 +250,8 @@ FLOW_RUN_TERMINAL_ERROR_CODES: frozenset[FlowApiErrorCode] = frozenset(
         FlowApiErrorCode.STEP_MISSING,
         FlowApiErrorCode.STEP_ATTEMPT_START_FAILED,
         FlowApiErrorCode.STEP_EXECUTION_FAILED,
+        FlowApiErrorCode.PROVIDER_RATE_LIMITED,
+        FlowApiErrorCode.PROVIDER_UNAVAILABLE,
         FlowApiErrorCode.PROVIDER_CALL_EVIDENCE_PERSISTENCE_FAILED,
         FlowApiErrorCode.WEBHOOK_DELIVERY_FAILED,
         FlowApiErrorCode.REVIEW_POLICY_INVALID,
@@ -261,12 +265,14 @@ FLOW_RUN_TERMINAL_ERROR_CODES: frozenset[FlowApiErrorCode] = frozenset(
     }
     | FLOW_TYPED_IO_ERROR_CODES
 )
-# Only pre-provider/pre-execution failures are safe; lifecycle drift must revisit this allowlist.
+# A new logical run is safe only when provider work was not accepted and no
+# external effect was produced; lifecycle drift must revisit this allowlist.
 FLOW_RUN_TERMINAL_ERROR_RETRYABILITY: dict[FlowApiErrorCode, bool] = {
     code: code
     in {
         FlowApiErrorCode.RUN_DISPATCH_FAILED,
         FlowApiErrorCode.STEP_ATTEMPT_START_FAILED,
+        FlowApiErrorCode.PROVIDER_RATE_LIMITED,
     }
     for code in FLOW_RUN_TERMINAL_ERROR_CODES
 }

@@ -61,6 +61,8 @@ export declare const FLOW_API_ERROR_CODE: Readonly<{
   STEP_MISSING: "flow_step_missing";
   STEP_ATTEMPT_START_FAILED: "flow_step_attempt_start_failed";
   STEP_EXECUTION_FAILED: "flow_step_execution_failed";
+  PROVIDER_RATE_LIMITED: "flow_provider_rate_limited";
+  PROVIDER_UNAVAILABLE: "flow_provider_unavailable";
   PROVIDER_CALL_EVIDENCE_PERSISTENCE_FAILED: "flow_provider_call_evidence_persistence_failed";
   WEBHOOK_DELIVERY_FAILED: "flow_webhook_delivery_failed";
   RUNTIME_FILE_EMPTY: "flow_runtime_file_empty";
@@ -211,6 +213,8 @@ export type FlowApiErrorCode =
   | "flow_step_missing"
   | "flow_step_attempt_start_failed"
   | "flow_step_execution_failed"
+  | "flow_provider_rate_limited"
+  | "flow_provider_unavailable"
   | "flow_provider_call_evidence_persistence_failed"
   | "flow_webhook_delivery_failed"
   | "flow_runtime_file_empty"

@@ -112,6 +112,7 @@ from eneo.flows.runtime.step_execution_runtime import (
 from eneo.flows.runtime.step_input_resolution import resolve_input_source_text
 from eneo.main.exceptions import (
     BadRequestException,
+    OpenAIException,
     ProviderCapabilityRejectedException,
     ProviderRejectedRequestException,
     TypedIOValidationException,
@@ -1376,7 +1377,9 @@ async def test_step_execution_failure_marks_attempt_and_run_failed(user):
         )
     )
     executor._flow_is_active = AsyncMock(return_value=True)
-    executor._execute_step = AsyncMock(side_effect=RuntimeError("llm boom"))
+    executor._execute_step = AsyncMock(
+        side_effect=OpenAIException("llm boom", code="provider_error")
+    )
 
     result = await executor.execute(
         run_id=queued_run.id,
@@ -1517,6 +1520,98 @@ async def test_provider_call_persistence_gap_is_typed_and_not_auto_retryable(use
     assert terminal_error.details is not None
     assert terminal_error.details.provider_call_evidence_gap == facts
     assert "the call was not repeated" in terminal_error.message
+
+
+@pytest.mark.asyncio
+async def test_provider_rate_limit_is_typed_and_safe_for_new_logical_run(user):
+    executor, _, flow_run_repo, _ = _build_executor(user)
+    flow_run_repo.finish_attempt = AsyncMock()
+    flow_run_repo.save_step_result = AsyncMock()
+    executor._terminalize_run = AsyncMock()
+    executor._rollback = AsyncMock()
+    step = _step_for_execute_step()
+    run_id = uuid4()
+    claimed = _claimed_step_result(
+        run_id=run_id,
+        flow_id=uuid4(),
+        tenant_id=user.tenant_id,
+        step_id=step.step_id,
+        assistant_id=step.assistant_id,
+    )
+
+    result = await executor._handle_generic_step_failure(
+        run_id=run_id,
+        tenant_id=user.tenant_id,
+        step=step,
+        attempt_no=1,
+        claimed=claimed,
+        state=_empty_execution_state(),
+        exc=OpenAIException(
+            "The AI provider rate limit was reached.",
+            code="provider_rate_limited",
+        ),
+    )
+
+    assert result == {
+        "status": "failed",
+        "error": FlowApiErrorCode.PROVIDER_RATE_LIMITED.value,
+    }
+    finish_kwargs = flow_run_repo.finish_attempt.await_args.kwargs
+    assert finish_kwargs["error_code"] == (FlowApiErrorCode.PROVIDER_RATE_LIMITED.value)
+    assert finish_kwargs["error_message"] == (
+        "Flow step 1 was rate-limited by the provider; wait before starting a new run."
+    )
+    terminal_error = executor._terminalize_run.await_args.kwargs["error"]
+    assert terminal_error.code is FlowApiErrorCode.PROVIDER_RATE_LIMITED
+    assert terminal_error.retryable is True
+    assert "may or may not have started" not in terminal_error.message
+
+
+@pytest.mark.asyncio
+async def test_provider_unavailability_is_typed_with_unknown_outcome_disclosure(user):
+    executor, _, flow_run_repo, _ = _build_executor(user)
+    flow_run_repo.finish_attempt = AsyncMock()
+    flow_run_repo.save_step_result = AsyncMock()
+    executor._terminalize_run = AsyncMock()
+    executor._rollback = AsyncMock()
+    step = _step_for_execute_step()
+    run_id = uuid4()
+    claimed = _claimed_step_result(
+        run_id=run_id,
+        flow_id=uuid4(),
+        tenant_id=user.tenant_id,
+        step_id=step.step_id,
+        assistant_id=step.assistant_id,
+    )
+
+    result = await executor._handle_generic_step_failure(
+        run_id=run_id,
+        tenant_id=user.tenant_id,
+        step=step,
+        attempt_no=1,
+        claimed=claimed,
+        state=_empty_execution_state(),
+        exc=OpenAIException(
+            "The AI provider is temporarily unavailable.",
+            code="provider_unavailable",
+        ),
+    )
+
+    assert result == {
+        "status": "failed",
+        "error": FlowApiErrorCode.PROVIDER_UNAVAILABLE.value,
+    }
+    finish_kwargs = flow_run_repo.finish_attempt.await_args.kwargs
+    assert finish_kwargs["error_code"] == FlowApiErrorCode.PROVIDER_UNAVAILABLE.value
+    assert finish_kwargs["error_message"] == (
+        "Flow step 1 execution failed because the provider was unavailable. "
+        "Provider work may or may not have started; rerunning can repeat provider "
+        "work and spend."
+    )
+    terminal_error = executor._terminalize_run.await_args.kwargs["error"]
+    assert terminal_error.code is FlowApiErrorCode.PROVIDER_UNAVAILABLE
+    assert terminal_error.retryable is False
+    assert "may or may not have started" in terminal_error.message
 
 
 @pytest.mark.asyncio

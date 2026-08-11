@@ -69,6 +69,8 @@ FLOW_RUN_RESULT_REASONS: Final[frozenset[str]] = frozenset(
         "flow_definition_checksum_mismatch",
         "flow_definition_invalid",
         "flow_deleted",
+        "flow_provider_rate_limited",
+        "flow_provider_unavailable",
         "flow_step_execution_failed",
         "flow_step_missing",
         "invalid_flow_definition",

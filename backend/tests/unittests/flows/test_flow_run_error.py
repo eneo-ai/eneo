@@ -31,7 +31,7 @@ def test_flow_run_error_from_source_requires_public_error_code() -> None:
 
 
 def test_terminal_error_retryability_covers_exact_current_catalog() -> None:
-    assert len(FLOW_RUN_TERMINAL_ERROR_RETRYABILITY) == 78
+    assert len(FLOW_RUN_TERMINAL_ERROR_RETRYABILITY) == 80
     assert set(FLOW_RUN_TERMINAL_ERROR_RETRYABILITY) == FLOW_RUN_TERMINAL_ERROR_CODES
     assert {
         code
@@ -40,6 +40,7 @@ def test_terminal_error_retryability_covers_exact_current_catalog() -> None:
     } == {
         FlowApiErrorCode.RUN_DISPATCH_FAILED,
         FlowApiErrorCode.STEP_ATTEMPT_START_FAILED,
+        FlowApiErrorCode.PROVIDER_RATE_LIMITED,
     }
     assert not FLOW_RUN_TERMINAL_ERROR_RETRYABILITY[
         FlowApiErrorCode.RUN_ERROR_PAYLOAD_INVALID
@@ -49,6 +50,9 @@ def test_terminal_error_retryability_covers_exact_current_catalog() -> None:
     ]
     assert not FLOW_RUN_TERMINAL_ERROR_RETRYABILITY[
         FlowApiErrorCode.PROVIDER_CALL_EVIDENCE_PERSISTENCE_FAILED
+    ]
+    assert not FLOW_RUN_TERMINAL_ERROR_RETRYABILITY[
+        FlowApiErrorCode.PROVIDER_UNAVAILABLE
     ]
 
 

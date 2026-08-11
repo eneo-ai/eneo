@@ -4926,6 +4926,8 @@
   "flow_error_flow_template_unsupported_extension": "Endast .docx-filer kan användas som mall. Välj en .docx-fil och försök igen.",
   "flow_error_typed_io_contract_violation": "Det ändrade resultatet matchar inte stegets utdatakontrakt. Rätta JSON-strukturen och spara igen.",
   "flow_error_flow_llm_request_timeout": "Modellanropet tog för lång tid, men leverantörsarbetet kan ändå ha slutförts. Kontrollera körningen innan du försöker igen eftersom det kan medföra dubbelt arbete och dubbla kostnader.",
+  "flow_error_flow_provider_rate_limited": "AI-leverantören begränsar tillfälligt antalet anrop. Vänta innan du startar en ny körning.",
+  "flow_error_flow_provider_unavailable": "AI-leverantören blev otillgänglig. Kontrollera körningen innan du startar en ny eftersom ett AI-anrop kan ha hunnit genomföras.",
   "flow_error_flow_provider_call_evidence_persistence_failed": "Evidensen för provider-anropet kunde inte sparas tillförlitligt. Försök inte igen automatiskt; kontrollera körningen eftersom provider-arbete kan ha utförts.",
   "flow_error_flow_evidence_export_too_large": "Körningen innehåller mer underlag än en export kan rymma. Öppna körningens bevisvy, som visar det som ryms och anger exakt vad som utelämnats.",
   "flow_error_flow_runtime_input_not_consumed": "Runtime-filer kopplades till körningen, men stegets indata refererar inte till dem. Uppdatera steget så att det använder step_input.* eller ta bort filerna.",

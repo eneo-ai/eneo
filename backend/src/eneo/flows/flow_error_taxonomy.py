@@ -545,6 +545,29 @@ FLOW_ERROR_TAXONOMY: dict[FlowApiErrorCode, FlowErrorTaxonomyEntry] = {
             "and spend."
         ),
     ),
+    FlowApiErrorCode.PROVIDER_RATE_LIMITED: _entry(
+        category="Step runtime",
+        surfaced_through="Run error payload",
+        cause="The provider rejected the step request because its rate limit was reached.",
+        consumer_action="Wait before submitting a new logical run; the runtime does not retry automatically.",
+        user_action="Wait before starting a new run.",
+    ),
+    FlowApiErrorCode.PROVIDER_UNAVAILABLE: _entry(
+        category="Step runtime",
+        surfaced_through="Run error payload",
+        cause=(
+            "The provider was unavailable while the step request was being "
+            "attempted, so its remote outcome may be unknown."
+        ),
+        consumer_action=(
+            "Do not retry automatically; inspect provider-call evidence before "
+            "deciding whether to start a new logical run."
+        ),
+        user_action=(
+            "Check the run before starting another because provider work may have "
+            "occurred."
+        ),
+    ),
     FlowApiErrorCode.PROVIDER_CALL_EVIDENCE_PERSISTENCE_FAILED: _entry(
         category="Step runtime",
         surfaced_through="Run error payload",
