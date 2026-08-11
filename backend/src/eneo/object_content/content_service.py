@@ -13,7 +13,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from eneo.database.database import DatabaseSessionManager, sessionmanager
 from eneo.object_content.configuration import (
     ObjectContentCoreSettings,
-    ObjectContentSettings,
 )
 from eneo.object_content.content import (
     ByteRange,
@@ -53,10 +52,12 @@ from eneo.object_content.s3_object_store import (
     ObjectStoreIntegrityError,
     ObjectStoreNotFoundError,
     ObjectStoreUnavailableError,
-    S3ObjectStore,
     new_object_key,
 )
-from eneo.object_content.store_binding import ensure_store_binding_ready
+from eneo.object_content.store_binding import (
+    ensure_store_binding_ready,
+    require_store_generation,
+)
 
 
 def retry_delay_seconds(
@@ -89,6 +90,8 @@ class VerifiedObjectUpload:
 class VerifiedObjectPublication:
     lease_owner: str
     uploads: tuple[VerifiedObjectUpload, ...]
+    store_slot: int
+    store_revision: int
     _reservation_lease: "_PublicationReservationLease" = field(
         repr=False,
         compare=False,
@@ -266,8 +269,7 @@ class ObjectContentService:
         async with self._object_store(expected_revision=object_store_revision) as lease:
             async with self._upload_for_publication_with_store(
                 contents,
-                settings=lease.settings,
-                store=lease.store,
+                lease=lease,
             ) as publication:
                 yield publication
 
@@ -276,11 +278,11 @@ class ObjectContentService:
         self,
         contents: Sequence[CapturedContent],
         *,
-        settings: ObjectContentSettings,
-        store: S3ObjectStore,
+        lease: ObjectStoreLease,
     ) -> AsyncGenerator[VerifiedObjectPublication]:
         if not contents:
             raise ValueError("Object publication requires at least one content item")
+        settings, store = lease.settings, lease.store
         lease_owner = token_hex(16)
         reservations = tuple(
             PublicationReservation(
@@ -292,6 +294,11 @@ class ObjectContentService:
         lease_started_at = monotonic()
         try:
             async with self._database.session() as session, session.begin():
+                await require_store_generation(
+                    session,
+                    slot=lease.slot,
+                    revision=lease.revision,
+                )
                 await ObjectContentReconciliationRepository(
                     session
                 ).reserve_publication_objects(
@@ -364,6 +371,8 @@ class ObjectContentService:
             yield VerifiedObjectPublication(
                 lease_owner=lease_owner,
                 uploads=tuple(uploads),
+                store_slot=lease.slot,
+                store_revision=lease.revision,
                 _reservation_lease=reservation_lease,
             )
         finally:
@@ -413,6 +422,11 @@ class ObjectContentService:
             )
 
         await publication.finish_for_adoption()
+        await require_store_generation(
+            session,
+            slot=publication.store_slot,
+            revision=publication.store_revision,
+        )
         await ObjectContentReconciliationRepository(
             session
         ).consume_publication_reservations(
@@ -488,12 +502,11 @@ class ObjectContentService:
         content_id: UUID,
         content: CapturedContent,
     ) -> ReadableContent:
-        async with self._object_store() as lease:
+        async with self._object_store() as store_lease:
             return await self._store_and_verify_with_store(
                 content_id=content_id,
                 content=content,
-                settings=lease.settings,
-                store=lease.store,
+                store_lease=store_lease,
             )
 
     async def _store_and_verify_with_store(
@@ -501,12 +514,17 @@ class ObjectContentService:
         *,
         content_id: UUID,
         content: CapturedContent,
-        settings: ObjectContentSettings,
-        store: S3ObjectStore,
+        store_lease: ObjectStoreLease,
     ) -> ReadableContent:
+        settings, store = store_lease.settings, store_lease.store
         lease_owner = token_hex(16)
         lease_started_at = monotonic()
         async with self._database.session() as session, session.begin():
+            await require_store_generation(
+                session,
+                slot=store_lease.slot,
+                revision=store_lease.revision,
+            )
             lease = await ObjectContentRepository(session).claim_upload(
                 content_id=content_id,
                 content=content,
@@ -584,6 +602,11 @@ class ObjectContentService:
             ) from error
 
         async with self._database.session() as session, session.begin():
+            await require_store_generation(
+                session,
+                slot=store_lease.slot,
+                revision=store_lease.revision,
+            )
             return await ObjectContentRepository(session).promote_available(
                 content_id=content_id,
                 lease_owner=lease_owner,

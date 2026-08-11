@@ -15,17 +15,19 @@ import { Callout } from "nextra/components";
 
 ## Current adoption
 
-File and Icon use this contract for exact originals and named derivatives.
-New content is stored inline by default, so Eneo still needs no S3-compatible
-service. A bounded upgrade migration copies and verifies legacy bytes before
-removing duplicate columns.
+File and Icon use this contract for exact originals and named derivatives. New
+knowledge file and audio uploads use it for the exact original while searchable
+text and vectors remain in PostgreSQL. New content is stored inline by default,
+so Eneo still needs no S3-compatible service. A bounded upgrade migration
+copies and verifies legacy File and Icon bytes before removing duplicate
+columns.
 
-Platform administrators use **Admin > Storage** to choose where eligible new
-content is written and to queue bounded moves of existing content. Eneo verifies
-each destination before switching the content record to that copy. Changing the
-write target or configuring an endpoint never moves existing content
-automatically. InfoBlob knowledge generations and Flow artifacts remain separate
-slices.
+Administrators with the Storage permission use **Admin > Storage** to choose
+where eligible new content is written and to queue bounded moves of existing
+content. Eneo verifies each destination before switching the content record to
+that copy. Changing the write target or configuring an endpoint never moves
+existing content automatically. Searchable knowledge generations and Flow
+artifacts remain outside this shared byte lifecycle.
 
 File and Icon visibility is derived from publication: a visible product row and
 its reference always point to already-available, verified bytes. A failed or
@@ -156,9 +158,12 @@ empty or foreign bucket. A missing or mismatched marker yields
 database and byte-store pair instead of silently accepting data loss. Inline
 mode does not create or require a bucket binding.
 
-`OBJECT_CONTENT_DEPLOYMENT_ID` adds a stable namespace to opaque object keys.
-Operators generate it once and preserve it through upgrades and restores. It is
-not a feature toggle, credential, or migration mechanism.
+Each connection has a stable deployment ID that namespaces opaque object keys.
+Connections created in **Admin > Storage** generate and persist it
+automatically. Legacy environment-managed connections use
+`OBJECT_CONTENT_DEPLOYMENT_ID`; operators generate that value once and preserve
+it through upgrades and restores. It is not a feature toggle, credential, or
+migration mechanism.
 
 ## Optional provider-independent contract
 
@@ -170,6 +175,7 @@ Amazon-specific product branch.
 The supported contract includes:
 
 - SigV4 authentication with path or virtual-host addressing;
+- conditional, non-overwriting marker creation with `If-None-Match: *`;
 - paginated object and multipart inventories;
 - single-part and multipart writes;
 - `HEAD`, streaming `GET`, and one byte range;

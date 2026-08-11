@@ -5,7 +5,8 @@ export function initObjectStoreConnection(client) {
   return {
     /**
      * Get the deployment-wide S3-compatible destination without credentials.
-     * Session-backed platform administrators only.
+     * Requires a session-backed user holding the storage administration
+     * permission (held by the Owner role by default).
      * @throws {EneoError}
      * @returns {Promise<import('../types/resources').ObjectStoreConnection>}
      */
@@ -38,6 +39,66 @@ export function initObjectStoreConnection(client) {
       return await client.fetch("/api/v1/admin/object-store-connection/credentials", {
         method: "put",
         requestBody: { "application/json": credentials }
+      });
+    },
+
+    /**
+     * Switch to an S3-compatible destination that already holds a copy of the
+     * content namespace. The previous destination is archived for switch-back.
+     * @param {import('../types/resources').ObjectStoreConnectionCreate} destination
+     * @throws {EneoError}
+     * @returns {Promise<import('../types/resources').ObjectStoreConnection>}
+     */
+    replaceDestination: async (destination) => {
+      return await client.fetch("/api/v1/admin/object-store-connection/destination", {
+        method: "post",
+        requestBody: { "application/json": destination }
+      });
+    },
+
+    /**
+     * Return to the archived previous destination using its stored credentials.
+     * The revision names the archive the administrator saw; the backend
+     * refuses if a concurrent change replaced it.
+     * @param {number} expectedPreviousRevision
+     * @throws {EneoError}
+     * @returns {Promise<import('../types/resources').ObjectStoreConnection>}
+     */
+    switchBackDestination: async (expectedPreviousRevision) => {
+      return await client.fetch("/api/v1/admin/object-store-connection/destination/switch-back", {
+        method: "post",
+        requestBody: {
+          "application/json": { expected_previous_revision: expectedPreviousRevision }
+        }
+      });
+    },
+
+    /**
+     * Forget the archived previous destination. The bucket is never touched.
+     * The revision names the archive the administrator saw; the backend
+     * refuses if a concurrent change replaced it.
+     * @param {number} expectedRevision
+     * @throws {EneoError}
+     * @returns {Promise<void>}
+     */
+    forgetPreviousDestination: async (expectedRevision) => {
+      await client.fetch("/api/v1/admin/object-store-connection/previous", {
+        method: "delete",
+        params: { query: { expected_revision: expectedRevision } }
+      });
+    },
+
+    /**
+     * Abandon the pending destination attempt an interrupted or ambiguous
+     * change left behind. Bucket content is never touched.
+     * @param {number} expectedRevision
+     * @throws {EneoError}
+     * @returns {Promise<void>}
+     */
+    abandonPendingDestination: async (expectedRevision) => {
+      await client.fetch("/api/v1/admin/object-store-connection/pending", {
+        method: "delete",
+        params: { query: { expected_revision: expectedRevision } }
       });
     }
   };

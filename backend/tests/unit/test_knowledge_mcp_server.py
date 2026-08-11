@@ -13,19 +13,32 @@ from uuid import uuid4
 import pytest
 
 from eneo.authentication.auth_service import AuthService
+from eneo.info_blobs.info_blob_repo import InfoBlobListing
 from eneo.internal_mcp.foundation import assistant_id_from_token
 from eneo.internal_mcp.knowledge import (
     DESCRIPTION_SOURCES_CAP,
     KNOWLEDGE_SERVER_NAME,
     MAX_RESULTS_CEILING,
+    NOT_FOUND_MESSAGE,
+    OVERVIEW_MAX_CHUNKS_PER_DOC,
+    OVERVIEW_SAMPLE_DOCUMENTS,
+    SCOPE_NOT_FOUND_MESSAGE,
     _blob_in_scope,
     _clamp_max_results,
     _diversify,
     _document_page_content,
+    _excerpts_per_document,
+    _fit_titles,
+    _matching_sources,
+    _overview_content,
     _pick_embedding_model,
     _resolve_search_params,
+    _sample_targets,
     _search_result_content,
+    _source_scopes,
     build_knowledge_mcp_server,
+    describe_source,
+    list_knowledge_sources,
     mcp,
     read_source,
     search_knowledge,
@@ -93,9 +106,12 @@ class TestBuildKnowledgeMcpServer:
         # Source enrichment may only append: the live docstring always leads.
         for entity, live in zip(server.tools, live_tools):
             assert entity.description.startswith(live.description)
-        assert {"search_knowledge", "list_knowledge_sources", "read_source"} <= {
-            t.name for t in server.tools
-        }
+        assert {
+            "search_knowledge",
+            "list_knowledge_sources",
+            "read_source",
+            "describe_source",
+        } <= {t.name for t in server.tools}
 
     @pytest.mark.asyncio
     async def test_search_description_names_the_sources(self):
@@ -355,6 +371,528 @@ class TestReadSourceErrors:
             await read_source(str(uuid4()), ctx=None)
 
 
+def _assistant_with_sources(collections=(), websites=(), integrations=()):
+    return SimpleNamespace(
+        collections=[
+            SimpleNamespace(id=i, name=n, embedding_model=MagicMock())
+            for i, n in collections
+        ],
+        websites=[
+            SimpleNamespace(id=i, name=n, url=u, embedding_model=MagicMock())
+            for i, n, u in websites
+        ],
+        integration_knowledge_list=[
+            SimpleNamespace(id=i, name=n, embedding_model=MagicMock())
+            for i, n in integrations
+        ],
+    )
+
+
+class TestMatchingSources:
+    def test_each_source_type_resolves_to_a_single_source_scope(self):
+        cid, wid, iid = uuid4(), uuid4(), uuid4()
+        assistant = _assistant_with_sources(
+            collections=[(cid, "Waste FAQ")],
+            websites=[(wid, "Kommun", "https://kommun.se")],
+            integrations=[(iid, "Confluence")],
+        )
+
+        collection_scope = _matching_sources(assistant, str(cid))[0]
+        assert [c.id for c in collection_scope.collections] == [cid]
+        assert collection_scope.websites == []
+        assert collection_scope.integration_knowledge_list == []
+
+        website_scope = _matching_sources(assistant, str(wid))[0]
+        assert [w.id for w in website_scope.websites] == [wid]
+        assert website_scope.collections == []
+
+        integration_scope = _matching_sources(assistant, str(iid))[0]
+        assert [k.id for k in integration_scope.integration_knowledge_list] == [iid]
+        assert integration_scope.collections == []
+
+    def test_foreign_id_matches_nothing(self):
+        assistant = _assistant_with_sources(collections=[(uuid4(), "Waste FAQ")])
+        assert _matching_sources(assistant, str(uuid4())) == []
+
+    def test_name_match_is_case_insensitive(self):
+        cid = uuid4()
+        assistant = _assistant_with_sources(collections=[(cid, "Waste FAQ")])
+
+        assert _matching_sources(assistant, "waste faq")[0].source_id == cid
+        assert _matching_sources(assistant, "  Waste FAQ ")[0].source_id == cid
+
+    def test_duplicate_names_are_reported_as_several_matches(self):
+        assistant = _assistant_with_sources(
+            collections=[(uuid4(), "Riktlinjer"), (uuid4(), "Riktlinjer")]
+        )
+        assert len(_matching_sources(assistant, "Riktlinjer")) == 2
+
+    def test_unrecognised_text_matches_nothing(self):
+        assistant = _assistant_with_sources(collections=[(uuid4(), "Waste FAQ")])
+        assert _matching_sources(assistant, "not a source") == []
+
+    def test_website_falls_back_to_url_as_its_name(self):
+        wid = uuid4()
+        assistant = _assistant_with_sources(websites=[(wid, None, "https://kommun.se")])
+
+        scope = _source_scopes(assistant)[0]
+        assert scope.name == "https://kommun.se"
+        assert _matching_sources(assistant, "https://kommun.se")[0].source_id == wid
+
+
+def _patch_search_context(monkeypatch, assistant, *, blob=None, chunks=()):
+    """Patch the tool context with a datastore that records its scope kwargs."""
+    calls: list[dict] = []
+
+    async def semantic_search(query, **kwargs):
+        calls.append({"query": query, **kwargs})
+        return list(chunks)
+
+    @asynccontextmanager
+    async def fake_context(_ctx):
+        async def get_assistant(_assistant_id):
+            return assistant, []
+
+        async def get_blob(_blob_id):
+            if blob is None or blob.id != _blob_id:
+                raise NotFoundException()
+            return blob
+
+        container = SimpleNamespace(
+            assistant_service=lambda: SimpleNamespace(get_assistant=get_assistant),
+            info_blob_repo=lambda: SimpleNamespace(get=get_blob),
+            datastore=lambda: SimpleNamespace(semantic_search=semantic_search),
+        )
+        yield container, SimpleNamespace(), uuid4()
+
+    monkeypatch.setattr(
+        "eneo.internal_mcp.knowledge.internal_tool_context", fake_context
+    )
+    return calls
+
+
+class TestSearchScoping:
+    async def test_unscoped_search_spans_every_attached_source(self, monkeypatch):
+        cid, wid = uuid4(), uuid4()
+        assistant = _assistant_with_sources(
+            collections=[(cid, "Waste FAQ")],
+            websites=[(wid, "Kommun", "https://kommun.se")],
+        )
+        calls = _patch_search_context(monkeypatch, assistant)
+
+        await search_knowledge("garden waste", ctx=None)
+
+        assert [c.id for c in calls[0]["collections"]] == [cid]
+        assert [w.id for w in calls[0]["websites"]] == [wid]
+        assert calls[0]["info_blob_ids"] == []
+
+    async def test_source_scope_excludes_the_other_sources(self, monkeypatch):
+        cid, wid = uuid4(), uuid4()
+        assistant = _assistant_with_sources(
+            collections=[(cid, "Waste FAQ")],
+            websites=[(wid, "Kommun", "https://kommun.se")],
+        )
+        calls = _patch_search_context(monkeypatch, assistant)
+
+        await search_knowledge("garden waste", ctx=None, within=str(cid))
+
+        assert [c.id for c in calls[0]["collections"]] == [cid]
+        assert calls[0]["websites"] == []
+        assert calls[0]["integration_knowledge_list"] == []
+        assert calls[0]["info_blob_ids"] == []
+
+    async def test_document_scope_passes_only_the_document(self, monkeypatch):
+        cid, blob_id = uuid4(), uuid4()
+        assistant = _assistant_with_sources(collections=[(cid, "Waste FAQ")])
+        blob = SimpleNamespace(
+            id=blob_id,
+            title="Waste policy",
+            group_id=cid,
+            website_id=None,
+            integration_knowledge_id=None,
+        )
+        calls = _patch_search_context(monkeypatch, assistant, blob=blob)
+
+        await search_knowledge("garden waste", ctx=None, within=str(blob_id))
+
+        assert calls[0]["info_blob_ids"] == [blob_id]
+        assert calls[0]["collections"] == []
+        assert calls[0]["websites"] == []
+        assert calls[0]["integration_knowledge_list"] == []
+
+    async def test_document_scope_returns_results_in_reading_order(self, monkeypatch):
+        cid, blob_id = uuid4(), uuid4()
+        assistant = _assistant_with_sources(collections=[(cid, "Waste FAQ")])
+        blob = SimpleNamespace(
+            id=blob_id,
+            title="Waste policy",
+            group_id=cid,
+            website_id=None,
+            integration_knowledge_id=None,
+        )
+        chunks = [
+            _chunk(info_blob_id=blob_id, chunk_no=7, score=0.9),
+            _chunk(info_blob_id=blob_id, chunk_no=2, score=0.8),
+        ]
+        _patch_search_context(monkeypatch, assistant, blob=blob, chunks=chunks)
+
+        content = await search_knowledge("waste", ctx=None, within=str(blob_id))
+
+        assert [c.resource.meta["score"] for c in content[1:]] == [0.8, 0.9]
+
+    async def test_document_overview_uses_the_full_result_cap(self, monkeypatch):
+        cid, blob_id = uuid4(), uuid4()
+        assistant = _assistant_with_sources(collections=[(cid, "Waste FAQ")])
+        blob = SimpleNamespace(
+            id=blob_id,
+            title="Waste policy",
+            group_id=cid,
+            website_id=None,
+            integration_knowledge_id=None,
+        )
+        chunks = [
+            _chunk(info_blob_id=blob_id, chunk_no=8, score=0.9),
+            _chunk(info_blob_id=blob_id, chunk_no=2, score=0.8),
+            _chunk(info_blob_id=blob_id, chunk_no=5, score=0.7),
+            _chunk(info_blob_id=blob_id, chunk_no=1, score=0.6),
+            _chunk(info_blob_id=blob_id, chunk_no=4, score=0.5),
+        ]
+        _patch_search_context(monkeypatch, assistant, blob=blob, chunks=chunks)
+
+        content = await search_knowledge(
+            "waste", ctx=None, within=str(blob_id), mode="overview", max_results=4
+        )
+
+        assert [str(c.resource.uri).rsplit("-", 1)[-1] for c in content[1:]] == [
+            "1",
+            "2",
+            "5",
+            "8",
+        ]
+
+    async def test_out_of_scope_within_is_indistinguishable_from_missing(
+        self, monkeypatch
+    ):
+        assistant = _assistant_with_sources(collections=[(uuid4(), "Waste FAQ")])
+        _patch_search_context(monkeypatch, assistant)
+
+        foreign_source = await search_knowledge("q", ctx=None, within=str(uuid4()))
+        nonsense = await search_knowledge("q", ctx=None, within="not-an-id")
+
+        assert foreign_source[0].text == SCOPE_NOT_FOUND_MESSAGE
+        assert nonsense[0].text == SCOPE_NOT_FOUND_MESSAGE
+
+    async def test_ambiguous_source_name_asks_for_the_id(self, monkeypatch):
+        assistant = _assistant_with_sources(
+            collections=[(uuid4(), "Riktlinjer"), (uuid4(), "Riktlinjer")]
+        )
+        _patch_search_context(monkeypatch, assistant)
+
+        content = await search_knowledge("q", ctx=None, within="Riktlinjer")
+
+        assert "source_id" in content[0].text
+        assert "Riktlinjer" in content[0].text
+
+
+class TestFitTitles:
+    def _listings(self, count):
+        return [
+            InfoBlobListing(id=uuid4(), title=f"Dokument {i}", url=None)
+            for i in range(count)
+        ]
+
+    def test_all_titles_kept_when_they_fit(self):
+        listings = self._listings(5)
+        kept, lines = _fit_titles(listings, budget=10_000)
+
+        assert len(kept) == 5
+        assert lines[0].startswith("- Dokument 0  document_id: ")
+
+    def test_budget_cuts_the_tail(self):
+        listings = self._listings(50)
+        kept, lines = _fit_titles(listings, budget=300)
+
+        assert 0 < len(kept) < 50
+        assert sum(len(line) + 1 for line in lines) <= 300
+
+    def test_first_title_is_kept_even_when_it_alone_exceeds_the_budget(self):
+        kept, lines = _fit_titles(self._listings(3), budget=1)
+
+        assert len(kept) == 1
+        assert len(lines) == 1
+
+    def test_untitled_listing_falls_back_to_url_then_placeholder(self):
+        blob_id = uuid4()
+        _, lines = _fit_titles(
+            [
+                InfoBlobListing(id=blob_id, title=None, url="https://kommun.se/sida"),
+                InfoBlobListing(id=uuid4(), title=None, url=None),
+            ],
+            budget=10_000,
+        )
+
+        assert lines[0].startswith("- https://kommun.se/sida")
+        assert lines[1].startswith("- Untitled source")
+
+
+class TestSampleTargets:
+    def test_every_document_sampled_when_below_the_cap(self):
+        listings = [
+            InfoBlobListing(id=uuid4(), title=f"D{i}", url=None) for i in range(4)
+        ]
+        assert _sample_targets(listings, 12) == listings
+
+    def test_targets_are_spread_rather_than_the_first_n(self):
+        listings = [
+            InfoBlobListing(id=uuid4(), title=f"D{i}", url=None) for i in range(100)
+        ]
+        targets = _sample_targets(listings, OVERVIEW_SAMPLE_DOCUMENTS)
+
+        assert len(targets) == OVERVIEW_SAMPLE_DOCUMENTS
+        assert targets[-1] != listings[OVERVIEW_SAMPLE_DOCUMENTS - 1]
+        assert listings.index(targets[-1]) > 50
+
+    @pytest.mark.parametrize("document_count", [13, 23])
+    def test_near_cap_sources_still_span_the_whole_listing(self, document_count):
+        listings = [
+            InfoBlobListing(id=uuid4(), title=f"D{i}", url=None)
+            for i in range(document_count)
+        ]
+
+        targets = _sample_targets(listings, OVERVIEW_SAMPLE_DOCUMENTS)
+
+        assert len(targets) == OVERVIEW_SAMPLE_DOCUMENTS
+        assert len({target.id for target in targets}) == OVERVIEW_SAMPLE_DOCUMENTS
+        assert targets[-1] == listings[-1]
+
+    def test_empty_listing_samples_nothing(self):
+        assert _sample_targets([], 12) == []
+
+
+class TestExcerptsPerDocument:
+    def test_few_documents_get_several_passages_each(self):
+        assert _excerpts_per_document(1) == OVERVIEW_MAX_CHUNKS_PER_DOC
+        assert _excerpts_per_document(3) == OVERVIEW_MAX_CHUNKS_PER_DOC
+        assert _excerpts_per_document(4) == 3
+        assert _excerpts_per_document(6) == 2
+
+    def test_a_full_sample_takes_one_passage_each(self):
+        assert _excerpts_per_document(OVERVIEW_SAMPLE_DOCUMENTS) == 1
+        assert _excerpts_per_document(400) == 1
+
+    def test_total_excerpts_never_exceed_the_document_budget(self):
+        # _sample_targets caps the document count, so that is the whole domain.
+        for count in range(1, OVERVIEW_SAMPLE_DOCUMENTS + 1):
+            assert count * _excerpts_per_document(count) <= OVERVIEW_SAMPLE_DOCUMENTS
+
+    def test_nothing_to_sample_needs_no_passages(self):
+        assert _excerpts_per_document(0) == 0
+
+
+class TestOverviewContent:
+    def _scope(self):
+        return _source_scopes(
+            _assistant_with_sources(collections=[(uuid4(), "Waste FAQ")])
+        )[0]
+
+    def _excerpt(self, blob_id, chunk_no=4, text="Garden waste is collected."):
+        return SimpleNamespace(info_blob_id=blob_id, chunk_no=chunk_no, text=text)
+
+    def test_titles_and_excerpts_are_rendered_together(self):
+        blob_id = uuid4()
+        content = _overview_content(
+            scope=self._scope(),
+            total=1,
+            offset=0,
+            title_lines=[f"- Waste policy  document_id: {blob_id}"],
+            excerpts=[self._excerpt(blob_id)],
+            excerpt_titles={blob_id: "Waste policy"},
+        )
+
+        assert "Collection 'Waste FAQ' contains 1 document(s)" in content[0].text
+        assert f"document_id: {blob_id}" in content[0].text
+        assert "completes the title listing" in content[0].text
+        assert "small sample, not the whole source" in content[1].text
+        assert str(content[2].resource.uri) == (f"eneo://info-blob/{blob_id}#chunk-4")
+
+    def test_caveat_counts_documents_rather_than_passages(self):
+        blob_id = uuid4()
+        content = _overview_content(
+            scope=self._scope(),
+            total=1,
+            offset=0,
+            title_lines=["- Waste policy"],
+            excerpts=[
+                self._excerpt(blob_id, chunk_no=2),
+                self._excerpt(blob_id, chunk_no=6),
+            ],
+            excerpt_titles={blob_id: "Waste policy"},
+        )
+
+        assert "2 excerpt(s) sampled from 1 of these documents" in content[1].text
+
+    def test_excerpts_are_citable_resources(self):
+        blob_id = uuid4()
+        content = _overview_content(
+            scope=self._scope(),
+            total=1,
+            offset=0,
+            title_lines=["- Waste policy"],
+            excerpts=[self._excerpt(blob_id)],
+            excerpt_titles={blob_id: "Waste policy"},
+        )
+
+        resource = content[-1].resource
+        assert resource.meta["info_blob_id"] == str(blob_id)
+        assert resource.text.startswith("Title: Waste policy")
+
+    def test_resume_notice_appears_only_when_titles_were_cut(self):
+        cut = _overview_content(
+            scope=self._scope(),
+            total=50,
+            offset=0,
+            title_lines=["- A", "- B"],
+            excerpts=[],
+            excerpt_titles={},
+        )
+        complete = _overview_content(
+            scope=self._scope(),
+            total=2,
+            offset=0,
+            title_lines=["- A", "- B"],
+            excerpts=[],
+            excerpt_titles={},
+        )
+
+        assert "offset=2" in cut[-1].text
+        assert "Do not answer" in cut[-1].text
+        assert "title listing is incomplete" in cut[0].text
+        assert all("offset=" not in block.text for block in complete)
+        assert "completes the title listing" in complete[0].text
+
+    def test_offset_is_reflected_in_the_shown_range(self):
+        content = _overview_content(
+            scope=self._scope(),
+            total=100,
+            offset=40,
+            title_lines=["- A", "- B"],
+            excerpts=[],
+            excerpt_titles={},
+        )
+
+        assert "Showing 41-42" in content[0].text
+
+    def test_empty_source_says_so_without_a_title_list(self):
+        content = _overview_content(
+            scope=self._scope(),
+            total=0,
+            offset=0,
+            title_lines=[],
+            excerpts=[],
+            excerpt_titles={},
+        )
+
+        assert len(content) == 1
+        assert "contains no documents" in content[0].text
+
+    def test_offset_past_the_end_reports_the_document_count(self):
+        content = _overview_content(
+            scope=self._scope(),
+            total=3,
+            offset=99,
+            title_lines=[],
+            excerpts=[],
+            excerpt_titles={},
+        )
+
+        assert "past the end" in content[0].text
+
+
+def _patch_describe_context(monkeypatch, assistant, *, listings=(), excerpts=()):
+    @asynccontextmanager
+    async def fake_context(_ctx):
+        async def get_assistant(_assistant_id):
+            return assistant, []
+
+        async def count_by_sources(**_kwargs):
+            return len(listings)
+
+        async def list_by_sources(**kwargs):
+            offset = kwargs.get("offset", 0)
+            return list(listings)[offset : offset + kwargs["limit"]]
+
+        async def sample_evenly(**_kwargs):
+            return list(excerpts)
+
+        container = SimpleNamespace(
+            assistant_service=lambda: SimpleNamespace(get_assistant=get_assistant),
+            info_blob_repo=lambda: SimpleNamespace(
+                count_by_sources=count_by_sources, list_by_sources=list_by_sources
+            ),
+            info_blob_chunk_repo=lambda: SimpleNamespace(sample_evenly=sample_evenly),
+        )
+        yield container, SimpleNamespace(), uuid4()
+
+    monkeypatch.setattr(
+        "eneo.internal_mcp.knowledge.internal_tool_context", fake_context
+    )
+
+
+class TestDescribeSource:
+    async def test_sole_source_needs_no_source_id(self, monkeypatch):
+        assistant = _assistant_with_sources(collections=[(uuid4(), "Waste FAQ")])
+        _patch_describe_context(
+            monkeypatch,
+            assistant,
+            listings=[InfoBlobListing(id=uuid4(), title="Waste policy", url=None)],
+        )
+
+        content = await describe_source(ctx=None)
+
+        assert "Collection 'Waste FAQ'" in content[0].text
+
+    async def test_several_sources_ask_which_one(self, monkeypatch):
+        assistant = _assistant_with_sources(
+            collections=[(uuid4(), "Waste FAQ"), (uuid4(), "Riktlinjer")]
+        )
+        _patch_describe_context(monkeypatch, assistant)
+
+        content = await describe_source(ctx=None)
+
+        assert "several knowledge sources" in content[0].text
+        assert "source_id:" in content[0].text
+
+    async def test_no_sources_says_so(self, monkeypatch):
+        _patch_describe_context(monkeypatch, _assistant_with_sources())
+
+        content = await describe_source(ctx=None)
+
+        assert content[0].text == "This assistant has no knowledge sources attached."
+
+    async def test_foreign_source_id_is_indistinguishable_from_missing(
+        self, monkeypatch
+    ):
+        assistant = _assistant_with_sources(collections=[(uuid4(), "Waste FAQ")])
+        _patch_describe_context(monkeypatch, assistant)
+
+        content = await describe_source(ctx=None, source_id=str(uuid4()))
+
+        assert content[0].text == SCOPE_NOT_FOUND_MESSAGE
+
+    async def test_negative_offset_is_clamped_to_the_start(self, monkeypatch):
+        cid = uuid4()
+        assistant = _assistant_with_sources(collections=[(cid, "Waste FAQ")])
+        _patch_describe_context(
+            monkeypatch,
+            assistant,
+            listings=[InfoBlobListing(id=uuid4(), title="Waste policy", url=None)],
+        )
+
+        content = await describe_source(ctx=None, source_id=str(cid), offset=-5)
+
+        assert "Showing 1-1" in content[0].text
+
+
 class TestToolSteering:
     def test_search_knowledge_documents_both_modes(self):
         doc = search_knowledge.__doc__ or ""
@@ -363,6 +901,26 @@ class TestToolSteering:
 
     def test_read_source_documents_the_document_id_handle(self):
         assert "document_id" in (read_source.__doc__ or "")
+
+    def test_search_knowledge_documents_the_within_handle(self):
+        doc = search_knowledge.__doc__ or ""
+        assert "within" in doc
+        assert "describe_source" in doc
+
+    def test_describe_source_states_it_needs_no_query(self):
+        doc = describe_source.__doc__ or ""
+        assert "without a search query" in doc
+        assert "source_id" in doc
+
+    def test_listing_explains_what_the_source_id_is_for(self):
+        doc = list_knowledge_sources.__doc__ or ""
+        assert "source_id" in doc
+        assert "describe_source" in doc
+
+    def test_not_found_messages_never_echo_what_was_asked_for(self):
+        # An echo would confirm the id exists somewhere; both stay constant.
+        assert "{" not in NOT_FOUND_MESSAGE
+        assert "{" not in SCOPE_NOT_FOUND_MESSAGE
 
 
 class TestPickEmbeddingModel:

@@ -49,6 +49,11 @@ class SettingsPublic(SettingsBase):
     # with them (e.g. the assistant inline-file-text toggle). Computed from
     # deployment config, never persisted.
     file_references_enabled: bool = False
+    # Read-only: whether an object-store connection is configured for this
+    # deployment. Gates UI that only works with S3-backed originals (the
+    # assistant inline-file-text toggle). Distinct from object_content_enabled,
+    # which only reports that the object-content module started.
+    object_store_configured: bool = False
 
 
 class GetModelsResponse(BaseModel):

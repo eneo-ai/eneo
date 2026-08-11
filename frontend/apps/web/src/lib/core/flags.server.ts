@@ -125,7 +125,6 @@ function isConfigured(value: unknown): boolean {
 
 export async function getFeatureFlags(fetchFn: typeof fetch = fetch) {
   const showHelpCenter = getFlagFromEnv("SHOW_HELP_CENTER", false);
-  const showChatDebugPanel = getFlagFromEnv("SHOW_CHAT_DEBUG_PANEL", false);
 
   // Auth
   const zitadelConfigured =
@@ -167,7 +166,6 @@ export async function getFeatureFlags(fetchFn: typeof fetch = fetch) {
   return Object.freeze({
     newAuth: useNewAuth,
     showHelpCenter,
-    showChatDebugPanel,
     federationStatus
   });
 }

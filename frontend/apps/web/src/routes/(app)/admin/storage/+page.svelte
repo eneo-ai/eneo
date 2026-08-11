@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
+  import { invalidate } from "$app/navigation";
   import {
     DEPLOYMENT_POLICY_CONFLICT_ERROR_CODE,
     EneoError,
@@ -41,6 +42,7 @@
   import { getAppContext } from "$lib/core/AppContext.js";
   import { getEneo } from "$lib/core/Eneo";
   import PolicySection from "$lib/features/admin/PolicySection.svelte";
+  import { hasPermission } from "$lib/core/hasPermission.js";
   import { m } from "$lib/paraglide/messages";
   import { getLocale } from "$lib/paraglide/runtime";
   import ByteLimitField from "./ByteLimitField.svelte";
@@ -86,7 +88,8 @@
   let moveAlertRef = $state<HTMLElement | null>(null);
   let moveStatusAlertRef = $state<HTMLElement | null>(null);
 
-  const canEdit = $derived(user.is_platform_admin === true && !authorityRevoked);
+  const canAdministerStorage = $derived(hasPermission(user)("storage"));
+  const canEdit = $derived(canAdministerStorage && !authorityRevoked);
   const policyMutationPending = $derived(saving || moveActionPending === "pause");
   const objectStoreCapability = $derived(
     deploymentPolicy?.capabilities.find((capability) => capability.target === "object_store")
@@ -211,7 +214,7 @@
   }
 
   async function loadInventory() {
-    if (user.is_platform_admin !== true || authorityRevoked) {
+    if (!canAdministerStorage || authorityRevoked) {
       contentInventory = null;
       inventoryStatus = "idle";
       return;
@@ -235,7 +238,7 @@
   }
 
   async function loadMoves() {
-    if (user.is_platform_admin !== true || authorityRevoked) {
+    if (!canAdministerStorage || authorityRevoked) {
       contentMoves = null;
       moveStatus = "idle";
       return;
@@ -469,7 +472,7 @@
   function policyActorLabel(actor: DeploymentPolicy["policy"]["updated_by_actor"]): string {
     const labels: Record<DeploymentPolicy["policy"]["updated_by_actor"], () => string> = {
       migration: m.storage_policy_actor_migration,
-      platform_admin: m.storage_policy_actor_platform_admin
+      storage_admin: m.storage_policy_actor_storage_admin
     };
     return labels[actor]();
   }
@@ -591,7 +594,14 @@
             capability={objectStoreCapability}
             {canEdit}
             {readinessLabel}
-            onConnectionChanged={() => loadPolicy(dirty)}
+            onConnectionChanged={async () => {
+              await loadPolicy(dirty);
+              // Connecting or removing a store flips a capability the rest of
+              // the app reads from the root layout's settings (e.g. whether an
+              // assistant may switch off inlined file text). Without this it
+              // stays stale for the whole client-side session.
+              await invalidate("global:state");
+            }}
             onAuthorityRevoked={() => (authorityRevoked = true)}
           />
 
@@ -973,7 +983,7 @@
             </PolicySection>
           </form>
 
-          {#if user.is_platform_admin === true && !authorityRevoked}
+          {#if canEdit}
             <PolicySection
               id="storage-moves"
               title={m.storage_moves_title()}

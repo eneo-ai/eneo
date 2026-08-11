@@ -87,7 +87,7 @@ def test_file_too_large_exception_includes_structured_details():
     )
 
     assert "knowledge_file" in str(exception)
-    assert "platform administrator" in str(exception)
+    assert "Storage permission" in str(exception)
     assert exception.details["file_size_bytes"] == 12_582_912
     assert exception.details["max_size_bytes"] == 10_485_760
     assert exception.details["limit_name"] == "knowledge_file"

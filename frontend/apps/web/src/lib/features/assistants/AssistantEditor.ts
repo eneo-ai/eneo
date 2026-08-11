@@ -28,7 +28,9 @@ function initAssistantEditor(data: {
       prompt: { description: "", text: "" },
       insight_enabled: false,
       inline_file_text: true,
-      knowledge_mode: "tool" as Assistant["knowledge_mode"],
+      // On-demand knowledge is opt-in. Missing values must preserve the
+      // legacy retrieve-and-inject behavior for existing assistants.
+      knowledge_mode: "inject" as Assistant["knowledge_mode"],
       mcp_tools: []
     },
     updateResource: async (resource, changes) => {

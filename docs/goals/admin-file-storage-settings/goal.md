@@ -46,11 +46,10 @@ begin any item after #569 PR 1 in this Goal.
 - Unavailable or incompatible object storage is rejected clearly; there is no fallback, dual write, third backend, provider registry, or vendor-specific branch.
 - Ordinary product APIs expose no endpoint, bucket, object key, provider, credentials, or infrastructure detail.
 - No per-tenant policy, routing, bucket, dedupe, automatic migration, automatic cleanup, knowledge/InfoBlob generation, Flow work, PR 2 verified moves, issue #571, or issue #586.
-- The editable admin UI uses the smallest explicit session-backed authority:
-  `users.is_platform_admin`, granted or revoked only through the existing
-  super-key sysadmin boundary. A mutation requires both tenant Admin and the
-  platform-admin flag. Do not create a control-tenant registry or generic
-  authorization framework.
+- The editable admin UI uses the existing role-based `Permission.STORAGE`
+  authority. Admin routes require both Admin and Storage permissions, while
+  backend storage mutations enforce Storage directly. Do not create a
+  control-tenant registry or generic authorization framework.
 - Reuse and deepen existing admin settings, object-content policy/capability, File/Icon producer, API/generated-type, migration, and documentation owners.
 - Use behavior-first tests and preserve constant or bounded database work.
 - Do not merge with pending, stale, skipped-unexpectedly, unverified, or failing required gates.

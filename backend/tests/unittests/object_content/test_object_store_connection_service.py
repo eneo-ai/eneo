@@ -26,21 +26,20 @@ from eneo.object_content.object_store_connection import (
     ObjectStoreConnectionRepository,
     ObjectStoreConnectionService,
     ObjectStoreCredentialRotation,
-    ObjectStoreEndpointNotPermitted,
     ObjectStoreProbeAuthenticationFailed,
     ObjectStoreProbeCleanupFailed,
     ObjectStoreProbeConnectionFailed,
     ObjectStoreProbeUnavailable,
     StoredObjectStoreConnection,
 )
-from eneo.object_content.reconciliation_repository import (
-    ObjectContentReconciliationRepository,
-    StoreBindingSnapshot,
-)
 from eneo.object_content.s3_object_store import (
     ObjectStoreProbeCleanupError,
     ObjectStoreUnavailableError,
     S3ObjectStore,
+)
+from eneo.object_content.store_binding import (
+    StoreBindingRepository,
+    StoreBindingSnapshot,
 )
 from eneo.settings.encryption_service import EncryptionService
 
@@ -223,7 +222,7 @@ def _stored_connection() -> StoredObjectStoreConnection:
         secret_access_key_encrypted="encrypted-secret",
         deployment_id=_settings().deployment_id,
         addressing_style="path",
-        updated_by_actor=ObjectStoreConnectionActor.PLATFORM_ADMIN,
+        updated_by_actor=ObjectStoreConnectionActor.STORAGE_ADMIN,
         updated_by_user_id=None,
         created_at=now,
         updated_at=now,
@@ -346,7 +345,6 @@ async def test_connection_is_not_saved_when_conditional_binding_write_is_rejecte
         database,
         operator_settings=ObjectStoreOperatorSettings(
             _env_file=None,
-            admin_allowed_endpoint_origins=("https://objects.example.test",),
         ),
     )
     persistence_attempted = False
@@ -357,7 +355,7 @@ async def test_connection_is_not_saved_when_conditional_binding_write_is_rejecte
         return None
 
     async def unbound_snapshot(
-        _repository: ObjectContentReconciliationRepository,
+        _repository: StoreBindingRepository,
     ) -> StoreBindingSnapshot:
         return StoreBindingSnapshot(None, None, False)
 
@@ -371,8 +369,8 @@ async def test_connection_is_not_saved_when_conditional_binding_write_is_rejecte
 
     monkeypatch.setattr(ObjectStoreConnectionRepository, "get", no_connection)
     monkeypatch.setattr(
-        ObjectContentReconciliationRepository,
-        "store_binding_snapshot",
+        StoreBindingRepository,
+        "snapshot",
         unbound_snapshot,
     )
     monkeypatch.setattr(ObjectStoreConnectionRepository, "create", persist_connection)
@@ -451,7 +449,6 @@ async def test_unbound_rotation_keeps_probe_bounds_and_authentication_error(
         core_settings=ObjectContentCoreSettings(_env_file=None),
         operator_settings=ObjectStoreOperatorSettings(
             _env_file=None,
-            admin_allowed_endpoint_origins=("https://objects.example.test",),
         ),
         encryption=EncryptionService(Fernet.generate_key().decode()),
         store_factory=store_factory,
@@ -463,14 +460,14 @@ async def test_unbound_rotation_keeps_probe_bounds_and_authentication_error(
         return stored
 
     async def unbound_snapshot(
-        _repository: ObjectContentReconciliationRepository,
+        _repository: StoreBindingRepository,
     ) -> StoreBindingSnapshot:
         return StoreBindingSnapshot(None, None, False)
 
     monkeypatch.setattr(ObjectStoreConnectionRepository, "get", get_connection)
     monkeypatch.setattr(
-        ObjectContentReconciliationRepository,
-        "store_binding_snapshot",
+        StoreBindingRepository,
+        "snapshot",
         unbound_snapshot,
     )
 
@@ -499,68 +496,6 @@ async def test_connection_database_failure_uses_typed_contract() -> None:
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("operation", ["create", "rotate"])
-async def test_admin_mutations_reject_unapproved_endpoint_before_remote_io(
-    monkeypatch: pytest.MonkeyPatch,
-    operation: str,
-) -> None:
-    stored = _stored_connection()
-    database = _SequencedCommitFailureDatabase()
-    service = _service(
-        _DelayedUploadStore(),
-        database,
-        operator_settings=ObjectStoreOperatorSettings(
-            _env_file=None,
-            admin_allowed_endpoint_origins=("https://approved.example.test",),
-        ),
-    )
-
-    async def get_connection(
-        _repository: ObjectStoreConnectionRepository,
-    ) -> StoredObjectStoreConnection | None:
-        return stored if operation == "rotate" else None
-
-    async def unbound_snapshot(
-        _repository: ObjectContentReconciliationRepository,
-    ) -> StoreBindingSnapshot:
-        return StoreBindingSnapshot(None, None, False)
-
-    async def remote_probe_must_not_run(*_args: object, **_kwargs: object) -> None:
-        pytest.fail("the remote store must not be opened")
-
-    monkeypatch.setattr(ObjectStoreConnectionRepository, "get", get_connection)
-    monkeypatch.setattr(
-        ObjectContentReconciliationRepository,
-        "store_binding_snapshot",
-        unbound_snapshot,
-    )
-    monkeypatch.setattr(service, "_probe", remote_probe_must_not_run)
-
-    with pytest.raises(ObjectStoreEndpointNotPermitted):
-        if operation == "create":
-            await service.create(
-                ObjectStoreConnectionInput(
-                    endpoint_url=stored.endpoint_url,
-                    region=stored.region,
-                    bucket=stored.bucket,
-                    access_key_id="access",
-                    secret_access_key="secret",
-                ),
-                actor_user_id=stored.deployment_id,
-            )
-        else:
-            await service.rotate_credentials(
-                ObjectStoreCredentialRotation(
-                    expected_revision=stored.revision,
-                    access_key_id="access",
-                    secret_access_key="secret",
-                ),
-                actor_user_id=stored.deployment_id,
-            )
-
-    assert database.transactions == 1
-
-
 @pytest.mark.asyncio
 @pytest.mark.parametrize("operation", ["create", "rotate"])
 async def test_admin_mutations_report_unknown_commit_outcome(
@@ -574,7 +509,6 @@ async def test_admin_mutations_report_unknown_commit_outcome(
         database,
         operator_settings=ObjectStoreOperatorSettings(
             _env_file=None,
-            admin_allowed_endpoint_origins=("https://objects.example.test",),
         ),
     )
 
@@ -584,7 +518,7 @@ async def test_admin_mutations_report_unknown_commit_outcome(
         return stored if operation == "rotate" else None
 
     async def unbound_snapshot(
-        _repository: ObjectContentReconciliationRepository,
+        _repository: StoreBindingRepository,
     ) -> StoreBindingSnapshot:
         if operation == "rotate":
             return StoreBindingSnapshot(
@@ -617,8 +551,8 @@ async def test_admin_mutations_report_unknown_commit_outcome(
         rotate_connection,
     )
     monkeypatch.setattr(
-        ObjectContentReconciliationRepository,
-        "store_binding_snapshot",
+        StoreBindingRepository,
+        "snapshot",
         unbound_snapshot,
     )
     monkeypatch.setattr(service, "_probe", probe_succeeds)
@@ -662,7 +596,6 @@ async def test_admin_connection_requires_bucket_readiness_before_persistence(
         database,
         operator_settings=ObjectStoreOperatorSettings(
             _env_file=None,
-            admin_allowed_endpoint_origins=("https://objects.example.test",),
         ),
     )
     persistence_attempted = False
@@ -673,7 +606,7 @@ async def test_admin_connection_requires_bucket_readiness_before_persistence(
         return None if operation == "create" else stored
 
     async def binding_snapshot(
-        _repository: ObjectContentReconciliationRepository,
+        _repository: StoreBindingRepository,
     ) -> StoreBindingSnapshot:
         if operation == "create":
             return StoreBindingSnapshot(None, None, False)
@@ -693,8 +626,8 @@ async def test_admin_connection_requires_bucket_readiness_before_persistence(
 
     monkeypatch.setattr(ObjectStoreConnectionRepository, "get", get_connection)
     monkeypatch.setattr(
-        ObjectContentReconciliationRepository,
-        "store_binding_snapshot",
+        StoreBindingRepository,
+        "snapshot",
         binding_snapshot,
     )
     monkeypatch.setattr(

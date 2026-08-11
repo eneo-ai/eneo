@@ -16,13 +16,15 @@ depends_on = None
 
 
 def upgrade() -> None:
+    # Backwards-compatible rollout: existing assistants stay on legacy
+    # retrieve-and-inject until an administrator explicitly enables tool mode.
     op.add_column(
         "assistants",
         sa.Column(
             "knowledge_mode",
             sa.String(),
             nullable=False,
-            server_default="tool",
+            server_default="inject",
         ),
     )
 

@@ -72,7 +72,7 @@ class Assistant(Entity):
         description: Optional[str] = None,
         insight_enabled: bool = False,
         inline_file_text: bool = True,
-        knowledge_mode: KnowledgeMode = KnowledgeMode.TOOL,
+        knowledge_mode: KnowledgeMode = KnowledgeMode.INJECT,
         data_retention_days: Optional[int] = None,
         metadata_json: dict[str, object] | None = None,
         icon_id: Optional[UUID] = None,
@@ -276,13 +276,15 @@ class Assistant(Entity):
         return (
             "You have access to the knowledge sources listed below through "
             "the built-in knowledge tools knowledge__search_knowledge, "
-            "knowledge__read_source and knowledge__list_knowledge_sources. "
+            "knowledge__read_source, knowledge__describe_source and "
+            "knowledge__list_knowledge_sources. "
             "Rules:\n"
             "1. ALWAYS search with knowledge__search_knowledge before "
             "answering anything the knowledge sources below could plausibly "
             "cover. Skip searching only for greetings, thanks, talk about the "
             "conversation itself, reformatting text already present in this "
-            "conversation, or questions about files attached to this "
+            "conversation, questions about what knowledge exists or what a "
+            "source covers (rule 3), or questions about files attached to this "
             "conversation: answer those from the attachment's content (its "
             "text in this conversation, or a file-reading tool when the "
             "attachment is provided as a download URL), not from knowledge "
@@ -307,9 +309,17 @@ class Assistant(Entity):
             "3. When asked what knowledge, sources or documents you have "
             "access to, answer with knowledge__list_knowledge_sources and "
             "the sources listed below, never with a listing tool from "
-            "another server.\n"
-            "4. Ground every knowledge answer in search results. If the "
-            "results do not contain the answer and no other tool "
+            "another server. When asked what one source covers, contains or "
+            "is about ('summarize this source', 'vad avhandlar den här "
+            "källan'), call knowledge__describe_source with that source's "
+            "source_id from the listing: a semantic query cannot describe a "
+            "corpus, so never answer such questions by searching for words "
+            "like 'summary' or 'content'. If describe_source says its title "
+            "listing is incomplete, keep calling it with the supplied offset "
+            "and do not answer until the title listing is complete.\n"
+            "4. Ground every knowledge answer in results from the built-in "
+            "knowledge tools. For factual searches, if the search results do "
+            "not contain the answer and no other tool "
             "legitimately covers the question (rule 2), say it could not be "
             "found in the knowledge sources; never answer from general "
             "knowledge. If the results answer only part of the question, "
@@ -323,7 +333,10 @@ class Assistant(Entity):
             "6. Specific factual questions: one precise query with "
             "mode='specific'.\n"
             "7. When a result looks central but incomplete, read the full "
-            "document with knowledge__read_source and its document_id.\n"
+            "document with knowledge__read_source and its document_id. To "
+            "narrow instead of widen, pass a source_id or a document_id as "
+            "'within' to knowledge__search_knowledge: it then searches only "
+            "that source or that document.\n"
             "Knowledge sources:\n" + "\n".join(lines)
         )
 

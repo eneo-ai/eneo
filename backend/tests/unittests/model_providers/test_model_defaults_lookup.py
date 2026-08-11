@@ -1,8 +1,9 @@
 """Unit tests for the shared LiteLLM defaults resolver.
 
-The resolver is the single source of truth for both the interactive
-``/model-defaults/`` endpoint and the cost-backfill migration, so the test
-matrix needs to cover the cases where the two used to disagree:
+The resolver is the single source of truth for the interactive
+``/model-defaults/`` endpoint, the cost-backfill migration, and the live
+model-listing enrichment, so the test matrix needs to cover the cases
+where the call paths used to disagree:
 
   - bare-name vs. provider-prefixed entries
   - same model under multiple providers (must not silently pick one)

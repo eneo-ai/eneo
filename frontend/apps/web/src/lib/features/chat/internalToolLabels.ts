@@ -50,6 +50,12 @@ const INTERNAL_SERVERS: Record<
       read_source: {
         running: () => m.tool_read_source(),
         done: () => m.tool_read_source_done()
+      },
+      // No argument folded into the label, unlike search_knowledge: source_id
+      // is an opaque UUID and must not surface in the UI.
+      describe_source: {
+        running: () => m.tool_describe_source(),
+        done: () => m.tool_describe_source_done()
       }
     }
   },

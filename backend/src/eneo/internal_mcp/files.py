@@ -3,12 +3,13 @@
 # over it, so strict unknown-type checking adds noise without safety here.
 """Internal MCP server exposing conversation attachments as a read tool.
 
-When an assistant runs with ``inline_file_text`` disabled, attached text
-files reach the model as signed download URLs instead of inlined text. This
-server is the built-in consumer of those URLs: ``read_file`` verifies the
-signed token and returns the file's already-extracted text, paged. The URL is
-a capability handle, not a fetch instruction: content is served through the
-durable object-content store, never fetched over HTTP.
+Attached text files with a durably stored original reach the model as signed
+reference URLs (alongside their inlined text, or instead of it when the
+assistant runs with ``inline_file_text`` disabled). This server is the
+built-in consumer of those URLs: ``read_file`` verifies the signed token and
+returns the file's already-extracted text, paged. The URL is a capability
+handle, not a fetch instruction: content is served through the durable
+object-content store, never fetched over HTTP.
 
 See :mod:`eneo.internal_mcp.foundation` for the hosting and authentication
 model shared by all internal servers.
@@ -17,14 +18,16 @@ model shared by all internal servers.
 from __future__ import annotations
 
 import logging
-import re
-from urllib.parse import parse_qs, urlsplit
+from typing import Sequence
 from uuid import UUID
 
 from mcp.server.fastmcp import Context, FastMCP
 from mcp.types import TextContent
 
-from eneo.authentication.signed_urls import verify_file_original_download_token
+from eneo.authentication.signed_urls import (
+    parse_file_reference_url,
+    verify_file_original_download_token,
+)
 from eneo.files.file_content_loader import FileContentLoader
 from eneo.files.file_models import FileType
 from eneo.internal_mcp.constants import FILES_SERVER_NAME
@@ -48,13 +51,6 @@ mcp = FastMCP(
     ),
 )
 
-# Path suffix of a signed original-download URL (the shape minted for file
-# references); matched host-agnostically because the HMAC token is the sole
-# authorizer (see _parse_reference_url).
-_DOWNLOAD_PATH = re.compile(
-    r"/api/v1/files/(?P<file_id>[0-9a-fA-F-]{36})/original/download/?$"
-)
-
 NOT_A_REFERENCE_MESSAGE = (
     'That is not an Eneo attachment URL. Pass the exact "url" value from an '
     "attached-file reference entry, without modifying it."
@@ -68,30 +64,6 @@ NOT_FOUND_MESSAGE = "No attached file matches that URL."
 
 def _text(message: str) -> list[TextContent]:
     return [TextContent(type="text", text=message)]
-
-
-def _parse_reference_url(url: str) -> tuple[UUID, str] | None:
-    """Extract ``(file_id, token)`` from a signed download URL.
-
-    Host-agnostic on purpose: the tool never fetches the URL, and the signed
-    token is the sole authorizer, so links minted against either the public
-    origin or the tool-facing reference base URL both resolve.
-    """
-    try:
-        parts = urlsplit(url)
-    except ValueError:
-        return None
-    match = _DOWNLOAD_PATH.search(parts.path)
-    if match is None:
-        return None
-    tokens = parse_qs(parts.query).get("token")
-    if not tokens or not tokens[0]:
-        return None
-    try:
-        file_id = UUID(match.group("file_id"))
-    except ValueError:
-        return None
-    return file_id, tokens[0]
 
 
 def _file_content(file, *, offset: int, page_cap: int) -> list[TextContent]:
@@ -148,16 +120,21 @@ async def read_file(
 
     Pass the exact "url" value from an attached-file reference entry (the
     JSON lines listing filename, mimetype, size_bytes and url); never
-    construct or modify URLs. Long files are returned in parts; the
-    truncation notice gives the offset for the next part.
+    construct or modify URLs. Every reference url is valid input here no
+    matter what host or scheme it shows: the url is a signed handle this
+    tool verifies, not an address it fetches, so never conclude from the
+    url's appearance that an attached file cannot be read. Long files are
+    returned in parts; the truncation notice gives the offset for the next
+    part.
 
     This is a general-purpose fallback that loads the file's raw text into
     context. If another available tool is better suited to the file or the
     task (for example tabular or spreadsheet analysis tools, or tools that
     summarize files too large to read into context), prefer that tool and
-    pass it the same url.
+    pass it the same url; if it fails or no such tool exists, use this one
+    rather than telling the user the file cannot be read.
     """
-    parsed = _parse_reference_url(url)
+    parsed = parse_file_reference_url(url)
     if parsed is None:
         return _text(NOT_A_REFERENCE_MESSAGE)
     file_id, token = parsed
@@ -200,12 +177,34 @@ async def read_file(
     return _file_content(file, offset=offset, page_cap=default_page_cap())
 
 
-async def build_files_mcp_server(*, token: str, tenant_id: UUID) -> MCPServer:
-    """Build the ephemeral MCP server eneo attaches for URL-only attachments."""
+def _attachments_suffix(attachment_labels: Sequence[str]) -> str:
+    """Static suffix appended when the conversation has referenced attachments.
+
+    Attachment names never enter the description: it is a trusted provider
+    channel, and a filename written as a directive would ride it into the
+    model as instructions. The JSON reference entries in the conversation
+    already name every file, so the suffix only binds the tool to their
+    existence.
+    """
+    if not attachment_labels:
+        return ""
+    return (
+        "\n\nEvery file attached to this conversation is readable here, "
+        "whatever its reference url looks like."
+    )
+
+
+async def build_files_mcp_server(
+    *, token: str, tenant_id: UUID, attachment_labels: Sequence[str] = ()
+) -> MCPServer:
+    """Build the ephemeral MCP server eneo attaches for referenced attachments."""
     return await build_ephemeral_server(
         mcp,
         name=FILES_SERVER_NAME,
         description="Loopback server for reading files attached to this conversation.",
         token=token,
         tenant_id=tenant_id,
+        tool_description_suffixes={"read_file": _attachments_suffix(attachment_labels)}
+        if attachment_labels
+        else None,
     )
