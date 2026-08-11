@@ -1215,3 +1215,62 @@ async def test_iterate_stream_round_cap_refuses_calls_and_forces_final_answer():
         if tm.result_status == "failed" and tm.tool_call_id == f"call_{max_rounds}"
     ]
     assert refused_events
+
+
+async def test_forced_final_drops_ignored_tool_calls_without_pending_events():
+    adapter = _make_adapter()
+    mcp_proxy = _FakeMCPProxy()
+    messages: list[dict] = []
+    max_rounds = TenantModelAdapter.MAX_TOOL_ROUNDS
+    follow_ups = [
+        _AsyncChunkStream([_tool_call_chunk(tool_call_id=f"call_{i}")])
+        for i in range(1, max_rounds + 1)
+    ]
+    # The forced toolless final: the provider streams text but ignores
+    # tool_choice="none" and emits yet another tool call.
+    follow_ups.append(
+        _AsyncChunkStream(
+            [
+                _text_chunk("partial answer"),
+                _tool_call_chunk(tool_call_id="call_ignored"),
+            ]
+        )
+    )
+
+    stream = _AsyncChunkStream(
+        [_tool_call_chunk(tool_call_id="call_0")],
+        eneo_context={
+            "mcp_proxy": mcp_proxy,
+            "messages": messages,
+            "kwargs": {},
+            "has_tools": True,
+        },
+    )
+
+    with patch(
+        "eneo.completion_models.infrastructure.adapters.tenant_model_adapter._acompletion_call",
+        AsyncMock(side_effect=follow_ups),
+    ) as completion_call:
+        completions = await _collect(
+            adapter,
+            stream,
+            require_tool_approval=False,
+            approval_manager=None,
+            approval_context=None,
+            pending_approval_ids=set(),
+        )
+
+    assert completion_call.await_args_list[-1].kwargs["tool_choice"] == "none"
+    # The ignored call surfaces nowhere: no pending event, no metadata at
+    # all, so nothing persists in a state that never resolves.
+    ignored = [
+        tm
+        for c in completions
+        if c.tool_calls_metadata
+        for tm in c.tool_calls_metadata
+        if tm.tool_call_id == "call_ignored"
+    ]
+    assert ignored == []
+    # Text streamed by the final response is preserved and the turn stops.
+    assert "partial answer" in "".join(c.text for c in completions if c.text)
+    assert any(c.stop for c in completions)

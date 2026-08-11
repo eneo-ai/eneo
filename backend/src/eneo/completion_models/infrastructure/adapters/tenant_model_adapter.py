@@ -1525,8 +1525,16 @@ class TenantModelAdapter(CompletionModelAdapter):
                 *,
                 request_messages: list[dict[str, Any]] | None = None,
                 provider_tools: list[dict[str, Any]] | None = None,
+                emit_pending: bool = True,
             ) -> AsyncIterator[Completion]:
-                """Drain a stream: yield text Completions, accumulate tool calls into res."""
+                """Drain a stream: yield text Completions, accumulate tool calls into res.
+
+                ``emit_pending=False`` suppresses the early "pending" TOOL_CALL
+                events. Used for the forced toolless final response: a provider
+                that ignores tool_choice="none" would otherwise surface a
+                pending step that nothing ever resolves, and that unresolved
+                status would be persisted.
+                """
                 buffer = ""
                 inside_thinking = False
                 thinking_stripped = False
@@ -1616,7 +1624,7 @@ class TenantModelAdapter(CompletionModelAdapter):
                         # name and id are known — argument JSON for many parallel
                         # calls can take tens of seconds to generate, and the
                         # stream is otherwise silent for that whole window.
-                        if mcp_tools_active:
+                        if mcp_tools_active and emit_pending:
                             for idx, acc in res.tool_calls_acc.items():
                                 if idx in pending_emitted:
                                     continue
@@ -2304,6 +2312,7 @@ class TenantModelAdapter(CompletionModelAdapter):
                             "list[dict[str, Any]]",
                             litellm_kwargs.get("tools") or [],
                         ),
+                        emit_pending=False,
                     ):
                         yield comp
                     if result.has_tool_calls:
