@@ -33,6 +33,17 @@ def test_resolve_flow_retention_policy_treats_missing_version_as_v1() -> None:
     assert policy == FlowRetentionPolicy(run_debug_evidence_days=14)
 
 
+@pytest.mark.parametrize("value", [0, 2556, True, 7.5, "7"])
+def test_resolve_flow_retention_policy_fails_closed_for_invalid_days(
+    value: object,
+) -> None:
+    policy = resolve_flow_retention_policy(
+        {"retention_policy": {"run_debug_evidence_days": value}}
+    )
+
+    assert policy == FlowRetentionPolicy()
+
+
 @pytest.mark.parametrize("version", [2, True, "1"])
 def test_resolve_flow_retention_policy_fails_closed_for_unsupported_version(
     version,
@@ -170,10 +181,21 @@ def test_validate_flow_retention_policy_object_rejects_deleted_fields() -> None:
         validate_flow_retention_policy_object({"source_audio_days": 3})
 
 
-def test_validate_flow_retention_policy_object_accepts_supported_version() -> None:
+@pytest.mark.parametrize("value", [1, 2555])
+def test_validate_flow_retention_policy_object_accepts_range_boundaries(
+    value: int,
+) -> None:
     assert validate_flow_retention_policy_object(
-        {"version": 1, "run_debug_evidence_days": 3}
-    ) == {"version": 1, "run_debug_evidence_days": 3}
+        {"version": 1, "run_debug_evidence_days": value}
+    ) == {"version": 1, "run_debug_evidence_days": value}
+
+
+@pytest.mark.parametrize("value", [0, 2556])
+def test_validate_flow_retention_policy_object_rejects_out_of_range_days(
+    value: int,
+) -> None:
+    with pytest.raises(ValueError, match="run_debug_evidence_days"):
+        validate_flow_retention_policy_object({"run_debug_evidence_days": value})
 
 
 @pytest.mark.parametrize("version", [0, 2, True, "1"])

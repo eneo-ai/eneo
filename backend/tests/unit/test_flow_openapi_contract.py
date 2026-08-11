@@ -1065,6 +1065,7 @@ def test_openapi_flow_retention_policy_is_default_off_and_strictly_bounded(
     }
 
     for field_name in (
+        "run_debug_evidence_days",
         "flow_run_history_retention_days",
         "flow_run_history_minimum_retention_days",
         "flow_runtime_upload_abandonment_days",

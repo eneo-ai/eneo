@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Final, cast
 
+from eneo.data_retention.constants import validate_retention_days
+
 FLOW_RETENTION_POLICY_SETTINGS_KEY: Final[str] = "retention_policy"
 FLOW_RETENTION_POLICY_STORAGE_VERSION_KEY: Final[str] = "version"
 FLOW_RETENTION_POLICY_STORAGE_VERSION: Final[int] = 1
@@ -39,7 +41,7 @@ def resolve_flow_retention_policy(
 ) -> FlowRetentionPolicy:
     retention_policy_dict = _extract_retention_policy(tenant_flow_settings)
     return FlowRetentionPolicy(
-        run_debug_evidence_days=_int_or_none(
+        run_debug_evidence_days=_retention_days_or_none(
             retention_policy_dict.get(FLOW_RETENTION_POLICY_RUN_DEBUG_EVIDENCE_DAYS_KEY)
         ),
     )
@@ -145,10 +147,10 @@ def validate_flow_retention_policy_object(value: Any) -> dict[str, Any]:
             raise ValueError(
                 f"flow_settings.retention_policy.{key} must be an integer or null"
             )
-        if raw_value < 1:
-            raise ValueError(
-                f"flow_settings.retention_policy.{key} must be greater than 0"
-            )
+        validate_retention_days(
+            raw_value,
+            context=f"flow_settings.retention_policy.{key}",
+        )
 
     return value_dict
 
@@ -173,5 +175,10 @@ def _has_retention_policy_payload(retention_policy: dict[str, Any]) -> bool:
     )
 
 
-def _int_or_none(value: Any) -> int | None:
-    return value if isinstance(value, int) and not isinstance(value, bool) else None
+def _retention_days_or_none(value: Any) -> int | None:
+    if not isinstance(value, int) or isinstance(value, bool):
+        return None
+    try:
+        return validate_retention_days(value)
+    except ValueError:
+        return None

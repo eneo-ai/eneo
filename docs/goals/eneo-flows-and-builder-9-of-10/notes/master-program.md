@@ -237,6 +237,10 @@ ARTIFACT re-checked per slice, not a permanent grep gate.
       postconditions. The impossible review-conflict question direction was
       corrected to retain the defensive compiler postcondition rather than
       inventing a second checkpoint state or question path.
+- [x] FLOW-RETENTION debug-evidence bound: the existing strict `1..2555`
+      retention range now applies at the public/update models and nested policy
+      owner; corrupt persisted values fail closed before public projection or
+      cleanup consumption.
 
 ## The Ranked Program (v10.3 — execution phase; slice bodies carry
 ## their originating iteration tags)
@@ -622,10 +626,16 @@ sake.
     capability cannot view or raw-export; no service key can access a
     non-matching run; human tenant-admin behavior is unchanged. No new
     policy layer or permission vocabulary.
-- [ ] FLOW-RETENTION Contract bound: apply the existing strict
-    `MIN_RETENTION_DAYS`/`MAX_RETENTION_DAYS` range to
-    `run_debug_evidence_days` in public and update schemas. Keep this
-    behavior change separate from documentation-only metadata.
+- [x] FLOW-RETENTION Contract bound (completed 2026-08-11): the existing strict
+    `MIN_RETENTION_DAYS`/`MAX_RETENTION_DAYS` range now governs
+    `run_debug_evidence_days` in public and update models and in the nested
+    JSONB policy owner. Missing values remain Off; booleans, coercible strings,
+    non-integers and values outside `1..2555` are rejected on writes. The raw
+    cleanup resolver also returns Off for corrupt persisted values, so invalid
+    JSONB cannot become a public response validation failure or authorize
+    irreversible cleanup. OpenAPI exposes the same bounds. No cleanup lifecycle,
+    precedence, database schema, compatibility reader or documentation metadata
+    changed in this slice.
 - [ ] FLOW-DOC Current-source accuracy: re-verify the 2026-08-11
     endpoint sweep against current `eneo` owners and apply only facts
     that still hold. Correct consumer authentication, nested step

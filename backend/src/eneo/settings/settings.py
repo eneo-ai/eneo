@@ -1068,7 +1068,12 @@ class FlowRetentionPolicyPublic(BaseModel):
         json_schema_extra={"example": FLOW_RETENTION_POLICY_EXAMPLE}
     )
 
-    run_debug_evidence_days: int | None = Field(...)
+    run_debug_evidence_days: int | None = Field(
+        ...,
+        strict=True,
+        ge=MIN_RETENTION_DAYS,
+        le=MAX_RETENTION_DAYS,
+    )
     flow_run_history_retention_days: int | None = Field(
         ...,
         strict=True,
@@ -1103,6 +1108,9 @@ class FlowRetentionPolicyUpdate(BaseModel):
 
     run_debug_evidence_days: int | None = Field(
         default=None,
+        strict=True,
+        ge=MIN_RETENTION_DAYS,
+        le=MAX_RETENTION_DAYS,
         json_schema_extra=_strip_json_schema_default,
     )
     flow_run_history_retention_days: int | None = Field(

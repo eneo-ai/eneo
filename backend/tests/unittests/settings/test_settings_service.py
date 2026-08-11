@@ -36,6 +36,7 @@ from eneo.settings.settings import (
     FlowInputLimitsUpdate,
     FlowMappedExecutionPolicyUpdate,
     FlowRetentionEffectiveStatePublic,
+    FlowRetentionPolicyPublic,
     FlowRetentionPolicyUpdate,
     FlowRuntimePolicyUpdate,
     SettingsBase,
@@ -59,8 +60,7 @@ def _upload_admission(
 ) -> UploadAdmissionSnapshot:
     return UploadAdmissionSnapshot(
         policy_revision=1,
-        session_storage_target=StorageKind.POSTGRES_INLINE,
-        session_operator_ceiling_bytes=200_000_000,
+        new_write_storage_target=StorageKind.POSTGRES_INLINE,
         session_file_maximum_bytes=file_maximum_bytes,
         session_image_maximum_bytes=50_000_000,
         session_audio_maximum_bytes=audio_maximum_bytes,
@@ -257,12 +257,13 @@ def test_flow_settings_update_models_reject_unknown_fields() -> None:
 @pytest.mark.parametrize(
     "field_name",
     (
+        "run_debug_evidence_days",
         "flow_run_history_retention_days",
         "flow_runtime_upload_abandonment_days",
     ),
 )
 @pytest.mark.parametrize("value", [0, 2556, True, 7.5, "7"])
-def test_flow_retention_policy_update_rejects_invalid_tenant_days(
+def test_flow_retention_policy_update_rejects_invalid_days(
     field_name: str,
     value: object,
 ) -> None:
@@ -273,11 +274,36 @@ def test_flow_retention_policy_update_rejects_invalid_tenant_days(
 def test_flow_retention_policy_update_accepts_nullable_range_boundaries() -> None:
     for value in (None, 1, 2555):
         update = FlowRetentionPolicyUpdate(
+            run_debug_evidence_days=value,
             flow_run_history_retention_days=value,
             flow_runtime_upload_abandonment_days=value,
         )
+        assert update.run_debug_evidence_days == value
         assert update.flow_run_history_retention_days == value
         assert update.flow_runtime_upload_abandonment_days == value
+
+
+@pytest.mark.parametrize("value", [0, 2556, True, 7.5, "7"])
+def test_flow_retention_policy_public_rejects_invalid_debug_evidence_days(
+    value: object,
+) -> None:
+    with pytest.raises(ValidationError):
+        FlowRetentionPolicyPublic.model_validate(
+            {
+                "run_debug_evidence_days": value,
+                "flow_run_history_retention_days": None,
+                "flow_runtime_upload_abandonment_days": None,
+                "flow_run_history_minimum_retention_days": None,
+                "flow_run_history_no_purge": False,
+                "effective_state": {
+                    "run_history_deletion_active": False,
+                    "runtime_upload_abandonment_active": False,
+                    "classification_policy_count": 0,
+                    "activation_sources": [],
+                    "barrier_sources": [],
+                },
+            }
+        )
 
 
 @pytest.mark.parametrize(
