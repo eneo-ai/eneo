@@ -57,7 +57,13 @@ frozen manifest, never restated as a prose constant.
   compose network P0 fixed.
 - Instrument barrier: CP8b/CP8c are landed, the frozen CP0 receipt
   still replays exactly, acquisition bundles seal derived observations,
-  and release verdicts fail closed on final identity.
+  and release verdicts fail closed on final identity. The first completed
+  post-integration runtime sentinel exposed one instrument defect: raw
+  fixture-byte hashes were compared with the extracted-text hashes the
+  runtime actually consumes. The harness now seals those as distinct
+  identities, validates runtime lineage against the uploaded projection's
+  size, and versions the corrected identity semantics; gate arithmetic is
+  unchanged.
 - Product changes since the barrier: authoring rejects unindexed array
   paths, the unmeasured JSON-to-text tuple rejects explicitly, and the
   mixed-audio topology guards no longer re-infer create intent. Fully
@@ -67,7 +73,14 @@ frozen manifest, never restated as a prose constant.
   Create compilation now takes its terminal type only from the committed
   architecture; conversation intent remains an edit-only concern, and a
   create postcondition mismatch is a typed compiler defect rather than a
-  model-repair instruction.
+  model-repair instruction. On the comparable 155-case population, its N=1
+  smoke moved accepted plans from 87.0% to 86.2%, first-pass plans from
+  69.1% to 65.9%, conformance from 39.0% to 41.5%, and Builder errors from
+  5.8% to 3.9%. A targeted repeat returned 10 of 14 apparent first-pass
+  losses to first pass and recovered all six apparent acceptance losses,
+  so they are treated as model variance rather than repair targets. Both
+  previously stable TEXT-terminal deaths now produce plans; none of the
+  new failures used CP2's terminal-mismatch code.
 - Platform integration: current develop storage, knowledge/internal
   tools, API, SDK and frontend work is merged without weakening Flow
   governance. Internal-tool approval now trusts runtime provenance,
@@ -258,7 +271,11 @@ any threshold.
     immutable receipt evidence, and reproduced every CP0 count
     (`832095bd8`). CP8c added bounded provider-fault slot
     remeasurement without changing frozen arithmetic (`07fa4ed42`).
-    The pre-registration barrier is closed.
+    The pre-registration barrier is closed. A later live runtime proof
+    corrected the harness's post-integration raw-fixture versus extracted-
+    runtime identity comparison without changing the 14-row definitions:
+    both identities remain sealed, runtime evidence stays fail-closed, and
+    their semantics version prevents unlike receipts from being compared.
 - [x] CP-ADMIT-0 Unsupported-architecture refusal (Fable Builder
     iteration 2): fully resolved unsupported tuples now produce one
     typed, localized terminal refusal. The existing derivation cascade
@@ -819,14 +836,15 @@ orchestrator verifies every diff and owns all git.
 
 ### Measurement cadence
 After a material Builder ownership slice, use one repetition of the
-final-frozen 155-case manifest as the broad progress smoke; use a smaller
-named N=1 cohort when the change is genuinely narrow or when diagnosing a
-specific failure. N=1 detects deterministic regressions and new failure
-families but makes no stability claim. Run the final-frozen manifest ×3 at
-the ownership-tranche gate, then N=5 at the release gate (detection power,
-not certification power), repeated after every material post-gate change.
-Suite starts remain at least 45 minutes apart for provider limits. This
-cadence replaces per-slice cohort ×3 by user decision on 2026-08-11.
+final-frozen manifest as the broad progress smoke; derive its population from
+the tracked manifest rather than a prose constant (currently 158 cases). Use
+a smaller named N=1 cohort when the change is genuinely narrow or when
+diagnosing a specific failure. N=1 detects deterministic regressions and new
+failure families but makes no stability claim. Run the final-frozen manifest
+×3 at the ownership-tranche gate, then N=5 at the release gate (detection
+power, not certification power), repeated after every material post-gate
+change. Suite starts remain at least 45 minutes apart for provider limits.
+This cadence replaces per-slice cohort ×3 by user decision on 2026-08-11.
 
 ## Operating protocol (for any agent continuing this)
 

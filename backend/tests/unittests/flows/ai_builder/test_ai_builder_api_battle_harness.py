@@ -731,12 +731,12 @@ def _live_provenance_fixture(
 def _empty_observation_input_identity(harness: ModuleType) -> dict[str, object]:
     payload = {
         "attachment_evidence_sha256s": [],
+        "runtime_fixture_sha256s": [],
         "runtime_source_sha256s": [],
     }
     return {
         **payload,
         "attachment_fixtures": [],
-        "declared_runtime_sha256s": [],
         "runtime_evidence_status": "not_required",
         "verified": True,
         "mismatches": [],
@@ -3465,12 +3465,13 @@ def test_release_identity_binds_target_version_and_observed_model(
     assert checks["suite_requested_model_identity"]["passed"] is False
 
 
-def test_observation_input_identity_verifies_evidence_text_and_runtime_file_bytes() -> (
+def test_observation_input_identity_distinguishes_fixture_bytes_from_runtime_content() -> (
     None
 ):
     harness = _battle_harness()
     runtime_fixture = "05_lokalkalkyl.csv"
-    runtime_sha256 = harness._fixture_manifest()[runtime_fixture]
+    runtime_fixture_sha256 = harness._fixture_manifest()[runtime_fixture]
+    runtime_source_sha256 = "b" * 64
     extracted_evidence_sha256 = "a" * 64
     case = harness.BattleCase(
         case_id="fixture-identity",
@@ -3495,7 +3496,7 @@ def test_observation_input_identity_verifies_evidence_text_and_runtime_file_byte
         "run_contract": {
             "steps_requiring_input": [{"step_id": "reader-step"}],
         },
-        "uploaded_files": [{"id": "runtime-file-1"}],
+        "uploaded_files": [{"id": "runtime-file-1", "size": 358}],
         "step_results": [
             {
                 "step_id": "reader-step",
@@ -3520,8 +3521,8 @@ def test_observation_input_identity_verifies_evidence_text_and_runtime_file_byte
                                 "kind": "runtime_file",
                                 "input_file_ordinal": 0,
                                 "file_id": "runtime-file-1",
-                                "checksum": runtime_sha256,
-                                "byte_size": 359,
+                                "checksum": runtime_source_sha256,
+                                "byte_size": 358,
                             },
                             "selection": {"encoding": "bound_file"},
                         }
@@ -3538,24 +3539,40 @@ def test_observation_input_identity_verifies_evidence_text_and_runtime_file_byte
         runtime_evidence=runtime_evidence,
     )
     assert identity["verified"] is True
+    assert identity["runtime_fixture_sha256s"] == [runtime_fixture_sha256]
+    assert identity["runtime_source_sha256s"] == [runtime_source_sha256]
+    assert "declared_runtime_sha256s" not in identity
     assert len(identity["sha256"]) == 64
 
-    # The runtime digest is owed by the manifest, so a lineage checksum that
-    # does not match the git-pinned bytes is content drift, not a stale
-    # hand-captured constant.
+    # Runtime lineage identifies the extracted content the step consumed. A
+    # different valid digest is observed product behaviour, not evidence that
+    # the git-pinned upload bytes changed, and it must move the fingerprint.
     runtime_edge = runtime_evidence["step_attempts"][0]["resolved_input_lineage"][
         "edges"
     ][0]
-    runtime_edge["source"]["checksum"] = "b" * 64
-    drifted = harness._observation_input_identity(
+    runtime_edge["source"]["checksum"] = "c" * 64
+    changed_projection = harness._observation_input_identity(
         case=case,
         attached_file_ids=("file-1",),
         classifier_diagnostics=diagnostics,
         runtime_evidence=runtime_evidence,
     )
-    assert drifted["verified"] is False
-    assert drifted["mismatches"] == ["runtime_content"]
-    runtime_edge["source"]["checksum"] = runtime_sha256
+    assert changed_projection["verified"] is True
+    assert changed_projection["sha256"] != identity["sha256"]
+    runtime_edge["source"]["checksum"] = runtime_source_sha256
+
+    # The upload response and resolved-input lineage describe the same selected
+    # content variant, so disagreement between their sizes is invalid evidence.
+    runtime_edge["source"]["byte_size"] = 359
+    mismatched_size = harness._observation_input_identity(
+        case=case,
+        attached_file_ids=("file-1",),
+        classifier_diagnostics=diagnostics,
+        runtime_evidence=runtime_evidence,
+    )
+    assert mismatched_size["verified"] is False
+    assert mismatched_size["mismatches"] == ["runtime_evidence"]
+    runtime_edge["source"]["byte_size"] = 358
 
     # An attachment that produced no well-formed extraction digest is an
     # unevaluable observation; which digest it produced is reported, never
@@ -5958,9 +5975,10 @@ def test_first_question_forbidden_and_unclassified_always_fail() -> None:
     assert reason == "unclassified"
 
 
-def test_evaluator_identity_carries_relevance_semantics_version() -> None:
+def test_evaluator_identity_carries_measurement_semantics_versions() -> None:
     harness = _battle_harness()
     assert harness.QUESTION_RELEVANCE_SEMANTICS_VERSION == 2
+    assert harness.OBSERVATION_INPUT_IDENTITY_SEMANTICS_VERSION == 2
     assert harness.SUPPORTED_CASES_FILE_VERSION == 7
     identity = harness._suite_evaluator_identity(
         release_identity={},
@@ -5968,6 +5986,7 @@ def test_evaluator_identity_carries_relevance_semantics_version() -> None:
         expected_observations=[],
     )
     assert identity["question_relevance_semantics_version"] == 2
+    assert identity["observation_input_identity_semantics_version"] == 2
 
 
 def test_planner_evidence_skips_planner_less_interactions() -> None:

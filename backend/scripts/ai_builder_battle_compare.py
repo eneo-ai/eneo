@@ -327,6 +327,7 @@ def _identity(summary: dict[str, Any]) -> dict[str, Any]:
 _IDENTITY_FIELDS: tuple[str, ...] = (
     "question_relevance_semantics_version",
     "outcome_classification_semantics_version",
+    "observation_input_identity_semantics_version",
     "requested_model_id",
     "harness_sha256",
 )

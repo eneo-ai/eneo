@@ -80,6 +80,10 @@ QUESTION_RELEVANCE_SEMANTICS_VERSION = 2
 # not export an environment variable — the flagship runtime sentinel skipped
 # itself that way through six full suite runs.
 OUTCOME_CLASSIFICATION_SEMANTICS_VERSION = 3
+# v2: raw fixture bytes and the extracted runtime content are separate input
+# identities. Runtime lineage records the content the step consumed; it must
+# not be compared to the original upload digest.
+OBSERVATION_INPUT_IDENTITY_SEMANTICS_VERSION = 2
 
 
 def _local_app_version() -> str:
@@ -1570,6 +1574,9 @@ def _suite_evaluator_identity(
         "outcome_classification_semantics_version": (
             OUTCOME_CLASSIFICATION_SEMANTICS_VERSION
         ),
+        "observation_input_identity_semantics_version": (
+            OBSERVATION_INPUT_IDENTITY_SEMANTICS_VERSION
+        ),
         "source_revision": build.get("source_revision"),
         "harness_sha256": build.get("harness_sha256"),
         "cases_sha256": build.get("cases_sha256"),
@@ -2446,8 +2453,8 @@ def _required_case_identity_checks(
             and _is_sha256(observation_input_identity.get("sha256")),
             "actual": dict(observation_input_identity),
             "expected": (
-                "declared attachment evidence-text and runtime file checksums "
-                "match observed evidence"
+                "fixture bytes and observed attachment/runtime projections are "
+                "complete and internally consistent"
             ),
         }
     )
@@ -3268,24 +3275,21 @@ def _observation_input_identity(
         _is_sha256(value) for value in observed_attachment_evidence_sha256s
     )
     manifest = _fixture_manifest()
-    declared_runtime_sha256s = [manifest[name] for name in case.runtime_files]
+    runtime_fixture_sha256s = [manifest[name] for name in case.runtime_files]
     runtime_sha256s, runtime_evidence_status = _runtime_lineage_sha256s(
         runtime_evidence,
-        expected_count=len(declared_runtime_sha256s),
+        expected_count=len(runtime_fixture_sha256s),
     )
 
     mismatches: list[str] = []
     if attached_file_ids and not attachment_evidence_complete:
         mismatches.append("attachment_evidence")
-    if declared_runtime_sha256s and runtime_evidence_status != "complete":
+    if runtime_fixture_sha256s and runtime_evidence_status != "complete":
         mismatches.append("runtime_evidence")
-    if runtime_evidence_status == "complete" and runtime_sha256s != (
-        declared_runtime_sha256s
-    ):
-        mismatches.append("runtime_content")
 
     fingerprint_payload = {
         "attachment_evidence_sha256s": observed_attachment_evidence_sha256s,
+        "runtime_fixture_sha256s": runtime_fixture_sha256s,
         "runtime_source_sha256s": runtime_sha256s,
     }
     fingerprint_complete = all(
@@ -3294,7 +3298,6 @@ def _observation_input_identity(
     return {
         **fingerprint_payload,
         "attachment_fixtures": _fixture_contract(case.attachments),
-        "declared_runtime_sha256s": declared_runtime_sha256s,
         "runtime_evidence_status": runtime_evidence_status,
         "verified": not mismatches and fingerprint_complete,
         "mismatches": mismatches,
@@ -3326,10 +3329,17 @@ def _runtime_lineage_sha256s(
     uploaded_file_ids = [
         _optional_string(uploaded_file, "id") for uploaded_file in uploaded_files
     ]
+    uploaded_runtime_content_sizes = [
+        uploaded_file.get("size") for uploaded_file in uploaded_files
+    ]
     if (
         len(uploaded_file_ids) != expected_count
         or any(file_id is None for file_id in uploaded_file_ids)
         or len(set(uploaded_file_ids)) != expected_count
+        or any(
+            not isinstance(size, int) or isinstance(size, bool) or size < 0
+            for size in uploaded_runtime_content_sizes
+        )
     ):
         return [None] * expected_count, "uploaded_files_invalid"
 
@@ -3384,12 +3394,14 @@ def _runtime_lineage_sha256s(
             continue
         ordinal = source.get("input_file_ordinal")
         checksum = source.get("checksum")
+        byte_size = source.get("byte_size")
         if (
             not isinstance(ordinal, int)
             or isinstance(ordinal, bool)
             or ordinal not in range(expected_count)
             or source.get("file_id") != uploaded_file_ids[ordinal]
             or not _is_sha256(checksum)
+            or byte_size != uploaded_runtime_content_sizes[ordinal]
             or ordinal in checksum_by_ordinal
         ):
             return [None] * expected_count, "current_lineage_invalid"
@@ -4109,7 +4121,7 @@ def _observation_evidence_report(bundle: Mapping[str, object]) -> JsonObject:
     )
     attachment_sha256s = observation_input.get("attachment_evidence_sha256s")
     runtime_sha256s = observation_input.get("runtime_source_sha256s")
-    declared_runtime_sha256s = observation_input.get("declared_runtime_sha256s")
+    runtime_fixture_sha256s = observation_input.get("runtime_fixture_sha256s")
     attached_file_ids = tuple(_string_list(case.get("file_ids")))
     # The receipt carries the fixture contract it ran against, so this recompute
     # stays offline even when the repository has since moved on: the digests
@@ -4130,11 +4142,12 @@ def _observation_evidence_report(bundle: Mapping[str, object]) -> JsonObject:
         runtime_evidence if isinstance(runtime_evidence, Mapping) else None,
         expected_count=expected_runtime_digest_count,
     )
-    expected_declared_runtime_sha256s = [
+    expected_runtime_fixture_sha256s = [
         entry["content_sha256"] for entry in expected_runtime_fixtures or []
     ]
     fingerprint_payload = {
         "attachment_evidence_sha256s": recomputed_attachment_sha256s,
+        "runtime_fixture_sha256s": expected_runtime_fixture_sha256s,
         "runtime_source_sha256s": recomputed_runtime_sha256s,
     }
     expected_mismatches: list[str] = []
@@ -4143,12 +4156,8 @@ def _observation_evidence_report(bundle: Mapping[str, object]) -> JsonObject:
     )
     if attached_file_ids and not attachment_evidence_complete:
         expected_mismatches.append("attachment_evidence")
-    if expected_declared_runtime_sha256s and recomputed_runtime_status != "complete":
+    if expected_runtime_fixture_sha256s and recomputed_runtime_status != "complete":
         expected_mismatches.append("runtime_evidence")
-    if recomputed_runtime_status == "complete" and recomputed_runtime_sha256s != (
-        expected_declared_runtime_sha256s
-    ):
-        expected_mismatches.append("runtime_content")
     fingerprint_complete = all(
         _is_sha256(value) for value in recomputed_attachment_sha256s
     ) and all(_is_sha256(value) for value in recomputed_runtime_sha256s)
@@ -4157,7 +4166,7 @@ def _observation_evidence_report(bundle: Mapping[str, object]) -> JsonObject:
         and isinstance(runtime_sha256s, list)
         and declared_attachments is not None
         and observation_input.get("attachment_fixtures") == declared_attachments
-        and declared_runtime_sha256s == expected_declared_runtime_sha256s
+        and runtime_fixture_sha256s == expected_runtime_fixture_sha256s
         and all(_is_sha256(value) for value in attachment_sha256s)
         and all(_is_sha256(value) for value in runtime_sha256s)
         and attachment_sha256s == recomputed_attachment_sha256s

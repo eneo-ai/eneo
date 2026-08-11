@@ -40,6 +40,7 @@ def _summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
         "evaluator_identity": {
             "question_relevance_semantics_version": 2,
             "outcome_classification_semantics_version": 2,
+            "observation_input_identity_semantics_version": 2,
             "requested_model_id": "model-under-test",
             "harness_sha256": "0" * 64,
             "run_context": {
@@ -221,6 +222,7 @@ def _with_identity(
     [
         ("outcome_classification_semantics_version", 1),
         ("question_relevance_semantics_version", 1),
+        ("observation_input_identity_semantics_version", 1),
         ("requested_model_id", "some-other-model"),
         ("harness_sha256", "9" * 64),
     ],
@@ -230,8 +232,8 @@ def test_identity_that_changes_meaning_refuses_comparison(
     field: str,
     value: object,
 ) -> None:
-    # Two semantic-version integers were not enough: receipts scored by a
-    # different model compared as though they measured the same thing.
+    # Semantic versions alone are not enough: receipts scored by a different
+    # model also measure a different experiment.
     module = _compare_module()
     baseline = _with_identity(tmp_path, "base.json", field, value)
     current = _write(tmp_path, "cur.json", [_row("case-a", "plan_first_pass")])
