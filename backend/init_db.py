@@ -122,6 +122,7 @@ def add_tenant_user(
                 "shared_spaces",
                 "api_keys",
                 "assistant_debug",
+                "storage",
             ]
             add_role_query = sql.SQL(
                 "INSERT INTO roles (name, permissions, tenant_id, predefined_source) "

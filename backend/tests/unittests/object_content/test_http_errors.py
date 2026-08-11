@@ -13,7 +13,6 @@ from eneo.object_content.content import (
 from eneo.object_content.object_store_connection import (
     ObjectStoreConnectionDatabaseUnavailable,
     ObjectStoreConnectionMutationOutcomeUnknown,
-    ObjectStoreEndpointNotPermitted,
 )
 from eneo.server.exception_handlers import add_exception_handlers
 
@@ -67,11 +66,6 @@ def test_connection_database_failure_has_stable_typed_503_contract() -> None:
 @pytest.mark.parametrize(
     ("error", "status_code", "code"),
     [
-        (
-            ObjectStoreEndpointNotPermitted("Endpoint denied by deployment policy"),
-            400,
-            "object_store_endpoint_not_permitted",
-        ),
         (
             ObjectStoreConnectionMutationOutcomeUnknown("Commit outcome unknown"),
             503,

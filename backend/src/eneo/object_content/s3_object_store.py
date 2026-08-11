@@ -327,12 +327,21 @@ class S3ObjectStore:
     async def prepare_binding_creation(
         self,
         binding_id: UUID,
+        *,
+        require_empty_namespace: bool = True,
     ) -> StoreBindingCreation | None:
-        """Finish read-only pairing checks before creation becomes ambiguous."""
+        """Finish read-only pairing checks before creation becomes ambiguous.
+
+        A destination switch admits a bucket the operator already filled with
+        this deployment's copied content; it passes
+        ``require_empty_namespace=False`` after its own foreign-marker check.
+        Every other caller keeps the empty-namespace precondition.
+        """
         if await self.verify_binding(binding_id):
             return None
 
-        await self._require_empty_content_namespace()
+        if require_empty_namespace:
+            await self._require_empty_content_namespace()
         expected = _BINDING_PREAMBLE + binding_id.bytes
         return StoreBindingCreation(
             binding_id=binding_id,
@@ -342,6 +351,18 @@ class S3ObjectStore:
     async def create_binding(self, creation: StoreBindingCreation) -> None:
         """Create a preflighted marker without replacing an existing marker."""
         await self._create_binding_at(self._binding_key, creation)
+
+    async def remove_binding(self, binding_id: UUID) -> None:
+        """Remove this database's marker after a rejected destination switch.
+
+        The marker is deleted only after verifying it names this binding, so
+        an absent or foreign marker is left untouched.
+        """
+        creation = StoreBindingCreation(
+            binding_id=binding_id,
+            body=_BINDING_PREAMBLE + binding_id.bytes,
+        )
+        await self._delete_binding_probe(self._binding_key, creation)
 
     async def probe_binding_creation(self) -> None:
         """Exercise conditional marker creation at this deployment's key."""
@@ -416,6 +437,11 @@ class S3ObjectStore:
                     )
                 await asyncio.sleep(self._settings.delete_poll_interval_seconds)
         except ObjectStoreProbeCleanupError:
+            raise
+        except ObjectStoreBindingError:
+            # A foreign marker is a definitive outcome, not a cleanup
+            # failure: the caller owns nothing at this key and must be able
+            # to release its local state accordingly.
             raise
         except (ObjectStoreError, BotoCoreError, ClientError) as error:
             raise ObjectStoreProbeCleanupError(

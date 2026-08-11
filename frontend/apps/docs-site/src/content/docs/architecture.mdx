@@ -210,9 +210,10 @@ verifies the PostgreSQL-owned SHA-256 before returning full or range responses,
 and a bounded reconciler resolves process and network failures.
 
 Object storage is optional. The default reference deployment is inline-capable
-without another service. Administrators can enable an Eneo-built and attested
-SeaweedFS profile or use external endpoints such as MinIO through one
-vendor-neutral contract.
+without another service. Operators can run Eneo's built and attested SeaweedFS
+profile or an external endpoint such as MinIO. Administrators with the Storage
+permission connect and select either option through the same vendor-neutral
+contract.
 
 Read [Object Content Architecture](/docs/object-content-architecture) for the
 complete lifecycle, integrity, reconciliation, binding, and image publication

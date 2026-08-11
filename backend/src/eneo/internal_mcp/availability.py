@@ -5,7 +5,7 @@ from typing import TYPE_CHECKING, Iterable
 from uuid import UUID
 
 from eneo.assistants.api.assistant_models import KnowledgeMode
-from eneo.files.file_reference import url_only_file_ids
+from eneo.files.file_reference import referenced_file_ids, url_only_file_ids
 
 if TYPE_CHECKING:
     from eneo.assistants.assistant import Assistant
@@ -20,6 +20,7 @@ class InternalMCPAvailability:
     knowledge: bool
     files: bool
     url_only_file_ids: frozenset[UUID]
+    referenced_file_ids: frozenset[UUID]
 
 
 def resolve_internal_mcp_availability(
@@ -35,9 +36,14 @@ def resolve_internal_mcp_availability(
     """
     if not completion_model.supports_tool_calling:
         return InternalMCPAvailability(
-            knowledge=False, files=False, url_only_file_ids=frozenset()
+            knowledge=False,
+            files=False,
+            url_only_file_ids=frozenset(),
+            referenced_file_ids=frozenset(),
         )
 
+    conversation_files = list(conversation_files)
+    referenced_ids = frozenset(referenced_file_ids(conversation_files))
     url_only_ids = frozenset(
         url_only_file_ids(conversation_files, assistant.inline_file_text)
     )
@@ -45,6 +51,10 @@ def resolve_internal_mcp_availability(
         knowledge=(
             assistant.knowledge_mode == KnowledgeMode.TOOL and assistant.has_knowledge()
         ),
-        files=bool(url_only_ids),
+        # The files server follows reference-URL presence, not the inlining
+        # mode: the prompt names read_file whenever reference entries render,
+        # so the tool must exist even when the same files are also inlined.
+        files=bool(referenced_ids),
         url_only_file_ids=url_only_ids,
+        referenced_file_ids=referenced_ids,
     )

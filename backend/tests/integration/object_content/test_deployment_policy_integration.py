@@ -1,6 +1,7 @@
 import asyncio
 
 import pytest
+import sqlalchemy as sa
 from dependency_injector import providers
 from sqlalchemy import delete, insert
 
@@ -8,7 +9,7 @@ from eneo.database.database import sessionmanager
 from eneo.database.tables.object_content_policy_table import (
     ObjectContentDeploymentPolicy,
 )
-from eneo.database.tables.users_table import Users
+from eneo.database.tables.roles_table import Roles
 from eneo.main.container.container import Container, SessionProxy
 from eneo.object_content.content import StorageKind
 from eneo.object_content.deployment_policy import (
@@ -48,10 +49,6 @@ async def test_policy_put_returns_the_committed_projection(
 ) -> None:
     await _seed_policy()
     async with db_container() as container:
-        session = container.session()
-        stored_user = await session.get(Users, admin_user.id)
-        assert stored_user is not None
-        stored_user.is_platform_admin = True
         token = container.auth_service().create_access_token_for_user(admin_user)
 
     response = await client.put(
@@ -75,7 +72,7 @@ async def test_policy_put_returns_the_committed_projection(
     assert policy["session_image_limit_bytes"] == 102
     assert policy["knowledge_file_limit_bytes"] == 103
     assert policy["transcription_audio_limit_bytes"] == 104
-    assert policy["updated_by_actor"] == "platform_admin"
+    assert policy["updated_by_actor"] == "storage_admin"
 
 
 @pytest.mark.integration
@@ -172,42 +169,46 @@ async def test_admin_projection_is_bounded_and_sanitized(db_container) -> None:
 
 @pytest.mark.integration
 @pytest.mark.asyncio
-async def test_global_inventory_requires_platform_admin_authority(
+async def test_global_inventory_requires_the_storage_permission(
     client,
     db_container,
     admin_user,
     patch_auth_service_jwt,
 ) -> None:
+    """Deployment-wide inventory follows the storage permission, not a flag."""
     await _seed_policy()
     async with db_container() as container:
         token = container.auth_service().create_access_token_for_user(admin_user)
-
     headers = {"Authorization": f"Bearer {token}"}
-    policy = await client.get(
-        "/api/v1/admin/object-content-policy",
-        headers=headers,
-    )
-    tenant_inventory = await client.get(
+
+    async def set_storage_permission(granted: bool) -> None:
+        async with db_container() as container:
+            session = container.session()
+            roles = (
+                await session.execute(
+                    sa.select(Roles).where(Roles.tenant_id == admin_user.tenant_id)
+                )
+            ).scalars()
+            for role in roles:
+                permissions = [p for p in role.permissions if p != "storage"]
+                if granted:
+                    permissions.append("storage")
+                role.permissions = permissions
+
+    await set_storage_permission(False)
+    refused = await client.get(
         "/api/v1/admin/object-content-inventory",
         headers=headers,
     )
+    assert refused.status_code == 403, refused.text
 
-    assert policy.status_code == 200, policy.text
-    assert "inventory" not in policy.json()
-    assert tenant_inventory.status_code == 403, tenant_inventory.text
-
-    async with db_container() as container:
-        stored_user = await container.session().get(Users, admin_user.id)
-        assert stored_user is not None
-        stored_user.is_platform_admin = True
-
-    platform_inventory = await client.get(
+    await set_storage_permission(True)
+    permitted = await client.get(
         "/api/v1/admin/object-content-inventory",
         headers=headers,
     )
-
-    assert platform_inventory.status_code == 200, platform_inventory.text
-    inventory = platform_inventory.json()["inventory"]
+    assert permitted.status_code == 200, permitted.text
+    inventory = permitted.json()["inventory"]
     assert len(inventory) <= 12
     assert all(
         set(fact) == {"target", "state", "count", "bytes", "oldest_created_at"}

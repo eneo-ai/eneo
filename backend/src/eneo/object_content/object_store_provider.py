@@ -5,6 +5,9 @@ from collections.abc import AsyncGenerator, Callable
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 
+from eneo.database.tables.object_store_connection_table import (
+    ACTIVE_DESTINATION_SLOT,
+)
 from eneo.main.logging import get_logger
 from eneo.object_content.configuration import ObjectContentSettings
 from eneo.object_content.content import (
@@ -17,14 +20,26 @@ from eneo.object_content.object_store_connection import (
     StoredObjectStoreConnection,
 )
 from eneo.object_content.s3_object_store import S3ObjectStore
+from eneo.object_content.store_binding import UNSTORED_CONNECTION_REVISION
 
 logger = get_logger(__name__)
 
 
 @dataclass(frozen=True, slots=True)
 class ObjectStoreLease:
+    """Immutable handle for one leased client and its store generation.
+
+    ``slot`` and ``revision`` identify the connection row and revision the
+    client was built from, captured atomically with the client. Durable
+    remote-intent transactions pass them to ``require_store_generation`` so
+    work performed against a rotated or cut-over destination can never be
+    committed.
+    """
+
     settings: ObjectContentSettings
     store: S3ObjectStore
+    slot: int
+    revision: int
 
 
 @dataclass(slots=True, eq=False)
@@ -67,10 +82,15 @@ class ObjectStoreProvider:
     ) -> ObjectStoreProvider:
         provider = cls(connection_service=None)
         provider._current = _ObjectStoreSnapshot(
-            revision=1,
+            revision=UNSTORED_CONNECTION_REVISION,
             source=ObjectStoreConnectionSource.ADMIN,
             stored=None,
-            lease=ObjectStoreLease(settings=settings, store=store),
+            lease=ObjectStoreLease(
+                settings=settings,
+                store=store,
+                slot=ACTIVE_DESTINATION_SLOT,
+                revision=UNSTORED_CONNECTION_REVISION,
+            ),
         )
         return provider
 
@@ -237,16 +257,20 @@ class ObjectStoreProvider:
                 lease=ObjectStoreLease(
                     settings=settings,
                     store=self._store_factory(settings),
+                    slot=ACTIVE_DESTINATION_SLOT,
+                    revision=stored.revision,
                 ),
             )
         elif self._legacy_settings is not None:
             replacement = _ObjectStoreSnapshot(
-                revision=0,
+                revision=UNSTORED_CONNECTION_REVISION,
                 source=ObjectStoreConnectionSource.ENVIRONMENT,
                 stored=None,
                 lease=ObjectStoreLease(
                     settings=self._legacy_settings,
                     store=self._store_factory(self._legacy_settings),
+                    slot=ACTIVE_DESTINATION_SLOT,
+                    revision=UNSTORED_CONNECTION_REVISION,
                 ),
             )
         else:

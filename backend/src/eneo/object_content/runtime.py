@@ -35,6 +35,7 @@ from eneo.object_content.content import (
 )
 from eneo.object_content.content_service import ObjectContentService
 from eneo.object_content.object_store_connection import (
+    DestinationSwitch,
     ObjectStoreConnectionDatabaseUnavailable,
     ObjectStoreConnectionError,
     ObjectStoreConnectionInput,
@@ -307,6 +308,98 @@ class ObjectContentRuntime:
         )
         await self._publish_saved_object_store_connection(stored)
         return stored
+
+    async def replace_object_store_destination(
+        self,
+        candidate: ObjectStoreConnectionInput,
+        *,
+        actor_user_id: UUID,
+    ) -> DestinationSwitch:
+        connection_service = self._connection_service
+        if connection_service is None:
+            raise ObjectContentConfigurationError(
+                "Admin-managed object storage is unavailable in this runtime"
+            )
+        switch = await connection_service.replace_destination(
+            candidate,
+            actor_user_id=actor_user_id,
+        )
+        await self._publish_saved_object_store_connection(switch.active)
+        return switch
+
+    async def switch_back_object_store_destination(
+        self,
+        *,
+        actor_user_id: UUID,
+        expected_previous_revision: int,
+    ) -> DestinationSwitch:
+        connection_service = self._connection_service
+        if connection_service is None:
+            raise ObjectContentConfigurationError(
+                "Admin-managed object storage is unavailable in this runtime"
+            )
+        switch = await connection_service.switch_back(
+            actor_user_id=actor_user_id,
+            expected_previous_revision=expected_previous_revision,
+        )
+        await self._publish_saved_object_store_connection(switch.active)
+        return switch
+
+    async def forget_previous_object_store_destination(
+        self,
+        *,
+        actor_user_id: UUID,
+        expected_revision: int,
+    ) -> None:
+        connection_service = self._connection_service
+        if connection_service is None:
+            raise ObjectContentConfigurationError(
+                "Admin-managed object storage is unavailable in this runtime"
+            )
+        await connection_service.forget_previous_destination(
+            actor_user_id=actor_user_id,
+            expected_revision=expected_revision,
+        )
+
+    async def previous_object_store_destination(
+        self,
+    ) -> StoredObjectStoreConnection | None:
+        connection_service = self._connection_service
+        if connection_service is None:
+            return None
+        return await connection_service.get_previous()
+
+    async def pending_object_store_destination(
+        self,
+    ) -> StoredObjectStoreConnection | None:
+        connection_service = self._connection_service
+        if connection_service is None:
+            return None
+        return await connection_service.get_candidate()
+
+    async def temporary_object_store_destinations(
+        self,
+    ) -> tuple[StoredObjectStoreConnection | None, StoredObjectStoreConnection | None]:
+        connection_service = self._connection_service
+        if connection_service is None:
+            return (None, None)
+        return await connection_service.get_temporary_destinations()
+
+    async def abandon_pending_object_store_destination(
+        self,
+        *,
+        actor_user_id: UUID,
+        expected_revision: int,
+    ) -> None:
+        connection_service = self._connection_service
+        if connection_service is None:
+            raise ObjectContentConfigurationError(
+                "Admin-managed object storage is unavailable in this runtime"
+            )
+        await connection_service.abandon_switch_candidate(
+            actor_user_id=actor_user_id,
+            expected_revision=expected_revision,
+        )
 
     async def _publish_saved_object_store_connection(
         self,
