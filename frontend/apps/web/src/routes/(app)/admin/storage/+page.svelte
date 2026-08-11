@@ -627,10 +627,10 @@
             <Button
               variant="outline"
               aria-busy={refreshing}
-              aria-disabled={refreshing}
-              class={refreshing ? "pointer-events-none opacity-50" : undefined}
+              aria-disabled={refreshing || saving}
+              class={refreshing || saving ? "pointer-events-none opacity-50" : undefined}
               onclick={() => {
-                if (!refreshing) void loadPolicy(dirty);
+                if (!refreshing && !saving) void loadPolicy(dirty);
               }}
             >
               <RefreshCw

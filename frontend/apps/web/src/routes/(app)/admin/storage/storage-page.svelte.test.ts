@@ -1353,6 +1353,42 @@ describe("admin storage settings page", () => {
     await expect.element(refreshButton).toHaveFocus();
   });
 
+  test("does not refresh policy while a limit save is awaiting its response", async () => {
+    testUser.canAdministerStorage = true;
+    const initial = policy();
+    const committed = policy({
+      policy: {
+        ...initial.policy,
+        revision: 5,
+        session_file_limit_bytes: 30 * 1024 * 1024
+      }
+    });
+    getPolicy.mockResolvedValueOnce(initial).mockResolvedValueOnce(committed);
+    let resolveReplacement!: (value: ReturnType<typeof policy>) => void;
+    replacePolicy.mockImplementation(
+      () => new Promise<ReturnType<typeof policy>>((resolve) => (resolveReplacement = resolve))
+    );
+
+    render(StoragePage);
+
+    await page.getByLabelText("storage_limit_session_file", { exact: true }).fill("30");
+    await page.getByRole("button", { name: "storage_settings_save" }).click();
+
+    const refreshButton = page.getByRole("button", { name: "storage_settings_refresh_status" });
+    await expect.element(refreshButton).toHaveAttribute("aria-disabled", "true");
+    const refreshElement = refreshButton.element();
+    if (!(refreshElement instanceof HTMLButtonElement)) {
+      throw new TypeError("Expected the refresh control to be a button");
+    }
+    refreshElement.click();
+    expect(getPolicy).toHaveBeenCalledTimes(1);
+
+    resolveReplacement(committed);
+
+    await expect.element(page.getByText("storage_settings_no_changes")).toBeVisible();
+    await expect.element(page.getByText("storage_settings_stale_title")).not.toBeInTheDocument();
+  });
+
   test("formats storage counts and binary byte units with the active locale", async () => {
     testUser.canAdministerStorage = true;
     getPolicy.mockResolvedValue(policy());
