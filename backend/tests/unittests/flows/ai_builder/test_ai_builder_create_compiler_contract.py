@@ -134,6 +134,7 @@ def test_compile_context_bridges_flow_input_type_to_authoring_input_type() -> No
 
     assert context is not None
     assert context.runtime_input_type == InputType.DOCUMENT
+    assert context.final_output_type == OutputType.TEXT
 
 
 def test_compile_context_does_not_derive_uncommitted_architecture() -> None:

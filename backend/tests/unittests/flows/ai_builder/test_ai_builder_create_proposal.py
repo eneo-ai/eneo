@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from unittest.mock import patch
 from uuid import uuid4
 
 import pytest
@@ -141,6 +142,113 @@ def test_create_contextual_quality_feedback_uses_semantic_remediation() -> None:
         "{{ step_",
     ):
         assert token not in feedback
+
+
+@pytest.mark.asyncio
+async def test_create_terminal_uses_committed_architecture_despite_negated_file_formats() -> (
+    None
+):
+    state = PlanningState.empty()
+    state.architecture_commit = finalize_architecture_commit(
+        ArchitectureCommitDraft(
+            tuples_chain=[
+                StepTriple(
+                    input_type="text",
+                    output_type="text",
+                    output_mode="pass_through",
+                )
+            ],
+            chosen_patterns=[],
+        )
+    )
+
+    result = await process_create_intent_arguments(
+        turn=_make_turn(),
+        conversation=[
+            ConversationMessage(
+                role="user",
+                content=("Slutresultatet ska vara text — ingen PDF, ingen DOCX-mall."),
+            )
+        ],
+        arguments={
+            "flow_name": "Bygglovsremiss",
+            "plan_rationale": "Sammanfatta remissen som text.",
+            "steps": [
+                {
+                    "name": "Sammanfatta remissen",
+                    "instructions": "Skriv en tydlig textsammanfattning.",
+                    "output_type": "text",
+                }
+            ],
+        },
+        tool_call_id="call-committed-text-terminal",
+        available_model_refs=None,
+        available_kb_refs=None,
+        planning_state=state,
+    )
+
+    assert result.compiled_proposal is not None
+    assert result.compiled_proposal.validation.valid
+    assert (
+        result.compiled_proposal.content.spec.steps[-1].output_type is OutputType.TEXT
+    )
+
+
+@pytest.mark.asyncio
+async def test_create_terminal_postcondition_treats_mismatch_as_compiler_defect() -> (
+    None
+):
+    state = PlanningState.empty()
+    state.architecture_commit = finalize_architecture_commit(
+        ArchitectureCommitDraft(
+            tuples_chain=[
+                StepTriple(
+                    input_type="text",
+                    output_type="json",
+                    output_mode="pass_through",
+                )
+            ],
+            chosen_patterns=[],
+        )
+    )
+
+    with (
+        patch(
+            "eneo.flows.ai_builder.ai_builder_create_proposal."
+            "compile_create_intent_to_spec",
+            return_value=_structured_fan_in_spec(),
+        ),
+        pytest.raises(AIBuilderArchitectureError) as exc_info,
+    ):
+        await process_create_intent_arguments(
+            turn=_make_turn(),
+            conversation=[
+                ConversationMessage(
+                    role="user",
+                    content="Slutresultatet ska vara strukturerad JSON.",
+                )
+            ],
+            arguments={
+                "flow_name": "Strukturerat resultat",
+                "plan_rationale": "Returnera ett maskinläsbart resultat.",
+                "steps": [
+                    {
+                        "name": "Strukturera resultat",
+                        "instructions": "Returnera resultatet som JSON.",
+                        "output_type": "json",
+                    }
+                ],
+            },
+            tool_call_id="call-terminal-postcondition",
+            available_model_refs=None,
+            available_kb_refs=None,
+            planning_state=state,
+        )
+
+    assert exc_info.value.public_code == "architecture_materialization_failed"
+    assert exc_info.value.log_context["failure_code"] == (
+        "terminal_output_type_mismatch"
+    )
 
 
 @pytest.mark.asyncio

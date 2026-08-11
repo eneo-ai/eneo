@@ -5,7 +5,8 @@ post-merge order adjudicated 2026-08-11 by the separate Fable runtime
 and Builder sessions, both green at 8). LANDED: CP0 evidence, CP8a–c,
 CP6, the unsupported JSON-to-text removal, CP-D3, L1a, L1c, and the
 develop-to-Flows integration at `b9c0aa238`, FLOW-AUTH, and
-CP-ADMIT-0. All three user decisions stand (TRAJECTORY / SPLIT /
+CP-ADMIT-0, and CP2 terminal ownership consolidation. All three user
+decisions stand (TRAJECTORY / SPLIT /
 BALANCED).
 
 v10.2 REPLACED v9.8 after three source-verified audits — structural
@@ -63,6 +64,10 @@ frozen manifest, never restated as a prose constant.
   resolved unsupported Builder architectures now return a typed,
   localized terminal refusal; server-known choices consume no provider
   call, and create mode offers the existing fresh-session recovery.
+  Create compilation now takes its terminal type only from the committed
+  architecture; conversation intent remains an edit-only concern, and a
+  create postcondition mismatch is a typed compiler defect rather than a
+  model-repair instruction.
 - Platform integration: current develop storage, knowledge/internal
   tools, API, SDK and frontend work is merged without weakening Flow
   governance. Internal-tool approval now trusts runtime provenance,
@@ -134,7 +139,7 @@ ARTIFACT re-checked per slice, not a permanent grep gate.
 
 | # | Fact | Status | Owner |
 |---|---|---|---|
-| D1 | Terminal output type (create) | TRUE | CP2 (exit check covers the 2nd caller `ai_builder_scoped_plan_revision.py:151`) |
+| D1 | Terminal output type (create) | SELF_CHECK | CP2 (`CreateCompileContext.final_output_type` → create postcondition; conversation derivation isolated to edit) |
 | D2 | Proposal tool schema built at two sites | TRUE | CP3 |
 | D3 | Mixed audio+doc re-inference on create | TRUE | CP-D3 |
 | D4 | Terminal step `output_type` still emit-able | TRUE | CP3 |
@@ -208,6 +213,11 @@ ARTIFACT re-checked per slice, not a permanent grep gate.
       no provider or planning mutation for server-known choices, and
       fresh-session recovery in create mode (Claude iteration 100
       green 9; Codex value gate iteration 2 green 8)
+- [x] CP2 create terminal ownership: normal and scoped create paths use
+      the already-materialized `CreateCompileContext.final_output_type`;
+      all create terminal types retain one compiler postcondition, while
+      true edit conversation inference and repair behavior remain intact
+      (Claude iteration 102 green 9).
 
 ## The Ranked Program (v10.3 — execution phase; slice bodies carry
 ## their originating iteration tags)
@@ -235,7 +245,7 @@ broken gate, not a high bar. Audit best-case feasibility before freezing
 any threshold.
 
 ### Critical path (builder stream; each slice design-gated → worker →
-### commit-gated → cohort probe)
+### commit-gated → proportionate live smoke)
 - [x] CP0 Matrix freeze — analysis DONE 2026-08-10 (evidence + gate
     inventory; not a frozen statistical contract). Evidence, dispositions, corrected taxonomy and the
     gate INVENTORY live in `cp0-matrix-freeze.md`;
@@ -271,27 +281,20 @@ any threshold.
     conflicting evidence becomes explicit ambiguity. NO role-history
     store. The extra question round is attributed inside this same
     case study.
-- [ ] CP2 Terminal ownership consolidation (premise CORRECTED in
-    iteration 32, source-verified): the mismatch is SERVER-vs-SERVER
-    dual ownership — compile derives the terminal from
-    `architecture_commit` (`ai_builder_create_compiler.py:710`) while
-    create preparation re-derives it from conversation text
-    (`ai_builder_create_proposal.py:190` →
-    `terminal_output_type_for_conversation`,
-    `ai_builder_proposal_policy.py:259`) and a guard compares the two
-    (`ai_builder_compiled_spec_preparation.py:70`). Ninth
-    dual-ownership family. Step 1: attribution table with BOTH
-    derivations per observation (re-derive offline from persisted
-    planning state + conversation). Step 2 if confirmed (AMENDED,
-    iteration 33): keep the postcondition but feed it
-    `CreateCompileContext.final_output_type` — same-owner self-check,
-    not dual ownership; delete only the conversation re-derivation on
-    the create path and the model-repair ownership (a create mismatch
-    becomes a compiler defect, never model-repairable feedback);
-    conversation derivation survives only for edit semantics.
-    Exit check: no create caller still invokes
-    `terminal_output_type_for_conversation`. `flow_step_invalid`
-    stays a separate heterogeneous family (`flow_validators.py:227`).
+- [x] CP2 Terminal ownership consolidation (completed 2026-08-11):
+    both create-only paths now consume
+    `CreateCompileContext.final_output_type`; scoped plan revision reuses
+    the context already built during request preparation instead of
+    materializing another copy. The existing terminal postcondition
+    checks every create output type, including TEXT, and reports any
+    disagreement as typed `architecture_materialization_failed` with
+    internal code `terminal_output_type_mismatch`; it cannot enter model
+    repair. Conversation-derived terminal intent is named and retained
+    only for true edit semantics, where the existing validation feedback
+    remains. The frozen 465-observation receipt still reproduces every
+    CP0 count, and the real negated-format regression now compiles the
+    committed TEXT terminal. `flow_step_invalid` remains a separate
+    heterogeneous family (`flow_validators.py:227`).
 - [ ] CP2b Parse-failure attribution (GATES CP3 AND CP5, added by CP0):
     parse failures are the single largest repair driver (36 of 86) and
     `json_to_structured_payload` is 15/15 parse. Both CP3 and CP5
@@ -517,10 +520,9 @@ any threshold.
    evidence access and run listing.
 3. **CP-ADMIT-0 complete** — typed unsupported-architecture refusal
    before provider use or mutation; corrective text remains admissible.
-4. **CP2**, then **CP1** — evidence rank: CP2 has deterministic
-   receipts; its cohort explicitly includes the mixed-audio and
-   transcription terminal failures. CP1 carries D7 only if its receipt
-   proves the slot variant.
+4. **CP2 complete; CP1 next** — CP2 had deterministic receipts; its
+   N=1 manifest smoke includes the mixed-audio and transcription terminal
+   failures. CP1 carries D7 only if its receipt proves the slot variant.
 5. **Edit aggregation-intent wiring correction** — the severed direct
    finalization fix; keep it out of the later CP-EDIT redesign.
 6. **CP-ADMIT implementation** — only after CP2+CP1 land and its
@@ -816,12 +818,15 @@ completed historical prerequisites, not active blockers. The
 orchestrator verifies every diff and owns all git.
 
 ### Measurement cadence
-Cohort probes (3 reps, named cohorts) per slice; exploratory
-final-frozen-manifest ×3 at
-the tranche gate; the N=5 release evaluation at the release gate
-(detection power, not certification power), repeated after every
-material post-gate change; suite runs ≥45 min
-apart (provider limits).
+After a material Builder ownership slice, use one repetition of the
+final-frozen 155-case manifest as the broad progress smoke; use a smaller
+named N=1 cohort when the change is genuinely narrow or when diagnosing a
+specific failure. N=1 detects deterministic regressions and new failure
+families but makes no stability claim. Run the final-frozen manifest ×3 at
+the ownership-tranche gate, then N=5 at the release gate (detection power,
+not certification power), repeated after every material post-gate change.
+Suite starts remain at least 45 minutes apart for provider limits. This
+cadence replaces per-slice cohort ×3 by user decision on 2026-08-11.
 
 ## Operating protocol (for any agent continuing this)
 

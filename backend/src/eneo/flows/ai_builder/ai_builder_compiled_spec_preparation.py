@@ -2,6 +2,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from eneo.flows.ai_builder.ai_builder_architecture_errors import (
+    AIBuilderArchitectureError,
+)
 from eneo.flows.ai_builder.ai_builder_domain_models import (
     TargetKind,
 )
@@ -20,7 +23,7 @@ from eneo.flows.flow_authoring_spec import (
     OutputType,
 )
 
-_STRICT_TERMINAL_OUTPUT_TYPES = frozenset(
+_STRICT_EDIT_TERMINAL_OUTPUT_TYPES = frozenset(
     {OutputType.JSON, OutputType.PDF, OutputType.DOCX}
 )
 
@@ -67,24 +70,29 @@ def prepare_compiled_spec_for_session(
         available_model_refs=available_model_refs,
         available_kb_refs=available_kb_refs,
     )
-    _add_terminal_output_alignment_error(
+    _enforce_terminal_output_alignment(
         validation=validation,
         spec=prepared_spec,
         terminal_output_type=terminal_output_type,
+        target_kind=target_kind,
     )
     return PreparedCompiledSpecResult(spec=prepared_spec, validation=validation)
 
 
-def _add_terminal_output_alignment_error(
+def _enforce_terminal_output_alignment(
     *,
     validation: SpecValidationResult,
     spec: FlowDraftSpecCore,
     terminal_output_type: OutputType | None,
+    target_kind: TargetKind,
 ) -> None:
     if (
         terminal_output_type is None
-        or terminal_output_type not in _STRICT_TERMINAL_OUTPUT_TYPES
         or not spec.steps
+        or (
+            target_kind == TargetKind.EDIT
+            and terminal_output_type not in _STRICT_EDIT_TERMINAL_OUTPUT_TYPES
+        )
     ):
         return
 
@@ -92,13 +100,30 @@ def _add_terminal_output_alignment_error(
     if terminal_step.output_type == terminal_output_type:
         return
 
+    if target_kind == TargetKind.CREATE:
+        raise AIBuilderArchitectureError(
+            public_code="architecture_materialization_failed",
+            detail=(
+                "The create compiler produced a terminal output type that does "
+                "not match the committed architecture."
+            ),
+            log_context={
+                "failure_code": "terminal_output_type_mismatch",
+                "reason": "terminal_output_type_mismatch",
+                "expected_output_type": terminal_output_type.value,
+                "actual_output_type": terminal_step.output_type.value,
+                "step_ref": terminal_step.plan_step_ref,
+            },
+        )
+
+    message = (
+        "The final step output_type must match the requested terminal output "
+        f"'{terminal_output_type.value}', but the compiled plan ends with "
+        f"'{terminal_step.output_type.value}'. Update the final step instead of "
+        "adding or preserving a trailing text step."
+    )
     validation.add_error(
         step_ref=terminal_step.plan_step_ref,
         code="terminal_output_type_mismatch",
-        message=(
-            "The final step output_type must match the requested terminal output "
-            f"'{terminal_output_type.value}', but the compiled plan ends with "
-            f"'{terminal_step.output_type.value}'. Update the final step instead of "
-            "adding or preserving a trailing text step."
-        ),
+        message=message,
     )

@@ -28,7 +28,7 @@ from eneo.flows.ai_builder.ai_builder_proposal_intent import OrderedEditProposal
 from eneo.flows.ai_builder.ai_builder_proposal_policy import (
     evaluate_edit_topology_policy,
     resolve_ui_language,
-    terminal_output_type_for_conversation,
+    terminal_output_type_for_edit_conversation,
 )
 from eneo.flows.ai_builder.ai_builder_proposal_tool_contracts import (
     CompiledProposal,
@@ -170,7 +170,7 @@ async def process_edit_arguments(
         available_model_refs=available_model_refs,
         available_kb_refs=available_kb_refs,
         resource_catalog=resource_catalog,
-        terminal_output_type=terminal_output_type_for_conversation(
+        terminal_output_type=terminal_output_type_for_edit_conversation(
             conversation,
             plan_edit_context=plan_edit_context,
             prior_plan=prior_plan_for_revision,

@@ -21,6 +21,7 @@ from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
     ui_language_from_metadata,
 )
 from eneo.flows.ai_builder.ai_builder_create_compiler import (
+    CreateCompileContext,
     create_compile_context_from_planning_state,
 )
 from eneo.flows.ai_builder.ai_builder_discovery_models import (
@@ -177,6 +178,7 @@ class ProposalPrepared(_PreparedBase):
     resource_catalog: AIBuilderResourceCatalog
     planning_state: PlanningState
     requested_output_sections: RequestedOutputSections
+    compile_context: CreateCompileContext | None
     request_budget: ProposalRequestBudget | None = None
 
     @property
@@ -438,6 +440,7 @@ def build_proposal_prepared(
         resource_catalog=resource_catalog,
         planning_state=planning_state,
         requested_output_sections=requested_output_sections,
+        compile_context=compile_context,
         request_budget=ProposalRequestBudget(
             context_window_tokens=max_input_tokens,
             output_reserve_tokens=max_output_tokens,

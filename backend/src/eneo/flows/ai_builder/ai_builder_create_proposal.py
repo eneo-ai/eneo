@@ -37,10 +37,7 @@ from eneo.flows.ai_builder.ai_builder_proposal_intent import (
     CreateFlowIntent,
     ProposalIntentArgumentError,
 )
-from eneo.flows.ai_builder.ai_builder_proposal_policy import (
-    resolve_ui_language,
-    terminal_output_type_for_conversation,
-)
+from eneo.flows.ai_builder.ai_builder_proposal_policy import resolve_ui_language
 from eneo.flows.ai_builder.ai_builder_proposal_tool_contracts import (
     CompiledProposal,
     ToolProcessingResult,
@@ -52,7 +49,7 @@ from eneo.flows.ai_builder.ai_builder_resource_catalog import (
 from eneo.flows.ai_builder.ai_builder_session_turn import SessionSendTurn
 from eneo.flows.ai_builder.ai_builder_tools import parse_create_flow_intent_arguments
 from eneo.flows.ai_builder.planning_state import AggregationIntent, PlanningState
-from eneo.flows.flow_authoring_spec import FlowDraftSpecCore
+from eneo.flows.flow_authoring_spec import FlowDraftSpecCore, OutputType
 from eneo.main.logging import get_logger
 
 logger = get_logger(__name__)
@@ -72,6 +69,7 @@ _NON_MODEL_REPAIRABLE_ARCHITECTURE_FAILURE_CODES = frozenset(
         "flow_input_schema_composite_bindings_unsupported",
         "flow_input_schema_target_missing",
         "section_writer_structured_source_ambiguous",
+        "terminal_output_type_mismatch",
         "template_attachment_selection_invalid",
         "template_attachment_unreadable",
         "template_placeholder_unresolved",
@@ -160,6 +158,9 @@ async def process_create_intent_arguments(
             if compile_context is not None
             else "linear"
         ),
+        committed_terminal_output_type=(
+            compile_context.final_output_type if compile_context is not None else None
+        ),
         plan_edit_context=plan_edit_context,
         prior_plan_for_revision=prior_plan_for_revision,
         field_diagnostics=field_diagnostics,
@@ -176,7 +177,8 @@ async def _process_create_spec(
     available_model_refs: set[str] | None,
     available_kb_refs: set[str] | None,
     resource_catalog: AIBuilderResourceCatalog | None,
-    aggregation_intent: AggregationIntent = "linear",
+    aggregation_intent: AggregationIntent,
+    committed_terminal_output_type: OutputType | None,
     plan_edit_context: AIBuilderPlanEditContext | None = None,
     prior_plan_for_revision: BuilderPlan | None = None,
     field_diagnostics: list[LintWarning] | None = None,
@@ -187,11 +189,7 @@ async def _process_create_spec(
         available_model_refs=available_model_refs,
         available_kb_refs=available_kb_refs,
         resource_catalog=resource_catalog,
-        terminal_output_type=terminal_output_type_for_conversation(
-            conversation,
-            plan_edit_context=plan_edit_context,
-            prior_plan=prior_plan_for_revision,
-        ),
+        terminal_output_type=committed_terminal_output_type,
         ui_language=resolve_ui_language(conversation),
     )
     if prepared.failure_feedback is not None:

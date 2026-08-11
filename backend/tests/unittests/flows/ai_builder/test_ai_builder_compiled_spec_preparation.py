@@ -3,6 +3,11 @@ from __future__ import annotations
 from typing import cast
 from unittest.mock import MagicMock, patch
 
+import pytest
+
+from eneo.flows.ai_builder.ai_builder_architecture_errors import (
+    AIBuilderArchitectureError,
+)
 from eneo.flows.ai_builder.ai_builder_compiled_spec_preparation import (
     prepare_compiled_spec_for_session,
 )
@@ -82,49 +87,6 @@ def _duplicate_step_name_spec() -> FlowDraftSpecCore:
     )
 
 
-def _json_helper_before_text_terminal_spec() -> FlowDraftSpecCore:
-    return FlowDraftSpecCore(
-        flow_name="Structured comparison",
-        steps=[
-            StepSpec(
-                plan_step_ref="step_a",
-                name="Extract source facts",
-                assistant_spec=AssistantSpec(
-                    instructions="Extract structured facts from the source.",
-                ),
-                input_source=InputSource.FLOW_INPUT,
-                input_type=InputType.TEXT,
-                output_mode=OutputMode.PASS_THROUGH,
-                output_type=OutputType.JSON,
-            ),
-            StepSpec(
-                plan_step_ref="step_b",
-                name="Prepare JSON result",
-                assistant_spec=AssistantSpec(
-                    instructions="Create the final structured JSON object.",
-                ),
-                input_source=InputSource.PREVIOUS_STEP,
-                input_type=InputType.JSON,
-                output_mode=OutputMode.PASS_THROUGH,
-                output_type=OutputType.JSON,
-                input_bindings={"question": "{{ step_a.output.structured }}"},
-            ),
-            StepSpec(
-                plan_step_ref="step_c",
-                name="Create final result",
-                assistant_spec=AssistantSpec(
-                    instructions="Return the final result.",
-                ),
-                input_source=InputSource.PREVIOUS_STEP,
-                input_type=InputType.JSON,
-                output_mode=OutputMode.PASS_THROUGH,
-                output_type=OutputType.TEXT,
-                input_bindings={"question": "{{ step_b.output.structured }}"},
-            ),
-        ],
-    )
-
-
 def _multi_step_fan_in_spec() -> FlowDraftSpecCore:
     return FlowDraftSpecCore(
         flow_name="Explicit synthesis",
@@ -158,49 +120,6 @@ def _multi_step_fan_in_spec() -> FlowDraftSpecCore:
                 input_bindings={
                     "question": "{{ step_a.output.text }}\n\n{{ step_b.output.text }}"
                 },
-            ),
-        ],
-    )
-
-
-def _pdf_helper_before_text_terminal_spec() -> FlowDraftSpecCore:
-    return FlowDraftSpecCore(
-        flow_name="Employee review",
-        steps=[
-            StepSpec(
-                plan_step_ref="step_a",
-                name="Analyze conversation",
-                assistant_spec=AssistantSpec(
-                    instructions="Analyze the employee review conversation.",
-                ),
-                input_source=InputSource.FLOW_INPUT,
-                input_type=InputType.TEXT,
-                output_mode=OutputMode.PASS_THROUGH,
-                output_type=OutputType.JSON,
-            ),
-            StepSpec(
-                plan_step_ref="step_b",
-                name="Generate PDF helper",
-                assistant_spec=AssistantSpec(
-                    instructions="Render the analysis as a PDF.",
-                ),
-                input_source=InputSource.PREVIOUS_STEP,
-                input_type=InputType.JSON,
-                output_mode=OutputMode.PASS_THROUGH,
-                output_type=OutputType.PDF,
-                input_bindings={"question": "{{ step_a.output.structured }}"},
-            ),
-            StepSpec(
-                plan_step_ref="step_c",
-                name="Create final result",
-                assistant_spec=AssistantSpec(
-                    instructions="Return the final review document.",
-                ),
-                input_source=InputSource.PREVIOUS_STEP,
-                input_type=InputType.TEXT,
-                output_mode=OutputMode.PASS_THROUGH,
-                output_type=OutputType.TEXT,
-                input_bindings={"question": "{{ step_b.output.text }}"},
             ),
         ],
     )
@@ -424,7 +343,7 @@ def test_prepared_assembly_document_pdf_spec_is_normalization_fixed_point() -> N
     _assert_prepared_spec_compiles_with_shared_compiler(prepared)
 
 
-def test_prepare_compiled_spec_for_session_rejects_terminal_output_type_drift() -> None:
+def test_create_terminal_output_drift_is_a_typed_compiler_defect() -> None:
     spec = _make_spec()
 
     with (
@@ -432,8 +351,9 @@ def test_prepare_compiled_spec_for_session_rejects_terminal_output_type_drift() 
             "eneo.flows.ai_builder.ai_builder_compiled_spec_preparation.validate_spec",
             return_value=SpecValidationResult(),
         ),
+        pytest.raises(AIBuilderArchitectureError) as exc_info,
     ):
-        result = prepare_compiled_spec_for_session(
+        prepare_compiled_spec_for_session(
             spec=spec,
             target_kind=TargetKind.CREATE,
             available_model_refs=None,
@@ -442,17 +362,20 @@ def test_prepare_compiled_spec_for_session_rejects_terminal_output_type_drift() 
             terminal_output_type=OutputType.PDF,
         )
 
-    assert result.validation is not None
-    assert not result.validation.valid
-    assert result.validation.errors[0].code == "terminal_output_type_mismatch"
+    assert exc_info.value.public_code == "architecture_materialization_failed"
+    assert exc_info.value.log_context == {
+        "failure_code": "terminal_output_type_mismatch",
+        "reason": "terminal_output_type_mismatch",
+        "expected_output_type": "pdf",
+        "actual_output_type": "text",
+        "step_ref": "step_a",
+    }
 
 
-def test_prepare_compiled_spec_for_session_rejects_terminal_text_artifact_mismatch() -> (
-    None
-):
+def test_edit_terminal_output_drift_remains_validation_feedback() -> None:
     result = prepare_compiled_spec_for_session(
         spec=_make_spec(),
-        target_kind=TargetKind.CREATE,
+        target_kind=TargetKind.EDIT,
         available_model_refs=None,
         available_kb_refs=None,
         resource_catalog=None,
@@ -464,36 +387,6 @@ def test_prepare_compiled_spec_for_session_rejects_terminal_text_artifact_mismat
     assert not result.validation.valid
     terminal = result.spec.steps[-1]
     assert terminal.output_type == OutputType.TEXT
-    assert result.validation.errors[-1].code == "terminal_output_type_mismatch"
-
-
-def test_prepare_compiled_spec_for_session_rejects_pdf_helper_before_text_terminal() -> (
-    None
-):
-    with (
-        patch(
-            "eneo.flows.ai_builder.ai_builder_compiled_spec_preparation.validate_spec",
-            return_value=SpecValidationResult(),
-        ),
-    ):
-        result = prepare_compiled_spec_for_session(
-            spec=_pdf_helper_before_text_terminal_spec(),
-            target_kind=TargetKind.CREATE,
-            available_model_refs=None,
-            available_kb_refs=None,
-            resource_catalog=None,
-            terminal_output_type=OutputType.PDF,
-        )
-
-    assert result.spec is not None
-    assert result.validation is not None
-    assert not result.validation.valid
-    assert [step.plan_step_ref for step in result.spec.steps] == [
-        "step_a",
-        "step_b",
-        "step_c",
-    ]
-    assert result.spec.steps[-1].output_type == OutputType.TEXT
     assert result.validation.errors[-1].code == "terminal_output_type_mismatch"
 
 
@@ -522,36 +415,6 @@ def test_prepared_edit_duplicate_names_are_apply_compile_stable() -> None:
     )
 
     _assert_prepared_spec_is_apply_normalization_fixed_point(spec)
-
-
-def test_prepare_compiled_spec_for_session_rejects_json_helper_before_text_terminal() -> (
-    None
-):
-    with (
-        patch(
-            "eneo.flows.ai_builder.ai_builder_compiled_spec_preparation.validate_spec",
-            return_value=SpecValidationResult(),
-        ),
-    ):
-        result = prepare_compiled_spec_for_session(
-            spec=_json_helper_before_text_terminal_spec(),
-            target_kind=TargetKind.CREATE,
-            available_model_refs=None,
-            available_kb_refs=None,
-            resource_catalog=None,
-            terminal_output_type=OutputType.JSON,
-        )
-
-    assert result.spec is not None
-    assert result.validation is not None
-    assert not result.validation.valid
-    assert [step.plan_step_ref for step in result.spec.steps] == [
-        "step_a",
-        "step_b",
-        "step_c",
-    ]
-    assert result.spec.steps[-1].output_type == OutputType.TEXT
-    assert result.validation.errors[-1].code == "terminal_output_type_mismatch"
 
 
 def test_prepare_compiled_spec_for_session_rejects_text_document_pass_through() -> None:

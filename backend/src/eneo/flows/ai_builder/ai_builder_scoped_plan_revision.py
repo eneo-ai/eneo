@@ -5,6 +5,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from eneo.flows.ai_builder.ai_builder_architecture_errors import (
+    AIBuilderArchitectureError,
+    build_proposal_architecture_error_event,
+    record_proposal_architecture_failure,
+)
 from eneo.flows.ai_builder.ai_builder_compiled_spec_preparation import (
     prepare_compiled_spec_for_session,
 )
@@ -40,10 +45,7 @@ from eneo.flows.ai_builder.ai_builder_proposal_finalization import (
     CompiledProposalFinalizationRequest,
     CompiledProposalFinalizer,
 )
-from eneo.flows.ai_builder.ai_builder_proposal_policy import (
-    resolve_ui_language,
-    terminal_output_type_for_conversation,
-)
+from eneo.flows.ai_builder.ai_builder_proposal_policy import resolve_ui_language
 from eneo.flows.ai_builder.ai_builder_proposal_telemetry import (
     ProposalTurnTelemetry,
 )
@@ -57,6 +59,7 @@ from eneo.flows.ai_builder.ai_builder_resource_catalog import (
 )
 from eneo.flows.ai_builder.ai_builder_session_turn import SessionSendTurn
 from eneo.flows.ai_builder.ai_builder_tool_names import PROPOSE_FLOW_TOOL_NAME
+from eneo.flows.flow_authoring_spec import OutputType
 from eneo.main.logging import get_logger
 
 if TYPE_CHECKING:
@@ -78,6 +81,7 @@ class ScopedPlanRevisionRequest:
     request_id: str
     usage_tracker: ProposalTurnTelemetry | None
     requested_output_sections: RequestedOutputSections
+    terminal_output_type: OutputType | None
     assistant_metadata: dict[str, object] | None = None
     flow: "Flow | None" = None
 
@@ -95,14 +99,31 @@ async def run_scoped_plan_revision_attempt(
     if request.flow is not None:
         return None
 
-    result = process_scoped_step_revision_if_requested(
-        conversation=request.conversation,
-        available_model_refs=request.available_model_refs,
-        available_kb_refs=request.available_kb_refs,
-        resource_catalog=request.resource_catalog,
-        plan_edit_context=request.plan_edit_context,
-        prior_plan_for_revision=request.prior_plan_for_revision,
-    )
+    try:
+        result = process_scoped_step_revision_if_requested(
+            conversation=request.conversation,
+            available_model_refs=request.available_model_refs,
+            available_kb_refs=request.available_kb_refs,
+            resource_catalog=request.resource_catalog,
+            plan_edit_context=request.plan_edit_context,
+            prior_plan_for_revision=request.prior_plan_for_revision,
+            terminal_output_type=request.terminal_output_type,
+        )
+    except AIBuilderArchitectureError as error:
+        record_proposal_architecture_failure(
+            request.usage_tracker,
+            request_id=request.request_id,
+            tool_name=PROPOSE_FLOW_TOOL_NAME,
+        )
+        return ScopedPlanRevisionOutcome(
+            events=(
+                build_proposal_architecture_error_event(
+                    error,
+                    request_id=request.request_id,
+                    tool_name=PROPOSE_FLOW_TOOL_NAME,
+                ),
+            )
+        )
     if result is None:
         return None
     if result.compiled_proposal is None:
@@ -146,13 +167,9 @@ def process_scoped_step_revision_if_requested(
     resource_catalog: AIBuilderResourceCatalog | None,
     plan_edit_context: AIBuilderPlanEditContext | None,
     prior_plan_for_revision: BuilderPlan | None,
+    terminal_output_type: OutputType | None,
     plan_rationale: str | None = None,
 ) -> ToolProcessingResult | None:
-    requested_terminal_output_type = terminal_output_type_for_conversation(
-        conversation,
-        plan_edit_context=plan_edit_context,
-        prior_plan=prior_plan_for_revision,
-    )
     scoped_revision = resolve_scoped_step_revision_if_requested(
         context=plan_edit_context,
         prior_spec=(
@@ -162,7 +179,7 @@ def process_scoped_step_revision_if_requested(
         ),
         latest_user_text=_latest_user_text(conversation),
         resource_catalog=resource_catalog,
-        requested_terminal_output_type=requested_terminal_output_type,
+        requested_terminal_output_type=terminal_output_type,
     )
     if scoped_revision is None:
         return None
@@ -175,7 +192,7 @@ def process_scoped_step_revision_if_requested(
         available_model_refs=available_model_refs,
         available_kb_refs=available_kb_refs,
         resource_catalog=resource_catalog,
-        terminal_output_type=requested_terminal_output_type,
+        terminal_output_type=terminal_output_type,
         ui_language=resolve_ui_language(conversation),
     )
     if prepared.failure_feedback is not None:

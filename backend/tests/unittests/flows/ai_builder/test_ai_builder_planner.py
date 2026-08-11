@@ -30,6 +30,7 @@ from eneo.flows.ai_builder.ai_builder_attachment_context import (
     build_ai_builder_attachment_context,
 )
 from eneo.flows.ai_builder.ai_builder_create_compiler import (
+    CreateCompileContext,
     compile_create_intent_to_spec,
     create_compile_context_from_planning_state,
 )
@@ -144,7 +145,7 @@ from eneo.flows.ai_builder.planning_state_builder import (
 )
 from eneo.flows.domain.flow import FlowPersistedJsonObject
 from eneo.flows.domain.mapped_execution_policy import FlowMappedExecutionPolicy
-from eneo.flows.flow_authoring_spec import AssistantSpec
+from eneo.flows.flow_authoring_spec import AssistantSpec, OutputType
 from eneo.flows.flow_resource_bindings import (
     LocalResourceBinding,
     LocalResourceKind,
@@ -2216,6 +2217,7 @@ async def test_send_message_proposal_branch_ignores_in_process_lease_loss(
             plan_edit_context=None,
             planning_state=PlanningState.empty(),
             requested_output_sections=RequestedOutputSections.empty(),
+            compile_context=None,
             resource_catalog=build_ai_builder_resource_catalog(
                 available_models=[],
                 available_kbs=[],
@@ -2490,6 +2492,7 @@ async def test_send_message_releases_lease_when_stream_is_cancelled(
             plan_edit_context=None,
             planning_state=PlanningState.empty(),
             requested_output_sections=RequestedOutputSections.empty(),
+            compile_context=None,
             resource_catalog=build_ai_builder_resource_catalog(
                 available_models=[],
                 available_kbs=[],
@@ -2579,6 +2582,7 @@ async def test_send_message_proposal_catalog_uses_prior_plan_bindings(
             plan_edit_context=None,
             planning_state=PlanningState.empty(),
             requested_output_sections=RequestedOutputSections.empty(),
+            compile_context=None,
             resource_catalog=build_ai_builder_resource_catalog(
                 available_models=[
                     _model_resource(str(local_model_id), "Renamed model")
@@ -2676,6 +2680,7 @@ async def test_stream_proposal_events_dispatches_once_to_the_selected_owner(
         plan_edit_context=None,
         planning_state=PlanningState.empty(),
         requested_output_sections=RequestedOutputSections.empty(),
+        compile_context=CreateCompileContext(final_output_type=OutputType.TEXT),
         resource_catalog=build_ai_builder_resource_catalog(
             available_models=[],
             available_kbs=[],
@@ -2732,6 +2737,11 @@ async def test_stream_proposal_events_dispatches_once_to_the_selected_owner(
 
     assert events == [build_text_event(expected_text)]
     assert scoped_attempt.await_count == expected_scoped_calls
+    if expected_scoped_calls:
+        assert (
+            scoped_attempt.await_args.kwargs["request"].terminal_output_type
+            is OutputType.TEXT
+        )
     assert submission_calls == expected_submission_calls
     planner.repo.complete_session_turn.assert_awaited_once()
 
@@ -2758,6 +2768,7 @@ async def test_stream_proposal_events_commits_planning_state_payload_too_large(
         plan_edit_context=None,
         planning_state=PlanningState.empty(),
         requested_output_sections=RequestedOutputSections.empty(),
+        compile_context=None,
         resource_catalog=build_ai_builder_resource_catalog(
             available_models=[],
             available_kbs=[],

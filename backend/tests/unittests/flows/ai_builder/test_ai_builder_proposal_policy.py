@@ -17,7 +17,7 @@ from eneo.flows.ai_builder.ai_builder_proposal_policy import (
     evaluate_edit_topology_policy,
     format_contextual_quality_feedback,
     format_validation_feedback,
-    terminal_output_type_for_conversation,
+    terminal_output_type_for_edit_conversation,
 )
 from eneo.flows.ai_builder.ai_builder_validation_common import SpecValidationError
 from eneo.flows.flow_authoring_spec import (
@@ -204,7 +204,7 @@ def test_plan_edit_output_intent_preserves_prior_document_terminal_type() -> Non
         target_plan_step_ref="step_a",
     )
 
-    output_type = terminal_output_type_for_conversation(
+    output_type = terminal_output_type_for_edit_conversation(
         [
             ConversationMessage(
                 role="user",
@@ -356,7 +356,7 @@ def test_plan_edit_output_intent_uses_latest_explicit_document_change() -> None:
         target_plan_step_ref="step_a",
     )
 
-    output_type = terminal_output_type_for_conversation(
+    output_type = terminal_output_type_for_edit_conversation(
         [
             ConversationMessage(
                 role="user",

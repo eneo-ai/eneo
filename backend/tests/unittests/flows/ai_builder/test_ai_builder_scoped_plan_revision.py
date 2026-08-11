@@ -7,10 +7,11 @@ from uuid import uuid4
 
 import pytest
 
+from eneo.flows.ai_builder.ai_builder_architecture_errors import (
+    AIBuilderArchitectureError,
+)
 from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
     PROVIDER_TOOL_CALL_ID_MAX_LENGTH,
-    metadata_with_slot_classification,
-    slot_classification_metadata_from_attempt,
 )
 from eneo.flows.ai_builder.ai_builder_domain_models import (
     ConversationMessage,
@@ -38,14 +39,6 @@ from eneo.flows.ai_builder.ai_builder_scoped_plan_revision import (
     ScopedPlanRevisionRequest,
     process_scoped_step_revision_if_requested,
     run_scoped_plan_revision_attempt,
-)
-from eneo.flows.ai_builder.ai_builder_slot_classification_contract import (
-    ClassifiedEvidence,
-    ClassifiedSlot,
-    SlotClassificationAttempt,
-    SlotClassificationInput,
-    SlotClassificationResult,
-    SlotClassificationSource,
 )
 from eneo.flows.flow_authoring_spec import (
     AssistantSpec,
@@ -98,49 +91,12 @@ def _make_request(**overrides: object) -> ScopedPlanRevisionRequest:
             target_kind=TargetKind.CREATE,
         ),
         "requested_output_sections": RequestedOutputSections.empty(),
+        "terminal_output_type": None,
         "assistant_metadata": None,
         "flow": None,
     }
     defaults.update(overrides)
     return ScopedPlanRevisionRequest(**defaults)
-
-
-def _terminal_output_slot_metadata(value: str = "pdf_document") -> dict[str, object]:
-    result = SlotClassificationResult(
-        slots=(
-            ClassifiedSlot(
-                slot_name="terminal_output",
-                value=value,
-                confidence="medium",
-                reason="classified terminal output",
-                evidence=(
-                    ClassifiedEvidence(
-                        source_id="user_message:user-1",
-                        quote="ändra output filen till pdf",
-                    ),
-                ),
-            ),
-        )
-    )
-    metadata = slot_classification_metadata_from_attempt(
-        SlotClassificationAttempt(outcome="resolved", result=result),
-        prompt_hash="a" * 64,
-        classification_input=SlotClassificationInput(
-            sources=(
-                SlotClassificationSource(
-                    source_id="user_message:user-1",
-                    kind="user_message",
-                    text="ändra output filen till pdf",
-                    message_id="user-1",
-                ),
-            )
-        ),
-        model="openai/gpt-test",
-        provider="openai",
-    )
-    result = metadata_with_slot_classification(None, metadata)
-    assert result is not None
-    return result
 
 
 @pytest.mark.asyncio
@@ -179,6 +135,42 @@ async def test_scoped_revision_returns_error_event_for_deterministic_failure() -
     assert "selected step change" in payload["message"]
     assert "selected model change" not in payload["message"]
     assert payload["details"] == {"failure_kind": "quality"}
+
+
+@pytest.mark.asyncio
+async def test_scoped_revision_contains_typed_compiler_defect() -> None:
+    compiler_error = AIBuilderArchitectureError(
+        public_code="architecture_materialization_failed",
+        detail="The compiled terminal disagrees with the committed architecture.",
+        log_context={"failure_code": "terminal_output_type_mismatch"},
+    )
+    finalize = AsyncMock()
+
+    with (
+        patch(
+            "eneo.flows.ai_builder.ai_builder_scoped_plan_revision."
+            "process_scoped_step_revision_if_requested",
+            side_effect=compiler_error,
+        ),
+        patch.object(
+            CompiledProposalFinalizer,
+            "finalize_compiled_proposal",
+            new=finalize,
+        ),
+    ):
+        result = await run_scoped_plan_revision_attempt(
+            request=_make_request(request_id="req-compiler-defect"),
+            finalizer=_make_finalizer(),
+        )
+
+    assert result is not None
+    assert len(result.events) == 1
+    payload = json.loads(encode_ai_builder_stream_event(result.events[0])["data"])
+    assert payload["code"] == "architecture_materialization_failed"
+    assert payload["phase"] == "proposal"
+    assert payload["request_id"] == "req-compiler-defect"
+    assert payload["details"]["failure_code"] == "terminal_output_type_mismatch"
+    finalize.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -322,6 +314,7 @@ async def test_scoped_revision_finalizes_terminal_pdf_revision(message: str) -> 
                     plan_id=prior_plan.id,
                     target_plan_step_ref="step_a",
                 ),
+                terminal_output_type=OutputType.PDF,
                 request_id="00000000-0000-0000-0000-000000000001",
             ),
             finalizer=_make_finalizer(),
@@ -445,6 +438,7 @@ async def test_scoped_outline_revision_explains_model_change_on_transcription_st
             target_step_number=1,
         ),
         prior_plan_for_revision=prior_plan,
+        terminal_output_type=OutputType.TEXT,
     )
 
     assert result is not None
@@ -512,6 +506,7 @@ async def test_scoped_outline_revision_changes_model_on_selected_ai_step() -> No
             target_step_number=2,
         ),
         prior_plan_for_revision=prior_plan,
+        terminal_output_type=OutputType.TEXT,
     )
 
     assert result is not None
@@ -590,6 +585,7 @@ async def test_scoped_outline_revision_changes_selected_terminal_step_to_pdf(
             target_step_number=2,
         ),
         prior_plan_for_revision=prior_plan,
+        terminal_output_type=OutputType.PDF,
     )
 
     assert result is not None
@@ -600,67 +596,3 @@ async def test_scoped_outline_revision_changes_selected_terminal_step_to_pdf(
     )
     assert revised_steps[1].output_type == OutputType.PDF
     assert revised_steps[1].output_contract is None
-
-
-@pytest.mark.asyncio
-async def test_scoped_outline_revision_uses_slot_classification_for_pdf_edit() -> None:
-    prior_spec = FlowDraftSpecCore(
-        flow_name="Mötesflöde",
-        steps=[
-            StepSpec(
-                plan_step_ref="step_a",
-                name="Extrahera agenda",
-                assistant_spec=AssistantSpec(instructions="Extrahera agenda."),
-                input_source=InputSource.FLOW_INPUT,
-                input_type=InputType.TEXT,
-                output_mode=OutputMode.PASS_THROUGH,
-                output_type=OutputType.JSON,
-                output_contract={
-                    "type": "object",
-                    "properties": {"agenda": {"type": "array"}},
-                },
-            ),
-            StepSpec(
-                plan_step_ref="step_f",
-                name="Sätt ihop slutligt strukturerat textresultat",
-                assistant_spec=AssistantSpec(
-                    instructions="Skriv ett strukturerat textprotokoll.",
-                    model_ref="model.gpt-5-4-mini",
-                ),
-                input_source=InputSource.PREVIOUS_STEP,
-                input_type=InputType.TEXT,
-                output_mode=OutputMode.PASS_THROUGH,
-                output_type=OutputType.TEXT,
-            ),
-        ],
-    )
-    prior_plan = _builder_plan(prior_spec)
-
-    result = process_scoped_step_revision_if_requested(
-        conversation=[
-            ConversationMessage(
-                role="user",
-                content="ändra output filen till pdf",
-                metadata=_terminal_output_slot_metadata(),
-            )
-        ],
-        available_model_refs=None,
-        available_kb_refs=None,
-        resource_catalog=None,
-        plan_edit_context=AIBuilderPlanEditContext(
-            scope="step",
-            plan_id=prior_plan.id,
-            target_plan_step_ref="step_f",
-            target_step_name="Sätt ihop slutligt strukturerat textresultat",
-            target_step_number=2,
-        ),
-        prior_plan_for_revision=prior_plan,
-    )
-
-    assert result is not None
-    assert result.compiled_proposal is not None
-    revised_steps = result.compiled_proposal.content.spec.steps
-    assert revised_steps[0].model_dump(mode="json") == prior_spec.steps[0].model_dump(
-        mode="json"
-    )
-    assert revised_steps[1].output_type == OutputType.PDF

@@ -24,7 +24,7 @@ from eneo.flows.ai_builder.ai_builder_plan_edit_context import (
     validate_scoped_plan_revision,
 )
 from eneo.flows.ai_builder.ai_builder_proposal_policy import (
-    terminal_output_type_for_conversation,
+    terminal_output_type_for_edit_conversation,
 )
 from eneo.flows.ai_builder.ai_builder_resource_catalog import (
     AIBuilderAvailableModelResource,
@@ -373,7 +373,7 @@ def test_scoped_step_revision_changes_terminal_output_for_pdf_file_wording() -> 
         ConversationMessage(role="assistant", content="Här är planen."),
         ConversationMessage(role="user", content="utdatat ska vara pdf fil"),
     ]
-    output_type = terminal_output_type_for_conversation(
+    output_type = terminal_output_type_for_edit_conversation(
         conversation,
         plan_edit_context=context,
         prior_plan=None,
@@ -412,7 +412,7 @@ def test_terminal_output_intent_recognizes_pdf_file_wording(
     ]
 
     assert (
-        terminal_output_type_for_conversation(
+        terminal_output_type_for_edit_conversation(
             conversation,
             plan_edit_context=_step_context(target_plan_step_ref="step_b"),
             prior_plan=None,
@@ -432,7 +432,7 @@ def test_terminal_output_intent_uses_latest_slot_classification_for_plan_edit() 
     ]
 
     assert (
-        terminal_output_type_for_conversation(
+        terminal_output_type_for_edit_conversation(
             conversation,
             plan_edit_context=_step_context(target_plan_step_ref="step_b"),
             prior_plan=None,
@@ -462,7 +462,7 @@ def test_scoped_step_revision_uses_slot_classification_for_pdf_output_edit() -> 
         prior_spec=prior,
         latest_user_text="ändra output filen till pdf",
         resource_catalog=None,
-        requested_terminal_output_type=terminal_output_type_for_conversation(
+        requested_terminal_output_type=terminal_output_type_for_edit_conversation(
             conversation,
             plan_edit_context=context,
             prior_plan=None,
@@ -505,7 +505,7 @@ def test_scoped_step_revision_does_not_patch_input_file_mentions(
         prior_spec=prior,
         latest_user_text=message,
         resource_catalog=None,
-        requested_terminal_output_type=terminal_output_type_for_conversation(
+        requested_terminal_output_type=terminal_output_type_for_edit_conversation(
             conversation,
             plan_edit_context=context,
             prior_plan=None,
@@ -928,7 +928,7 @@ def test_plan_revision_terminal_output_intent_uses_latest_user_message() -> None
     ]
 
     assert (
-        terminal_output_type_for_conversation(
+        terminal_output_type_for_edit_conversation(
             conversation,
             plan_edit_context=context,
             prior_plan=None,
@@ -956,7 +956,7 @@ def test_plan_revision_terminal_output_intent_accepts_current_pdf_edit() -> None
     ]
 
     assert (
-        terminal_output_type_for_conversation(
+        terminal_output_type_for_edit_conversation(
             conversation,
             plan_edit_context=context,
             prior_plan=None,
@@ -965,7 +965,7 @@ def test_plan_revision_terminal_output_intent_accepts_current_pdf_edit() -> None
     )
 
 
-def test_initial_plan_terminal_output_intent_can_use_full_requirements() -> None:
+def test_whole_flow_edit_terminal_output_intent_can_use_full_requirements() -> None:
     conversation = [
         ConversationMessage(
             role="user",
@@ -976,7 +976,7 @@ def test_initial_plan_terminal_output_intent_can_use_full_requirements() -> None
     ]
 
     assert (
-        terminal_output_type_for_conversation(
+        terminal_output_type_for_edit_conversation(
             conversation,
             plan_edit_context=None,
             prior_plan=None,

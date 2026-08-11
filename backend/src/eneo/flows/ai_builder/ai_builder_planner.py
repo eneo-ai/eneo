@@ -217,6 +217,11 @@ class AIBuilderPlanner:
                         requested_output_sections=(
                             proposal_request.requested_output_sections
                         ),
+                        terminal_output_type=(
+                            proposal_request.compile_context.final_output_type
+                            if proposal_request.compile_context is not None
+                            else None
+                        ),
                         assistant_metadata=assistant_metadata,
                         flow=flow,
                     ),

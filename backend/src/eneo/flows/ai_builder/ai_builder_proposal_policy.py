@@ -256,7 +256,7 @@ def resolve_ui_language(
     return None
 
 
-def terminal_output_type_for_conversation(
+def terminal_output_type_for_edit_conversation(
     conversation: list[ConversationMessage],
     *,
     plan_edit_context: "AIBuilderPlanEditContext | None",
