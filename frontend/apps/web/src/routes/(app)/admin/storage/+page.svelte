@@ -141,6 +141,7 @@
   const refreshing = $derived(
     reloading || inventoryStatus === "loading" || moveStatus === "loading"
   );
+  const refreshUnavailable = $derived(refreshing || policyMutationPending);
 
   function isValidByteLimit(value: number): boolean {
     return Number.isSafeInteger(value) && value > 0;
@@ -627,10 +628,10 @@
             <Button
               variant="outline"
               aria-busy={refreshing}
-              aria-disabled={refreshing || saving}
-              class={refreshing || saving ? "pointer-events-none opacity-50" : undefined}
+              aria-disabled={refreshUnavailable}
+              class={refreshUnavailable ? "pointer-events-none opacity-50" : undefined}
               onclick={() => {
-                if (!refreshing && !saving) void loadPolicy(dirty);
+                if (!refreshUnavailable) void loadPolicy(dirty);
               }}
             >
               <RefreshCw
