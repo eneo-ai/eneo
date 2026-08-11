@@ -796,6 +796,7 @@ class TestMCPProxySessionToolCollision:
             tool = MagicMock()
             tool.name = tool_def["name"]
             tool.title = tool_def.get("title")
+            tool.display_name = tool_def.get("display_name")
             tool.description = tool_def.get("description", "")
             tool.input_schema = tool_def.get("input_schema", {})
             tool.is_enabled_by_default = tool_def.get("is_enabled", True)
@@ -886,6 +887,7 @@ class TestMCPProxySessionToolDisplayName:
         tool = MagicMock()
         tool.name = "ingest_urls"
         tool.title = title
+        tool.display_name = None
         tool.description = "Fetch files from HTTPS links."
         tool.input_schema = {"type": "object", "properties": {}}
         tool.is_enabled_by_default = True
