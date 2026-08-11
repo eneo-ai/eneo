@@ -316,6 +316,18 @@ any threshold.
     CP0 count, and the real negated-format regression now compiles the
     committed TEXT terminal. `flow_step_invalid` remains a separate
     heterogeneous family (`flow_validators.py:227`).
+- [x] Edit aggregation-intent wiring correction (completed 2026-08-11):
+    edit compilation now materializes the planning-state compile context once,
+    reuses it for runtime input, and carries its typed aggregation intent through
+    `CompiledProposal` into the existing contextual quality owner. The silent
+    `linear` defaults at both severed boundaries no longer judge a committed
+    compare edit with linear topology; the finalization wrapper now requires an
+    explicit intent, and the redundant one-use runtime-input helper is deleted.
+    One existing edit behavior test protects the carrier and one finalization
+    behavior test protects plan persistence. The full Flow suite passes (6524
+    passed, 10 skipped, 1 xfailed), and the frozen 465-observation receipt still
+    reproduces every CP0 count. No helper, policy, schema or public contract was
+    added.
 - [ ] CP2b Parse-failure attribution (GATES CP3 AND CP5, added by CP0):
     parse failures are the single largest repair driver (36 of 86) and
     `json_to_structured_payload` is 15/15 parse. Both CP3 and CP5
@@ -430,12 +442,12 @@ any threshold.
     as compiler postconditions. Extracts ONLY the gates seam.
     `assembly_document_report_review_mode_conflict` becomes a USER
     QUESTION, not an error. No blanket "kills 8 of 10" claim.
-- [ ] Edit aggregation-intent wiring correction (severed from
-    CP-EDIT): pass the already-compiled `aggregation_intent` into the
-    existing contextual quality owner. One behavior test proves a
-    compare edit is not judged with the default linear topology. No
-    new helper or policy; this is a direct missing argument at the
-    finalization boundary.
+- [x] Edit aggregation-intent wiring correction (severed from
+    CP-EDIT): reuse the planning-state compile context, carry its
+    `aggregation_intent` through the existing compiled proposal, and pass it
+    into the existing contextual quality owner. A compare edit is no longer
+    judged with the default linear topology. The redundant one-use helper was
+    deleted; no helper or policy was added.
 - [ ] CP-EDIT Edit-path terminal-type ownership (design gate first):
     ONE conversation-derivation owner with ONE precedence rule — today
     `ai_builder_proposal_policy.py:265` (latest message first) and
@@ -541,39 +553,36 @@ any threshold.
    evidence access and run listing.
 3. **CP-ADMIT-0 complete** — typed unsupported-architecture refusal
    before provider use or mutation; corrective text remains admissible.
-4. **CP2 and CP1 complete** — both ownership defects have deterministic
-   receipts; CP1 did not absorb D7 because its receipt proved only the file-role
-   merge mechanism.
-5. **Edit aggregation-intent wiring correction next** — the severed direct
-   finalization fix; keep it out of the later CP-EDIT redesign.
-6. **CP-ADMIT implementation** — only after CP2+CP1 land and its
-   per-code dependency table exists; the table/design gate runs during
-   steps 4–5.
-7. **CP2b** — parse attribution; it gates CP3 and CP5.
-8. **CP9b** — land the already-chosen BALANCED question behavior so
+4. **CP2, CP1 and edit aggregation-intent wiring complete** — the ownership
+   defects have deterministic receipts; CP1 did not absorb D7, and the bounded
+   edit wiring correction remains separate from CP-EDIT.
+5. **CP-ADMIT next** — freeze its per-code dependency table in the design gate,
+   then implement only the server-decidable transfers.
+6. **CP2b** — parse attribution; it gates CP3 and CP5.
+7. **CP9b** — land the already-chosen BALANCED question behavior so
    the tranche measures the product behavior intended for release.
-9. **CP3** (+D2 +D4 +D8 +D10) — one proposal-schema and
+8. **CP3** (+D2 +D4 +D8 +D10) — one proposal-schema and
    compile-context materialization lifecycle, not two abstractions.
-10. **Ownership-tranche checkpoint** — exploratory
+9. **Ownership-tranche checkpoint** — exploratory
     final-frozen-manifest ×3 after CP1–CP3 and CP9b.
-11. **Critic disposition receipt**, then **CP4 → CP5**, **CP-EDIT**,
+10. **Critic disposition receipt**, then **CP4 → CP5**, **CP-EDIT**,
     **CP-D6**, **CP7**; the post-CP5 re-attribution loop runs alongside.
-12. **Public contract lane:** after FLOW-AUTH, the retention bound and
+11. **Public contract lane:** after FLOW-AUTH, the retention bound and
     current-source Flow docs/OpenAPI accuracy slices may proceed in
     sequence, parallel to Builder ownership work. The Builder SDK,
-    pagination and showcase-doc slice starts only after step 10 and
+    pagination and showcase-doc slice starts only after step 9 and
     must land before showcase/release.
-13. **Runtime lane**, parallel throughout in its own Fable/peer
+12. **Runtime lane**, parallel throughout in its own Fable/peer
     session: **L2 → L1b → L3 → L5**. L1b and L3 sequence because they
     share the deployment compose; L5 is terminal evidence.
-14. **Release evaluation:** final-frozen-manifest N=5 only at the
+13. **Release evaluation:** final-frozen-manifest N=5 only at the
     release gate, repeated after every material post-gate product
     change. The full-corpus run is not an instrument-progress check.
-15. Post-program: **PKG**, per `docs/flows/package-layout.md`.
+14. Post-program: **PKG**, per `docs/flows/package-layout.md`.
 
 Receipt tasks: D5 reachability and D7 occurrence may run in the
 analysis lane. The critic disposition table is not "any time"; it must
-close before CP4 or CP5 within step 11.
+close before CP4 or CP5 within step 10.
 
 Maintainability rulings bind every slice: ownership transfers delete
 their old path, tests die with their owners, no splits for their own
@@ -876,7 +885,7 @@ This cadence replaces per-slice cohort ×3 by user decision on 2026-08-11.
   orchestrator verifies each finding in current source, reruns decisive
   tests, and owns all git.
 - Validation: `cd backend && uv run pytest tests/unittests/flows/ -q`
-  (current baseline: 6523 passed, 10 skipped, 1 xfailed); ruff
+  (current baseline: 6524 passed, 10 skipped, 1 xfailed); ruff
   check/format + pyright
   (`--pythonpath .venv/bin/python`) on exact changed paths only.
 - Measurement: harness + protocol in `conformance-program-plan.md`.

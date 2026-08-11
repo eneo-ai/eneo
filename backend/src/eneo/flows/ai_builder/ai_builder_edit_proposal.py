@@ -42,7 +42,6 @@ from eneo.flows.ai_builder.ai_builder_resource_catalog import (
 from eneo.flows.ai_builder.ai_builder_session_turn import SessionSendTurn
 from eneo.flows.ai_builder.planning_state import PlanningState
 from eneo.flows.assistant_authoring_snapshot import AssistantAuthoringSnapshots
-from eneo.flows.flow_authoring_spec import InputType
 from eneo.main.exceptions import BadRequestException
 from eneo.main.logging import get_logger
 
@@ -102,6 +101,10 @@ async def process_edit_arguments(
             failure_kind="parse",
         )
     ui_language = resolve_ui_language(conversation)
+    compile_context = create_compile_context_from_planning_state(
+        planning_state,
+        ui_language=ui_language,
+    )
     selected_template_roles = (
         []
         if planning_state is None
@@ -117,9 +120,10 @@ async def process_edit_arguments(
             current_metadata_json=flow.metadata_json,
             assistant_snapshots=assistant_snapshots,
             resource_catalog=resource_catalog,
-            requested_primary_runtime_input_type=_requested_primary_runtime_input_type(
-                planning_state=planning_state,
-                conversation=conversation,
+            requested_primary_runtime_input_type=(
+                compile_context.runtime_input_type
+                if compile_context is not None
+                else None
             ),
             ui_language=ui_language,
             selected_template_count=(
@@ -262,6 +266,11 @@ async def process_edit_arguments(
                 if resource_catalog is not None
                 else tuple()
             ),
+            aggregation_intent=(
+                compile_context.aggregation_intent
+                if compile_context is not None
+                else "linear"
+            ),
         ),
     )
 
@@ -288,20 +297,6 @@ def _apply_server_owned_input_fields(
         if field.variable_name not in projected_names
     )
     return proposal.model_copy(update={"form_fields": projected_fields})
-
-
-def _requested_primary_runtime_input_type(
-    *,
-    planning_state: PlanningState | None,
-    conversation: list[ConversationMessage],
-) -> InputType | None:
-    compile_context = create_compile_context_from_planning_state(
-        planning_state,
-        ui_language=resolve_ui_language(conversation),
-    )
-    if compile_context is None:
-        return None
-    return compile_context.runtime_input_type
 
 
 def _format_edit_compilation_request_error(exc: BadRequestException) -> str:

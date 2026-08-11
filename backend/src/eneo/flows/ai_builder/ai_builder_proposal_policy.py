@@ -154,7 +154,7 @@ def format_contextual_quality_feedback(
     spec: FlowDraftSpecCore,
     *,
     flow: "Flow | None" = None,
-    aggregation_intent: AggregationIntent = "linear",
+    aggregation_intent: AggregationIntent,
     resource_catalog: "AIBuilderResourceCatalog | None" = None,
     planning_state: PlanningState | None = None,
     requested_output_sections: RequestedOutputSections = (

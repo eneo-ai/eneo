@@ -45,7 +45,7 @@ from eneo.flows.ai_builder.ai_builder_session_turn import (
 from eneo.flows.ai_builder.ai_builder_tool_names import PROPOSE_FLOW_TOOL_NAME
 from eneo.flows.ai_builder.ai_builder_validation_common import SpecValidationResult
 from eneo.flows.ai_builder.ai_builder_validator import validate_spec
-from eneo.flows.ai_builder.planning_state import ReportDisposition
+from eneo.flows.ai_builder.planning_state import AggregationIntent, ReportDisposition
 from eneo.flows.flow_authoring_spec import (
     AssistantSpec,
     FlowDraftSpecCore,
@@ -88,7 +88,10 @@ def _make_flow_spec() -> FlowDraftSpecCore:
     )
 
 
-def _structured_underbound_spec() -> FlowDraftSpecCore:
+def _structured_underbound_spec(
+    *,
+    final_input_source: InputSource = InputSource.PREVIOUS_STEP,
+) -> FlowDraftSpecCore:
     return FlowDraftSpecCore(
         flow_name="Structured report",
         steps=[
@@ -122,7 +125,7 @@ def _structured_underbound_spec() -> FlowDraftSpecCore:
                 plan_step_ref="step_c",
                 name="Write report",
                 assistant_spec=AssistantSpec(instructions="Write report."),
-                input_source=InputSource.PREVIOUS_STEP,
+                input_source=final_input_source,
                 input_type=InputType.TEXT,
                 output_mode=OutputMode.PASS_THROUGH,
                 output_type=OutputType.TEXT,
@@ -153,7 +156,11 @@ def _compiled_outline_proposal_with_validation(
     )
 
 
-def _compiled_edit_proposal(*, compiled_spec: FlowDraftSpecCore) -> CompiledProposal:
+def _compiled_edit_proposal(
+    *,
+    compiled_spec: FlowDraftSpecCore,
+    aggregation_intent: AggregationIntent = "linear",
+) -> CompiledProposal:
     edit = FlowBuilderEditApproval(
         diff=FlowEditDiff(
             step_changes=[StepChange(kind="unchanged", step_name="Analys")]
@@ -175,6 +182,7 @@ def _compiled_edit_proposal(*, compiled_spec: FlowDraftSpecCore) -> CompiledProp
             edit=edit,
         ),
         validation=SpecValidationResult(),
+        aggregation_intent=aggregation_intent,
     )
 
 
@@ -576,6 +584,32 @@ async def test_finalize_compiled_proposal_uses_target_kind_for_quality_branch() 
     assert result.feedback == "edit"
     create_quality.assert_not_called()
     edit_quality.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_finalize_compare_edit_uses_compiled_aggregation_intent() -> None:
+    store_plan = AsyncMock(return_value=_stored_plan_result())
+
+    with patch(
+        "eneo.flows.ai_builder.ai_builder_proposal_finalization."
+        "store_plan_and_update_conversation",
+        new=store_plan,
+    ):
+        result = await _make_finalizer().finalize_compiled_proposal(
+            _make_request(
+                target_kind=TargetKind.EDIT,
+                compiled=_compiled_edit_proposal(
+                    compiled_spec=_structured_underbound_spec(
+                        final_input_source=InputSource.ALL_PREVIOUS_STEPS
+                    ),
+                    aggregation_intent="compare",
+                ),
+                flow=MagicMock(),
+            )
+        )
+
+    assert [event.event for event in result.events] == ["plan"]
+    store_plan.assert_awaited_once()
 
 
 @pytest.mark.asyncio

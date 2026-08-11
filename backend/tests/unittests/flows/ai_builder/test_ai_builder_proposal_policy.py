@@ -241,6 +241,7 @@ def test_edit_contextual_quality_feedback_keeps_mechanics_remediation() -> None:
                 )
             ],
         ),
+        aggregation_intent="linear",
     )
 
     assert feedback is not None

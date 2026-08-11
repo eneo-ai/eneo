@@ -276,6 +276,7 @@ class CompiledProposalFinalizer:
             conversation=request.conversation,
             spec=compiled.content.spec,
             flow=request.flow,
+            aggregation_intent=compiled.aggregation_intent,
             resource_catalog=request.resource_catalog,
             planning_state=request.planning_state,
             requested_output_sections=request.requested_output_sections,

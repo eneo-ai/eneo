@@ -492,6 +492,7 @@ async def test_edit_preserving_compare_aggregation_target_is_accepted() -> None:
 
     assert result.failure_kind is None
     assert result.compiled_proposal is not None
+    assert result.compiled_proposal.aggregation_intent == "compare"
 
 
 @pytest.mark.asyncio
