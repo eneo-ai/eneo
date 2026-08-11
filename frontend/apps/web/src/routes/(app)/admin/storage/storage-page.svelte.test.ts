@@ -16,10 +16,9 @@ const replaceObjectStoreDestination = vi.hoisted(() => vi.fn());
 const switchBackObjectStoreDestination = vi.hoisted(() => vi.fn());
 const forgetPreviousObjectStoreDestination = vi.hoisted(() => vi.fn());
 const abandonPendingObjectStoreDestination = vi.hoisted(() => vi.fn());
-// Storage administration is a normal permission (held by the Owner role by
-// default), independent of the deployment-wide platform-admin flag. The
-// fixture keeps is_platform_admin false so every editable-state test proves
-// the actual contract: an ordinary user with the storage permission.
+// Storage administration is a normal permission, held by the Owner role by
+// default. Every editable-state test therefore proves the actual contract:
+// an ordinary user carrying the storage permission on one of their roles.
 const testUser = vi.hoisted(() => ({ canAdministerStorage: false }));
 const invalidate = vi.hoisted(() => vi.fn(async () => {}));
 
@@ -43,7 +42,6 @@ vi.mock("$app/navigation", () => ({
 vi.mock("$lib/core/AppContext.js", () => ({
   getAppContext: () => ({
     user: {
-      is_platform_admin: false,
       roles: testUser.canAdministerStorage ? [{ permissions: ["admin", "storage"] }] : [],
       predefined_roles: []
     }

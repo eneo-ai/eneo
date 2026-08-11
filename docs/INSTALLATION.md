@@ -147,9 +147,9 @@ ENEO_SUPER_DUPER_API_KEY=your-other-secure-api-key
 
 ```
 
-Platform admins set upload limits and choose storage for eligible new File and
-Icon writes in **Admin > Storage**. Changes take effect without restarting the
-backend or worker. Operators keep
+Administrators with the Storage permission set upload limits and choose storage
+for eligible new File and Icon writes in **Admin > Storage**. Changes take effect
+without restarting the backend or worker. Operators keep
 `OBJECT_CONTENT_INLINE_MAXIMUM_BYTES` as a PostgreSQL, WAL, backup, and process
 safety ceiling; it is not the upload policy.
 
@@ -171,9 +171,9 @@ Then restart the backend.
 
 ### File Upload Errors (Large PDFs)
 
-Ask a platform admin to review the configured and effective limits in
-**Admin > Storage**. For PostgreSQL-inline session uploads, the effective limit
-is the smaller of the admin policy and the operator's
+Ask an administrator with the Storage permission to review the configured and
+effective limits in **Admin > Storage**. For PostgreSQL-inline session uploads,
+the effective limit is the smaller of the admin policy and the operator's
 `OBJECT_CONTENT_INLINE_MAXIMUM_BYTES` ceiling. For object-store session uploads,
 the effective limit is the smaller of the admin policy and the configured
 portable multipart envelope. The page identifies which value constrains the

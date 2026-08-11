@@ -67,15 +67,11 @@ Compose loads that file automatically because the devcontainer's project
 directory is `.devcontainer/`. Rebuild or reopen the container to apply it.
 
 Then connect it on the admin **File storage** page (`/admin/storage`). That page
-is read-only unless your user holds platform-administrator authority, which is
-granted only through the sysadmin API:
-
-```bash
-curl -X PUT "$ENEO_URL/api/v1/sysadmin/users/$USER_ID/platform-admin" \
-  -H "X-API-Key: $ENEO_SUPER_API_KEY" \
-  -H "Content-Type: application/json" \
-  -d '{"enabled": true}'
-```
+is read-only unless one of your roles carries the **Storage** permission. Roles
+that already have **Admin** were granted it automatically, and new tenants get
+it from the predefined-role seed, so the tenant owner account you develop with
+normally has it. If the page is read-only, add the Storage permission to your
+role under **Admin > Roles**.
 
 Use these values in the connection dialog. They match the Compose defaults; the
 devcontainer already permits plain HTTP, generates a development

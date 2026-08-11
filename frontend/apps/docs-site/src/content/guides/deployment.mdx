@@ -298,8 +298,9 @@ curl -fsS https://your-domain.com/version
     | `MAX_IN_QUESTION` | `1` | Max files per chat message |
 
     <Callout type="info">
-      Platform admins set byte limits and new-write placement in **Admin >
-      Storage**. Those changes take effect without restarting backend or worker.
+      Administrators with the Storage permission set byte limits and new-write
+      placement in **Admin > Storage**. Those changes take effect without
+      restarting backend or worker.
       Operators keep `OBJECT_CONTENT_INLINE_MAXIMUM_BYTES` as a PostgreSQL, WAL,
       backup, and process safety ceiling. For an inline session upload, the
       effective limit is the smaller value; the admin page shows the configured
@@ -416,10 +417,10 @@ compatible endpoint, including MinIO. Both object-store paths use the same
 contract and fail closed when configuration or the database/bucket binding does
 not match.
 
-| Owner          | Responsibility                                                                                                                          |
-| -------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
-| Platform admin | Choose one deployment-wide target for eligible new File and Icon writes and set business upload limits in **Admin > Storage**           |
-| Operator       | Run PostgreSQL and any optional compatible endpoint; own credentials, TLS, capacity, backups, and `OBJECT_CONTENT_INLINE_MAXIMUM_BYTES` |
+| Owner                                 | Responsibility                                                                                                                          |
+| ------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| Administrator with Storage permission | Choose one deployment-wide target for eligible new File, Icon, and knowledge-original writes and set business upload limits in **Admin > Storage** |
+| Operator                              | Run PostgreSQL and any optional compatible endpoint; own credentials, TLS, capacity, backups, and `OBJECT_CONTENT_INLINE_MAXIMUM_BYTES` |
 
 Policy changes take effect without a backend or worker restart. They affect
 eligible new writes only; existing content stays in its recorded backend until
