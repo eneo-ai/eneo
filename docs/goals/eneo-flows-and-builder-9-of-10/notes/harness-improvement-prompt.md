@@ -105,7 +105,9 @@ cd /workspace/backend && source /tmp/eneo-battle-key && .venv/bin/python \
 
 `--base-url` must end in `/api/v1`; the harness verifies `/version`
 against the local source revision and refuses otherwise. Compare two
-receipts with `ai_builder_battle_compare.py BASELINE CURRENT`.
+receipts with `ai_builder_battle_compare.py compare BASELINE CURRENT`, and
+judge one release run with
+`ai_builder_battle_compare.py release-verdict SUITE_DIR`.
 
 ## Definition of done
 

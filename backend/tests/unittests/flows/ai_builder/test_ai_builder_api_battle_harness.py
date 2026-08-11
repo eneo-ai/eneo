@@ -1882,7 +1882,7 @@ def test_suite_result_does_not_evaluate_invalid_live_evidence(tmp_path: Path) ->
     bundle_path = tmp_path / "invalid-evidence.json"
     bundle_path.write_text(json.dumps(bundle), encoding="utf-8")
 
-    result = harness._suite_result(bundle, bundle_path)
+    result = harness._suite_result(harness.seal_observation(bundle), bundle_path)
 
     assert result["observation_status"] == "invalid_evidence"
     assert result["expectation_verdict"] == "not_evaluated"
@@ -1909,7 +1909,7 @@ def test_suite_result_keeps_error_terminated_journey_outcome(
     bundle_path = tmp_path / "error-terminated.json"
     bundle_path.write_text(json.dumps(bundle), encoding="utf-8")
 
-    result = harness._suite_result(bundle, bundle_path)
+    result = harness._suite_result(harness.seal_observation(bundle), bundle_path)
 
     assert result["outcome_class"] == "builder_error"
     assert result["observation_status"] == "error_terminated"
@@ -1927,7 +1927,7 @@ def test_acquisition_validity_ignores_product_failures_and_catches_execution_fai
     """
     harness = _battle_harness()
 
-    clean = harness._evaluate_acquisition_validity(
+    clean = harness.acquisition_validity_checks(
         execution_failure_observation_count=0,
         invalid_evidence_observation_count=0,
     )
@@ -1935,7 +1935,7 @@ def test_acquisition_validity_ignores_product_failures_and_catches_execution_fai
     assert not any("expectation" in check["name"] for check in clean)
     assert not any("quality" in check["name"] for check in clean)
 
-    dirty = harness._evaluate_acquisition_validity(
+    dirty = harness.acquisition_validity_checks(
         execution_failure_observation_count=1,
         invalid_evidence_observation_count=2,
     )
@@ -2318,7 +2318,7 @@ def test_release_run_requires_explicit_model_before_execution(
     # expectation failure must NOT fail it, an execution failure must.
     assert all(
         check["passed"]
-        for check in harness._evaluate_acquisition_validity(
+        for check in harness.acquisition_validity_checks(
             execution_failure_observation_count=0,
             invalid_evidence_observation_count=0,
         )
@@ -2326,7 +2326,7 @@ def test_release_run_requires_explicit_model_before_execution(
     assert (
         next(
             check
-            for check in harness._evaluate_acquisition_validity(
+            for check in harness.acquisition_validity_checks(
                 execution_failure_observation_count=1,
                 invalid_evidence_observation_count=0,
             )
@@ -2336,7 +2336,7 @@ def test_release_run_requires_explicit_model_before_execution(
     )
 
 
-def test_release_receipt_version_defaults_to_v4_and_rejects_other_versions(
+def test_release_receipt_version_defaults_to_v5_and_rejects_other_versions(
     tmp_path: Path,
 ) -> None:
     harness = _battle_harness()
@@ -2345,7 +2345,7 @@ def test_release_receipt_version_defaults_to_v4_and_rejects_other_versions(
         required_case_ids=("required-case",),
     )
 
-    assert gate.artifact_schema_version == "ai-builder-live-release.v4"
+    assert gate.artifact_schema_version == "ai-builder-live-release.v5"
     assert gate.artifact_schema_version == harness.SUPPORTED_RECEIPT_ARTIFACT_VERSION
 
     cases_path = tmp_path / "cases.json"
@@ -2472,6 +2472,13 @@ def test_suite_receipts_preserve_canonical_case_identity_for_every_outcome(
     for result in results_by_case_id.values():
         bundle_path = suite_dir / result["bundle_file"]
         assert bundle_path.is_file()
+        bundle = json.loads(bundle_path.read_text())
+        sealed_row = {
+            key: value
+            for key, value in result.items()
+            if key not in harness.BUNDLE_REFERENCE_FIELDS
+        }
+        assert sealed_row == bundle["observation"]
         assert (
             result["bundle_sha256"]
             == hashlib.sha256(bundle_path.read_bytes()).hexdigest()
@@ -2720,6 +2727,10 @@ def test_final_identity_probe_failure_still_writes_failed_summary(
         case_id=case.case_id,
         prompt=case.prompt,
     )
+    release_identity["target"] = {
+        "expected_source_revision": "a" * 40,
+        "verified": True,
+    }
     calls = 0
 
     def release_identity_or_network_failure(**_: object) -> dict[str, object]:
@@ -2780,7 +2791,14 @@ def test_final_identity_probe_failure_still_writes_failed_summary(
         ).read_text()
     )
     assert summary["sentinel_verdict"] == "fail"
-    assert summary["suite_identity_failed_check_count"] == 5
+    assert summary["suite_identity_failed_check_count"] == 6
+    assert summary["release_identity_recheck_checks"] == (
+        harness._release_identity_recheck_checks(
+            expected=release_identity,
+            actual=summary["release_identity_recheck"],
+            require_verified_target=True,
+        )
+    )
     assert all(
         check["passed"] is False for check in summary["release_identity_recheck_checks"]
     )
@@ -4412,7 +4430,7 @@ def test_release_inventory_owns_required_dimensions_and_named_cases() -> None:
     acquisition_contract = harness._read_acquisition_contract(cases_path, cases=cases)
     by_id = {case.case_id: case for case in cases}
 
-    assert acquisition_contract.artifact_schema_version == "ai-builder-live-release.v4"
+    assert acquisition_contract.artifact_schema_version == "ai-builder-live-release.v5"
     assert acquisition_contract.require_clean_source is True
     assert not hasattr(acquisition_contract, "thresholds")
     required_dimensions = {
@@ -5072,22 +5090,24 @@ def test_event_summary_records_assumptions_for_posture_goldens(
         ]
     )
     result = harness._suite_result(
-        {
-            "case_identity": {
-                "id": "document_pdf_source_retention_balance",
-                "required": False,
-                "complexity": "custom",
-                "domain": "custom",
-                "cohorts": [],
-            },
-            "case": {"id": "document_pdf_source_retention_balance"},
-            "session_id": "session-1",
-            "plan_id": "plan-1",
-            "repetition": 1,
-            "plan_summary": {"step_count": 2},
-            "event_summary": summary,
-            "quality_report": {"checks": [], "warnings": [], "metrics": {}},
-        },
+        harness.seal_observation(
+            {
+                "case_identity": {
+                    "id": "document_pdf_source_retention_balance",
+                    "required": False,
+                    "complexity": "custom",
+                    "domain": "custom",
+                    "cohorts": [],
+                },
+                "case": {"id": "document_pdf_source_retention_balance"},
+                "session_id": "session-1",
+                "plan_id": "plan-1",
+                "repetition": 1,
+                "plan_summary": {"step_count": 2},
+                "event_summary": summary,
+                "quality_report": {"checks": [], "warnings": [], "metrics": {}},
+            }
+        ),
         bundle_path,
     )
     reliability = harness._suite_reliability_summary([result])

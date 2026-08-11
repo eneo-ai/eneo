@@ -66,22 +66,44 @@ Depends on CP8a. Three owners, no new path:
   `floor(0.10 x eligible cases)`. Both derive from the receipt
   manifest — never from a prose constant.
 - Row 11 classification is canonical, not ad hoc: semantic vs
-  architecture is read from the invariant registry
-  (`ai_builder_critic_invariants.py`) at import time, never a hardcoded
-  id list. Count occurrences over supported observations in
+  architecture is read from the invariant KIND CATALOG
+  (`ai_builder_critic_invariant_kinds.py`) at import time, never a
+  hardcoded id list. REVISED during implementation: reading the critic
+  registry itself initializes the application (it died on missing
+  settings outside `backend/`), so the kinds moved to a leaf module that
+  the registry, the tests and the offline gate all answer to. Count occurrences over supported observations in
   `failure_summary.failure_codes` plus every
   `journey.plan_outcome.attempt_failure_ladder[*].failure_codes`;
   architecture ids are reported separately, never inside row 11.
 - Repair numerator: `journey.plan_outcome.repair_attempts` only.
 - Cost rows: nearest-rank p95 = `sorted[ceil(0.95n)-1]`.
 - Missing data is fail-closed; every ceiling derives from the manifest.
-- Row 14 (machine-verifiable, revision-bound): the gate asserts that
-  every supported matrix row has >= 1 manifest case, that no
+- Row 14 (machine-verifiable, pre-registration-bound): the gate asserts
+  that every supported matrix row has >= 1 manifest case, that no
   observation is committed to a row outside the matrix, AND that the
-  receipt's source revision matches the revision recorded in the
-  matrix-state file the `json_to_text_summary` REMOVAL slice writes.
-  The source-side invariant (branch absent, tuple rejects) is a PRODUCT
-  test in that removal slice — the gate never reads source.
+  evaluator is pinned — checked out at the receipt's own source revision
+  with no uncommitted tracked changes. REVISED during implementation
+  (peer-adjudicated 2026-08-11): the earlier form had the matrix-state
+  file record the revision it was affirmed at, which is unimplementable —
+  a tracked file cannot contain the hash of the commit that contains it.
+  Freshness is proved from the other side instead, so the policy file's
+  own git history is what shows it predates the run. The matrix state
+  also declares the non-row MODIFIER pattern ids, so a pattern that is
+  neither declared row nor declared modifier makes the receipt invalid
+  rather than silently dropping out of the supported population. The
+  `json_to_text_summary` REMOVAL slice flips that row to `removed`. The
+  source-side invariant (branch absent, tuple rejects) is a PRODUCT test
+  in that removal slice — the gate never reads source.
+- A release verdict is computed from the suite DIRECTORY, never a lone
+  summary. The harness SEALS each derived observation inside its bundle
+  before hashing (artifact contract v5), so the release reader compares
+  the summary row against the sealed observation rather than re-deriving
+  a second opinion; the manifest's expected slots, every bundle digest,
+  each bundle's identity against the run's declared identity, and the
+  run's own acquisition verdict are all checked before anything is
+  scored. `receipt_integrity` in the summary is the writer's report about
+  itself, now rendered from the same shared analysis the reader raises
+  from.
 - Built-in `--feasibility`: computes every gate under a PERFECT run for
   the receipt's manifest and FAILS if any gate is unpassable (the
   broken-gate rule — a gate needing more cases than exist is a plan

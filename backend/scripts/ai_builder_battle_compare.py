@@ -1,16 +1,22 @@
 #!/usr/bin/env python3
-"""Compare two AI Builder battle suite receipts case by case.
+"""Read AI Builder battle suite receipts: compare two, or judge one for release.
 
 The battle harness answers "what should we improve next" only when run
-pairs are comparable. This tool takes two ``suite-summary.json`` receipts
+pairs are comparable. ``compare`` takes two ``suite-summary.json`` receipts
 (older first) and reports, per case: the outcome transition, failure-code
 and failed-check deltas, question changes, and authoring-token deltas —
 then ranks the remaining blockers by family so the next slice is chosen
 from evidence instead of memory.
 
+``release-verdict`` answers the other question — is this build releasable —
+by rendering the fourteen rows of `ai_builder_release_gate`. This file owns
+presentation and exit codes only; not one number is computed here.
+
 Usage:
-    ai_builder_battle_compare.py BASELINE_SUMMARY CURRENT_SUMMARY
+    ai_builder_battle_compare.py compare BASELINE_SUMMARY CURRENT_SUMMARY
         [--format markdown|json] [--only-changed]
+    ai_builder_battle_compare.py release-verdict SUITE_DIR
+        [--feasibility] [--format markdown|json]
 
 Receipts carry their own identity (app_version, evaluator_identity). The
 report refuses to compare receipts that measure different things — a
@@ -23,10 +29,35 @@ from __future__ import annotations
 
 import argparse
 import json
+import subprocess
 import sys
 from collections import Counter
 from pathlib import Path
 from typing import Any, cast
+
+# These are standalone scripts, not a package: operators run them directly and
+# tests load them by path, so neither route puts this directory on the import
+# path by itself.
+_SCRIPTS_DIR = str(Path(__file__).resolve().parent)
+if _SCRIPTS_DIR not in sys.path:
+    sys.path.insert(0, _SCRIPTS_DIR)
+
+from ai_builder_receipt import (  # noqa: E402
+    ReceiptError,
+    load_release_receipt,
+    load_summary_receipt,
+)
+from ai_builder_release_gate import (  # noqa: E402
+    EvaluatorPin,
+    ReleaseGateError,
+    evaluate,
+    feasibility_audit,
+    matrix_state_from_payload,
+)
+
+DEFAULT_MATRIX_STATE = (
+    Path(__file__).resolve().with_name("ai_builder_release_matrix_state.json")
+)
 
 # Better outcomes rank higher; a transition to a higher rank is an
 # improvement. Ties are "changed" but neither improved nor regressed.
@@ -59,21 +90,19 @@ def _load_rows(path: Path) -> tuple[dict[str, list[dict[str, Any]]], dict[str, A
     large: 36 of 122 cases changed outcome between two runs of neighbouring
     builds (2026-08-06). Callers decide how to summarize; nothing is dropped
     here.
+
+    Reading is fail-closed and owned by `ai_builder_receipt`: this loader used
+    to skip any row it could not read, so a truncated receipt compared as a
+    smaller, healthier run.
     """
 
-    summary = cast(dict[str, Any], json.loads(path.read_text()))
+    receipt = load_summary_receipt(path)
     rows: dict[str, list[dict[str, Any]]] = {}
-    for row_value in cast(list[Any], summary.get("results") or []):
-        if not isinstance(row_value, dict):
-            continue
-        row = cast(dict[str, Any], row_value)
-        case_id = row.get("case_id")
-        if not isinstance(case_id, str) or not case_id:
-            continue
-        rows.setdefault(case_id, []).append(row)
+    for observation in receipt.observations:
+        rows.setdefault(observation.case_id, []).append(dict(observation.row))
     for case_rows in rows.values():
         case_rows.sort(key=lambda item: item.get("repetition") or 0)
-    return rows, summary
+    return rows, dict(receipt.summary)
 
 
 def _failure_codes(row: dict[str, Any]) -> tuple[str, ...]:
@@ -867,17 +896,142 @@ def _render_markdown(report: dict[str, Any], *, only_changed: bool) -> str:
     return "\n".join(lines)
 
 
+def _git(*arguments: str, cwd: Path) -> str:
+    result = subprocess.run(
+        ["git", *arguments],
+        capture_output=True,
+        text=True,
+        cwd=cwd,
+        check=False,
+    )
+    if result.returncode != 0:
+        raise SystemExit(f"git {' '.join(arguments)} failed: {result.stderr.strip()}")
+    return result.stdout.strip()
+
+
+def evaluator_pin() -> EvaluatorPin:
+    """Where this verdict is being computed, and whether the evaluator is frozen.
+
+    The release policy cannot name the commit that contains it, so freshness is
+    proved from the other side: the evaluator must be checked out at the
+    receipt's own revision with NO uncommitted tracked changes. Checking only
+    the policy file would leave the arithmetic and the invariant kinds free to
+    change after the run was seen, which is the same false-green by a longer
+    route.
+    """
+
+    directory = DEFAULT_MATRIX_STATE.resolve().parent
+    return EvaluatorPin(
+        revision=_git("rev-parse", "HEAD", cwd=directory),
+        evaluator_tree_clean=not _git(
+            "status", "--porcelain", "--untracked-files=no", cwd=directory
+        ),
+    )
+
+
+def release_verdict_report(
+    suite_dir: Path,
+    *,
+    pin: EvaluatorPin,
+    feasibility: bool = False,
+) -> dict[str, Any]:
+    """Judge one suite directory. Every number below is the gate module's.
+
+    The policy is the tracked canonical file, never an operator-supplied path:
+    a `--matrix-state` flag is a way to hand the gate a friendlier, untracked
+    set of supported rows after seeing the run.
+    """
+
+    matrix_state_path = DEFAULT_MATRIX_STATE
+    receipt = load_release_receipt(suite_dir)
+    matrix = matrix_state_from_payload(
+        json.loads(matrix_state_path.read_text(encoding="utf-8")),
+        where=str(matrix_state_path),
+    )
+    report = evaluate(receipt, matrix, pin).as_json()
+    report["suite_dir"] = str(suite_dir)
+    report["matrix_state"] = str(matrix_state_path)
+    report["evaluator_revision"] = pin.revision
+    if feasibility:
+        report["feasibility"] = feasibility_audit(receipt, matrix, pin)
+    return report
+
+
+def _render_release_markdown(report: dict[str, Any]) -> str:
+    release = cast(str, report["release"])
+    lines = [f"# Release verdict: **{release.upper()}**", ""]
+    invalidity = cast(list[str], report["invalidity"])
+    if invalidity:
+        lines.append(
+            "## The receipt cannot be scored (fail-closed; every reason at once)"
+        )
+        lines.extend(f"- {reason}" for reason in invalidity)
+        lines.append("")
+        return "\n".join(lines)
+    lines.append("## Gate rows")
+    for row in cast(list[dict[str, Any]], report["rows"]):
+        scope = "gating" if row["gating"] else "reported"
+        lines.append(
+            f"- [{row['verdict'].upper()}] row {row['row']} {row['name']} "
+            f"({scope}, {row['population']}): {row['actual']} "
+            f"{row['direction']} {row['threshold']}"
+        )
+        detail = row.get("detail")
+        if detail:
+            lines.append(f"  - {json.dumps(detail, ensure_ascii=False)}")
+    trajectory = cast(dict[str, Any], report["trajectory"])
+    lines.append("")
+    lines.append(
+        f"## Conformance trajectory: complete={trajectory['complete']}"
+        if trajectory
+        else "## Conformance trajectory: not evaluated"
+    )
+    if trajectory:
+        lines.append(
+            f"- {json.dumps(trajectory['conformance_instability'], ensure_ascii=False)}"
+        )
+    feasibility = cast(dict[str, Any] | None, report.get("feasibility"))
+    if feasibility is not None:
+        lines.append("")
+        lines.append(f"## Feasibility audit: feasible={feasibility['feasible']}")
+        # A gate a perfect product cannot pass is a plan defect, not a product
+        # failure, and it must be named as such before anyone tries to fix the
+        # product to satisfy it.
+        for row in cast(list[dict[str, Any]], feasibility["unpassable_rows"]):
+            lines.append(f"- UNPASSABLE row {row['row']} {row['name']}")
+        for reason in cast(list[str], feasibility["invalidity"]):
+            lines.append(f"- receipt invalid under a perfect run: {reason}")
+    return "\n".join(lines)
+
+
+_INVALID_RECEIPT_EXIT = 2
+
+
+def _release_exit_code(report: dict[str, Any]) -> int:
+    if report["release"] == "invalid":
+        return _INVALID_RECEIPT_EXIT
+    feasibility = cast(dict[str, Any] | None, report.get("feasibility"))
+    if feasibility is not None and not feasibility["feasible"]:
+        return _INVALID_RECEIPT_EXIT
+    return 0 if report["release"] == "go" else 1
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("baseline", type=Path)
-    parser.add_argument("current", type=Path)
-    parser.add_argument("--format", choices=("markdown", "json"), default="markdown")
-    parser.add_argument(
+    modes = parser.add_subparsers(dest="mode", required=True)
+
+    compare_mode = modes.add_parser("compare", help="Compare two receipts.")
+    compare_mode.add_argument("baseline", type=Path)
+    compare_mode.add_argument("current", type=Path)
+    compare_mode.add_argument(
+        "--format", choices=("markdown", "json"), default="markdown"
+    )
+    compare_mode.add_argument(
         "--only-changed",
         action="store_true",
         help="Omit unchanged, stable cases from the per-case section.",
     )
-    parser.add_argument(
+    compare_mode.add_argument(
         "--allow-harness-change",
         action="store_true",
         help=(
@@ -886,7 +1040,7 @@ def main() -> None:
             "cases are excluded from direction counts."
         ),
     )
-    parser.add_argument(
+    compare_mode.add_argument(
         "--noise-margin",
         type=int,
         default=None,
@@ -897,7 +1051,52 @@ def main() -> None:
             "result is not a margin."
         ),
     )
+
+    release_mode = modes.add_parser(
+        "release-verdict", help="Judge one receipt against the release gate."
+    )
+    release_mode.add_argument(
+        "suite_dir",
+        type=Path,
+        help=(
+            "The suite directory holding suite-summary.json, "
+            "release-manifest.json and the observation bundles."
+        ),
+    )
+    release_mode.add_argument(
+        "--feasibility",
+        action="store_true",
+        help=(
+            "Also audit whether a PERFECT run of this manifest could pass every "
+            "gate; an unpassable gate is a plan defect, not a product failure."
+        ),
+    )
+    release_mode.add_argument(
+        "--format", choices=("markdown", "json"), default="markdown"
+    )
+
     args = parser.parse_args()
+    if args.mode == "release-verdict":
+        try:
+            report = release_verdict_report(
+                args.suite_dir,
+                pin=evaluator_pin(),
+                feasibility=args.feasibility,
+            )
+        except (ReceiptError, ReleaseGateError) as error:
+            # A receipt that cannot be read is INVALID, never a NO-GO: exit 1
+            # means "measured and failed", and a caller must not confuse the
+            # two.
+            print(f"Refusing to judge this receipt: {error}", file=sys.stderr)
+            raise SystemExit(_INVALID_RECEIPT_EXIT) from error
+        if args.format == "json":
+            json.dump(report, sys.stdout, ensure_ascii=False, indent=2)
+            sys.stdout.write("\n")
+        else:
+            sys.stdout.write(_render_release_markdown(report))
+            sys.stdout.write("\n")
+        raise SystemExit(_release_exit_code(report))
+
     report = compare(
         args.baseline,
         args.current,

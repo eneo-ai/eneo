@@ -31,6 +31,10 @@ def _compare_module() -> ModuleType:
 
 def _summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
     return {
+        "artifact_schema_version": "ai-builder-live-release.v4",
+        "artifact_mode": "live_execution_exploratory_summary",
+        "repetitions": 3,
+        "release_identity": {"source": {"revision": "a" * 40}},
         "app_version": "DEV-test",
         "base_url": "http://localhost:8123/api/v1",
         "evaluator_identity": {
@@ -61,8 +65,12 @@ def _row(
     return {
         "case_id": case_id,
         "repetition": repetition,
+        "observation_status": "completed",
         "outcome_class": outcome,
         "expectation_verdict": verdict,
+        "case_contract_sha256": "c" * 64,
+        "bundle_file": f"{case_id}-r{repetition}.json",
+        "bundle_sha256": "b" * 64,
         "cohorts": cohorts if cohorts is not None else [],
     }
 

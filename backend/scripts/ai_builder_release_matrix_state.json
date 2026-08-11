@@ -1,0 +1,20 @@
+{
+  "artifact_schema_version": "ai-builder-release-matrix.v1",
+  "description": "The archetype rows a release verdict may generalize to. Row identity is the primary pattern id of the derivation cascade (ai_builder_architecture_derivation.py:_primary_pattern_id), an ordered early-return and therefore mutually exclusive by construction. Modifiers are pattern ids that are not rows; declaring them is what makes an undeclared pattern id fail closed instead of being read as one or the other. This file is release policy, not a source mirror: it must be committed before the run it judges, and the evaluator must be checked out at the receipt's own revision with this file clean.",
+  "rows": {
+    "audio_to_artifact_report": "supported",
+    "audio_transcription": "supported",
+    "document_to_docx_template": "supported",
+    "document_to_pdf_report": "supported",
+    "document_to_structured_report": "supported",
+    "extract_structured_fields": "supported",
+    "json_to_artifact_report": "supported",
+    "json_to_structured_payload": "supported",
+    "json_to_text_summary": "supported",
+    "summarize_text": "supported",
+    "text_to_artifact_report": "supported"
+  },
+  "modifiers": [
+    "form_field_runtime_inputs"
+  ]
+}

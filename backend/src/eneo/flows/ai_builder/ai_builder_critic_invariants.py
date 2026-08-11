@@ -20,7 +20,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Literal, cast
+from typing import TYPE_CHECKING, cast
 
 from eneo.flows.ai_builder.ai_builder_architecture_errors import (
     AIBuilderArchitectureError,
@@ -33,6 +33,10 @@ from eneo.flows.ai_builder.ai_builder_assembly.plan import SOURCE_READER_INPUT_T
 from eneo.flows.ai_builder.ai_builder_checkpoint_contract import (
     baseline_spec_from_flow_steps,
     checkpoint_intent_mismatches,
+)
+from eneo.flows.ai_builder.ai_builder_critic_invariant_kinds import (
+    CRITIC_INVARIANT_KINDS,
+    CriticInvariantKind,
 )
 from eneo.flows.ai_builder.ai_builder_form_field_usage import (
     find_unused_form_fields,
@@ -138,7 +142,6 @@ class CriticContext:
 
 CriticCheck = Callable[[CriticContext], bool]
 CriticRemediation = str | Callable[[CriticContext], str]
-CriticInvariantKind = Literal["architecture", "semantic"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -155,14 +158,22 @@ class CriticInvariant:
 
     `evidence(context)` returns True when the invariant is violated and the
     critic should surface `remediation` to the planner.
+
+    `kind` is not declared here: it is read from
+    `ai_builder_critic_invariant_kinds`, the one table both this registry and
+    the offline release gate answer to. An invariant missing from that table
+    raises on first use rather than defaulting to a classification.
     """
 
     id: str
-    kind: CriticInvariantKind
     description: str
     evidence: CriticCheck
     remediation: CriticRemediation
     edit_topology: bool = False
+
+    @property
+    def kind(self) -> CriticInvariantKind:
+        return CRITIC_INVARIANT_KINDS[self.id]
 
 
 # ── Shared helpers ───────────────────────────────────────────────────────
@@ -193,7 +204,6 @@ def _checkpoint_intent_mismatch_evidence(context: CriticContext) -> bool:
 
 _CHECKPOINT_INTENT_MISMATCH = CriticInvariant(
     id="checkpoint_intent_mismatch",
-    kind="architecture",
     description=(
         "Typed checkpoint intent must match the compiled output producer and mode."
     ),
@@ -405,7 +415,6 @@ def _runtime_metadata_requires_form_fields_remediation(
 
 _RUNTIME_METADATA_REQUIRES_FORM_FIELDS = CriticInvariant(
     id="runtime_metadata_requires_form_fields",
-    kind="semantic",
     description=(
         "When the user asked for reusable runtime metadata, the plan must model "
         "those values as `form_fields` instead of hiding them in prompt text."
@@ -425,7 +434,6 @@ def _sectioned_form_intake_requires_form_fields_evidence(
 
 _SECTIONED_FORM_INTAKE_REQUIRES_FORM_FIELDS = CriticInvariant(
     id="sectioned_form_intake_requires_form_fields",
-    kind="semantic",
     description=(
         "Sectioned free-text intake (one rubric/section per field) must be "
         "modelled as `form_fields`, not as a per-section collection step."
@@ -452,7 +460,6 @@ def _rich_workflow_requires_form_fields_evidence(context: CriticContext) -> bool
 
 _RICH_WORKFLOW_REQUIRES_FORM_FIELDS = CriticInvariant(
     id="rich_workflow_requires_form_fields",
-    kind="semantic",
     description=(
         "A rich document workflow that also needs manual completions must "
         "declare `form_fields` instead of hiding them in instruction text."
@@ -489,7 +496,6 @@ def _rich_workflow_requires_json_contract_step_evidence(
 
 _RICH_WORKFLOW_REQUIRES_JSON_CONTRACT_STEP = CriticInvariant(
     id="rich_workflow_requires_json_contract_step",
-    kind="semantic",
     description=(
         "A rich document workflow that will reuse structured analysis must "
         "include an intermediate JSON step with an `output_contract`."
@@ -514,7 +520,6 @@ def _rich_workflow_requires_multiple_steps_evidence(context: CriticContext) -> b
 
 _RICH_WORKFLOW_REQUIRES_MULTIPLE_STEPS = CriticInvariant(
     id="rich_workflow_requires_multiple_steps",
-    kind="semantic",
     description=(
         "A rich document workflow that calls for analysis or review must not "
         "collapse into fewer than three steps."
@@ -543,7 +548,6 @@ def _pdf_terminal_alignment_evidence(context: CriticContext) -> bool:
 
 _PDF_TERMINAL_OUTPUT_ALIGNMENT = CriticInvariant(
     id="pdf_terminal_output_alignment",
-    kind="architecture",
     description=(
         "When the user explicitly picks PDF as the final artefact, the terminal "
         "step must produce `output_type=PDF`."
@@ -568,7 +572,6 @@ def _docx_terminal_alignment_evidence(context: CriticContext) -> bool:
 
 _DOCX_TERMINAL_OUTPUT_ALIGNMENT = CriticInvariant(
     id="docx_terminal_output_alignment",
-    kind="architecture",
     description=(
         "When the user explicitly picks DOCX as the final artefact, the "
         "terminal step must produce `output_type=DOCX`."
@@ -586,7 +589,6 @@ _DOCX_TERMINAL_OUTPUT_ALIGNMENT = CriticInvariant(
 
 _NON_TERMINAL_STEP_DOCUMENT_CONVERSION_FORBIDDEN = CriticInvariant(
     id="non_terminal_step_document_conversion_forbidden",
-    kind="architecture",
     description=(
         "When the user only asks to change the final artefact format, the "
         "plan must not flip intermediate analysis steps to DOCX/PDF output."
@@ -602,7 +604,6 @@ _NON_TERMINAL_STEP_DOCUMENT_CONVERSION_FORBIDDEN = CriticInvariant(
 
 _NON_TERMINAL_STEP_TEMPLATE_FILL_FORBIDDEN = CriticInvariant(
     id="non_terminal_step_template_fill_forbidden",
-    kind="architecture",
     description=(
         "`output_mode=template_fill` only makes sense on the terminal step of "
         "an output-format edit; intermediate steps must stay analytical."
@@ -635,7 +636,6 @@ def _structured_extraction_requires_json_contract_step_evidence(
 
 _STRUCTURED_EXTRACTION_REQUIRES_JSON_CONTRACT_STEP = CriticInvariant(
     id="structured_extraction_requires_json_contract_step",
-    kind="semantic",
     description=(
         "Conversations that imply downstream reuse of structured fields must "
         "include a JSON contract step before the terminal output."
@@ -673,7 +673,6 @@ def _explicit_json_contract_request_without_step_evidence(
 
 _EXPLICIT_JSON_CONTRACT_REQUEST_WITHOUT_STEP = CriticInvariant(
     id="explicit_json_contract_request_without_step",
-    kind="semantic",
     description=(
         "When the conversation explicitly asks for JSON/fields/contracts, the "
         "plan must include a JSON-extraction step unless the terminal step is "
@@ -705,7 +704,6 @@ def _standalone_audio_requires_transcription_step_evidence(
 
 _STANDALONE_AUDIO_REQUIRES_TRANSCRIPTION_STEP = CriticInvariant(
     id="standalone_audio_requires_transcription_step",
-    kind="architecture",
     description=(
         "When the slot classifier resolves the runtime input to audio (not "
         "mixed with documents), the plan must include a dedicated "
@@ -792,7 +790,6 @@ def _is_structured_source_reader(step: StepSpec) -> bool:
 
 _SOURCE_READER_REQUIRED_FIELDS_MUST_BE_CAPTURED = CriticInvariant(
     id="source_reader_required_fields_must_be_captured",
-    kind="architecture",
     description=(
         "Source-reader output contracts must retain the server-owned fields "
         "required by the accepted planning result contract."
@@ -898,7 +895,6 @@ def _named_result_obligations_remediation(context: CriticContext) -> str:
 
 _NAMED_RESULT_OBLIGATIONS_MUST_SURVIVE = CriticInvariant(
     id="named_result_obligations_must_survive",
-    kind="semantic",
     description=(
         "Field names the user explicitly requested must survive as keys in "
         "the outcome contract; named-result evidence does not pin the schema, so "
@@ -911,7 +907,6 @@ _NAMED_RESULT_OBLIGATIONS_MUST_SURVIVE = CriticInvariant(
 
 _ACTION_FOLLOWUP_REQUIRES_FOLLOWUP_FIELDS = CriticInvariant(
     id="action_followup_requires_followup_fields",
-    kind="semantic",
     description=(
         "When the user asks for action follow-up, the plan must preserve the "
         "follow-up fields that make the output useful."
@@ -986,7 +981,6 @@ def _field_reuse_requires_input_bindings_evidence(context: CriticContext) -> boo
 
 _FIELD_REUSE_REQUIRES_INPUT_BINDINGS = CriticInvariant(
     id="field_reuse_requires_input_bindings",
-    kind="semantic",
     description=(
         "When the conversation reuses named JSON fields downstream, the plan "
         "must declare `input_bindings` / `uses_previous_fields`."
@@ -1055,7 +1049,6 @@ def _spec_has_multiple_content_steps(spec: FlowDraftSpecCore) -> bool:
 
 _MULTI_DOCUMENT_COMPARE_REQUIRES_EXPLICIT_FAN_IN = CriticInvariant(
     id="multi_document_compare_requires_all_previous_steps",
-    kind="architecture",
     description=(
         "When the conversation describes comparing multiple documents, one "
         "non-renderer step must explicitly fan in multiple prior content steps "
@@ -1100,7 +1093,6 @@ def _spec_is_single_text_transform_step(spec: FlowDraftSpecCore) -> bool:
 
 _SIMPLE_TEXT_TRANSFORM_MUST_REMAIN_SINGLE_STEP = CriticInvariant(
     id="simple_text_transform_must_remain_single_step",
-    kind="semantic",
     description=(
         "A direct text-to-text transform must not add unrequested JSON, "
         "review, artifact, or multi-step structure."
@@ -1130,7 +1122,6 @@ def _json_input_rejects_all_previous_steps_source_evidence(
 
 _JSON_INPUT_REJECTS_ALL_PREVIOUS_STEPS_SOURCE = CriticInvariant(
     id="json_input_rejects_all_previous_steps_source",
-    kind="architecture",
     description=(
         "A step declaring `input_type=json` cannot read from "
         "`input_source=all_previous_steps` because the runtime concatenates "
@@ -1262,7 +1253,6 @@ def _document_renderer_must_immediately_follow_body_writer_evidence(
 
 _DOCUMENT_RENDERER_MUST_IMMEDIATELY_FOLLOW_BODY_WRITER = CriticInvariant(
     id="document_renderer_must_immediately_follow_body_writer",
-    kind="semantic",
     description=(
         "A document body writer must remain immediately adjacent to its renderer."
     ),
@@ -1290,7 +1280,6 @@ def _contains_any(text: str, markers: tuple[str, ...]) -> bool:
 
 _TERMINAL_RENDERER_MUST_NOT_CONSUME_REVIEW_ONLY_STEP = CriticInvariant(
     id="terminal_renderer_must_not_consume_review_only_step",
-    kind="semantic",
     description=(
         "A terminal DOCX/PDF renderer should not render a review-only step. "
         "If a review step is last before the renderer, it must output the "
@@ -1442,7 +1431,6 @@ def _section_writer_count(spec: FlowDraftSpecCore) -> int:
 
 _REQUESTED_OUTPUT_SECTIONS_REQUIRE_SECTION_WRITERS = CriticInvariant(
     id="requested_output_sections_require_section_writers",
-    kind="semantic",
     description=(
         "When the user names several output sections for a generated report, "
         "the plan must preserve them as section-writing work. A single broad "
@@ -1511,7 +1499,6 @@ def _redundant_terminal_json_format_tail_after_final_text_composer_evidence(
 
 _REDUNDANT_TERMINAL_JSON_FORMAT_TAIL_AFTER_FINAL_TEXT_COMPOSER = CriticInvariant(
     id="redundant_terminal_json_format_tail_after_final_text_composer",
-    kind="semantic",
     description=(
         "A flow that has already produced its final text answer should not "
         "append an unrequested JSON formatting step, nor a JSON formatting "
@@ -1633,7 +1620,6 @@ def _final_text_step_must_reference_relevant_structured_outputs_remediation(
 
 _FINAL_TEXT_STEP_MUST_REFERENCE_RELEVANT_STRUCTURED_OUTPUTS = CriticInvariant(
     id="final_text_step_must_reference_relevant_structured_outputs",
-    kind="semantic",
     description=(
         "When at least two prior content steps emit a structured JSON "
         "output_contract, at least two relevant producers must be explicitly "
@@ -1665,7 +1651,6 @@ def _form_fields_declared_must_be_referenced_evidence(
 
 _FORM_FIELDS_DECLARED_MUST_BE_REFERENCED = CriticInvariant(
     id="form_fields_declared_must_be_referenced",
-    kind="semantic",
     description=(
         "Every form_field declared on the flow must be referenced by at "
         "least one step's templates (instructions, input_bindings, or "
@@ -1705,7 +1690,6 @@ def _template_fill_docx_requires_template_fill_step_evidence(
 
 _TEMPLATE_FILL_DOCX_REQUIRES_TEMPLATE_FILL_STEP = CriticInvariant(
     id="template_fill_docx_requires_template_fill_step",
-    kind="architecture",
     description=(
         "Template-based DOCX generation must include a step with "
         "`output_mode=template_fill`."
@@ -1727,7 +1711,6 @@ def _generated_docx_rejects_template_fill_evidence(context: CriticContext) -> bo
 
 _GENERATED_DOCX_REJECTS_TEMPLATE_FILL = CriticInvariant(
     id="generated_docx_rejects_template_fill",
-    kind="architecture",
     description=(
         "Generated DOCX (no template) must not use `output_mode=template_fill`."
     ),
@@ -1753,7 +1736,6 @@ def _mixed_audio_doc_rejects_file_degradation_evidence(
 
 _MIXED_AUDIO_DOC_REJECTS_FILE_DEGRADATION = CriticInvariant(
     id="mixed_audio_doc_rejects_file_degradation",
-    kind="architecture",
     description=(
         "When the user wants to add audio alongside an existing document flow, "
         "the plan must not degrade the document entry to a generic file input."
@@ -1777,7 +1759,6 @@ def _mixed_audio_doc_rejects_pseudo_transcription_evidence(
 
 _MIXED_AUDIO_DOC_REJECTS_PSEUDO_TRANSCRIPTION = CriticInvariant(
     id="mixed_audio_doc_rejects_pseudo_transcription",
-    kind="architecture",
     description=(
         "Mixed audio/document edits must not fake transcription inside a "
         "non-audio step instead of adding a real transcription step."
@@ -1801,7 +1782,6 @@ def _mixed_audio_doc_requires_real_transcription_step_evidence(
 
 _MIXED_AUDIO_DOC_REQUIRES_REAL_TRANSCRIPTION_STEP = CriticInvariant(
     id="mixed_audio_doc_requires_real_transcription_step",
-    kind="architecture",
     description=(
         "When the user combines audio transcription with documents, the plan "
         "must pick a single `flow_input` architecture — either keep documents "

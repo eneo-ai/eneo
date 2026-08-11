@@ -7,6 +7,9 @@ import pytest
 from eneo.flows.ai_builder.ai_builder_architecture_errors import (
     AIBuilderArchitectureError,
 )
+from eneo.flows.ai_builder.ai_builder_critic_invariant_kinds import (
+    CRITIC_INVARIANT_KINDS,
+)
 from eneo.flows.ai_builder.ai_builder_critic_invariants import (
     CRITIC_INVARIANTS,
     enforce_architecture_critic_invariants,
@@ -57,41 +60,6 @@ if TYPE_CHECKING:
     )
     from eneo.flows.ai_builder.planning_state import AggregationIntent
     from eneo.flows.domain.flow import Flow
-
-
-EXPECTED_CRITIC_INVARIANT_KINDS = {
-    "checkpoint_intent_mismatch": "architecture",
-    "runtime_metadata_requires_form_fields": "semantic",
-    "sectioned_form_intake_requires_form_fields": "semantic",
-    "rich_workflow_requires_form_fields": "semantic",
-    "rich_workflow_requires_json_contract_step": "semantic",
-    "rich_workflow_requires_multiple_steps": "semantic",
-    "pdf_terminal_output_alignment": "architecture",
-    "docx_terminal_output_alignment": "architecture",
-    "non_terminal_step_document_conversion_forbidden": "architecture",
-    "non_terminal_step_template_fill_forbidden": "architecture",
-    "structured_extraction_requires_json_contract_step": "semantic",
-    "explicit_json_contract_request_without_step": "semantic",
-    "standalone_audio_requires_transcription_step": "architecture",
-    "source_reader_required_fields_must_be_captured": "architecture",
-    "action_followup_requires_followup_fields": "semantic",
-    "named_result_obligations_must_survive": "semantic",
-    "field_reuse_requires_input_bindings": "semantic",
-    "multi_document_compare_requires_all_previous_steps": "architecture",
-    "simple_text_transform_must_remain_single_step": "semantic",
-    "json_input_rejects_all_previous_steps_source": "architecture",
-    "document_renderer_must_immediately_follow_body_writer": "semantic",
-    "terminal_renderer_must_not_consume_review_only_step": "semantic",
-    "requested_output_sections_require_section_writers": "semantic",
-    "redundant_terminal_json_format_tail_after_final_text_composer": "semantic",
-    "final_text_step_must_reference_relevant_structured_outputs": "semantic",
-    "form_fields_declared_must_be_referenced": "semantic",
-    "template_fill_docx_requires_template_fill_step": "architecture",
-    "generated_docx_rejects_template_fill": "architecture",
-    "mixed_audio_doc_rejects_file_degradation": "architecture",
-    "mixed_audio_doc_rejects_pseudo_transcription": "architecture",
-    "mixed_audio_doc_requires_real_transcription_step": "architecture",
-}
 
 
 def test_critic_requires_typed_checkpoint_on_the_actual_report_producer() -> None:
@@ -1272,8 +1240,16 @@ def test_critic_context_omits_requirements_signal_without_summary() -> None:
 
 
 def test_critic_invariant_registry_has_stable_kind_map() -> None:
-    assert {invariant.id: invariant.kind for invariant in CRITIC_INVARIANTS} == (
-        EXPECTED_CRITIC_INVARIANT_KINDS
+    """The kinds table is the canonical classification; the registry obeys it.
+
+    Equality both ways: the release gate reads the table alone (importing the
+    evaluator would drag the application into an offline statistics tool), so a
+    registry entry the table does not know, or the reverse, is a silent
+    misclassification of what a release verdict scores.
+    """
+
+    assert {invariant.id: invariant.kind for invariant in CRITIC_INVARIANTS} == dict(
+        CRITIC_INVARIANT_KINDS
     )
 
 

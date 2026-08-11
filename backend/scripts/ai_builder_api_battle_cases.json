@@ -37,7 +37,7 @@
     }
   },
   "acquisition_contract": {
-    "artifact_schema_version": "ai-builder-live-release.v4",
+    "artifact_schema_version": "ai-builder-live-release.v5",
     "require_clean_source": true
   },
   "cases": [

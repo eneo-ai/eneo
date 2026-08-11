@@ -28,6 +28,32 @@ from urllib.parse import urlsplit, urlunsplit
 from urllib.request import Request, urlopen
 from uuid import uuid4
 
+# These are standalone scripts, not a package: operators run them directly and
+# tests load them by path, so neither route puts this directory on the import
+# path by itself.
+_SCRIPTS_DIR = str(Path(__file__).resolve().parent)
+if _SCRIPTS_DIR not in sys.path:
+    sys.path.insert(0, _SCRIPTS_DIR)
+
+from ai_builder_receipt import (  # noqa: E402
+    BUNDLE_FILE_FIELD,
+    BUNDLE_REFERENCE_FIELDS,
+    BUNDLE_SHA256_FIELD,
+    SUPPORTED_RECEIPT_ARTIFACT_VERSION,
+    acquisition_validity_checks,
+)
+from ai_builder_receipt import canonical_sha256 as _canonical_sha256  # noqa: E402
+from ai_builder_receipt import (  # noqa: E402
+    failure_summary_from_events as _failure_summary,
+)
+from ai_builder_receipt import is_sha256 as _is_sha256  # noqa: E402
+from ai_builder_receipt import (  # noqa: E402
+    receipt_membership_report as _suite_receipt_integrity,
+)
+from ai_builder_receipt import (
+    release_identity_recheck_checks as _release_identity_recheck_checks,
+)
+
 JsonObject = dict[str, Any]
 DEFAULT_CASES_FILE = Path(__file__).with_name("ai_builder_api_battle_cases.json")
 FIXTURE_DIR = Path(__file__).with_name("fixtures") / "ai_builder_battle"
@@ -47,7 +73,6 @@ QUESTION_RELEVANCE_SEMANTICS_VERSION = 2
 # not export an environment variable — the flagship runtime sentinel skipped
 # itself that way through six full suite runs.
 OUTCOME_CLASSIFICATION_SEMANTICS_VERSION = 3
-SUPPORTED_RECEIPT_ARTIFACT_VERSION = "ai-builder-live-release.v4"
 
 
 def _local_app_version() -> str:
@@ -1653,7 +1678,7 @@ def _run_suite(
                 bundle["release_identity"] = release_identity
             bundle_path = _write_bundle(
                 suite_dir,
-                bundle,
+                seal_observation(bundle),
                 suffix=f"{case.case_id}{repetition_suffix}",
             )
             result = _suite_result(bundle, bundle_path)
@@ -1674,7 +1699,7 @@ def _run_suite(
             }
             failure_path = _write_bundle(
                 suite_dir,
-                failure,
+                seal_observation(failure),
                 suffix=f"{case.case_id}{repetition_suffix}-failure",
             )
             print(f"\n=== {label} ===\ncase failed: {error}", file=sys.stderr)
@@ -1753,15 +1778,11 @@ def _run_suite(
         ValueError,
     ) as error:
         release_identity_recheck = {"error": str(error)}
-        release_identity_recheck_checks = [
-            {
-                "name": f"suite_{component}_identity_unchanged",
-                "passed": False,
-                "actual": str(error),
-                "expected": release_identity.get(component),
-            }
-            for component in ("source", "build", "model", "prompts", "target")
-        ]
+        release_identity_recheck_checks = _release_identity_recheck_checks(
+            expected=release_identity,
+            actual=release_identity_recheck,
+            require_verified_target=is_release_run,
+        )
     suite_identity_failure_count = sum(
         1
         for check in release_identity_recheck_checks
@@ -1773,7 +1794,7 @@ def _run_suite(
     identity_failure_count = (
         suite_identity_failure_count + observation_identity_failure_count
     )
-    acquisition_checks = _evaluate_acquisition_validity(
+    acquisition_checks = acquisition_validity_checks(
         execution_failure_observation_count=case_error_count,
         invalid_evidence_observation_count=invalid_evidence_observation_count,
     )
@@ -1785,7 +1806,7 @@ def _run_suite(
     receipt_complete = receipt_integrity["status"] == "complete"
     sentinel_checks_pass = (
         identity_failure_count == 0
-        # `_evaluate_acquisition_validity` owns the two observation-status
+        # `acquisition_validity_checks` owns the two observation-status
         # checks; identity and receipt completeness are gated separately.
         # An exploratory probe may legitimately contain an execution
         # failure or invalid evidence - that is often what is being probed -
@@ -2093,74 +2114,6 @@ def _required_case_identity_checks(
         }
     )
     return checks
-
-
-def _release_identity_recheck_checks(
-    *,
-    expected: Mapping[str, object],
-    actual: Mapping[str, object],
-    require_verified_target: bool = False,
-) -> list[JsonObject]:
-    components = ["source", "build", "model", "prompts"]
-    if "target" in expected or "target" in actual:
-        components.append("target")
-    checks = [
-        {
-            "name": f"suite_{component}_identity_unchanged",
-            "passed": actual.get(component) == expected.get(component),
-            "actual": actual.get(component),
-            "expected": expected.get(component),
-        }
-        for component in components
-    ]
-    if require_verified_target and "target" in expected:
-        target = actual.get("target")
-        target = target if isinstance(target, Mapping) else {}
-        checks.append(
-            {
-                "name": "suite_target_runtime_verified",
-                "passed": target.get("verified") is True,
-                "actual": dict(target),
-                "expected": "running backend version matches the local benchmark build",
-            }
-        )
-    return checks
-
-
-def _evaluate_acquisition_validity(
-    *,
-    execution_failure_observation_count: int,
-    invalid_evidence_observation_count: int,
-) -> list[JsonObject]:
-    """Acquisition validity only: did we MEASURE cleanly, not did the product win.
-
-    Both invariants are status-based and span EVERY selected observation, so a
-    corrupt observation cannot ride through on a non-required case:
-
-    * `execution_failure` - a caught HTTP, timeout or harness error written as
-      a `live_execution_failure` bundle. It can still satisfy bundle-count and
-      hash completeness and leaves `evidence_valid` unset, so completeness
-      alone would not catch it.
-    * `invalid_evidence` - provenance that failed its own checks.
-
-    Deliberately absent: product expectation failures (the release evaluator
-    scores those), and `error_terminated` observations, whose journey outcome
-    IS the product truth and which have no provenance to validate.
-    """
-    return [
-        {
-            "name": "execution_failure_observations",
-            "passed": execution_failure_observation_count == 0,
-            "actual": execution_failure_observation_count,
-            "threshold": 0,
-        },
-        {
-            "name": "invalid_evidence_observations",
-            "passed": invalid_evidence_observation_count == 0,
-            "actual": invalid_evidence_observation_count,
-            "threshold": 0,
-        },
-    ]
 
 
 def _run_case(
@@ -4091,14 +4044,6 @@ def _first_pass_provenance_checks(
     ]
 
 
-def _is_sha256(value: object) -> bool:
-    return (
-        isinstance(value, str)
-        and len(value) == 64
-        and all(character in "0123456789abcdef" for character in value)
-    )
-
-
 def _git_output(*args: str) -> str:
     repository_root = Path(__file__).resolve().parents[2]
     result = subprocess.run(
@@ -4109,16 +4054,6 @@ def _git_output(*args: str) -> str:
         text=True,
     )
     return result.stdout.strip()
-
-
-def _canonical_sha256(value: object) -> str:
-    encoded = json.dumps(
-        value,
-        ensure_ascii=False,
-        separators=(",", ":"),
-        sort_keys=True,
-    ).encode("utf-8")
-    return hashlib.sha256(encoded).hexdigest()
 
 
 def _write_json_exclusive(path: Path, payload: Mapping[str, object]) -> None:
@@ -4138,7 +4073,42 @@ def _write_bytes_exclusive(path: Path, payload: bytes) -> None:
         os.fsync(handle.fileno())
 
 
+def seal_observation(bundle: JsonObject) -> JsonObject:
+    """Derive the observation and put it INSIDE the bundle, before hashing.
+
+    The harness is the acquisition owner: it decides an observation's status,
+    outcome, expectation verdict and evidence validity from the whole bundle.
+    Deriving that and then publishing it only in a separate, unhashed summary
+    left the judgement editable — a failed observation could be relabelled a
+    passing one with every bundle digest still intact. Sealing it here makes
+    the digest cover the judgement too, so the release reader compares rather
+    than re-derives.
+    """
+
+    bundle["observation"] = _observation_projection(bundle)
+    return bundle
+
+
 def _suite_result(bundle: JsonObject, bundle_path: Path) -> JsonObject:
+    """The sealed observation, plus the two facts only the file can carry."""
+
+    observation = bundle.get("observation")
+    if not isinstance(observation, Mapping):
+        raise ValueError(f"{bundle_path} carries no sealed observation.")
+    unexpected_references = BUNDLE_REFERENCE_FIELDS.intersection(observation)
+    if unexpected_references:
+        raise ValueError(
+            f"{bundle_path} seals file-only fields {sorted(unexpected_references)}."
+        )
+    bundle_bytes = bundle_path.read_bytes()
+    return {
+        **cast(JsonObject, dict(observation)),
+        BUNDLE_FILE_FIELD: bundle_path.name,
+        BUNDLE_SHA256_FIELD: hashlib.sha256(bundle_bytes).hexdigest(),
+    }
+
+
+def _observation_projection(bundle: JsonObject) -> JsonObject:
     report = bundle.get("quality_report")
     checks = report.get("checks") if isinstance(report, Mapping) else []
     identity_checks = bundle.get("release_identity_checks")
@@ -4211,7 +4181,6 @@ def _suite_result(bundle: JsonObject, bundle_path: Path) -> JsonObject:
         observation_status = "completed"
         expectation_verdict = "fail" if raw_failed_checks else "pass"
     failed_checks = raw_failed_checks if expectation_verdict in {"pass", "fail"} else []
-    bundle_bytes = bundle_path.read_bytes()
     return {
         "artifact_mode": bundle.get("artifact_mode"),
         "case_identity": case_identity,
@@ -4228,8 +4197,6 @@ def _suite_result(bundle: JsonObject, bundle_path: Path) -> JsonObject:
         "observation_input_verified": (
             observation_input_identity.get("verified") is True
         ),
-        "bundle_file": bundle_path.name,
-        "bundle_sha256": hashlib.sha256(bundle_bytes).hexdigest(),
         "observation_status": observation_status,
         "expectation_verdict": expectation_verdict,
         "outcome_class": outcome_class,
@@ -4425,126 +4392,6 @@ def _suite_observation_summary(results: list[JsonObject]) -> JsonObject:
     }
 
 
-def _observation_key(value: Mapping[str, object]) -> tuple[str, int] | None:
-    case_id = value.get("case_id")
-    repetition = value.get("repetition")
-    if (
-        not isinstance(case_id, str)
-        or not case_id
-        or not isinstance(repetition, int)
-        or isinstance(repetition, bool)
-        or repetition < 1
-    ):
-        return None
-    return case_id, repetition
-
-
-def _observation_key_payload(key: tuple[str, int]) -> JsonObject:
-    return {"case_id": key[0], "repetition": key[1]}
-
-
-def _suite_receipt_integrity(
-    *,
-    expected_observations: list[JsonObject],
-    results: list[JsonObject],
-    suite_dir: Path,
-) -> JsonObject:
-    expected_by_key: dict[tuple[str, int], str] = {}
-    invalid_expected_keys: list[JsonObject] = []
-    for expected in expected_observations:
-        key = _observation_key(expected)
-        contract_sha256 = expected.get("case_contract_sha256")
-        if key is None or not _is_sha256(contract_sha256) or key in expected_by_key:
-            invalid_expected_keys.append(dict(expected))
-            continue
-        expected_by_key[key] = str(contract_sha256)
-
-    actual_counts: dict[tuple[str, int], int] = {}
-    actual_results: dict[tuple[str, int], JsonObject] = {}
-    invalid_actual_keys: list[JsonObject] = []
-    for result in results:
-        key = _observation_key(result)
-        if key is None:
-            invalid_actual_keys.append(
-                {
-                    "case_id": result.get("case_id"),
-                    "repetition": result.get("repetition"),
-                }
-            )
-            continue
-        actual_counts[key] = actual_counts.get(key, 0) + 1
-        actual_results.setdefault(key, result)
-
-    expected_keys = set(expected_by_key)
-    actual_keys = set(actual_counts)
-    missing_keys = sorted(expected_keys - actual_keys)
-    unexpected_keys = sorted(actual_keys - expected_keys)
-    duplicate_keys = sorted(key for key, count in actual_counts.items() if count > 1)
-    case_contract_mismatches: list[JsonObject] = []
-    invalid_bundle_references: list[JsonObject] = []
-    for key in sorted(expected_keys & actual_keys):
-        result = actual_results[key]
-        if result.get("case_contract_sha256") != expected_by_key[key]:
-            case_contract_mismatches.append(_observation_key_payload(key))
-        bundle_file = result.get("bundle_file")
-        bundle_sha256 = result.get("bundle_sha256")
-        if (
-            not isinstance(bundle_file, str)
-            or not bundle_file
-            or Path(bundle_file).is_absolute()
-            or Path(bundle_file).name != bundle_file
-        ):
-            invalid_bundle_references.append(
-                {**_observation_key_payload(key), "reason": "invalid_relative_path"}
-            )
-            continue
-        if not _is_sha256(bundle_sha256):
-            invalid_bundle_references.append(
-                {**_observation_key_payload(key), "reason": "invalid_sha256"}
-            )
-            continue
-        bundle_path = suite_dir / bundle_file
-        if not bundle_path.is_file():
-            invalid_bundle_references.append(
-                {**_observation_key_payload(key), "reason": "missing_bundle"}
-            )
-            continue
-        if hashlib.sha256(bundle_path.read_bytes()).hexdigest() != bundle_sha256:
-            invalid_bundle_references.append(
-                {**_observation_key_payload(key), "reason": "sha256_mismatch"}
-            )
-
-    complete = not any(
-        (
-            invalid_expected_keys,
-            invalid_actual_keys,
-            missing_keys,
-            unexpected_keys,
-            duplicate_keys,
-            case_contract_mismatches,
-            invalid_bundle_references,
-        )
-    )
-    return {
-        "status": "complete" if complete else "partial",
-        "expected_observation_count": len(expected_observations),
-        "actual_observation_count": len(results),
-        "missing_observation_keys": [
-            _observation_key_payload(key) for key in missing_keys
-        ],
-        "unexpected_observation_keys": [
-            _observation_key_payload(key) for key in unexpected_keys
-        ],
-        "duplicate_observation_keys": [
-            _observation_key_payload(key) for key in duplicate_keys
-        ],
-        "invalid_expected_observation_keys": invalid_expected_keys,
-        "invalid_actual_observation_keys": invalid_actual_keys,
-        "case_contract_mismatches": case_contract_mismatches,
-        "invalid_bundle_references": invalid_bundle_references,
-    }
-
-
 def _verified_suite_receipt_membership(
     *,
     suite_summary_path: Path,
@@ -4717,7 +4564,9 @@ def _reanalyze_bundles(
                 "runtime_metrics": _runtime_metrics_from_quality_report(report),
                 "quality_report": report,
             }
-            output_path = _write_reanalysis_bundle(output_dir, bundle_path, refreshed)
+            output_path = _write_reanalysis_bundle(
+                output_dir, bundle_path, seal_observation(refreshed)
+            )
             _print_summary(summary, output_path)
             for warning in report.get("warnings", []):
                 print(f"  warning: {warning}")
@@ -5717,20 +5566,6 @@ def _extend_failure_observability(
                 ("repair_feedback", "retry_feedback", "feedback"),
             ),
         )
-
-
-def _failure_summary(event_summary: Mapping[str, Any]) -> JsonObject:
-    return {
-        "error_codes": _string_list(event_summary.get("error_codes")),
-        "failure_codes": _string_list(event_summary.get("failure_codes")),
-        "critic_issue_ids": _string_list(event_summary.get("critic_issue_ids")),
-        "repair_feedback_texts": _string_list(
-            event_summary.get("repair_feedback_texts")
-        ),
-        "error_details": event_summary.get("error_details")
-        if isinstance(event_summary.get("error_details"), list)
-        else [],
-    }
 
 
 def _event_text(data: object) -> str:
