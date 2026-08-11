@@ -51,10 +51,6 @@ mcp = FastMCP(
     ),
 )
 
-# Attachments named in the read_file description; past this the listing ends
-# with a count, mirroring the knowledge server's DESCRIPTION_SOURCES_CAP.
-DESCRIPTION_ATTACHMENTS_CAP = 10
-
 NOT_A_REFERENCE_MESSAGE = (
     'That is not an Eneo attachment URL. Pass the exact "url" value from an '
     "attached-file reference entry, without modifying it."
@@ -182,22 +178,19 @@ async def read_file(
 
 
 def _attachments_suffix(attachment_labels: Sequence[str]) -> str:
-    """Per-completion attachment listing appended to read_file's description.
+    """Static suffix appended when the conversation has referenced attachments.
 
-    Naming the conversation's actual attachments inside the description binds
-    the tool to concrete files, which is the strongest counter to the model
-    concluding from a URL's appearance that an attachment is unreadable.
+    Attachment names never enter the description: it is a trusted provider
+    channel, and a filename written as a directive would ride it into the
+    model as instructions. The JSON reference entries in the conversation
+    already name every file, so the suffix only binds the tool to their
+    existence.
     """
     if not attachment_labels:
         return ""
-    shown = list(attachment_labels[:DESCRIPTION_ATTACHMENTS_CAP])
-    listing = "; ".join(shown)
-    remaining = len(attachment_labels) - len(shown)
-    if remaining > 0:
-        listing += f"; and {remaining} more"
     return (
-        f"\n\nCan read these attached files: {listing}. Every one of them is "
-        "always readable here, whatever its reference url looks like."
+        "\n\nEvery file attached to this conversation is readable here, "
+        "whatever its reference url looks like."
     )
 
 
