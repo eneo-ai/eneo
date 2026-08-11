@@ -77,8 +77,11 @@ class FlowRunAccessPolicy:
             UUID, FlowEvidenceAccessContext
         ] = {}
 
-    def is_tenant_admin(self) -> bool:
-        return Permission.ADMIN in self.user.permissions
+    def is_human_tenant_admin(self) -> bool:
+        return (
+            not self.principal().is_service_key
+            and Permission.ADMIN in self.user.permissions
+        )
 
     def principal(self) -> FlowPrincipal:
         return FlowPrincipal.from_user(self.user)
@@ -165,8 +168,6 @@ class FlowRunAccessPolicy:
             self.deny_run_access(auth_layer="tenant_isolation")
         if access_kind in {"evidence_export_redacted", "evidence_export_raw"}:
             await self._ensure_sensitive_flow_export_allowed(flow_id=run.flow_id)
-        if self.is_tenant_admin():
-            return
         principal = self.principal()
         if principal.is_service_key:
             if not principal.matches_run(run):
@@ -213,6 +214,8 @@ class FlowRunAccessPolicy:
                     )
                 return
             self.deny_run_access(auth_layer="flow_run_principal")
+        if self.is_human_tenant_admin():
+            return
 
         actor, classification_level = await self.load_space_access(flow_id=run.flow_id)
         role_value = self._space_role_from_actor(actor)

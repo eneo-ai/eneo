@@ -9,17 +9,13 @@ from uuid import uuid4
 import pytest
 
 from eneo.authentication.auth_models import (
-    ApiKeyHashVersion,
     ApiKeyOwnership,
     ApiKeyPermission,
-    ApiKeyScopeType,
-    ApiKeyState,
-    ApiKeyType,
-    ApiKeyV2InDB,
     ResourcePermissionLevel,
     ResourcePermissions,
 )
 from eneo.authentication.principal_types import PrincipalType
+from eneo.authentication.service_key_user import build_service_key_user
 from eneo.flows.application.flow_run_access_policy import (
     FlowRunAccessKind,
     FlowRunAccessPolicy,
@@ -32,6 +28,7 @@ from eneo.flows.flow_evidence_policy import (
 )
 from eneo.main.exceptions import NotFoundException, UnauthorizedException
 from eneo.roles.permissions import Permission
+from tests.unit.api_key_test_utils import make_api_key
 
 
 def _run(user, flow_id) -> FlowRun:
@@ -58,51 +55,22 @@ def _service_key_user(
     user,
     *,
     resource_permissions: ResourcePermissions | None = None,
+    tenant_admin: bool = False,
 ):
-    service_key = ApiKeyV2InDB(
-        id=uuid4(),
+    service_key = make_api_key(
+        default_permission=(
+            ApiKeyPermission.ADMIN if tenant_admin else ApiKeyPermission.WRITE
+        ),
         ownership=ApiKeyOwnership.SERVICE,
         owner_user_id=None,
-        key_prefix=ApiKeyType.SK.value,
-        key_suffix="test",
-        name="Flow service key",
-        description=None,
-        key_type=ApiKeyType.SK,
-        permission=ApiKeyPermission.WRITE,
-        scope_type=ApiKeyScopeType.TENANT,
-        scope_id=None,
-        allowed_origins=None,
-        allowed_ips=None,
         resource_permissions=resource_permissions,
-        state=ApiKeyState.ACTIVE,
-        expires_at=None,
-        last_used_at=None,
-        revoked_at=None,
-        revoked_reason_code=None,
-        revoked_reason_text=None,
-        suspended_at=None,
-        suspended_reason_code=None,
-        suspended_reason_text=None,
-        rotation_grace_until=None,
-        rate_limit=None,
-        created_at=None,
-        updated_at=None,
-        rotated_from_key_id=None,
-        created_by_user_id=None,
-        owner_user=None,
-        created_by_user=None,
-        search_match_reasons=None,
         tenant_id=user.tenant_id,
         service_principal_id=uuid4(),
-        created_by_key_id=None,
-        delegation_depth=0,
-        key_hash="hash",
-        hash_version=ApiKeyHashVersion.HMAC_SHA256,
     )
-    return user.model_copy(
-        update={
-            "active_api_key": service_key,
-        }
+    return build_service_key_user(
+        key=service_key,
+        tenant=user.tenant,
+        permissions={Permission.ADMIN} if tenant_admin else None,
     )
 
 
@@ -273,8 +241,14 @@ async def test_load_run_allows_tenant_admin_for_other_users_run(user):
 
 
 @pytest.mark.asyncio
-async def test_service_key_access_requires_matching_run_principal(user):
-    service_user = _service_key_user(user)
+async def test_admin_service_key_access_requires_matching_run_principal(user):
+    service_user = _service_key_user(
+        user,
+        resource_permissions=ResourcePermissions(
+            flow_evidence=ResourcePermissionLevel.ADMIN
+        ),
+        tenant_admin=True,
+    )
     flow_id = uuid4()
     run = _run(user, flow_id).model_copy(
         update={
@@ -294,7 +268,7 @@ async def test_service_key_access_requires_matching_run_principal(user):
         await policy.load_run(
             run_id=run.id,
             flow_id=flow_id,
-            access_kind="content",
+            access_kind="evidence_view",
         )
 
     assert exc_info.value.code == "flow_run_access_denied"
@@ -334,8 +308,15 @@ async def test_service_key_evidence_view_uses_key_capability(user):
 
 
 @pytest.mark.asyncio
-async def test_service_key_evidence_view_denies_missing_resource_permissions(user):
-    service_user = _service_key_user(user)
+@pytest.mark.parametrize(
+    "access_kind",
+    ["evidence_view", "evidence_export_raw"],
+)
+async def test_admin_service_key_evidence_access_requires_key_capability(
+    user,
+    access_kind: FlowRunAccessKind,
+):
+    service_user = _service_key_user(user, tenant_admin=True)
     flow_id = uuid4()
     run = _run(user, flow_id).model_copy(
         update={
@@ -350,12 +331,20 @@ async def test_service_key_evidence_view_denies_missing_resource_permissions(use
     flow_run_repo = AsyncMock()
     flow_run_repo.get.return_value = run
     policy = _policy(service_user, flow_run_repo=flow_run_repo)
+    cast(
+        AsyncMock, policy.flow_repo
+    ).get_evidence_access_context.return_value = FlowEvidenceAccessContext(
+        flow_id=flow_id,
+        space_id=uuid4(),
+        sensitive=False,
+        classification_level=0,
+    )
 
     with pytest.raises(UnauthorizedException) as exc_info:
         await policy.load_run(
             run_id=run.id,
             flow_id=flow_id,
-            access_kind="evidence_view",
+            access_kind=access_kind,
         )
 
     assert exc_info.value.code == "flow_run_evidence_forbidden"

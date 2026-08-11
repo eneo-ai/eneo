@@ -4,8 +4,8 @@ Status: EXECUTION PHASE, program **v10.3** (v10.2 architecture retained;
 post-merge order adjudicated 2026-08-11 by the separate Fable runtime
 and Builder sessions, both green at 8). LANDED: CP0 evidence, CP8a–c,
 CP6, the unsupported JSON-to-text removal, CP-D3, L1a, L1c, and the
-develop-to-Flows integration at `b9c0aa238`. All three user decisions
-stand (TRAJECTORY / SPLIT / BALANCED).
+develop-to-Flows integration at `b9c0aa238`, and FLOW-AUTH. All three
+user decisions stand (TRAJECTORY / SPLIT / BALANCED).
 
 v10.2 REPLACED v9.8 after three source-verified audits — structural
 debt, a systematic dual-ownership inventory, and runtime-slice drift —
@@ -62,8 +62,12 @@ frozen manifest, never restated as a prose constant.
 - Platform integration: current develop storage, knowledge/internal
   tools, API, SDK and frontend work is merged without weakening Flow
   governance. Internal-tool approval now trusts runtime provenance,
-  not tenant-controlled server names. The affected Flow suite is
-  6512 passed, 10 skipped, 1 xfailed.
+  not tenant-controlled server names.
+- Flow authorization: service-key principals remain scoped to their own
+  runs and subject to explicit evidence capability even when the key
+  carries the synthetic tenant-admin permission. Human tenant-admin
+  behavior is unchanged. The affected Flow suite is 6514 passed,
+  10 skipped, 1 xfailed.
 
 ## THE ARCHITECTURE VERDICT (peer pass 31, max effort — adopted)
 
@@ -191,6 +195,10 @@ ARTIFACT re-checked per slice, not a permanent grep gate.
       regeneration, provenance-owned internal-tool trust)
 - [x] v10.3 production-order review — separate Fable runtime iteration
       2 and Builder iteration 2, both green 8
+- [x] FLOW-AUTH service-key evidence and run-list access remain
+      principal-scoped even when the key carries tenant-admin
+      permission; human tenant admins remain unchanged (Claude
+      iteration 97 green 8)
 
 ## The Ranked Program (v10.3 — execution phase; slice bodies carry
 ## their originating iteration tags)
@@ -496,8 +504,9 @@ any threshold.
 1. **Foundation complete:** CP8b → CP8c → CP6 → JSON-to-text removal
    → CP-D3 → current develop integration. Frozen arithmetic did not
    change; named cohort measurement is now permitted.
-2. **FLOW-AUTH** — close the tenant-admin service-key evidence bypass
-   in the existing access policy before any public-contract work.
+2. **FLOW-AUTH complete** — the existing access policy now keeps
+   tenant-admin service keys inside the service-principal branch for
+   evidence access and run listing.
 3. **CP-ADMIT-0** — typed unsupported-architecture refusal before
    provider use or mutation.
 4. **CP2**, then **CP1** — evidence rank: CP2 has deterministic
@@ -541,7 +550,7 @@ sake.
 
 ### Public contract and documentation stream (pre-showcase)
 
-- [ ] FLOW-AUTH Evidence capability enforcement: service-key own-run
+- [x] FLOW-AUTH Evidence capability enforcement: service-key own-run
     and `flow_evidence` checks precede the human tenant-admin bypass in
     `FlowRunAccessPolicy`. Reuse the existing capability resolver and
     denial contracts. Tests: tenant-admin service key with no evidence
@@ -827,7 +836,7 @@ apart (provider limits).
   orchestrator verifies each finding in current source, reruns decisive
   tests, and owns all git.
 - Validation: `cd backend && uv run pytest tests/unittests/flows/ -q`
-  (current baseline: 6512 passed, 10 skipped, 1 xfailed); ruff
+  (current baseline: 6514 passed, 10 skipped, 1 xfailed); ruff
   check/format + pyright
   (`--pythonpath .venv/bin/python`) on exact changed paths only.
 - Measurement: harness + protocol in `conformance-program-plan.md`.

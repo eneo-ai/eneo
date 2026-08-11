@@ -11,11 +11,13 @@ from uuid import UUID, uuid4
 import pytest
 
 from eneo.authentication.auth_models import (
+    ApiKeyOwnership,
     ApiKeyPermission,
     ResourcePermissionLevel,
     ResourcePermissions,
 )
 from eneo.authentication.principal_types import PrincipalType
+from eneo.authentication.service_key_user import build_service_key_user
 from eneo.files.file_models import FileType
 from eneo.flows.application.flow_run_access_policy import FlowRunAccessPolicy
 from eneo.flows.application.flow_run_evidence_service import FlowRunEvidenceService
@@ -117,6 +119,7 @@ from eneo.main.exceptions import (
     UnauthorizedException,
 )
 from eneo.roles.permissions import Permission
+from tests.unit.api_key_test_utils import make_api_key
 
 # Preflight sizing double: zero everywhere means the evidence view never
 # narrows its load and an export preflight never refuses in these tests.
@@ -426,17 +429,20 @@ def _run(user, flow_id) -> FlowRun:
     )
 
 
-def _service_key_user(user):
-    return user.model_copy(
-        update={
-            "active_api_key": SimpleNamespace(
-                id=uuid4(),
-                ownership="service",
-                service_principal_id=uuid4(),
-                permission=ApiKeyPermission.WRITE,
-                resource_permissions=None,
-            ),
-        }
+def _service_key_user(user, *, tenant_admin: bool = False):
+    key = make_api_key(
+        default_permission=(
+            ApiKeyPermission.ADMIN if tenant_admin else ApiKeyPermission.WRITE
+        ),
+        ownership=ApiKeyOwnership.SERVICE,
+        owner_user_id=None,
+        tenant_id=user.tenant_id,
+        service_principal_id=uuid4(),
+    )
+    return build_service_key_user(
+        key=key,
+        tenant=user.tenant,
+        permissions={Permission.ADMIN} if tenant_admin else None,
     )
 
 
@@ -2073,6 +2079,39 @@ async def test_list_runs_filters_service_key_runs_by_service_principal(user):
     result = await service.list_runs(flow_id=flow_id)
 
     assert result == expected
+    flow_run_repo.list_runs.assert_awaited_once_with(
+        tenant_id=service_user.tenant_id,
+        flow_id=flow_id,
+        statuses=None,
+        principal_user_id=None,
+        principal_service_id=service_user.active_api_key.service_principal_id,
+        limit=None,
+        offset=None,
+    )
+
+
+@pytest.mark.asyncio
+async def test_list_runs_keeps_tenant_admin_service_key_scoped_to_service_principal(
+    user,
+):
+    service_user = _service_key_user(user, tenant_admin=True)
+    flow_id = uuid4()
+    flow_run_repo = flow_run_repo_mock()
+    flow_run_repo.list_runs.return_value = []
+    service = _flow_run_service(
+        user=service_user,
+        flow_repo=_flow_repo(),
+        flow_run_repo=flow_run_repo,
+        flow_run_review_checkpoint_repo=AsyncMock(),
+        flow_version_repo=AsyncMock(),
+        runtime_upload_repo=_runtime_upload_repo(),
+        max_concurrent_runs=5,
+    )
+
+    assert Permission.ADMIN in service_user.permissions
+
+    await service.list_runs(flow_id=flow_id)
+
     flow_run_repo.list_runs.assert_awaited_once_with(
         tenant_id=service_user.tenant_id,
         flow_id=flow_id,

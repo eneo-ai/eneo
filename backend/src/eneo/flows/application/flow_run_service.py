@@ -532,8 +532,12 @@ class FlowRunService:
         offset: int | None = None,
     ) -> list[FlowRun]:
         principal = self._principal()
-        is_tenant_admin = self.access_policy.is_tenant_admin()
-        if not is_tenant_admin and not principal.is_service_key and flow_id is not None:
+        is_human_tenant_admin = self.access_policy.is_human_tenant_admin()
+        if (
+            not is_human_tenant_admin
+            and not principal.is_service_key
+            and flow_id is not None
+        ):
             if await self.access_policy.can_list_all_runs_in_flow(flow_id=flow_id):
                 return await self.flow_run_repo.list_runs(
                     tenant_id=self.user.tenant_id,
@@ -550,12 +554,12 @@ class FlowRunService:
             statuses=statuses,
             principal_user_id=(
                 None
-                if is_tenant_admin or principal.is_service_key
+                if is_human_tenant_admin or principal.is_service_key
                 else principal.principal_user_id
             ),
             principal_service_id=(
                 principal.principal_service_id
-                if not is_tenant_admin and principal.is_service_key
+                if not is_human_tenant_admin and principal.is_service_key
                 else None
             ),
             limit=limit,
