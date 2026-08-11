@@ -40,7 +40,7 @@ class ObjectContentDeploymentPolicy(TimestampMixin, BaseWithTableName):
             name="ck_object_content_policy_target",
         ),
         CheckConstraint(
-            "updated_by_actor IN ('migration', 'platform_admin')",
+            "updated_by_actor IN ('migration', 'storage_admin')",
             name="ck_object_content_policy_actor",
         ),
         CheckConstraint(

@@ -17,7 +17,7 @@ from eneo.object_content.content import MAXIMUM_UPLOAD_POLICY_BYTES, StorageKind
 
 class PolicyActor(StrEnum):
     MIGRATION = "migration"
-    PLATFORM_ADMIN = "platform_admin"
+    STORAGE_ADMIN = "storage_admin"
 
 
 class DeploymentPolicyUpdate(BaseModel):
@@ -191,7 +191,7 @@ class DeploymentPolicyRepository:
         values = replacement.model_dump(exclude={"expected_revision"})
         values.update(
             revision=ObjectContentDeploymentPolicy.revision + 1,
-            updated_by_actor=PolicyActor.PLATFORM_ADMIN.value,
+            updated_by_actor=PolicyActor.STORAGE_ADMIN.value,
             updated_by_user_id=actor_user_id,
         )
         row = await self._session.scalar(
@@ -222,7 +222,7 @@ class DeploymentPolicyRepository:
             .values(
                 moves_paused=replacement.moves_paused,
                 revision=ObjectContentDeploymentPolicy.revision + 1,
-                updated_by_actor=PolicyActor.PLATFORM_ADMIN.value,
+                updated_by_actor=PolicyActor.STORAGE_ADMIN.value,
                 updated_by_user_id=actor_user_id,
             )
             .returning(ObjectContentDeploymentPolicy)

@@ -16,7 +16,7 @@ from pydantic import ValidationError
 
 import eneo.object_content.deployment_policy_router as deployment_policy_router
 from eneo.authentication.auth_dependencies import (
-    require_platform_admin,
+    require_storage_administration,
 )
 from eneo.database.database import get_session, get_session_with_transaction
 from eneo.database.tables.object_content_policy_table import (
@@ -297,12 +297,17 @@ def test_tenant_user_write_schema_cannot_escalate_platform_authority() -> None:
 
 
 @pytest.mark.asyncio
-async def test_platform_authority_requires_current_active_eligibility() -> None:
+async def test_storage_authority_requires_current_active_eligibility() -> None:
     eligible = TEST_USER.model_copy(update={"is_platform_admin": True})
-    await require_platform_admin(eligible)
+    await require_storage_administration(eligible)
+
+    # The separate platform flag is not what grants storage administration:
+    # the storage permission is, and the Owner role carries it by default.
+    await require_storage_administration(
+        TEST_USER.model_copy(update={"is_platform_admin": False})
+    )
 
     ineligible = (
-        TEST_USER.model_copy(update={"is_platform_admin": False}),
         eligible.model_copy(update={"state": UserState.INACTIVE}),
         eligible.model_copy(update={"state": UserState.INVITED}),
         eligible.model_copy(update={"state": UserState.DELETED, "deleted_at": None}),
@@ -318,7 +323,7 @@ async def test_platform_authority_requires_current_active_eligibility() -> None:
     )
     for user in ineligible:
         with pytest.raises(HTTPException) as error:
-            await require_platform_admin(user)
+            await require_storage_administration(user)
         assert error.value.status_code == 403
 
 
@@ -331,7 +336,7 @@ def test_policy_mutation_composes_existing_session_and_identity_fences() -> None
     dependency_calls = {dependency.call for dependency in route.dependant.dependencies}
     assert deployment_policy_router._require_policy_session_auth in dependency_calls
     assert deployment_policy_router._require_policy_user_identity in dependency_calls
-    assert deployment_policy_router._require_policy_platform_admin in dependency_calls
+    assert deployment_policy_router._require_policy_storage_admin in dependency_calls
     assert route.responses[403]["model"].__name__ == "GeneralError"
     assert route.responses[409]["model"].__name__ == "GeneralError"
 
@@ -351,7 +356,7 @@ def test_inventory_read_composes_existing_platform_authority_fences() -> None:
     dependency_calls = {dependency.call for dependency in route.dependant.dependencies}
     assert deployment_policy_router._require_policy_session_auth in dependency_calls
     assert deployment_policy_router._require_policy_user_identity in dependency_calls
-    assert deployment_policy_router._require_policy_platform_admin in dependency_calls
+    assert deployment_policy_router._require_policy_storage_admin in dependency_calls
     assert route.responses[403]["model"].__name__ == "GeneralError"
 
 
@@ -721,7 +726,7 @@ async def test_policy_replace_uses_revision_compare_and_swap() -> None:
         knowledge_file_limit_bytes=3,
         transcription_audio_limit_bytes=4,
         moves_paused=False,
-        updated_by_actor="platform_admin",
+        updated_by_actor="storage_admin",
         updated_by_user_id=uuid4(),
         created_at=datetime.now(timezone.utc),
         updated_at=datetime.now(timezone.utc),
@@ -753,7 +758,7 @@ async def test_move_pause_uses_the_policy_revision_compare_and_swap() -> None:
         knowledge_file_limit_bytes=3,
         transcription_audio_limit_bytes=4,
         moves_paused=True,
-        updated_by_actor="platform_admin",
+        updated_by_actor="storage_admin",
         updated_by_user_id=uuid4(),
         created_at=datetime.now(timezone.utc),
         updated_at=datetime.now(timezone.utc),
