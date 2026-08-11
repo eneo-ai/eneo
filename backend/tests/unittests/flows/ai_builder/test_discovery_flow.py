@@ -1099,7 +1099,7 @@ class TestExtendedClarificationHints:
         assert "flow_input_architecture" not in question_ids
         assert "terminal_output" not in question_ids
 
-    def test_swedish_audio_prompt_asks_runtime_metadata_before_confirmation(
+    def test_swedish_audio_prompt_assumes_no_runtime_metadata_before_confirmation(
         self,
     ) -> None:
         conversation = [
@@ -1125,10 +1125,13 @@ class TestExtendedClarificationHints:
             if issue.suggestion is not None
         ]
 
-        assert analysis.ready_for_confirmation is False
-        assert analysis.next_issue is not None
-        assert analysis.next_issue.issue_id == "runtime_metadata_fields"
-        assert "runtime_metadata_fields" in question_ids
+        assert analysis.ready_for_confirmation is True
+        assert analysis.next_issue is None
+        assert "runtime_metadata_fields" not in question_ids
+        assert (
+            "Antar tills vidare att inga extra formulärfält behövs vid körning; "
+            "du kan lägga till dem innan du bekräftar."
+        ) in analysis.assumptions
         assert "primary_runtime_input" not in question_ids
         assert "flow_input_architecture" not in question_ids
         assert "terminal_output" not in question_ids
@@ -1560,7 +1563,7 @@ class TestExtendedClarificationHints:
         assert analysis.next_issue is not None
         assert analysis.next_issue.issue_id == "terminal_output"
 
-    def test_generic_uploaded_pdf_docx_prompt_asks_runtime_metadata_only(
+    def test_generic_uploaded_pdf_docx_prompt_assumes_no_runtime_metadata(
         self,
     ) -> None:
         conversation = [
@@ -1586,12 +1589,15 @@ class TestExtendedClarificationHints:
             if issue.suggestion is not None
         ]
 
-        assert analysis.next_issue is not None
-        assert analysis.next_issue.issue_id == "runtime_metadata_fields"
-        assert "runtime_metadata_fields" in question_ids
+        assert analysis.next_issue is None
+        assert "runtime_metadata_fields" not in question_ids
+        assert (
+            "Antar tills vidare att inga extra formulärfält behövs vid körning; "
+            "du kan lägga till dem innan du bekräftar."
+        ) in analysis.assumptions
         assert "docx_output_mode" not in question_ids
 
-    def test_audio_docx_extraction_asks_runtime_metadata_without_structured_analysis_slot(
+    def test_audio_docx_extraction_assumes_no_runtime_metadata_without_structured_analysis_slot(
         self,
     ) -> None:
         conversation = [
@@ -1608,8 +1614,11 @@ class TestExtendedClarificationHints:
         state = _planning_state_with_post_processing_goal("extract_key_information")
         analysis = analyze_discovery(conversation, planning_state=state)
 
-        assert analysis.next_issue is not None
-        assert analysis.next_issue.issue_id == "runtime_metadata_fields"
+        assert analysis.next_issue is None
+        assert (
+            "Assuming no extra form fields are needed at runtime for now; "
+            "you can add them before confirming."
+        ) in analysis.assumptions
         assert state.resolved_slots["post_processing_goal"].value == (
             "extract_key_information"
         )
@@ -2517,7 +2526,7 @@ class TestExtendedClarificationHints:
             if issue.suggestion is not None
         ]
 
-        assert "runtime_metadata_fields" in question_ids
+        assert "runtime_metadata_fields" not in question_ids
         assert "document_material_scope" not in question_ids
         assert "comparison_scope" not in question_ids
 
@@ -2932,7 +2941,7 @@ class TestExtendedClarificationHints:
         assert "structured_analysis_need" not in question_ids
         assert "runtime_metadata_fields" not in question_ids
 
-    def test_generic_flow_with_resolved_core_requirements_asks_runtime_metadata_fields(
+    def test_generic_flow_with_resolved_core_requirements_assumes_no_runtime_metadata(
         self,
     ) -> None:
         conversation = [
@@ -2956,6 +2965,10 @@ class TestExtendedClarificationHints:
                 "terminal_output",
                 "structured_text",
             ),
+            "post_processing_goal": _resolved_slot(
+                "post_processing_goal",
+                "summarize_or_overview",
+            ),
         }
 
         analysis = analyze_discovery(conversation, planning_state=planning_state)
@@ -2965,91 +2978,11 @@ class TestExtendedClarificationHints:
             if issue.suggestion is not None
         ]
 
-        assert "runtime_metadata_fields" in question_ids
-
-    def test_document_flow_with_spent_question_budget_surfaces_runtime_metadata_assumption(
-        self,
-    ) -> None:
-        conversation = [
-            ConversationMessage(
-                role="user",
-                content="Bygg ett flöde för ett ärende.",
-                metadata={"ui_language": "sv"},
-            ),
-            ConversationMessage(
-                role="user",
-                content="Ett ärende åt gången",
-                metadata={
-                    "question_answer": {
-                        "question_id": "processing_scope",
-                        "selected_option_id": "single_case",
-                        "answer": "single_case",
-                    },
-                    "ui_language": "sv",
-                },
-            ),
-            ConversationMessage(
-                role="user",
-                content="Dokument",
-                metadata={
-                    "question_answer": {
-                        "question_id": "primary_runtime_input",
-                        "selected_option_id": "documents",
-                        "answer": "documents",
-                    },
-                    "ui_language": "sv",
-                },
-            ),
-            ConversationMessage(
-                role="user",
-                content="Ett huvuddokument per ärende",
-                metadata={
-                    "question_answer": {
-                        "question_id": "document_material_scope",
-                        "selected_option_id": "single_document_case",
-                        "answer": "single_document_case",
-                    },
-                    "ui_language": "sv",
-                },
-            ),
-            ConversationMessage(
-                role="user",
-                content="Strukturerat textresultat.",
-                metadata={
-                    "question_answer": {
-                        "question_id": "terminal_output",
-                        "selected_option_id": "structured_text",
-                        "answer": "structured_text",
-                    },
-                    "ui_language": "sv",
-                },
-            ),
-            ConversationMessage(
-                role="user",
-                content="Sammanfatta och ge en överblick.",
-                metadata={
-                    "question_answer": {
-                        "question_id": "post_processing_goal",
-                        "selected_option_id": "summarize_or_overview",
-                        "answer": "summarize_or_overview",
-                    },
-                    "ui_language": "sv",
-                },
-            ),
-        ]
-
-        analysis = analyze_discovery(conversation)
-        question_ids = [
-            issue.suggestion.question_id
-            for issue in analysis.blocking_issues
-            if issue.suggestion is not None
-        ]
-
         assert "runtime_metadata_fields" not in question_ids
         assert analysis.ready_for_confirmation is True
         assert analysis.assumptions == (
-            "Antar tills vidare att inga extra formulärfält behövs vid körning; "
-            "du kan lägga till dem innan du bekräftar.",
+            "Assuming no extra form fields are needed at runtime for now; "
+            "you can add them before confirming.",
         )
 
     def test_explicit_runtime_metadata_does_not_reask_runtime_metadata_fields(

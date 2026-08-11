@@ -330,8 +330,8 @@ class TestQuestionBudget:
         assert analysis.mvs_met
 
         blocking = analysis.blocking_issues
-        # Budget should suppress high_value questions (case_scope,
-        # document_material_scope, runtime_metadata_fields)
+        # The normal policy resolves optional scope and runtime metadata through
+        # visible assumptions instead of spending the question budget.
         # Only blocking-level questions should remain
         high_value_count = sum(1 for i in blocking if i.question_level == "high_value")
         assert high_value_count == 0, (

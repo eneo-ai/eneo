@@ -31,9 +31,6 @@ from eneo.flows.ai_builder.ai_builder_discovery_text_matcher import (
 from eneo.flows.ai_builder.ai_builder_domain_models import (
     ConversationMessage,
 )
-from eneo.flows.ai_builder.ai_builder_framework_policy import (
-    mentions_runtime_metadata,
-)
 from eneo.flows.ai_builder.ai_builder_signal_confidence import (
     ScoredSignal,
     score_conversation_signals,
@@ -75,7 +72,6 @@ _QUESTION_IMPACT: Mapping[str, DiscoveryImpact] = MappingProxyType(
 
 _BudgetExhaustionDisposition: TypeAlias = Literal[
     "ask",
-    "assume_no_runtime_metadata",
     "reject",
 ]
 
@@ -92,7 +88,9 @@ _BUDGET_EXHAUSTION_DISPOSITION: Mapping[str, _BudgetExhaustionDisposition] = (
             "post_processing_goal": "ask",
             # Routed by action policy today; kept explicit for catalog-wide coverage.
             "report_disposition": "ask",
-            "runtime_metadata_fields": "assume_no_runtime_metadata",
+            # Omission is assumption-safe today; keep the total policy explicit so
+            # a future typed ambiguity asks instead of being dropped at budget.
+            "runtime_metadata_fields": "ask",
         }
     )
 )
@@ -166,10 +164,6 @@ def apply_discovery_decision_engine(
         if budget_exhausted:
             disposition = _budget_exhaustion_disposition_for_candidate(candidate)
             if disposition == "reject":
-                continue
-            if disposition == "assume_no_runtime_metadata":
-                assumptions.append(_no_runtime_metadata_assumption(profile))
-                family_used.add(candidate.family)
                 continue
 
         selected.append(issue)
@@ -384,8 +378,6 @@ def candidate_assumption_safe(issue_id: str, profile: DiscoveryProfile) -> bool:
         if profile.output_intent.terminal_output != "pdf_document":
             return False
         return implies_structured_report_pdf(profile.text)
-    if issue_id == "runtime_metadata_fields":
-        return mentions_runtime_metadata(profile.text)
     return True
 
 
@@ -419,6 +411,8 @@ def assumption_for_candidate(
             "Antar att slut-PDF:n ska vara en strukturerad rapport snarare än en kort punktlista.",
             "Assuming the final PDF should be a structured report rather than a short bullet list.",
         )
+    if candidate.issue_id == "runtime_metadata_fields":
+        return _no_runtime_metadata_assumption(profile)
     return None
 
 

@@ -2249,7 +2249,7 @@ class TestRevisePlan:
 
 class TestSendMessageStructuredQuestion:
     @pytest.mark.anyio
-    async def test_spent_budget_runtime_default_reaches_requirements_confirmation(
+    async def test_runtime_metadata_default_reaches_requirements_confirmation(
         self, unset_mapped_deployment_default: None
     ):
         user = _make_user()

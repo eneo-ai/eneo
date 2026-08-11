@@ -95,10 +95,13 @@ frozen manifest, never restated as a prose constant.
   before proposal generation through one typed refusal path; compiler-only
   checks remain defensive postconditions. Debug-evidence retention is bounded
   consistently at `1..2555` from public input through cleanup consumption.
-- CP2b instrumentation now captures initial malformed proposal arguments per
-  Builder session through the existing opt-in capture owner. The required
-  eight-case, three-repetition attribution run remains open; CP3 and CP5 stay
-  blocked until its mechanisms are recorded.
+- CP2b attribution is complete. The frozen eight-case cohort ran three times on
+  Luna with 24/24 trustworthy observations; all 19 parse-family attempts joined
+  to exact session captures. The failures are structured schema-shape defects
+  assigned to CP3 and CP5, not malformed raw JSON, so no cleanup path was added.
+- CP9b now defaults omitted runtime metadata through the existing visible,
+  overridable assumption. It removes the redundant question on open prompts and
+  deletes the special budget-exhaustion branch without adding state or policy.
 - The 2026-08-11 broad progress smoke at `f39853daeb` produced all 158 slots but
   is not a release receipt: the required six-file execution sentinel had no
   applied Flow or final commit identity, so the sealed reader refused it. The
@@ -259,7 +262,17 @@ ARTIFACT re-checked per slice, not a permanent grep gate.
 - [x] CP2b initial parse capture: initial malformed proposal arguments now use
       the existing env-gated capture owner, and filenames bind the exact stored
       content plus session identity (`074545546`; Claude iteration 111 green 8).
-      The live attribution half remains open in the ranked CP2b row.
+      The live attribution is complete: the frozen eight-case cohort ran ×3 on
+      Luna at `3f2d69c98`, and all 19 parse-family attempts joined exactly to
+      their session-scoped captures with no missing or extra artifacts.
+- [x] CP9b balanced metadata questioning: the ordinary discovery-decision path
+      now resolves omitted optional runtime metadata through the existing
+      localized assumption; the question contract remains available for a
+      future typed unresolved requirement, and explicit metadata still resolves
+      upstream and overrides the default. The current analyzer has no separate
+      mentioned-but-unresolved state, so no keyword heuristic or second
+      lifecycle was invented. The special budget-exhaustion disposition and
+      its duplicate test path were deleted.
 - [x] L2 provider failure typing: the executor now translates the provider
       domain's existing rate-limit and unavailable codes into Flow's public
       error vocabulary without adding a retry path or third disposition owner;
@@ -361,15 +374,29 @@ any threshold.
     passed, 10 skipped, 1 xfailed), and the frozen 465-observation receipt still
     reproduces every CP0 count. No helper, policy, schema or public contract was
     added.
-- [ ] CP2b Parse-failure attribution (GATES CP3 AND CP5, added by CP0):
+- [x] CP2b Parse-failure attribution (completed 2026-08-11; GATES CP3 AND CP5,
+    added by CP0):
     parse failures are the single largest repair driver (36 of 86) and
     `json_to_structured_payload` is 15/15 parse. Both CP3 and CP5 tighten the
     same raw-argument seam, so neither may implement before this is attributed.
-    The initial-parse gap is now closed (`074545546`): the existing env-gated
-    capture owner sees initial and repair parse failures, and identical raw
-    arguments cannot overwrite another session's evidence. Re-run the exact
-    eight-case JSON cohort for three repetitions, join captures by session id,
-    record the mechanism counts here, then clear the private capture directory.
+    The initial-parse gap closed at `074545546`: the existing env-gated capture
+    owner sees initial and repair parse failures, and identical raw arguments
+    cannot overwrite another session's evidence. The frozen eight-case
+    attribution cohort then ran for three repetitions at `3f2d69c98` on the
+    pinned Luna model: 24/24 observations completed with valid evidence and
+    unchanged source/model identity; 14 observations repaired and 10 were
+    first-pass. Every one of 19 parse-family attempts (14 initial, five repair)
+    had exactly one matching session capture. None was malformed raw JSON.
+    Fifteen captures were object fields missing their required nested schema,
+    one was a non-object output field, and three were non-object step entries.
+    CP5 owns the 16 output-contract shapes while reusing CP3's one schema
+    materializer; CP3 owns strict provider/submission/server validation for the
+    three invalid step entries. Do not add a raw-JSON cleanup path. The official
+    comparator correctly refuses movement claims against CP0 because harness
+    semantics and concurrency differ; the identical 10/14 outcome split and
+    the current 19 versus historical 15 repair attempts are diagnostic only,
+    not a regression or improvement verdict. The private raw captures were
+    reduced to this receipt and cleared.
 - [ ] CP3 Runtime-input-field contract (AMENDED, iteration 33).
     `FlowInputFieldIntent` stays the field VALUE schema, but verified
     it carries no citations/confidence
@@ -557,19 +584,21 @@ any threshold.
     (`cp0-matrix-freeze.md` §8b); in short, the product deliberately
     asks `runtime_metadata_fields` on open interviews (issue created
     when metadata absent, no normal-path assumption case, behaviour
-    tests expect the question) while 19 battle contracts forbid it.
+    tests expect the question). CP0 observed it in 19 cases; 35 current tracked
+    contracts forbid it.
     The chosen product branch keeps the contracts frozen. CP9b must
     prove that the question disappears on open prompts, the no-metadata
     assumption is visible through the existing assumption seam, and the
     user can override it. Any later instrument correction invalidates
     earlier candidate receipts and re-enters pre-registration.
-- [ ] CP9b Question-policy product change (REQUIRED by the completed
-    BALANCED decision): implemented before CP3 and the ownership
+- [x] CP9b Question-policy product change (completed 2026-08-11; REQUIRED by
+    the completed BALANCED decision): implemented before CP3 and the ownership
     checkpoint, inside
-    the existing discovery decision engine (the budget-exhaustion
-    path's `assume_no_runtime_metadata` seam is the candidate), with
-    the deliberately-expecting tests updated in the same slice. No new
-    policy, no new store, no second owner.
+    the existing discovery decision engine. Omitted optional metadata now uses
+    its existing localized assumption during ordinary candidate resolution;
+    explicit metadata continues to win. The former
+    `assume_no_runtime_metadata` budget disposition and its spent-budget-only
+    test were deleted. No new policy, store, schema or second owner was added.
 - [ ] Remaining family assignments (v9 — every measured family has
     an ASSIGNED ATTRIBUTION SLICE; product owners are established by
     attribution; counts live in `cp0-matrix-freeze.md`): output-contract schema → CP5; input-contract schema and
@@ -611,10 +640,11 @@ any threshold.
 5. **CP-ADMIT complete** — its per-code dependency table moved only the four
    server-decidable contradictions; compiled topology and binding checks remain
    postconditions.
-6. **CP2b next** — parse attribution; it gates CP3 and CP5.
-7. **CP9b** — land the already-chosen BALANCED question behavior so
-   the tranche measures the product behavior intended for release.
-8. **CP3** (+D2 +D4 +D8 +D10) — one proposal-schema and
+6. **CP2b complete** — parse attribution assigned the general schema failures
+   to CP3 and CP5 without adding a case-specific repair path.
+7. **CP9b complete** — omitted optional runtime metadata uses a visible,
+   overridable assumption instead of another interview question.
+8. **CP3 next** (+D2 +D4 +D8 +D10) — one proposal-schema and
    compile-context materialization lifecycle, not two abstractions.
 9. **Ownership-tranche checkpoint** — exploratory
     final-frozen-manifest ×3 after CP1–CP3 and CP9b.
