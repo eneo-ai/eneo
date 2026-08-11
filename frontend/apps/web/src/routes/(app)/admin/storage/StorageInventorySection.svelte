@@ -128,7 +128,7 @@
         <div class="flex min-w-0 flex-col gap-1">
           <dt class="text-secondary text-sm">{m.storage_inventory_managed_total()}</dt>
           <dd class="text-primary text-xl font-semibold tabular-nums">
-            {storageBytes(managedTotalBytes, 1)}
+            {storageBytes(managedTotalBytes, 2)}
           </dd>
           <p class="text-muted max-w-[38ch] text-sm leading-5">
             {m.storage_inventory_managed_total_description()}
@@ -137,7 +137,7 @@
         <div class="flex min-w-0 flex-col gap-1">
           <dt class="text-secondary text-sm">{m.storage_inventory_managed_postgresql()}</dt>
           <dd class="text-primary text-xl font-semibold tabular-nums">
-            {storageBytes(managedPostgresqlBytes, 1)}
+            {storageBytes(managedPostgresqlBytes, 2)}
           </dd>
           <p class="text-muted max-w-[38ch] text-sm leading-5">
             {m.storage_inventory_managed_postgresql_description()}
@@ -146,7 +146,7 @@
         <div class="flex min-w-0 flex-col gap-1">
           <dt class="text-secondary text-sm">{m.storage_inventory_managed_object_store()}</dt>
           <dd class="text-primary text-xl font-semibold tabular-nums">
-            {storageBytes(managedObjectStoreBytes, 1)}
+            {storageBytes(managedObjectStoreBytes, 2)}
           </dd>
           <p class="text-muted max-w-[38ch] text-sm leading-5">
             {m.storage_inventory_managed_object_store_description()}
@@ -157,7 +157,7 @@
           <dd class="text-primary text-xl font-semibold tabular-nums">
             {inventory.postgresql_allocation === null
               ? m.storage_inventory_not_available()
-              : storageBytes(inventory.postgresql_allocation.total_bytes, 1)}
+              : storageBytes(inventory.postgresql_allocation.total_bytes, 2)}
           </dd>
           <p class="text-muted max-w-[38ch] text-sm leading-5">
             {m.storage_inventory_postgresql_total_description()}

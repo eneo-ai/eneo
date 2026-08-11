@@ -601,6 +601,24 @@
             </Alert.Root>
           {/if}
 
+          {#if canEdit}
+            <StorageInventorySection
+              inventory={contentInventory}
+              status={inventoryStatus}
+              lastRefreshed={inventoryRefreshedAt === null
+                ? null
+                : storageTime(inventoryRefreshedAt)}
+              onRetry={loadInventory}
+              onRefresh={loadInventory}
+              {storageTargetLabel}
+              {contentOwnerLabel}
+              {contentStateLabel}
+              {storageDate}
+              {storageCount}
+              {storageBytes}
+            />
+          {/if}
+
           <StorageConnectionSection
             capability={objectStoreCapability}
             {canEdit}
@@ -1261,22 +1279,6 @@
                 </p>
               {/if}
             </PolicySection>
-
-            <StorageInventorySection
-              inventory={contentInventory}
-              status={inventoryStatus}
-              lastRefreshed={inventoryRefreshedAt === null
-                ? null
-                : storageTime(inventoryRefreshedAt)}
-              onRetry={loadInventory}
-              onRefresh={loadInventory}
-              {storageTargetLabel}
-              {contentOwnerLabel}
-              {contentStateLabel}
-              {storageDate}
-              {storageCount}
-              {storageBytes}
-            />
           {/if}
         {/if}
       </div>
