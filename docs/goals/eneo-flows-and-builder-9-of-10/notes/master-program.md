@@ -910,13 +910,22 @@ orchestrator verifies every diff and owns all git.
 After a material Builder ownership slice, use one repetition of the
 final-frozen manifest as the broad progress smoke; derive its population from
 the tracked manifest rather than a prose constant (currently 158 cases). Use
-a smaller named N=1 cohort when the change is genuinely narrow or when
-diagnosing a specific failure. N=1 detects deterministic regressions and new
-failure families but makes no stability claim. Run the final-frozen manifest
-×3 at the ownership-tranche gate, then N=5 at the release gate (detection
-power, not certification power), repeated after every material post-gate
-change. Suite starts remain at least 45 minutes apart for provider limits.
-This cadence replaces per-slice cohort ×3 by user decision on 2026-08-11.
+an affected named cohort at ×3 when the slice transfers measured behavior or
+when attribution needs protection from provider variance; Luna's lower cost
+makes this the default targeted check rather than an exceptional tranche-only
+expense. N=1 still detects broad deterministic regressions and new failure
+families but makes no stability claim, while a targeted ×3 describes only its
+named mechanism and never certifies the full product. Run the final-frozen
+manifest ×3 at the ownership-tranche gate, then N=5 at the release gate
+(detection power, not certification power), repeated after every material
+post-gate change.
+
+All comparable Builder receipts use completion-model UUID
+`90824b05-9913-4210-968f-9294eb017d31`, verified in the live model catalog as
+enabled, non-deprecated `gpt-5.6-luna`. A model change starts a new evidence
+lineage and must not be compared as product movement. Suite starts remain at
+least 45 minutes apart for provider limits. This cadence supersedes the earlier
+N=1-only per-slice interpretation by user decision on 2026-08-11.
 
 ## Operating protocol (for any agent continuing this)
 

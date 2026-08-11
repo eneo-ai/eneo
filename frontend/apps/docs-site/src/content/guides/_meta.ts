@@ -5,6 +5,7 @@ const meta: MetaRecord = {
   "flows-api-guide": "Flows API Guide",
   flows: "Eneo Flows",
   authentication: "Authentication & OIDC",
+  "oidc-federation": "OIDC Federation",
   "scim-provisioning": "SCIM Provisioning",
   "audit-logging": "Audit Logging",
   skills: "Skills",

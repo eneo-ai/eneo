@@ -4,6 +4,7 @@ const meta: MetaRecord = {
   index: "Overview",
   "getting-started": "Getting Started",
   architecture: "Architecture",
+  "authentication-architecture": "Authentication Architecture",
   flows: "Eneo Flows",
   "flows-for-developers": "Flows for Developers",
   "object-content-architecture": "Object Content Architecture",

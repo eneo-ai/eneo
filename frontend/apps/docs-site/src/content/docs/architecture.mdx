@@ -1,640 +1,98 @@
 # Architecture
 
-Eneo follows a modern microservices architecture with clean separation of concerns, designed for scalability, maintainability, and deployment flexibility.
+Eneo is a web application with a Python API, relational control plane, and
+background workers. The reference deployment is a Docker Compose stack; it is a
+deployment model, not a claim that every installation uses a microservice or
+Kubernetes topology.
 
-## High-Level Overview
+## System shape
 
-<div className="bg-white dark:bg-white p-4 rounded-lg border border-gray-200 dark:border-gray-700 my-8">
-
-![Eneo System Architecture showing Client Layer, Reverse Proxy (Traefik), Frontend (SvelteKit), Backend API (FastAPI), Database (PostgreSQL with pgvector), Redis Cache/Queue, worker services, and AI Providers (OpenAI, Anthropic, Azure, Local models)](/diagrams/eneo-architecture.svg)
-
-</div>
-
----
-
-## Core Components
-
-### Frontend (SvelteKit)
-
-**Technology Stack:**
-
-- **Framework**: SvelteKit with TypeScript
-- **Styling**: Tailwind CSS
-- **State Management**: Svelte stores
-- **HTTP Client**: Fetch API with type-safe wrappers
-
-**Responsibilities:**
-
-- User interface and user experience
-- Client-side routing and navigation
-- Form handling and validation
-- Real-time updates via SSE and WebSockets
-- State management and caching
-
-**Key Features:**
-
-- Server-side rendering (SSR) for SEO
-- Hot module replacement for development
-- Type-safe API client generation
-- Responsive design
-- Dark mode support
-
-**Directory Structure:**
-
-```
-frontend/apps/client/
-├── src/
-│   ├── routes/          # SvelteKit routes
-│   ├── lib/             # Shared utilities
-│   │   ├── api/         # API client
-│   │   ├── stores/      # State stores
-│   │   └── components/  # Reusable components
-│   └── app.html         # HTML template
-└── package.json
+```text
+Browser
+  │
+  ├── frontend web application
+  │
+  └── reverse proxy (reference deployment)
+          │
+          ├── FastAPI application ── PostgreSQL with pgvector
+          │           │                         │
+          │           └── Redis                 └── durable content metadata
+          │
+          └── background workers ── AI providers and configured integrations
 ```
 
----
+The backend is the boundary between users and the data layers, configured
+external providers, optional object storage, and optional modules. The reference
+Compose configuration keeps PostgreSQL and Redis on an internal data network;
+the backend and workers receive the outbound access they need for configured
+providers and integrations.
 
-### Backend (FastAPI)
+## Application components
 
-**Technology Stack:**
+### Frontend
 
-- **Framework**: FastAPI (Python 3.11+)
-- **ORM**: SQLAlchemy 2.0
-- **Validation**: Pydantic v2
-- **Authentication**: JWT tokens, OIDC
-- **API Documentation**: OpenAPI/Swagger
+The primary web application lives in `frontend/apps/web`. It is a SvelteKit
+application built with Vite. It presents Eneo’s user interface and calls the
+backend API; it does not own the authoritative data or permission decisions.
 
-**Responsibilities:**
+The documentation site is a separate Next.js and Nextra application in
+`frontend/apps/docs-site`. It is not part of the product request path.
 
-- RESTful API endpoints
-- Business logic and validation
-- Authentication and authorization
-- Database operations
-- AI provider integration
-- WebSocket connections
+### Backend API
 
-**Architecture Pattern:**
+`backend/src/eneo/server/main.py` creates the FastAPI application. The server
+mounts the main API router under the configured API prefix, exposes generated
+OpenAPI at `/openapi.json`, and serves interactive documentation at `/docs` and
+`/redoc`.
 
-- **Domain-Driven Design** (DDD)
-- **Repository Pattern** for data access
-- **Service Layer** for business logic
-- **Dependency Injection** for modularity
+Route adapters own HTTP concerns. Domain services and repositories own the
+application and persistence behavior behind those routes. See the
+[API Reference](/docs/api) for the generated public contract.
 
-**Directory Structure:**
+### PostgreSQL, Redis, and durable content
 
-```
-backend/src/eneo/
-├── server/                  # FastAPI app, routers, middleware, lifespan
-├── main/                    # Configuration, container, logging
-├── database/                # SQLAlchemy tables and database setup
-├── flows/                   # Flow domain, application, API, runtime, AI Builder plugin
-├── worker/                  # ARQ background jobs and Flow Celery worker wiring
-├── info_blobs/              # Uploaded document metadata and processing
-├── assistants/              # Assistant configuration and chat surfaces
-└── spaces/                  # Workspace and membership ownership
-```
+PostgreSQL, with pgvector in the reference deployment, holds application data
+and searchable vector data. Redis supports queueing and other transient runtime
+coordination.
 
-**Key Design Patterns:**
+Durable file content has a PostgreSQL control plane. Bytes can remain bounded
+and inline or use a configured object store; authorization, integrity,
+lifecycle, retention, and reconciliation remain backend-owned. Read
+[Object Content Architecture](/docs/object-content-architecture) for the
+complete contract.
 
-**Repository Pattern:**
+### Background work
 
-```python
-class UserRepository:
-    def __init__(self, db: Session):
-        self.db = db
+The general worker uses ARQ for asynchronous work such as document processing,
+crawls, and integrations. Flow execution and maintenance use dedicated Celery
+workers and a scheduler. Their queues share infrastructure where configured,
+but their responsibilities stay separate so Flow runtime recovery does not
+change unrelated background work.
 
-    def get(self, user_id: int) -> User:
-        return self.db.query(User).filter(User.id == user_id).first()
+### Identity and authorization
 
-    def create(self, user_data: UserCreate) -> User:
-        user = User(**user_data.dict())
-        self.db.add(user)
-        self.db.commit()
-        return user
-```
+Eneo supports local sign-in as well as OpenID Connect federation. Federation
+can use globally configured OIDC settings or tenant-specific configuration;
+the login route resolves the appropriate configuration and validates redirect
+origins before it redirects to an identity provider.
 
-**Service Layer:**
+Maintainers should use [Authentication Architecture](/docs/authentication-architecture)
+for protocol and implementation detail.
 
-```python
-class AIService:
-    def __init__(self, user_repo: UserRepository, ai_provider: AIProvider):
-        self.user_repo = user_repo
-        self.ai_provider = ai_provider
+## Reference deployment
 
-    async def generate_response(self, prompt: str, user_id: int) -> str:
-        user = self.user_repo.get(user_id)
-        # Business logic here
-        return await self.ai_provider.generate(prompt)
-```
+The tracked Compose deployment includes Traefik, the frontend, backend,
+PostgreSQL, Redis, a general worker, and the dedicated Flow worker processes.
+Traefik terminates TLS and routes product, API, SCIM, and API-documentation
+traffic to the correct service.
 
----
+Deployment-specific settings, startup ordering, health checks, network
+boundaries, and optional object storage belong in the
+[deployment guide](/guides/deployment), not in this overview.
 
-### Eneo Flows and Flow AI Builder
+## Further reading
 
-Eneo Flows is a backend product surface with authoring, publishing, runtime execution, evidence, artifacts, and API consumer contracts. Flow AI Builder is an authoring plugin that creates or edits draft Flows; it is not a runtime and it is not a second Flow definition format.
-
-**Flow runtime ownership:**
-
-| Concern                    | Canonical owner                                                                                   |
-| -------------------------- | ------------------------------------------------------------------------------------------------- |
-| Draft authoring            | `FlowService`, `FlowRepository`, and `FlowDraftSpecCore`                                          |
-| Published runtime snapshot | `published_definition.py` and `flow_versions.definition_json`                                     |
-| Run contract               | `FlowRunContractService`                                                                          |
-| Run creation and dispatch  | `FlowRunService` and Flow runtime tasks                                                           |
-| Step execution             | `FlowRunExecutor` and runtime `StepHandler` implementations                                       |
-| Output rendering           | Output format specs plus `compose_text`, `render_verbatim`, `transcribe_only`, `template_fill`, and step handlers |
-| Evidence and artifacts     | `FlowRunEvidenceService`, evidence bundle/export modules, and artifact file services              |
-
-**Flow AI Builder create compilation:**
-
-AI Builder separates semantic intent from deterministic Flow mechanics. Supported create-mode shapes pass through a compile-time assembly spine:
-
-```
-planning state + conversation evidence
-    ↓
-ai_builder_assembly.create
-    ↓
-FlowAssemblyPlan
-    ↓
-ai_builder_assembly.lower
-    ↓
-FlowDraftSpecCore
-```
-
-`FlowAssemblyPlan` is not persisted. It validates capability support, step order, previous-output references, form-field placement, source exposure, source-reader obligations, UI language, and aggregation intent before lowering.
-
-Create-mode no longer has a separate create-dataflow or step-skeleton compiler path. `ai_builder_assembly` is the canonical create compiler owner.
-
-The lowering layer is the only writer of compiled source refs and input bindings for assembly-backed create plans. Later passes must not silently rewrite underlag channels, renderer modes, transcription mechanics, or template-fill mechanics.
-
-Generated PDF/DOCX final artifacts use a body-writer step followed by `render_verbatim`. Source-section document reports require a deterministic `compose_text` body writer immediately before the renderer. Audio transcription uses `transcribe_only`, and DOCX templates use `template_fill`. These fixed runtime modes avoid unnecessary LLM calls; the semantic LLM work happens before the fixed composer, renderer, transcriber, or filler step.
-
-Create-mode proposal schemas keep input/output mechanics backend-owned: the model supplies semantic step instructions, JSON `output_fields`, form-field usage, and resource refs, while assembly derives concrete output types, previous-output material, and final render steps.
-
-Builder-generated intermediate JSON contracts use stable machine keys, defaulting to canonical English names even when the conversation is Swedish. Localized language is kept in descriptions and generated prose unless the requested final public JSON output explicitly needs localized keys.
-
-See [AI Builder](/docs/ai-builder), [Eneo Flows](/docs/flows), and [Flows for Developers](/docs/flows-for-developers) for maintainer-facing details.
-
----
-
-### Database (PostgreSQL + pgvector)
-
-**Technology:**
-
-- **Database**: PostgreSQL 13+
-- **Extension**: pgvector for vector similarity search
-- **Migrations**: Alembic
-
-**Schema Design:**
-
-**Core Tables:**
-
-- `users` - User accounts and profiles
-- `organizations` - Organization/tenant data
-- `spaces` - Collaborative workspaces
-- `assistants` - AI assistant configurations
-- `conversations` - Chat conversations
-- `messages` - Individual messages
-- `documents` - Uploaded documents
-- `document_chunks` - Chunked document text with embeddings
-
-**Key Relationships:**
-
-```
-organizations (1) ─── (N) users
-organizations (1) ─── (N) spaces
-spaces (1) ─── (N) assistants
-spaces (1) ─── (N) documents
-users (1) ─── (N) conversations
-conversations (1) ─── (N) messages
-documents (1) ─── (N) document_chunks
-```
-
-**Vector Search:**
-
-```sql
--- Example vector similarity search
-SELECT id, content,
-       1 - (embedding <=> query_embedding) as similarity
-FROM document_chunks
-WHERE 1 - (embedding <=> query_embedding) > 0.7
-ORDER BY embedding <=> query_embedding
-LIMIT 5;
-```
-
-**Indexes:**
-
-- B-tree indexes on foreign keys
-- IVFFlat index on vector embeddings
-- GiST indexes for full-text search
-
----
-
-### Durable Object Content
-
-Durable content has one PostgreSQL control plane and one explicit byte backend
-per record:
-
-| PostgreSQL control plane                                | Byte backend                                                       |
-| ------------------------------------------------------- | ------------------------------------------------------------------ |
-| Content identity and lifecycle state                    | Bounded `postgres_inline` payload or private `object_store` object |
-| Canonical SHA-256, exact size, and media type           | Payload bytes only                                                 |
-| Concrete authorization references, holds, and retention | Backend-specific transport/deletion state                          |
-| Audit and bounded reconciliation/query facts            | No authorization, routing, or product policy                       |
-
-Inline bytes, control state, and the first owner reference commit atomically.
-Object-store intent and the first reference commit before remote work. Eneo
-verifies the PostgreSQL-owned SHA-256 before returning full or range responses,
-and a bounded reconciler resolves process and network failures.
-
-Object storage is optional. The default reference deployment is inline-capable
-without another service. Administrators can enable an Eneo-built and attested
-SeaweedFS profile or use external endpoints such as MinIO through one
-vendor-neutral contract.
-
-Read [Object Content Architecture](/docs/object-content-architecture) for the
-complete lifecycle, integrity, reconciliation, binding, and image publication
-design. The [Object Content Storage guide](/guides/object-content-storage)
-covers deployment and operations.
-
----
-
-### Worker Services
-
-**Technology:**
-
-- **General queue**: Redis-based ARQ (Async Redis Queue)
-- **Flow runtime queue**: Celery workers for Flow execution, maintenance, reconciliation, and outbox delivery
-- **Language**: Python with async/await
-- **Concurrency**: Configurable worker pool
-
-**Responsibilities:**
-
-- Document processing (PDF, Word, etc.)
-- Web crawling and content extraction
-- Embedding generation
-- Background tasks and scheduled jobs
-- Flow run execution, stale-run reconciliation, and Flow runtime delivery outboxes
-
-Object-content reconciliation is implemented as a queue-neutral async task.
-Only the current registration and schedule adapter depends on ARQ. A future
-worker change therefore does not alter the object store, lifecycle, or database
-contract, and Eneo avoids a speculative generic queue framework in the meantime.
-
-**Task Types:**
-
-**Document Processing:**
-
-```python
-@worker.task
-async def process_document(ctx, document_id: int):
-    # Extract text from document
-    text = await extract_text(document_id)
-
-    # Chunk the text
-    chunks = chunk_text(text)
-
-    # Generate embeddings
-    embeddings = await generate_embeddings(chunks)
-
-    # Store in database
-    await store_chunks(document_id, chunks, embeddings)
-```
-
-**Web Crawling:**
-
-```python
-@worker.task
-async def crawl_website(ctx, url: str, max_depth: int):
-    async with Crawler() as crawler:
-        pages = await crawler.crawl(url, max_depth=max_depth)
-        for page in pages:
-            await process_page_content(page)
-```
-
-**Flow Runtime:**
-
-- Flow execution tasks load a published snapshot, claim run and step work, invoke StepHandlers, persist artifacts and evidence, and terminalize the run.
-- Flow maintenance tasks reconcile stale runs and deliver runtime outboxes outside the HTTP request path.
-
----
-
-### Audit Logging
-
-Audit logging captures security- and compliance-relevant actions across tenants. Logs are persisted in PostgreSQL, exports are handled by the worker, and retention is enforced by a daily purge job.
-
-See [Audit Logging](/docs/audit-logging) for implementation details, retention hierarchy, and export options.
-
----
-
-### Redis (Cache & Queue)
-
-**Responsibilities:**
-
-- Session storage
-- Task queues for ARQ and Flow Celery workers
-- Caching frequently accessed data
-- Rate limiting counters
-- WebSocket pub/sub
-
-**Cache Strategy:**
-
-- **Session data**: 24-hour TTL
-- **API responses**: 5-minute TTL
-- **Embeddings**: 1-hour TTL
-- **User preferences**: No expiration
-
----
-
-### Reverse Proxy (Traefik)
-
-**Responsibilities:**
-
-- SSL/TLS termination
-- Load balancing
-- Request routing
-- Automatic certificate management (Let's Encrypt)
-- Health checks
-
-**Configuration:**
-
-```yaml
-# Route HTTP to HTTPS
-- "traefik.http.routers.http-catchall.rule=hostregexp(`{host:.+}`)"
-- "traefik.http.routers.http-catchall.middlewares=redirect-to-https"
-
-# Backend routing
-- "traefik.http.routers.backend.rule=Host(`eneo.example.com`) && PathPrefix(`/api`)"
-- "traefik.http.routers.backend.tls.certresolver=myresolver"
-
-# Frontend routing
-- "traefik.http.routers.frontend.rule=Host(`eneo.example.com`)"
-- "traefik.http.routers.frontend.tls.certresolver=myresolver"
-```
-
----
-
-## Data Flow
-
-### User Authentication Flow
-
-```
-User → Frontend → Backend → Database
-                     ↓
-                  Generate JWT
-                     ↓
-                  Response ← Frontend ← User
-```
-
-### AI Chat Flow
-
-```
-User types message
-    ↓
-Frontend sends POST /api/chat
-    ↓
-Backend validates & authenticates
-    ↓
-Retrieve relevant documents (RAG)
-    ↓
-Generate prompt with context
-    ↓
-Stream to AI Provider (OpenAI/Claude)
-    ↓
-Stream response back via SSE
-    ↓
-Frontend displays streaming text
-    ↓
-Save conversation to database
-```
-
-### Document Upload Flow
-
-<div className="bg-white dark:bg-white p-4 rounded-lg border border-gray-200 dark:border-gray-700 my-8">
-
-![Document Processing Pipeline showing User uploading to Backend API, which queues jobs in Redis for the Worker to process. The Worker runs the Processing Pipeline (Text Extractor, Text Chunker, Embedding Model, Vector Store) and stores results in PostgreSQL with pgvector (InfoBlobs for raw text, InfoBlobChunks for embeddings with HNSW index, Jobs for status tracking).](/diagrams/document-processing-pipeline.svg)
-
-</div>
-
-1. User uploads a File; its bytes follow the deployment's selected storage policy.
-2. Backend enqueues document processing.
-3. Worker extracts text, creates chunks, and generates embeddings.
-4. One short transaction publishes the new `InfoBlobs` version and every
-   `InfoBlobChunks` vector, then supersedes the previous version.
-5. Retrieval reads only the active version. Exact historical references remain
-   readable until the document is deleted.
-6. A failed replacement rolls back; the previous complete version remains active.
-7. The job records `COMPLETE` or `FAILED` for the frontend.
-
-PostgreSQL owns searchable text, version state, and pgvector data regardless of
-where Eneo stores the original File bytes. Object storage remains optional.
-
----
-
-## Security Architecture
-
-### Authentication Layers
-
-1. **Session-based** (default)
-
-   - JWT tokens stored in httpOnly cookies
-   - CSRF protection
-   - Token refresh mechanism
-
-2. **OIDC** (optional)
-   - Integration with enterprise IdP
-   - Automatic user provisioning
-   - Single sign-on (SSO)
-
-### Authorization Model
-
-**Role-Based Access Control (RBAC):**
-
-- **Global Roles**: Admin, User
-- **Space Roles**: Owner, Editor, Viewer
-- **Resource-level**: Per-assistant, per-document permissions
-
-**Permission Checks:**
-
-```python
-def check_permission(user: User, resource: Space, action: str) -> bool:
-    membership = get_membership(user.id, resource.id)
-    return membership.role.has_permission(action)
-```
-
-### Data Security
-
-- **At Rest**: Database encryption (optional)
-- **In Transit**: TLS 1.3 everywhere
-- **Secrets**: Environment variables, never in code
-- **API Keys**: Hashed storage, regular rotation
-
----
-
-## Scalability Considerations
-
-### Horizontal Scaling
-
-**Stateless Services:**
-
-- Frontend and Backend are stateless
-- Can run multiple instances behind load balancer
-- Session state in Redis (shared)
-
-**Scaling Strategy:**
-
-```yaml
-# Docker Compose scaling
-docker compose up -d --scale backend=3 --scale worker=2
-```
-
-### Database Scaling
-
-**Read Replicas:**
-
-- Primary for writes
-- Replicas for reads
-- Connection pooling (PgBouncer)
-
-**Partitioning:**
-
-- Partition large tables by date
-- Separate hot and cold data
-
-### Caching Strategy
-
-**Multi-Level Cache:**
-
-1. Browser cache (static assets)
-2. CDN cache (public content)
-3. Redis cache (dynamic data)
-4. Application cache (in-memory)
-
----
-
-## Deployment Architectures
-
-### Single Server (Small Organizations)
-
-All services on one server with Docker Compose:
-
-- Frontend, Backend, Worker
-- PostgreSQL, Redis
-- Traefik
-
-**Suitable for:** < 100 users
-
-### Multi-Server (Medium Organizations)
-
-Separate servers for different roles:
-
-- **Web Server**: Frontend + Backend
-- **Database Server**: PostgreSQL
-- **Worker Server**: Background processing
-- **Cache Server**: Redis
-
-**Suitable for:** 100-1000 users
-
-### Kubernetes (Large Organizations)
-
-Fully orchestrated with K8s:
-
-- Auto-scaling pods
-- Service discovery
-- Rolling updates
-- Health checks and self-healing
-
-**Suitable for:** 1000+ users
-
----
-
-## Monitoring & Observability
-
-### Logging
-
-**Structured Logging:**
-
-```json
-{
-  "timestamp": "2025-09-30T10:30:45Z",
-  "level": "INFO",
-  "service": "backend",
-  "user_id": "user-123",
-  "request_id": "req-456",
-  "message": "AI request completed",
-  "duration_ms": 1250
-}
-```
-
-### Metrics
-
-**Key Metrics:**
-
-- Request rate and latency
-- Error rates (4xx, 5xx)
-- Database query performance
-- AI provider response times
-- Worker queue depth
-
-### Health Checks
-
-**Endpoints:**
-
-- `GET /api/health` - Basic health
-- `GET /api/health/db` - Database connectivity
-- `GET /api/health/redis` - Redis connectivity
-- `GET /api/health/ready` - Readiness probe
-
----
-
-## Technology Decisions
-
-### Why SvelteKit?
-
-- Lightweight and fast
-- Excellent developer experience
-- Built-in SSR and routing
-- Smaller bundle sizes than React
-
-### Why FastAPI?
-
-- Modern Python async framework
-- Automatic OpenAPI documentation
-- Type safety with Pydantic
-- High performance (comparable to Node.js)
-
-### Why PostgreSQL + pgvector?
-
-- Reliable and mature RDBMS
-- Native vector support (pgvector)
-- Excellent performance
-- ACID compliance for data integrity
-
-### Why ARQ and Celery?
-
-- ARQ remains the Python-native async queue for general background jobs and scheduled document/crawler work.
-- Celery owns Flow runtime execution and maintenance because Flow runs need explicit retry, redelivery, worker-loss, and outbox behavior.
-- Both queues use Redis, but their ownership is separate so Flow runtime guarantees do not leak into unrelated background jobs.
-
----
-
-## Future Architecture Plans
-
-### Planned Enhancements
-
-- **Kubernetes Native**: Helm charts for K8s deployment
-- **Multi-Region**: Geographic distribution
-- **Plugin System**: Extensibility via plugins
-- **GraphQL API**: Alternative to REST
-- **Event Sourcing**: Audit trail improvements
-- **Microservices**: Further service decomposition
-
----
-
-## Additional Resources
-
-- **Technical Diagrams**: [Architecture diagrams on GitHub](https://github.com/eneo-ai/eneo/tree/main/docs/architecture)
-- **API Documentation**: [OpenAPI Specification](https://your-eneo-instance.com/api/docs)
-- **Database Schema**: [Schema documentation](https://github.com/eneo-ai/eneo/tree/main/backend/migrations)
-- **Contributing Guide**: [Development guidelines](https://github.com/eneo-ai/eneo/blob/develop/docs/CONTRIBUTING.md)
+- [API Reference](/docs/api)
+- [Object Content Architecture](/docs/object-content-architecture)
+- [Audit Logging](/docs/audit-logging)
+- [Deploy Eneo](/guides/deployment)

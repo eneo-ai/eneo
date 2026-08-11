@@ -1,115 +1,45 @@
 # Documentation
 
-Welcome to the Eneo technical documentation! This section covers the core concepts, architecture, and API reference for the Eneo platform.
+This is the technical map of Eneo. Use the linked owner documents and the running
+application's OpenAPI schema for details that change with a release.
 
-## Getting Started
+## Start here
 
-New to Eneo? Start here:
+- [Getting Started](/docs/getting-started) explains local setup and the first
+  configuration steps.
+- [Deploy Eneo](/guides/deployment) describes the reference production
+  deployment, operational configuration, and supported infrastructure choices.
+- [Architecture](/docs/architecture) explains the deployed components and their
+  responsibilities.
+- [API Reference](/docs/api) points to the generated API contract and interactive
+  explorer.
 
-### [Getting Started](/docs/getting-started)
+## Product and operational references
 
-Quick start guide to set up your Eneo instance:
+- [Eneo Flows](/docs/flows) and [Flows for Developers](/docs/flows-for-developers)
+  describe Flow authoring and runtime contracts.
+- [Object Content Architecture](/docs/object-content-architecture) describes
+  durable file-byte storage, integrity, retention, and recovery.
+- [Audit Logging](/docs/audit-logging) describes compliance-relevant event
+  recording and retention.
+- [API Key Management](/docs/api-key-management) explains API-key lifecycle and
+  access scope.
+- [Release SBOMs](/docs/release-sboms) explains released-image provenance and
+  software-bill-of-material artifacts.
 
-- Installation and setup
-- First-time configuration
-- Creating your first AI assistant
-- Basic usage examples
+## Identity and access
 
-## Technical Documentation
+- [Multi-Tenant OIDC Federation](/guides/oidc-federation/multi-tenant) explains
+  tenant-specific identity-provider configuration.
+- [Authentication Architecture](/docs/authentication-architecture) is the
+  maintainer-facing reference for the OIDC implementation.
+- [SCIM Provisioning](/guides/scim-provisioning) covers user provisioning when
+  an identity provider supports it.
 
-### [Architecture](/docs/architecture)
+## Contributing
 
-Understand how Eneo is built:
-
-- System architecture overview
-- Technology stack (FastAPI, Next.js, PostgreSQL)
-- Database schema and migrations
-- Authentication and authorization
-- Real-time communication (SSE, WebSockets)
-
-### [Flows](/docs/flows)
-
-Understand how Eneo Flows work end-to-end:
-
-- Draft vs published lifecycle
-- Sequential steps and step configuration
-- Transcription, template fill, knowledge, and RAG
-- Ownership, permissions, and evidence
-- Security classification and supported external effects
-
-### [AI Builder](/docs/ai-builder)
-
-Draft and revise Flows through a guided authoring conversation:
-
-- Form fields, runtime input, JSON contracts, and final artifacts
-- Server-owned step wiring and Underlag composition
-- Explicit external-data and delivery boundaries
-- Token usage transparency for builder activity
-
-### [Object Content Architecture](/docs/object-content-architecture)
-
-Understand how Eneo stores and protects durable file bytes:
-
-- PostgreSQL control plane with bounded inline or optional object-store bytes
-- Integrity, lifecycle, retention, and reconciliation
-- Database/bucket binding and failure behavior
-- SeaweedFS image build, provenance, and SBOM attestations
-
-### [Audit Logging](/docs/audit-logging)
-
-Audit trails for compliance and security:
-
-- How audit logs are created and stored
-- Retention policies and conversation retention hierarchy
-- Viewing, exporting, and configuring audit logs
-- Adding audit logging to new features
-
-### [Token Counting](/docs/token-counting)
-
-How Eneo tracks token usage for LLM requests:
-
-- Accurate counts from major providers (OpenAI, Anthropic, Azure)
-- Estimation for self-hosted models
-- How token data flows to Insights dashboards
-
-### [Release SBOMs](/docs/release-sboms)
-
-Downloadable SBOMs and attestations for released artifacts:
-
-- CycloneDX and SPDX files for security tooling
-- Frontend source dependency inventory from the release lockfile
-- Human-readable package lists for quick review
-- Image digests, checksums, and provenance verification
-
-### [API Reference](/docs/api)
-
-Complete API documentation for developers:
-
-- REST API endpoints
-- Authentication and API keys
-- Request/response formats
-- WebSocket events
-- Error handling
-
-## Core Concepts
-
-- **Assistants**: AI agents with customizable system prompts and provider configurations
-- **Productions**: Collaborative workspaces within organizations
-- **Knowledge**: Document collections for RAG (Retrieval-Augmented Generation)
-- **Organizations**: Multi-tenant structure with role-based access control
-
-## Development
-
-For development setup and contributing guidelines, visit:
-
-- [GitHub Repository](https://github.com/eneo-ai/eneo)
-- [Contributing Guide](https://github.com/eneo-ai/eneo/blob/develop/docs/CONTRIBUTING.md)
-- [Security for Contributors](/contributing/security)
-- [Installation Guide](https://github.com/eneo-ai/eneo/blob/develop/docs/INSTALLATION.md)
-
-## Need Help?
-
-- **Guides**: Check out our [practical guides](/guides) for specific use cases
-- **Forum**: Join discussions at [forum.eneo.ai](https://forum.eneo.ai)
-- **Issues**: Report bugs on [GitHub](https://github.com/eneo-ai/eneo/issues)
-- **Contact**: digitalisering@sundsvall.se (for public sector organizations)
+- [Contributing](/contributing) explains repository contribution paths.
+- [Security for Contributors](/contributing/security) explains how to report and
+  handle security issues.
+- The [GitHub repository](https://github.com/eneo-ai/eneo) is the source for
+  release history and issues.
