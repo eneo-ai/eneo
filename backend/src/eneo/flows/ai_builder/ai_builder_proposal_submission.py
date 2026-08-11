@@ -49,6 +49,9 @@ from eneo.flows.ai_builder.ai_builder_output_sections_signals import (
 from eneo.flows.ai_builder.ai_builder_plan_edit_context import (
     AIBuilderPlanEditContext,
 )
+from eneo.flows.ai_builder.ai_builder_proposal_capture import (
+    capture_malformed_proposal_arguments,
+)
 from eneo.flows.ai_builder.ai_builder_proposal_finalization import (
     CompiledProposalFinalizationRequest,
     CompiledProposalFinalizer,
@@ -613,6 +616,11 @@ class ProposalSubmissionOwner:
         try:
             arguments = parse_tool_call_arguments(tool_call.function.arguments)
         except ToolArgumentParseError as error:
+            capture_malformed_proposal_arguments(
+                tool_call.function.arguments,
+                session_id=str(ctx.session_id),
+                error_message=str(error),
+            )
             async for event in self._run_proposal_self_correction(
                 ctx=ctx,
                 error_message=f"Invalid propose_flow arguments: {error}",

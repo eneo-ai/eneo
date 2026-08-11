@@ -80,9 +80,12 @@ def capture_malformed_proposal_arguments(
     try:
         directory = Path(capture_dir)
         directory.mkdir(parents=True, exist_ok=True)
-        digest = hashlib.sha256(raw_arguments.encode("utf-8")).hexdigest()[:12]
+        stored_content = (
+            f"session_id: {session_id}\nerror: {error_message}\n---\n{raw_arguments}"
+        )
+        digest = hashlib.sha256(stored_content.encode("utf-8")).hexdigest()[:12]
         (directory / f"malformed-proposal-{digest}.txt").write_text(
-            f"session_id: {session_id}\nerror: {error_message}\n---\n{raw_arguments}",
+            stored_content,
             encoding="utf-8",
         )
     except OSError:

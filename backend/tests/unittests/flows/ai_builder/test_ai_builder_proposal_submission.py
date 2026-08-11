@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from time import perf_counter_ns
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -45,6 +46,9 @@ from eneo.flows.ai_builder.ai_builder_litellm_completion import (
 from eneo.flows.ai_builder.ai_builder_output_sections_signals import (
     RequestedOutputSections,
     extract_requested_output_sections,
+)
+from eneo.flows.ai_builder.ai_builder_proposal_capture import (
+    REJECTED_PROPOSAL_CAPTURE_DIR_ENV,
 )
 from eneo.flows.ai_builder.ai_builder_proposal_finalization import (
     CompiledProposalFinalizer,
@@ -1081,6 +1085,48 @@ async def test_create_propose_flow_self_correction_preserves_unknown_provider_ou
     assert dispatched is not None
     with pytest.raises(AIBuilderProviderOutcomeUnknownException):
         _ = [event async for event in dispatched]
+
+
+@pytest.mark.asyncio
+async def test_initial_parse_failures_capture_identical_arguments_per_session(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv(REJECTED_PROPOSAL_CAPTURE_DIR_ENV, str(tmp_path))
+    submission = _make_submission()
+    raw_arguments = "{not-json"
+    session_ids = (uuid4(), uuid4())
+
+    async def _repair_events(_request):
+        yield build_status_event(AIBuilderStatus.REPAIRING)
+
+    with patch(
+        "eneo.flows.ai_builder.ai_builder_proposal_submission.run_tool_self_correction",
+        side_effect=_repair_events,
+    ) as repair:
+        for session_id in session_ids:
+            tool_call = MagicMock()
+            tool_call.id = "call-malformed"
+            tool_call.function.name = PROPOSE_FLOW_TOOL_NAME
+            tool_call.function.arguments = raw_arguments
+            dispatched = submission.dispatch_submission_tool_call(
+                ctx=_make_context(session_id=session_id),
+                tool_call=tool_call,
+            )
+            assert dispatched is not None
+            events = _wire_events([event async for event in dispatched])
+            assert events == [{"event": "status", "data": '{"status":"repairing"}'}]
+
+    assert repair.call_count == 2
+    captures = sorted(tmp_path.glob("malformed-proposal-*.txt"))
+    assert len(captures) == 2
+    captured_contents = [capture.read_text(encoding="utf-8") for capture in captures]
+    assert all(content.endswith(raw_arguments) for content in captured_contents)
+    for session_id in session_ids:
+        assert any(
+            content.startswith(f"session_id: {session_id}\n")
+            for content in captured_contents
+        )
 
 
 @pytest.mark.asyncio
