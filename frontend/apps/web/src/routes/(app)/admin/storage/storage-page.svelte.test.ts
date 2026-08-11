@@ -174,13 +174,36 @@ function inventory() {
   return {
     inventory: [
       {
+        owner: "file_content",
         target: "postgres_inline",
         state: "available",
         count: 3,
         bytes: 4096,
         oldest_created_at: "2026-07-20T10:00:00Z"
+      },
+      {
+        owner: "knowledge_file",
+        target: "object_store",
+        state: "available",
+        count: 4,
+        bytes: 8 * 1024,
+        oldest_created_at: "2026-07-19T10:00:00Z"
+      },
+      {
+        owner: "knowledge_file",
+        target: "object_store",
+        state: "tombstoned",
+        count: 2,
+        bytes: 16 * 1024,
+        oldest_created_at: "2026-07-18T10:00:00Z"
       }
-    ]
+    ],
+    postgresql_allocation: {
+      total_bytes: 32 * 1024 * 1024,
+      inline_content_bytes: 8 * 1024 * 1024,
+      searchable_knowledge_bytes: 12 * 1024 * 1024,
+      other_bytes: 12 * 1024 * 1024
+    }
   };
 }
 
@@ -1350,7 +1373,7 @@ describe("admin storage settings page", () => {
     await expect.element(inventorySection.getByText(/^storage_last_refreshed/)).toBeVisible();
     await inventorySection.getByRole("button", { name: "storage_inventory_caption" }).click();
     const inventoryTable = inventorySection.getByRole("table", {
-      name: "storage_inventory_caption"
+      name: "storage_inventory_managed_caption"
     });
     await expect.element(inventoryTable).toBeVisible();
     const refreshButton = inventorySection.getByRole("button", {
@@ -1676,7 +1699,11 @@ describe("admin storage settings page", () => {
     await clickQueue;
 
     await expect.element(page.getByText("storage_moves_outcome_unknown_title")).toBeVisible();
-    await expect.element(page.getByText("4", { exact: true })).toBeVisible();
+    await expect
+      .element(
+        page.getByRole("region", { name: "storage_moves_title" }).getByText("4", { exact: true })
+      )
+      .toBeVisible();
   });
 
   test("keeps a dirty draft on its old baseline after a committed pause response is lost", async () => {
@@ -2005,7 +2032,7 @@ describe("admin storage settings page", () => {
     await page.getByRole("button", { name: "retry" }).click();
     await page.getByRole("button", { name: "storage_inventory_caption" }).click();
 
-    await expect.element(page.getByText("storage_content_state_available")).toBeVisible();
+    await expect.element(page.getByText("storage_content_state_available").first()).toBeVisible();
     await expect.element(page.getByText("storage_inventory_error_title")).not.toBeInTheDocument();
     expect(getPolicy).toHaveBeenCalledTimes(1);
     expect(getInventory).toHaveBeenCalledTimes(2);
@@ -2360,20 +2387,66 @@ describe("admin storage settings page", () => {
     await expect
       .element(page.getByText("storage_readiness_object_store_not_configured").first())
       .toBeVisible();
+    await expect
+      .element(page.getByText("storage_inventory_managed_total", { exact: true }))
+      .toBeVisible();
+    await expect
+      .element(page.getByText("storage_inventory_postgresql_total", { exact: true }))
+      .toBeVisible();
+    const inventorySection = page.getByRole("region", { name: "storage_inventory_title" });
+    await expect
+      .element(inventorySection.getByText("12 storage_unit_kb", { exact: true }).first())
+      .toBeVisible();
+    await expect
+      .element(inventorySection.getByText("4 storage_unit_kb", { exact: true }).first())
+      .toBeVisible();
+    await expect
+      .element(inventorySection.getByText("8 storage_unit_kb", { exact: true }).first())
+      .toBeVisible();
+    await expect
+      .element(inventorySection.getByText("32 storage_unit_mb", { exact: true }).first())
+      .toBeVisible();
     const connectionSection = page.getByRole("region", { name: "storage_connection_title" });
     await expect
       .element(connectionSection.getByText("storage_connection_empty_title"))
       .toBeVisible();
     await page.getByRole("button", { name: "storage_inventory_caption" }).click();
-    await expect.element(page.getByText("storage_content_state_available")).toBeVisible();
+    await expect.element(page.getByText("storage_content_state_available").first()).toBeVisible();
+    await expect.element(page.getByText("storage_inventory_owner_file_content")).toBeVisible();
+    await expect.element(page.getByText("storage_inventory_allocation_other")).toBeVisible();
     await expect
       .element(
         page
-          .getByRole("table", { name: "storage_inventory_caption" })
+          .getByRole("table", { name: "storage_inventory_managed_caption" })
+          .getByText("16 storage_unit_kb", { exact: true })
+      )
+      .toBeVisible();
+    await expect
+      .element(
+        page
+          .getByRole("table", { name: "storage_inventory_managed_caption" })
           .getByText("4 storage_unit_kb")
       )
       .toBeVisible();
     await expect.element(page.getByText("Jul 20, 2026")).toBeVisible();
     expect(getInventory).toHaveBeenCalledTimes(1);
+  });
+
+  test("keeps managed totals visible when PostgreSQL allocation is unavailable", async () => {
+    testUser.canAdministerStorage = true;
+    getPolicy.mockResolvedValue(policy());
+    getInventory.mockResolvedValue({
+      ...inventory(),
+      postgresql_allocation: null
+    });
+
+    render(StoragePage);
+
+    await expect
+      .element(page.getByText("storage_inventory_managed_total", { exact: true }))
+      .toBeVisible();
+    await expect
+      .element(page.getByText("storage_inventory_allocation_unavailable_title"))
+      .toBeVisible();
   });
 });

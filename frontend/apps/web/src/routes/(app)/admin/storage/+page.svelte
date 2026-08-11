@@ -5,6 +5,7 @@
     DEPLOYMENT_POLICY_CONFLICT_ERROR_CODE,
     EneoError,
     OBJECT_STORE_NOT_SELECTABLE_ERROR_CODE,
+    type ContentOwner,
     type ContentMoveFailureCode,
     type ContentMoveState,
     type ContentState,
@@ -447,6 +448,16 @@
     return labels[state]();
   }
 
+  function contentOwnerLabel(owner: ContentOwner): string {
+    const labels: Record<ContentOwner, () => string> = {
+      file_content: m.storage_inventory_owner_file_content,
+      knowledge_file: m.storage_inventory_owner_knowledge_file,
+      icon: m.storage_inventory_owner_icon,
+      other: m.storage_inventory_owner_other
+    };
+    return labels[owner]();
+  }
+
   function moveStateLabel(state: ContentMoveState): string {
     const labels: Record<ContentMoveState, () => string> = {
       pending: m.storage_move_state_pending,
@@ -497,7 +508,7 @@
       : `${storageCount(value)} ${m.storage_unit_b()}`;
   }
 
-  function storageBytes(value: number): string {
+  function storageBytes(value: number, maximumFractionDigits = 0): string {
     const units = [
       { bytes: 1024 ** 3, label: m.storage_unit_gb },
       { bytes: 1024 ** 2, label: m.storage_unit_mb },
@@ -505,7 +516,7 @@
       { bytes: 1, label: m.storage_unit_b }
     ];
     const unit = units.find((candidate) => value >= candidate.bytes) ?? units[units.length - 1];
-    return `${new Intl.NumberFormat(storageLocale(), { maximumFractionDigits: 0 }).format(
+    return `${new Intl.NumberFormat(storageLocale(), { maximumFractionDigits }).format(
       value / unit.bytes
     )} ${unit.label()}`;
   }
@@ -1260,6 +1271,7 @@
               onRetry={loadInventory}
               onRefresh={loadInventory}
               {storageTargetLabel}
+              {contentOwnerLabel}
               {contentStateLabel}
               {storageDate}
               {storageCount}
