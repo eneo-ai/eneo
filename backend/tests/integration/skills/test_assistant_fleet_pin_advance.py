@@ -200,18 +200,31 @@ async def _explain_statement(
     statement: str,
     parameters: tuple[object, ...],
 ) -> list[Mapping[str, object]]:
-    connection = await session.connection()
-    explained = await connection.exec_driver_sql(
-        f"EXPLAIN (ANALYZE, COSTS OFF, SUMMARY OFF, FORMAT JSON) {statement}",
-        parameters,
-    )
-    document = explained.scalar_one()
-    assert isinstance(document, list)
-    root = document[0]
-    assert isinstance(root, dict)
-    plan = root.get("Plan")
-    assert isinstance(plan, dict)
-    return _walk_plan(plan)
+    """Plan ``statement`` against statistics measured from this test's own rows.
+
+    Integration tests share one PostgreSQL container per xdist worker, and the
+    autouse cleanup truncates every table between them — but TRUNCATE resets
+    pg_class while leaving pg_statistic behind. Measuring inside a savepoint that
+    is always rolled back keeps this test's plan reproducible without leaving
+    statistics that would describe this test's rows to whichever test runs next.
+    """
+    savepoint = await session.begin_nested()
+    try:
+        connection = await session.connection()
+        await connection.exec_driver_sql("ANALYZE assistant_skill_bindings")
+        explained = await connection.exec_driver_sql(
+            f"EXPLAIN (ANALYZE, COSTS OFF, SUMMARY OFF, FORMAT JSON) {statement}",
+            parameters,
+        )
+        document = explained.scalar_one()
+        assert isinstance(document, list)
+        root = document[0]
+        assert isinstance(root, dict)
+        plan = root.get("Plan")
+        assert isinstance(plan, dict)
+        return _walk_plan(plan)
+    finally:
+        await savepoint.rollback()
 
 
 @pytest.mark.integration
@@ -1238,7 +1251,6 @@ async def test_discovery_scales_as_one_bounded_forward_index_walk(
                 for skill_id, revision_id, position in binding_variants
             ],
         )
-        await session.execute(sa.text("ANALYZE assistant_skill_bindings"))
 
         discovery_queries = 0
         captured_statement: tuple[str, tuple[object, ...]] | None = None

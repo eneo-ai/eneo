@@ -118,7 +118,6 @@ services:
       - OBJECT_CONTENT_SECRET_ACCESS_KEY
       - OBJECT_CONTENT_DEPLOYMENT_ID
       - OBJECT_CONTENT_ALLOW_INSECURE_HTTP
-      - OBJECT_CONTENT_ADMIN_ALLOWED_ENDPOINT_ORIGINS
     env_file:
       - env_backend.env
     volumes:
@@ -172,7 +171,6 @@ services:
       - OBJECT_CONTENT_SECRET_ACCESS_KEY
       - OBJECT_CONTENT_DEPLOYMENT_ID
       - OBJECT_CONTENT_ALLOW_INSECURE_HTTP
-      - OBJECT_CONTENT_ADMIN_ALLOWED_ENDPOINT_ORIGINS
     env_file:
       - env_backend.env
     volumes:

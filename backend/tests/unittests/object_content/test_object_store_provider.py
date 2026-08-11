@@ -108,7 +108,7 @@ def _stored(revision: int) -> StoredObjectStoreConnection:
         secret_access_key_encrypted="encrypted-secret",
         deployment_id=UUID("a2d539af-fef0-42aa-a7f8-14376947be2c"),
         addressing_style="path",
-        updated_by_actor=ObjectStoreConnectionActor.PLATFORM_ADMIN,
+        updated_by_actor=ObjectStoreConnectionActor.STORAGE_ADMIN,
         updated_by_user_id=None,
         created_at=now,
         updated_at=now,

@@ -17,5 +17,6 @@ PERMISSIONS_WITH_DESCRIPTION = {
     Permission.ADMIN: "Organization owner. Management of Users, Roles, and Groups.",
     Permission.SHARED_SPACES: "Create shared Spaces. Viewing, editing, and deleting shared Spaces are governed by space membership.",
     Permission.API_KEYS: "Create API keys. Required for minting tenant, space, assistant, and app-scoped keys via the dashboard.",
+    Permission.STORAGE: "Administer file storage. Required for connecting an S3-compatible destination, changing it, rotating its keys, and setting upload limits.",
     Permission.ASSISTANT_DEBUG: "Inspect body-free chat diagnostics, including Skill activation decisions, for conversations you can access.",
 }

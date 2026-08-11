@@ -24,6 +24,7 @@ from eneo.database.tables.object_content_table import (
     ObjectContents,
     ObjectStoreObjects,
 )
+from eneo.database.tables.object_store_binding_table import ObjectStoreBindings
 
 pytestmark = [pytest.mark.integration, pytest.mark.migration_isolation]
 
@@ -119,7 +120,19 @@ def test_fresh_upgrade_downgrade_reupgrade_and_orm_parity(
         ObjectContentOrphanCandidates,
         ObjectContentMultipartCandidates,
         ObjectContentReconciliationState,
+        ObjectStoreBindings,
     )
+    # Expand/contract: the legacy binding columns stay on the reconciliation
+    # singleton — unmapped by the ORM — until a later release drops them, so
+    # a pre-upgrade process keeps working during the deployment window.
+    legacy_binding_columns = {
+        "store_deployment_id",
+        "store_binding_id",
+        "store_binding_confirmed_at",
+        "store_binding_claim_id",
+        "store_binding_claim_until",
+        "store_binding_create_started_at",
+    }
     engine = create_engine(database_url)
     try:
         inspector = inspect(engine)
@@ -128,35 +141,22 @@ def test_fresh_upgrade_downgrade_reupgrade_and_orm_parity(
             database_columns = {
                 str(column["name"]) for column in inspector.get_columns(table_name)
             }
+            if model is ObjectContentReconciliationState:
+                assert legacy_binding_columns <= database_columns
+                database_columns -= legacy_binding_columns
             orm_columns = {column.name for column in model.__table__.columns}
             assert database_columns == orm_columns, table_name
-        reconciliation_columns = {
-            str(column["name"])
-            for column in inspector.get_columns(
-                ObjectContentReconciliationState.__tablename__
-            )
-        }
-        assert {
-            "store_deployment_id",
-            "store_binding_id",
-            "store_binding_confirmed_at",
-            "store_binding_claim_id",
-            "store_binding_claim_until",
-            "store_binding_create_started_at",
-        } <= reconciliation_columns
-        reconciliation_checks = {
+        binding_checks = {
             str(constraint["name"])
             for constraint in inspector.get_check_constraints(
-                ObjectContentReconciliationState.__tablename__
+                ObjectStoreBindings.__tablename__
             )
         }
         assert {
-            "ck_object_content_reconciliation_state_binding_pair",
-            "ck_object_content_reconciliation_state_binding_confirmation",
-            "ck_object_content_reconciliation_state_binding_claim_pair",
-            "ck_object_content_reconciliation_state_binding_claim_state",
-            "ck_object_content_reconciliation_state_binding_create_state",
-        } <= reconciliation_checks
+            "ck_object_store_bindings_slot",
+            "ck_object_store_bindings_claim_pair",
+            "ck_object_store_bindings_claim_state",
+        } <= binding_checks
     finally:
         engine.dispose()
 

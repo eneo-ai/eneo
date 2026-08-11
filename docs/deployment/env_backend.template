@@ -228,10 +228,9 @@ OBJECT_CONTENT_PENDING_STALE_SECONDS=300
 # Use virtual only when the endpoint and DNS/TLS support bucket hosts.
 # OBJECT_CONTENT_ADDRESSING_STYLE=path
 
-# Outbound boundary for destinations configured in Admin > Storage. This is a
-# JSON array of exact endpoint origins, without bucket names or paths. It does
-# not activate object storage or expose credentials to the administrator.
-# OBJECT_CONTENT_ADMIN_ALLOWED_ENDPOINT_ORIGINS=["https://objects.example.se"]
+# Administrators choose destinations in Admin > Storage; restrict reachable
+# hosts with your normal network egress controls if your deployment requires
+# that boundary. See docs/deployment/OBJECT_CONTENT.md.
 
 # External private CA only. Mount the file read-only into backend and worker.
 # OBJECT_CONTENT_CA_BUNDLE=/etc/eneo/object-content/ca.pem

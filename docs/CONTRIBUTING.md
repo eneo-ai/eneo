@@ -77,8 +77,9 @@ curl -X PUT "$ENEO_URL/api/v1/sysadmin/users/$USER_ID/platform-admin" \
   -d '{"enabled": true}'
 ```
 
-Use these values in the connection dialog. They match the Compose defaults, and
-the devcontainer already allowlists this endpoint and permits plain HTTP for it:
+Use these values in the connection dialog. They match the Compose defaults; the
+devcontainer already permits plain HTTP, generates a development
+`ENCRYPTION_KEY`, and prints these values on start while the service runs:
 
 | Field | Value |
 | --- | --- |

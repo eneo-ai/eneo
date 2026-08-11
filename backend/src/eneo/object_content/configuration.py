@@ -1,6 +1,5 @@
 import os
 from collections.abc import Callable
-from ipaddress import ip_address
 from pathlib import Path
 from typing import Literal, Self, cast
 from urllib.parse import urlparse
@@ -14,37 +13,35 @@ from pydantic import (
 )
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+_DEFAULT_PORTS = {"http": 80, "https": 443}
+
+
+def canonical_endpoint_origin(endpoint_url: str) -> str:
+    """Return an endpoint's identity, for deciding if two name one place.
+
+    Hostnames are case-insensitive and a default port is implicit, so
+    ``https://HOST``, ``https://host:443`` and ``https://host/`` all address
+    the same destination. Comparing raw strings would let one of those pass
+    as a different destination than another. This is used only to compare
+    endpoints — never to rewrite what is stored or contacted.
+    """
+    parsed = urlparse(endpoint_url)
+    scheme = parsed.scheme.lower()
+    host = (parsed.hostname or "").lower()
+    if ":" in host:  # IPv6 literal, which needs its brackets back
+        host = f"[{host}]"
+    port = parsed.port
+    if port is not None and port != _DEFAULT_PORTS.get(scheme):
+        return f"{scheme}://{host}:{port}"
+    return f"{scheme}://{host}"
+
+
 _MEBIBYTE = 1024 * 1024
 _MINIMUM_MULTIPART_PART_BYTES = 5 * _MEBIBYTE
 _MAXIMUM_MULTIPART_PART_BYTES = 5 * 1024 * _MEBIBYTE
 _MAXIMUM_MULTIPART_PARTS = 10_000
 _MAXIMUM_S3_OBJECT_BYTES = 5 * 1024 * 1024 * _MEBIBYTE
 _MAXIMUM_S3_PAGE_SIZE = 1_000
-
-
-def _normalized_http_origin(value: str) -> str:
-    parsed = urlparse(value)
-    if parsed.scheme not in {"http", "https"} or not parsed.hostname:
-        raise ValueError("origin must be an absolute HTTP(S) URL")
-    if parsed.username or parsed.password:
-        raise ValueError("origin must not contain credentials")
-    if parsed.path not in {"", "/"} or parsed.query or parsed.fragment:
-        raise ValueError("origin must not contain a path, query, or fragment")
-    try:
-        port = parsed.port or (443 if parsed.scheme == "https" else 80)
-    except ValueError as error:
-        raise ValueError("origin port is invalid") from error
-
-    hostname = parsed.hostname
-    try:
-        address = ip_address(hostname)
-    except ValueError:
-        normalized_host = hostname.encode("idna").decode("ascii").lower()
-    else:
-        normalized_host = address.compressed
-        if address.version == 6:
-            normalized_host = f"[{normalized_host}]"
-    return f"{parsed.scheme}://{normalized_host}:{port}"
 
 
 class ObjectContentCoreSettings(BaseSettings):
@@ -98,7 +95,6 @@ class ObjectStoreOperatorSettings(BaseSettings):
     )
 
     allow_insecure_http: bool = False
-    admin_allowed_endpoint_origins: tuple[str, ...] = ()
     ca_bundle: Path | None = None
     connect_timeout_seconds: float = Field(default=5.0, gt=0)
     read_timeout_seconds: float = Field(default=60.0, gt=0)
@@ -121,14 +117,6 @@ class ObjectStoreOperatorSettings(BaseSettings):
     delete_visibility_timeout_seconds: int = Field(default=30, ge=1)
     delete_poll_interval_seconds: float = Field(default=0.25, gt=0)
     orphan_grace_seconds: int = Field(default=3600, ge=1)
-
-    @field_validator("admin_allowed_endpoint_origins")
-    @classmethod
-    def validate_admin_allowed_endpoint_origins(
-        cls,
-        value: tuple[str, ...],
-    ) -> tuple[str, ...]:
-        return tuple(dict.fromkeys(_normalized_http_origin(origin) for origin in value))
 
     @model_validator(mode="after")
     def validate_operator_bounds(self) -> Self:
@@ -172,13 +160,6 @@ class ObjectStoreOperatorSettings(BaseSettings):
             _MAXIMUM_S3_OBJECT_BYTES,
         )
 
-    def permits_admin_endpoint(self, endpoint_url: str) -> bool:
-        try:
-            origin = _normalized_http_origin(endpoint_url)
-        except ValueError:
-            return False
-        return origin in self.admin_allowed_endpoint_origins
-
 
 class ObjectContentSettings(ObjectContentCoreSettings, ObjectStoreOperatorSettings):
     endpoint_url: str
@@ -195,6 +176,15 @@ class ObjectContentSettings(ObjectContentCoreSettings, ObjectStoreOperatorSettin
         parsed = urlparse(value)
         if parsed.scheme not in {"http", "https"} or not parsed.hostname:
             raise ValueError("endpoint_url must be an absolute HTTP(S) URL")
+        try:
+            # urlparse defers port parsing to this access, so a malformed
+            # port would otherwise surface later, outside the typed
+            # validation contract every consumer of this field relies on.
+            parsed.port
+        except ValueError:
+            raise ValueError(
+                "endpoint_url port must be a number between 1 and 65535"
+            ) from None
         if parsed.username or parsed.password:
             raise ValueError("endpoint_url must not contain credentials")
         if parsed.path not in {"", "/"} or parsed.query or parsed.fragment:
