@@ -286,18 +286,22 @@ any threshold.
     classification. Create mode reuses fresh-session recovery. No table,
     service, framework or module was added, and the later CP-ADMIT
     dependency-table transfer remains separate.
-- [ ] CP1 File-role flip closure (TRIMMED, iteration 33). The margin
-    regression IS the task-14 case (same mechanism, confirmed).
-    Deepen the EXISTING merge owner `_model_file_role_can_replace`
-    (`planning_state_builder.py:1006`) — verified: it checks source
-    and heuristic confidence but never the existing role's evidence
-    LEVEL, so an inferred re-classification can replace an
-    explicit-quote-backed role. Fix: monotonic precedence from
-    existing evidence level + citation identity — same-evidence flips
-    rejected, genuinely later explicit corrections accepted,
-    conflicting evidence becomes explicit ambiguity. NO role-history
-    store. The extra question round is attributed inside this same
-    case study.
+- [x] CP1 File-role flip closure (completed 2026-08-11). The margin
+    regression is the task-14 case: repeated classification could reinterpret
+    the same cited user message and replace an explicit role. The existing
+    merge owner now applies monotonic precedence from evidence level and the
+    complete citation source identity: a role cannot flip within one source,
+    inferred evidence cannot downgrade an explicit role, and a genuinely new
+    explicit source can replace the role and its evidence atomically. The
+    earlier candidate ambiguity direction is retired: `candidate_roles` is a
+    proposal hint, not a fail-closed selection state, and deterministic
+    precedence leaves no unresolved merge state. A future user-resolvable
+    ambiguity lifecycle would require its own product contract; CP1 adds no
+    state, schema, question path, module or role-history store. The full Flow
+    suite passes (6523 passed, 10 skipped, 1 xfailed), and the frozen
+    465-observation receipt reproduces every CP0 count. The extra question
+    round remains attributed to this case for the next permitted progress
+    smoke rather than being guessed at from deterministic tests.
 - [x] CP2 Terminal ownership consolidation (completed 2026-08-11):
     both create-only paths now consume
     `CreateCompileContext.final_output_type`; scoped plan revision reuses
@@ -537,10 +541,10 @@ any threshold.
    evidence access and run listing.
 3. **CP-ADMIT-0 complete** — typed unsupported-architecture refusal
    before provider use or mutation; corrective text remains admissible.
-4. **CP2 complete; CP1 next** — CP2 had deterministic receipts; its
-   N=1 manifest smoke includes the mixed-audio and transcription terminal
-   failures. CP1 carries D7 only if its receipt proves the slot variant.
-5. **Edit aggregation-intent wiring correction** — the severed direct
+4. **CP2 and CP1 complete** — both ownership defects have deterministic
+   receipts; CP1 did not absorb D7 because its receipt proved only the file-role
+   merge mechanism.
+5. **Edit aggregation-intent wiring correction next** — the severed direct
    finalization fix; keep it out of the later CP-EDIT redesign.
 6. **CP-ADMIT implementation** — only after CP2+CP1 land and its
    per-code dependency table exists; the table/design gate runs during
@@ -872,7 +876,7 @@ This cadence replaces per-slice cohort ×3 by user decision on 2026-08-11.
   orchestrator verifies each finding in current source, reruns decisive
   tests, and owns all git.
 - Validation: `cd backend && uv run pytest tests/unittests/flows/ -q`
-  (current baseline: 6519 passed, 10 skipped, 1 xfailed); ruff
+  (current baseline: 6523 passed, 10 skipped, 1 xfailed); ruff
   check/format + pyright
   (`--pythonpath .venv/bin/python`) on exact changed paths only.
 - Measurement: harness + protocol in `conformance-program-plan.md`.

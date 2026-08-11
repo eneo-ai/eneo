@@ -91,6 +91,12 @@ class ClassifiedEvidence:
         return f"quote:{self.source_id}:{self.quote}"
 
 
+def planning_reference_cites_source(reference: str, *, source_id: str) -> bool:
+    """Match a persisted quote to its complete source identity."""
+
+    return reference.startswith(f"quote:{source_id}:")
+
+
 def quoted_texts_from_planning_references(references: Sequence[str]) -> list[str]:
     """Return every user quote carried by persisted evidence references."""
 

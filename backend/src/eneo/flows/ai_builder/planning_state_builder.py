@@ -77,6 +77,7 @@ from eneo.flows.ai_builder.ai_builder_slot_classification_contract import (
     ClassifiedFormIntake,
     ClassifiedNamedResultDelta,
     SlotClassificationResult,
+    planning_reference_cites_source,
 )
 from eneo.flows.ai_builder.ai_builder_slot_vocabulary import (
     KNOWN_REQUIREMENT_SLOT_NAMES,
@@ -908,9 +909,7 @@ def _merged_model_file_roles(
         if existing_role is None:
             continue
         if not _model_file_role_can_replace(
-            existing_role=existing_role.role,
-            existing_role_source=existing_role.source,
-            existing_role_confidence=existing_role.confidence,
+            existing_role=existing_role,
             classified_role=classified_role,
         ):
             continue
@@ -1005,22 +1004,37 @@ def _example_output_constraints_match_file_roles(
 
 def _model_file_role_can_replace(
     *,
-    existing_role: FileRole,
-    existing_role_source: str,
-    existing_role_confidence: str,
+    existing_role: FileRoleEvidence,
     classified_role: ClassifiedFileRole,
 ) -> bool:
     if classified_role.confidence == "low":
         return False
     if not classified_role.evidence:
         return False
-    if existing_role_source == "structured_answer":
+    if existing_role.source == "structured_answer":
         return False
-    if existing_role_source == "heuristic" and existing_role != "context_only":
+    if existing_role.source == "heuristic" and existing_role.role != "context_only":
         return False
-    if existing_role_source == "heuristic" and existing_role_confidence == "high":
+    if existing_role.source == "heuristic" and existing_role.confidence == "high":
         return False
-    return True
+    if existing_role.source != "model":
+        return True
+    if (
+        existing_role.evidence_level == "explicit"
+        and classified_role.evidence_level != "explicit"
+    ):
+        return False
+    if existing_role.role == classified_role.role:
+        return True
+    # A different quote from the same message is a reinterpretation, not new
+    # evidence. A role change needs a source the prior decision did not cite.
+    return any(
+        not any(
+            planning_reference_cites_source(reference, source_id=evidence.source_id)
+            for reference in existing_role.evidence
+        )
+        for evidence in classified_role.evidence
+    )
 
 
 def _merged_file_role_candidates(
