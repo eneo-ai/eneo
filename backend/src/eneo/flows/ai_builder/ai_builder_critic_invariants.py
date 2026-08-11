@@ -1726,10 +1726,14 @@ _GENERATED_DOCX_REJECTS_TEMPLATE_FILL = CriticInvariant(
 # ── Mixed-audio + document edit guardrails ───────────────────────────────
 
 
+def _is_mixed_audio_document_edit(context: CriticContext) -> bool:
+    return not _is_create_context(context) and context.mixed_audio_doc_input
+
+
 def _mixed_audio_doc_rejects_file_degradation_evidence(
     context: CriticContext,
 ) -> bool:
-    if not context.mixed_audio_doc_input:
+    if not _is_mixed_audio_document_edit(context):
         return False
     return degrades_document_entry_to_generic_file(context.spec, flow=context.flow)
 
@@ -1746,13 +1750,14 @@ _MIXED_AUDIO_DOC_REJECTS_FILE_DEGRADATION = CriticInvariant(
         'men planen degraderar den dokumentbaserade ingången till generisk `input_type="file"`. '
         "Gör inte om ett dokumentflöde till allmän filinput bara för att få plats med ljud."
     ),
+    edit_topology=True,
 )
 
 
 def _mixed_audio_doc_rejects_pseudo_transcription_evidence(
     context: CriticContext,
 ) -> bool:
-    if not context.mixed_audio_doc_input:
+    if not _is_mixed_audio_document_edit(context):
         return False
     return uses_pseudo_transcription_without_audio_step(context.spec)
 
@@ -1769,13 +1774,14 @@ _MIXED_AUDIO_DOC_REJECTS_PSEUDO_TRANSCRIPTION = CriticInvariant(
         'transkriberingssteg (`input_type="audio"`, `output_mode="transcribe_only"`, '
         '`output_type="text"`). Faka inte transkribering inne i ett dokument- eller JSON-steg.'
     ),
+    edit_topology=True,
 )
 
 
 def _mixed_audio_doc_requires_real_transcription_step_evidence(
     context: CriticContext,
 ) -> bool:
-    if not context.mixed_audio_doc_input:
+    if not _is_mixed_audio_document_edit(context):
         return False
     return not has_real_audio_transcription_step(context.spec)
 
@@ -1794,6 +1800,7 @@ _MIXED_AUDIO_DOC_REQUIRES_REAL_TRANSCRIPTION_STEP = CriticInvariant(
         "så planen ska antingen behålla dokument som primär indata eller byta till en riktig "
         "audio-first-arkitektur med ett transkriberingssteg — inte låtsas att båda ryms via prompttext."
     ),
+    edit_topology=True,
 )
 
 

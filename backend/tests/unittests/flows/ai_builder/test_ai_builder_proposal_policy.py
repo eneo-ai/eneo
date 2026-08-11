@@ -13,6 +13,8 @@ from eneo.flows.ai_builder.ai_builder_plan_edit_context import (
     AIBuilderPlanEditContext,
 )
 from eneo.flows.ai_builder.ai_builder_proposal_policy import (
+    build_create_contextual_quality_feedback,
+    evaluate_edit_topology_policy,
     format_contextual_quality_feedback,
     format_validation_feedback,
     terminal_output_type_for_conversation,
@@ -90,6 +92,44 @@ def _structured_fan_in_spec() -> FlowDraftSpecCore:
     )
 
 
+def _pseudo_mixed_audio_document_spec(
+    *,
+    input_type: InputType,
+    existing_step_ref: str | None = None,
+) -> FlowDraftSpecCore:
+    return FlowDraftSpecCore(
+        flow_name="Mixed source report",
+        steps=[
+            StepSpec(
+                plan_step_ref="step_a",
+                existing_step_ref=existing_step_ref,
+                name="Transcribe and summarize",
+                assistant_spec=AssistantSpec(
+                    instructions=(
+                        "Transcribe the discussion and summarize the documents."
+                    )
+                ),
+                input_source=InputSource.FLOW_INPUT,
+                input_type=input_type,
+                output_mode=OutputMode.PASS_THROUGH,
+                output_type=OutputType.TEXT,
+            )
+        ],
+    )
+
+
+def _mixed_audio_document_conversation() -> list[ConversationMessage]:
+    return [
+        ConversationMessage(
+            role="user",
+            content=(
+                "I will upload an audio recording and documents at runtime. "
+                "Transcribe the audio and summarize the documents."
+            ),
+        )
+    ]
+
+
 def _make_plan(spec: FlowDraftSpecCore) -> BuilderPlan:
     return BuilderPlan(
         id=uuid4(),
@@ -98,6 +138,56 @@ def _make_plan(spec: FlowDraftSpecCore) -> BuilderPlan:
         status=PlanStatus.PROPOSED,
         proposal=FlowBuilderProposal(content=FlowBuilderProposalContent(spec=spec)),
     )
+
+
+def test_create_policy_does_not_run_mixed_audio_edit_guardrails() -> None:
+    result = build_create_contextual_quality_feedback(
+        conversation=_mixed_audio_document_conversation(),
+        spec=_pseudo_mixed_audio_document_spec(input_type=InputType.DOCUMENT),
+        aggregation_intent="linear",
+        resource_catalog=None,
+    )
+
+    assert result.failure_codes == frozenset()
+
+
+def test_edit_policy_rejects_mixed_audio_topology_regressions() -> None:
+    from eneo.flows.domain.flow import Flow, FlowStep
+
+    result = evaluate_edit_topology_policy(
+        conversation=_mixed_audio_document_conversation(),
+        spec=_pseudo_mixed_audio_document_spec(
+            input_type=InputType.FILE,
+            existing_step_ref="existing_step_1",
+        ),
+        flow=Flow(
+            id=uuid4(),
+            tenant_id=uuid4(),
+            space_id=uuid4(),
+            name="Existing document flow",
+            steps=[
+                FlowStep(
+                    assistant_id=uuid4(),
+                    step_order=1,
+                    user_description="Read the source document",
+                    input_source="flow_input",
+                    input_type="document",
+                    output_mode="pass_through",
+                    output_type="text",
+                )
+            ],
+        ),
+        planning_state=None,
+    )
+
+    assert result.failure_codes == frozenset(
+        {
+            "mixed_audio_doc_rejects_file_degradation",
+            "mixed_audio_doc_rejects_pseudo_transcription",
+            "mixed_audio_doc_requires_real_transcription_step",
+        }
+    )
+    assert result.rejection_feedback is not None
 
 
 def test_plan_edit_output_intent_preserves_prior_document_terminal_type() -> None:
