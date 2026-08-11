@@ -542,6 +542,17 @@ is captured per object, so later multipart tuning cannot invalidate existing
 content. A range proves the chunks it covers; a full read still checks the
 canonical full-object SHA-256 and can detect corruption elsewhere.
 
+**Admin > Storage** reports two related measurements, not remaining capacity.
+The file-content total is the sum of Eneo's recorded content sizes, excluding
+content marked for deletion. Its PostgreSQL and object-storage figures are
+parts of that total. **PostgreSQL on disk** comes from PostgreSQL's catalog and
+covers the whole database, including inline file content, searchable knowledge
+text and pgvector embeddings, tables, indexes, and internal storage. It is
+therefore larger than the PostgreSQL file-content figure and must not be added
+to the file-content total. The object-storage figure is Eneo's recorded content
+size, not provider-reported bucket usage, free capacity, version history, or
+billing size. Use provider and host monitoring for those operational measures.
+
 For PostgreSQL-inline content, monitor database size, WAL generation, backup
 duration, connection-pool pressure, and the documented inline admission
 ceiling. Reads are linear in payload size and use bounded chunks after the

@@ -712,6 +712,24 @@ The `region` value is a signing scope, not a hosting decision.
 No. Object content preserves bytes; document processing produces searchable
 text and vectors. Both remain necessary for RAG.
 
+### What do the storage-usage figures mean?
+
+**Admin > Storage** shows related measurements that must not be added together:
+
+- **File content total** is the combined content size recorded by Eneo, excluding
+  content marked for deletion. The PostgreSQL and object-storage figures are
+  parts of this total.
+- **File content in PostgreSQL** counts the content bytes stored inline in the
+  database. **File content in object storage** counts the content bytes recorded
+  for the connected endpoint. Neither figure includes searchable RAG data.
+- **PostgreSQL on disk** is the size of the entire database. It includes inline
+  file content, searchable knowledge text, pgvector embeddings, tables, indexes,
+  and PostgreSQL's internal storage.
+
+These figures describe Eneo's data, not remaining capacity. Eneo does not report
+host free disk space, an object-storage provider's bucket quota, object versions,
+or billing size. Monitor those values through the host and storage provider.
+
 ### Can we stop using object storage later?
 
 Yes. Select PostgreSQL for new writes, move every remote item back, and keep the
