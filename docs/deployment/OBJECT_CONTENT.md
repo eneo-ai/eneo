@@ -32,14 +32,18 @@ state, audit, and reconciliation facts. The chosen byte backend owns only the
 payload. Selection is explicit when content is created and never changes
 silently after a failure.
 
-| Owner          | Responsibility                                                                                                                        |
-| -------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
-| Administrator  | Connect an S3-compatible destination, change or roll back that destination, rotate its access keys, and set the new-write target and business upload limits in **Admin > Storage** |
-| Operator       | Run PostgreSQL and any optional compatible endpoint; own TLS, certificates, capacity, backups, network reachability, and process safety tuning |
+| Owner         | Responsibility                                                                                                                                                                     |
+| ------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Administrator | Connect an S3-compatible destination, change or roll back that destination, rotate its access keys, and set the new-write target and business upload limits in **Admin > Storage** |
+| Operator      | Run PostgreSQL and any optional compatible endpoint; own TLS, certificates, capacity, backups, network reachability, and process safety tuning                                     |
 
 Storage administration uses the same administrator authority as API keys and
 models. Deployment-wide content inventory spans tenants, so it is part of that
-same administrative view.
+same administrative view. **Admin > Storage** leads with the active target,
+object-store health, recorded file-content distribution, and migration state.
+Changing the target, editing upload limits, and moving existing content remain
+separate actions; detailed limits and PostgreSQL allocation stay available in
+expandable technical details.
 
 Persisted business limits accept whole-byte values from 1 through
 9,007,199,254,740,991 so PostgreSQL and browser clients can round-trip the same

@@ -417,10 +417,10 @@ compatible endpoint, including MinIO. Both object-store paths use the same
 contract and fail closed when configuration or the database/bucket binding does
 not match.
 
-| Owner                                 | Responsibility                                                                                                                          |
-| ------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| Owner                                 | Responsibility                                                                                                                                     |
+| ------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Administrator with Storage permission | Choose one deployment-wide target for eligible new File, Icon, and knowledge-original writes and set business upload limits in **Admin > Storage** |
-| Operator                              | Run PostgreSQL and any optional compatible endpoint; own credentials, TLS, capacity, backups, and `OBJECT_CONTENT_INLINE_MAXIMUM_BYTES` |
+| Operator                              | Run PostgreSQL and any optional compatible endpoint; own credentials, TLS, capacity, backups, and `OBJECT_CONTENT_INLINE_MAXIMUM_BYTES`            |
 
 Policy changes take effect without a backend or worker restart. They affect
 eligible new writes only; existing content stays in its recorded backend until
@@ -433,6 +433,11 @@ tables, indexes, and internal storage. The page does not report remaining host
 or bucket capacity. See [What do the storage-usage figures
 mean?](/guides/object-content-storage#what-do-the-storage-usage-figures-mean)
 for the exact boundaries.
+
+The same page presents current status before configuration: the active target,
+object-store health, file-content distribution, and migration state appear
+first. PostgreSQL allocation and detailed effective limits remain available as
+technical details instead of competing with routine storage decisions.
 
 The page also shows the portable multipart envelope when it constrains
 object-store session
@@ -664,24 +669,24 @@ ENEO_SUPER_DUPER_API_KEY=your-other-secure-api-key
 
 ### Common Issues
 
-| Symptom                              | Likely Cause                                       | Fix                                                                                 |
-| ------------------------------------ | -------------------------------------------------- | ----------------------------------------------------------------------------------- |
-| Can't login with default credentials | `DEFAULT_*` vars commented or db-init didn't run   | Uncomment vars in env_backend.env, check `docker logs eneo_db_init`                 |
-| Can't see Users page in Admin        | `USING_ACCESS_MANAGEMENT=false`                    | Set to `true`, restart backend                                                      |
-| Frontend shows wrong API URL         | `PUBLIC_ENEO_BACKEND_URL` incorrect                | Set to external URL (not localhost in prod)                                         |
-| Can't upload multiple files          | `MAX_IN_QUESTION=1`                                | Increase value in backend env                                                       |
-| Large file uploads fail              | Admin policy or applicable operator ceiling is lower | Review configured, effective, and source values in Admin > Storage                |
-| "Failed to decrypt credential"       | `ENCRYPTION_KEY` missing or changed                | Set correct key or re-enter credentials                                             |
-| Credentials API returns 404/error    | `TENANT_CREDENTIALS_ENABLED=false`                 | Set to `true`, requires `ENCRYPTION_KEY`                                            |
-| OIDC redirect fails                  | `PUBLIC_ORIGIN` mismatch                           | Must match in backend, frontend, AND IdP config                                     |
-| Crawls not processing                | `CRAWL_FEEDER_ENABLED=false`                       | Set to `true`                                                                       |
-| Crawls/uploads not working           | Worker not running or no embedding model           | Check worker is running, enable embedding model in Admin → Models                   |
-| Can't create Apps                    | No transcription model enabled                     | Admin → Models → Transcription tab, enable Whisper                                  |
-| JWT token invalid                    | `JWT_SECRET` mismatch                              | Must be identical in backend AND frontend                                           |
-| Worker jobs stuck or slow            | Worker overloaded                                  | Reduce `WORKER_MAX_JOBS` or increase resources                                      |
-| `ECONNREFUSED 127.0.0.1:8000`        | Frontend using localhost instead of Docker service | Set `ENEO_BACKEND_SERVER_URL=http://backend:8000` (use service name, not localhost) |
-| HTTP to HTTPS redirect broken        | Missing Traefik label                              | Ensure `traefik.enable=true` label on traefik service                               |
-| 502 Bad Gateway                      | Domain not replaced in docker-compose.yml          | Replace `your-domain.com` in all 4 locations                                        |
+| Symptom                              | Likely Cause                                         | Fix                                                                                 |
+| ------------------------------------ | ---------------------------------------------------- | ----------------------------------------------------------------------------------- |
+| Can't login with default credentials | `DEFAULT_*` vars commented or db-init didn't run     | Uncomment vars in env_backend.env, check `docker logs eneo_db_init`                 |
+| Can't see Users page in Admin        | `USING_ACCESS_MANAGEMENT=false`                      | Set to `true`, restart backend                                                      |
+| Frontend shows wrong API URL         | `PUBLIC_ENEO_BACKEND_URL` incorrect                  | Set to external URL (not localhost in prod)                                         |
+| Can't upload multiple files          | `MAX_IN_QUESTION=1`                                  | Increase value in backend env                                                       |
+| Large file uploads fail              | Admin policy or applicable operator ceiling is lower | Review configured, effective, and source values in Admin > Storage                  |
+| "Failed to decrypt credential"       | `ENCRYPTION_KEY` missing or changed                  | Set correct key or re-enter credentials                                             |
+| Credentials API returns 404/error    | `TENANT_CREDENTIALS_ENABLED=false`                   | Set to `true`, requires `ENCRYPTION_KEY`                                            |
+| OIDC redirect fails                  | `PUBLIC_ORIGIN` mismatch                             | Must match in backend, frontend, AND IdP config                                     |
+| Crawls not processing                | `CRAWL_FEEDER_ENABLED=false`                         | Set to `true`                                                                       |
+| Crawls/uploads not working           | Worker not running or no embedding model             | Check worker is running, enable embedding model in Admin → Models                   |
+| Can't create Apps                    | No transcription model enabled                       | Admin → Models → Transcription tab, enable Whisper                                  |
+| JWT token invalid                    | `JWT_SECRET` mismatch                                | Must be identical in backend AND frontend                                           |
+| Worker jobs stuck or slow            | Worker overloaded                                    | Reduce `WORKER_MAX_JOBS` or increase resources                                      |
+| `ECONNREFUSED 127.0.0.1:8000`        | Frontend using localhost instead of Docker service   | Set `ENEO_BACKEND_SERVER_URL=http://backend:8000` (use service name, not localhost) |
+| HTTP to HTTPS redirect broken        | Missing Traefik label                                | Ensure `traefik.enable=true` label on traefik service                               |
+| 502 Bad Gateway                      | Domain not replaced in docker-compose.yml            | Replace `your-domain.com` in all 4 locations                                        |
 
 ### Debug Mode
 
