@@ -137,7 +137,7 @@ def run_schema_drift_check(repo: Path) -> None:
                 (
                     "import json; "
                     "from eneo.server.main import app; "
-                    f"json.dump(app.openapi(), open({str(openapi_path)!r}, 'w'))"
+                    f"json.dump(app.openapi(), open({str(openapi_path)!r}, 'w'), sort_keys=True)"
                 ),
             ],
             cwd=repo / "backend",

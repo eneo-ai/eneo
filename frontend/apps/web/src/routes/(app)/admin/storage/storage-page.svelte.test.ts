@@ -9,12 +9,43 @@ const getMoves = vi.hoisted(() => vi.fn());
 const queueMoves = vi.hoisted(() => vi.fn());
 const setMovesPaused = vi.hoisted(() => vi.fn());
 const replacePolicy = vi.hoisted(() => vi.fn());
-const testUser = vi.hoisted(() => ({ isPlatformAdmin: false }));
+const getObjectStoreConnection = vi.hoisted(() => vi.fn());
+const createObjectStoreConnection = vi.hoisted(() => vi.fn());
+const rotateObjectStoreCredentials = vi.hoisted(() => vi.fn());
+const replaceObjectStoreDestination = vi.hoisted(() => vi.fn());
+const switchBackObjectStoreDestination = vi.hoisted(() => vi.fn());
+const forgetPreviousObjectStoreDestination = vi.hoisted(() => vi.fn());
+const abandonPendingObjectStoreDestination = vi.hoisted(() => vi.fn());
+// Storage administration is a normal permission (held by the Owner role by
+// default), independent of the deployment-wide platform-admin flag. The
+// fixture keeps is_platform_admin false so every editable-state test proves
+// the actual contract: an ordinary user with the storage permission.
+const testUser = vi.hoisted(() => ({ canAdministerStorage: false }));
+const invalidate = vi.hoisted(() => vi.fn(async () => {}));
+
+// Every export is listed: other modules in the component graph import
+// `replaceState` and friends, and a partial factory breaks their named imports.
+vi.mock("$app/navigation", () => ({
+  afterNavigate: vi.fn(),
+  beforeNavigate: vi.fn(),
+  disableScrollHandling: vi.fn(),
+  goto: vi.fn(),
+  invalidate,
+  invalidateAll: vi.fn(),
+  onNavigate: vi.fn(),
+  preloadCode: vi.fn(),
+  preloadData: vi.fn(),
+  pushState: vi.fn(),
+  refreshAll: vi.fn(),
+  replaceState: vi.fn()
+}));
 
 vi.mock("$lib/core/AppContext.js", () => ({
   getAppContext: () => ({
     user: {
-      is_platform_admin: testUser.isPlatformAdmin
+      is_platform_admin: false,
+      roles: testUser.canAdministerStorage ? [{ permissions: ["admin", "storage"] }] : [],
+      predefined_roles: []
     }
   })
 }));
@@ -28,6 +59,15 @@ vi.mock("$lib/core/Eneo", () => ({
       queueMoves,
       setMovesPaused,
       replace: replacePolicy
+    },
+    objectStoreConnection: {
+      get: getObjectStoreConnection,
+      create: createObjectStoreConnection,
+      rotateCredentials: rotateObjectStoreCredentials,
+      replaceDestination: replaceObjectStoreDestination,
+      switchBackDestination: switchBackObjectStoreDestination,
+      forgetPreviousDestination: forgetPreviousObjectStoreDestination,
+      abandonPendingDestination: abandonPendingObjectStoreDestination
     }
   })
 }));
@@ -68,7 +108,7 @@ function policy(overrides: Record<string, unknown> = {}) {
       knowledge_file_limit_bytes: 50 * 1024 * 1024,
       transcription_audio_limit_bytes: 100 * 1024 * 1024,
       moves_paused: false,
-      updated_by_actor: "platform_admin",
+      updated_by_actor: "storage_admin",
       created_at: "2026-07-25T10:00:00Z",
       updated_at: "2026-07-25T11:00:00Z"
     },
@@ -100,18 +140,18 @@ function policy(overrides: Record<string, unknown> = {}) {
       {
         use_case: "knowledge_file",
         configured_bytes: 50 * 1024 * 1024,
-        effective_bytes: 50 * 1024 * 1024,
-        storage_target: null,
-        operator_ceiling_bytes: null,
-        constraining_source: "admin_policy"
+        effective_bytes: 8 * 1024 * 1024,
+        storage_target: "postgres_inline",
+        operator_ceiling_bytes: 8 * 1024 * 1024,
+        constraining_source: "operator_ceiling"
       },
       {
         use_case: "knowledge_audio",
         configured_bytes: 100 * 1024 * 1024,
-        effective_bytes: 100 * 1024 * 1024,
-        storage_target: null,
-        operator_ceiling_bytes: null,
-        constraining_source: "admin_policy"
+        effective_bytes: 8 * 1024 * 1024,
+        storage_target: "postgres_inline",
+        operator_ceiling_bytes: 8 * 1024 * 1024,
+        constraining_source: "operator_ceiling"
       }
     ],
     capabilities: [
@@ -166,7 +206,7 @@ function moves(overrides: Record<string, unknown> = {}) {
 
 describe("admin storage settings page", () => {
   beforeEach(() => {
-    testUser.isPlatformAdmin = false;
+    testUser.canAdministerStorage = false;
     getPolicy.mockReset();
     getInventory.mockReset();
     getInventory.mockResolvedValue(inventory());
@@ -175,6 +215,21 @@ describe("admin storage settings page", () => {
     queueMoves.mockReset();
     setMovesPaused.mockReset();
     replacePolicy.mockReset();
+    getObjectStoreConnection.mockReset();
+    getObjectStoreConnection.mockResolvedValue({
+      source: "unconfigured",
+      configured: false,
+      credentials_can_be_managed: true,
+      revision: null,
+      endpoint_url: null,
+      region: null,
+      bucket: null,
+      addressing_style: null,
+      updated_at: null
+    });
+    createObjectStoreConnection.mockReset();
+    rotateObjectStoreCredentials.mockReset();
+    invalidate.mockClear();
   });
 
   test("shows a loading state before rendering the sanitized deployment policy", async () => {
@@ -229,7 +284,7 @@ describe("admin storage settings page", () => {
       .element(page.getByText("20 storage_unit_mb", { exact: true }).first())
       .toBeVisible();
     await expect
-      .element(page.getByRole("button", { name: "storage_settings_save" }))
+      .element(page.getByRole("button", { name: "storage_settings_save", exact: true }))
       .not.toBeInTheDocument();
     expect(getInventory).not.toHaveBeenCalled();
     expect(getMoves).not.toHaveBeenCalled();
@@ -273,7 +328,7 @@ describe("admin storage settings page", () => {
       .toBeVisible();
   });
 
-  test("explains the knowledge-content exclusion shown by the effective limits", async () => {
+  test("explains knowledge-original routing and shows its effective limits", async () => {
     getPolicy.mockResolvedValue(policy());
 
     render(StoragePage);
@@ -281,7 +336,7 @@ describe("admin storage settings page", () => {
     await expect
       .element(
         page.getByText(
-          "Applies to new file and icon content across this deployment. Knowledge content is always stored in the database and is not affected by this choice."
+          "Applies to new file and icon content and to originals from new knowledge file and audio uploads. Searchable knowledge stays in PostgreSQL. Existing content stays where it is; nothing moves automatically."
         )
       )
       .toBeVisible();
@@ -293,11 +348,16 @@ describe("admin storage settings page", () => {
       [...limitsTable.element().querySelectorAll("td")].filter(
         (cell) => cell.textContent === "storage_target_not_applicable"
       )
-    ).toHaveLength(2);
+    ).toHaveLength(0);
+    expect(
+      [...limitsTable.element().querySelectorAll("td")].filter(
+        (cell) => cell.textContent === "storage_target_postgres_inline"
+      )
+    ).toHaveLength(5);
   });
 
   test("shows localized policy governance metadata and links unavailable storage to its guide", async () => {
-    testUser.isPlatformAdmin = true;
+    testUser.canAdministerStorage = true;
     getPolicy.mockResolvedValue(policy());
 
     render(StoragePage);
@@ -305,7 +365,7 @@ describe("admin storage settings page", () => {
     await expect
       .element(
         page.getByText(
-          'storage_settings_last_changed {"date":"Jul 25, 2026","actor":"storage_policy_actor_platform_admin","revision":4}'
+          'storage_settings_last_changed {"date":"Jul 25, 2026","actor":"storage_policy_actor_storage_admin","revision":4}'
         )
       )
       .toBeVisible();
@@ -314,8 +374,925 @@ describe("admin storage settings page", () => {
       .toHaveAttribute("href", "https://docs.eneo.ai/guides/object-content-storage");
   });
 
+  test("tests and saves the first connection without changing the storage target", async () => {
+    testUser.canAdministerStorage = true;
+    getPolicy.mockResolvedValue(policy());
+    createObjectStoreConnection.mockResolvedValue({
+      source: "admin",
+      configured: true,
+      credentials_can_be_managed: true,
+      revision: 1,
+      endpoint_url: "https://objects.example.test",
+      region: "se-1",
+      bucket: "eneo-content",
+      addressing_style: "path",
+      updated_at: "2026-08-03T18:00:00Z"
+    });
+
+    render(StoragePage);
+
+    await page.getByRole("button", { name: "storage_connection_add_action" }).click();
+    await page.getByLabelText("storage_connection_endpoint").fill("https://objects.example.test");
+    await page.getByLabelText("storage_connection_bucket").fill("eneo-content");
+    await page.getByLabelText("storage_connection_region").fill("se-1");
+    await page.getByLabelText("storage_connection_access_key").fill("access-key");
+    await page.getByLabelText("storage_connection_secret_key").fill("secret-key");
+    await page.getByRole("button", { name: "storage_connection_test_and_save" }).click();
+
+    expect(createObjectStoreConnection).toHaveBeenCalledWith({
+      endpoint_url: "https://objects.example.test",
+      region: "se-1",
+      bucket: "eneo-content",
+      access_key_id: "access-key",
+      secret_access_key: "secret-key",
+      addressing_style: "path"
+    });
+    await expect.element(page.getByText("storage_connection_created_title")).toBeVisible();
+    await expect
+      .element(page.getByRole("radio", { name: /storage_target_postgres_inline/ }))
+      .toBeChecked();
+    // Connecting a store flips a capability other pages read from the root
+    // layout's settings, so that data has to be reloaded too.
+    expect(invalidate).toHaveBeenCalledWith("global:state");
+  });
+
+  test("switches to a copied destination and offers switching back", async () => {
+    testUser.canAdministerStorage = true;
+    getPolicy.mockResolvedValue(policy());
+    getObjectStoreConnection.mockReset().mockResolvedValue({
+      source: "admin",
+      configured: true,
+      credentials_can_be_managed: true,
+      revision: 1,
+      endpoint_url: "https://old.example.test",
+      region: "se-1",
+      bucket: "eneo-content",
+      addressing_style: "path",
+      updated_at: "2026-08-03T18:00:00Z"
+    });
+    replaceObjectStoreDestination.mockResolvedValue({
+      source: "admin",
+      configured: true,
+      credentials_can_be_managed: true,
+      revision: 2,
+      endpoint_url: "https://new.example.test",
+      region: "se-1",
+      bucket: "eneo-content-new",
+      addressing_style: "path",
+      updated_at: "2026-08-06T10:00:00Z",
+      previous_destination: {
+        revision: 1,
+        endpoint_url: "https://old.example.test",
+        region: "se-1",
+        bucket: "eneo-content",
+        addressing_style: "path",
+        updated_at: "2026-08-03T18:00:00Z"
+      }
+    });
+
+    render(StoragePage);
+
+    await page.getByRole("button", { name: "storage_switch_action" }).click();
+    await expect.element(page.getByText("storage_switch_checklist_title")).toBeVisible();
+    await page.getByLabelText("storage_connection_endpoint").fill("https://new.example.test");
+    await page.getByLabelText("storage_connection_bucket").fill("eneo-content-new");
+    await page.getByLabelText("storage_connection_region").fill("se-1");
+    await page.getByLabelText("storage_connection_access_key").fill("new-access-key");
+    await page.getByLabelText("storage_connection_secret_key").fill("new-secret-key");
+    await page.getByRole("button", { name: "storage_switch_test_and_switch" }).click();
+
+    expect(replaceObjectStoreDestination).toHaveBeenCalledWith({
+      endpoint_url: "https://new.example.test",
+      region: "se-1",
+      bucket: "eneo-content-new",
+      access_key_id: "new-access-key",
+      secret_access_key: "new-secret-key",
+      addressing_style: "path"
+    });
+    await expect.element(page.getByText("storage_switch_done_title")).toBeVisible();
+    await expect.element(page.getByText("storage_switch_previous_title")).toBeVisible();
+    await expect
+      .element(page.getByRole("button", { name: "storage_switch_back_action" }))
+      .toBeVisible();
+  });
+
+  test("tells the administrator to redirect new files before switching", async () => {
+    testUser.canAdministerStorage = true;
+    getPolicy.mockResolvedValue(policy());
+    getObjectStoreConnection.mockReset().mockResolvedValue({
+      source: "admin",
+      configured: true,
+      credentials_can_be_managed: true,
+      revision: 1,
+      endpoint_url: "https://old.example.test",
+      region: "se-1",
+      bucket: "eneo-content",
+      addressing_style: "path",
+      updated_at: "2026-08-03T18:00:00Z"
+    });
+    replaceObjectStoreDestination.mockRejectedValue(
+      new EneoError(
+        "Files are still being saved",
+        "RESPONSE",
+        409,
+        0,
+        { code: "object_store_new_writes_not_redirected" },
+        { endpoint: "POST@/admin/object-store-connection/destination" }
+      )
+    );
+
+    render(StoragePage);
+
+    await page.getByRole("button", { name: "storage_switch_action" }).click();
+    await page.getByLabelText("storage_connection_endpoint").fill("https://new.example.test");
+    await page.getByLabelText("storage_connection_bucket").fill("eneo-content-new");
+    await page.getByLabelText("storage_connection_region").fill("se-1");
+    await page.getByLabelText("storage_connection_access_key").fill("new-access-key");
+    await page.getByLabelText("storage_connection_secret_key").fill("new-secret-key");
+    await page.getByRole("button", { name: "storage_switch_test_and_switch" }).click();
+
+    await expect.element(page.getByText("storage_switch_error_new_writes_title")).toBeVisible();
+  });
+
+  test("shows why switching back to the previous destination was refused", async () => {
+    testUser.canAdministerStorage = true;
+    getPolicy.mockResolvedValue(policy());
+    getObjectStoreConnection.mockReset().mockResolvedValue({
+      source: "admin",
+      configured: true,
+      credentials_can_be_managed: true,
+      revision: 2,
+      endpoint_url: "https://new.example.test",
+      region: "se-1",
+      bucket: "eneo-content-new",
+      addressing_style: "path",
+      updated_at: "2026-08-06T10:00:00Z",
+      previous_destination: {
+        revision: 1,
+        endpoint_url: "https://old.example.test",
+        region: "se-1",
+        bucket: "eneo-content",
+        addressing_style: "path",
+        updated_at: "2026-08-03T18:00:00Z"
+      }
+    });
+    switchBackObjectStoreDestination.mockRejectedValue(
+      new EneoError(
+        "New files still go to object storage",
+        "RESPONSE",
+        409,
+        0,
+        { code: "object_store_new_writes_not_redirected" },
+        { endpoint: "POST@/admin/object-store-connection/destination/switch-back" }
+      )
+    );
+
+    render(StoragePage);
+
+    await page.getByRole("button", { name: "storage_switch_back_action" }).click();
+
+    // The reason has to be readable on the page: this action never opens the
+    // connection dialog where submission errors are rendered.
+    await expect.element(page.getByText("storage_switch_error_new_writes_title")).toBeVisible();
+  });
+
+  test("shows why removing the previous destination failed", async () => {
+    testUser.canAdministerStorage = true;
+    getPolicy.mockResolvedValue(policy());
+    getObjectStoreConnection.mockReset().mockResolvedValue({
+      source: "admin",
+      configured: true,
+      credentials_can_be_managed: true,
+      revision: 2,
+      endpoint_url: "https://new.example.test",
+      region: "se-1",
+      bucket: "eneo-content-new",
+      addressing_style: "path",
+      updated_at: "2026-08-06T10:00:00Z",
+      previous_destination: {
+        revision: 1,
+        endpoint_url: "https://old.example.test",
+        region: "se-1",
+        bucket: "eneo-content",
+        addressing_style: "path",
+        updated_at: "2026-08-03T18:00:00Z"
+      }
+    });
+    forgetPreviousObjectStoreDestination.mockRejectedValue(
+      new EneoError(
+        "Connection data is temporarily unavailable",
+        "RESPONSE",
+        503,
+        0,
+        { code: "object_store_connection_database_unavailable" },
+        { endpoint: "DELETE@/admin/object-store-connection/previous" }
+      )
+    );
+
+    render(StoragePage);
+
+    await page.getByRole("button", { name: "storage_switch_forget_action" }).click();
+
+    await expect
+      .element(page.getByText("storage_connection_error_unavailable_title"))
+      .toBeVisible();
+  });
+
+  test("renders a committed switch-back whose acknowledgement was lost as done", async () => {
+    testUser.canAdministerStorage = true;
+    getPolicy.mockResolvedValue(policy());
+    getObjectStoreConnection
+      .mockReset()
+      .mockResolvedValueOnce({
+        source: "admin",
+        configured: true,
+        credentials_can_be_managed: true,
+        revision: 2,
+        endpoint_url: "https://new.example.test",
+        region: "se-1",
+        bucket: "eneo-content-new",
+        addressing_style: "path",
+        updated_at: "2026-08-06T10:00:00Z",
+        previous_destination: {
+          revision: 1,
+          endpoint_url: "https://old.example.test",
+          region: "se-1",
+          bucket: "eneo-content",
+          addressing_style: "path",
+          updated_at: "2026-08-03T18:00:00Z"
+        }
+      })
+      // The refresh proves the switch-back committed: the previous destination
+      // is active again even though the mutation response was lost.
+      .mockResolvedValue({
+        source: "admin",
+        configured: true,
+        credentials_can_be_managed: true,
+        revision: 4,
+        endpoint_url: "https://old.example.test",
+        region: "se-1",
+        bucket: "eneo-content",
+        addressing_style: "path",
+        updated_at: "2026-08-06T11:00:00Z",
+        previous_destination: {
+          revision: 3,
+          endpoint_url: "https://new.example.test",
+          region: "se-1",
+          bucket: "eneo-content-new",
+          addressing_style: "path",
+          updated_at: "2026-08-06T10:00:00Z"
+        }
+      });
+    switchBackObjectStoreDestination.mockRejectedValue(
+      new EneoError(
+        "The save result could not be confirmed",
+        "RESPONSE",
+        503,
+        0,
+        { code: "object_store_connection_mutation_outcome_unknown" },
+        { endpoint: "POST@/admin/object-store-connection/destination/switch-back" }
+      )
+    );
+
+    render(StoragePage);
+
+    await page.getByRole("button", { name: "storage_switch_back_action" }).click();
+
+    // The committed cutover must render as done, not as a retryable failure
+    // that would invite reversing it.
+    await expect.element(page.getByText("storage_switch_back_done_title")).toBeVisible();
+    await expect
+      .element(page.getByText("storage_switch_outcome_not_applied_title"))
+      .not.toBeInTheDocument();
+  });
+
+  test("reports an unconfirmed switch-back that never applied and allows retry", async () => {
+    testUser.canAdministerStorage = true;
+    getPolicy.mockResolvedValue(policy());
+    getObjectStoreConnection.mockReset().mockResolvedValue({
+      source: "admin",
+      configured: true,
+      credentials_can_be_managed: true,
+      revision: 2,
+      endpoint_url: "https://new.example.test",
+      region: "se-1",
+      bucket: "eneo-content-new",
+      addressing_style: "path",
+      updated_at: "2026-08-06T10:00:00Z",
+      previous_destination: {
+        revision: 1,
+        endpoint_url: "https://old.example.test",
+        region: "se-1",
+        bucket: "eneo-content",
+        addressing_style: "path",
+        updated_at: "2026-08-03T18:00:00Z"
+      }
+    });
+    switchBackObjectStoreDestination.mockRejectedValue(
+      new EneoError(
+        "The save result could not be confirmed",
+        "RESPONSE",
+        503,
+        0,
+        { code: "object_store_connection_mutation_outcome_unknown" },
+        { endpoint: "POST@/admin/object-store-connection/destination/switch-back" }
+      )
+    );
+
+    render(StoragePage);
+
+    await page.getByRole("button", { name: "storage_switch_back_action" }).click();
+
+    await expect.element(page.getByText("storage_switch_outcome_not_applied_title")).toBeVisible();
+    await expect
+      .element(page.getByRole("button", { name: "storage_switch_back_action" }))
+      .toBeEnabled();
+  });
+
+  test("reconciles a committed switch-back whose transport failed without a response", async () => {
+    testUser.canAdministerStorage = true;
+    getPolicy.mockResolvedValue(policy());
+    getObjectStoreConnection
+      .mockReset()
+      .mockResolvedValueOnce({
+        source: "admin",
+        configured: true,
+        credentials_can_be_managed: true,
+        revision: 2,
+        endpoint_url: "https://new.example.test",
+        region: "se-1",
+        bucket: "eneo-content-new",
+        addressing_style: "path",
+        updated_at: "2026-08-06T10:00:00Z",
+        previous_destination: {
+          revision: 1,
+          endpoint_url: "https://old.example.test",
+          region: "se-1",
+          bucket: "eneo-content",
+          addressing_style: "path",
+          updated_at: "2026-08-03T18:00:00Z"
+        }
+      })
+      .mockResolvedValue({
+        source: "admin",
+        configured: true,
+        credentials_can_be_managed: true,
+        revision: 4,
+        endpoint_url: "https://old.example.test",
+        region: "se-1",
+        bucket: "eneo-content",
+        addressing_style: "path",
+        updated_at: "2026-08-06T11:00:00Z",
+        previous_destination: {
+          revision: 3,
+          endpoint_url: "https://new.example.test",
+          region: "se-1",
+          bucket: "eneo-content-new",
+          addressing_style: "path",
+          updated_at: "2026-08-06T10:00:00Z"
+        }
+      });
+    // The browser never received a response: no status, no error code. The
+    // server may still have committed the cutover.
+    switchBackObjectStoreDestination.mockRejectedValue(
+      new EneoError("Failed to fetch", "CONNECTION", 0, 0, "No response text", {
+        endpoint: "POST@/admin/object-store-connection/destination/switch-back"
+      })
+    );
+
+    render(StoragePage);
+
+    await page.getByRole("button", { name: "storage_switch_back_action" }).click();
+
+    // The refresh proves the cutover committed; it must not be offered as a
+    // retryable failure whose retry would reverse it.
+    await expect.element(page.getByText("storage_switch_back_done_title")).toBeVisible();
+    await expect
+      .element(page.getByText("storage_connection_error_unavailable_title"))
+      .not.toBeInTheDocument();
+  });
+
+  test("shows divergence when the archive changed under an unconfirmed switch-back", async () => {
+    testUser.canAdministerStorage = true;
+    getPolicy.mockResolvedValue(policy());
+    getObjectStoreConnection
+      .mockReset()
+      .mockResolvedValueOnce({
+        source: "admin",
+        configured: true,
+        credentials_can_be_managed: true,
+        revision: 2,
+        endpoint_url: "https://new.example.test",
+        region: "se-1",
+        bucket: "eneo-content-new",
+        addressing_style: "path",
+        updated_at: "2026-08-06T10:00:00Z",
+        previous_destination: {
+          revision: 1,
+          endpoint_url: "https://old.example.test",
+          region: "se-1",
+          bucket: "eneo-content",
+          addressing_style: "path",
+          updated_at: "2026-08-03T18:00:00Z"
+        }
+      })
+      // A concurrent administrator replaced the archive: same destinations,
+      // but the archived row is a different revision.
+      .mockResolvedValue({
+        source: "admin",
+        configured: true,
+        credentials_can_be_managed: true,
+        revision: 4,
+        endpoint_url: "https://new.example.test",
+        region: "se-1",
+        bucket: "eneo-content-new",
+        addressing_style: "path",
+        updated_at: "2026-08-06T11:00:00Z",
+        previous_destination: {
+          revision: 3,
+          endpoint_url: "https://old.example.test",
+          region: "se-1",
+          bucket: "eneo-content",
+          addressing_style: "path",
+          updated_at: "2026-08-06T11:00:00Z"
+        }
+      });
+    switchBackObjectStoreDestination.mockRejectedValue(
+      new EneoError(
+        "The save result could not be confirmed",
+        "RESPONSE",
+        503,
+        0,
+        { code: "object_store_connection_mutation_outcome_unknown" },
+        { endpoint: "POST@/admin/object-store-connection/destination/switch-back" }
+      )
+    );
+
+    render(StoragePage);
+
+    await page.getByRole("button", { name: "storage_switch_back_action" }).click();
+
+    await expect.element(page.getByText("storage_connection_error_conflict_title")).toBeVisible();
+    await expect
+      .element(page.getByText("storage_switch_outcome_not_applied_title"))
+      .not.toBeInTheDocument();
+  });
+
+  test("lets the administrator abandon a pending destination attempt", async () => {
+    testUser.canAdministerStorage = true;
+    getPolicy.mockResolvedValue(policy());
+    getObjectStoreConnection
+      .mockReset()
+      .mockResolvedValueOnce({
+        source: "admin",
+        configured: true,
+        credentials_can_be_managed: true,
+        revision: 2,
+        endpoint_url: "https://objects.example.test",
+        region: "se-1",
+        bucket: "eneo-content",
+        addressing_style: "path",
+        updated_at: "2026-08-06T10:00:00Z",
+        pending_destination: {
+          revision: 3,
+          endpoint_url: "https://stuck.example.test",
+          region: "se-1",
+          bucket: "eneo-content-stuck",
+          addressing_style: "path",
+          updated_at: "2026-08-06T09:00:00Z"
+        }
+      })
+      .mockResolvedValue({
+        source: "admin",
+        configured: true,
+        credentials_can_be_managed: true,
+        revision: 2,
+        endpoint_url: "https://objects.example.test",
+        region: "se-1",
+        bucket: "eneo-content",
+        addressing_style: "path",
+        updated_at: "2026-08-06T10:00:00Z",
+        pending_destination: null
+      });
+    abandonPendingObjectStoreDestination.mockReset().mockResolvedValue(undefined);
+
+    render(StoragePage);
+
+    await expect.element(page.getByText("storage_pending_title")).toBeVisible();
+    await page.getByRole("button", { name: "storage_pending_abandon_action" }).click();
+
+    expect(abandonPendingObjectStoreDestination).toHaveBeenCalledWith(3);
+    await expect.element(page.getByText("storage_pending_title")).not.toBeInTheDocument();
+  });
+
+  test("shows divergence when a lost abandon response hides a replaced attempt", async () => {
+    testUser.canAdministerStorage = true;
+    getPolicy.mockResolvedValue(policy());
+    const base = {
+      source: "admin",
+      configured: true,
+      credentials_can_be_managed: true,
+      revision: 2,
+      endpoint_url: "https://objects.example.test",
+      region: "se-1",
+      bucket: "eneo-content",
+      addressing_style: "path",
+      updated_at: "2026-08-06T10:00:00Z"
+    };
+    getObjectStoreConnection
+      .mockReset()
+      .mockResolvedValueOnce({
+        ...base,
+        pending_destination: {
+          revision: 3,
+          endpoint_url: "https://stuck.example.test",
+          region: "se-1",
+          bucket: "eneo-content-stuck",
+          addressing_style: "path",
+          updated_at: "2026-08-06T09:00:00Z"
+        }
+      })
+      // The reconciling refresh fails too; the captured revision must
+      // survive it.
+      .mockRejectedValueOnce(new Error("offline"))
+      // While the response was lost, a newer attempt claimed the slot.
+      .mockResolvedValue({
+        ...base,
+        pending_destination: {
+          revision: 5,
+          endpoint_url: "https://stuck.example.test",
+          region: "se-1",
+          bucket: "eneo-content-stuck",
+          addressing_style: "path",
+          updated_at: "2026-08-06T09:30:00Z"
+        }
+      });
+    abandonPendingObjectStoreDestination.mockReset().mockRejectedValue(
+      new EneoError("Failed to fetch", "CONNECTION", 0, 0, "No response text", {
+        endpoint: "DELETE@/admin/object-store-connection/pending"
+      })
+    );
+
+    render(StoragePage);
+
+    await page.getByRole("button", { name: "storage_pending_abandon_action" }).click();
+
+    // The failed refresh leaves the load-error recovery path; retrying it
+    // resumes the SAME reconciliation against the captured revision.
+    await expect.element(page.getByText("storage_connection_load_error_title")).toBeVisible();
+    await page.getByRole("button", { name: "retry" }).click();
+
+    // The click must not silently transfer to the newer attempt.
+    await expect.element(page.getByText("storage_connection_error_conflict_title")).toBeVisible();
+    expect(abandonPendingObjectStoreDestination).toHaveBeenCalledTimes(1);
+  });
+
+  test("renders a committed forget whose acknowledgement was lost as done", async () => {
+    testUser.canAdministerStorage = true;
+    getPolicy.mockResolvedValue(policy());
+    getObjectStoreConnection
+      .mockReset()
+      .mockResolvedValueOnce({
+        source: "admin",
+        configured: true,
+        credentials_can_be_managed: true,
+        revision: 2,
+        endpoint_url: "https://new.example.test",
+        region: "se-1",
+        bucket: "eneo-content-new",
+        addressing_style: "path",
+        updated_at: "2026-08-06T10:00:00Z",
+        previous_destination: {
+          revision: 1,
+          endpoint_url: "https://old.example.test",
+          region: "se-1",
+          bucket: "eneo-content",
+          addressing_style: "path",
+          updated_at: "2026-08-03T18:00:00Z"
+        }
+      })
+      .mockResolvedValue({
+        source: "admin",
+        configured: true,
+        credentials_can_be_managed: true,
+        revision: 2,
+        endpoint_url: "https://new.example.test",
+        region: "se-1",
+        bucket: "eneo-content-new",
+        addressing_style: "path",
+        updated_at: "2026-08-06T10:00:00Z",
+        previous_destination: null
+      });
+    forgetPreviousObjectStoreDestination.mockRejectedValue(
+      new EneoError(
+        "The save result could not be confirmed",
+        "RESPONSE",
+        503,
+        0,
+        { code: "object_store_connection_mutation_outcome_unknown" },
+        { endpoint: "DELETE@/admin/object-store-connection/previous" }
+      )
+    );
+
+    render(StoragePage);
+
+    await page.getByRole("button", { name: "storage_switch_forget_action" }).click();
+
+    await expect
+      .element(page.getByRole("button", { name: "storage_switch_back_action" }))
+      .not.toBeInTheDocument();
+    await expect
+      .element(page.getByText("storage_switch_outcome_not_applied_title"))
+      .not.toBeInTheDocument();
+  });
+
+  test("reloads the existing connection after a setup conflict", async () => {
+    testUser.canAdministerStorage = true;
+    getPolicy.mockResolvedValue(policy());
+    const configuredConnection = {
+      source: "admin",
+      configured: true,
+      credentials_can_be_managed: true,
+      revision: 1,
+      endpoint_url: "https://objects.example.test",
+      region: "se-1",
+      bucket: "eneo-content",
+      addressing_style: "path",
+      updated_at: "2026-08-03T18:00:00Z"
+    } as const;
+    getObjectStoreConnection
+      .mockReset()
+      .mockResolvedValueOnce({
+        source: "unconfigured",
+        configured: false,
+        credentials_can_be_managed: true,
+        revision: null,
+        endpoint_url: null,
+        region: null,
+        bucket: null,
+        addressing_style: null,
+        updated_at: null
+      })
+      .mockResolvedValueOnce(configuredConnection);
+    createObjectStoreConnection.mockRejectedValue(
+      new EneoError(
+        "Object storage is already configured",
+        "RESPONSE",
+        409,
+        0,
+        { code: "object_store_connection_already_configured" },
+        { endpoint: "POST@/admin/object-store-connection" }
+      )
+    );
+
+    render(StoragePage);
+
+    await page.getByRole("button", { name: "storage_connection_add_action" }).click();
+    await page.getByLabelText("storage_connection_endpoint").fill("https://objects.example.test");
+    await page.getByLabelText("storage_connection_bucket").fill("eneo-content");
+    await page.getByLabelText("storage_connection_region").fill("se-1");
+    await page.getByLabelText("storage_connection_access_key").fill("access-key");
+    await page.getByLabelText("storage_connection_secret_key").fill("secret-key");
+    await page.getByRole("button", { name: "storage_connection_test_and_save" }).click();
+
+    await expect
+      .element(page.getByText("storage_connection_already_configured_title"))
+      .toBeVisible();
+    await expect
+      .element(page.getByRole("heading", { name: "storage_connection_dialog_create_title" }))
+      .not.toBeInTheDocument();
+    await expect.element(page.getByText("https://objects.example.test")).toBeVisible();
+    await expect
+      .element(page.getByRole("button", { name: "storage_connection_add_action" }))
+      .not.toBeInTheDocument();
+    expect(getObjectStoreConnection).toHaveBeenCalledTimes(2);
+    expect(getPolicy).toHaveBeenCalledTimes(2);
+  });
+
+  test("keeps the previous-destination controls after rotating credentials", async () => {
+    testUser.canAdministerStorage = true;
+    getPolicy.mockResolvedValue(policy());
+    const archived = {
+      revision: 1,
+      endpoint_url: "https://old.example.test",
+      region: "se-1",
+      bucket: "eneo-content-old",
+      addressing_style: "path",
+      updated_at: "2026-08-03T18:00:00Z"
+    } as const;
+    const connection = {
+      source: "admin",
+      configured: true,
+      credentials_can_be_managed: true,
+      revision: 3,
+      endpoint_url: "https://objects.example.test",
+      region: "se-1",
+      bucket: "eneo-content",
+      addressing_style: "path",
+      updated_at: "2026-08-03T18:00:00Z",
+      previous_destination: archived
+    } as const;
+    getObjectStoreConnection.mockReset().mockResolvedValue(connection);
+    // Rotation leaves the archive in place, so its response carries it too.
+    rotateObjectStoreCredentials.mockResolvedValue({
+      ...connection,
+      revision: 4,
+      previous_destination: archived
+    });
+
+    render(StoragePage);
+
+    await page.getByRole("button", { name: "storage_connection_rotate_action" }).click();
+    await page.getByLabelText("storage_connection_access_key").fill("new-access-key");
+    await page.getByLabelText("storage_connection_secret_key").fill("new-secret-key");
+    await page.getByRole("button", { name: "storage_connection_test_and_rotate" }).click();
+
+    await expect.element(page.getByText("storage_connection_rotated_title")).toBeVisible();
+    // The recovery controls must survive a rotation: the page does not
+    // reload the connection after a successful save.
+    await expect
+      .element(page.getByRole("button", { name: "storage_switch_back_action" }))
+      .toBeVisible();
+  });
+
+  test("replaces the complete key pair without presenting the destination as editable", async () => {
+    testUser.canAdministerStorage = true;
+    getPolicy.mockResolvedValue(policy());
+    const connection = {
+      source: "admin",
+      configured: true,
+      credentials_can_be_managed: true,
+      revision: 3,
+      endpoint_url: "https://objects.example.test",
+      region: "se-1",
+      bucket: "eneo-content",
+      addressing_style: "path",
+      updated_at: "2026-08-03T18:00:00Z"
+    } as const;
+    getObjectStoreConnection.mockResolvedValue(connection);
+    rotateObjectStoreCredentials.mockResolvedValue({ ...connection, revision: 4 });
+
+    render(StoragePage);
+
+    await page.getByRole("button", { name: "storage_connection_rotate_action" }).click();
+
+    await expect.element(page.getByText("storage_connection_current_destination")).toBeVisible();
+    await expect
+      .element(page.getByText("storage_connection_destination_locked_help"))
+      .toBeVisible();
+    await expect
+      .element(page.getByLabelText("storage_connection_endpoint"))
+      .not.toBeInTheDocument();
+    await expect.element(page.getByLabelText("storage_connection_bucket")).not.toBeInTheDocument();
+
+    await page.getByLabelText("storage_connection_access_key").fill("replacement-access-key");
+    await page.getByLabelText("storage_connection_secret_key").fill("replacement-secret-key");
+    await page.getByRole("button", { name: "storage_connection_test_and_rotate" }).click();
+
+    expect(rotateObjectStoreCredentials).toHaveBeenCalledWith({
+      expected_revision: 3,
+      access_key_id: "replacement-access-key",
+      secret_access_key: "replacement-secret-key"
+    });
+  });
+
+  test("reloads the connection revision after a concurrent credential rotation", async () => {
+    testUser.canAdministerStorage = true;
+    getPolicy.mockResolvedValue(policy());
+    const connection = {
+      source: "admin",
+      configured: true,
+      credentials_can_be_managed: true,
+      revision: 3,
+      endpoint_url: "https://objects.example.test",
+      region: "se-1",
+      bucket: "eneo-content",
+      addressing_style: "path",
+      updated_at: "2026-08-03T18:00:00Z"
+    } as const;
+    let rejectConnectionReload!: (reason: unknown) => void;
+    getObjectStoreConnection
+      .mockResolvedValueOnce(connection)
+      .mockImplementationOnce(
+        () =>
+          new Promise<never>((_resolve, reject) => {
+            rejectConnectionReload = reject;
+          })
+      )
+      .mockResolvedValueOnce({ ...connection, revision: 4 });
+    rotateObjectStoreCredentials
+      .mockRejectedValueOnce(
+        new EneoError(
+          "The connection changed while it was being tested",
+          "RESPONSE",
+          409,
+          0,
+          { code: "object_store_connection_revision_conflict" },
+          { endpoint: "PUT@/admin/object-store-connection/credentials" }
+        )
+      )
+      .mockResolvedValueOnce({ ...connection, revision: 5 });
+
+    render(StoragePage);
+
+    await page.getByRole("button", { name: "storage_connection_rotate_action" }).click();
+    await page.getByLabelText("storage_connection_access_key").fill("stale-access-key");
+    await page.getByLabelText("storage_connection_secret_key").fill("stale-secret-key");
+    await page.getByRole("button", { name: "storage_connection_test_and_rotate" }).click();
+
+    await expect
+      .element(page.getByRole("heading", { name: "storage_connection_dialog_rotate_title" }))
+      .not.toBeInTheDocument();
+    expect(getObjectStoreConnection).toHaveBeenCalledTimes(2);
+    await expect
+      .element(page.getByText("storage_connection_error_conflict_title"))
+      .not.toBeInTheDocument();
+
+    rejectConnectionReload(new Error("connection reload failed"));
+
+    await expect.element(page.getByText("storage_connection_load_error_title")).toBeVisible();
+    await expect
+      .element(page.getByText("storage_connection_error_conflict_title"))
+      .not.toBeInTheDocument();
+
+    await page.getByRole("button", { name: "retry" }).click();
+
+    await expect.element(page.getByText("storage_connection_error_conflict_title")).toBeVisible();
+    await expect
+      .element(page.getByText('storage_connection_revision {"revision":4}'))
+      .toBeVisible();
+
+    await page.getByRole("button", { name: "storage_connection_rotate_action" }).click();
+    await expect.element(page.getByLabelText("storage_connection_access_key")).toHaveValue("");
+    await expect.element(page.getByLabelText("storage_connection_secret_key")).toHaveValue("");
+    await page.getByLabelText("storage_connection_access_key").fill("current-access-key");
+    await page.getByLabelText("storage_connection_secret_key").fill("current-secret-key");
+    await page.getByRole("button", { name: "storage_connection_test_and_rotate" }).click();
+
+    expect(rotateObjectStoreCredentials).toHaveBeenNthCalledWith(2, {
+      expected_revision: 4,
+      access_key_id: "current-access-key",
+      secret_access_key: "current-secret-key"
+    });
+    expect(getObjectStoreConnection).toHaveBeenCalledTimes(3);
+    expect(getPolicy).toHaveBeenCalledTimes(3);
+  });
+
+  test("finishes connection and policy recovery when an uncertain save needs a retry", async () => {
+    testUser.canAdministerStorage = true;
+    getPolicy.mockResolvedValue(policy());
+    const connection = {
+      source: "admin",
+      configured: true,
+      credentials_can_be_managed: true,
+      revision: 3,
+      endpoint_url: "https://objects.example.test",
+      region: "se-1",
+      bucket: "eneo-content",
+      addressing_style: "path",
+      updated_at: "2026-08-03T18:00:00Z"
+    } as const;
+    getObjectStoreConnection
+      .mockResolvedValueOnce(connection)
+      .mockRejectedValueOnce(new Error("connection reload failed"))
+      .mockResolvedValueOnce({ ...connection, revision: 4 });
+    rotateObjectStoreCredentials.mockRejectedValue(
+      new EneoError(
+        "The database could not confirm the save",
+        "RESPONSE",
+        503,
+        0,
+        { code: "object_store_connection_mutation_outcome_unknown" },
+        { endpoint: "PUT@/admin/object-store-connection/credentials" }
+      )
+    );
+
+    render(StoragePage);
+
+    await page.getByRole("button", { name: "storage_connection_rotate_action" }).click();
+    await page.getByLabelText("storage_connection_access_key").fill("replacement-access-key");
+    await page.getByLabelText("storage_connection_secret_key").fill("replacement-secret-key");
+    await page.getByRole("button", { name: "storage_connection_test_and_rotate" }).click();
+
+    await expect
+      .element(page.getByText("storage_connection_mutation_outcome_unknown_title"))
+      .toBeVisible();
+    await expect
+      .element(page.getByRole("heading", { name: "storage_connection_dialog_rotate_title" }))
+      .not.toBeInTheDocument();
+    expect(getObjectStoreConnection).toHaveBeenCalledTimes(2);
+
+    await page.getByRole("button", { name: "retry" }).click();
+
+    await expect
+      .element(page.getByText('storage_connection_revision {"revision":4}'))
+      .toBeVisible();
+    expect(getObjectStoreConnection).toHaveBeenCalledTimes(3);
+    expect(getPolicy).toHaveBeenCalledTimes(2);
+  });
+
   test("refreshes move progress and inventory independently without reloading policy", async () => {
-    testUser.isPlatformAdmin = true;
+    testUser.canAdministerStorage = true;
     getPolicy.mockResolvedValue(policy());
 
     render(StoragePage);
@@ -330,7 +1307,7 @@ describe("admin storage settings page", () => {
   });
 
   test("keeps focus on the move refresh button through a completed refresh", async () => {
-    testUser.isPlatformAdmin = true;
+    testUser.canAdministerStorage = true;
     getPolicy.mockResolvedValue(policy());
     let resolveMoves!: (value: ReturnType<typeof moves>) => void;
     getMoves.mockResolvedValueOnce(moves()).mockImplementationOnce(
@@ -359,7 +1336,7 @@ describe("admin storage settings page", () => {
   });
 
   test("keeps focus on the inventory refresh button through a completed refresh", async () => {
-    testUser.isPlatformAdmin = true;
+    testUser.canAdministerStorage = true;
     getPolicy.mockResolvedValue(policy());
     let resolveInventory!: (value: ReturnType<typeof inventory>) => void;
     getInventory.mockResolvedValueOnce(inventory()).mockImplementationOnce(
@@ -395,7 +1372,7 @@ describe("admin storage settings page", () => {
   });
 
   test("formats storage counts and binary byte units with the active locale", async () => {
-    testUser.isPlatformAdmin = true;
+    testUser.canAdministerStorage = true;
     getPolicy.mockResolvedValue(policy());
     getMoves.mockResolvedValue(
       moves({
@@ -421,7 +1398,7 @@ describe("admin storage settings page", () => {
   });
 
   test("queues a bounded page and pauses or resumes through revision-fenced commands", async () => {
-    testUser.isPlatformAdmin = true;
+    testUser.canAdministerStorage = true;
     const loadedPolicy = policy();
     const initial = policy({
       policy: {
@@ -477,7 +1454,7 @@ describe("admin storage settings page", () => {
   });
 
   test("queues moves to PostgreSQL while object storage is unavailable", async () => {
-    testUser.isPlatformAdmin = true;
+    testUser.canAdministerStorage = true;
     getPolicy.mockResolvedValue(policy());
     queueMoves.mockResolvedValue({ queued_count: 1, target_too_large_count: 0 });
 
@@ -493,7 +1470,7 @@ describe("admin storage settings page", () => {
   });
 
   test("defaults the move destination to the current policy target", async () => {
-    testUser.isPlatformAdmin = true;
+    testUser.canAdministerStorage = true;
     getPolicy.mockResolvedValue(policy());
 
     render(StoragePage);
@@ -504,7 +1481,7 @@ describe("admin storage settings page", () => {
   });
 
   test("shows progress only on the move action that is running", async () => {
-    testUser.isPlatformAdmin = true;
+    testUser.canAdministerStorage = true;
     getPolicy.mockResolvedValue(
       policy({
         capabilities: [
@@ -555,7 +1532,7 @@ describe("admin storage settings page", () => {
   });
 
   test("locks policy inputs while pause recovery is pending", async () => {
-    testUser.isPlatformAdmin = true;
+    testUser.canAdministerStorage = true;
     const initial = policy();
     getPolicy.mockResolvedValueOnce(initial).mockResolvedValueOnce(
       policy({
@@ -605,7 +1582,7 @@ describe("admin storage settings page", () => {
   });
 
   test("keeps the selected destination and limit when readiness rejects queueing", async () => {
-    testUser.isPlatformAdmin = true;
+    testUser.canAdministerStorage = true;
     const loadedPolicy = policy();
     getPolicy.mockResolvedValue(
       policy({
@@ -644,7 +1621,7 @@ describe("admin storage settings page", () => {
   });
 
   test("reloads committed queue progress when the command outcome is unknown", async () => {
-    testUser.isPlatformAdmin = true;
+    testUser.canAdministerStorage = true;
     getPolicy.mockResolvedValue(
       policy({
         capabilities: [
@@ -705,7 +1682,7 @@ describe("admin storage settings page", () => {
   });
 
   test("keeps a dirty draft on its old baseline after a committed pause response is lost", async () => {
-    testUser.isPlatformAdmin = true;
+    testUser.canAdministerStorage = true;
     const initial = policy();
     getPolicy.mockResolvedValueOnce(initial).mockResolvedValueOnce(
       policy({
@@ -735,13 +1712,13 @@ describe("admin storage settings page", () => {
       .element(page.getByLabelText("storage_limit_session_image", { exact: true }))
       .toHaveValue(10);
     await expect
-      .element(page.getByRole("button", { name: "storage_settings_save" }))
+      .element(page.getByRole("button", { name: "storage_settings_save", exact: true }))
       .toBeDisabled();
     expect(replacePolicy).not.toHaveBeenCalled();
   });
 
   test("keeps the full policy revision as the replacement baseline", async () => {
-    testUser.isPlatformAdmin = true;
+    testUser.canAdministerStorage = true;
     const initial = policy();
     getPolicy.mockResolvedValue(initial);
     getMoves.mockResolvedValue(moves({ policy_revision: 5, paused: true }));
@@ -758,13 +1735,13 @@ describe("admin storage settings page", () => {
     render(StoragePage);
 
     await page.getByLabelText("storage_limit_session_file", { exact: true }).fill("30");
-    await page.getByRole("button", { name: "storage_settings_save" }).click();
+    await page.getByRole("button", { name: "storage_settings_save", exact: true }).click();
 
     expect(replacePolicy).toHaveBeenCalledWith(expect.objectContaining({ expected_revision: 4 }));
   });
 
   test("refreshes the full policy after pausing from a newer move projection", async () => {
-    testUser.isPlatformAdmin = true;
+    testUser.canAdministerStorage = true;
     const initial = policy();
     getPolicy.mockResolvedValueOnce(initial).mockResolvedValueOnce(
       policy({
@@ -796,7 +1773,7 @@ describe("admin storage settings page", () => {
 
     await page.getByRole("button", { name: "storage_moves_pause" }).click();
     await page.getByLabelText("storage_limit_session_file", { exact: true }).fill("30");
-    await page.getByRole("button", { name: "storage_settings_save" }).click();
+    await page.getByRole("button", { name: "storage_settings_save", exact: true }).click();
 
     expect(replacePolicy).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -807,7 +1784,7 @@ describe("admin storage settings page", () => {
   });
 
   test("serializes policy saves and pause commands on their shared revision", async () => {
-    testUser.isPlatformAdmin = true;
+    testUser.canAdministerStorage = true;
     const initial = policy();
     getPolicy.mockResolvedValue(initial);
     let resolveSave!: (value: ReturnType<typeof policy>) => void;
@@ -825,7 +1802,10 @@ describe("admin storage settings page", () => {
     render(StoragePage);
 
     await page.getByLabelText("storage_limit_session_file", { exact: true }).fill("30");
-    const saveButton = page.getByRole("button", { name: "storage_settings_save" });
+    const saveButton = page.getByRole("button", {
+      name: "storage_settings_save",
+      exact: true
+    });
     const pauseButton = page.getByRole("button", { name: "storage_moves_pause" });
     const saveClick = (async () => {
       await saveButton.click();
@@ -856,7 +1836,7 @@ describe("admin storage settings page", () => {
   });
 
   test("uses the saved policy revision and pause state for the next move command", async () => {
-    testUser.isPlatformAdmin = true;
+    testUser.canAdministerStorage = true;
     const initial = policy();
     getPolicy.mockResolvedValue(initial);
     replacePolicy.mockResolvedValue(
@@ -874,7 +1854,7 @@ describe("admin storage settings page", () => {
     render(StoragePage);
 
     await page.getByLabelText("storage_limit_session_file", { exact: true }).fill("30");
-    await page.getByRole("button", { name: "storage_settings_save" }).click();
+    await page.getByRole("button", { name: "storage_settings_save", exact: true }).click();
     await page.getByRole("button", { name: "storage_moves_resume" }).click();
 
     expect(setMovesPaused).toHaveBeenCalledWith({
@@ -884,7 +1864,7 @@ describe("admin storage settings page", () => {
   });
 
   test("keeps a newer move projection when an older full policy response finishes later", async () => {
-    testUser.isPlatformAdmin = true;
+    testUser.canAdministerStorage = true;
     const initial = policy({
       capabilities: [
         {
@@ -916,7 +1896,7 @@ describe("admin storage settings page", () => {
 
     await page.getByLabelText("storage_limit_session_file", { exact: true }).fill("30");
     const save = (async () => {
-      await page.getByRole("button", { name: "storage_settings_save" }).click();
+      await page.getByRole("button", { name: "storage_settings_save", exact: true }).click();
     })();
     await expect.element(page.getByRole("button", { name: "storage_moves_pause" })).toBeDisabled();
     await page.getByRole("button", { name: "storage_moves_queue" }).click();
@@ -939,7 +1919,7 @@ describe("admin storage settings page", () => {
   });
 
   test("disables moves toward object storage while it is unavailable", async () => {
-    testUser.isPlatformAdmin = true;
+    testUser.canAdministerStorage = true;
     const loadedPolicy = policy();
     getPolicy.mockResolvedValue(
       policy({
@@ -960,7 +1940,7 @@ describe("admin storage settings page", () => {
   });
 
   test("recovers a scoped move-progress failure without reloading policy or inventory", async () => {
-    testUser.isPlatformAdmin = true;
+    testUser.canAdministerStorage = true;
     getPolicy.mockResolvedValue(policy());
     getMoves.mockRejectedValueOnce(new Error("progress unavailable"));
 
@@ -979,7 +1959,7 @@ describe("admin storage settings page", () => {
   });
 
   test("keeps current progress visible when a pause command uses a stale revision", async () => {
-    testUser.isPlatformAdmin = true;
+    testUser.canAdministerStorage = true;
     getPolicy.mockResolvedValue(policy());
     setMovesPaused.mockRejectedValue({ status: 409 });
 
@@ -995,8 +1975,8 @@ describe("admin storage settings page", () => {
     });
   });
 
-  test("keeps policy visible and stops inventory retries after platform authority is revoked", async () => {
-    testUser.isPlatformAdmin = true;
+  test("keeps policy visible and stops inventory retries after storage authority is revoked", async () => {
+    testUser.canAdministerStorage = true;
     getPolicy.mockResolvedValue(policy());
     getInventory.mockRejectedValue({ status: 403 });
 
@@ -1013,7 +1993,7 @@ describe("admin storage settings page", () => {
   });
 
   test("shows a scoped inventory error and retries only inventory", async () => {
-    testUser.isPlatformAdmin = true;
+    testUser.canAdministerStorage = true;
     getPolicy.mockResolvedValue(policy());
     getInventory.mockRejectedValueOnce(new Error("inventory unavailable"));
 
@@ -1037,7 +2017,7 @@ describe("admin storage settings page", () => {
   });
 
   test("round-trips a byte limit through human-readable units without changing its bytes", async () => {
-    testUser.isPlatformAdmin = true;
+    testUser.canAdministerStorage = true;
     getPolicy.mockResolvedValue(policy());
 
     render(StoragePage);
@@ -1058,12 +2038,12 @@ describe("admin storage settings page", () => {
     await page.getByRole("option", { name: "storage_unit_mb" }).click();
     await expect.element(sessionFileInput).toHaveValue(20);
     await expect
-      .element(page.getByRole("button", { name: "storage_settings_save" }))
+      .element(page.getByRole("button", { name: "storage_settings_save", exact: true }))
       .toBeDisabled();
   });
 
   test("falls back to bytes for a stored limit that is not divisible by a larger unit", async () => {
-    testUser.isPlatformAdmin = true;
+    testUser.canAdministerStorage = true;
     const initial = policy();
     getPolicy.mockResolvedValue(
       policy({
@@ -1085,7 +2065,7 @@ describe("admin storage settings page", () => {
   });
 
   test("serializes a human-readable byte limit to an exact-byte policy payload", async () => {
-    testUser.isPlatformAdmin = true;
+    testUser.canAdministerStorage = true;
     const initial = policy({
       capabilities: [
         {
@@ -1112,7 +2092,10 @@ describe("admin storage settings page", () => {
 
     await page.getByRole("radio", { name: /storage_target_object_store/ }).click();
     await page.getByLabelText("storage_limit_session_file", { exact: true }).fill("30");
-    const saveButton = page.getByRole("button", { name: "storage_settings_save" });
+    const saveButton = page.getByRole("button", {
+      name: "storage_settings_save",
+      exact: true
+    });
     await saveButton.click();
 
     await expect
@@ -1145,7 +2128,7 @@ describe("admin storage settings page", () => {
   });
 
   test("discards an unsaved policy draft through the shared settings row", async () => {
-    testUser.isPlatformAdmin = true;
+    testUser.canAdministerStorage = true;
     getPolicy.mockResolvedValue(policy());
 
     render(StoragePage);
@@ -1156,13 +2139,13 @@ describe("admin storage settings page", () => {
 
     await expect.element(sessionFileInput).toHaveValue(20);
     await expect
-      .element(page.getByRole("button", { name: "storage_settings_save" }))
+      .element(page.getByRole("button", { name: "storage_settings_save", exact: true }))
       .toBeDisabled();
     expect(replacePolicy).not.toHaveBeenCalled();
   });
 
   test("requires a reload when a generic save failure has an unknown outcome", async () => {
-    testUser.isPlatformAdmin = true;
+    testUser.canAdministerStorage = true;
     const initial = policy();
     const committed = policy({
       policy: {
@@ -1179,14 +2162,14 @@ describe("admin storage settings page", () => {
 
     const sessionFileInput = page.getByLabelText("storage_limit_session_file", { exact: true });
     await sessionFileInput.fill("31");
-    await page.getByRole("button", { name: "storage_settings_save" }).click();
+    await page.getByRole("button", { name: "storage_settings_save", exact: true }).click();
 
     await expect
       .element(page.getByText("storage_settings_save_outcome_unknown_title"))
       .toBeVisible();
     await expect.element(sessionFileInput).toHaveValue(31);
     await expect
-      .element(page.getByRole("button", { name: "storage_settings_save" }))
+      .element(page.getByRole("button", { name: "storage_settings_save", exact: true }))
       .toBeDisabled();
 
     await page.getByRole("button", { name: "storage_settings_reload_latest" }).click();
@@ -1197,8 +2180,8 @@ describe("admin storage settings page", () => {
       .not.toBeInTheDocument();
   });
 
-  test("switches to read-only when platform-admin authority is revoked before save", async () => {
-    testUser.isPlatformAdmin = true;
+  test("switches to read-only when storage authority is revoked before save", async () => {
+    testUser.canAdministerStorage = true;
     const initial = policy({
       capabilities: [
         {
@@ -1222,7 +2205,7 @@ describe("admin storage settings page", () => {
 
     await page.getByRole("radio", { name: /storage_target_object_store/ }).click();
     await page.getByLabelText("storage_limit_session_file", { exact: true }).fill("31");
-    await page.getByRole("button", { name: "storage_settings_save" }).click();
+    await page.getByRole("button", { name: "storage_settings_save", exact: true }).click();
 
     await expect.element(page.getByText("storage_settings_read_only_title")).toBeVisible();
     await expect.element(page.getByText("storage_inventory_title")).not.toBeInTheDocument();
@@ -1241,7 +2224,7 @@ describe("admin storage settings page", () => {
       .element(page.getByText("20 storage_unit_mb", { exact: true }).first())
       .toBeVisible();
     await expect
-      .element(page.getByRole("button", { name: "storage_settings_save" }))
+      .element(page.getByRole("button", { name: "storage_settings_save", exact: true }))
       .not.toBeInTheDocument();
     await expect
       .element(page.getByText("storage_settings_save_outcome_unknown_title"))
@@ -1249,7 +2232,7 @@ describe("admin storage settings page", () => {
   });
 
   test("preserves a stale draft until the administrator explicitly reloads the latest revision", async () => {
-    testUser.isPlatformAdmin = true;
+    testUser.canAdministerStorage = true;
     const initial = policy();
     const latest = policy({
       policy: {
@@ -1274,7 +2257,7 @@ describe("admin storage settings page", () => {
 
     const sessionFileInput = page.getByLabelText("storage_limit_session_file", { exact: true });
     await sessionFileInput.fill("31");
-    await page.getByRole("button", { name: "storage_settings_save" }).click();
+    await page.getByRole("button", { name: "storage_settings_save", exact: true }).click();
 
     await expect.element(page.getByText("storage_settings_stale_title")).toBeVisible();
     await expect.element(sessionFileInput).toHaveValue(31);
@@ -1285,7 +2268,7 @@ describe("admin storage settings page", () => {
   });
 
   test("keeps the draft and reports object-store readiness when selection becomes unavailable", async () => {
-    testUser.isPlatformAdmin = true;
+    testUser.canAdministerStorage = true;
     getPolicy.mockResolvedValue(policy());
     replacePolicy.mockRejectedValue(
       new EneoError(
@@ -1302,16 +2285,18 @@ describe("admin storage settings page", () => {
 
     const sessionFileInput = page.getByLabelText("storage_limit_session_file", { exact: true });
     await sessionFileInput.fill("31");
-    await page.getByRole("button", { name: "storage_settings_save" }).click();
+    await page.getByRole("button", { name: "storage_settings_save", exact: true }).click();
 
     await expect.element(page.getByText("storage_settings_target_unavailable_title")).toBeVisible();
     await expect.element(page.getByText("storage_settings_stale_title")).not.toBeInTheDocument();
     await expect.element(sessionFileInput).toHaveValue(31);
-    await expect.element(page.getByRole("button", { name: "storage_settings_save" })).toBeEnabled();
+    await expect
+      .element(page.getByRole("button", { name: "storage_settings_save", exact: true }))
+      .toBeEnabled();
   });
 
   test("truthfully shows a degraded selected object store while preventing it from being reselected", async () => {
-    testUser.isPlatformAdmin = true;
+    testUser.canAdministerStorage = true;
     const initial = policy();
     getPolicy.mockResolvedValue(
       policy({
@@ -1350,8 +2335,22 @@ describe("admin storage settings page", () => {
   });
 
   test("shows all five effective limits plus bounded capability and inventory facts", async () => {
-    testUser.isPlatformAdmin = true;
-    getPolicy.mockResolvedValue(policy());
+    testUser.canAdministerStorage = true;
+    const currentPolicy = policy();
+    getPolicy.mockResolvedValue(
+      policy({
+        limits: currentPolicy.limits.map((limit) =>
+          limit.use_case === "session_image"
+            ? {
+                ...limit,
+                effective_bytes: limit.configured_bytes,
+                operator_ceiling_bytes: 20 * 1024 * 1024,
+                constraining_source: "admin_policy"
+              }
+            : limit
+        )
+      })
+    );
 
     render(StoragePage);
 
@@ -1371,7 +2370,10 @@ describe("admin storage settings page", () => {
     await expect
       .element(page.getByText("storage_readiness_object_store_not_configured").first())
       .toBeVisible();
-    await page.getByRole("button", { name: "storage_capabilities_caption" }).click();
+    const connectionSection = page.getByRole("region", { name: "storage_connection_title" });
+    await expect
+      .element(connectionSection.getByText("storage_connection_empty_title"))
+      .toBeVisible();
     await page.getByRole("button", { name: "storage_inventory_caption" }).click();
     await expect.element(page.getByText("storage_content_state_available")).toBeVisible();
     await expect

@@ -9,9 +9,12 @@
   import { initMentionInput } from "../mentions/MentionInput";
   import MentionButton from "../mentions/MentionButton.svelte";
   import ChatModelSelect from "../switcher/ChatModelSelect.svelte";
+  import ChatKnowledge from "./ChatKnowledge.svelte";
   import ChatMcpServers from "./ChatMcpServers.svelte";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
   import { getChatService } from "../../ChatService.svelte";
+  import { effectiveKnowledgeMode, internalMcpServerNames } from "../../internalMcpAvailability";
+  import { selectEffectiveChatModel } from "../../selectEffectiveChatModel";
   import { track } from "$lib/core/helpers/track";
   import { getAppContext } from "$lib/core/AppContext";
   import { m } from "$lib/paraglide/messages";
@@ -133,6 +136,8 @@
             })
           }
         : undefined;
+    // Approval controls external MCP servers only. Eneo's read-only internal
+    // knowledge/files tools are core capabilities and always auto-execute.
     const toolApprovalEnabled = !autoAcceptTools && hasMcpTools;
     scrollToBottom();
 
@@ -276,6 +281,74 @@
   // Check if the assistant has MCP servers/tools
   const hasMcpTools = $derived(mcpServers.length > 0);
 
+  // Knowledge sources attached to the partner (read-only indicator; knowledge
+  // cannot be toggled per conversation the way MCP servers can).
+  type NamedSource = { id: string; name: string };
+  const knowledgeSources = $derived.by(() => {
+    const partner = chat.partner as Record<string, unknown> | null;
+    const named = (value: unknown, fallbackKey?: string): NamedSource[] =>
+      Array.isArray(value)
+        ? value.map((source) => ({
+            id: String(source.id),
+            name: String(source.name ?? (fallbackKey ? (source[fallbackKey] ?? "") : ""))
+          }))
+        : [];
+    return {
+      collections: named(partner?.groups),
+      websites: named(partner?.websites, "url"),
+      integrations: named(partner?.integration_knowledge_list)
+    };
+  });
+  const hasKnowledge = $derived(
+    knowledgeSources.collections.length +
+      knowledgeSources.websites.length +
+      knowledgeSources.integrations.length >
+      0
+  );
+  const partnerKnowledgeMode = $derived.by(() => {
+    const partner = chat.partner as Record<string, unknown> | null;
+    return typeof partner?.knowledge_mode === "string" ? partner.knowledge_mode : undefined;
+  });
+
+  const effectiveModel = $derived.by(() => {
+    const partner = chat.partner;
+    if (!partner || !("completion_model" in partner)) return undefined;
+    return selectEffectiveChatModel(partner.completion_model, partner.effective_config);
+  });
+  const supportsToolCalling = $derived(effectiveModel?.supports_tool_calling === true);
+  const runtimeKnowledgeMode = $derived(
+    effectiveKnowledgeMode(partnerKnowledgeMode, supportsToolCalling)
+  );
+
+  // Current uploads and persisted user-message attachments are the only files
+  // the backend's files server considers. Assistant prompt attachments remain
+  // inline and therefore do not activate this tool.
+  const hasDownloadReference = $derived.by(() => {
+    const pending = $attachments
+      .map((attachment) => attachment.fileRef)
+      .filter((file) => file !== undefined);
+    const history = (chat.currentConversation?.messages ?? []).flatMap(
+      (message) => message.files ?? []
+    );
+    return [...pending, ...history].some((file) => file.has_download_reference === true);
+  });
+
+  // Eneo's built-in loopback MCP servers that will be active for this partner:
+  // always on, not togglable, but surfaced next to the external servers so the
+  // user sees every tool the model can reach. Mirrors the backend attach gates
+  // (knowledge_mode "tool" + knowledge attached; inline_file_text off means
+  // attachments reach the model as signed URLs read by the files server).
+  const internalMcpServers = $derived.by(() => {
+    const partner = chat.partner as Record<string, unknown> | null;
+    return internalMcpServerNames({
+      supportsToolCalling,
+      hasKnowledge,
+      storedKnowledgeMode: partnerKnowledgeMode,
+      inlineFileText: partner?.inline_file_text !== false,
+      hasDownloadReference
+    }).map((name) => ({ name }));
+  });
+
   const showWebSearch = $derived(
     chat.partner.type === "default-assistant" && featureFlags.showWebSearch
   );
@@ -397,9 +470,19 @@
         <MentionButton></MentionButton>
       {/if}
 
-      {#if hasMcpTools}
+      {#if hasKnowledge}
+        <ChatKnowledge
+          collections={knowledgeSources.collections}
+          websites={knowledgeSources.websites}
+          integrations={knowledgeSources.integrations}
+          knowledgeMode={runtimeKnowledgeMode}
+        />
+      {/if}
+
+      {#if hasMcpTools || internalMcpServers.length > 0}
         <ChatMcpServers
           servers={mcpServers}
+          internalServers={internalMcpServers}
           disabledServerIds={disabledMcpServerIds}
           bind:autoAcceptTools
         />

@@ -190,6 +190,10 @@ class File(InDB, FileBaseWithContent):
     owner_service_id: UUID | None = None
     tenant_id: UUID
     parent_file_id: Optional[UUID] = None
+    # True when the exact original upload is durably stored (an ORIGINAL content
+    # reference exists), i.e. a signed original-download URL can serve it. False
+    # for rows predating durable originals and for generated files.
+    original_available: bool = False
 
 
 class FilePublic(InDB):
@@ -203,6 +207,11 @@ class FilePublic(InDB):
     size: int
     transcription: Optional[str] = None
     token_count: Optional[int] = None  # Token count for the file's content
+    # Public capability signal only; never expose storage internals. The chat
+    # composer uses this to show the built-in files tool only when a
+    # conversation attachment can actually be represented by a signed URL
+    # (a TEXT file whose exact original is durably stored).
+    has_download_reference: bool = False
 
 
 class AcceptedFileType(BaseModel):

@@ -6,7 +6,10 @@ import time
 from typing import Any
 from uuid import UUID
 
-from eneo.files.file_models import ContentDisposition
+from eneo.files.file_models import (
+    FILE_ORIGINAL_SIGNED_URL_MAXIMUM_EXPIRY_SECONDS,
+    ContentDisposition,
+)
 from eneo.main.config import get_settings
 
 
@@ -33,7 +36,7 @@ def _generate_token(
     signing_key: bytes,
     audience: str | None,
 ) -> str:
-    payload = {
+    payload: dict[str, Any] = {
         "file_id": str(file_id),
         "tenant_id": str(tenant_id),
         "expires_at": expires_at,
@@ -173,3 +176,31 @@ def verify_file_original_download_token(
     if payload is None or payload.get("aud") != FILE_ORIGINAL_DOWNLOAD_AUDIENCE:
         return None
     return payload
+
+
+def build_signed_original_download_url(
+    file_id: UUID,
+    base_url: str,
+    expires_in: int,
+    tenant_id: UUID,
+    content_disposition: ContentDisposition = ContentDisposition.ATTACHMENT,
+) -> str:
+    """Build an absolute signed URL for an exact-original download.
+
+    Used where there is no ``Request`` object (e.g. the completion layer minting
+    file references for MCP tools), so ``base_url`` must be a configured origin
+    (no trailing slash). ``expires_in`` is clamped to the original-download
+    token maximum so a config value cannot extend a leaked URL's lifetime.
+    """
+    expires_in = min(expires_in, FILE_ORIGINAL_SIGNED_URL_MAXIMUM_EXPIRY_SECONDS)
+    expires_at = int(time.time()) + expires_in
+    token = generate_file_original_download_token(
+        file_id=file_id,
+        expires_at=expires_at,
+        content_disposition=content_disposition,
+        tenant_id=tenant_id,
+    )
+    return (
+        f"{base_url.rstrip('/')}/api/v1/files/{file_id}/original/download/"
+        f"?token={token}"
+    )

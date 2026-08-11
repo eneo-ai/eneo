@@ -1,8 +1,9 @@
 """Fixtures for integration domain tests."""
 
-import pytest
 from datetime import datetime, timedelta
 from uuid import uuid4
+
+import pytest
 
 from eneo.integration.domain.entities.sync_log import SyncLog
 
@@ -23,6 +24,7 @@ async def integration_knowledge_factory(db_container):
         repository directly.
         """
         from sqlalchemy import text
+
         from eneo.database.database import sessionmanager
 
         # Get tenant from db_container

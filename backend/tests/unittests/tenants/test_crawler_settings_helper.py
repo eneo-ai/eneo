@@ -4,13 +4,14 @@ Tests the single source of truth (CRAWLER_SETTING_SPECS) and helper functions
 for tenant-specific crawler settings with hierarchical override support.
 """
 
+from unittest.mock import MagicMock, patch
+
 import pytest
-from unittest.mock import patch, MagicMock
 
 from eneo.tenants.crawler_settings_helper import (
     CRAWLER_SETTING_SPECS,
-    get_crawler_setting,
     get_all_crawler_settings,
+    get_crawler_setting,
     validate_crawler_setting,
 )
 

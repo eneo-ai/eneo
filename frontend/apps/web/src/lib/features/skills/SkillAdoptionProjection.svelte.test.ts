@@ -279,7 +279,7 @@ describe("Skill adoption projection", () => {
       .toBeVisible();
   });
 
-  test("offers explicit recovery for outdated App bindings", async () => {
+  test("offers one App-only recovery action when no Personal Chat or Assistant is behind", async () => {
     const appProjection = adoptionPage({
       items: [
         {
@@ -294,21 +294,51 @@ describe("Skill adoption projection", () => {
         }
       ]
     });
-    const onStartAppUpdate = vi.fn();
+    const onStartOutdatedBindingsUpdate = vi.fn();
+    if (appProjection.summary?.personal_chat) {
+      appProjection.summary.personal_chat.drift = "current";
+      appProjection.summary.personal_chat.revision_id = "revision-2";
+      appProjection.summary.personal_chat.revision_number = 2;
+    }
 
     render(SkillAdoptionProjection, {
       skillId: "skill-1",
       initialPage: appProjection,
       getOrganizationSkillAdoption: vi.fn(),
       publishedRevisionId: "revision-2",
-      onStartAppUpdate,
+      onStartOutdatedBindingsUpdate,
       run: null
     });
     await page
-      .getByRole("button", { name: m.organization_skills_rollout_apps_recovery_action() })
+      .getByRole("button", { name: m.organization_skills_rollout_recovery_action() })
       .click();
-    expect(onStartAppUpdate).toHaveBeenCalledOnce();
-    expect(onStartAppUpdate.mock.calls[0]?.[0].items[0]?.resource_id).toBe("app-1");
+    expect(onStartOutdatedBindingsUpdate).toHaveBeenCalledOnce();
+    expect(onStartOutdatedBindingsUpdate).toHaveBeenCalledWith(appProjection, {
+      assistants: false,
+      apps: true
+    });
+  });
+
+  test("offers one Assistant and Personal Chat recovery action without Apps", async () => {
+    const assistantProjection = adoptionPage();
+    const onStartOutdatedBindingsUpdate = vi.fn();
+
+    render(SkillAdoptionProjection, {
+      skillId: "skill-1",
+      initialPage: assistantProjection,
+      getOrganizationSkillAdoption: vi.fn(),
+      publishedRevisionId: "revision-2",
+      onStartOutdatedBindingsUpdate,
+      run: null
+    });
+
+    await page
+      .getByRole("button", { name: m.organization_skills_rollout_recovery_action() })
+      .click();
+    expect(onStartOutdatedBindingsUpdate).toHaveBeenCalledWith(assistantProjection, {
+      assistants: true,
+      apps: false
+    });
   });
 
   test("shows server-owned summary, Personal Chat pin, revision counts, and resource drift", async () => {

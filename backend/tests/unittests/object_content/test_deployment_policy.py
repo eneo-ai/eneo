@@ -16,7 +16,7 @@ from pydantic import ValidationError
 
 import eneo.object_content.deployment_policy_router as deployment_policy_router
 from eneo.authentication.auth_dependencies import (
-    require_platform_admin,
+    require_storage_administration,
 )
 from eneo.database.database import get_session, get_session_with_transaction
 from eneo.database.tables.object_content_policy_table import (
@@ -297,12 +297,17 @@ def test_tenant_user_write_schema_cannot_escalate_platform_authority() -> None:
 
 
 @pytest.mark.asyncio
-async def test_platform_authority_requires_current_active_eligibility() -> None:
+async def test_storage_authority_requires_current_active_eligibility() -> None:
     eligible = TEST_USER.model_copy(update={"is_platform_admin": True})
-    await require_platform_admin(eligible)
+    await require_storage_administration(eligible)
+
+    # The separate platform flag is not what grants storage administration:
+    # the storage permission is, and the Owner role carries it by default.
+    await require_storage_administration(
+        TEST_USER.model_copy(update={"is_platform_admin": False})
+    )
 
     ineligible = (
-        TEST_USER.model_copy(update={"is_platform_admin": False}),
         eligible.model_copy(update={"state": UserState.INACTIVE}),
         eligible.model_copy(update={"state": UserState.INVITED}),
         eligible.model_copy(update={"state": UserState.DELETED, "deleted_at": None}),
@@ -318,7 +323,7 @@ async def test_platform_authority_requires_current_active_eligibility() -> None:
     )
     for user in ineligible:
         with pytest.raises(HTTPException) as error:
-            await require_platform_admin(user)
+            await require_storage_administration(user)
         assert error.value.status_code == 403
 
 
@@ -331,7 +336,7 @@ def test_policy_mutation_composes_existing_session_and_identity_fences() -> None
     dependency_calls = {dependency.call for dependency in route.dependant.dependencies}
     assert deployment_policy_router._require_policy_session_auth in dependency_calls
     assert deployment_policy_router._require_policy_user_identity in dependency_calls
-    assert deployment_policy_router._require_policy_platform_admin in dependency_calls
+    assert deployment_policy_router._require_policy_storage_admin in dependency_calls
     assert route.responses[403]["model"].__name__ == "GeneralError"
     assert route.responses[409]["model"].__name__ == "GeneralError"
 
@@ -351,7 +356,7 @@ def test_inventory_read_composes_existing_platform_authority_fences() -> None:
     dependency_calls = {dependency.call for dependency in route.dependant.dependencies}
     assert deployment_policy_router._require_policy_session_auth in dependency_calls
     assert deployment_policy_router._require_policy_user_identity in dependency_calls
-    assert deployment_policy_router._require_policy_platform_admin in dependency_calls
+    assert deployment_policy_router._require_policy_storage_admin in dependency_calls
     assert route.responses[403]["model"].__name__ == "GeneralError"
 
 
@@ -721,7 +726,7 @@ async def test_policy_replace_uses_revision_compare_and_swap() -> None:
         knowledge_file_limit_bytes=3,
         transcription_audio_limit_bytes=4,
         moves_paused=False,
-        updated_by_actor="platform_admin",
+        updated_by_actor="storage_admin",
         updated_by_user_id=uuid4(),
         created_at=datetime.now(timezone.utc),
         updated_at=datetime.now(timezone.utc),
@@ -753,7 +758,7 @@ async def test_move_pause_uses_the_policy_revision_compare_and_swap() -> None:
         knowledge_file_limit_bytes=3,
         transcription_audio_limit_bytes=4,
         moves_paused=True,
-        updated_by_actor="platform_admin",
+        updated_by_actor="storage_admin",
         updated_by_user_id=uuid4(),
         created_at=datetime.now(timezone.utc),
         updated_at=datetime.now(timezone.utc),
@@ -776,7 +781,7 @@ async def test_move_pause_uses_the_policy_revision_compare_and_swap() -> None:
         await repository.set_moves_paused(replacement, actor_user_id=uuid4())
 
 
-def test_limit_projection_applies_inline_ceiling_only_to_session_content() -> None:
+def test_limit_projection_applies_inline_ceiling_to_all_new_content() -> None:
     policy = _policy(
         target=StorageKind.POSTGRES_INLINE,
         session_file=101,
@@ -804,14 +809,16 @@ def test_limit_projection_applies_inline_ceiling_only_to_session_content() -> No
     assert projections[1].constraining_source is ConstrainingSource.ADMIN_POLICY
     assert projections[2].effective_bytes == 100
     assert projections[2].operator_ceiling_bytes == 100
-    assert projections[3].effective_bytes == 103
-    assert projections[3].operator_ceiling_bytes is None
-    assert projections[3].storage_target is None
-    assert projections[4].effective_bytes == 104
-    assert projections[4].operator_ceiling_bytes is None
+    assert projections[3].effective_bytes == 100
+    assert projections[3].operator_ceiling_bytes == 100
+    assert projections[3].storage_target is StorageKind.POSTGRES_INLINE
+    assert projections[4].effective_bytes == 100
+    assert projections[4].operator_ceiling_bytes == 100
 
 
-def test_limit_projection_applies_portable_ceiling_to_object_store_sessions() -> None:
+def test_limit_projection_applies_portable_ceiling_to_all_object_store_uploads() -> (
+    None
+):
     projections = project_upload_limits(
         _policy(
             target=StorageKind.OBJECT_STORE,
@@ -824,23 +831,16 @@ def test_limit_projection_applies_portable_ceiling_to_object_store_sessions() ->
         object_store_maximum_bytes=100,
     )
 
-    assert [projection.effective_bytes for projection in projections[:3]] == [
-        100,
-        100,
-        100,
-    ]
-    assert all(
-        projection.operator_ceiling_bytes == 100 for projection in projections[:3]
-    )
+    assert [projection.effective_bytes for projection in projections] == [100] * 5
+    assert all(projection.operator_ceiling_bytes == 100 for projection in projections)
     assert all(
         projection.constraining_source is ConstrainingSource.OPERATOR_CEILING
-        for projection in projections[:3]
+        for projection in projections
     )
-    assert projections[0].storage_target is StorageKind.OBJECT_STORE
-    assert projections[3].effective_bytes == 103
-    assert projections[3].operator_ceiling_bytes is None
-    assert projections[3].constraining_source is ConstrainingSource.ADMIN_POLICY
-    assert projections[3].storage_target is None
+    assert all(
+        projection.storage_target is StorageKind.OBJECT_STORE
+        for projection in projections
+    )
 
 
 def test_object_store_projection_without_capability_keeps_admin_policy_limits() -> None:
@@ -856,21 +856,21 @@ def test_object_store_projection_without_capability_keeps_admin_policy_limits() 
         object_store_maximum_bytes=None,
     )
 
-    assert [projection.effective_bytes for projection in projections[:3]] == [
+    assert [projection.effective_bytes for projection in projections] == [
         101,
         102,
+        104,
+        103,
         104,
     ]
     assert all(
         projection.storage_target is StorageKind.OBJECT_STORE
-        for projection in projections[:3]
+        for projection in projections
     )
-    assert all(
-        projection.operator_ceiling_bytes is None for projection in projections[:3]
-    )
+    assert all(projection.operator_ceiling_bytes is None for projection in projections)
     assert all(
         projection.constraining_source is ConstrainingSource.ADMIN_POLICY
-        for projection in projections[:3]
+        for projection in projections
     )
 
 
@@ -903,11 +903,12 @@ async def test_object_store_admission_snapshot_uses_portable_ceiling() -> None:
         object_store_maximum_bytes=100,
     )
 
-    assert snapshot.session_storage_target is StorageKind.OBJECT_STORE
-    assert snapshot.session_operator_ceiling_bytes == 100
+    assert snapshot.new_write_storage_target is StorageKind.OBJECT_STORE
     assert snapshot.session_file_maximum_bytes == 100
     assert snapshot.session_image_maximum_bytes == 99
     assert snapshot.session_audio_maximum_bytes == 100
+    assert snapshot.knowledge_file_maximum_bytes == 100
+    assert snapshot.knowledge_audio_maximum_bytes == 100
 
 
 async def test_load_upload_admission_snapshot_reads_one_effective_revision() -> None:
@@ -941,13 +942,12 @@ async def test_load_upload_admission_snapshot_reads_one_effective_revision() -> 
 
     assert snapshot == UploadAdmissionSnapshot(
         policy_revision=1,
-        session_storage_target=StorageKind.POSTGRES_INLINE,
-        session_operator_ceiling_bytes=100,
+        new_write_storage_target=StorageKind.POSTGRES_INLINE,
         session_file_maximum_bytes=100,
         session_image_maximum_bytes=100,
         session_audio_maximum_bytes=100,
-        knowledge_file_maximum_bytes=103,
-        knowledge_audio_maximum_bytes=104,
+        knowledge_file_maximum_bytes=100,
+        knowledge_audio_maximum_bytes=100,
     )
     session.scalar.assert_awaited_once()
 

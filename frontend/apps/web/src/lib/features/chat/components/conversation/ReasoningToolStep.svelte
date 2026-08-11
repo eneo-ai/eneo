@@ -7,18 +7,18 @@
 -->
 <script lang="ts">
   import { m } from "$lib/paraglide/messages";
-  import { toastError } from "$lib/core/errors";
   import Check from "lucide-svelte/icons/check";
-  import X from "lucide-svelte/icons/x";
-  import Loader2 from "lucide-svelte/icons/loader-2";
   import ChevronRight from "lucide-svelte/icons/chevron-right";
-  import Wrench from "lucide-svelte/icons/wrench";
+  import Loader2 from "lucide-svelte/icons/loader-2";
+  import X from "lucide-svelte/icons/x";
+  import ToolCallDetailsPanel from "./ToolCallDetailsPanel.svelte";
 
   type Status = "preparing" | "running" | "complete" | "failed" | "denied";
 
   let {
     toolName,
     serverName,
+    detail = null,
     args,
     toolCallId,
     onLoadResult,
@@ -26,6 +26,8 @@
   }: {
     toolName: string;
     serverName: string;
+    /** Extra context for the call, e.g. the filename a read_file call reads. */
+    detail?: string | null;
     args?: Record<string, unknown>;
     toolCallId?: string;
     onLoadResult?: () => Promise<string | null>;
@@ -33,42 +35,16 @@
   } = $props();
 
   let argsOpen = $state(false);
-  let result = $state<string | null>(null);
-  let resultLoaded = $state(false);
-  let resultLoading = $state(false);
   const hasArgs = $derived(args != null && Object.keys(args).length > 0);
   const canViewResult = $derived(
     !!toolCallId && !!onLoadResult && (status === "complete" || status === "failed")
   );
   const canExpand = $derived(hasArgs || canViewResult);
 
-  async function loadResult() {
-    if (resultLoaded || resultLoading || !onLoadResult) return;
-
-    resultLoading = true;
-    try {
-      result = await onLoadResult();
-      resultLoaded = true;
-    } catch (error) {
-      toastError(error, m.mcp_tool_response_load_error());
-    } finally {
-      resultLoading = false;
-    }
-  }
-
   function toggleOpen() {
     if (!canExpand) return;
     argsOpen = !argsOpen;
-    if (argsOpen && canViewResult) {
-      void loadResult();
-    }
   }
-
-  $effect(() => {
-    if (argsOpen && canViewResult) {
-      void loadResult();
-    }
-  });
 
   // Visuals per status: icon colour, badge label, and badge tone. Kept in one
   // map so the header and badge never drift out of sync.
@@ -125,6 +101,9 @@
     <div class="flex min-w-0 flex-1 flex-col gap-0.5">
       <div class="flex items-center gap-2">
         <span class="text-secondary truncate text-sm font-medium">{toolName}</span>
+        {#if detail}
+          <span class="text-muted min-w-0 truncate text-xs">{detail}</span>
+        {/if}
         <span
           class="shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium tracking-wide uppercase {ui.badge}"
         >
@@ -141,36 +120,5 @@
     {/if}
   </button>
 
-  {#if argsOpen}
-    <div class="border-dimmer border-t px-3 py-2.5">
-      {#if hasArgs}
-        <div class="text-muted mb-1.5 flex items-center gap-1.5 text-xs font-semibold">
-          <Wrench class="h-3 w-3 shrink-0" />
-          <span>{m.chat_reasoning_parameters()}</span>
-        </div>
-        <pre
-          class="bg-primary/60 text-secondary overflow-x-auto rounded-md p-2.5 font-mono text-xs whitespace-pre-wrap">{JSON.stringify(
-            args,
-            null,
-            2
-          )}</pre>
-      {/if}
-
-      {#if canViewResult}
-        <div class={hasArgs ? "border-dimmer mt-2.5 border-t pt-2.5" : ""}>
-          <div class="text-muted mb-1.5 text-xs font-semibold">
-            {m.mcp_tool_response_title({ toolName })}
-          </div>
-          {#if resultLoading}
-            <p class="text-muted text-xs">{m.loading_ellipsis()}</p>
-          {:else if resultLoaded && result}
-            <pre
-              class="bg-primary/60 text-secondary max-h-72 overflow-auto rounded-md p-2.5 font-mono text-xs whitespace-pre-wrap">{result}</pre>
-          {:else if resultLoaded}
-            <p class="text-muted text-xs italic">{m.mcp_tool_response_empty()}</p>
-          {/if}
-        </div>
-      {/if}
-    </div>
-  {/if}
+  <ToolCallDetailsPanel open={argsOpen} {toolName} {args} {toolCallId} {onLoadResult} {status} />
 </div>

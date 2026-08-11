@@ -44,6 +44,60 @@ cd frontend && bun run dev                 # Terminal 2
 cd backend && uv run worker             # Terminal 3
 ```
 
+**Optional: object storage locally**
+
+Eneo stores file bytes in PostgreSQL by default, which is all most work needs.
+To exercise the S3-compatible path instead, start the bundled SeaweedFS service
+from the `object-content` Compose profile. It is off by default because the
+image is built from upstream source, so the first start takes a few minutes.
+
+```bash
+docker compose -p eneo_devcontainer -f .devcontainer/docker-compose.yml \
+  --profile object-content up -d object-content
+```
+
+To have VS Code bring it up together with the rest of the devcontainer, create
+`.devcontainer/.env` (gitignored, so it stays a per-developer choice) with:
+
+```
+COMPOSE_PROFILES=object-content
+```
+
+Compose loads that file automatically because the devcontainer's project
+directory is `.devcontainer/`. Rebuild or reopen the container to apply it.
+
+Then connect it on the admin **File storage** page (`/admin/storage`). That page
+is read-only unless your user holds platform-administrator authority, which is
+granted only through the sysadmin API:
+
+```bash
+curl -X PUT "$ENEO_URL/api/v1/sysadmin/users/$USER_ID/platform-admin" \
+  -H "X-API-Key: $ENEO_SUPER_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"enabled": true}'
+```
+
+Use these values in the connection dialog. They match the Compose defaults; the
+devcontainer already permits plain HTTP, generates a development
+`ENCRYPTION_KEY`, and prints these values on start while the service runs:
+
+| Field | Value |
+| --- | --- |
+| S3 endpoint | `http://object-content:8333` |
+| Bucket | `eneo-object-content-dev` |
+| Region for signing | `local` |
+| Access key ID | `eneo-dev-object-content` |
+| Secret access key | `local-development-only-secret` |
+| Bucket addressing | `Bucket in the URL path` (the default) |
+
+Leave `OBJECT_CONTENT_ENDPOINT_URL`, `OBJECT_CONTENT_REGION`,
+`OBJECT_CONTENT_BUCKET`, `OBJECT_CONTENT_ACCESS_KEY_ID`,
+`OBJECT_CONTENT_SECRET_ACCESS_KEY`, `OBJECT_CONTENT_DEPLOYMENT_ID`, and
+`OBJECT_CONTENT_ADDRESSING_STYLE` unset. Setting any one of them switches Eneo
+to the operator-managed connection instead, and the admin dialog stops being the
+authority. See [docs/deployment/OBJECT_CONTENT.md](deployment/OBJECT_CONTENT.md)
+for the operator-managed path and for connecting an external endpoint.
+
 ### 2. Make Your First Contribution
 
 ```bash

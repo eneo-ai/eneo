@@ -39,6 +39,7 @@ import { initFlows } from "./endpoints/flows.js";
 import { initHelpAssistants } from "./endpoints/helpAssistants.js";
 import { initSkills } from "./endpoints/skills.js";
 import { initObjectContentPolicy } from "./endpoints/object-content-policy.js";
+import { initObjectStoreConnection } from "./endpoints/object-store-connection.js";
 
 /**
  * Create an Eneo.js object to interact with the eneo backend.
@@ -92,6 +93,7 @@ export function createEneo(args) {
     helpAssistants: initHelpAssistants(client),
     skills: initSkills(client),
     objectContentPolicy: initObjectContentPolicy(client),
+    objectStoreConnection: initObjectStoreConnection(client),
     client
   };
 }

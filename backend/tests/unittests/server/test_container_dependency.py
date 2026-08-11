@@ -73,25 +73,42 @@ async def test_inactive_user_setup_uses_non_ambient_authentication_transaction(
     authenticate.assert_awaited_once()
 
 
-async def test_upload_admission_finishes_before_the_route_uses_its_container(
+async def test_upload_admission_refreshes_before_authentication_and_loads_in_transaction(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     session = _Session()
     user = SimpleNamespace(is_active=True)
-    authenticate = AsyncMock(return_value=user)
+    events: list[str] = []
+
+    async def _authenticate(**_kwargs: object) -> object:
+        events.append("authenticate")
+        return user
+
+    authenticate = AsyncMock(side_effect=_authenticate)
     container = SimpleNamespace(
         session=lambda: session,
         user_service=lambda: SimpleNamespace(authenticate=authenticate),
     )
 
+    async def _refresh_object_store_configuration() -> None:
+        events.append("refresh")
+
     async def _load_upload_admission(resolved_container: object) -> None:
         assert resolved_container is container
         assert session.in_transaction()
+        events.append("admission")
 
     monkeypatch.setattr(
         container_dependency,
         "load_container_upload_admission",
         _load_upload_admission,
+    )
+    monkeypatch.setattr(
+        container_dependency,
+        "object_content_runtime",
+        SimpleNamespace(
+            refresh_object_store_configuration=_refresh_object_store_configuration
+        ),
     )
     monkeypatch.setattr(
         container_dependency,
@@ -114,6 +131,7 @@ async def test_upload_admission_finishes_before_the_route_uses_its_container(
     assert resolved is container
     assert session.begin_calls == 1
     assert not session.in_transaction()
+    assert events == ["refresh", "authenticate", "admission"]
 
 
 async def test_load_container_upload_admission_binds_one_immutable_snapshot(
@@ -122,13 +140,13 @@ async def test_load_container_upload_admission_binds_one_immutable_snapshot(
     session = _Session(in_transaction=True)
     snapshot = UploadAdmissionSnapshot(
         policy_revision=8,
-        session_storage_target=StorageKind.OBJECT_STORE,
-        session_operator_ceiling_bytes=199,
+        new_write_storage_target=StorageKind.OBJECT_STORE,
         session_file_maximum_bytes=11,
         session_image_maximum_bytes=12,
         session_audio_maximum_bytes=13,
         knowledge_file_maximum_bytes=14,
         knowledge_audio_maximum_bytes=15,
+        object_store_revision=7,
     )
     loader = AsyncMock(return_value=snapshot)
     monkeypatch.setattr(
@@ -142,6 +160,7 @@ async def test_load_container_upload_admission_binds_one_immutable_snapshot(
         SimpleNamespace(
             inline_maximum_bytes=99,
             object_store_maximum_bytes=199,
+            object_store_configuration_revision=7,
         ),
     )
     container = Container(session=providers.Object(session))
@@ -154,4 +173,5 @@ async def test_load_container_upload_admission_binds_one_immutable_snapshot(
         session,
         inline_maximum_bytes=99,
         object_store_maximum_bytes=199,
+        object_store_revision=7,
     )

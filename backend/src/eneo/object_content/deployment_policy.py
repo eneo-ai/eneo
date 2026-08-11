@@ -17,7 +17,7 @@ from eneo.object_content.content import MAXIMUM_UPLOAD_POLICY_BYTES, StorageKind
 
 class PolicyActor(StrEnum):
     MIGRATION = "migration"
-    PLATFORM_ADMIN = "platform_admin"
+    STORAGE_ADMIN = "storage_admin"
 
 
 class DeploymentPolicyUpdate(BaseModel):
@@ -82,7 +82,7 @@ class UploadLimitProjection:
     use_case: UploadLimitUseCase
     configured_bytes: int
     effective_bytes: int
-    storage_target: StorageKind | None
+    storage_target: StorageKind
     operator_ceiling_bytes: int | None
     constraining_source: ConstrainingSource
 
@@ -90,13 +90,13 @@ class UploadLimitProjection:
 @dataclass(frozen=True, slots=True)
 class UploadAdmissionSnapshot:
     policy_revision: int
-    session_storage_target: StorageKind
-    session_operator_ceiling_bytes: int | None
+    new_write_storage_target: StorageKind
     session_file_maximum_bytes: int
     session_image_maximum_bytes: int
     session_audio_maximum_bytes: int
     knowledge_file_maximum_bytes: int
     knowledge_audio_maximum_bytes: int
+    object_store_revision: int | None = None
 
 
 def project_upload_limits(
@@ -105,17 +105,17 @@ def project_upload_limits(
     inline_maximum_bytes: int,
     object_store_maximum_bytes: int | None,
 ) -> tuple[UploadLimitProjection, ...]:
-    session_ceiling = {
+    operator_ceiling = {
         StorageKind.POSTGRES_INLINE: inline_maximum_bytes,
         StorageKind.OBJECT_STORE: object_store_maximum_bytes,
     }[policy.new_write_storage_target]
 
-    def session_limit(
+    def project_limit(
         use_case: UploadLimitUseCase, configured_bytes: int
     ) -> UploadLimitProjection:
         effective_bytes = (
-            min(configured_bytes, session_ceiling)
-            if session_ceiling is not None
+            min(configured_bytes, operator_ceiling)
+            if operator_ceiling is not None
             else configured_bytes
         )
         return UploadLimitProjection(
@@ -123,7 +123,7 @@ def project_upload_limits(
             configured_bytes=configured_bytes,
             effective_bytes=effective_bytes,
             storage_target=policy.new_write_storage_target,
-            operator_ceiling_bytes=session_ceiling,
+            operator_ceiling_bytes=operator_ceiling,
             constraining_source=(
                 ConstrainingSource.OPERATOR_CEILING
                 if effective_bytes < configured_bytes
@@ -131,36 +131,24 @@ def project_upload_limits(
             ),
         )
 
-    def knowledge_limit(
-        use_case: UploadLimitUseCase, configured_bytes: int
-    ) -> UploadLimitProjection:
-        return UploadLimitProjection(
-            use_case=use_case,
-            configured_bytes=configured_bytes,
-            effective_bytes=configured_bytes,
-            storage_target=None,
-            operator_ceiling_bytes=None,
-            constraining_source=ConstrainingSource.ADMIN_POLICY,
-        )
-
     return (
-        session_limit(
+        project_limit(
             UploadLimitUseCase.SESSION_FILE,
             policy.session_file_limit_bytes,
         ),
-        session_limit(
+        project_limit(
             UploadLimitUseCase.SESSION_IMAGE,
             policy.session_image_limit_bytes,
         ),
-        session_limit(
+        project_limit(
             UploadLimitUseCase.SESSION_AUDIO,
             policy.transcription_audio_limit_bytes,
         ),
-        knowledge_limit(
+        project_limit(
             UploadLimitUseCase.KNOWLEDGE_FILE,
             policy.knowledge_file_limit_bytes,
         ),
-        knowledge_limit(
+        project_limit(
             UploadLimitUseCase.KNOWLEDGE_AUDIO,
             policy.transcription_audio_limit_bytes,
         ),
@@ -203,7 +191,7 @@ class DeploymentPolicyRepository:
         values = replacement.model_dump(exclude={"expected_revision"})
         values.update(
             revision=ObjectContentDeploymentPolicy.revision + 1,
-            updated_by_actor=PolicyActor.PLATFORM_ADMIN.value,
+            updated_by_actor=PolicyActor.STORAGE_ADMIN.value,
             updated_by_user_id=actor_user_id,
         )
         row = await self._session.scalar(
@@ -234,7 +222,7 @@ class DeploymentPolicyRepository:
             .values(
                 moves_paused=replacement.moves_paused,
                 revision=ObjectContentDeploymentPolicy.revision + 1,
-                updated_by_actor=PolicyActor.PLATFORM_ADMIN.value,
+                updated_by_actor=PolicyActor.STORAGE_ADMIN.value,
                 updated_by_user_id=actor_user_id,
             )
             .returning(ObjectContentDeploymentPolicy)
@@ -249,6 +237,7 @@ async def load_upload_admission_snapshot(
     *,
     inline_maximum_bytes: int,
     object_store_maximum_bytes: int | None,
+    object_store_revision: int | None = None,
 ) -> UploadAdmissionSnapshot:
     policy = await DeploymentPolicyRepository(session).get()
     projections = {
@@ -259,13 +248,12 @@ async def load_upload_admission_snapshot(
             object_store_maximum_bytes=object_store_maximum_bytes,
         )
     }
-    session_file = projections[UploadLimitUseCase.SESSION_FILE]
-
     return UploadAdmissionSnapshot(
         policy_revision=policy.revision,
-        session_storage_target=policy.new_write_storage_target,
-        session_operator_ceiling_bytes=session_file.operator_ceiling_bytes,
-        session_file_maximum_bytes=session_file.effective_bytes,
+        new_write_storage_target=policy.new_write_storage_target,
+        session_file_maximum_bytes=projections[
+            UploadLimitUseCase.SESSION_FILE
+        ].effective_bytes,
         session_image_maximum_bytes=projections[
             UploadLimitUseCase.SESSION_IMAGE
         ].effective_bytes,
@@ -278,4 +266,5 @@ async def load_upload_admission_snapshot(
         knowledge_audio_maximum_bytes=projections[
             UploadLimitUseCase.KNOWLEDGE_AUDIO
         ].effective_bytes,
+        object_store_revision=object_store_revision,
     )

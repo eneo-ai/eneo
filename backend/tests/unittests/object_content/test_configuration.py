@@ -9,6 +9,7 @@ from eneo.object_content.configuration import (
     ObjectContentSettings,
     load_object_content_core_settings,
     load_object_content_settings,
+    load_object_store_operator_settings,
 )
 
 
@@ -45,6 +46,16 @@ def test_inline_tuning_does_not_require_object_store_configuration(
         inline_maximum_bytes=2 * 1024**2,
         inline_io_chunk_bytes=64 * 1024,
     )
+
+
+def test_operator_guardrails_do_not_trigger_legacy_connection_loading(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _clear_object_content_environment(monkeypatch)
+    monkeypatch.setenv("OBJECT_CONTENT_CONNECT_TIMEOUT_SECONDS", "7")
+
+    assert load_object_content_settings() is None
+    assert load_object_store_operator_settings().connect_timeout_seconds == 7
 
 
 def test_partial_object_content_environment_fails_closed(
@@ -128,6 +139,34 @@ def test_object_content_configuration_rejects_unapproved_plain_http(
     endpoint_url: str,
 ) -> None:
     with pytest.raises(ValidationError, match="allow_insecure_http"):
+        ObjectContentSettings(
+            _env_file=None,
+            endpoint_url=endpoint_url,
+            region="local",
+            bucket="eneo-content",
+            access_key_id="test-access",
+            secret_access_key="test-secret",
+            deployment_id=UUID("a2d539af-fef0-42aa-a7f8-14376947be2c"),
+        )
+
+
+@pytest.mark.parametrize(
+    "endpoint_url",
+    (
+        "https://objects.example.test:not-a-port",
+        "https://objects.example.test:99999",
+    ),
+)
+def test_endpoint_url_with_a_malformed_port_fails_typed_validation(
+    endpoint_url: str,
+) -> None:
+    """A bad port is a validation error, not a later crash.
+
+    urlparse defers port parsing, so without this check the malformed value
+    passes validation and blows up wherever the port is first read — outside
+    the typed contract, as an internal server error.
+    """
+    with pytest.raises(ValidationError, match="endpoint_url port"):
         ObjectContentSettings(
             _env_file=None,
             endpoint_url=endpoint_url,

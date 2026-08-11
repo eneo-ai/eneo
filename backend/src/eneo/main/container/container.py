@@ -999,6 +999,17 @@ class Container(containers.DeclarativeContainer):
     audit_session_service = providers.Factory(
         AuditSessionService,
     )
+    # Feature flag service for audit logging and other toggles
+    feature_flag_service = providers.Factory(
+        FeatureFlagService,
+        feature_flag_repo=feature_flag_repo,
+    )
+    audit_service = providers.Factory(
+        AuditService,
+        repository=audit_log_repo,
+        audit_config_service=audit_config_service,
+        feature_flag_service=feature_flag_service,
+    )
 
     # Completion model adapters
     context_builder = providers.Factory(ContextBuilder)
@@ -1012,6 +1023,7 @@ class Container(containers.DeclarativeContainer):
         session=session,
         redis_client=redis_client,
         mcp_server_tool_repo=mcp_server_tool_repo,
+        audit_service=audit_service,
     )
 
     # Datastore
@@ -1095,17 +1107,6 @@ class Container(containers.DeclarativeContainer):
         transcription_model_repo=transcription_model_repo,
     )
     auth_service = providers.Factory(AuthService)
-    # Feature flag service for audit logging and other toggles
-    feature_flag_service = providers.Factory(
-        FeatureFlagService,
-        feature_flag_repo=feature_flag_repo,
-    )
-    audit_service = providers.Factory(
-        AuditService,
-        repository=audit_log_repo,
-        audit_config_service=audit_config_service,
-        feature_flag_service=feature_flag_service,
-    )
     data_retention_service = providers.Factory(
         DataRetentionService,
         session=session,
@@ -1260,7 +1261,7 @@ class Container(containers.DeclarativeContainer):
         user=user,
         file_size_service=file_size_service,
         job_service=job_service,
-        quota_service=quota_service,
+        object_content=object_content_service,
         upload_admission=upload_admission,
     )
     group_service = providers.Factory(
@@ -1282,9 +1283,6 @@ class Container(containers.DeclarativeContainer):
         space_repo=space_repo,
         actor_manager=actor_manager,
         group_service=group_service,
-    )
-    quota_service = providers.Factory(
-        QuotaService, user=user, info_blob_repo=info_blob_repo
     )
     allowed_origin_service = providers.Factory(
         AllowedOriginService,
@@ -1344,6 +1342,7 @@ class Container(containers.DeclarativeContainer):
         space_service=space_service,
         actor_manager=actor_manager,
         datastore=datastore,
+        object_content=object_content_service,
     )
     prompt_service = providers.Factory(
         PromptService, user=user, repo=prompt_repo, factory=prompt_factory
@@ -1459,6 +1458,7 @@ class Container(containers.DeclarativeContainer):
         icon_repo=icon_repo,
         org_space_assistant_role_repo=org_space_assistant_role_repo,
         help_assistant_assignment_history_repo=help_assistant_assignment_history_repo,
+        auth_service=auth_service,
         api_key_scope_revoker=api_key_scope_revoker,
         effective_config_service=effective_config_service,
         skill_service=skill_service,

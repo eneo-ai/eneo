@@ -34,6 +34,7 @@ class Permission(str, Enum):
     FLOWS_MANAGE = "flows_manage"
     FLOWS_AI_BUILDER = "flows_ai_builder"
     FLOWS_TRACE = "flows_trace"
+    STORAGE = "storage"
     ASSISTANT_DEBUG = "assistant_debug"
 
 

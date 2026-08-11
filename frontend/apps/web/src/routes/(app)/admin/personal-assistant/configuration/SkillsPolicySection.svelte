@@ -19,7 +19,6 @@
     bindingSummaries: AssistantSkillBindingSummary[];
     summary: string;
     skillsValid: boolean;
-    canSelectOnDemand: boolean;
     selectiveActivationEnabled: boolean;
     badgeVariant: (enabled: boolean, valid: boolean) => "default" | "outline" | "destructive";
     onListCatalog: ListSkillBindingCatalog;
@@ -32,7 +31,6 @@
     bindingSummaries,
     summary,
     skillsValid,
-    canSelectOnDemand,
     selectiveActivationEnabled,
     badgeVariant,
     onListCatalog,
@@ -78,8 +76,7 @@
       {bindingSummaries}
       canEditBindings={true}
       canCreateSkills={false}
-      supportsActivationModes
-      {canSelectOnDemand}
+      activationSurface="personal_chat"
       {selectiveActivationEnabled}
       {onListCatalog}
       {onGetSkillPreview}

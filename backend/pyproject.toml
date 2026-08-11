@@ -28,7 +28,8 @@ dependencies = [
     "pillow-heif>=0.18,<2",  # HEIC/HEIF decode (iPhone photos) -> converted to JPEG
     "langchain-core>=1.4.8,<2",  # output parsers; pulls patched langsmith
     "langchain-text-splitters>=1.1.2,<2",  # RecursiveCharacterTextSplitter; >=1.1.2 clears GHSA-fv5p
-    "pydantic-settings>=2.14.2,<3",
+    # 2.15 warns on FastMCP's unresolved generic lifespan field during import.
+    "pydantic-settings>=2.14.2,<2.15",
     "wrapt>=1.16.0,<2",
     "python-multipart>=0.0.27,<1",
     "arq>=0.26,<1",  # v0.26+ required for allow_abort_jobs, lifecycle hooks
@@ -49,9 +50,10 @@ dependencies = [
     "sentry-sdk[fastapi]==2.8.0",
     "tavily-python>=0.5.1,<0.6",
     "greenlet>=3.2.2,<4",
-    "litellm==1.90.2",
+    "litellm==1.95.0",
     "mcp>=1.2.0,<2", # Model Context Protocol SDK for MCP server integration
-    "cryptography>=48.0.1,<49", # For Fernet encryption of HTTP auth passwords
+    "anyio>=4.5,<5",  # memory-stream types the MCP client annotates against; floor matches mcp's
+    "cryptography>=50.0.0,<51", # For Fernet encryption of HTTP auth passwords; >=50 clears CVE-2026-69247
     "httpx~=0.28.0",
     "pandas>=2.2.3,<3",
     "orjson>=3.9,<4",

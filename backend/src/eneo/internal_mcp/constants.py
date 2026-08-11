@@ -1,0 +1,2 @@
+FILES_SERVER_NAME = "files"
+KNOWLEDGE_SERVER_NAME = "knowledge"

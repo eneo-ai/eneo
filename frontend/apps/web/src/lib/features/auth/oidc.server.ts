@@ -3,6 +3,7 @@
     Uses backend federation router endpoints (/api/v1/auth/initiate and /api/v1/auth/callback).
 */
 
+import { readTraceId } from "@eneo/eneo-js";
 import { getBackendUrl } from "$lib/core/environment.server";
 import { setFrontendAuthCookie } from "./auth.server";
 import { LoginError } from "./LoginError";
@@ -47,9 +48,7 @@ export async function loginWithOidc(
         errorDetails = responseText;
       }
 
-      // Prefer X-Trace-Id; fall back to legacy X-Correlation-ID during the migration period.
-      const traceId =
-        response.headers.get("X-Trace-Id") || response.headers.get("X-Correlation-ID") || undefined;
+      const traceId = readTraceId(response.headers);
       const rawDetail =
         typeof errorDetails === "object" && errorDetails?.detail ? errorDetails.detail : undefined;
 

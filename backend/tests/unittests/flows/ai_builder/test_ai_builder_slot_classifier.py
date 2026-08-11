@@ -2083,7 +2083,7 @@ async def test_luna_classification_uses_explicit_reasoning_control() -> None:
     )
 
     call_kwargs = litellm_client.acompletion.await_args.kwargs
-    assert call_kwargs["reasoning_effort"] == "low"
+    assert call_kwargs["reasoning_effort"] == "none"
 
 
 def test_classification_prompt_emphasizes_the_biased_target_slot() -> None:

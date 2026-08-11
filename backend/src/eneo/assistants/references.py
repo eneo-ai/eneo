@@ -5,6 +5,7 @@ from uuid import UUID
 
 from eneo.files.file_models import FileType
 from eneo.info_blobs.info_blob import InfoBlobInDBWithScore
+from eneo.main.config import get_settings
 from eneo.services.service import DatastoreResult
 
 if TYPE_CHECKING:
@@ -67,10 +68,13 @@ class ReferencesService:
     ) -> tuple[list["InfoBlobChunkInDBWithScore"], Optional["EmbeddingModel"]]:
         integration_knowledge_list = list(integration_knowledge_list or [])
         if (collections or websites or integration_knowledge_list) and input_string:
+            # Named rather than splatted from a dict: a homogeneously typed
+            # **kwargs would silently bind to any parameter semantic_search
+            # grows later.
             if version == 1:
-                search_params = dict(autocut_cutoff=3, num_chunks=30)
+                autocut_cutoff, chunk_limit = 3, 30
             elif version == 2:
-                search_params = dict(autocut_cutoff=None, num_chunks=num_chunks)
+                autocut_cutoff, chunk_limit = None, num_chunks
             else:
                 raise ValueError(f"Unsupported retrieval version: {version}")
 
@@ -87,7 +91,11 @@ class ReferencesService:
                 collections=collections,
                 websites=websites,
                 integration_knowledge_list=integration_knowledge_list,
-                **search_params,
+                # Deployment-wide relevance floor for injected chunks (off by
+                # default; cosine-similarity scales differ per embedding model).
+                min_score=get_settings().inject_knowledge_min_score,
+                num_chunks=chunk_limit,
+                autocut_cutoff=autocut_cutoff,
             )
             return chunks, embedding_model
 

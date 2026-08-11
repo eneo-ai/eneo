@@ -1,5 +1,4 @@
 import asyncio
-import base64
 from collections.abc import AsyncIterator
 from hashlib import sha256
 from typing import TYPE_CHECKING, cast
@@ -180,7 +179,6 @@ async def test_real_store_single_multipart_range_list_and_delete(
     ) as captured:
         head = await store.upload(multipart_key, captured)
         assert head.size_bytes == len(multipart_payload)
-        assert head.checksum_type == "COMPOSITE"
         assert (
             await _read_all(
                 store,
@@ -201,7 +199,7 @@ async def test_real_store_single_multipart_range_list_and_delete(
 
 
 @pytest.mark.asyncio
-async def test_real_store_rejects_wrong_checksum_and_bucket_escape(
+async def test_real_store_rejects_bucket_escape_and_wrong_credentials(
     real_object_store: RealObjectStore,
 ) -> None:
     client = _raw_client(real_object_store)
@@ -212,20 +210,6 @@ async def test_real_store_rejects_wrong_checksum_and_bucket_escape(
         secret_access_key="wrong-object-content-secret",
     )
     try:
-        with pytest.raises(ClientError) as checksum_error:
-            client.put_object(
-                Bucket=settings.bucket,
-                Key=new_object_key(settings),
-                Body=b"trusted bytes",
-                ContentLength=13,
-                ContentType="application/octet-stream",
-                ChecksumSHA256=base64.b64encode(bytes(32)).decode(),
-            )
-        assert checksum_error.value.response["Error"]["Code"] in {
-            "BadDigest",
-            "InvalidRequest",
-        }
-
         with pytest.raises(ClientError) as bucket_error:
             client.list_objects_v2(Bucket="outside-object-content-test")
         assert bucket_error.value.response["Error"]["Code"] in {
@@ -258,15 +242,12 @@ async def test_real_store_lists_and_aborts_multipart_and_rejects_part_reordering
             Bucket=settings.bucket,
             Key=key,
             ContentType="application/octet-stream",
-            ChecksumAlgorithm="SHA256",
-            ChecksumType="COMPOSITE",
         )
         upload_id = created["UploadId"]
         first = b"a" * (5 * _MEBIBYTE)
         second = b"b" * _MEBIBYTE
         uploaded_parts: list[dict[str, object]] = []
         for number, payload in enumerate((first, second), start=1):
-            checksum = base64.b64encode(sha256(payload).digest()).decode()
             result = client.upload_part(
                 Bucket=settings.bucket,
                 Key=key,
@@ -274,12 +255,10 @@ async def test_real_store_lists_and_aborts_multipart_and_rejects_part_reordering
                 PartNumber=number,
                 Body=payload,
                 ContentLength=len(payload),
-                ChecksumSHA256=checksum,
             )
             uploaded_parts.append(
                 {
                     "ETag": result["ETag"],
-                    "ChecksumSHA256": checksum,
                     "PartNumber": number,
                 }
             )
@@ -302,7 +281,6 @@ async def test_real_store_lists_and_aborts_multipart_and_rejects_part_reordering
                 Key=key,
                 UploadId=upload_id,
                 MultipartUpload={"Parts": list(reversed(uploaded_parts))},
-                ChecksumType="COMPOSITE",
             )
         assert order_error.value.response["Error"]["Code"] in {
             "InvalidPartOrder",

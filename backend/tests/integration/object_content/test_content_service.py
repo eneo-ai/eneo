@@ -38,6 +38,7 @@ from eneo.object_content.content import (
     capture_content,
 )
 from eneo.object_content.content_service import ObjectContentService
+from eneo.object_content.object_store_provider import ObjectStoreProvider
 from eneo.object_content.reconciliation import ObjectContentReconciler
 from eneo.object_content.s3_object_store import (
     ObjectStoreNotFoundError,
@@ -52,6 +53,8 @@ if TYPE_CHECKING:
         CompleteMultipartUploadRequestTypeDef,
         CreateMultipartUploadOutputTypeDef,
         CreateMultipartUploadRequestTypeDef,
+        GetObjectOutputTypeDef,
+        GetObjectRequestTypeDef,
         HeadObjectOutputTypeDef,
         HeadObjectRequestTypeDef,
         PutObjectOutputTypeDef,
@@ -122,6 +125,9 @@ class _DelayedSingleUploadClient:
             raise TimeoutError("test did not release the verification HEAD")
         return self._delegate.head_object(**cast("HeadObjectRequestTypeDef", request))
 
+    def get_object(self, **request: object) -> "GetObjectOutputTypeDef":
+        return self._delegate.get_object(**cast("GetObjectRequestTypeDef", request))
+
 
 class _DelayedMultipartUploadClient:
     def __init__(self, delegate: "S3Client") -> None:
@@ -156,6 +162,9 @@ class _DelayedMultipartUploadClient:
     def head_object(self, **request: object) -> "HeadObjectOutputTypeDef":
         return self._delegate.head_object(**cast("HeadObjectRequestTypeDef", request))
 
+    def get_object(self, **request: object) -> "GetObjectOutputTypeDef":
+        return self._delegate.get_object(**cast("GetObjectRequestTypeDef", request))
+
 
 async def _wait_for(event: Event) -> None:
     assert await asyncio.to_thread(event.wait, 10)
@@ -188,8 +197,7 @@ def _service(
     return ObjectContentService(
         settings,
         database,
-        object_store_settings=settings,
-        object_store=store,
+        object_store_provider=ObjectStoreProvider.fixed(settings, store),
     )
 
 
@@ -201,8 +209,7 @@ def _reconciler(
     return ObjectContentReconciler(
         settings,
         database,
-        object_store_settings=settings,
-        object_store=store,
+        object_store_provider=ObjectStoreProvider.fixed(settings, store),
     )
 
 

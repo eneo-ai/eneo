@@ -75,7 +75,7 @@ To regenerate the backend types from the configured backend URL, run
 bun run update && bun run lint
 ```
 
-`bun run update` reads `ENEO_BACKEND_URL`, then `ENEO_BACKEND_URL`, then falls back to `http://localhost:8123`. `bun run update -- --local` forces `http://localhost:8123`.
+`bun run update` reads `ENEO_BACKEND_URL`, then falls back to `http://localhost:8123`. `bun run update -- --local` forces `http://localhost:8123`.
 
 For reviewable, byte-stable regeneration, first save one backend OpenAPI snapshot and then update from that file:
 
@@ -88,6 +88,6 @@ node update.js --schema-file /tmp/eneo-openapi.json
 git diff --stat src/types/schema.d.ts
 ```
 
-`--schema-file` is mutually exclusive with `--local` and ignores backend URL environment variables. URL mode preserves the backend's raw OpenAPI response ordering; use a saved, canonicalized schema file when a byte-identical diff is required.
+`--schema-file` is mutually exclusive with `--local` and ignores backend URL environment variables. The updater canonicalizes object keys in both URL and file modes so either path produces the same reviewable schema ordering.
 
 Update the endpoints accordingly.

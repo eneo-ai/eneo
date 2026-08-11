@@ -15,6 +15,10 @@ from eneo.ai_models.completion_models.completion_model import (
     ModelKwargs,
     ResponseType,
 )
+from eneo.audit.application.audit_metadata import AuditMetadata
+from eneo.audit.domain.action_types import ActionType
+from eneo.audit.domain.entity_types import EntityType
+from eneo.authentication.signed_urls import build_signed_original_download_url
 from eneo.completion_models.domain.model_kwargs_capabilities import (
     ModelKwargCapability,
     SupportedModelKwargs,
@@ -30,7 +34,8 @@ from eneo.completion_models.infrastructure.tenant_model_capabilities import (
     StructuredOutputCapabilityDecision,
     normalize_reasoning_effort,
 )
-from eneo.files.file_models import File
+from eneo.files.file_models import File, FileType
+from eneo.files.file_reference import file_reference_base_url
 from eneo.info_blobs.info_blob import InfoBlobChunkInDBWithScore
 from eneo.main.config import SETTINGS, Settings, get_settings
 from eneo.main.exceptions import ProviderInactiveException
@@ -47,6 +52,7 @@ from eneo.tokens.token_utils import log_token_count_drift
 from eneo.vision_models.infrastructure.flux_ai import FluxAdapter
 
 if TYPE_CHECKING:
+    from eneo.audit.application.audit_service import AuditService
     from eneo.completion_models.infrastructure.adapters.base_adapter import (
         CompletionModelAdapter,
     )
@@ -304,10 +310,12 @@ class CompletionService:
         session: Optional["AsyncSession"] = None,
         redis_client: Optional[aioredis.Redis] = None,
         mcp_server_tool_repo: "MCPServerToolRepository | None" = None,
+        audit_service: Optional["AuditService"] = None,
     ):
         self.context_builder = context_builder
         self.tenant = tenant
         self.user = user
+        self.audit_service = audit_service
         self.config = config or SETTINGS
         if encryption_service is None:
             encryption_settings: Settings | None = (
@@ -475,6 +483,70 @@ class CompletionService:
         finally:
             if mcp_proxy is not None:
                 await mcp_proxy.close()
+
+    def _build_file_reference_urls(self, files: list[File]) -> dict[UUID, str]:
+        """Map file id -> signed original-download URL for files with originals.
+
+        Empty when there is no reference base URL or tenant context, or no file
+        has a durably stored original (rows predating durable originals).
+        """
+        base_url = file_reference_base_url(self.config)
+        if not base_url or self.tenant is None:
+            return {}
+
+        expires_in = self.config.file_reference_url_expiry_seconds
+        urls: dict[UUID, str] = {}
+        for file in files:
+            # Only TEXT files are surfaced in the reference block (images ride
+            # as vision inputs), so mint only what can actually be exposed —
+            # which also keeps the mint audit truthful.
+            if file.file_type == FileType.TEXT and file.original_available:
+                urls[file.id] = build_signed_original_download_url(
+                    file_id=file.id,
+                    base_url=base_url,
+                    expires_in=expires_in,
+                    tenant_id=self.tenant.id,
+                )
+        return urls
+
+    async def _audit_file_reference_mints(
+        self,
+        files: list[File],
+        file_reference_urls: dict[UUID, str],
+        session: SessionInDB | None,
+    ) -> None:
+        """Audit the signed-URL mints for this turn's newly attached files.
+
+        History files are re-minted every turn but represent the same exposure
+        of the same file to the same session — the initial mint is the audited
+        event, so only current-turn files are logged. Skipped without a user
+        (worker/service contexts): the mint has no attributable actor.
+        """
+        if self.audit_service is None or self.tenant is None or self.user is None:
+            return
+        for file in files:
+            if file.id not in file_reference_urls:
+                continue
+            await self.audit_service.log_async(
+                tenant_id=self.tenant.id,
+                user=self.user,
+                action=ActionType.FILE_SIGNED_URL_MINTED,
+                entity_type=EntityType.FILE,
+                entity_id=file.id,
+                description=(
+                    f"Minted signed URL for file '{file.name}' for LLM/MCP context"
+                ),
+                metadata=AuditMetadata.standard(
+                    actor=self.user,
+                    target=file,
+                    extra={
+                        "source": "completion",
+                        "variant": "original",
+                        "expires_in": self.config.file_reference_url_expiry_seconds,
+                        "session_id": str(session.id) if session else None,
+                    },
+                ),
+            )
 
     async def load_skill_activation_preflight_adapters(
         self,
@@ -660,6 +732,8 @@ class CompletionService:
         provider_call_observer: ProviderCallObserver | None = None,
         provider_call_reason: ProviderCallReason = "initial",
         skill_runtime: SkillActivationRuntime | None = None,
+        inline_file_text: bool = True,
+        knowledge_catalog: str = "",
     ) -> CompletionModelResponse:
         if files is None:
             files = []
@@ -703,6 +777,23 @@ class CompletionService:
         # And only if feature flag is turned on
         use_image_generation = (
             use_image_generation and stream and get_settings().using_image_generation
+        )
+
+        # Mint signed download URLs for attached files whose exact original is
+        # durably stored, so the model can hand them to a URL-accepting MCP
+        # tool. Covers history files too — URLs are minted fresh per request, and
+        # history replay must honor URL-only mode (inline_file_text=False) the
+        # same way the current turn does, or the skipped text leaks back into
+        # context on every follow-up. Requires a reference base URL for absolute
+        # URLs.
+        history_files = [
+            file
+            for question in (session.questions if session else [])
+            for file in question.files
+        ]
+        file_reference_urls = self._build_file_reference_urls(files + history_files)
+        await self._audit_file_reference_mints(
+            files=files, file_reference_urls=file_reference_urls, session=session
         )
 
         # Create MCP proxy session before building the context, so the tool
@@ -749,6 +840,7 @@ class CompletionService:
                     and skill_runtime.tool_definition is not None
                     else None
                 ),
+                knowledge_catalog=knowledge_catalog,
                 vision=model.vision,
                 extra_tool_dicts=(
                     mcp_proxy.get_tools_for_llm()
@@ -756,6 +848,8 @@ class CompletionService:
                     else None
                 ),
                 reject_over_limit=reject_context_over_limit,
+                file_reference_urls=file_reference_urls,
+                inline_file_text=inline_file_text,
             )
 
             if extended_logging:

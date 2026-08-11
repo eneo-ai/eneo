@@ -242,7 +242,8 @@ async def generate_signed_url(
     # Calculate expiration time
     expires_at = int(time.time()) + signed_url_req.expires_in
 
-    # Generate the signed token
+    # Generate the signed token. tenant_id is bound into the signature so the
+    # download handler refuses cross-tenant replay even if the URL leaks.
     token = generate_signed_token(
         file_id=id,
         expires_at=expires_at,

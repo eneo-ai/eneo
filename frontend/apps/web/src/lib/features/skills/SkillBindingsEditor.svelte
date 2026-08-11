@@ -20,7 +20,6 @@
   import * as Dialog from "$lib/components/ui/dialog/index.js";
   import * as Popover from "$lib/components/ui/popover/index.js";
   import * as Select from "$lib/components/ui/select/index.js";
-  import { Tooltip } from "@eneo/ui";
   import { m } from "$lib/paraglide/messages";
   import SkillForm from "./SkillForm.svelte";
   import SkillPreview from "./SkillPreview.svelte";
@@ -55,8 +54,7 @@
     bindingSummaries: SkillBindingSummary[];
     canEditBindings: boolean;
     canCreateSkills: boolean;
-    supportsActivationModes?: boolean;
-    canSelectOnDemand?: boolean;
+    activationSurface?: "assistant" | "personal_chat";
     /** Tenant runtime prerequisite, supplied by policy editors that validate a
         draft before any turn exists. `undefined` when unknown. */
     selectiveActivationEnabled?: boolean;
@@ -72,8 +70,7 @@
     bindingSummaries,
     canEditBindings,
     canCreateSkills,
-    supportsActivationModes = false,
-    canSelectOnDemand,
+    activationSurface,
     selectiveActivationEnabled,
     skillRuntime = null,
     onListCatalog,
@@ -134,7 +131,11 @@
     getSkillBindingRows(bindings, bindingSummaries, catalog, loadedRevisionMetadata)
   );
   const canChooseOnDemand = $derived(
-    canSelectOnDemand ?? (skillRuntime !== null && skillRuntime.fallback_reason === null)
+    activationSurface === "personal_chat"
+      ? selectiveActivationEnabled === true
+      : activationSurface === "assistant" &&
+          skillRuntime !== null &&
+          skillRuntime.fallback_reason === null
   );
   const emptyChoiceMessage = $derived.by(() => {
     if (skillCatalog.loading) return m.skills_search_loading();
@@ -180,7 +181,7 @@
         id: preview.id,
         revisionId: preview.revisionId
       },
-      supportsActivationModes ? "always" : undefined
+      activationSurface !== undefined ? "always" : undefined
     );
     previewOpen = false;
     announcement = m.skills_added_to_draft_announcement({ name: preview.displayName });
@@ -198,7 +199,7 @@
         id: created.id,
         revisionId: created.current_revision_id
       },
-      supportsActivationModes ? "always" : undefined
+      activationSurface !== undefined ? "always" : undefined
     );
     createFormDirty = false;
     createOpen = false;
@@ -251,8 +252,9 @@
       // The tenant switch outranks the model requirements: it cannot be fixed
       // from a policy editor, so naming only the model rules would misdirect.
       if (selectiveActivationEnabled === false) return m.skills_activation_runtime_disabled();
-      if (canSelectOnDemand === true) return m.skills_activation_runtime_policy_selective();
-      if (canSelectOnDemand === false) return m.skills_activation_runtime_policy_requirements();
+      if (activationSurface === "personal_chat") {
+        return m.skills_activation_runtime_policy_selective();
+      }
       return m.skills_activation_runtime_no_model();
     }
     switch (skillRuntime.fallback_reason) {
@@ -276,9 +278,9 @@
   }
 
   function runtimeHint(): string {
-    return canSelectOnDemand === undefined
-      ? m.skills_activation_runtime_saved_hint()
-      : m.skills_activation_runtime_policy_validation_hint();
+    return activationSurface === "personal_chat"
+      ? m.skills_activation_runtime_policy_validation_hint()
+      : m.skills_activation_runtime_saved_hint();
   }
 
   async function useLatestRevision(row: SkillBindingRow, index: number) {
@@ -382,9 +384,11 @@
 <div class="flex flex-col gap-4">
   <div class="flex items-start justify-between gap-3">
     <p class="text-muted-foreground max-w-[65ch] text-sm leading-6">
-      {supportsActivationModes
+      {activationSurface === "assistant"
         ? m.skills_binding_assistant_draft_description()
-        : m.skills_binding_draft_description()}
+        : activationSurface === "personal_chat"
+          ? m.skills_binding_personal_chat_draft_description()
+          : m.skills_binding_draft_description()}
     </p>
     {#if rows.length > 0}
       <Badge variant="secondary" class="shrink-0">
@@ -393,7 +397,7 @@
     {/if}
   </div>
 
-  {#if supportsActivationModes}
+  {#if activationSurface !== undefined}
     <div class="border-border flex items-start gap-2 border-y py-3 text-sm">
       <Info class="text-muted-foreground mt-0.5 size-4 shrink-0" aria-hidden="true" />
       <div class="min-w-0">
@@ -427,7 +431,7 @@
   {:else}
     <!-- svelte-ignore a11y_no_noninteractive_tabindex (overflow region must be keyboard-scrollable) -->
     <div
-      class="border-border focus-visible:ring-ring max-h-[min(32rem,60dvh)] overflow-y-auto overscroll-contain border-y outline-none focus-visible:ring-2 focus-visible:ring-offset-2 [scrollbar-gutter:stable]"
+      class="border-border focus-visible:ring-ring max-h-[min(32rem,60dvh)] [scrollbar-gutter:stable] overflow-y-auto overscroll-contain border-y outline-none focus-visible:ring-2 focus-visible:ring-offset-2"
       role="region"
       aria-label={m.skills_binding_scroll_region_label({ count: String(rows.length) })}
       tabindex="0"
@@ -477,59 +481,50 @@
                     </Badge>
                   {/if}
                 </div>
-                {#if supportsActivationModes}
+                {#if activationSurface !== undefined}
                   <div class="mt-3 w-full sm:max-w-56">
-                    <Tooltip
-                      text={canEditBindings &&
-                      !row.executionBlocked &&
-                      !canChooseOnDemand &&
-                      activationMode(row) === "always"
-                        ? m.skills_activation_mode_locked_tooltip()
-                        : undefined}
+                    <Select.Root
+                      type="single"
+                      value={activationMode(row)}
+                      disabled={!canEditBindings ||
+                        row.executionBlocked ||
+                        (!canChooseOnDemand && activationMode(row) === "always")}
+                      onValueChange={(value) => updateActivationMode(row, value)}
                     >
-                      <Select.Root
-                        type="single"
-                        value={activationMode(row)}
-                        disabled={!canEditBindings ||
-                          row.executionBlocked ||
-                          (!canChooseOnDemand && activationMode(row) === "always")}
-                        onValueChange={(value) => updateActivationMode(row, value)}
+                      <Select.Trigger
+                        class="w-full"
+                        aria-label={m.skills_activation_mode_label({ name: rowName(row) })}
+                        aria-describedby={`${runtimeStatusId} ${runtimeHintId}`}
                       >
-                        <Select.Trigger
-                          class="w-full"
-                          aria-label={m.skills_activation_mode_label({ name: rowName(row) })}
-                          aria-describedby={`${runtimeStatusId} ${runtimeHintId}`}
-                        >
-                          <span data-slot="select-value">
-                            {activationModeLabel(activationMode(row))}
-                          </span>
-                        </Select.Trigger>
-                        <Select.Content class="w-(--bits-select-anchor-width) min-w-56">
-                          <Select.Group>
-                            <Select.Item value="always" label={activationModeLabel("always")}>
-                              <span class="flex flex-col items-start gap-0.5 text-left">
-                                <span>{activationModeLabel("always")}</span>
-                                <span class="text-muted-foreground text-xs font-normal">
-                                  {m.skills_activation_mode_always_description()}
-                                </span>
+                        <span data-slot="select-value">
+                          {activationModeLabel(activationMode(row))}
+                        </span>
+                      </Select.Trigger>
+                      <Select.Content class="w-(--bits-select-anchor-width) min-w-56">
+                        <Select.Group>
+                          <Select.Item value="always" label={activationModeLabel("always")}>
+                            <span class="flex flex-col items-start gap-0.5 text-left">
+                              <span>{activationModeLabel("always")}</span>
+                              <span class="text-muted-foreground text-xs font-normal">
+                                {m.skills_activation_mode_always_description()}
                               </span>
-                            </Select.Item>
-                            <Select.Item
-                              value="on_demand"
-                              label={activationModeLabel("on_demand")}
-                              disabled={!canChooseOnDemand}
-                            >
-                              <span class="flex flex-col items-start gap-0.5 text-left">
-                                <span>{activationModeLabel("on_demand")}</span>
-                                <span class="text-muted-foreground text-xs font-normal">
-                                  {m.skills_activation_mode_on_demand_description()}
-                                </span>
+                            </span>
+                          </Select.Item>
+                          <Select.Item
+                            value="on_demand"
+                            label={activationModeLabel("on_demand")}
+                            disabled={!canChooseOnDemand}
+                          >
+                            <span class="flex flex-col items-start gap-0.5 text-left">
+                              <span>{activationModeLabel("on_demand")}</span>
+                              <span class="text-muted-foreground text-xs font-normal">
+                                {m.skills_activation_mode_on_demand_description()}
                               </span>
-                            </Select.Item>
-                          </Select.Group>
-                        </Select.Content>
-                      </Select.Root>
-                    </Tooltip>
+                            </span>
+                          </Select.Item>
+                        </Select.Group>
+                      </Select.Content>
+                    </Select.Root>
                   </div>
                 {/if}
               </div>
@@ -622,7 +617,7 @@
         <Command.Root
           label={m.skills_search_existing()}
           shouldFilter={false}
-          class="p-0 [&_[data-slot=command-input-wrapper]]:border-border [&_[data-slot=command-input-wrapper]]:border-b [&_[data-slot=command-input-wrapper]]:p-2 [&_[data-slot=input-group]]:border-input [&_[data-slot=input-group]]:bg-background"
+          class="[&_[data-slot=command-input-wrapper]]:border-border [&_[data-slot=input-group]]:border-input [&_[data-slot=input-group]]:bg-background p-0 [&_[data-slot=command-input-wrapper]]:border-b [&_[data-slot=command-input-wrapper]]:p-2"
         >
           <Command.Input
             value={skillCatalog.query}
@@ -666,7 +661,7 @@
                   >
                     <div class="min-w-0 flex-1">
                       <div class="flex items-start justify-between gap-3">
-                        <p class="line-clamp-2 font-medium leading-5">{skill.display_name}</p>
+                        <p class="line-clamp-2 leading-5 font-medium">{skill.display_name}</p>
                         <Badge variant="outline" class="shrink-0">
                           {m.skills_revision_label({
                             revision: String(getSkillCandidateRevisionNumber(skill))
@@ -717,10 +712,10 @@
 
     <Dialog.Root bind:open={previewOpen} onOpenChange={setPreviewOpen}>
       <Dialog.Content
-        class="grid max-h-[calc(100dvh-2rem)] grid-rows-[auto_minmax(0,1fr)_auto] gap-0 overflow-hidden p-0 sm:max-w-2xl"
+        class="flex max-h-[calc(100dvh-2rem)] flex-col gap-0 overflow-hidden p-0 sm:max-w-2xl"
         closeLabel={m.close()}
       >
-        <Dialog.Header class="border-b px-6 py-5 pr-12">
+        <Dialog.Header class="shrink-0 border-b px-4 py-4 pr-12 sm:px-6 sm:py-5">
           <Dialog.Title>
             {m.skills_preview_title({
               name: preview?.displayName ?? previewCandidate?.display_name ?? m.skills()
@@ -728,7 +723,13 @@
           </Dialog.Title>
           <Dialog.Description>{m.skills_preview_description()}</Dialog.Description>
         </Dialog.Header>
-        <div class="min-h-0 overflow-y-auto px-6 py-5 [scrollbar-gutter:stable]">
+        <!-- svelte-ignore a11y_no_noninteractive_tabindex (named overflow region must be keyboard-scrollable) -->
+        <div
+          class="max-h-[min(40rem,calc(100dvh-12rem))] min-h-0 flex-1 [scrollbar-gutter:stable] overflow-y-auto px-4 py-4 outline-none focus-visible:ring-2 focus-visible:ring-inset sm:px-6 sm:py-5"
+          role="region"
+          aria-label={m.skills_preview_scroll_region()}
+          tabindex="0"
+        >
           {#if previewLoading}
             <p class="text-muted-foreground py-8 text-center text-sm" role="status">
               {m.loading()}
@@ -746,7 +747,7 @@
             <SkillPreview {preview} />
           {/if}
         </div>
-        <Dialog.Footer class="border-t px-6 py-4">
+        <Dialog.Footer class="shrink-0 border-t px-4 py-4 sm:px-6">
           <Button type="button" variant="outline" onclick={() => setPreviewOpen(false)}>
             {m.cancel()}
           </Button>
@@ -782,7 +783,7 @@
             <Dialog.Title>{m.skills_create_dialog_title()}</Dialog.Title>
             <Dialog.Description>{m.skills_create_dialog_description()}</Dialog.Description>
           </Dialog.Header>
-          <div class="min-h-0 overflow-y-auto px-6 py-5 [scrollbar-gutter:stable]">
+          <div class="min-h-0 [scrollbar-gutter:stable] overflow-y-auto px-6 py-5">
             <div class="flex flex-col gap-5">
               <Alert.Root role="note">
                 <Info aria-hidden="true" />

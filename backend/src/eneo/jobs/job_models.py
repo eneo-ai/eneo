@@ -7,7 +7,17 @@ from uuid import UUID
 from pydantic import BaseModel, field_validator, model_validator
 
 from eneo.files.text import ExtractionError
+from eneo.main.exceptions import (
+    InfoBlobPublicationConflictError,
+    QuotaExceededException,
+)
 from eneo.main.models import InDB, Status
+from eneo.object_content.content import (
+    ContentTooLargeError,
+    ObjectContentBusyError,
+    ObjectContentIntegrityError,
+    ObjectContentUnavailableError,
+)
 
 
 class Task(str, Enum):
@@ -39,6 +49,11 @@ class JobFailureCode(StrEnum):
     CANCELLED = "cancelled"
     PROCESSING_INTERRUPTED = "processing_interrupted"
     INVALID_JOB_PAYLOAD = "invalid_job_payload"
+    QUOTA_EXCEEDED = "quota_exceeded"
+    STORAGE_LIMIT_EXCEEDED = "storage_limit_exceeded"
+    STORAGE_UNAVAILABLE = "storage_unavailable"
+    STORAGE_VERIFICATION_FAILED = "storage_verification_failed"
+    KNOWLEDGE_SOURCE_CONFLICT = "knowledge_source_conflict"
 
 
 _EXTRACTION_FAILURE_CODES = {
@@ -53,6 +68,16 @@ _EXTRACTION_FAILURE_CODES = {
 def failure_code_for_exception(error: BaseException) -> JobFailureCode:
     if isinstance(error, asyncio.CancelledError):
         return JobFailureCode.CANCELLED
+    if isinstance(error, QuotaExceededException):
+        return JobFailureCode.QUOTA_EXCEEDED
+    if isinstance(error, ContentTooLargeError):
+        return JobFailureCode.STORAGE_LIMIT_EXCEEDED
+    if isinstance(error, ObjectContentIntegrityError):
+        return JobFailureCode.STORAGE_VERIFICATION_FAILED
+    if isinstance(error, (ObjectContentUnavailableError, ObjectContentBusyError)):
+        return JobFailureCode.STORAGE_UNAVAILABLE
+    if isinstance(error, InfoBlobPublicationConflictError):
+        return JobFailureCode.KNOWLEDGE_SOURCE_CONFLICT
     if isinstance(error, ExtractionError):
         return _EXTRACTION_FAILURE_CODES.get(
             error.code,

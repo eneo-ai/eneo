@@ -141,6 +141,7 @@ def _adapter() -> TenantModelAdapter:
     adapter.model = SimpleNamespace(
         name="test-model",
         supports_tool_calling=True,
+        token_limit=128000,
     )
     adapter._prepare_kwargs = Mock(return_value={})
     adapter._create_messages_from_context = Mock(
@@ -1209,6 +1210,7 @@ def test_reserved_activation_tool_collision_is_dropped_and_recorded() -> None:
     adapter.model = SimpleNamespace(
         name="test-model",
         supports_tool_calling=True,
+        token_limit=128000,
     )
     runtime = _runtime()
     built_in = {
@@ -1230,6 +1232,7 @@ def test_reserved_activation_tool_collision_is_dropped_during_fallback() -> None
     adapter.model = SimpleNamespace(
         name="test-model",
         supports_tool_calling=True,
+        token_limit=128000,
     )
     runtime = _runtime(selective_activation_enabled=False)
     proxy = _CollisionMCPProxy()

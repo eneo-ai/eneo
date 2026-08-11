@@ -85,6 +85,7 @@ class ErrorCodes(int, Enum):
     SKILL_NOT_PUBLISHED_FOR_BINDING = 9053
     SKILL_BLOCKED_FOR_BINDING = 9054
     SKILL_RUNTIME_POLICY_CHANGED = 9055
+    INVALID_FILENAME = 9058
 
 
 class NotFoundException(Exception):
@@ -402,6 +403,14 @@ class FileTooLargeException(Exception):
         return details
 
 
+class InvalidFilenameException(Exception):
+    pass
+
+
+class InfoBlobPublicationConflictError(RuntimeError):
+    """The locked publication identities resolve to different active sources."""
+
+
 class ChunkEmbeddingMisMatchException(Exception):
     pass
 
@@ -596,6 +605,7 @@ EXCEPTION_MAP = {
     PydanticParseError: (500, None, ErrorCodes.PYDANTIC_PARSE_ERROR),
     FileNotSupportedException: (415, None, ErrorCodes.FILE_NOT_SUPPORTED),
     FileTooLargeException: (413, None, ErrorCodes.FILE_TOO_LARGE),
+    InvalidFilenameException: (400, None, ErrorCodes.INVALID_FILENAME),
     ChunkEmbeddingMisMatchException: (
         500,
         "Something went wrong.",

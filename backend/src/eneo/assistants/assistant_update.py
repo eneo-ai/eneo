@@ -7,6 +7,7 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field
 
 from eneo.ai_models.completion_models.completion_model import ModelKwargs
+from eneo.assistants.api.assistant_models import KnowledgeMode
 from eneo.main.models import NOT_PROVIDED, NotProvided
 from eneo.prompts.api.prompt_models import PromptCreate
 from eneo.skills.domain.skill import SkillBindingIntent
@@ -25,6 +26,8 @@ AssistantUpdateField: TypeAlias = Literal[
     "attachment_ids",
     "description",
     "insight_enabled",
+    "inline_file_text",
+    "knowledge_mode",
     "data_retention_days",
     "metadata_json",
     "icon_id",
@@ -65,6 +68,8 @@ class AssistantUpdateCommand(BaseModel):
     attachment_ids: list[UUID] | None = None
     description: str | None | NotProvided = Field(default=NOT_PROVIDED)
     insight_enabled: bool | None = None
+    inline_file_text: bool | None = None
+    knowledge_mode: KnowledgeMode | None = None
     data_retention_days: int | None | NotProvided = Field(default=NOT_PROVIDED)
     metadata_json: dict[str, object] | None | NotProvided = Field(default=NOT_PROVIDED)
     icon_id: UUID | None | NotProvided = Field(default=NOT_PROVIDED)

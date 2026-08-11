@@ -397,7 +397,7 @@ async def test_luna_proposal_call_uses_real_pinned_reasoning_capability() -> Non
     )
 
     call_kwargs = litellm_client.acompletion.await_args.kwargs
-    assert call_kwargs["reasoning_effort"] == "low"
+    assert call_kwargs["reasoning_effort"] == "none"
     assert call_kwargs["tools"] == [{"function": {"name": PROPOSE_FLOW_TOOL_NAME}}]
 
 

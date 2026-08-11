@@ -24,6 +24,7 @@ pytestmark = [pytest.mark.integration, pytest.mark.migration_isolation]
 
 PRIOR_REVISION = "202607271530_provider_call_v2"
 MIGRATION_REVISION = "202607271700_call_input_indexes"
+SIBLING_HEAD_REVISION = "202608101300"
 
 
 class MigrationDb(NamedTuple):
@@ -137,7 +138,10 @@ def test_upgrade_removes_unlinkable_rows_and_requires_bounded_indexes(
 
     command.upgrade(migration_db.cfg, MIGRATION_REVISION)
 
-    assert current_revisions(migration_db.conn) == {MIGRATION_REVISION}
+    assert current_revisions(migration_db.conn) == {
+        MIGRATION_REVISION,
+        SIBLING_HEAD_REVISION,
+    }
     with migration_db.conn.cursor() as cur:
         cur.execute("SELECT count(*) FROM flow_provider_calls")
         assert cur.fetchone() == (0,)
@@ -220,13 +224,19 @@ def test_downgrade_refuses_to_discard_links_and_removes_empty_schema(
 
     with pytest.raises(RuntimeError, match="resolved-input links"):
         command.downgrade(migration_db.cfg, PRIOR_REVISION)
-    assert current_revisions(migration_db.conn) == {MIGRATION_REVISION}
+    assert current_revisions(migration_db.conn) == {
+        MIGRATION_REVISION,
+        SIBLING_HEAD_REVISION,
+    }
 
     with migration_db.conn.cursor() as cur:
         cur.execute("DELETE FROM flow_provider_calls")
     command.downgrade(migration_db.cfg, PRIOR_REVISION)
 
-    assert current_revisions(migration_db.conn) == {PRIOR_REVISION}
+    assert current_revisions(migration_db.conn) == {
+        PRIOR_REVISION,
+        SIBLING_HEAD_REVISION,
+    }
     with migration_db.conn.cursor() as cur:
         cur.execute(
             """

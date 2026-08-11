@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
+  import { invalidate } from "$app/navigation";
   import {
     DEPLOYMENT_POLICY_CONFLICT_ERROR_CODE,
     EneoError,
@@ -39,11 +40,12 @@
   import { getAppContext } from "$lib/core/AppContext.js";
   import { getEneo } from "$lib/core/Eneo";
   import PolicySection from "$lib/features/admin/PolicySection.svelte";
+  import { hasPermission } from "$lib/core/hasPermission.js";
   import { m } from "$lib/paraglide/messages";
   import { getLocale } from "$lib/paraglide/runtime";
   import ByteLimitField from "./ByteLimitField.svelte";
+  import StorageConnectionSection from "./StorageConnectionSection.svelte";
   import StorageInventorySection from "./StorageInventorySection.svelte";
-  import StorageReadinessSection from "./StorageReadinessSection.svelte";
 
   type InventoryStatus = "idle" | "loading" | "error";
   type MoveAction = "queue" | "pause" | null;
@@ -84,7 +86,8 @@
   let moveAlertRef = $state<HTMLElement | null>(null);
   let moveStatusAlertRef = $state<HTMLElement | null>(null);
 
-  const canEdit = $derived(user.is_platform_admin === true && !authorityRevoked);
+  const canAdministerStorage = $derived(hasPermission(user)("storage"));
+  const canEdit = $derived(canAdministerStorage && !authorityRevoked);
   const policyMutationPending = $derived(saving || moveActionPending === "pause");
   const objectStoreCapability = $derived(
     deploymentPolicy?.capabilities.find((capability) => capability.target === "object_store")
@@ -209,7 +212,7 @@
   }
 
   async function loadInventory() {
-    if (user.is_platform_admin !== true || authorityRevoked) {
+    if (!canAdministerStorage || authorityRevoked) {
       contentInventory = null;
       inventoryStatus = "idle";
       return;
@@ -233,7 +236,7 @@
   }
 
   async function loadMoves() {
-    if (user.is_platform_admin !== true || authorityRevoked) {
+    if (!canAdministerStorage || authorityRevoked) {
       contentMoves = null;
       moveStatus = "idle";
       return;
@@ -402,10 +405,9 @@
     }
   }
 
-  function storageTargetLabel(target: StorageKind | null): string {
+  function storageTargetLabel(target: StorageKind): string {
     if (target === "postgres_inline") return m.storage_target_postgres_inline();
-    if (target === "object_store") return m.storage_target_object_store();
-    return m.storage_target_not_applicable();
+    return m.storage_target_object_store();
   }
 
   function readinessLabel(code: ObjectContentReadinessCode): string {
@@ -468,7 +470,7 @@
   function policyActorLabel(actor: DeploymentPolicy["policy"]["updated_by_actor"]): string {
     const labels: Record<DeploymentPolicy["policy"]["updated_by_actor"], () => string> = {
       migration: m.storage_policy_actor_migration,
-      platform_admin: m.storage_policy_actor_platform_admin
+      storage_admin: m.storage_policy_actor_storage_admin
     };
     return labels[actor]();
   }
@@ -569,7 +571,7 @@
             <p class="text-secondary text-sm leading-6">
               {m.storage_settings_description()}
             </p>
-            <p class="text-muted text-xs">
+            <p class="text-muted text-sm leading-5">
               {m.storage_settings_last_changed({
                 date: storageDate(deploymentPolicy.policy.updated_at),
                 actor: policyActorLabel(deploymentPolicy.policy.updated_by_actor),
@@ -585,6 +587,21 @@
               <Alert.Description>{m.storage_settings_read_only_description()}</Alert.Description>
             </Alert.Root>
           {/if}
+
+          <StorageConnectionSection
+            capability={objectStoreCapability}
+            {canEdit}
+            {readinessLabel}
+            onConnectionChanged={async () => {
+              await loadPolicy(dirty);
+              // Connecting or removing a store flips a capability the rest of
+              // the app reads from the root layout's settings (e.g. whether an
+              // assistant may switch off inlined file text). Without this it
+              // stays stale for the whole client-side session.
+              await invalidate("global:state");
+            }}
+            onAuthorityRevoked={() => (authorityRevoked = true)}
+          />
 
           <form
             class="flex flex-col gap-6"
@@ -616,14 +633,16 @@
                 </Alert.Root>
               {/if}
 
-              <Alert.Root>
-                <Info />
-                <Alert.Title>{m.storage_settings_new_writes_only_title()}</Alert.Title>
-                <Alert.Description>
+              <div class="text-secondary flex items-start gap-3 text-sm">
+                <Info class="text-primary mt-0.5 size-4 shrink-0" aria-hidden="true" />
+                <div class="max-w-[72ch] space-y-1 leading-5">
+                  <p class="text-primary font-medium">
+                    {m.storage_settings_new_writes_only_title()}
+                  </p>
                   <p>{m.storage_settings_no_move_notice()}</p>
                   <p>{m.storage_settings_no_fallback_notice()}</p>
-                </Alert.Description>
-              </Alert.Root>
+                </div>
+              </div>
 
               {#if stale}
                 <Alert.Root
@@ -750,7 +769,7 @@
 
                     <Field.Label
                       for="storage-target-object-store"
-                      class="border-default has-data-[state=checked]:border-accent-default has-data-[state=checked]:bg-accent-dimmer data-[disabled=true]:opacity-60 w-auto cursor-pointer items-start rounded-lg border p-4"
+                      class="border-default has-data-[state=checked]:border-accent-default has-data-[state=checked]:bg-accent-dimmer w-auto cursor-pointer items-start rounded-lg border p-4 data-[disabled=true]:opacity-60"
                       data-disabled={objectStoreUnavailable}
                     >
                       <RadioGroup.Item
@@ -892,7 +911,7 @@
                 </dl>
               {/if}
 
-              <div class="border-default overflow-x-auto rounded-lg border">
+              <div class="border-default border-y [&_td]:px-3 [&_th]:px-3">
                 <Table.Root class="min-w-[760px]">
                   <Table.Caption class="sr-only">
                     {m.storage_effective_limits_caption()}
@@ -962,13 +981,7 @@
             </PolicySection>
           </form>
 
-          <StorageReadinessSection
-            capabilities={deploymentPolicy.capabilities}
-            {storageTargetLabel}
-            {readinessLabel}
-          />
-
-          {#if user.is_platform_admin === true && !authorityRevoked}
+          {#if canEdit}
             <PolicySection
               id="storage-moves"
               title={m.storage_moves_title()}
@@ -992,7 +1005,7 @@
 
               <div class="flex flex-wrap items-center justify-end gap-3">
                 {#if movesRefreshedAt !== null}
-                  <span class="text-muted text-xs">
+                  <span class="text-muted text-sm">
                     {m.storage_last_refreshed({ time: storageTime(movesRefreshedAt) })}
                   </span>
                 {/if}
@@ -1195,11 +1208,11 @@
               {/if}
 
               {#if contentMoves?.moves.length === 0}
-                <p class="border-default text-muted rounded-lg border px-4 py-3 text-sm">
+                <p class="text-muted py-3 text-sm">
                   {m.storage_moves_empty()}
                 </p>
               {:else if contentMoves}
-                <div class="border-default overflow-x-auto rounded-lg border">
+                <div class="border-default border-y [&_td]:px-3 [&_th]:px-3">
                   <Table.Root class="min-w-[760px]">
                     <Table.Caption class="sr-only">{m.storage_moves_caption()}</Table.Caption>
                     <Table.Header>

@@ -116,6 +116,7 @@ class MCPServer(Entity):
         documentation_url: Optional[str] = None,
         tools: Optional[list[MCPServerTool]] = None,
         security_classification: Optional["SecurityClassification"] = None,
+        is_internal: bool = False,
         id: Optional[UUID] = None,
         created_at: Optional[datetime] = None,
         updated_at: Optional[datetime] = None,
@@ -139,6 +140,9 @@ class MCPServer(Entity):
         self.documentation_url = documentation_url
         self.tools = tools or []
         self.security_classification = security_classification
+        # Runtime provenance must be explicit: a tenant-controlled display name
+        # cannot grant the reduced approval policy of built-in loopback tools.
+        self.is_internal = is_internal
 
 
 class MCPServerSettings(Entity):

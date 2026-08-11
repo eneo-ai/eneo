@@ -17,7 +17,8 @@ export function initObjectContentPolicy(client) {
 
     /**
      * Get bounded deployment-wide object-content inventory facts.
-     * Session-backed platform administrators only.
+     * Requires a session-backed user holding the storage administration
+     * permission (held by the Owner role by default).
      * @throws {EneoError}
      * @returns {Promise<import('../types/resources').ObjectContentInventory>}
      */
@@ -29,7 +30,8 @@ export function initObjectContentPolicy(client) {
 
     /**
      * Get aggregate progress and typed failure reasons for explicit storage moves.
-     * Session-backed platform administrators only.
+     * Requires a session-backed user holding the storage administration
+     * permission (held by the Owner role by default).
      * @throws {EneoError}
      * @returns {Promise<import('../types/resources').ObjectContentMoves>}
      */
@@ -41,7 +43,8 @@ export function initObjectContentPolicy(client) {
 
     /**
      * Queue one bounded page of eligible content for an explicit storage move.
-     * Session-backed platform administrators only.
+     * Requires a session-backed user holding the storage administration
+     * permission (held by the Owner role by default).
      * @param {import('../types/resources').MoveQueueRequest} request
      * @throws {EneoError}
      * @returns {Promise<import('../types/resources').MoveQueueResult>}
@@ -55,7 +58,8 @@ export function initObjectContentPolicy(client) {
 
     /**
      * Pause or resume new storage-move claims at an expected policy revision.
-     * Session-backed platform administrators only.
+     * Requires a session-backed user holding the storage administration
+     * permission (held by the Owner role by default).
      * @param {import('../types/resources').MovePauseUpdate} request
      * @throws {EneoError}
      * @returns {Promise<import('../types/resources').MovePauseResult>}
@@ -69,7 +73,8 @@ export function initObjectContentPolicy(client) {
 
     /**
      * Replace the deployment-wide object content storage policy.
-     * Session-backed platform administrators only.
+     * Requires a session-backed user holding the storage administration
+     * permission (held by the Owner role by default).
      * @param {import('../types/resources').DeploymentPolicyUpdate} policy
      * @throws {EneoError}
      * @returns {Promise<import('../types/resources').DeploymentPolicy>}

@@ -57,6 +57,9 @@ const ERROR_CODE_MESSAGES: Partial<Record<EneoErrorCode, () => string>> = {
   9024: () => m.eneo_error_9024(), // INTERNAL_SERVER_ERROR
   9038: () => m.eneo_error_9038(), // RESOURCE_NOT_READY
 
+  // --- File uploads ---
+  9056: () => m.eneo_error_9056(), // INVALID_FILENAME
+
   // --- Model lifecycle ---
   9039: () => m.eneo_error_9039(), // MODEL_IN_USE
 
@@ -91,9 +94,9 @@ const ERROR_CODE_MESSAGES: Partial<Record<EneoErrorCode, () => string>> = {
  */
 export function getErrorMessage(error: unknown, fallback?: string): string {
   if (error instanceof EneoError) {
-    const mapped = ERROR_CODE_MESSAGES[error.code];
+    const mapped = getErrorCodeMessage(error.code);
     if (mapped) {
-      return mapped();
+      return mapped;
     }
     const readable = error.getReadableMessage();
     if (readable) {
@@ -101,4 +104,17 @@ export function getErrorMessage(error: unknown, fallback?: string): string {
     }
   }
   return fallback ?? m.request_failed();
+}
+
+/**
+ * Localized message for a backend error code alone.
+ *
+ * Use it where the EneoError itself is gone — SvelteKit serializes errors to
+ * `App.Error` before the error page sees them, so the page has the code and the
+ * backend's English message but not the error object.
+ *
+ * @returns The localized message, or undefined when the code has no mapping.
+ */
+export function getErrorCodeMessage(code: EneoErrorCode): string | undefined {
+  return ERROR_CODE_MESSAGES[code]?.();
 }

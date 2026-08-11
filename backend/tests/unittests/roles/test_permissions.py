@@ -275,6 +275,7 @@ class TestPermissionSemantics:
             "flows_manage",
             "flows_ai_builder",
             "flows_trace",
+            "storage",
             "assistant_debug",
         }
         actual = {p.value for p in Permission}

@@ -28,6 +28,7 @@ from eneo.assistants.assistant_update import (
 from eneo.assistants.reference_tags import extract_inline_reference_ids
 from eneo.authentication.api_key_scope_revoker import ApiKeyScopeRevoker
 from eneo.authentication.auth_models import ApiKeyScopeType, ApiKeyStateReasonCode
+from eneo.authentication.auth_service import AuthService
 from eneo.completion_models.infrastructure.context_builder import (
     count_tokens,
 )
@@ -37,6 +38,7 @@ from eneo.files.attachment_budget import (
     attachment_token_ceiling,
 )
 from eneo.files.file_models import File, FileType
+from eneo.files.file_reference import url_only_file_ids
 from eneo.files.file_service import FileService
 from eneo.governance_policy.domain.policy_resolver import (
     select_effective_completion_model,
@@ -49,6 +51,11 @@ from eneo.help_assistants.infrastructure.org_space_assistant_role_repo import (
     OrgSpaceAssistantRoleRepo,
 )
 from eneo.icons.icon_repo import IconRepository
+from eneo.internal_mcp import (
+    build_files_mcp_server,
+    build_knowledge_mcp_server,
+    resolve_internal_mcp_availability,
+)
 from eneo.logging.logging import LoggingDetails
 from eneo.main.exceptions import (
     BadRequestException,
@@ -126,6 +133,15 @@ _ON_DEMAND_REJECTION_MESSAGES: dict[SkillActivationFallbackReason, str] = {
         "The selected completion model cannot measure the Skill catalogue exactly"
     ),
 }
+_PERSONAL_CHAT_SAFE_FALLBACK_REASONS = frozenset(
+    {
+        SkillActivationFallbackReason.MODEL_LACKS_TOOL_CALLING,
+        SkillActivationFallbackReason.CATALOG_BUDGET_EXCEEDED,
+        SkillActivationFallbackReason.TOKEN_MEASUREMENT_UNAVAILABLE,
+    }
+)
+# Personal Chat can inherit a model that its policy editor did not choose. Those
+# model limitations degrade to Always-only; the tenant's off switch must not.
 _ON_DEMAND_CANDIDATE_REJECTION_MESSAGES: dict[
     SkillActivationRejectionReason,
     str,
@@ -258,6 +274,36 @@ def get_references(
     return [blob for blob in blobs if blob is not None]
 
 
+def filter_mcp_tool_references(
+    response_string: str,
+    references: Sequence[McpToolReference],
+    version: int = 1,
+) -> list[McpToolReference]:
+    """Keep only the MCP references the answer cites inline, mirroring the
+    legacy info-blob path.
+
+    Display-only image references never receive a ``source_id`` line (see
+    ``_build_tool_result_with_references``) so they cannot be cited; they are
+    always kept so thumbnail rendering survives filtering.
+    """
+    if version == 1:
+        return list(references)
+
+    display_only = [
+        ref for ref in references if (ref.mime_type or "").startswith("image/")
+    ]
+    citeable = [
+        ref for ref in references if not (ref.mime_type or "").startswith("image/")
+    ]
+    cited = get_references(
+        response_string=response_string,
+        info_blobs=citeable,
+        version=version,
+        get_id_func=lambda ref: ref.id,
+    )
+    return cited + display_only
+
+
 class AssistantService:
     def __init__(
         self,
@@ -280,6 +326,7 @@ class AssistantService:
         icon_repo: IconRepository,
         org_space_assistant_role_repo: OrgSpaceAssistantRoleRepo,
         help_assistant_assignment_history_repo: HelpAssistantAssignmentHistoryRepo,
+        auth_service: AuthService,
         skill_service: "SkillService",
         api_key_scope_revoker: ApiKeyScopeRevoker | None = None,
         effective_config_service: "EffectiveConfigService | None" = None,
@@ -306,6 +353,7 @@ class AssistantService:
         self.help_assistant_assignment_history_repo = (
             help_assistant_assignment_history_repo
         )
+        self.auth_service = auth_service
         self.skill_service = skill_service
         self.api_key_scope_revoker = api_key_scope_revoker
         self.effective_config_service = effective_config_service
@@ -639,6 +687,7 @@ class AssistantService:
         completion_prompt_files: list[File],
         effective_mcp_servers: list["MCPServer"],
         preflight_adapter: "CompletionModelAdapter | None" = None,
+        allow_always_only_fallback: bool = False,
     ) -> None:
         """Validate one model-specific Skill plan using the runtime calculator."""
         runtime = validation_plan.to_activation_runtime(
@@ -647,9 +696,17 @@ class AssistantService:
             supports_tool_calling=model.supports_tool_calling,
         )
         snapshot = runtime.snapshot()
-        if (
+        # This exception is intentionally surface-scoped. Ordinary Assistant
+        # authors choose the model themselves and still fail closed.
+        uses_safe_fallback = bool(
             candidate_skill_ids
             and snapshot.effective_mode is not SkillTurnEffectiveMode.SELECTIVE
+            and allow_always_only_fallback
+            and snapshot.fallback_reason in _PERSONAL_CHAT_SAFE_FALLBACK_REASONS
+        )
+        if candidate_skill_ids and (
+            snapshot.effective_mode is not SkillTurnEffectiveMode.SELECTIVE
+            and not uses_safe_fallback
         ):
             message = (
                 _ON_DEMAND_REJECTION_MESSAGES.get(
@@ -661,7 +718,10 @@ class AssistantService:
             )
             raise SkillActivationUnavailableException(message)
 
-        assessments = runtime.assess_on_demand_candidates(candidate_skill_ids)
+        validated_candidate_skill_ids: frozenset[UUID] = (
+            frozenset() if uses_safe_fallback else candidate_skill_ids
+        )
+        assessments = runtime.assess_on_demand_candidates(validated_candidate_skill_ids)
         rejected_assessment = next(
             (
                 assessment
@@ -688,7 +748,7 @@ class AssistantService:
             files=completion_prompt_files,
         )
 
-        if not candidate_skill_ids and not effective_mcp_servers:
+        if not validated_candidate_skill_ids and not effective_mcp_servers:
             return
 
         provider_input = (
@@ -713,7 +773,7 @@ class AssistantService:
                 "model context window"
             )
         provider_assessments = runtime.assess_provider_payload_candidates(
-            candidate_skill_ids,
+            validated_candidate_skill_ids,
             messages=provider_input.messages,
             provider_tools=provider_input.tools,
             provider_input_token_limit=provider_input_token_limit,
@@ -820,6 +880,7 @@ class AssistantService:
             model=model,
             completion_prompt_files=completion_prompt_files,
             effective_mcp_servers=effective_mcp_servers,
+            allow_always_only_fallback=(assistant.is_default and space.is_personal()),
         )
 
     async def assert_assistant_fits_candidate_pin(
@@ -955,12 +1016,6 @@ class AssistantService:
             for frozen in policy_validation_plan.available
             if frozen.binding.activation_mode is SkillActivationMode.ON_DEMAND
         )
-        if candidate_skill_ids and not effective_config.models_bounded_for_on_demand:
-            raise BadRequestException(
-                "On-demand Skills require explicit completion models; "
-                "provider-wide or unrestricted model access cannot be validated safely"
-            )
-
         requires_allowlist_adapters = bool(
             candidate_skill_ids
             or (
@@ -990,6 +1045,7 @@ class AssistantService:
                         else []
                     ),
                     preflight_adapter=preflight_adapters[model.id],
+                    allow_always_only_fallback=True,
                 )
 
         # Walk the tenant's personal defaults one bounded page at a time — a
@@ -1127,6 +1183,7 @@ class AssistantService:
                 completion_prompt_files=completion_prompt_files,
                 effective_mcp_servers=effective_mcp_servers,
                 preflight_adapter=preflight_adapter,
+                allow_always_only_fallback=True,
             )
             del completion_prompt_files
 
@@ -1151,14 +1208,21 @@ class AssistantService:
         downstream."""
         if not files and not validate_persistent_baseline:
             return
+        # URL-only uploads are sent as a signed URL — no inlined text, no
+        # derived images — so they cost ~nothing. Count only the files whose
+        # content is actually inlined; otherwise a large stored CSV would be
+        # rejected here even though URL-only mode exists precisely to let it
+        # through.
+        url_only = url_only_file_ids(files, assistant.inline_file_text)
+        countable = [f for f in files if f.id not in url_only]
         persistent_files = await self._completion_prompt_files_for_model(
             persistent_attachments=assistant.attachments,
             completion_model=model,
         )
         message_files = (
-            await self.file_service.with_derived_images(files)
+            await self.file_service.with_derived_images(countable)
             if model.vision
-            else files
+            else countable
         )
         assert_prompt_and_files_fit_context(
             max_input_tokens=model.max_input_tokens,
@@ -1221,6 +1285,8 @@ class AssistantService:
         attachment_ids = update.attachment_ids
         description = update.description
         insight_enabled = update.insight_enabled
+        inline_file_text = update.inline_file_text
+        knowledge_mode = update.knowledge_mode
         data_retention_days = update.data_retention_days
         metadata_json = update.metadata_json
         icon_id = update.icon_id
@@ -1291,6 +1357,8 @@ class AssistantService:
                 mcp_tools,
                 attachment_ids,
                 insight_enabled,
+                inline_file_text,
+                knowledge_mode,
                 skill_binding_intents,
             )
         ) or any(
@@ -1510,29 +1578,18 @@ class AssistantService:
             integration_knowledge_list=integration_knowledge_list,
             description=description,
             insight_enabled=insight_enabled,
+            inline_file_text=inline_file_text,
+            knowledge_mode=knowledge_mode,
             data_retention_days=data_retention_days,
             metadata_json=metadata_json,
             icon_id=icon_id,
         )
 
-        # Validate mutual exclusivity: knowledge and MCP servers cannot both be active.
-        # Only check when either side is being updated to avoid false positives on
-        # unrelated updates (e.g. renaming an assistant).
         knowledge_changing = (
             groups is not None
             or websites is not None
             or integration_knowledge_ids is not None
         )
-        mcp_changing = mcp_server_ids is not None
-        if knowledge_changing or mcp_changing:
-            will_have_mcp = (
-                mcp_server_ids is not None and len(mcp_server_ids) > 0
-            ) or (mcp_server_ids is None and assistant.has_mcp())
-            if assistant.has_knowledge() and will_have_mcp:
-                raise BadRequestException(
-                    "Knowledge and MCP servers cannot both be active on an assistant. "
-                    "Remove one before enabling the other."
-                )
 
         # Only validate space references when the relevant fields are actually changing
         self.validate_space_assistant(
@@ -2275,7 +2332,12 @@ class AssistantService:
                         or LoggingDetails(model_kwargs={}),
                         web_search_results=list(web_search_results or []),
                         tool_calls=tool_calls if tool_calls else None,
-                        mcp_tool_references=mcp_tool_references or None,
+                        mcp_tool_references=filter_mcp_tool_references(
+                            response_string=response_string,
+                            references=mcp_tool_references,
+                            version=version,
+                        )
+                        or None,
                         reasoning=reasoning_string or None,
                         skill_provenance=skill_provenance,
                         skill_activation=skill_activation,
@@ -2362,6 +2424,12 @@ class AssistantService:
                         getattr(answer, "mcp_tool_references", None) or []
                     )
                     final_reasoning = getattr(answer, "reasoning_content", None)
+
+            non_streaming_mcp_refs = filter_mcp_tool_references(
+                response_string=final_answer,
+                references=non_streaming_mcp_refs,
+                version=version,
+            )
 
             reference_chunks = get_references(
                 response_string=final_answer,
@@ -2483,25 +2551,48 @@ class AssistantService:
             completion_model=completion_model,
         )
 
-        await self._attach_history_derivatives(session=session)
+        await self._attach_history_derivatives(
+            session=session, inline_file_text=assistant.inline_file_text
+        )
+
+        # A URL-only document reaches the model as a signed URL: its extracted
+        # text is skipped by the context builder, so its rendered page images
+        # must be skipped here too — otherwise the images alone defeat the
+        # toggle's purpose of keeping large documents out of the context
+        # window. Assistant attachments are exempt: they are always inlined
+        # and get no URL references.
+        completion_message_files = await self.file_service.with_derived_images(files)
+        url_only = url_only_file_ids(files, assistant.inline_file_text)
+        if url_only:
+            completion_message_files = [
+                f for f in completion_message_files if f.parent_file_id not in url_only
+            ]
 
         return AssistantCompletionFileInputs(
-            completion_message_files=await self.file_service.with_derived_images(files),
+            completion_message_files=completion_message_files,
             completion_prompt_files=completion_prompt_files,
         )
 
-    async def _attach_history_derivatives(self, session: "SessionInDB") -> None:
+    async def _attach_history_derivatives(
+        self, session: "SessionInDB", inline_file_text: bool = True
+    ) -> None:
         """Re-attach derived images to history messages for replay.
 
         Derived images are not persisted on questions, so each ask rebuilds
         them in memory from the parent files referenced by the history.
+        URL-only parents are skipped: history replay surfaces them as signed
+        URLs (their text is skipped too), so their rendered images must not
+        ride along either.
         """
-        parent_ids = {
-            file.id
+        parents = [
+            file
             for question in session.questions
             for file in question.files
             if file.file_type == FileType.TEXT
-        }
+        ]
+        parent_ids = {file.id for file in parents} - url_only_file_ids(
+            parents, inline_file_text
+        )
         if not parent_ids:
             return
 
@@ -2816,6 +2907,73 @@ class AssistantService:
         else:
             web_search_results = []
 
+        # Internal (loopback) MCP servers are scoped by one short-lived token
+        # per completion, minted only when some server actually attaches.
+        scoped_token: str | None = None
+
+        def mint_scoped_token() -> str:
+            nonlocal scoped_token
+            if scoped_token is None:
+                scoped_token = self.auth_service.create_scoped_mcp_token(
+                    self.user, assistant_id=assistant_to_ask.id
+                )
+            return scoped_token
+
+        history_files = [
+            file for _question in session.questions for file in _question.files
+        ]
+        internal_mcp = resolve_internal_mcp_availability(
+            assistant=assistant_to_ask,
+            completion_model=effective_completion_model,
+            conversation_files=[*files, *history_files],
+        )
+
+        # Tool-mode knowledge: attach an ephemeral loopback MCP server whose
+        # search tool covers this assistant's knowledge. Models without tool
+        # calling never get a server and fall back to legacy
+        # retrieve-and-inject inside Assistant.ask.
+        knowledge_mcp_server = None
+        if internal_mcp.knowledge:
+            knowledge_mcp_server = await build_knowledge_mcp_server(
+                token=mint_scoped_token(),
+                tenant_id=self.user.tenant_id,
+                source_labels=assistant_to_ask.knowledge_source_labels(),
+            )
+
+        # URL-only attachments: when file text is withheld from the prompt in
+        # favor of signed reference URLs, attach the loopback files server so
+        # the model always has at least one tool that can read them. External
+        # servers coexist; tool descriptions steer the choice.
+        files_mcp_server = None
+        if internal_mcp.files:
+            files_mcp_server = await build_files_mcp_server(
+                token=mint_scoped_token(),
+                tenant_id=self.user.tenant_id,
+            )
+            logger.info(
+                "[FILES] assistant=%s files tool attached (%d url-only attachments)",
+                assistant_to_ask.id,
+                len(internal_mcp.url_only_file_ids),
+            )
+        logger.info(
+            "[RAG] assistant=%s knowledge_mode=%s "
+            "collections=%d websites=%d integrations=%d "
+            "model_supports_tools=%s -> %s",
+            assistant_to_ask.id,
+            assistant_to_ask.knowledge_mode.value,
+            len(assistant_to_ask.collections),
+            len(assistant_to_ask.websites),
+            len(assistant_to_ask.integration_knowledge_list),
+            effective_completion_model.supports_tool_calling,
+            "knowledge tool attached"
+            if knowledge_mcp_server is not None
+            else (
+                "legacy inject retrieval"
+                if assistant_to_ask.has_knowledge()
+                else "no knowledge"
+            ),
+        )
+
         try:
             response, datastore_result = await assistant_to_ask.ask(
                 question=cleaned_question,
@@ -2832,6 +2990,10 @@ class AssistantService:
                 prompt_override=prompt_override,
                 completion_prompt_files=completion_file_inputs.completion_prompt_files,
                 skill_runtime=skill_runtime,
+                knowledge_mcp_server=knowledge_mcp_server,
+                internal_mcp_servers=(
+                    [files_mcp_server] if files_mcp_server is not None else []
+                ),
             )
         except Exception:
             failed_snapshot = skill_runtime.snapshot()
@@ -2884,7 +3046,11 @@ class AssistantService:
             assert isinstance(answer, str)
             info_blob_references = datastore_result.info_blobs
             if isinstance(response.completion, Completion):
-                mcp_tool_references = response.completion.mcp_tool_references or []
+                mcp_tool_references = filter_mcp_tool_references(
+                    response_string=answer,
+                    references=response.completion.mcp_tool_references or [],
+                    version=version,
+                )
         else:
             info_blob_references = datastore_result.info_blobs
 

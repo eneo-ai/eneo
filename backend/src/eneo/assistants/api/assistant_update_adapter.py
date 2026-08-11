@@ -81,5 +81,9 @@ def _extract_common_update_fields(
         command_fields["logging_enabled"] = assistant.logging_enabled
     if "insight_enabled" in payload:
         command_fields["insight_enabled"] = assistant.insight_enabled
+    if "inline_file_text" in payload:
+        command_fields["inline_file_text"] = assistant.inline_file_text
+    if "knowledge_mode" in payload:
+        command_fields["knowledge_mode"] = assistant.knowledge_mode
 
     return payload, command_fields

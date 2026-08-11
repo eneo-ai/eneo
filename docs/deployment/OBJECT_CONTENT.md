@@ -8,9 +8,9 @@ offline reference shipped beside the Compose templates.
 
 - Eneo runs normally without S3-compatible storage. PostgreSQL inline is the
   complete ready-to-use default.
-- Platform admins choose one deployment-wide target for eligible new File and
-  Icon writes in **Admin > Storage**. Policy changes need no backend or worker
-  restart.
+- Administrators connect an S3-compatible destination and choose the
+  deployment-wide target for eligible new File and Icon writes in **Admin >
+  Storage**. These changes need no backend or worker restart.
 - PostgreSQL owns identity, SHA-256, size/type, references, access, retention,
   and lifecycle. Exactly one selected backend owns each payload.
 - Compatible object storage is optional. Enabling or selecting it never moves
@@ -34,12 +34,12 @@ silently after a failure.
 
 | Owner          | Responsibility                                                                                                                        |
 | -------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
-| Platform admin | Set the deployment-wide new-write target and business upload limits in **Admin > Storage**                                            |
-| Operator       | Run PostgreSQL and any optional compatible endpoint; own credentials, TLS, certificates, capacity, backups, and process safety tuning |
+| Administrator  | Connect an S3-compatible destination, change or roll back that destination, rotate its access keys, and set the new-write target and business upload limits in **Admin > Storage** |
+| Operator       | Run PostgreSQL and any optional compatible endpoint; own TLS, certificates, capacity, backups, network reachability, and process safety tuning |
 
-Tenant admins can review policy, effective limits, and capability status.
-Deployment-wide content inventory spans tenants, so only platform admins can
-view it.
+Storage administration uses the same administrator authority as API keys and
+models. Deployment-wide content inventory spans tenants, so it is part of that
+same administrative view.
 
 Persisted business limits accept whole-byte values from 1 through
 9,007,199,254,740,991 so PostgreSQL and browser clients can round-trip the same
@@ -64,6 +64,27 @@ a separate migration workflow.
 
 ## Choose the endpoint
 
+For a new installation, the operator sets Eneo's root encryption key. A platform
+admin can then enter the endpoint, bucket, signing region, and access keys in
+**Admin > Storage**. Eneo tests the destination before encrypting and saving the
+credentials. Saving the connection does not select it for new writes or move
+existing content.
+
+An administrator chooses the destination, as they do for AI provider and
+MCP server endpoints. Restrict which hosts the backend may reach with your normal
+network controls if your deployment requires that boundary.
+
+Earlier releases required operators to approve endpoint origins through
+`OBJECT_CONTENT_ADMIN_ALLOWED_ENDPOINT_ORIGINS`. That setting is gone. A leftover
+value is ignored rather than rejected, so remove it from your deployment
+configuration whenever convenient.
+
+Existing operator-managed connections supplied through `OBJECT_CONTENT_*`
+remain supported as trusted deployment input. When encrypted persistence is
+available, Eneo adopts that connection without changing its destination;
+otherwise it remains read-only in the admin interface. Do not configure the
+same destination through both paths.
+
 The optional `object-content` Compose profile starts an Eneo-built SeaweedFS
 4.40 service on the private `object_content_net`. The image is built from upstream commit
 `875cd1f67ea25e8965a4f5ba1e6aaf501ba6b6fa`, not from an upstream image. Eneo
@@ -83,8 +104,11 @@ must pass the same tested subset:
 - bucket-scoped paginated object and multipart listing;
 - single-part `PUT`, `HEAD`, streaming `GET`, and one byte range;
 - multipart create, ordered part upload, complete, abort, and list;
-- object deletion with observable not-found convergence;
-- SHA-256 part/composite semantics for multipart where requested.
+- object deletion with observable not-found convergence.
+
+Eneo does not require AWS additional-checksum extensions from an external
+endpoint. Some compatible services implement them fully, some omit them, and
+some accept only the core multipart fields.
 
 Native range support is an endpoint conformance gate. Eneo fetches and verifies
 only the persisted upload chunks covering the requested interval before sending
@@ -92,10 +116,11 @@ response headers. Content migrated as one whole-object chunk retains its
 full-verification cost for range reads.
 
 Eneo computes the canonical full-byte SHA-256 incrementally over its own upload
-stream. S3 ETags, multipart composite checksums, CRCs, and user metadata never
-replace that digest. A bypassing upload, migration, restore, or ambiguous
-reconciliation must be fully streamed back and rehashed before it becomes
-available.
+stream and stores it in PostgreSQL. Every new remote write is streamed back and
+rehashed before it becomes available. S3 ETags, multipart composite checksums,
+CRCs, and user metadata never replace that digest. The same read-back contract
+also applies to a bypassing upload, migration, restore, or ambiguous
+reconciliation.
 
 For an external endpoint, set `OBJECT_CONTENT_ENDPOINT_URL`, TLS, addressing,
 signing region, bucket, credentials, and the stable deployment ID in `.env`,
@@ -196,7 +221,7 @@ curl -fsS https://eneo.example.eu/api/readyz \
   | jq -e '.detail.object_content.code == "ready"'
 ```
 
-After readiness reports `ready`, a platform admin can select **Object store**
+After readiness reports `ready`, an administrator can select **Object store**
 in **Admin > Storage**. Selection fails clearly if the endpoint is unavailable
 or incompatible. The policy update takes effect without restarting backend or
 worker.
@@ -235,7 +260,7 @@ The backend and worker receive the same variables through Compose pass-through;
 the optional service receives the matching credentials. There is deliberately
 no usable mutable-tag default.
 
-When readiness reports `ready`, a platform admin can select **Object store** in
+When readiness reports `ready`, an administrator can select **Object store** in
 **Admin > Storage**. The same deployment-wide policy applies to bundled and
 external endpoints; there is no provider or vendor product branch.
 
@@ -387,7 +412,7 @@ the scheduling/registration adapter, not S3 or lifecycle logic.
 
 PostgreSQL inline remains a complete deployment without an object-store
 service or configuration. When compatible object storage is configured and
-ready, a platform administrator can use **Admin > Storage** to queue an explicit
+ready, an administrator can use **Admin > Storage** to queue an explicit
 move in either direction. Selecting the default target for new writes never
 moves existing content.
 
@@ -418,6 +443,70 @@ inline, confirm **Admin > Storage** reports no active object-store content or
 nonterminal moves, then allow those cleanup observations to finish before
 removing configuration.
 
+### Change the S3-compatible destination
+
+Changing hosting provider does not require staging content in PostgreSQL — and
+cannot, once any object exceeds the inline admission ceiling. Eneo does not
+copy buckets; the operator copies with their own tooling and Eneo performs the
+guarded switch. Object keys carry no endpoint or bucket, so a faithful copy is
+readable immediately.
+
+0. Confirm every backend and worker process runs the current release. The
+   coordinated upgrade window above guarantees this; a pre-upgrade process
+   does not hold the write fence the switch relies on.
+1. Create an empty private bucket and a bucket-scoped application identity on
+   the new service, and back up the current bucket.
+2. Select `postgres_inline` for new writes in **Admin > Storage**, let queued
+   moves and in-flight uploads finish, then select **Pause moves**. Both are
+   required: an empty queue does not by itself stop a new move from starting
+   mid-copy. New uploads above `OBJECT_CONTENT_INLINE_MAXIMUM_BYTES` fail
+   during this window.
+3. Copy only `v1/<deployment-id-hex>/` with `rclone copy --checksum` (never
+   `sync`, which deletes at the destination) and preserve object metadata;
+   Eneo enforces the stored media type on every read. Read the hex id from
+   the current bucket — it is the filename under `v1/.eneo-bindings/`; on an
+   environment-managed deployment it equals `OBJECT_CONTENT_DEPLOYMENT_ID`
+   without dashes, while an Admin-created connection generates it internally.
+   Never copy `v1/.eneo-bindings/` itself: that prefix holds the
+   database-to-bucket marker and Eneo manages it per destination.
+4. Compare both sides with `rclone check --download` until it reports no
+   differences. `--download` reads and compares the actual bytes;
+   `--checksum` falls back to size-only comparison when a hash is
+   unavailable — the multipart-uploaded S3 case — and is not proof.
+5. Use **Change destination** in **Admin > Storage**. Eneo probes the
+   candidate, refuses a bucket paired with another Eneo installation, verifies
+   the presence, size, and media type of every object the deployment still
+   serves (byte equality is what step 4's `--download` comparison proves, and
+   every read re-verifies the canonical SHA-256 and fails closed), and
+   commits one fenced transaction that swaps the destination, preserves the
+   deployment identity and every object key, archives the previous
+   destination, resets both remote inventory cursors, and raises the
+   connection revision. Work started against the previous destination cannot
+   commit afterwards. No restart is needed. The verification contacts the new
+   destination once per stored object, sixteen concurrently, so a large
+   deployment's switch request runs for a while — keep it inside the
+   maintenance window and raise any reverse-proxy request timeout in front of
+   the backend if needed. An archived previous destination from an earlier
+   change must be removed first, since the switch reuses that slot.
+6. Select object storage for new writes again and resume moves, then let one
+   complete inventory cycle run and confirm no `backend_missing` content. Full
+   and range reads verify the canonical SHA-256, so an incomplete or corrupt
+   copy surfaces instead of returning wrong bytes.
+
+The previous destination stays archived until an administrator forgets it, and
+**Switch back** returns to it under the same preconditions. It is a rollback,
+not a second migration: once any object has been stored after the cutover, the
+archived bucket can no longer serve every key and Eneo refuses it. Copy the
+current bucket back and use **Change destination** instead. Eneo never deletes
+objects or buckets on either destination: decommission the retired bucket at
+the provider once the archived record is removed.
+
+The switch is refused with a typed reason while new writes still target object
+storage, storage moves are not paused, remote content is pending or
+delete-pending, storage moves are nonterminal, an upload or cleanup lease is
+live, or the candidate does not yet hold every object the deployment serves.
+Retry after the worker has converged or the copy is complete.
+
 The schema downgrade is available only before this feature has persisted a
 move intent or `storage_moved` audit event. Once either exists, downgrade stops
 without deleting the row, event, or feature schema. Restore the matching
@@ -442,10 +531,12 @@ bounded (1-32) and should be raised only after measuring PostgreSQL and endpoint
 capacity. Size the backend/worker temporary volume for concurrent in-flight
 upload and verified-read spools: memory use stops at the configured threshold,
 while the remainder uses temporary disk until each upload or verified response
-finishes. Full reads verify and spool the full object. Range reads fetch and
-verify only the persisted upload chunks covering the requested interval before
-response headers are sent. Their transfer and temporary-disk cost is the
-requested interval plus at most two chunk edges; existing rows migrated as one
+finishes. Account for one full remote read after each new remote write; this is
+the provider-neutral integrity check before publication. Full user reads verify
+and spool the full object. Range reads fetch and verify only the persisted upload
+chunks covering the requested interval before response headers are sent. Their
+transfer and temporary-disk cost is the requested interval plus at most two
+chunk edges; existing rows migrated as one
 whole-object chunk retain their previous full-verification cost. The chunk size
 is captured per object, so later multipart tuning cannot invalidate existing
 content. A range proves the chunks it covers; a full read still checks the
@@ -552,6 +643,18 @@ docker compose run --rm db-init
 
 `db-init` runs Alembic `upgrade head`. The runtime does not create or repair a
 missing policy table.
+
+The store-binding migration (`202608061200`) moves the database-to-bucket
+pairing facts to a per-destination table. It is the expand half of an
+expand/contract change: the legacy columns stay in place with their
+constraints so the later contract migration owns their removal explicitly.
+Running pre-upgrade processes against the upgraded schema is unsupported —
+this release upgrades through the coordinated maintenance window above, with
+every pre-upgrade backend and worker stopped before Alembic runs.
+Destination switching assumes every running writer holds the
+store-generation fence, which pre-upgrade code does not, so never change
+destination while any pre-upgrade process is running. The old columns are
+dropped by a separate migration in a later release.
 
 For the File/Icon normalization upgrade, stop backend and worker producers
 before Alembic starts and do not restart them until the migration succeeds. If

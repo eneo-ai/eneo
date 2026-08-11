@@ -21,6 +21,7 @@ from eneo.files.docx_template_validation import (
     MAX_TEMPLATE_ARCHIVE_ENTRIES,
     MAX_TEMPLATE_UNCOMPRESSED_BYTES,
 )
+from eneo.files.file_reference import file_reference_base_url
 from eneo.flows.ai_builder.ai_builder_settings import (
     AIBuilderBudgetPolicy,
     apply_ai_builder_budget_policy_patch,
@@ -479,6 +480,8 @@ class SettingService:
             tenant_credentials_enabled=app_settings.tenant_credentials_enabled,
             provisioning=provisioning,
             api_key_expiry_notifications=api_key_expiry_notifications,
+            file_references_enabled=bool(file_reference_base_url(app_settings)),
+            object_store_configured=self.object_content.object_store_configured,
         )
 
     async def get_settings(self) -> SettingsPublic:

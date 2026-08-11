@@ -6,7 +6,7 @@ from uuid import uuid4
 import pytest
 from pydantic import ValidationError
 
-from eneo.assistants.api.assistant_models import AssistantUpdatePublic
+from eneo.assistants.api.assistant_models import AssistantUpdatePublic, KnowledgeMode
 from eneo.assistants.api.assistant_update_adapter import (
     to_flow_assistant_update_command,
     to_standalone_assistant_update_command,
@@ -108,6 +108,20 @@ def test_standalone_mapper_ignores_deprecated_completion_model(
     assert update.name == "Assistant"
     assert update.completion_model_id is NOT_PROVIDED
     assert not update.is_set("completion_model_id")
+
+
+def test_standalone_mapper_preserves_knowledge_delivery_fields() -> None:
+    update = to_standalone_assistant_update_command(
+        AssistantUpdatePublic(
+            inline_file_text=False,
+            knowledge_mode=KnowledgeMode.TOOL,
+        )
+    )
+
+    assert update.inline_file_text is False
+    assert update.knowledge_mode is KnowledgeMode.TOOL
+    assert update.is_set("inline_file_text")
+    assert update.is_set("knowledge_mode")
 
 
 def test_flow_mapper_preserves_current_data_retention_behavior() -> None:

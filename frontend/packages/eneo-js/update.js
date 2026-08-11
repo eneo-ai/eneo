@@ -132,26 +132,30 @@ function readOpenApiVersion(openapi) {
  * @returns {Promise<OpenApiSnapshot>}
  */
 async function acquireOpenApiSnapshot(source, ports) {
+  let raw;
+  let sourceLabel;
   if (source.kind === "file") {
-    let raw;
     try {
       raw = String(ports.fs.readFileSync(source.path));
     } catch (error) {
       throw new Error(`Could not read --schema-file ${source.path}: ${error.message}`);
     }
-    return { snapshotPath: source.path, openapi: parseOpenApiJson(raw, source.path) };
+    sourceLabel = source.path;
+  } else {
+    const url = openApiUrl(source.url);
+    const response = await ports.fetch(url);
+    if (!response.ok) {
+      throw new Error(`Could not fetch ${url}: HTTP ${response.status}`);
+    }
+    raw = await response.text();
+    sourceLabel = url;
   }
 
-  const url = openApiUrl(source.url);
-  const response = await ports.fetch(url);
-  if (!response.ok) {
-    throw new Error(`Could not fetch ${url}: HTTP ${response.status}`);
-  }
-  const raw = await response.text();
+  const openapi = parseOpenApiJson(raw, sourceLabel);
   const snapshotPath = path.join(ports.tmpdir(), `eneo-openapi-${ports.now()}-${ports.pid}.json`);
-  ports.fs.writeFileSync(snapshotPath, raw);
+  ports.fs.writeFileSync(snapshotPath, canonicalJson(openapi));
   ports.console.log(`Saved OpenAPI snapshot to ${snapshotPath}`);
-  return { snapshotPath, openapi: parseOpenApiJson(raw, url) };
+  return { snapshotPath, openapi };
 }
 
 /** @param {string} raw @param {string} sourceLabel @returns {Record<string, unknown>} */
@@ -165,6 +169,20 @@ function parseOpenApiJson(raw, sourceLabel) {
   } catch (error) {
     throw new Error(`Invalid OpenAPI JSON from ${sourceLabel}: ${error.message}`);
   }
+}
+
+/** @param {unknown} value @returns {string} */
+function canonicalJson(value) {
+  if (Array.isArray(value)) {
+    return `[${value.map(canonicalJson).join(",")}]`;
+  }
+  if (value !== null && typeof value === "object") {
+    return `{${Object.keys(value)
+      .sort()
+      .map((key) => `${JSON.stringify(key)}:${canonicalJson(value[key])}`)
+      .join(",")}}`;
+  }
+  return JSON.stringify(value);
 }
 
 /**

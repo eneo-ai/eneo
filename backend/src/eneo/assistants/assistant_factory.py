@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING
 from uuid import UUID
 
 from eneo.ai_models.completion_models.completion_model import ModelKwargs
+from eneo.assistants.api.assistant_models import KnowledgeMode
 from eneo.assistants.assistant import Assistant, AssistantOrigin
 from eneo.completion_models.domain.completion_model import CompletionModel
 from eneo.database.tables.assistant_table import Assistants
@@ -131,6 +132,11 @@ class AssistantFactory:
             completion_model_kwargs = ModelKwargs.model_validate(
                 completion_model_kwargs_raw
             )
+        if completion_model is not None:
+            completion_model_kwargs = completion_model_kwargs.filter_unsupported(
+                completion_model.get_supported_model_kwargs()
+            )
+
         source_template = (
             self.assistant_template_factory.create_assistant_template(
                 assistant_in_db.template
@@ -161,6 +167,8 @@ class AssistantFactory:
             is_default=assistant_in_db.is_default,
             description=assistant_in_db.description,
             insight_enabled=assistant_in_db.insight_enabled,
+            inline_file_text=assistant_in_db.inline_file_text,
+            knowledge_mode=KnowledgeMode(assistant_in_db.knowledge_mode),
             icon_id=assistant_in_db.icon_id,
             hidden=assistant_in_db.hidden,
             origin=AssistantOrigin(
@@ -245,6 +253,11 @@ class AssistantFactory:
             ),
             None,
         )
+        if completion_model is not None:
+            completion_model_kwargs = completion_model_kwargs.filter_unsupported(
+                completion_model.get_supported_model_kwargs()
+            )
+
         source_template = (
             self.assistant_template_factory.create_assistant_template(
                 assistant_in_db.template
@@ -275,6 +288,8 @@ class AssistantFactory:
             is_default=assistant_in_db.is_default,
             description=assistant_in_db.description,
             insight_enabled=assistant_in_db.insight_enabled,
+            inline_file_text=assistant_in_db.inline_file_text,
+            knowledge_mode=KnowledgeMode(assistant_in_db.knowledge_mode),
             data_retention_days=assistant_in_db.data_retention_days,
             metadata_json=assistant_in_db.metadata_json,
             icon_id=assistant_in_db.icon_id,

@@ -58,6 +58,7 @@ from eneo.object_content.move_repository import (
     MoveWork,
     ObjectContentMoveRepository,
 )
+from eneo.object_content.object_store_provider import ObjectStoreProvider
 from eneo.object_content.reconciliation import ObjectContentReconciler
 from eneo.object_content.reconciliation_repository import PublicationReservation
 from eneo.object_content.runtime import (
@@ -524,8 +525,10 @@ async def test_reconciler_moves_verified_bytes_in_both_directions(
     reconciler = ObjectContentReconciler(
         real_object_store.settings,
         object_content_database,
-        object_store_settings=real_object_store.settings,
-        object_store=real_object_store.store,
+        object_store_provider=ObjectStoreProvider.fixed(
+            real_object_store.settings,
+            real_object_store.store,
+        ),
     )
 
     async with object_content_database.session() as session, session.begin():
@@ -725,8 +728,10 @@ async def test_reconciler_round_trips_content_across_the_multipart_boundary(
     reconciler = ObjectContentReconciler(
         real_object_store.settings,
         object_content_database,
-        object_store_settings=real_object_store.settings,
-        object_store=real_object_store.store,
+        object_store_provider=ObjectStoreProvider.fixed(
+            real_object_store.settings,
+            real_object_store.store,
+        ),
     )
 
     await _queue_move(
@@ -813,8 +818,10 @@ async def test_store_outage_retries_without_changing_authority(
     reconciler = ObjectContentReconciler(
         real_object_store.settings,
         object_content_database,
-        object_store_settings=real_object_store.settings,
-        object_store=real_object_store.store,
+        object_store_provider=ObjectStoreProvider.fixed(
+            real_object_store.settings,
+            real_object_store.store,
+        ),
     )
     async with object_content_database.session() as session, session.begin():
         await ObjectContentMoveRepository(session).queue(
@@ -873,8 +880,10 @@ async def test_current_target_limits_fence_io_after_configuration_changes(
     reconciler = ObjectContentReconciler(
         real_object_store.settings,
         object_content_database,
-        object_store_settings=real_object_store.settings,
-        object_store=real_object_store.store,
+        object_store_provider=ObjectStoreProvider.fixed(
+            real_object_store.settings,
+            real_object_store.store,
+        ),
     )
     await _queue_move(
         object_content_database,
@@ -898,8 +907,10 @@ async def test_current_target_limits_fence_io_after_configuration_changes(
     exact_inline_reconciler = ObjectContentReconciler(
         exact_inline_settings,
         object_content_database,
-        object_store_settings=exact_inline_settings,
-        object_store=real_object_store.store,
+        object_store_provider=ObjectStoreProvider.fixed(
+            exact_inline_settings,
+            real_object_store.store,
+        ),
     )
     assert (await exact_inline_reconciler.run_once()).moves_processed == 1
 
@@ -925,8 +936,10 @@ async def test_current_target_limits_fence_io_after_configuration_changes(
     smaller_inline_reconciler = ObjectContentReconciler(
         smaller_inline_settings,
         object_content_database,
-        object_store_settings=smaller_inline_settings,
-        object_store=real_object_store.store,
+        object_store_provider=ObjectStoreProvider.fixed(
+            smaller_inline_settings,
+            real_object_store.store,
+        ),
     )
     forbidden_read = MagicMock(
         side_effect=AssertionError("oversized inline target must not read the store")
@@ -997,8 +1010,10 @@ async def test_pause_blocks_move_claim_until_resumed(
     reconciler = ObjectContentReconciler(
         real_object_store.settings,
         object_content_database,
-        object_store_settings=real_object_store.settings,
-        object_store=real_object_store.store,
+        object_store_provider=ObjectStoreProvider.fixed(
+            real_object_store.settings,
+            real_object_store.store,
+        ),
     )
     async with object_content_database.session() as session, session.begin():
         await ObjectContentMoveRepository(session).queue(
@@ -1047,8 +1062,10 @@ async def test_blocked_move_does_not_starve_eligible_work_or_lose_its_source(
     reconciler = ObjectContentReconciler(
         real_object_store.settings,
         object_content_database,
-        object_store_settings=real_object_store.settings,
-        object_store=real_object_store.store,
+        object_store_provider=ObjectStoreProvider.fixed(
+            real_object_store.settings,
+            real_object_store.store,
+        ),
     )
     async with object_content_database.session() as session, session.begin():
         await ObjectContentMoveRepository(session).queue(
@@ -1124,8 +1141,10 @@ async def test_failed_staged_move_releases_store_dependency_after_orphan_cleanup
     reconciler = ObjectContentReconciler(
         real_object_store.settings,
         object_content_database,
-        object_store_settings=real_object_store.settings,
-        object_store=real_object_store.store,
+        object_store_provider=ObjectStoreProvider.fixed(
+            real_object_store.settings,
+            real_object_store.store,
+        ),
     )
     await _queue_move(
         object_content_database,
@@ -1227,8 +1246,10 @@ async def test_inline_to_object_recovers_at_each_crash_boundary(
     reconciler = ObjectContentReconciler(
         real_object_store.settings,
         object_content_database,
-        object_store_settings=real_object_store.settings,
-        object_store=real_object_store.store,
+        object_store_provider=ObjectStoreProvider.fixed(
+            real_object_store.settings,
+            real_object_store.store,
+        ),
     )
     original_upload = real_object_store.store.upload
 
@@ -1439,8 +1460,10 @@ async def test_object_to_inline_recovers_when_capture_precedes_a_crash(
     reconciler = ObjectContentReconciler(
         real_object_store.settings,
         object_content_database,
-        object_store_settings=real_object_store.settings,
-        object_store=real_object_store.store,
+        object_store_provider=ObjectStoreProvider.fixed(
+            real_object_store.settings,
+            real_object_store.store,
+        ),
     )
     await _queue_move(
         object_content_database,
@@ -1526,8 +1549,10 @@ async def test_local_timeout_is_not_reported_as_a_store_outage(
     reconciler = ObjectContentReconciler(
         real_object_store.settings,
         object_content_database,
-        object_store_settings=real_object_store.settings,
-        object_store=real_object_store.store,
+        object_store_provider=ObjectStoreProvider.fixed(
+            real_object_store.settings,
+            real_object_store.store,
+        ),
     )
     await _queue_move(
         object_content_database,

@@ -22,5 +22,6 @@ PERMISSIONS_WITH_DESCRIPTION = {
     Permission.FLOWS_MANAGE: "Create, update, publish, and delete flows and flow-managed resources.",
     Permission.FLOWS_AI_BUILDER: "Use the AI Builder to plan and edit flows.",
     Permission.FLOWS_TRACE: "Inspect and export rich flow evidence, provenance, and AI Builder trace data.",
+    Permission.STORAGE: "Administer file storage. Required for connecting an S3-compatible destination, changing it, rotating its keys, and setting upload limits.",
     Permission.ASSISTANT_DEBUG: "Inspect body-free chat diagnostics, including Skill activation decisions, for conversations you can access.",
 }

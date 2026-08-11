@@ -11,10 +11,15 @@ import {
 } from "./update.js";
 
 const openapi = JSON.stringify({
+  paths: {
+    "/z": { summary: "last", description: "sorted recursively" },
+    "/a": {}
+  },
   openapi: "3.1.0",
-  info: { title: "Eneo", version: "2.0.0" },
-  paths: {}
+  info: { version: "2.0.0", title: "Eneo" }
 });
+const canonicalOpenapi =
+  '{"info":{"title":"Eneo","version":"2.0.0"},"openapi":"3.1.0","paths":{"/a":{},"/z":{"description":"sorted recursively","summary":"last"}}}';
 
 function spawnSuccess(calls, order) {
   return (command, args) => {
@@ -141,7 +146,7 @@ test("runUpdate URL mode fetches once and reuses one snapshot", async () => {
 
   assert.deepEqual(fetchCalls, ["https://backend.example/openapi.json"]);
   assert.equal(snapshotWriteCount, 1);
-  assert.equal(writes.get(snapshotPath), openapi);
+  assert.equal(writes.get(snapshotPath), canonicalOpenapi);
   assert.equal(writes.get(clientFile), 'const version = "2.0.0";\n');
   assert.equal(spawnCalls[0].command, "bun");
   assert.equal(spawnCalls[0].args[2], snapshotPath);
@@ -149,10 +154,12 @@ test("runUpdate URL mode fetches once and reuses one snapshot", async () => {
   assert.equal(order.indexOf("writeSnapshot") < order.indexOf("spawnSchema"), true);
 });
 
-test("runUpdate schema-file mode does not fetch and passes the file to schema generation", async () => {
+test("runUpdate schema-file mode canonicalizes without fetching", async () => {
   const order = [];
   const spawnCalls = [];
+  const writes = new Map();
   const schemaFile = "/tmp/canonical-openapi.json";
+  const snapshotPath = "/tmp/eneo-openapi-123-456.json";
   const clientFile = "./src/client/client.js";
 
   await runUpdate(["--schema-file", schemaFile], {
@@ -170,7 +177,7 @@ test("runUpdate schema-file mode does not fetch and passes the file to schema ge
         }
         throw new Error(`Unexpected read: ${filePath}`);
       },
-      writeFileSync: () => {}
+      writeFileSync: (filePath, content) => writes.set(filePath, String(content))
     },
     spawn: spawnSuccess(spawnCalls, order),
     console: { log() {}, error() {} },
@@ -179,7 +186,8 @@ test("runUpdate schema-file mode does not fetch and passes the file to schema ge
     pid: 456
   });
 
-  assert.equal(spawnCalls[0].args[2], schemaFile);
+  assert.equal(writes.get(snapshotPath), canonicalOpenapi);
+  assert.equal(spawnCalls[0].args[2], snapshotPath);
 });
 
 test("runUpdate reports missing and invalid schema files clearly", async () => {

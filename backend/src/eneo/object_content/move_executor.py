@@ -6,11 +6,10 @@ from secrets import token_hex
 from tempfile import SpooledTemporaryFile
 from time import monotonic
 
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from eneo.database.database import DatabaseSessionManager
-from eneo.object_content.configuration import (
-    ObjectContentCoreSettings,
-    ObjectContentSettings,
-)
+from eneo.object_content.configuration import ObjectContentCoreSettings
 from eneo.object_content.content import (
     CapturedContent,
     ContentMoveFailureCode,
@@ -26,6 +25,7 @@ from eneo.object_content.move_repository import (
     MoveWork,
     ObjectContentMoveRepository,
 )
+from eneo.object_content.object_store_provider import ObjectStoreLease
 from eneo.object_content.reconciliation_repository import (
     ObjectContentReconciliationRepository,
     PublicationReservation,
@@ -34,9 +34,9 @@ from eneo.object_content.s3_object_store import (
     ObjectStoreIntegrityError,
     ObjectStoreNotFoundError,
     ObjectStoreUnavailableError,
-    S3ObjectStore,
     new_object_key,
 )
+from eneo.object_content.store_binding import require_store_generation
 
 
 class ObjectContentMoveExecutor:
@@ -47,19 +47,20 @@ class ObjectContentMoveExecutor:
         core_settings: ObjectContentCoreSettings,
         database: DatabaseSessionManager,
         *,
-        object_store_settings: ObjectContentSettings,
-        object_store: S3ObjectStore,
+        store_lease: ObjectStoreLease,
     ) -> None:
         self._core_settings = core_settings
         self._database = database
-        self._settings = object_store_settings
-        self._store = object_store
+        self._store_lease = store_lease
+        self._settings = store_lease.settings
+        self._store = store_lease.store
 
     async def run_once(self) -> int:
         settings = self._settings
         lease_owner = token_hex(16)
         lease_started_at = monotonic()
         async with self._database.session() as session, session.begin():
+            await self._require_generation(session)
             repository = ObjectContentMoveRepository(session)
             work = await repository.claim(
                 lease_owner=lease_owner,
@@ -151,6 +152,7 @@ class ObjectContentMoveExecutor:
         if work.target_object_key is None:
             try:
                 async with self._database.session() as session, session.begin():
+                    await self._require_generation(session)
                     await ObjectContentMoveRepository(session).record_object_target(
                         content_id=work.content_id,
                         lease_owner=lease_owner,
@@ -212,6 +214,7 @@ class ObjectContentMoveExecutor:
             )
             if work.state is ContentMoveState.PENDING:
                 async with self._database.session() as session, session.begin():
+                    await self._require_generation(session)
                     await ObjectContentMoveRepository(session).record_target_verified(
                         content_id=work.content_id,
                         lease_owner=lease_owner,
@@ -220,6 +223,7 @@ class ObjectContentMoveExecutor:
                         verification_chunk_sha256=b"".join(captured.part_sha256),
                     )
             async with self._database.session() as session, session.begin():
+                await self._require_generation(session)
                 await ObjectContentMoveRepository(session).complete_to_object_store(
                     content_id=work.content_id,
                     lease_owner=lease_owner,
@@ -354,6 +358,7 @@ class ObjectContentMoveExecutor:
 
         try:
             async with self._database.session() as session, session.begin():
+                await self._require_generation(session)
                 await ObjectContentMoveRepository(session).complete_to_inline(
                     content_id=work.content_id,
                     lease_owner=lease_owner,
@@ -369,6 +374,13 @@ class ObjectContentMoveExecutor:
                 ContentMoveFailureCode.CONTENT_INELIGIBLE,
                 "content changed before the authority flip",
             )
+
+    async def _require_generation(self, session: AsyncSession) -> None:
+        await require_store_generation(
+            session,
+            slot=self._store_lease.slot,
+            revision=self._store_lease.revision,
+        )
 
     async def _record_move_retry(
         self,

@@ -7,7 +7,8 @@
     MCP servers are active for this conversation and whether tool calls run
     automatically or require per-call approval. State is owned by the parent
     (ConversationInput) so it can be sent with each ask request — this component
-    only renders and mutates it.
+    only renders and mutates it. Eneo's own internal (loopback) servers are
+    listed too, but they are always active and cannot be toggled.
 -->
 <script lang="ts">
   import { buttonVariants } from "$lib/components/ui/button/index.js";
@@ -16,6 +17,9 @@
   import { Separator } from "$lib/components/ui/separator/index.js";
   import * as Popover from "$lib/components/ui/popover/index.js";
   import { m } from "$lib/paraglide/messages";
+  import { serverDisplayName } from "$lib/features/chat/internalToolLabels";
+  import BookOpen from "lucide-svelte/icons/book-open";
+  import Paperclip from "lucide-svelte/icons/paperclip";
   import Plug from "lucide-svelte/icons/plug";
   import ShieldCheck from "lucide-svelte/icons/shield-check";
   import type { SvelteSet } from "svelte/reactivity";
@@ -27,17 +31,34 @@
     icon_url?: string | null;
   };
 
+  type InternalMcpServer = {
+    /** Internal server name as the backend attaches it (e.g. "knowledge"). */
+    name: string;
+  };
+
   type Props = {
     servers: McpServer[];
+    /** Eneo's built-in loopback servers active for this partner (not togglable). */
+    internalServers?: InternalMcpServer[];
     /** Server ids the user has switched off for this conversation (mutated in place). */
     disabledServerIds: SvelteSet<string>;
     /** When true, tool calls run without per-call approval. */
     autoAcceptTools: boolean;
   };
 
-  let { servers, disabledServerIds, autoAcceptTools = $bindable() }: Props = $props();
+  let {
+    servers,
+    internalServers = [],
+    disabledServerIds,
+    autoAcceptTools = $bindable()
+  }: Props = $props();
 
-  const total = $derived(servers.length);
+  const INTERNAL_SERVER_ICONS: Record<string, typeof Plug> = {
+    knowledge: BookOpen,
+    files: Paperclip
+  };
+
+  const total = $derived(servers.length + internalServers.length);
   const disabledCount = $derived(
     servers.filter((server) => disabledServerIds.has(server.id)).length
   );
@@ -74,25 +95,49 @@
       <Popover.Title class="text-sm">{m.mcp_servers()}</Popover.Title>
       <div class="text-muted-foreground mt-0.5 flex items-center justify-between gap-2 text-xs">
         <span>{m.mcp_servers_active_count({ active: activeCount, total })}</span>
-        {#if total > 1}
+        {#if servers.length > 1}
           <span class="flex items-center gap-0.5">
             <button
               type="button"
               class="hover:text-foreground rounded px-1 py-0.5 font-medium transition-colors disabled:pointer-events-none disabled:opacity-40"
-              disabled={activeCount === total}
+              disabled={disabledCount === 0}
               onclick={() => setAll(true)}>{m.mcp_all_on()}</button
             >
             <span aria-hidden="true" class="text-border">·</span>
             <button
               type="button"
               class="hover:text-foreground rounded px-1 py-0.5 font-medium transition-colors disabled:pointer-events-none disabled:opacity-40"
-              disabled={activeCount === 0}
+              disabled={disabledCount === servers.length}
               onclick={() => setAll(false)}>{m.mcp_all_off()}</button
             >
           </span>
         {/if}
       </div>
     </div>
+
+    {#if internalServers.length > 0}
+      <div
+        class="flex items-center gap-2 border-b px-3 py-2"
+        role="group"
+        aria-label={m.mcp_internal_server_hint()}
+      >
+        <div class="flex min-w-0 flex-1 flex-wrap items-center gap-1">
+          {#each internalServers as server (server.name)}
+            {@const Icon = INTERNAL_SERVER_ICONS[server.name] ?? Plug}
+            <span
+              class="bg-muted text-foreground flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium"
+              title={m.mcp_internal_server_hint()}
+            >
+              <Icon class="text-muted-foreground size-3.5" aria-hidden="true" />
+              {serverDisplayName(server.name)}
+            </span>
+          {/each}
+        </div>
+        <span class="text-muted-foreground shrink-0 text-xs"
+          >{m.mcp_internal_tools_always_active()}</span
+        >
+      </div>
+    {/if}
 
     <div
       class="flex max-h-64 flex-col overflow-y-auto p-1"
@@ -137,27 +182,29 @@
       {/each}
     </div>
 
-    <Separator />
+    {#if servers.length > 0}
+      <Separator />
 
-    <div class="p-1">
-      <label
-        class="hover:bg-muted flex cursor-pointer items-start gap-2.5 rounded-md px-2 py-2 transition-colors"
-      >
-        <ShieldCheck class="text-muted-foreground mt-0.5 size-5 shrink-0" aria-hidden="true" />
-        <span class="min-w-0 flex-1">
-          <span class="text-foreground block text-sm font-medium"
-            >{m.mcp_run_tools_automatically()}</span
-          >
-          <span id="mcp-auto-accept-desc" class="text-muted-foreground block text-xs">
-            {autoAcceptTools ? m.auto_accept_tools_on() : m.auto_accept_tools_off()}
+      <div class="p-1">
+        <label
+          class="hover:bg-muted flex cursor-pointer items-start gap-2.5 rounded-md px-2 py-2 transition-colors"
+        >
+          <ShieldCheck class="text-muted-foreground mt-0.5 size-5 shrink-0" aria-hidden="true" />
+          <span class="min-w-0 flex-1">
+            <span class="text-foreground block text-sm font-medium"
+              >{m.mcp_run_tools_automatically()}</span
+            >
+            <span id="mcp-auto-accept-desc" class="text-muted-foreground block text-xs">
+              {autoAcceptTools ? m.auto_accept_tools_on() : m.auto_accept_tools_off()}
+            </span>
           </span>
-        </span>
-        <Switch
-          bind:checked={autoAcceptTools}
-          aria-label={m.mcp_run_tools_automatically()}
-          aria-describedby="mcp-auto-accept-desc"
-        />
-      </label>
-    </div>
+          <Switch
+            bind:checked={autoAcceptTools}
+            aria-label={m.mcp_run_tools_automatically()}
+            aria-describedby="mcp-auto-accept-desc"
+          />
+        </label>
+      </div>
+    {/if}
   </Popover.Content>
 </Popover.Root>

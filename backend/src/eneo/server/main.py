@@ -34,6 +34,7 @@ from eneo.flows.runtime.flow_runtime_health import (
     flow_runtime_health_probe_failure_response,
     load_flow_runtime_health_snapshot,
 )
+from eneo.internal_mcp import internal_mcp_mounts
 from eneo.main.config import get_settings
 from eneo.main.exceptions import ErrorCodes
 from eneo.main.logging import get_logger
@@ -399,6 +400,11 @@ def get_application():
 
     app.include_router(api_router, prefix=get_settings().api_prefix)
     app.mount("/scim/v2", scim_app)
+    # Loopback internal-MCP servers (knowledge search, attachment reading;
+    # their session managers are driven by the parent lifespan in
+    # dependencies/lifespan.py).
+    for mount_path, internal_mcp_app in internal_mcp_mounts():
+        app.mount(mount_path, internal_mcp_app)
 
     # Add handlers of all errors except 500
     add_exception_handlers(app)

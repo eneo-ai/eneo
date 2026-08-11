@@ -117,6 +117,32 @@ async def test_watchdog_cancels_body_when_lease_lost():
 
 
 @pytest.mark.asyncio
+async def test_can_redact_sensitive_lock_key_when_lease_is_lost():
+    redis_mock = _redis(set_result=True)
+    logger = MagicMock()
+
+    async def run_with_lease():
+        async with redis_lease(
+            redis_mock,
+            "sensitive-lock-key",
+            renew_interval_seconds=0.01,
+            log_lock_key=False,
+        ) as acquired:
+            assert acquired is True
+            await asyncio.sleep(10)
+
+    with (
+        patch(_REFRESH, new=AsyncMock(return_value=False)),
+        patch(_RELEASE, new=AsyncMock(return_value=False)),
+        patch("eneo.worker.redis.lease.logger", logger),
+    ):
+        with pytest.raises(asyncio.CancelledError):
+            await run_with_lease()
+
+    assert "sensitive-lock-key" not in repr(logger.method_calls)
+
+
+@pytest.mark.asyncio
 async def test_watchdog_cancels_body_when_ownership_unconfirmed_for_ttl():
     redis_mock = _redis(set_result=True)
 

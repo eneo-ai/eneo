@@ -14,8 +14,7 @@ from eneo.object_content.deployment_policy import UploadAdmissionSnapshot
 def _upload_admission() -> UploadAdmissionSnapshot:
     return UploadAdmissionSnapshot(
         policy_revision=9,
-        session_storage_target=StorageKind.OBJECT_STORE,
-        session_operator_ceiling_bytes=16,
+        new_write_storage_target=StorageKind.OBJECT_STORE,
         session_file_maximum_bytes=11,
         session_image_maximum_bytes=12,
         session_audio_maximum_bytes=13,

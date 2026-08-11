@@ -35,6 +35,7 @@ EXPECTED_DERIVED_ERROR_CODES = frozenset(
         "iam_exception",
         "internal_http_error",
         "internal_server_error",
+        "invalid_filename",
         "knowledge_model_unavailable",
         "mcp_upstream_auth_error",
         "mcp_upstream_error",

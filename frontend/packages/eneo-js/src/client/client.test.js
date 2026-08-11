@@ -145,7 +145,7 @@ describe("createClient query parameters", () => {
     expect(statuses).toEqual(originalStatuses);
   });
 
-  it("preserves scalar null, omits undefined, and emits nothing for an empty array", async () => {
+  it("preserves zero and omits null, undefined, and empty arrays", async () => {
     const fetch = vi.fn(async () => new Response(JSON.stringify({ items: [] }), { status: 200 }));
     const client = createClient({ baseUrl: "https://api.example.test", fetch });
 
@@ -165,7 +165,7 @@ describe("createClient query parameters", () => {
     });
 
     expect(fetch.mock.calls.map((call) => call[0])).toEqual([
-      "https://api.example.test/api/v1/flows/flow-1/runs/?limit=0&status=null",
+      "https://api.example.test/api/v1/flows/flow-1/runs/?limit=0",
       "https://api.example.test/api/v1/flows/flow-1/runs/"
     ]);
   });
@@ -231,36 +231,23 @@ describe("EneoError readable messages", () => {
     expect(error.getReadableMessage()).toBe("Request validation failed.");
   });
 
-  it("keeps legacy FastAPI validation messages working", () => {
-    const reasonError = new EneoError(
-      "See details for more info.",
-      "RESPONSE",
-      422,
-      0,
-      { detail: [{ ctx: { reason: "Legacy reason." }, msg: "Legacy message." }] },
-      { endpoint: "POST@test" }
-    );
-    const msgError = new EneoError(
-      "See details for more info.",
-      "RESPONSE",
-      422,
-      0,
-      { detail: [{ msg: "Legacy message." }] },
-      { endpoint: "POST@test" }
-    );
-
-    expect(reasonError.getReadableMessage()).toBe("Legacy reason.");
-    expect(msgError.getReadableMessage()).toBe("Legacy message.");
-  });
-
   it.each([
+    [
+      "parser errors containing an upstream body",
+      { message: "Could not parse server response.\n<html>Bad Gateway</html>" },
+      "Could not parse server response.\n<html>Bad Gateway</html>"
+    ],
+    [
+      "legacy validation details",
+      { detail: [{ ctx: { reason: "Legacy reason." }, msg: "Legacy message." }] },
+      "See details for more info."
+    ],
     ["string detail", { detail: "Invalid request body." }, "See details for more info."],
-    ["malformed detail", { detail: { unexpected: true } }, "See details for more info."],
     ["no response body", undefined, "Request validation failed."]
-  ])("does not throw for %s validation responses", (_case, response, message) => {
+  ])("uses a safe generic message for untyped %s", (_case, response, message) => {
     const error = new EneoError(message, "RESPONSE", 422, 0, response, { endpoint: "POST@test" });
 
     expect(() => error.getReadableMessage()).not.toThrow();
-    expect(error.getReadableMessage()).toBe(message);
+    expect(error.getReadableMessage()).toBe("A validation error occurred.");
   });
 });

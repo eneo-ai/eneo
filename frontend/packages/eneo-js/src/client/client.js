@@ -28,6 +28,25 @@ function hasReadableErrorMessage(value) {
 }
 
 /**
+ * @param {unknown} value
+ * @returns {boolean}
+ */
+function isRequestValidationResponse(value) {
+  return (
+    value !== null &&
+    typeof value === "object" &&
+    !Array.isArray(value) &&
+    "code" in value &&
+    value.code === "request_validation_error" &&
+    "eneo_error_code" in value &&
+    typeof value.eneo_error_code === "number" &&
+    "message" in value &&
+    typeof value.message === "string" &&
+    value.message.length > 0
+  );
+}
+
+/**
  * Creates a client to request eneo resources over a typesafe interface.
  * Requires either an api key or a user token to authenticate requests.
  * @param {Object} args
@@ -39,7 +58,7 @@ function hasReadableErrorMessage(value) {
  */
 
 export function createClient(args) {
-  const version = "DEV-20260729T125436Z"; // # Client version auto-updates when running the updater, do not edit this line.
+  const version = "DEV-20260811T101240Z"; // # Client version auto-updates when running the updater, do not edit this line.
   const baseUrl = args.baseUrl;
   const _fetch = args.fetch ?? fetch;
 
@@ -329,6 +348,56 @@ function getContentDispositionFilename(contentDisposition) {
   return asciiMatch?.[1];
 }
 
+/**
+ * Response headers this client reads off responses, lowercased.
+ *
+ * SvelteKit refuses header reads on responses fetched inside a load function
+ * unless the header is permitted by the `filterSerializedResponseHeaders`
+ * option — see `headerFilterHandle` in the web app's `hooks.server.ts`, which
+ * allows exactly this list. Add a header here when the client starts reading
+ * it, or SSR loses the value.
+ *
+ * @type {readonly string[]}
+ */
+export const ENEO_RESPONSE_HEADERS = ["x-trace-id", "x-correlation-id", "x-error-code"];
+
+/**
+ * Read a response header, yielding `undefined` instead of throwing.
+ *
+ * Every header this client reads is diagnostic metadata attached to an error
+ * that is already being reported. A throw here would replace that error with a
+ * confusing one about header access — which is exactly what SvelteKit's load
+ * fetch does for headers missing from `filterSerializedResponseHeaders`.
+ *
+ * @param {Headers | undefined} headers
+ * @param {string} name Lowercased header name
+ * @returns {string | undefined}
+ */
+function readResponseHeader(headers, name) {
+  try {
+    return headers?.get(name) ?? undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Read the backend trace id off a response.
+ *
+ * Prefers ``X-Trace-Id`` (set by TraceIdResponseMiddleware on every response,
+ * including 4xx/5xx) and falls back to the legacy ``X-Correlation-ID`` during
+ * the migration period when both headers are emitted in parallel.
+ *
+ * @param {Headers | undefined} headers Response headers
+ * @returns {string | undefined} 32-char hex trace id, or undefined if no span
+ *   was active when the response was produced.
+ */
+export function readTraceId(headers) {
+  return (
+    readResponseHeader(headers, "x-trace-id") ?? readResponseHeader(headers, "x-correlation-id")
+  );
+}
+
 /** An intermediate error that is throw during running a request on the client. Needs to be finalised into an EneoError */
 export class PartialError extends Error {
   /**
@@ -362,9 +431,11 @@ export class PartialError extends Error {
     this.status = status;
     this.stage = stage;
 
-    // Extract error code from X-Error-Code header (for audit sessions) or response body
-    const headerCode = headers?.get("x-error-code");
-    this.code = headerCode || parsedResponse?.eneo_error_code || 0;
+    // `code` is compared against the numeric ErrorCodes enum, so only the body
+    // may set it. The audit endpoints send a symbolic X-Error-Code
+    // (AUDIT_SESSION_REQUIRED) which would never match one of those codes;
+    // read it off `headers` if a call site ever needs it.
+    this.code = parsedResponse?.eneo_error_code || 0;
 
     /** @type {Headers | undefined} */
     this.headers = headers;
@@ -408,6 +479,10 @@ export class EneoError extends Error {
     }
 
     const response = this.response;
+    if (!isRequestValidationResponse(response)) {
+      return "A validation error occurred.";
+    }
+
     const generalErrorMessage = Array.isArray(response?.details?.errors)
       ? response.details.errors.find(hasReadableErrorMessage)?.message
       : undefined;
@@ -415,27 +490,17 @@ export class EneoError extends Error {
       return generalErrorMessage;
     }
 
-    if (typeof response?.message === "string" && response.message.length > 0) {
-      return response.message;
-    }
-
-    const legacyError = Array.isArray(response?.detail) ? response.detail[0] : undefined;
-    const legacyReason = legacyError?.ctx?.reason;
-    if (typeof legacyReason === "string" && legacyReason.length > 0) {
-      return legacyReason;
-    }
-
-    const legacyMessage = legacyError?.msg;
-    if (typeof legacyMessage === "string" && legacyMessage.length > 0) {
-      return legacyMessage;
-    }
-
-    return this.message || "A validation error occurred.";
+    return response.message;
   }
 
-  /** @returns {string | undefined} */
+  /**
+   * Return the backend trace ID for this error, suitable for support reports.
+   *
+   * @returns {string | undefined} See {@link readTraceId}. Undefined as well
+   *   when the header could not be read.
+   */
   getTraceId() {
-    return this.headers?.get("X-Trace-Id") ?? this.headers?.get("X-Correlation-ID") ?? undefined;
+    return readTraceId(this.headers);
   }
 
   /**

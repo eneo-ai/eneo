@@ -143,6 +143,7 @@ class TestCategoryMappings:
             ActionType.FILE_UPLOADED,
             ActionType.FILE_DELETED,
             ActionType.FILE_ORIGINAL_DOWNLOAD_LINK_CREATED,
+            ActionType.FILE_SIGNED_URL_MINTED,
         ]
 
         for action_type in file_actions:

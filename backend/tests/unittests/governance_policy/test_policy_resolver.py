@@ -10,7 +10,6 @@ from eneo.governance_policy.domain.governance_policy import (
 from eneo.governance_policy.domain.policy_resolver import (
     EffectiveConfig,
     resolve,
-    resolve_personal_default,
     select_effective_completion_model,
 )
 from eneo.skills.domain.skill import (
@@ -189,44 +188,6 @@ def test_models_enforced_with_multiple_models_no_lock():
     )
     assert cfg.locked_model is None
     assert {m.id for m in cfg.available_models} == {m1.id, m2.id}
-
-
-def test_explicit_model_restriction_is_bounded_for_on_demand_skills():
-    model = _mk_model()
-    policy = _empty_policy()
-    policy.set_models_restriction(
-        enabled=True,
-        models=[PolicyCompletionModel(completion_model_id=model.id)],
-    )
-
-    cfg = resolve_personal_default(
-        policy=policy,
-        tenant_completion_models=[model],
-        tenant_mcp_servers=[],
-        library_prompt_text=None,
-    )
-
-    assert cfg.models_bounded_for_on_demand is True
-
-
-def test_provider_model_restriction_is_not_bounded_for_on_demand_skills():
-    provider_id = uuid4()
-    model = _mk_model(provider_id=provider_id)
-    policy = _empty_policy()
-    policy.set_models_restriction(
-        enabled=True,
-        models=[],
-        provider_ids=[provider_id],
-    )
-
-    cfg = resolve_personal_default(
-        policy=policy,
-        tenant_completion_models=[model],
-        tenant_mcp_servers=[],
-        library_prompt_text=None,
-    )
-
-    assert cfg.models_bounded_for_on_demand is False
 
 
 def test_stale_model_in_policy_not_in_tenant_list_is_filtered_out():
@@ -480,7 +441,6 @@ def _eff_config(
         available_mcp_servers=[],
         prompt_enforced=False,
         enforced_prompt_text=None,
-        models_bounded_for_on_demand=False,
     )
 
 

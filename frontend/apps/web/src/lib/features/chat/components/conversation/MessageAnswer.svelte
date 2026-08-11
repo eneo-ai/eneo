@@ -3,19 +3,27 @@
   import MessageEneoInfoBlob from "./MessageEneoInfoBlob.svelte";
   import McpImageAttachments from "./McpImageAttachments.svelte";
   import ReasoningTrace from "./ReasoningTrace.svelte";
+  import InternalToolStep from "./InternalToolStep.svelte";
   import { dynamicColour } from "$lib/core/colours";
   import { IconSpeechBubble } from "@eneo/icons/speech-bubble";
   import { formatEmojiTitle } from "$lib/core/formatting/formatEmojiTitle";
   import { getChatService } from "../../ChatService.svelte";
+  import {
+    internalReadFileId,
+    internalToolDoneLabel,
+    isInternalServer,
+    serverDisplayName,
+    toolDisplayName
+  } from "../../internalToolLabels";
   import { getAttachmentUrlService } from "$lib/features/attachments/AttachmentUrlService.svelte";
   import { getMessageContext } from "../../MessageContext.svelte";
   import AsyncImage from "$lib/components/AsyncImage.svelte";
   import { m } from "$lib/paraglide/messages";
-  import ChevronRight from "lucide-svelte/icons/chevron-right";
   import Check from "lucide-svelte/icons/check";
-  import X from "lucide-svelte/icons/x";
+  import ChevronRight from "lucide-svelte/icons/chevron-right";
   import Wrench from "lucide-svelte/icons/wrench";
-  import { SvelteSet } from "svelte/reactivity";
+  import X from "lucide-svelte/icons/x";
+  import { SvelteMap, SvelteSet } from "svelte/reactivity";
 
   const chat = getChatService();
   const attachmentUrls = getAttachmentUrlService();
@@ -76,6 +84,25 @@
     !!tc.tool_call_id && pendingToolIds.includes(tc.tool_call_id);
   const pendingToolCalls = $derived((mcpToolCalls ?? []).filter(isPending));
   const tracedToolCalls = $derived((mcpToolCalls ?? []).filter((tc) => !isPending(tc)));
+
+  // Attachment names across the whole conversation, so a read_file call on the
+  // internal files server can be labelled with the file it is reading (its url
+  // argument only carries the file id).
+  const attachmentNamesById = $derived.by(() => {
+    const names = new SvelteMap<string, string>();
+    for (const msg of chat.currentConversation?.messages ?? []) {
+      for (const file of msg.files ?? []) names.set(file.id, file.name);
+    }
+    return names;
+  });
+  const readFileDetail = (tc: {
+    server_name: string;
+    tool_name: string;
+    arguments?: Record<string, unknown>;
+  }) => {
+    const fileId = internalReadFileId(tc.server_name, tc.tool_name, tc.arguments);
+    return fileId ? (attachmentNamesById.get(fileId) ?? null) : null;
+  };
   const tracedSteps = $derived(
     tracedToolCalls.map((tc, i) => {
       const denied =
@@ -101,17 +128,52 @@
               : toolsStillExecuting && isLastTraced
                 ? "running"
                 : "complete";
+      const toolName = toolDisplayName(tc.tool_name, tc.server_name, tc.title, tc.arguments);
       return {
-        // Prefer the server-provided title annotation, falling back to the
-        // raw tool name when the MCP server omits one.
-        toolName: tc.title || tc.tool_name,
-        serverName: tc.server_name,
+        // Eneo's own built-in tools get localized labels; otherwise prefer the
+        // server-provided title annotation, falling back to the raw tool name.
+        toolName,
+        doneLabel: internalToolDoneLabel(tc.tool_name, tc.server_name, tc.arguments) ?? toolName,
+        serverName: serverDisplayName(tc.server_name),
+        detail: readFileDetail(tc),
         args: tc.arguments,
         toolCallId: tc.tool_call_id,
-        status
+        status,
+        internal: isInternalServer(tc.server_name)
       };
     })
   );
+  // Built-in loopback tools render as slim thinking-style lines in the message
+  // flow; only external MCP calls keep their cards in the reasoning trace.
+  // Contiguous steps of the same kind group into runs that render in call
+  // order, so the trace stays chronological when a turn mixes both kinds
+  // (e.g. a knowledge search followed by web tools).
+  const stepRuns = $derived.by(() => {
+    const runs: { internal: boolean; steps: typeof tracedSteps }[] = [];
+    for (const step of tracedSteps) {
+      const last = runs[runs.length - 1];
+      if (last && last.internal === step.internal) last.steps.push(step);
+      else runs.push({ internal: step.internal, steps: [step] });
+    }
+    return runs;
+  });
+
+  // Internal steps take up a single line per run: while the assistant works,
+  // only the run's latest step shows and each new call replaces the previous
+  // one in place; once the run completes it folds into a one-line summary
+  // that expands to the full list. A single step never folds — the summary
+  // would be no smaller than the step itself. Runs only ever append during a
+  // turn, so the run index is a stable key for the expanded state.
+  const openInternalRuns = new SvelteSet<number>();
+  const runWorking = (run: (typeof stepRuns)[number], runIndex: number) =>
+    (toolsStillExecuting && runIndex === stepRuns.length - 1) ||
+    run.steps.some((step) => step.status === "preparing" || step.status === "running");
+  const runFailed = (run: (typeof stepRuns)[number]) =>
+    run.steps.some((step) => step.status === "failed" || step.status === "denied");
+  const runSummary = (run: (typeof stepRuns)[number]) => {
+    const servers = [...new Set(run.steps.map((step) => step.serverName))].join(" · ");
+    return `${servers} · ${m.internal_tool_steps_count({ count: run.steps.length })}`;
+  };
 
   function toggleToolCallExpanded(index: number) {
     if (expandedToolCalls.has(index)) {
@@ -196,16 +258,88 @@
     {/each}
   {/if}
 
-  {#if tracedSteps.length > 0 || reasoningText.trim().length > 0}
+  <!-- Reasoning text belongs at the top of the trace: it rides in the first
+       run's box when that run is external, otherwise it gets its own box so
+       it never renders below tool activity it preceded. -->
+  {#if reasoningText.trim().length > 0 && (stepRuns.length === 0 || stepRuns[0].internal)}
     <div class="mb-4">
-      <ReasoningTrace
-        steps={tracedSteps}
-        reasoning={reasoningText}
-        working={toolsStillExecuting}
-        loadToolResult={(toolCallId) => chat.getToolCallResult(toolCallId)}
-      />
+      <ReasoningTrace reasoning={reasoningText} working={toolsStillExecuting} />
     </div>
   {/if}
+
+  {#each stepRuns as run, runIndex (runIndex)}
+    {#if !run.internal}
+      <div class="mb-4">
+        <ReasoningTrace
+          steps={run.steps}
+          reasoning={runIndex === 0 ? reasoningText : ""}
+          working={toolsStillExecuting && runIndex === stepRuns.length - 1}
+          loadToolResult={(toolCallId) => chat.getToolCallResult(toolCallId)}
+        />
+      </div>
+    {:else}
+      {#snippet internalStepLines()}
+        {#each run.steps as step, i (step.toolCallId ?? i)}
+          <InternalToolStep
+            runningLabel={step.toolName}
+            doneLabel={step.doneLabel}
+            serverName={step.serverName}
+            detail={step.detail}
+            args={step.args}
+            toolCallId={step.toolCallId}
+            status={step.status}
+            onLoadResult={step.toolCallId
+              ? () => chat.getToolCallResult(step.toolCallId!)
+              : undefined}
+          />
+        {/each}
+      {/snippet}
+      <div class="mb-4 flex flex-col gap-0.5">
+        {#if runWorking(run, runIndex)}
+          {@const currentStep = run.steps[run.steps.length - 1]}
+          <InternalToolStep
+            runningLabel={currentStep.toolName}
+            doneLabel={currentStep.doneLabel}
+            serverName={currentStep.serverName}
+            detail={currentStep.detail}
+            args={currentStep.args}
+            toolCallId={currentStep.toolCallId}
+            status={currentStep.status}
+            onLoadResult={currentStep.toolCallId
+              ? () => chat.getToolCallResult(currentStep.toolCallId!)
+              : undefined}
+          />
+        {:else if run.steps.length > 1}
+          <button
+            type="button"
+            class="text-muted hover:text-secondary flex w-fit max-w-full items-center gap-1.5 text-sm leading-tight transition-colors"
+            onclick={() =>
+              openInternalRuns.has(runIndex)
+                ? openInternalRuns.delete(runIndex)
+                : openInternalRuns.add(runIndex)}
+            aria-expanded={openInternalRuns.has(runIndex)}
+          >
+            <ChevronRight
+              class="h-3.5 w-3.5 shrink-0 transition-transform {openInternalRuns.has(runIndex)
+                ? 'rotate-90'
+                : ''}"
+            />
+            {#if runFailed(run)}
+              <X class="text-negative-default h-3.5 w-3.5 shrink-0" />
+            {/if}
+            <span class="truncate font-medium">{runSummary(run)}</span>
+          </button>
+          {#if openInternalRuns.has(runIndex)}
+            <div class="flex flex-col gap-0.5 pl-7">
+              {@render internalStepLines()}
+            </div>
+          {/if}
+        {:else}
+          {@render internalStepLines()}
+        {/if}
+      </div>
+    {/if}
+  {/each}
 
   {#if pendingToolCalls.length > 0}
     <div class="mb-5 flex flex-col gap-2">
@@ -223,6 +357,7 @@
         {@const isSubmitting = toolCall.tool_call_id
           ? submittingToolIds.has(toolCall.tool_call_id)
           : false}
+        {@const pendingDetail = readFileDetail(toolCall)}
         {@const statusStyle = isDenied
           ? "border-negative-default/20 bg-negative-dimmer/50"
           : isApproved
@@ -256,7 +391,12 @@
             <!-- Tool info -->
             <div class="flex min-w-0 flex-1 flex-col gap-0.5">
               <div class="flex items-center gap-2">
-                <span class="text-default truncate text-sm font-medium">{toolCall.tool_name}</span>
+                <span class="text-default truncate text-sm font-medium"
+                  >{toolDisplayName(toolCall.tool_name, toolCall.server_name)}</span
+                >
+                {#if pendingDetail}
+                  <span class="text-muted min-w-0 truncate text-xs">{pendingDetail}</span>
+                {/if}
                 {#if isDenied}
                   <span
                     class="bg-negative-dimmer text-negative-default inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium tracking-wide uppercase"

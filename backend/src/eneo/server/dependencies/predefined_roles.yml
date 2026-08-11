@@ -26,6 +26,7 @@ roles:
   - name: 'Owner'
     permissions:
       - admin
+      - storage
       - personal_chat
       - assistants
       - skills

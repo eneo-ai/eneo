@@ -341,11 +341,6 @@ async def test_download_file_signed_raises_not_found_for_missing_content(monkeyp
             and str(kwargs["expected_file_id"]) != payload["file_id"]
         ):
             return None
-        if (
-            kwargs.get("expected_tenant_id") is not None
-            and str(kwargs["expected_tenant_id"]) != payload["tenant_id"]
-        ):
-            return None
         return payload
 
     monkeypatch.setattr(file_router, "verify_signed_token", _verify)
@@ -777,3 +772,27 @@ def test_original_download_openapi_declares_json_error_contracts():
         content = operation["responses"][status]["content"]
         schema = content["application/json"]["schema"]
         assert schema["$ref"] == "#/components/schemas/GeneralError"
+
+
+def test_download_claims_return_tenant_claim_when_present():
+    file_id, tenant_id = uuid4(), uuid4()
+    claims = file_router._validate_download_claims(
+        file_id=file_id,
+        payload={
+            "file_id": str(file_id),
+            "content_disposition": "inline",
+            "tenant_id": str(tenant_id),
+        },
+    )
+
+    assert claims.content_disposition is ContentDisposition.INLINE
+    assert claims.tenant_id == tenant_id
+
+
+def test_download_claims_reject_absent_tenant_claim():
+    file_id = uuid4()
+    with pytest.raises(AuthenticationException, match="Invalid or expired token"):
+        file_router._validate_download_claims(
+            file_id=file_id,
+            payload={"file_id": str(file_id), "content_disposition": "attachment"},
+        )

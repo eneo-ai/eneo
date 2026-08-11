@@ -9,6 +9,7 @@
   import { browser } from "$app/environment";
   import { getChatService } from "../../ChatService.svelte";
   import { setMessageContext } from "../../MessageContext.svelte";
+  import { isInternalServer } from "../../internalToolLabels";
 
   interface Props {
     message: ConversationMessage;
@@ -65,8 +66,22 @@
     const hasReasoning =
       (((message as Record<string, unknown>).reasoning as string | undefined) ?? "").trim().length >
       0;
+    // Built-in tool calls render their own shimmer line (InternalToolStep),
+    // which keeps animating until the first answer token — suppress the badge
+    // so "Tänker..." never shows next to "Söker kunskap…".
+    const toolCalls = ((message as Record<string, unknown>).mcp_tool_calls ??
+      message.tool_calls ??
+      []) as Array<{ server_name: string }>;
+    const hasInternalToolActivity = toolCalls.some((tc) => isInternalServer(tc.server_name));
     // Show typing indicator only while waiting for text to start, not during streaming
-    return isLast && isLoading && !isGeneratingImage && !hasStartedStreaming && !hasReasoning;
+    return (
+      isLast &&
+      isLoading &&
+      !isGeneratingImage &&
+      !hasStartedStreaming &&
+      !hasReasoning &&
+      !hasInternalToolActivity
+    );
   });
 
   const isReasoning = $derived.by(() => {

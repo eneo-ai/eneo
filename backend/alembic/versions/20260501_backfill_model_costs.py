@@ -16,8 +16,8 @@ Notes:
     ``input_cost_per_token`` / ``output_cost_per_token`` from LiteLLM as-is.
   - Transcription gets ``cost_per_minute`` derived from
     ``input_cost_per_second × 60`` (LiteLLM's native unit).
-  - Lookup tries the bare model name first, then ``<provider>/<name>``
-    variants, mirroring `/model-defaults/`.
+  - With provider context, lookup prefers ``<provider>/<name>`` and then
+    falls back to the bare model name, mirroring `/model-defaults/`.
 
 Revision ID: 20260501_backfill_model_costs
 Revises: 20260430_add_model_costs
@@ -39,11 +39,10 @@ branch_labels = None
 depends_on = None
 
 
-# Inlined from the model defaults lookup so this
-# migration stays runnable on a fresh DB even if the app module is later
-# moved or renamed. Keep semantics in sync with that module if either
-# changes — both paths must agree on which LiteLLM row a given
-# (name, provider_type) maps to.
+# Frozen copy of the model-defaults lookup so this migration stays runnable on
+# a fresh DB even if the app module is later moved or renamed. Do not replace it
+# with a runtime import. If the application resolver changes, review explicitly
+# whether this historical migration should retain or mirror the new semantics.
 def resolve_model_defaults(
     model_cost: dict[str, dict[str, Any]],
     names: list[str | None] | str,
@@ -107,15 +106,19 @@ def _backfill_token_costs(
     are left untouched so admins can disambiguate via "Lookup defaults" in the
     UI rather than receive a silently-wrong price.
     """
-    rows = connection.execute(
-        sa.text(
-            f"SELECT t.id, t.name, t.litellm_model_name, mp.provider_type "
-            f"FROM {table} t "
-            "LEFT JOIN model_providers mp ON mp.id = t.provider_id "
-            "WHERE t.input_cost_per_token IS NULL "
-            "   OR t.output_cost_per_token IS NULL"
+    rows = (
+        connection.execute(
+            sa.text(
+                f"SELECT t.id, t.name, t.litellm_model_name, mp.provider_type "
+                f"FROM {table} t "
+                "LEFT JOIN model_providers mp ON mp.id = t.provider_id "
+                "WHERE t.input_cost_per_token IS NULL "
+                "   OR t.output_cost_per_token IS NULL"
+            )
         )
-    ).mappings().all()
+        .mappings()
+        .all()
+    )
 
     updates = 0
     ambiguous = 0
@@ -153,14 +156,18 @@ def _backfill_per_minute(
 
     Same return shape as ``_backfill_token_costs`` — see that docstring.
     """
-    rows = connection.execute(
-        sa.text(
-            "SELECT t.id, t.name, t.model_name, mp.provider_type "
-            "FROM transcription_models t "
-            "LEFT JOIN model_providers mp ON mp.id = t.provider_id "
-            "WHERE t.cost_per_minute IS NULL"
+    rows = (
+        connection.execute(
+            sa.text(
+                "SELECT t.id, t.name, t.model_name, mp.provider_type "
+                "FROM transcription_models t "
+                "LEFT JOIN model_providers mp ON mp.id = t.provider_id "
+                "WHERE t.cost_per_minute IS NULL"
+            )
         )
-    ).mappings().all()
+        .mappings()
+        .all()
+    )
 
     updates = 0
     ambiguous = 0
@@ -197,8 +204,12 @@ def upgrade() -> None:
         return
 
     bind = op.get_bind()
-    completion_n, completion_amb = _backfill_token_costs(bind, "completion_models", model_cost)
-    embedding_n, embedding_amb = _backfill_token_costs(bind, "embedding_models", model_cost)
+    completion_n, completion_amb = _backfill_token_costs(
+        bind, "completion_models", model_cost
+    )
+    embedding_n, embedding_amb = _backfill_token_costs(
+        bind, "embedding_models", model_cost
+    )
     transcription_n, transcription_amb = _backfill_per_minute(bind, model_cost)
 
     ambiguous_total = completion_amb + embedding_amb + transcription_amb

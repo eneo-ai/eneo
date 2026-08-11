@@ -1,7 +1,7 @@
 export { createEneo } from "./src/eneo.js";
 export { createEneoSocket } from "./src/socket/socket.js";
 export { createClient } from "./src/client/client.js";
-export { EneoError } from "./src/client/client.js";
+export { EneoError, ENEO_RESPONSE_HEADERS, readTraceId } from "./src/client/client.js";
 export {
   createFlowRuntimeUploadTimeoutController,
   resolveFlowRuntimeUploadIdleTimeoutMs,

@@ -506,7 +506,7 @@ jobs:
       # it in sync, so a backend model change that skips regeneration silently
       # leaves the frontend types (and any ActionType-driven i18n guards) stale.
       - name: Dump backend OpenAPI spec
-        run: uv run python -c "import json; from eneo.server.main import app; json.dump(app.openapi(), open('/tmp/openapi.gen.json', 'w'))"
+        run: uv run python -c "import json; from eneo.server.main import app; json.dump(app.openapi(), open('/tmp/openapi.gen.json', 'w'), sort_keys=True)"
         working-directory: backend
 
       - name: Regenerate schema.d.ts
@@ -530,7 +530,7 @@ jobs:
             echo "## ❌ schema.d.ts drift detected"
             echo ""
             echo "\`$SCHEMA\` does not match the backend OpenAPI spec."
-            echo "Regenerate it (\`cd frontend/packages/eneo-js && node update.js\` against a backend, or the offline \`app.openapi()\` regen) and commit the result."
+            echo "Regenerate it with the canonical workflow in \`frontend/packages/eneo-js/README.md\` and commit the result."
             echo ""
             echo "<details><summary>Diff — committed (red) vs. regenerated/expected (green)</summary>"
             echo ""

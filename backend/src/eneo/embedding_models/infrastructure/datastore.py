@@ -151,12 +151,24 @@ class Datastore:
         collections: Optional[list["Collection"]] = None,
         websites: Optional[list["Website"]] = None,
         integration_knowledge_list: Optional[list[IntegrationKnowledge]] = None,
+        info_blob_ids: Optional[list[UUID]] = None,
         num_chunks: Optional[int] = 30,
         autocut_cutoff: Optional[int] = None,
+        min_score: Optional[float] = None,
     ) -> list[InfoBlobChunkInDBWithScore]:
         group_ids = [group.id for group in (collections or [])]
         website_ids = [website.id for website in (websites or [])]
         integration_knowledge_ids = [i.id for i in (integration_knowledge_list or [])]
+
+        # The scope buckets are OR-ed in SQL, so combining a document with its
+        # own sources would widen the search back out to those sources instead
+        # of narrowing it to the document. On an authorization-adjacent
+        # predicate that footgun is worth making unconstructible.
+        if info_blob_ids and (group_ids or website_ids or integration_knowledge_ids):
+            raise ValueError(
+                "info_blob_ids narrows a search to single documents and cannot be "
+                "combined with collection, website or integration scopes."
+            )
 
         start = time.time()
         search_string_embedding = (
@@ -170,6 +182,7 @@ class Datastore:
             group_ids=group_ids,
             website_ids=website_ids,
             integration_knowledge_ids=integration_knowledge_ids,
+            info_blob_ids=info_blob_ids,
             limit=num_chunks if num_chunks is not None else 30,
         )
         end = time.time()
@@ -178,6 +191,15 @@ class Datastore:
             f"Time to get results: Embed step: {step_1 - start},"
             f" Search step: {end - step_1}, Total: {end - start}"
         )
+
+        # Vector search returns nearest neighbors unconditionally; a relevance
+        # floor lets callers drop chunks that merely happen to be the least
+        # distant (e.g. retrieval triggered by an off-topic message). Score
+        # scales are embedding-model-dependent, so there is no global default.
+        if min_score is not None:
+            semantic_results = [
+                res for res in semantic_results if res.score >= min_score
+            ]
 
         scores = [res.score for res in semantic_results]
 

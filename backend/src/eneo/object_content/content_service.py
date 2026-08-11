@@ -1,10 +1,11 @@
+import asyncio
 from collections.abc import AsyncGenerator, AsyncIterable, Sequence
 from contextlib import asynccontextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from secrets import token_hex
 from time import monotonic
-from uuid import UUID, uuid4
+from uuid import UUID
 
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -12,7 +13,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from eneo.database.database import DatabaseSessionManager, sessionmanager
 from eneo.object_content.configuration import (
     ObjectContentCoreSettings,
-    ObjectContentSettings,
 )
 from eneo.object_content.content import (
     ByteRange,
@@ -40,17 +40,23 @@ from eneo.object_content.content_repository import (
 )
 from eneo.object_content.inline_content_store import InlineContentStore
 from eneo.object_content.lease import OperationLeaseCheckpoint
+from eneo.object_content.object_store_provider import (
+    ObjectStoreLease,
+    ObjectStoreProvider,
+)
 from eneo.object_content.reconciliation_repository import (
     ObjectContentReconciliationRepository,
     PublicationReservation,
 )
 from eneo.object_content.s3_object_store import (
-    ObjectStoreBindingError,
     ObjectStoreIntegrityError,
     ObjectStoreNotFoundError,
     ObjectStoreUnavailableError,
-    S3ObjectStore,
     new_object_key,
+)
+from eneo.object_content.store_binding import (
+    ensure_store_binding_ready,
+    require_store_generation,
 )
 
 
@@ -84,6 +90,76 @@ class VerifiedObjectUpload:
 class VerifiedObjectPublication:
     lease_owner: str
     uploads: tuple[VerifiedObjectUpload, ...]
+    store_slot: int
+    store_revision: int
+    _reservation_lease: "_PublicationReservationLease" = field(
+        repr=False,
+        compare=False,
+    )
+
+    async def finish_for_adoption(self) -> None:
+        await self._reservation_lease.finish_for_adoption()
+
+
+class _PublicationReservationLease:
+    """Keep verified but unadopted objects fenced from orphan cleanup."""
+
+    def __init__(
+        self,
+        checkpoint: OperationLeaseCheckpoint,
+        *,
+        heartbeat_seconds: float,
+    ) -> None:
+        self._checkpoint = checkpoint
+        self._heartbeat_seconds = heartbeat_seconds
+        self._heartbeat: asyncio.Task[None] | None = None
+        self._adoption_started = False
+
+    def start(self) -> None:
+        if self._heartbeat is not None:
+            raise RuntimeError("Publication reservation heartbeat already started")
+        self._heartbeat = asyncio.create_task(self._keep_alive())
+
+    async def _keep_alive(self) -> None:
+        while True:
+            await asyncio.sleep(self._heartbeat_seconds)
+            await self._checkpoint.renew_now()
+
+    async def _stop_heartbeat(self) -> BaseException | None:
+        heartbeat = self._heartbeat
+        self._heartbeat = None
+        if heartbeat is None:
+            return None
+        if not heartbeat.done():
+            heartbeat.cancel()
+        try:
+            await heartbeat
+        except asyncio.CancelledError:
+            return None
+        except BaseException as error:
+            return error
+        return None
+
+    async def finish_for_adoption(self) -> None:
+        if self._adoption_started:
+            raise ObjectContentStateError(
+                "Verified publication can be adopted only once"
+            )
+        self._adoption_started = True
+        heartbeat_error = await self._stop_heartbeat()
+        if heartbeat_error is not None:
+            raise ObjectContentUnavailableError(
+                "Durable object publication reservation could not be renewed"
+            ) from heartbeat_error
+        try:
+            await self._checkpoint.renew_now()
+        except (ObjectContentBusyError, OSError, SQLAlchemyError) as error:
+            raise ObjectContentUnavailableError(
+                "Durable object publication reservation could not be renewed"
+            ) from error
+
+    async def close(self) -> None:
+        await self._stop_heartbeat()
 
 
 class ObjectContentService:
@@ -94,16 +170,10 @@ class ObjectContentService:
         core_settings: ObjectContentCoreSettings,
         database: DatabaseSessionManager = sessionmanager,
         *,
-        object_store_settings: ObjectContentSettings | None = None,
-        object_store: S3ObjectStore | None = None,
+        object_store_provider: ObjectStoreProvider | None = None,
     ) -> None:
-        if (object_store_settings is None) != (object_store is None):
-            raise ValueError(
-                "Object-store settings and adapter must be supplied together"
-            )
         self._core_settings = core_settings
-        self._object_store_settings = object_store_settings
-        self._object_store = object_store
+        self._object_store_provider = object_store_provider
         self._inline_store = InlineContentStore(
             maximum_size_bytes=core_settings.inline_maximum_bytes,
             io_chunk_bytes=core_settings.inline_io_chunk_bytes,
@@ -112,121 +182,20 @@ class ObjectContentService:
 
     @property
     def object_store_configured(self) -> bool:
-        return self._object_store is not None
+        provider = self._object_store_provider
+        return provider is not None and provider.configured
 
-    async def check_object_store_ready(self) -> None:
-        settings, store = self._require_object_store()
-        try:
-            await store.check_ready()
-        except ObjectStoreUnavailableError as error:
-            raise ObjectContentUnavailableError(
-                "Durable object content is temporarily unavailable"
-            ) from error
-        claim_id = uuid4()
-        try:
-            async with self._database.session() as session, session.begin():
-                binding = await ObjectContentReconciliationRepository(
-                    session
-                ).get_or_initialize_store_binding(
-                    settings.deployment_id,
-                    claim_id=claim_id,
-                    claim_seconds=settings.binding_claim_seconds,
-                )
-        except ObjectContentConfigurationError:
-            raise
-        except (OSError, SQLAlchemyError) as error:
-            raise ObjectContentUnavailableError(
-                "Unable to verify the object-content database binding"
-            ) from error
-
-        if not binding.confirmed and binding.claim_id is None:
-            raise ObjectContentUnavailableError(
-                "Object-content storage binding is being established"
+    async def check_object_store_ready(
+        self,
+        *,
+        object_store_revision: int | None = None,
+    ) -> None:
+        async with self._object_store(expected_revision=object_store_revision) as lease:
+            await ensure_store_binding_ready(
+                self._database,
+                lease.settings,
+                lease.store,
             )
-
-        try:
-            marker_exists = await store.verify_binding(binding.binding_id)
-        except ObjectStoreBindingError as error:
-            raise ObjectContentConfigurationError(
-                "Object-content storage does not match PostgreSQL"
-            ) from error
-        except ObjectStoreUnavailableError as error:
-            raise ObjectContentUnavailableError(
-                "Durable object content is temporarily unavailable"
-            ) from error
-
-        if binding.confirmed:
-            if not marker_exists:
-                raise ObjectContentConfigurationError(
-                    "The confirmed object-content storage binding is missing"
-                )
-            return
-
-        if not marker_exists:
-            if binding.creation_started:
-                raise ObjectContentConfigurationError(
-                    "Object-content marker creation has an ambiguous prior outcome"
-                )
-            try:
-                creation = await store.prepare_binding_creation(binding.binding_id)
-            except ObjectStoreBindingError as error:
-                raise ObjectContentConfigurationError(
-                    "Object-content storage does not match PostgreSQL"
-                ) from error
-            except ObjectStoreUnavailableError as error:
-                raise ObjectContentUnavailableError(
-                    "Durable object content is temporarily unavailable"
-                ) from error
-            if creation is not None:
-                try:
-                    async with self._database.session() as session, session.begin():
-                        await ObjectContentReconciliationRepository(
-                            session
-                        ).mark_store_binding_creation_started(
-                            deployment_id=binding.deployment_id,
-                            binding_id=binding.binding_id,
-                            claim_id=claim_id,
-                        )
-                except ObjectContentConfigurationError:
-                    raise
-                except ObjectContentBusyError as error:
-                    raise ObjectContentUnavailableError(
-                        "Object-content storage binding claim changed"
-                    ) from error
-                except (OSError, SQLAlchemyError) as error:
-                    raise ObjectContentUnavailableError(
-                        "Unable to claim object-content marker creation"
-                    ) from error
-                try:
-                    await store.create_binding(creation)
-                except ObjectStoreBindingError as error:
-                    raise ObjectContentConfigurationError(
-                        "Object-content storage does not match PostgreSQL"
-                    ) from error
-                except ObjectStoreUnavailableError as error:
-                    raise ObjectContentUnavailableError(
-                        "Durable object content is temporarily unavailable"
-                    ) from error
-
-        try:
-            async with self._database.session() as session, session.begin():
-                await ObjectContentReconciliationRepository(
-                    session
-                ).confirm_store_binding(
-                    deployment_id=binding.deployment_id,
-                    binding_id=binding.binding_id,
-                    claim_id=claim_id,
-                )
-        except ObjectContentConfigurationError:
-            raise
-        except ObjectContentBusyError as error:
-            raise ObjectContentUnavailableError(
-                "Object-content storage binding claim changed"
-            ) from error
-        except (OSError, SQLAlchemyError) as error:
-            raise ObjectContentUnavailableError(
-                "Unable to confirm the object-content database binding"
-            ) from error
 
     @asynccontextmanager
     async def capture_for_target(
@@ -237,6 +206,7 @@ class ObjectContentService:
         declared_media_type: str,
         verified_media_type: str,
         business_maximum_bytes: int | None = None,
+        object_store_revision: int | None = None,
     ) -> AsyncGenerator[CapturedContent]:
         if business_maximum_bytes is not None and business_maximum_bytes < 1:
             raise ValueError("business_maximum_bytes must be positive")
@@ -252,17 +222,22 @@ class ObjectContentService:
             spool_memory_bytes = self._core_settings.inline_io_chunk_bytes
             multipart_part_bytes = self._core_settings.inline_io_chunk_bytes
         else:
-            settings, _store = self._require_object_store()
-            maximum_size_bytes = (
-                settings.maximum_multipart_bytes
-                if business_maximum_bytes is None
-                else min(
-                    business_maximum_bytes,
-                    settings.maximum_multipart_bytes,
+            # Capture sizing is fixed operator configuration. Copy it from one
+            # current snapshot without retaining a credential-bearing client
+            # while an upload stream is still arriving.
+            async with self._object_store(
+                expected_revision=object_store_revision
+            ) as lease:
+                maximum_size_bytes = (
+                    lease.settings.maximum_multipart_bytes
+                    if business_maximum_bytes is None
+                    else min(
+                        business_maximum_bytes,
+                        lease.settings.maximum_multipart_bytes,
+                    )
                 )
-            )
-            spool_memory_bytes = settings.spool_memory_bytes
-            multipart_part_bytes = settings.multipart_part_bytes
+                spool_memory_bytes = lease.settings.spool_memory_bytes
+                multipart_part_bytes = lease.settings.multipart_part_bytes
         async with capture_content(
             source,
             declared_media_type=declared_media_type,
@@ -273,18 +248,41 @@ class ObjectContentService:
         ) as captured:
             yield captured
 
-    async def ensure_target_ready(self, storage_kind: StorageKind) -> None:
+    async def ensure_target_ready(
+        self,
+        storage_kind: StorageKind,
+        *,
+        object_store_revision: int | None = None,
+    ) -> None:
         if storage_kind is StorageKind.OBJECT_STORE:
-            await self.check_object_store_ready()
+            await self.check_object_store_ready(
+                object_store_revision=object_store_revision
+            )
 
     @asynccontextmanager
     async def upload_for_publication(
         self,
         contents: Sequence[CapturedContent],
+        *,
+        object_store_revision: int | None = None,
+    ) -> AsyncGenerator[VerifiedObjectPublication]:
+        async with self._object_store(expected_revision=object_store_revision) as lease:
+            async with self._upload_for_publication_with_store(
+                contents,
+                lease=lease,
+            ) as publication:
+                yield publication
+
+    @asynccontextmanager
+    async def _upload_for_publication_with_store(
+        self,
+        contents: Sequence[CapturedContent],
+        *,
+        lease: ObjectStoreLease,
     ) -> AsyncGenerator[VerifiedObjectPublication]:
         if not contents:
             raise ValueError("Object publication requires at least one content item")
-        settings, store = self._require_object_store()
+        settings, store = lease.settings, lease.store
         lease_owner = token_hex(16)
         reservations = tuple(
             PublicationReservation(
@@ -296,6 +294,11 @@ class ObjectContentService:
         lease_started_at = monotonic()
         try:
             async with self._database.session() as session, session.begin():
+                await require_store_generation(
+                    session,
+                    slot=lease.slot,
+                    revision=lease.revision,
+                )
                 await ObjectContentReconciliationRepository(
                     session
                 ).reserve_publication_objects(
@@ -329,6 +332,10 @@ class ObjectContentService:
             request_budget_seconds=settings.sdk_request_budget_seconds,
             renew=renew_publication_reservations,
         )
+        reservation_lease = _PublicationReservationLease(
+            checkpoint,
+            heartbeat_seconds=settings.reconciliation_lease_seconds / 2,
+        )
         try:
             try:
                 uploads: list[VerifiedObjectUpload] = []
@@ -360,11 +367,16 @@ class ObjectContentService:
                     "Unable to renew durable object publication"
                 ) from error
 
+            reservation_lease.start()
             yield VerifiedObjectPublication(
                 lease_owner=lease_owner,
                 uploads=tuple(uploads),
+                store_slot=lease.slot,
+                store_revision=lease.revision,
+                _reservation_lease=reservation_lease,
             )
         finally:
+            await reservation_lease.close()
             try:
                 async with self._database.session() as session, session.begin():
                     await ObjectContentReconciliationRepository(
@@ -409,6 +421,12 @@ class ObjectContentService:
                 )
             )
 
+        await publication.finish_for_adoption()
+        await require_store_generation(
+            session,
+            slot=publication.store_slot,
+            revision=publication.store_revision,
+        )
         await ObjectContentReconciliationRepository(
             session
         ).consume_publication_reservations(
@@ -470,13 +488,13 @@ class ObjectContentService:
                 # Keep PENDING for persisted rows and explicit store_and_verify
                 # recovery. Delete it only after a database audit finds no such
                 # rows and every live producer/cutover uses verified publication.
-                settings, _store = self._require_object_store()
-                return await repository.prepare_object_store(
-                    intent=intent,
-                    content=content,
-                    object_key=new_object_key(settings),
-                    request_fingerprint=request_fingerprint,
-                )
+                async with self._object_store() as lease:
+                    return await repository.prepare_object_store(
+                        intent=intent,
+                        content=content,
+                        object_key=new_object_key(lease.settings),
+                        request_fingerprint=request_fingerprint,
+                    )
 
     async def store_and_verify(
         self,
@@ -484,10 +502,29 @@ class ObjectContentService:
         content_id: UUID,
         content: CapturedContent,
     ) -> ReadableContent:
-        settings, store = self._require_object_store()
+        async with self._object_store() as store_lease:
+            return await self._store_and_verify_with_store(
+                content_id=content_id,
+                content=content,
+                store_lease=store_lease,
+            )
+
+    async def _store_and_verify_with_store(
+        self,
+        *,
+        content_id: UUID,
+        content: CapturedContent,
+        store_lease: ObjectStoreLease,
+    ) -> ReadableContent:
+        settings, store = store_lease.settings, store_lease.store
         lease_owner = token_hex(16)
         lease_started_at = monotonic()
         async with self._database.session() as session, session.begin():
+            await require_store_generation(
+                session,
+                slot=store_lease.slot,
+                revision=store_lease.revision,
+            )
             lease = await ObjectContentRepository(session).claim_upload(
                 content_id=content_id,
                 content=content,
@@ -565,6 +602,11 @@ class ObjectContentService:
             ) from error
 
         async with self._database.session() as session, session.begin():
+            await require_store_generation(
+                session,
+                slot=store_lease.slot,
+                revision=store_lease.revision,
+            )
             return await ObjectContentRepository(session).promote_available(
                 content_id=content_id,
                 lease_owner=lease_owner,
@@ -628,65 +670,83 @@ class ObjectContentService:
                     raise RuntimeError(
                         "Object-store content dispatch lost its descriptor"
                     )
-                _settings, store = self._require_object_store()
-                try:
-                    verification_chunk_sha256: tuple[bytes, ...] = ()
-                    descriptor = source.object_store_descriptor
-                    if byte_range is not None:
-                        window = verification_chunk_window(
-                            byte_range,
-                            chunk_size_bytes=(descriptor.verification_chunk_size_bytes),
-                            chunk_count=descriptor.verification_chunk_count,
-                        )
-                        async with self._database.session() as session, session.begin():
-                            verification_chunk_sha256 = await (
-                                ObjectContentRepository(session)
-                            ).get_object_store_verification_chunks(
-                                content_id=content.content_id,
-                                first_chunk_index=window.first_chunk_index,
-                                chunk_count=window.chunk_count,
-                            )
-                    async with store.open_verified_read(
-                        descriptor.object_key,
-                        expected_sha256=content.sha256,
-                        expected_size_bytes=content.size_bytes,
-                        expected_media_type=content.media_type,
+                async with self._object_store() as lease:
+                    async with self._open_object_store_source(
+                        source,
+                        lease=lease,
                         byte_range=byte_range,
-                        verification_chunk_size_bytes=(
-                            descriptor.verification_chunk_size_bytes
-                        ),
-                        verification_chunk_count=(descriptor.verification_chunk_count),
-                        verification_chunk_sha256=verification_chunk_sha256,
                     ) as opened:
                         yield opened
-                except (ValueError, ObjectContentStateError) as error:
-                    await self._mark_backend_failure(
-                        content.content_id,
-                        ContentFailureCode.BACKEND_CORRUPT,
+
+    @asynccontextmanager
+    async def _open_object_store_source(
+        self,
+        source: ReadableContentSource,
+        *,
+        lease: ObjectStoreLease,
+        byte_range: ByteRange | None,
+    ) -> AsyncGenerator[ContentRead]:
+        content = source.content
+        descriptor = source.object_store_descriptor
+        if descriptor is None:
+            raise RuntimeError("Object-store content dispatch lost its descriptor")
+        try:
+            verification_chunk_sha256: tuple[bytes, ...] = ()
+            if byte_range is not None:
+                window = verification_chunk_window(
+                    byte_range,
+                    chunk_size_bytes=descriptor.verification_chunk_size_bytes,
+                    chunk_count=descriptor.verification_chunk_count,
+                )
+                async with self._database.session() as session, session.begin():
+                    verification_chunk_sha256 = await ObjectContentRepository(
+                        session
+                    ).get_object_store_verification_chunks(
+                        content_id=content.content_id,
+                        first_chunk_index=window.first_chunk_index,
+                        chunk_count=window.chunk_count,
                     )
-                    raise ObjectContentIntegrityError(
-                        "Durable object verification metadata is invalid"
-                    ) from error
-                except ObjectStoreNotFoundError as error:
-                    await self._mark_backend_failure(
-                        content.content_id,
-                        ContentFailureCode.BACKEND_MISSING,
-                    )
-                    raise ObjectContentUnavailableError(
-                        "Durable object content is unavailable"
-                    ) from error
-                except ObjectStoreIntegrityError as error:
-                    await self._mark_backend_failure(
-                        content.content_id,
-                        ContentFailureCode.BACKEND_CORRUPT,
-                    )
-                    raise ObjectContentIntegrityError(
-                        "Durable object verification failed"
-                    ) from error
-                except ObjectStoreUnavailableError as error:
-                    raise ObjectContentUnavailableError(
-                        "Durable object content is temporarily unavailable"
-                    ) from error
+            async with lease.store.open_verified_read(
+                descriptor.object_key,
+                expected_sha256=content.sha256,
+                expected_size_bytes=content.size_bytes,
+                expected_media_type=content.media_type,
+                byte_range=byte_range,
+                verification_chunk_size_bytes=(
+                    descriptor.verification_chunk_size_bytes
+                ),
+                verification_chunk_count=descriptor.verification_chunk_count,
+                verification_chunk_sha256=verification_chunk_sha256,
+            ) as opened:
+                yield opened
+        except (ValueError, ObjectContentStateError) as error:
+            await self._mark_backend_failure(
+                content.content_id,
+                ContentFailureCode.BACKEND_CORRUPT,
+            )
+            raise ObjectContentIntegrityError(
+                "Durable object verification metadata is invalid"
+            ) from error
+        except ObjectStoreNotFoundError as error:
+            await self._mark_backend_failure(
+                content.content_id,
+                ContentFailureCode.BACKEND_MISSING,
+            )
+            raise ObjectContentUnavailableError(
+                "Durable object content is unavailable"
+            ) from error
+        except ObjectStoreIntegrityError as error:
+            await self._mark_backend_failure(
+                content.content_id,
+                ContentFailureCode.BACKEND_CORRUPT,
+            )
+            raise ObjectContentIntegrityError(
+                "Durable object verification failed"
+            ) from error
+        except ObjectStoreUnavailableError as error:
+            raise ObjectContentUnavailableError(
+                "Durable object content is temporarily unavailable"
+            ) from error
 
     async def read_content_bytes(
         self,
@@ -716,12 +776,44 @@ class ObjectContentService:
                     page
                 )
 
-            for grant in page:
-                source = sources[grant.content_id]
-                payloads[grant.content_id] = await self._read_source_bytes(
-                    source,
-                )
+            remote_page = any(
+                sources[grant.content_id].content.storage_kind
+                is StorageKind.OBJECT_STORE
+                for grant in page
+            )
+            if remote_page:
+                async with self._object_store() as lease:
+                    for grant in page:
+                        source = sources[grant.content_id]
+                        if source.content.storage_kind is StorageKind.OBJECT_STORE:
+                            payloads[
+                                grant.content_id
+                            ] = await self._read_object_store_source_bytes(
+                                source,
+                                lease=lease,
+                            )
+                        else:
+                            payloads[grant.content_id] = await self._read_source_bytes(
+                                source
+                            )
+            else:
+                for grant in page:
+                    source = sources[grant.content_id]
+                    payloads[grant.content_id] = await self._read_source_bytes(source)
         return payloads
+
+    async def _read_object_store_source_bytes(
+        self,
+        source: ReadableContentSource,
+        *,
+        lease: ObjectStoreLease,
+    ) -> bytes:
+        async with self._open_object_store_source(
+            source,
+            lease=lease,
+            byte_range=None,
+        ) as opened:
+            return b"".join([chunk async for chunk in opened.chunks])
 
     async def _read_source_bytes(
         self,
@@ -804,11 +896,19 @@ class ObjectContentService:
                 failure_code=failure_code,
             )
 
-    def _require_object_store(self) -> tuple[ObjectContentSettings, S3ObjectStore]:
-        settings = self._object_store_settings
-        store = self._object_store
-        if settings is None or store is None:
+    @asynccontextmanager
+    async def _object_store(
+        self,
+        *,
+        expected_revision: int | None = None,
+    ) -> AsyncGenerator[ObjectStoreLease]:
+        provider = self._object_store_provider
+        if provider is None:
             raise ObjectContentConfigurationError(
                 "Object-store content is not configured for this deployment"
             )
-        return settings, store
+        async with provider.acquire(
+            refresh=expected_revision is None,
+            expected_revision=expected_revision,
+        ) as lease:
+            yield lease

@@ -254,6 +254,8 @@ class CommitHookTests(unittest.TestCase):
             "#!/usr/bin/env python3\n"
             "import json, os, pathlib, sys\n"
             f"marker = pathlib.Path({str(schema_env)!r})\n"
+            "if 'sort_keys=True' not in sys.argv[-1]:\n"
+            "    sys.exit(3)\n"
             "keys = [\n"
             "    'POSTGRES_USER',\n"
             "    'POSTGRES_PORT',\n"
@@ -333,6 +335,14 @@ class CommitHookTests(unittest.TestCase):
         missing = required_settings_env_keys() - set(pre_push_check.SCHEMA_DRIFT_ENV)
 
         self.assertEqual(missing, set())
+
+    def test_ci_schema_drift_dump_uses_canonical_key_order(self) -> None:
+        workflow = (REPO_ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+
+        self.assertIn(
+            "json.dump(app.openapi(), open('/tmp/openapi.gen.json', 'w'), sort_keys=True)",
+            workflow,
+        )
 
     def test_pre_push_check_blocks_schema_drift(self) -> None:
         root = self.make_repo()

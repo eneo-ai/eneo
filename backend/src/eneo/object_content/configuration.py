@@ -5,8 +5,36 @@ from typing import Literal, Self, cast
 from urllib.parse import urlparse
 from uuid import UUID
 
-from pydantic import Field, SecretStr, field_validator, model_validator
+from pydantic import (
+    Field,
+    SecretStr,
+    field_validator,
+    model_validator,
+)
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+_DEFAULT_PORTS = {"http": 80, "https": 443}
+
+
+def canonical_endpoint_origin(endpoint_url: str) -> str:
+    """Return an endpoint's identity, for deciding if two name one place.
+
+    Hostnames are case-insensitive and a default port is implicit, so
+    ``https://HOST``, ``https://host:443`` and ``https://host/`` all address
+    the same destination. Comparing raw strings would let one of those pass
+    as a different destination than another. This is used only to compare
+    endpoints — never to rewrite what is stored or contacted.
+    """
+    parsed = urlparse(endpoint_url)
+    scheme = parsed.scheme.lower()
+    host = (parsed.hostname or "").lower()
+    if ":" in host:  # IPv6 literal, which needs its brackets back
+        host = f"[{host}]"
+    port = parsed.port
+    if port is not None and port != _DEFAULT_PORTS.get(scheme):
+        return f"{scheme}://{host}:{port}"
+    return f"{scheme}://{host}"
+
 
 _MEBIBYTE = 1024 * 1024
 _MINIMUM_MULTIPART_PART_BYTES = 5 * _MEBIBYTE
@@ -56,17 +84,18 @@ class ObjectContentCoreSettings(BaseSettings):
         return self
 
 
-class ObjectContentSettings(ObjectContentCoreSettings):
-    endpoint_url: str
-    region: str = Field(min_length=1, max_length=128)
-    bucket: str = Field(min_length=3, max_length=63)
-    access_key_id: SecretStr
-    secret_access_key: SecretStr
-    deployment_id: UUID
-    addressing_style: Literal["path", "virtual"] = "path"
+class ObjectStoreOperatorSettings(BaseSettings):
+    """Fixed deployment guardrails that are not administrator policy."""
+
+    model_config = SettingsConfigDict(
+        env_prefix="OBJECT_CONTENT_",
+        env_file=None,
+        extra="forbid",
+        hide_input_in_errors=True,
+    )
+
     allow_insecure_http: bool = False
     ca_bundle: Path | None = None
-
     connect_timeout_seconds: float = Field(default=5.0, gt=0)
     read_timeout_seconds: float = Field(default=60.0, gt=0)
     sdk_max_attempts: int = Field(default=3, ge=1)
@@ -89,12 +118,73 @@ class ObjectContentSettings(ObjectContentCoreSettings):
     delete_poll_interval_seconds: float = Field(default=0.25, gt=0)
     orphan_grace_seconds: int = Field(default=3600, ge=1)
 
+    @model_validator(mode="after")
+    def validate_operator_bounds(self) -> Self:
+        if self.ca_bundle is not None and not self.ca_bundle.is_file():
+            raise ValueError("ca_bundle must name a readable regular file")
+        if self.multipart_threshold_bytes < self.multipart_part_bytes:
+            raise ValueError(
+                "multipart_threshold_bytes must be at least multipart_part_bytes"
+            )
+        if self.io_chunk_bytes > self.spool_memory_bytes:
+            raise ValueError("io_chunk_bytes must not exceed spool_memory_bytes")
+        if self.delete_poll_interval_seconds > self.delete_visibility_timeout_seconds:
+            raise ValueError(
+                "delete_poll_interval_seconds must not exceed the visibility timeout"
+            )
+        if self.binding_claim_seconds < self.readiness_request_budget_seconds:
+            raise ValueError(
+                "binding_claim_seconds must cover the configured readiness request window"
+            )
+        return self
+
+    @property
+    def sdk_request_budget_seconds(self) -> float:
+        """Bound one SDK request, including retries and a scheduling margin."""
+        return (
+            self.sdk_max_attempts
+            * (self.connect_timeout_seconds + self.read_timeout_seconds)
+            + 5
+        )
+
+    @property
+    def readiness_request_budget_seconds(self) -> float:
+        """Bound one binding probe or mutation, including scheduling margin."""
+        return self.readiness_max_attempts * (2 * self.readiness_timeout_seconds) + 5
+
+    @property
+    def maximum_multipart_bytes(self) -> int:
+        """Return the portable S3 multipart protocol envelope."""
+        return min(
+            self.multipart_part_bytes * _MAXIMUM_MULTIPART_PARTS,
+            _MAXIMUM_S3_OBJECT_BYTES,
+        )
+
+
+class ObjectContentSettings(ObjectContentCoreSettings, ObjectStoreOperatorSettings):
+    endpoint_url: str
+    region: str = Field(min_length=1, max_length=128)
+    bucket: str = Field(min_length=3, max_length=63)
+    access_key_id: SecretStr
+    secret_access_key: SecretStr
+    deployment_id: UUID
+    addressing_style: Literal["path", "virtual"] = "path"
+
     @field_validator("endpoint_url")
     @classmethod
     def validate_endpoint_url(cls, value: str) -> str:
         parsed = urlparse(value)
         if parsed.scheme not in {"http", "https"} or not parsed.hostname:
             raise ValueError("endpoint_url must be an absolute HTTP(S) URL")
+        try:
+            # urlparse defers port parsing to this access, so a malformed
+            # port would otherwise surface later, outside the typed
+            # validation contract every consumer of this field relies on.
+            parsed.port
+        except ValueError:
+            raise ValueError(
+                "endpoint_url port must be a number between 1 and 65535"
+            ) from None
         if parsed.username or parsed.password:
             raise ValueError("endpoint_url must not contain credentials")
         if parsed.path not in {"", "/"} or parsed.query or parsed.fragment:
@@ -132,49 +222,11 @@ class ObjectContentSettings(ObjectContentCoreSettings):
             raise ValueError(
                 "plain HTTP requires allow_insecure_http=true on a private trusted network"
             )
-        if self.ca_bundle is not None and not self.ca_bundle.is_file():
-            raise ValueError("ca_bundle must name a readable regular file")
-        if self.multipart_threshold_bytes < self.multipart_part_bytes:
-            raise ValueError(
-                "multipart_threshold_bytes must be at least multipart_part_bytes"
-            )
-        if self.io_chunk_bytes > self.spool_memory_bytes:
-            raise ValueError("io_chunk_bytes must not exceed spool_memory_bytes")
-        if self.delete_poll_interval_seconds > self.delete_visibility_timeout_seconds:
-            raise ValueError(
-                "delete_poll_interval_seconds must not exceed the visibility timeout"
-            )
         if self.reconciliation_lease_seconds < self.sdk_request_budget_seconds:
             raise ValueError(
                 "reconciliation_lease_seconds must cover the configured SDK retry window"
             )
-        if self.binding_claim_seconds < self.readiness_request_budget_seconds:
-            raise ValueError(
-                "binding_claim_seconds must cover the configured readiness request window"
-            )
         return self
-
-    @property
-    def sdk_request_budget_seconds(self) -> float:
-        """Bound one SDK request, including retries and a scheduling margin."""
-        return (
-            self.sdk_max_attempts
-            * (self.connect_timeout_seconds + self.read_timeout_seconds)
-            + 5
-        )
-
-    @property
-    def readiness_request_budget_seconds(self) -> float:
-        """Bound one binding probe or mutation, including scheduling margin."""
-        return self.readiness_max_attempts * (2 * self.readiness_timeout_seconds) + 5
-
-    @property
-    def maximum_multipart_bytes(self) -> int:
-        """Return the portable S3 multipart protocol envelope."""
-        return min(
-            self.multipart_part_bytes * _MAXIMUM_MULTIPART_PARTS,
-            _MAXIMUM_S3_OBJECT_BYTES,
-        )
 
     @property
     def signing_region(self) -> str:
@@ -187,11 +239,17 @@ class ObjectContentSettings(ObjectContentCoreSettings):
 
 
 def load_object_content_settings() -> ObjectContentSettings | None:
-    core_fields = ObjectContentCoreSettings.model_fields
+    connection_fields = {
+        "endpoint_url",
+        "region",
+        "bucket",
+        "access_key_id",
+        "secret_access_key",
+        "deployment_id",
+        "addressing_style",
+    }
     remote_environment_names = {
-        f"OBJECT_CONTENT_{name.upper()}"
-        for name in ObjectContentSettings.model_fields
-        if name not in core_fields
+        f"OBJECT_CONTENT_{name.upper()}" for name in connection_fields
     }
     if not any(name.upper() in remote_environment_names for name in os.environ):
         return None
@@ -203,5 +261,13 @@ def load_object_content_core_settings() -> ObjectContentCoreSettings:
     settings_factory = cast(
         Callable[[], ObjectContentCoreSettings],
         ObjectContentCoreSettings,
+    )
+    return settings_factory()
+
+
+def load_object_store_operator_settings() -> ObjectStoreOperatorSettings:
+    settings_factory = cast(
+        Callable[[], ObjectStoreOperatorSettings],
+        ObjectStoreOperatorSettings,
     )
     return settings_factory()
