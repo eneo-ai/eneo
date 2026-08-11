@@ -23,7 +23,8 @@ from eneo.flows.ai_builder.ai_builder_router import (
     ai_builder_enveloped_error_handler,
 )
 from eneo.flows.runtime.celery_app import (
-    flow_maintenance_queue_has_live_consumer,
+    inspect_flow_celery_consumers,
+    read_flow_beat_freshness_ttl_seconds,
 )
 from eneo.flows.runtime.flow_runtime_health import (
     FlowRuntimeHealthResponse,
@@ -680,7 +681,7 @@ def get_application():
         description=(
             "Return super-key-protected Flow runtime readiness signals derived from "
             "persisted run, review, data-integrity, audit-outbox, webhook-outbox, and "
-            "maintenance-queue consumer state."
+            "Celery worker and scheduler state."
         ),
         responses={
             200: {
@@ -699,9 +700,15 @@ def get_application():
         policy = build_flow_runtime_health_policy(
             task_timeout_seconds=settings.flow_task_timeout_seconds
         )
-        maintenance_queue_consumer_ok = await asyncio.to_thread(
-            flow_maintenance_queue_has_live_consumer,
-            timeout_seconds=1.0,
+        consumer_presence, beat_freshness_ttl_seconds = await asyncio.gather(
+            asyncio.to_thread(
+                inspect_flow_celery_consumers,
+                timeout_seconds=1.0,
+            ),
+            asyncio.to_thread(
+                read_flow_beat_freshness_ttl_seconds,
+                timeout_seconds=1.0,
+            ),
         )
         query_started_at = time.perf_counter()
         query_now = datetime.now(timezone.utc)
@@ -724,7 +731,9 @@ def get_application():
                 policy=policy,
                 query_duration_ms=query_duration_ms,
                 failure=FlowRuntimeProbeFailure.TIMEOUT,
-                maintenance_queue_consumer_ok=maintenance_queue_consumer_ok,
+                execution_queue_consumer_ok=consumer_presence.execution,
+                maintenance_queue_consumer_ok=consumer_presence.maintenance,
+                beat_freshness_ttl_seconds=beat_freshness_ttl_seconds,
             )
         except Exception as exc:
             query_duration_ms = int((time.perf_counter() - query_started_at) * 1000)
@@ -737,7 +746,9 @@ def get_application():
                 policy=policy,
                 query_duration_ms=query_duration_ms,
                 failure=FlowRuntimeProbeFailure.ERROR,
-                maintenance_queue_consumer_ok=maintenance_queue_consumer_ok,
+                execution_queue_consumer_ok=consumer_presence.execution,
+                maintenance_queue_consumer_ok=consumer_presence.maintenance,
+                beat_freshness_ttl_seconds=beat_freshness_ttl_seconds,
             )
 
         query_duration_ms = int((time.perf_counter() - query_started_at) * 1000)
@@ -748,7 +759,9 @@ def get_application():
             probe=FlowRuntimeProbe(
                 db_query_ok=True,
                 db_query_duration_ms=query_duration_ms,
-                maintenance_queue_consumer_ok=maintenance_queue_consumer_ok,
+                execution_queue_consumer_ok=consumer_presence.execution,
+                maintenance_queue_consumer_ok=consumer_presence.maintenance,
+                beat_freshness_ttl_seconds=beat_freshness_ttl_seconds,
             ),
         )
 

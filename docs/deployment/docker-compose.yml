@@ -208,6 +208,12 @@ services:
       # its queue at all.
       - proxy_tier
       - data_net
+    healthcheck:
+      test: ["CMD", "flow-worker-health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
     depends_on:
       - backend
 
@@ -232,6 +238,12 @@ services:
       # data_net for broker/DB; proxy_tier for outbound webhook delivery.
       - proxy_tier
       - data_net
+    healthcheck:
+      test: ["CMD", "flow-worker-health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
     depends_on:
       - backend
 
@@ -253,6 +265,12 @@ services:
       # service) and makes no outbound model calls, so data_net alone
       # is correct.
       - data_net
+    healthcheck:
+      test: ["CMD", "flow-beat-health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 90s
     depends_on:
       - backend
       - redis

@@ -2,9 +2,14 @@ from __future__ import annotations
 
 import logging
 import os
+import socket
 from typing import TYPE_CHECKING, NoReturn
 
 from eneo.flows.runtime import celery_preflight
+from eneo.flows.runtime.celery_app import (
+    inspect_flow_celery_consumers,
+    read_flow_beat_freshness_ttl_seconds,
+)
 from eneo.main.config import get_loglevel, get_settings
 from eneo.main.logging import get_logger
 
@@ -85,4 +90,26 @@ def worker() -> NoReturn:
 
 
 def beat() -> NoReturn:
+    os.environ["RUN_AS_CELERY_BEAT"] = "true"
     os.execvp("celery", _flow_beat_argv())
+
+
+def worker_health() -> NoReturn:
+    settings = get_settings()
+    node_name = f"celery@{socket.gethostname()}"
+    consumer_presence = inspect_flow_celery_consumers(
+        destination=node_name,
+        timeout_seconds=1.0,
+    )
+    expected_queue = _flow_worker_queues(settings)
+    expected_queue_has_consumer = (
+        consumer_presence.maintenance
+        if expected_queue == settings.flow_celery_maintenance_queue
+        else consumer_presence.execution
+    )
+    raise SystemExit(0 if expected_queue_has_consumer else 1)
+
+
+def beat_health() -> NoReturn:
+    ttl_seconds = read_flow_beat_freshness_ttl_seconds(timeout_seconds=1.0)
+    raise SystemExit(0 if ttl_seconds is not None else 1)

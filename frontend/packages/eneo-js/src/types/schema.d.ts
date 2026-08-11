@@ -53,7 +53,7 @@ export interface paths {
     };
     /**
      * Flow Runtime Health
-     * @description Return super-key-protected Flow runtime readiness signals derived from persisted run, review, data-integrity, audit-outbox, webhook-outbox, and maintenance-queue consumer state.
+     * @description Return super-key-protected Flow runtime readiness signals derived from persisted run, review, data-integrity, audit-outbox, webhook-outbox, and Celery worker and scheduler state.
      */
     get: operations["flow_runtime_health_api_healthz_flows_get"];
     put?: never;
@@ -21165,7 +21165,9 @@ export interface components {
      * @enum {string}
      */
     FlowRuntimeHealthFlag:
+      | "EXECUTION_QUEUE_CONSUMER_UNAVAILABLE"
       | "MAINTENANCE_QUEUE_CONSUMER_UNAVAILABLE"
+      | "BEAT_SCHEDULER_STALE"
       | "STALE_QUEUED_RUNS"
       | "ACCEPTED_DISPATCH_EXHAUSTED"
       | "STALE_RUNNING_RUNS"
@@ -21373,25 +21375,35 @@ export interface components {
     };
     /** FlowRuntimeProbe */
     FlowRuntimeProbe: {
+      /**
+       * Beat Freshness Ttl Seconds
+       * @description Remaining lifetime of the latest successful scheduled Flow task publish. Null means the receipt is missing, expired, non-expiring, or unreadable.
+       */
+      beat_freshness_ttl_seconds: number | null;
+      /**
+       * Celery Inspection Timeout Seconds
+       * @description Bounded Celery and Beat inspection timeout used by the adapter.
+       * @default 1
+       */
+      celery_inspection_timeout_seconds?: number;
       /** Db Query Duration Ms */
       db_query_duration_ms?: number | null;
       db_query_failure?: components["schemas"]["FlowRuntimeProbeFailure"] | null;
       /** Db Query Ok */
       db_query_ok: boolean;
       /**
+       * Execution Queue Consumer Ok
+       * @description Whether a responding Celery worker reports consuming the configured Flow execution queue. False includes unavailable broker/control replies.
+       */
+      execution_queue_consumer_ok: boolean;
+      /**
        * Maintenance Queue Consumer Ok
        * @description Whether a responding Celery worker reports consuming the configured Flow maintenance queue. False includes unavailable broker/control replies.
        */
       maintenance_queue_consumer_ok: boolean;
       /**
-       * Maintenance Queue Inspection Timeout Seconds
-       * @description Celery control inspection timeout used by the HTTP adapter.
-       * @default 1
-       */
-      maintenance_queue_inspection_timeout_seconds?: number;
-      /**
        * Scope
-       * @default db_and_maintenance_consumer
+       * @default db_and_celery_runtime
        */
       scope?: string;
     };

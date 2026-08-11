@@ -6,7 +6,8 @@ and Builder sessions, both green at 8). LANDED: CP0 evidence, CP8a–c,
 CP6, the unsupported JSON-to-text removal, CP-D3, L1a, L1c, and the
 develop-to-Flows integration at `b9c0aa238`, FLOW-AUTH, and
 CP-ADMIT-0, CP1, CP2 terminal ownership consolidation, full CP-ADMIT,
-FLOW-RETENTION, the CP2b capture seam, and Runtime L2. All three user
+FLOW-RETENTION, the CP2b capture seam, Runtime L2, immutable deployment
+identity, and Runtime L3 health. All three user
 decisions stand (TRAJECTORY / SPLIT /
 BALANCED).
 
@@ -102,12 +103,22 @@ frozen manifest, never restated as a prose constant.
 - CP9b now defaults omitted runtime metadata through the existing visible,
   overridable assumption. It removes the redundant question on open prompts and
   deletes the special budget-exhaustion branch without adding state or policy.
-- The 2026-08-11 broad progress smoke at `f39853daeb` produced all 158 slots but
-  is not a release receipt: the required six-file execution sentinel had no
-  applied Flow or final commit identity, so the sealed reader refused it. The
-  prior smoke also used different concurrency and observation-identity
-  semantics. Its raw N=1 movements are therefore non-comparable diagnostic
-  evidence, not proof of improvement or regression and not a repair trigger.
+  Its named `vague` cohort then produced 81/81 trustworthy Luna observations:
+  no observation asked `runtime_metadata_fields`, and all 80 observations that
+  reached requirements resolution surfaced the visible no-extra-fields
+  assumption. One observation stopped earlier on an unrelated DOCX choice.
+- The first broad progress smoke at `f39853daeb` produced all 158 slots but was
+  correctly refused by the sealed reader and remains non-comparable. The later
+  clean-source smoke at `03985fbff` passed the whole-directory v5 reader with
+  158/158 trustworthy Luna observations and no acquisition, identity or final
+  recheck failure. Of 141 eligible observations, 129 produced accepted plans
+  (102 first pass and 27 after repair); 76 of 152 evaluated observations passed
+  all case contracts. No create terminal-mismatch failure returned and no new
+  terminal error family appeared. The N=1 receipt is directional evidence, not
+  a stability claim: repair pressure remains material, schema and source-reference
+  families remain assigned to CP3/CP5/CP7, and accepted-plan p95 latency was
+  48.922 seconds against the frozen 48-second limit. The ownership-tranche x3
+  remains the first broad stability checkpoint.
 
 ## THE ARCHITECTURE VERDICT (peer pass 31, max effort — adopted)
 
@@ -282,6 +293,12 @@ ARTIFACT re-checked per slice, not a permanent grep gate.
       image. One backend digest supplies all six backend roles; the deployment
       `.env.template` owns operator input, and baked-manifest version precedence
       remains unchanged and tested.
+- [x] L3 runtime health: the existing operator-health owner now reports missing
+      execution or maintenance consumers and stale Beat publication; native
+      checks verify each worker consumes its configured role queue, and Beat
+      freshness reuses an existing scheduled publication plus an expiring Redis
+      receipt. No task, table, migration, public liveness endpoint, or monitoring
+      subsystem was added.
 
 ## The Ranked Program (v10.3 — execution phase; slice bodies carry
 ## their originating iteration tags)
@@ -661,8 +678,8 @@ any threshold.
     pagination and showcase-doc slice starts only after step 9 and
     must land before showcase/release.
 12. **Runtime lane**, parallel throughout in its own Fable/peer
-    session: **L2 → L1b → L3 → L5**. L1b and L3 sequence because they
-    share the deployment compose; L5 is terminal evidence.
+    session: **L2 → L1b → L3 complete; L5 next**. L1b and L3 sequence
+    because they share the deployment compose; L5 is terminal evidence.
 13. **Release evaluation:** final-frozen-manifest N=5 only at the
     release gate, repeated after every material post-gate product
     change. The full-corpus run is not an instrument-progress check.
@@ -805,11 +822,18 @@ sake.
     taxonomy, tracing, en+sv messages, SDK catalog and generated error docs use
     their existing owners. No automatic retry, state transition, module or
     third provider vocabulary was added.
-- [ ] L3 Health (SOLE healthcheck owner, iteration 35):
+- [x] L3 Health (completed 2026-08-11; SOLE healthcheck owner,
+    iteration 35):
     execution-consumer presence + beat freshness on the existing
     operator surface, plus every deployment-native container
     healthcheck for the celery roles. No new public liveness
-    endpoint.
+    endpoint. One bounded Celery inspection reports both configured queues;
+    each worker healthcheck targets its own node and requires the exact queue
+    selected by `FLOW_CELERY_WORKER_ROLE`. Beat seals a 90-second Redis
+    freshness receipt only after the existing 30-second redispatch schedule is
+    published successfully. Missing consumers and stale Beat state are typed,
+    fail-closed operator flags. Compose image digests and runtime scheduling,
+    retry, singleton and dispatch semantics are unchanged.
 - [ ] L4 Object-content scope (DEFAULT OUT, iteration 33): the tracked
     deployment default keeps bounded durable content in PostgreSQL
     with no separate object store (`docs/deployment/README.md:68`),
@@ -936,8 +960,8 @@ not inspect mutable candidate results:
 - Public contracts: FLOW-RETENTION and FLOW-DOC may proceed after
   FLOW-AUTH, in sequence and independently of Builder ownership work.
   BUILDER-API waits for the ownership-tranche checkpoint.
-- Runtime: L2 and L1b are complete. L3 is next, then L5 consumes the typed
-  provider failures, immutable image set and health contracts under load.
+- Runtime: L2, L1b and L3 are complete. L5 consumes the typed provider
+  failures, immutable image set and health contracts under load.
 
 Dependencies that stay hard (v10.3): FLOW-AUTH before Flow public
 contract work; CP-ADMIT-0 before the next Builder ownership transfer;
@@ -966,9 +990,11 @@ post-gate change.
 All comparable Builder receipts use completion-model UUID
 `90824b05-9913-4210-968f-9294eb017d31`, verified in the live model catalog as
 enabled, non-deprecated `gpt-5.6-luna`. A model change starts a new evidence
-lineage and must not be compared as product movement. Suite starts remain at
-least 45 minutes apart for provider limits. This cadence supersedes the earlier
-N=1-only per-slice interpretation by user decision on 2026-08-11.
+lineage and must not be compared as product movement. Completed suites may be
+followed immediately by the next planned suite, but measurement runs must not
+overlap. This cadence supersedes both the earlier N=1-only per-slice
+interpretation and the fixed 45-minute spacing rule by user decision on
+2026-08-11.
 
 ## Operating protocol (for any agent continuing this)
 

@@ -53,7 +53,9 @@ class FlowRuntimeHealthStatus(str, Enum):
 
 
 class FlowRuntimeHealthFlag(str, Enum):
+    EXECUTION_QUEUE_CONSUMER_UNAVAILABLE = "EXECUTION_QUEUE_CONSUMER_UNAVAILABLE"
     MAINTENANCE_QUEUE_CONSUMER_UNAVAILABLE = "MAINTENANCE_QUEUE_CONSUMER_UNAVAILABLE"
+    BEAT_SCHEDULER_STALE = "BEAT_SCHEDULER_STALE"
     STALE_QUEUED_RUNS = "STALE_QUEUED_RUNS"
     ACCEPTED_DISPATCH_EXHAUSTED = "ACCEPTED_DISPATCH_EXHAUSTED"
     STALE_RUNNING_RUNS = "STALE_RUNNING_RUNS"
@@ -117,20 +119,33 @@ class FlowRuntimeHealthSnapshot:
 
 
 class FlowRuntimeProbe(BaseModel):
-    scope: str = "db_and_maintenance_consumer"
+    scope: str = "db_and_celery_runtime"
     db_query_ok: bool
     db_query_duration_ms: int | None = None
     db_query_failure: FlowRuntimeProbeFailure | None = None
-    maintenance_queue_inspection_timeout_seconds: float = Field(
+    celery_inspection_timeout_seconds: float = Field(
         default=1.0,
         gt=0,
-        description="Celery control inspection timeout used by the HTTP adapter.",
+        description="Bounded Celery and Beat inspection timeout used by the adapter.",
+    )
+    execution_queue_consumer_ok: bool = Field(
+        description=(
+            "Whether a responding Celery worker reports consuming the configured "
+            "Flow execution queue. False includes unavailable broker/control replies."
+        )
     )
     maintenance_queue_consumer_ok: bool = Field(
         description=(
             "Whether a responding Celery worker reports consuming the configured "
             "Flow maintenance queue. False includes unavailable broker/control replies."
         )
+    )
+    beat_freshness_ttl_seconds: int | None = Field(
+        gt=0,
+        description=(
+            "Remaining lifetime of the latest successful scheduled Flow task publish. "
+            "Null means the receipt is missing, expired, non-expiring, or unreadable."
+        ),
     )
 
 
@@ -478,7 +493,9 @@ def flow_runtime_health_probe_failure_response(
     policy: FlowRuntimeHealthPolicy,
     query_duration_ms: int | None,
     failure: FlowRuntimeProbeFailure,
+    execution_queue_consumer_ok: bool,
     maintenance_queue_consumer_ok: bool,
+    beat_freshness_ttl_seconds: int | None,
 ) -> FlowRuntimeHealthResponse:
     return classify_flow_runtime_health(
         snapshot=FlowRuntimeHealthSnapshot(),
@@ -488,7 +505,9 @@ def flow_runtime_health_probe_failure_response(
             db_query_ok=False,
             db_query_duration_ms=query_duration_ms,
             db_query_failure=failure,
+            execution_queue_consumer_ok=execution_queue_consumer_ok,
             maintenance_queue_consumer_ok=maintenance_queue_consumer_ok,
+            beat_freshness_ttl_seconds=beat_freshness_ttl_seconds,
         ),
     )
 
@@ -819,8 +838,12 @@ def _flow_runtime_health_flags(
     policy: FlowRuntimeHealthPolicy,
 ) -> list[FlowRuntimeHealthFlag]:
     flags: list[FlowRuntimeHealthFlag] = []
+    if not probe.execution_queue_consumer_ok:
+        flags.append(FlowRuntimeHealthFlag.EXECUTION_QUEUE_CONSUMER_UNAVAILABLE)
     if not probe.maintenance_queue_consumer_ok:
         flags.append(FlowRuntimeHealthFlag.MAINTENANCE_QUEUE_CONSUMER_UNAVAILABLE)
+    if probe.beat_freshness_ttl_seconds is None:
+        flags.append(FlowRuntimeHealthFlag.BEAT_SCHEDULER_STALE)
     if snapshot.stale_queued_count > 0:
         flags.append(FlowRuntimeHealthFlag.STALE_QUEUED_RUNS)
     if snapshot.accepted_dispatch_exhausted_count > 0:
@@ -865,7 +888,9 @@ def _flow_runtime_health_status(
     status_flags: list[FlowRuntimeHealthFlag],
 ) -> FlowRuntimeHealthStatus:
     unhealthy_flags = {
+        FlowRuntimeHealthFlag.EXECUTION_QUEUE_CONSUMER_UNAVAILABLE,
         FlowRuntimeHealthFlag.MAINTENANCE_QUEUE_CONSUMER_UNAVAILABLE,
+        FlowRuntimeHealthFlag.BEAT_SCHEDULER_STALE,
         FlowRuntimeHealthFlag.ACCEPTED_DISPATCH_EXHAUSTED,
         FlowRuntimeHealthFlag.STALE_RUNNING_RECONCILER_LAG,
         FlowRuntimeHealthFlag.REVIEW_EXPIRY_RECONCILER_LAG,
@@ -885,9 +910,9 @@ def _flow_runtime_health_status(
 
 def _flow_runtime_status_reason(*, status: FlowRuntimeHealthStatus) -> str:
     return {
-        FlowRuntimeHealthStatus.HEALTHY: "Flow runtime DB and maintenance-consumer signals are healthy.",
+        FlowRuntimeHealthStatus.HEALTHY: "Flow runtime DB, worker-consumer, and scheduler signals are healthy.",
         FlowRuntimeHealthStatus.DEGRADED: "Flow runtime has recoverable stale run, review checkpoint, or outbox signals.",
-        FlowRuntimeHealthStatus.UNHEALTHY: "Flow runtime has no maintenance-queue consumer, accepted dispatch exhaustion, stale reconciliation lag, review expiry lag, terminal-run integrity issues, or outbox dead letters.",
+        FlowRuntimeHealthStatus.UNHEALTHY: "Flow runtime has a missing queue consumer, stale scheduler, accepted dispatch exhaustion, reconciliation lag, terminal-run integrity issue, or outbox dead letter.",
         FlowRuntimeHealthStatus.UNKNOWN: "Flow runtime DB signals could not be read.",
     }[status]
 

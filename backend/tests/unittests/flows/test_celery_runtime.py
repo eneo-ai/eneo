@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import concurrent.futures
 import importlib
+import socket
 import threading
 from collections import deque
 from collections.abc import Coroutine
@@ -428,7 +429,7 @@ def test_create_flow_celery_app_applies_redis_and_queue_settings(monkeypatch):
     )
 
 
-def test_maintenance_consumer_probe_recognizes_configured_queue(monkeypatch):
+def test_consumer_probe_recognizes_both_configured_queues(monkeypatch):
     celery_app_module = importlib.import_module("eneo.flows.runtime.celery_app")
     app = MagicMock()
     app.control.inspect.return_value.active_queues.return_value = {
@@ -441,16 +442,22 @@ def test_maintenance_consumer_probe_recognizes_configured_queue(monkeypatch):
     monkeypatch.setattr(
         celery_app_module,
         "get_settings",
-        lambda: SimpleNamespace(flow_celery_maintenance_queue="flows.maintenance"),
+        lambda: SimpleNamespace(
+            flow_celery_queue="flows.execute",
+            flow_celery_maintenance_queue="flows.maintenance",
+        ),
     )
 
-    assert celery_app_module.flow_maintenance_queue_has_live_consumer(
-        timeout_seconds=0.25
+    assert celery_app_module.inspect_flow_celery_consumers(timeout_seconds=0.25) == (
+        celery_app_module.FlowCeleryConsumerPresence(
+            execution=True,
+            maintenance=True,
+        )
     )
     app.control.inspect.assert_called_once_with(timeout=0.25)
 
 
-def test_maintenance_consumer_probe_rejects_execution_queues_only(monkeypatch):
+def test_consumer_probe_reports_each_configured_queue_independently(monkeypatch):
     celery_app_module = importlib.import_module("eneo.flows.runtime.celery_app")
     app = MagicMock()
     app.control.inspect.return_value.active_queues.return_value = {
@@ -460,11 +467,24 @@ def test_maintenance_consumer_probe_rejects_execution_queues_only(monkeypatch):
     monkeypatch.setattr(
         celery_app_module,
         "get_settings",
-        lambda: SimpleNamespace(flow_celery_maintenance_queue="flows.maintenance"),
+        lambda: SimpleNamespace(
+            flow_celery_queue="flows.execute",
+            flow_celery_maintenance_queue="flows.maintenance",
+        ),
     )
 
-    assert not celery_app_module.flow_maintenance_queue_has_live_consumer(
-        timeout_seconds=0.25
+    assert celery_app_module.inspect_flow_celery_consumers(
+        timeout_seconds=0.25,
+        destination="celery@flow-worker",
+    ) == (
+        celery_app_module.FlowCeleryConsumerPresence(
+            execution=True,
+            maintenance=False,
+        )
+    )
+    app.control.inspect.assert_called_once_with(
+        timeout=0.25,
+        destination=["celery@flow-worker"],
     )
 
 
@@ -472,9 +492,7 @@ def test_maintenance_consumer_probe_rejects_execution_queues_only(monkeypatch):
     "active_queues",
     [None, [], {"celery@flow-worker": None}, {"celery@flow-worker": ["invalid"]}],
 )
-def test_maintenance_consumer_probe_rejects_malformed_replies(
-    monkeypatch, active_queues
-):
+def test_consumer_probe_rejects_malformed_replies(monkeypatch, active_queues):
     celery_app_module = importlib.import_module("eneo.flows.runtime.celery_app")
     app = MagicMock()
     app.control.inspect.return_value.active_queues.return_value = active_queues
@@ -482,18 +500,24 @@ def test_maintenance_consumer_probe_rejects_malformed_replies(
     monkeypatch.setattr(
         celery_app_module,
         "get_settings",
-        lambda: SimpleNamespace(flow_celery_maintenance_queue="flows.maintenance"),
+        lambda: SimpleNamespace(
+            flow_celery_queue="flows.execute",
+            flow_celery_maintenance_queue="flows.maintenance",
+        ),
     )
 
-    assert not celery_app_module.flow_maintenance_queue_has_live_consumer(
-        timeout_seconds=0.25
+    assert celery_app_module.inspect_flow_celery_consumers(timeout_seconds=0.25) == (
+        celery_app_module.FlowCeleryConsumerPresence(
+            execution=False,
+            maintenance=False,
+        )
     )
 
 
 @pytest.mark.parametrize(
     "failure", [TimeoutError(), RuntimeError("broker unavailable")]
 )
-def test_maintenance_consumer_probe_translates_inspection_failure(monkeypatch, failure):
+def test_consumer_probe_translates_inspection_failure(monkeypatch, failure):
     celery_app_module = importlib.import_module("eneo.flows.runtime.celery_app")
     app = MagicMock()
     app.control.inspect.return_value.active_queues.side_effect = failure
@@ -501,12 +525,70 @@ def test_maintenance_consumer_probe_translates_inspection_failure(monkeypatch, f
     monkeypatch.setattr(
         celery_app_module,
         "get_settings",
-        lambda: SimpleNamespace(flow_celery_maintenance_queue="flows.maintenance"),
+        lambda: SimpleNamespace(
+            flow_celery_queue="flows.execute",
+            flow_celery_maintenance_queue="flows.maintenance",
+        ),
     )
 
-    assert not celery_app_module.flow_maintenance_queue_has_live_consumer(
-        timeout_seconds=0.25
+    assert celery_app_module.inspect_flow_celery_consumers(timeout_seconds=0.25) == (
+        celery_app_module.FlowCeleryConsumerPresence(
+            execution=False,
+            maintenance=False,
+        )
     )
+
+
+def test_beat_freshness_is_written_after_selected_task_publish(monkeypatch):
+    celery_app_module = importlib.import_module("eneo.flows.runtime.celery_app")
+    client = MagicMock()
+    monkeypatch.setenv("RUN_AS_CELERY_BEAT", "true")
+    monkeypatch.setattr(
+        celery_app_module,
+        "_open_flow_health_redis_client",
+        lambda **_kwargs: client,
+    )
+    app = celery_app_module.Celery("beat-signal-contract", broker="memory://")
+
+    app.send_task(celery_app_module.FLOW_BEAT_FRESHNESS_TASK)
+
+    client.set.assert_called_once_with(
+        celery_app_module.FLOW_BEAT_FRESHNESS_KEY,
+        "1",
+        ex=celery_app_module.FLOW_BEAT_FRESHNESS_TTL_SECONDS,
+    )
+    client.close.assert_called_once_with()
+
+
+def test_unrelated_publish_does_not_refresh_beat_freshness(monkeypatch):
+    celery_app_module = importlib.import_module("eneo.flows.runtime.celery_app")
+    client = MagicMock()
+    monkeypatch.setenv("RUN_AS_CELERY_BEAT", "true")
+    monkeypatch.setattr(
+        celery_app_module,
+        "_open_flow_health_redis_client",
+        lambda **_kwargs: client,
+    )
+    app = celery_app_module.Celery("beat-signal-filter", broker="memory://")
+
+    app.send_task("flows.execute")
+
+    client.set.assert_not_called()
+
+
+def test_beat_freshness_reader_returns_only_live_expiring_keys(monkeypatch):
+    celery_app_module = importlib.import_module("eneo.flows.runtime.celery_app")
+    client = MagicMock()
+    monkeypatch.setattr(
+        celery_app_module,
+        "_open_flow_health_redis_client",
+        lambda **_kwargs: client,
+    )
+    client.ttl.side_effect = [42, -1, -2]
+
+    assert celery_app_module.read_flow_beat_freshness_ttl_seconds() == 42
+    assert celery_app_module.read_flow_beat_freshness_ttl_seconds() is None
+    assert celery_app_module.read_flow_beat_freshness_ttl_seconds() is None
 
 
 def test_flow_worker_cli_app_path_loads_registered_flow_tasks():
@@ -644,6 +726,7 @@ def test_flow_beat_cli_uses_installed_package_celery_app_and_schedule_file(
     monkeypatch: pytest.MonkeyPatch,
 ):
     cli_module = importlib.import_module("eneo.flows.runtime.cli")
+    monkeypatch.delenv("RUN_AS_CELERY_BEAT", raising=False)
     monkeypatch.setattr(cli_module, "get_loglevel", lambda: 30)
     monkeypatch.setenv("CELERYBEAT_SCHEDULE_FILE", "/var/run/flows/celerybeat")
     exec_calls: list[tuple[str, list[str]]] = []
@@ -672,6 +755,84 @@ def test_flow_beat_cli_uses_installed_package_celery_app_and_schedule_file(
             ],
         )
     ]
+    assert cli_module.os.environ["RUN_AS_CELERY_BEAT"] == "true"
+
+
+@pytest.mark.parametrize(
+    ("role", "presence"),
+    [
+        ("execute", (True, False)),
+        ("maintenance", (False, True)),
+    ],
+)
+def test_flow_worker_health_requires_its_role_queue_on_its_own_node(
+    monkeypatch,
+    test_settings: Settings,
+    role: str,
+    presence: tuple[bool, bool],
+):
+    cli_module = importlib.import_module("eneo.flows.runtime.cli")
+    celery_app_module = importlib.import_module("eneo.flows.runtime.celery_app")
+    settings = _worker_settings(test_settings, flow_celery_worker_role=role)
+    node_name = f"celery@{socket.gethostname()}"
+    inspect_consumers = MagicMock(
+        return_value=celery_app_module.FlowCeleryConsumerPresence(
+            execution=presence[0],
+            maintenance=presence[1],
+        )
+    )
+    monkeypatch.setattr(cli_module, "get_settings", lambda: settings)
+    monkeypatch.setattr(
+        cli_module,
+        "inspect_flow_celery_consumers",
+        inspect_consumers,
+    )
+
+    with pytest.raises(SystemExit) as exc_info:
+        cli_module.worker_health()
+
+    assert exc_info.value.code == 0
+    inspect_consumers.assert_called_once_with(
+        destination=node_name,
+        timeout_seconds=1.0,
+    )
+
+
+def test_flow_worker_health_rejects_wrong_role_queue(
+    monkeypatch,
+    test_settings: Settings,
+):
+    cli_module = importlib.import_module("eneo.flows.runtime.cli")
+    celery_app_module = importlib.import_module("eneo.flows.runtime.celery_app")
+    settings = _worker_settings(test_settings, flow_celery_worker_role="maintenance")
+    monkeypatch.setattr(cli_module, "get_settings", lambda: settings)
+    monkeypatch.setattr(
+        cli_module,
+        "inspect_flow_celery_consumers",
+        lambda **_kwargs: celery_app_module.FlowCeleryConsumerPresence(
+            execution=True,
+            maintenance=False,
+        ),
+    )
+
+    with pytest.raises(SystemExit) as exc_info:
+        cli_module.worker_health()
+
+    assert exc_info.value.code == 1
+
+
+def test_flow_beat_health_uses_freshness_ttl(monkeypatch):
+    cli_module = importlib.import_module("eneo.flows.runtime.cli")
+    monkeypatch.setattr(
+        cli_module,
+        "read_flow_beat_freshness_ttl_seconds",
+        lambda **_kwargs: 30,
+    )
+
+    with pytest.raises(SystemExit) as exc_info:
+        cli_module.beat_health()
+
+    assert exc_info.value.code == 0
 
 
 def test_execute_flow_run_rejects_missing_user_id_without_terminalizing(monkeypatch):

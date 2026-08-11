@@ -14,13 +14,12 @@ curl --fail-with-body --silent --show-error \
   "${ENEO_BASE_URL}/api/healthz/flows" | jq .
 ```
 
-The response combines bounded database diagnostics with a bounded Celery
-control inspection. `UNKNOWN` means the database query timed out or failed.
-`MAINTENANCE_QUEUE_CONSUMER_UNAVAILABLE` means no responding worker reported
-consuming the configured Flow maintenance queue; broker/control failure and an
-inspection timeout are deliberately treated as unavailable. Verify the broker,
-Flow worker process, worker queue subscription, and worker logs, then restart or
-correct the worker deployment and repeat the check.
+The response combines bounded database diagnostics, one bounded Celery control
+inspection for both Flow queues, and the remaining lifetime of Beat's latest
+successful scheduled publish receipt. `UNKNOWN` means the database query timed
+out or failed. Missing worker replies, unavailable broker/control replies, and
+inspection timeouts fail closed as unavailable consumers. A missing, expired,
+non-expiring, or unreadable Beat receipt fails closed as a stale scheduler.
 
 Recovery and health use the same staleness predicate for running runs. A stale
 run with a pending or claimed webhook delivery is excluded from both surfaces:
@@ -35,7 +34,9 @@ Any positive count triggers a flag unless an age condition is stated.
 
 | Flag | Effective threshold | Recovery action |
 | --- | --- | --- |
+| `EXECUTION_QUEUE_CONSUMER_UNAVAILABLE` | The 1-second Celery inspection finds no live worker consuming the configured execution queue, including unavailable broker/control replies. | Restore broker/control connectivity and the Flow execution worker, verify its queue subscription, then repeat the endpoint check. |
 | `MAINTENANCE_QUEUE_CONSUMER_UNAVAILABLE` | The 1-second Celery inspection finds no live worker consuming the configured maintenance queue, including unavailable broker/control replies. | Restore broker/control connectivity and a Flow worker subscribed to the maintenance queue, then repeat the endpoint check. |
+| `BEAT_SCHEDULER_STALE` | Beat has not successfully published the selected 30-second Flow maintenance schedule within the 90-second receipt lifetime, or the receipt cannot be read. | Restore Beat and Redis connectivity. The next successful selected schedule publish refreshes the receipt automatically; repeat the endpoint check after it publishes. |
 | `STALE_QUEUED_RUNS` | A queued run remains dispatch-pending for at least `stale_queued_after_seconds` (30 seconds). | Verify broker and execution-worker health; allow bounded redispatch to converge and inspect dispatch diagnosis if it does not. |
 | `ACCEPTED_DISPATCH_EXHAUSTED` | At least one queued run has exhausted dispatch after broker acceptance or an outcome-unknown send. | Check for delayed claims, then use the generation-fenced redispatch operation described below; never clear fields with SQL. |
 | `STALE_RUNNING_RUNS` | A recovery-eligible running run is at least `stale_running_after_seconds` old (task timeout plus 60 seconds) but has not exceeded the unhealthy threshold. | Verify the execution worker and wait for the maintenance reconciler; investigate if the age keeps increasing. |
@@ -49,6 +50,18 @@ Any positive count triggers a flag unless an age condition is stated.
 | `WEBHOOK_OUTBOX_DELIVERY_BACKLOG` | An unclaimed or sufficiently expired pending webhook delivery remains eligible beyond the 300-second grace. | Restore destination connectivity and the maintenance consumer; inspect sanitized delivery diagnosis and let bounded retry converge. |
 | `WEBHOOK_OUTBOX_EXPIRED_CLAIMS` | Any pending webhook claim has reached `claim_expires_at`. | Verify the former worker is gone or no longer owns the effect, then let the maintenance delivery loop reclaim it. |
 | `WEBHOOK_OUTBOX_DEAD_LETTERS` | Any webhook delivery exhausted its five-attempt budget. | Inspect the sanitized failure and destination contract; preserve the dead letter for operator diagnosis rather than editing it with SQL. |
+
+The production Compose file gives the execution worker, maintenance worker, and
+Beat scheduler container-native healthchecks. Worker checks address the Celery
+node in the same container and require that node to report the role's configured
+queue; they do not accept another worker's reply. Beat's check reads the same
+expiring receipt as the operator endpoint. Docker retries these checks and they
+recover without manual state edits when the worker reports the expected queue or
+Beat publishes its next selected schedule.
+
+For ad-hoc diagnosis, start Beat through `flow-beat`. A direct Celery command
+must set `RUN_AS_CELERY_BEAT=true`; without that explicit process identity the
+freshness receipt deliberately remains unarmed and the check fails closed.
 
 ## Evidence export controls (D5)
 

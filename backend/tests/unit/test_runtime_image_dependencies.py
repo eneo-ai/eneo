@@ -1,5 +1,6 @@
 import re
 import shlex
+import tomllib
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -24,6 +25,7 @@ RUNTIME_BOOTSTRAP_FILES = (
 )
 DEPLOYMENT_COMPOSE = REPO_ROOT / "docs" / "deployment" / "docker-compose.yml"
 DEPLOYMENT_ENV_TEMPLATE = REPO_ROOT / "docs" / "deployment" / ".env.template"
+BACKEND_PROJECT = REPO_ROOT / "backend" / "pyproject.toml"
 REQUIRED_IMAGE_DIGESTS = (
     "TRAEFIK_IMAGE_DIGEST",
     "ENEO_FRONTEND_IMAGE_DIGEST",
@@ -42,6 +44,11 @@ BASE_STACK_SERVICE_IMAGES = {
     "db": "pgvector/pgvector@sha256:${PGVECTOR_IMAGE_DIGEST:?Set PGVECTOR_IMAGE_DIGEST in .env}",
     "redis": "redis@sha256:${REDIS_IMAGE_DIGEST:?Set REDIS_IMAGE_DIGEST in .env}",
     "db-init": "ghcr.io/eneo-ai/eneo-backend@sha256:${ENEO_BACKEND_IMAGE_DIGEST:?Set ENEO_BACKEND_IMAGE_DIGEST in .env}",
+}
+FLOW_CELERY_HEALTH_COMMANDS = {
+    "celery-worker-flows": "flow-worker-health",
+    "celery-worker-flows-maintenance": "flow-worker-health",
+    "celery-beat-flows": "flow-beat-health",
 }
 
 
@@ -74,6 +81,16 @@ def _compose_service_images(source: str) -> dict[str, str]:
     return service_images
 
 
+def _compose_service_body(source: str, service: str) -> str:
+    match = re.search(
+        rf"^  {re.escape(service)}:\n(?P<body>.*?)(?=^  [a-z0-9-]+:|\Z)",
+        source,
+        flags=re.DOTALL | re.MULTILINE,
+    )
+    assert match is not None, f"Missing deployment service: {service}"
+    return match.group("body")
+
+
 def test_application_images_install_native_runtime_dependencies() -> None:
     for dockerfile in APPLICATION_IMAGE_DOCKERFILES:
         installed_packages = _apt_install_packages(dockerfile)
@@ -103,3 +120,13 @@ def test_deployment_env_template_owns_base_stack_image_digest_inputs() -> None:
     )
 
     assert digest_inputs == list(REQUIRED_IMAGE_DIGESTS)
+
+
+def test_flow_celery_roles_have_native_healthchecks() -> None:
+    compose = DEPLOYMENT_COMPOSE.read_text()
+    project_scripts = tomllib.loads(BACKEND_PROJECT.read_text())["project"]["scripts"]
+
+    for service, command in FLOW_CELERY_HEALTH_COMMANDS.items():
+        service_body = _compose_service_body(compose, service)
+        assert f'test: ["CMD", "{command}"]' in service_body
+        assert command in project_scripts

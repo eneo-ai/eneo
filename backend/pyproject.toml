@@ -77,6 +77,8 @@ start = "eneo.server.main:start"
 worker = "eneo.worker.cli:start"
 flow-worker = "eneo.flows.runtime.cli:worker"
 flow-beat = "eneo.flows.runtime.cli:beat"
+flow-worker-health = "eneo.flows.runtime.cli:worker_health"
+flow-beat-health = "eneo.flows.runtime.cli:beat_health"
 
 [dependency-groups]
 dev = [
