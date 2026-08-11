@@ -22,6 +22,27 @@ RUNTIME_BOOTSTRAP_FILES = (
     REPO_ROOT / "docker-compose.e2e.yml",
     REPO_ROOT / "docker-compose.e2e.ci.yml",
 )
+DEPLOYMENT_COMPOSE = REPO_ROOT / "docs" / "deployment" / "docker-compose.yml"
+DEPLOYMENT_ENV_TEMPLATE = REPO_ROOT / "docs" / "deployment" / ".env.template"
+REQUIRED_IMAGE_DIGESTS = (
+    "TRAEFIK_IMAGE_DIGEST",
+    "ENEO_FRONTEND_IMAGE_DIGEST",
+    "ENEO_BACKEND_IMAGE_DIGEST",
+    "PGVECTOR_IMAGE_DIGEST",
+    "REDIS_IMAGE_DIGEST",
+)
+BASE_STACK_SERVICE_IMAGES = {
+    "traefik": "traefik@sha256:${TRAEFIK_IMAGE_DIGEST:?Set TRAEFIK_IMAGE_DIGEST in .env}",
+    "frontend": "ghcr.io/eneo-ai/eneo-frontend@sha256:${ENEO_FRONTEND_IMAGE_DIGEST:?Set ENEO_FRONTEND_IMAGE_DIGEST in .env}",
+    "backend": "ghcr.io/eneo-ai/eneo-backend@sha256:${ENEO_BACKEND_IMAGE_DIGEST:?Set ENEO_BACKEND_IMAGE_DIGEST in .env}",
+    "worker": "ghcr.io/eneo-ai/eneo-backend@sha256:${ENEO_BACKEND_IMAGE_DIGEST:?Set ENEO_BACKEND_IMAGE_DIGEST in .env}",
+    "celery-worker-flows": "ghcr.io/eneo-ai/eneo-backend@sha256:${ENEO_BACKEND_IMAGE_DIGEST:?Set ENEO_BACKEND_IMAGE_DIGEST in .env}",
+    "celery-worker-flows-maintenance": "ghcr.io/eneo-ai/eneo-backend@sha256:${ENEO_BACKEND_IMAGE_DIGEST:?Set ENEO_BACKEND_IMAGE_DIGEST in .env}",
+    "celery-beat-flows": "ghcr.io/eneo-ai/eneo-backend@sha256:${ENEO_BACKEND_IMAGE_DIGEST:?Set ENEO_BACKEND_IMAGE_DIGEST in .env}",
+    "db": "pgvector/pgvector@sha256:${PGVECTOR_IMAGE_DIGEST:?Set PGVECTOR_IMAGE_DIGEST in .env}",
+    "redis": "redis@sha256:${REDIS_IMAGE_DIGEST:?Set REDIS_IMAGE_DIGEST in .env}",
+    "db-init": "ghcr.io/eneo-ai/eneo-backend@sha256:${ENEO_BACKEND_IMAGE_DIGEST:?Set ENEO_BACKEND_IMAGE_DIGEST in .env}",
+}
 
 
 def _apt_install_packages(dockerfile: Path) -> set[str]:
@@ -38,6 +59,21 @@ def _apt_install_packages(dockerfile: Path) -> set[str]:
     }
 
 
+def _compose_service_images(source: str) -> dict[str, str]:
+    service_images: dict[str, str] = {}
+    current_service: str | None = None
+
+    for line in source.splitlines():
+        if service_match := re.fullmatch(r"  ([a-z0-9-]+):", line):
+            current_service = service_match.group(1)
+        elif current_service and (
+            image_match := re.fullmatch(r"    image:\s+(.+)", line)
+        ):
+            service_images[current_service] = image_match.group(1)
+
+    return service_images
+
+
 def test_application_images_install_native_runtime_dependencies() -> None:
     for dockerfile in APPLICATION_IMAGE_DOCKERFILES:
         installed_packages = _apt_install_packages(dockerfile)
@@ -51,3 +87,19 @@ def test_application_images_install_native_runtime_dependencies() -> None:
 def test_runtime_dependencies_are_not_installed_after_image_build() -> None:
     for bootstrap_file in RUNTIME_BOOTSTRAP_FILES:
         assert "apt-get install" not in bootstrap_file.read_text()
+
+
+def test_production_base_stack_images_require_immutable_digests() -> None:
+    service_images = _compose_service_images(DEPLOYMENT_COMPOSE.read_text())
+
+    assert service_images == BASE_STACK_SERVICE_IMAGES
+
+
+def test_deployment_env_template_owns_base_stack_image_digest_inputs() -> None:
+    digest_inputs = re.findall(
+        r"^([A-Z0-9_]+_IMAGE_DIGEST)=$",
+        DEPLOYMENT_ENV_TEMPLATE.read_text(),
+        re.MULTILINE,
+    )
+
+    assert digest_inputs == list(REQUIRED_IMAGE_DIGESTS)

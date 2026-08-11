@@ -170,6 +170,21 @@ def test_local_dev_app_version_uses_build_id(monkeypatch):
     assert main_config._set_app_version() == "DEV-abcdef123456"
 
 
+def test_baked_release_manifest_precedes_local_manifest_and_build_id(
+    monkeypatch, tmp_path: Path
+):
+    docker_manifest = tmp_path / "docker-release-manifest.json"
+    local_manifest = tmp_path / "local-release-manifest.json"
+    docker_manifest.write_text('{".": "1.2.3"}')
+    local_manifest.write_text('{".": "9.9.9"}')
+    monkeypatch.setattr(main_config, "_DOCKER_MANIFEST", docker_manifest)
+    monkeypatch.setattr(main_config, "_LOCAL_MANIFEST", local_manifest)
+    monkeypatch.setenv("GIT_COMMIT", "abcdef1234567890")
+    monkeypatch.delenv("DEV", raising=False)
+
+    assert main_config._set_app_version() == "1.2.3"
+
+
 def test_local_dev_app_version_falls_back_to_process_start(monkeypatch):
     missing = Path("/tmp/eneo-missing-release-manifest.json")
     monkeypatch.setattr(main_config, "_DOCKER_MANIFEST", missing)

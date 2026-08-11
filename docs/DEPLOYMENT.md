@@ -17,6 +17,7 @@ cd eneo/docs/deployment/
 
 # You'll find these files:
 # - docker-compose.yml
+# - .env.template
 # - env_backend.template
 # - env_frontend.template
 # - env_db.template
@@ -37,6 +38,7 @@ Before you begin, ensure you have the following:
 Review this checklist before you begin deployment. Ensure your setup meets these security requirements:
 
 - [ ] Domain and email are correctly set in `docker-compose.yml`
+- [ ] All five base-stack image digest suffixes are set in `.env`
 - [ ] A strong, unique password will be generated for `POSTGRES_PASSWORD`
 - [ ] Strong, unique secrets will be generated for `JWT_SECRET` and `URL_SIGNING_KEY`
 - [ ] You will change the default user password immediately after first login
@@ -73,13 +75,34 @@ First, copy the provided template files to create your local environment configu
 cp env_backend.template env_backend.env
 cp env_frontend.template env_frontend.env
 cp env_db.template env_db.env
+cp .env.template .env
+chmod 600 .env env_backend.env env_frontend.env env_db.env
 ```
 
 ### Step 2: Configure Your Environment
 
 This is the most critical step. You will set the required variables for your specific setup.
 
-#### A. Domain & SSL in `docker-compose.yml`
+#### A. Immutable Images in `.env`
+
+Docker Compose rejects missing or empty base-stack image digests. Set these five
+values in `.env`, using only the 64-character hexadecimal suffix after
+`sha256:`:
+
+```dotenv
+TRAEFIK_IMAGE_DIGEST=
+ENEO_FRONTEND_IMAGE_DIGEST=
+ENEO_BACKEND_IMAGE_DIGEST=
+PGVECTOR_IMAGE_DIGEST=
+REDIS_IMAGE_DIGEST=
+```
+
+Copy the linux/amd64 backend and frontend digests from the matching Eneo
+release's `IMAGE-DIGESTS.txt`. Use organization-approved Traefik, pgvector, and
+Redis release digests for the other three values. Keep the complete `.env`
+digest set with each deployment backup.
+
+#### B. Domain & SSL in `docker-compose.yml`
 
 You need to tell Traefik (our reverse proxy) which domain to use and what email to use for SSL certificate registration.
 
@@ -100,7 +123,7 @@ sed -i 's/your-domain.com/eneo.your-company.com/g' docker-compose.yml
 
 </details>
 
-#### B. Database Password in `env_db.env`
+#### C. Database Password in `env_db.env`
 
 Generate a secure password for your PostgreSQL database.
 
@@ -109,7 +132,7 @@ Generate a secure password for your PostgreSQL database.
 echo "POSTGRES_PASSWORD=$(openssl rand -base64 32)" >> env_db.env
 ```
 
-#### C. Backend Secrets & API Keys in `env_backend.env`
+#### D. Backend Secrets & API Keys in `env_backend.env`
 
 Configure the backend with security secrets and your chosen AI provider's API key.
 
@@ -122,7 +145,7 @@ echo "JWT_SECRET=$(openssl rand -hex 32)" >> env_backend.env
 echo "URL_SIGNING_KEY=$(openssl rand -hex 32)" >> env_backend.env
 ```
 
-#### D. Frontend Configuration in `env_frontend.env`
+#### E. Frontend Configuration in `env_frontend.env`
 
 The frontend needs three URLs configured and must share the exact same `JWT_SECRET` as the backend.
 
@@ -196,13 +219,17 @@ docker compose ps
 docker compose logs -f backend
 ```
 
-**Update to the latest container images:**
+**Deploy a reviewed image digest set:**
 ```bash
+# First replace all five digest suffixes in .env and preserve the old set.
+docker compose config --images
 docker compose pull
 docker compose up -d
+curl -fsS https://your-domain.com/version
 ```
 
-> **Production Tip:** For production deployments, consider pinning to specific version tags (e.g., `v1.2.3`) instead of using `latest`. This gives you control over when updates are applied. See [Version Pinning](#production-best-practice-version-pinning) for details.
+> **Production Tip:** Keep the resolved digest set with the matching backup.
+> Tags identify releases for people; digests identify the artifacts Docker runs.
 
 **Stop and remove all containers:**
 ```bash
@@ -227,63 +254,41 @@ Eneo uses several Docker volumes for persistent data storage:
 
 ## 🔄 Upgrading Your Eneo Instance
 
-### Production Best Practice: Version Pinning
+### Production Requirement: Immutable Image Digests
 
-For production deployments, we **strongly recommend** pinning to specific version tags instead of using `latest`.
+The provided Compose file requires immutable digests for Traefik, frontend,
+backend, pgvector, and Redis. One backend digest supplies the API, ARQ worker,
+both Celery workers, Celery beat, and database initialization roles.
 
-**Why pin versions?**
-- **Predictable deployments** - Know exactly which version is running
-- **Controlled upgrades** - Test new versions in staging before production
-- **Easy rollbacks** - Return to a previous working version if issues arise
-- **Audit trail** - Clear version history in your docker-compose.yml
+**Why pin digests?**
+- **Predictable deployments** - Know exactly which artifacts are running
+- **Controlled upgrades** - Test new artifacts in staging before production
+- **Easy rollbacks** - Return to the previous artifact set
+- **Audit trail** - Record exact artifacts with each backup
 
-**How to pin versions:**
+Replace the five digest suffixes in `.env`; do not edit image tags in
+`docker-compose.yml`. Compose builds each identity as
+`repository@sha256:<digest-suffix>` and rejects an unset value.
 
-The example `docker-compose.yml` uses `:latest` tags to keep documentation current, but you should replace these with specific versions:
-
-```yaml
-# ❌ Example (uses latest - not recommended for production)
-frontend:
-  image: ghcr.io/eneo-ai/eneo-frontend:latest
-
-backend:
-  image: ghcr.io/eneo-ai/eneo-backend:latest
-
-worker:
-  image: ghcr.io/eneo-ai/eneo-backend:latest
-```
-
-```yaml
-# ✅ Production (pinned to specific version)
-frontend:
-  image: ghcr.io/eneo-ai/eneo-frontend:v1.2.3
-
-backend:
-  image: ghcr.io/eneo-ai/eneo-backend:v1.2.3
-
-worker:
-  image: ghcr.io/eneo-ai/eneo-backend:v1.2.3
-```
-
-**Where to find versions:**
-- GitHub Releases: https://github.com/eneo-ai/eneo/releases
-- Container Registry: https://github.com/orgs/eneo-ai/packages
+Find Eneo image digests in `IMAGE-DIGESTS.txt` on the matching
+[GitHub Release](https://github.com/eneo-ai/eneo/releases). Use approved release
+artifacts for the Traefik, pgvector, and Redis digests.
 
 **Controlled upgrade workflow:**
 ```bash
-# 1. Check for new versions at GitHub releases
+# 1. Review the release and its IMAGE-DIGESTS.txt.
 
-# 2. Update version tags in docker-compose.yml
-#    Change: v1.2.3 → v1.2.4
+# 2. Replace all five digest suffixes in .env and retain the previous set.
 
-# 3. Pull the specific version
+# 3. Confirm and pull the resolved image identities.
+docker compose config --images
 docker compose pull
 
-# 4. Deploy the updated version
+# 4. Deploy the reviewed digest set.
 docker compose up -d
 
-# 5. Verify the new version is running
-docker compose exec backend python -c "import eneo; print(eneo.__version__)"
+# 5. Verify the version baked into the backend image.
+curl -fsS https://your-domain.com/version
 ```
 
 ### Before You Upgrade
@@ -303,21 +308,17 @@ docker run --rm -v eneo_eneo_postgres_data:/data -v $(pwd):/backup ubuntu tar cz
 
 For routine updates (e.g., v1.2.3 → v1.2.4):
 
-**With version pinning (recommended):**
+Replace the complete digest set in `.env`, then pull and deploy it:
+
 ```bash
-# 1. Edit docker-compose.yml and update version tags
-# 2. Pull and deploy the new version
+docker compose config --images
 docker compose pull
 docker compose up -d
+curl -fsS https://your-domain.com/version
 ```
 
-**With latest tags (if you haven't pinned versions yet):**
-```bash
-docker compose pull
-docker compose up -d
-```
-
-> **Note:** Using pinned versions gives you control over when updates are applied. With `latest`, updates happen whenever you run `docker compose pull`, which may introduce unexpected changes.
+> **Note:** Restore the previous `.env` digest set to select the previous image
+> artifacts during rollback.
 
 ### Upgrading Between Major Versions or After Long Gaps
 

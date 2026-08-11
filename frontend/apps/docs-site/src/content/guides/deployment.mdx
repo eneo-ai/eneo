@@ -92,7 +92,7 @@ Before running `docker compose up`:
 - set `PUBLIC_ORIGIN` in the backend and frontend files;
 - configure at least one AI provider;
 - create the `proxy_tier` network;
-- pin released Eneo images instead of mutable `latest` tags;
+- set all five required base-stack image digest suffixes in `.env`;
 - leave the optional object-store block commented unless you have chosen and
   prepared that storage path.
 
@@ -140,6 +140,22 @@ echo "URL_SIGNING_KEY=$(openssl rand -hex 32)"
 echo "POSTGRES_PASSWORD=$(openssl rand -base64 24)"
 ```
 
+Set all five image digest suffixes in `.env`. Enter only the 64-character
+hexadecimal value after `sha256:`:
+
+```dotenv
+TRAEFIK_IMAGE_DIGEST=
+ENEO_FRONTEND_IMAGE_DIGEST=
+ENEO_BACKEND_IMAGE_DIGEST=
+PGVECTOR_IMAGE_DIGEST=
+REDIS_IMAGE_DIGEST=
+```
+
+Copy the linux/amd64 backend and frontend digests from the matching Eneo
+release's `IMAGE-DIGESTS.txt`. Use organization-approved Traefik, pgvector, and
+Redis release digests for the remaining values. Preserve the complete set with
+the deployment backup.
+
 Edit `env_backend.env` with your values:
 
 - `JWT_SECRET` - paste the generated value
@@ -160,9 +176,9 @@ Edit `docker-compose.yml`:
 - Replace `your-domain.com` with your actual domain (4 locations)
 - Replace `your-email@domain.com` with your email for Let's Encrypt
 
-The default `.env` needs no object-store values. Eneo uses bounded
-PostgreSQL-inline content. To enable the optional SeaweedFS profile or an
-external compatible endpoint, follow
+After setting the required image digests, the default `.env` needs no
+object-store values. Eneo uses bounded PostgreSQL-inline content. To enable the
+optional SeaweedFS profile or an external compatible endpoint, follow
 [Object Content Storage](/guides/object-content-storage) before deployment.
 
 ### Create Docker network and deploy
@@ -727,38 +743,26 @@ docker compose logs --tail=100 backend worker
 
 ## Maintenance
 
-### Version Pinning (Recommended)
+### Immutable Image Digests
 
 <Callout type="warning">
-  **Production deployments should pin to specific version tags** instead of
-  using `latest`. This gives you control over when updates are applied and makes
-  rollbacks straightforward.
+  The production Compose file requires immutable digests for Traefik, frontend,
+  backend, pgvector, and Redis. Missing or empty digest inputs stop Compose
+  before deployment.
 </Callout>
 
-The example `docker-compose.yml` uses `:latest` tags for simplicity, but for production you should pin versions:
+Set the five digest suffixes in `.env`. Compose builds each image identity as
+`repository@sha256:<digest-suffix>`. One backend digest supplies the API, ARQ
+worker, both Celery workers, Celery beat, and database initialization roles.
 
-```yaml
-# Default (not recommended for production)
-frontend:
-  image: ghcr.io/eneo-ai/eneo-frontend:latest
-
-# Production (pin to specific version)
-frontend:
-  image: ghcr.io/eneo-ai/eneo-frontend:v1.2.3
-backend:
-  image: ghcr.io/eneo-ai/eneo-backend:v1.2.3
-worker:
-  image: ghcr.io/eneo-ai/eneo-backend:v1.2.3
-```
-
-**Find available versions:**
+**Find Eneo image digests:**
 
 - GitHub Releases: https://github.com/eneo-ai/eneo/releases
-- Container Registry: https://github.com/orgs/eneo-ai/packages
+- Download `IMAGE-DIGESTS.txt` from the matching release.
 
 <Callout type="info">
-  **Always run the latest released version** to get bug fixes and security
-  patches. Check the release notes before upgrading.
+  Review release notes and test a complete digest set before upgrading. Keep the
+  previous set with the matching backup for rollback.
 </Callout>
 
 ### Backups
@@ -813,9 +817,10 @@ docker compose exec -T db pg_dump -U eneo eneo | gzip > backup_$(date +%Y%m%d).s
 If object-store rows exist, take the matching endpoint snapshot before resuming
 writes. Inline-only content needs no second backup artifact.
 
-### Update version tags (if pinned)
+### Update the image digest set
 
-Edit `docker-compose.yml` and update version tags (e.g., `v1.2.3` → `v1.2.4`).
+Replace all five digest suffixes in `.env`. Keep the previous `.env` with the
+matching backup.
 
 ### Review network changes
 
@@ -836,9 +841,11 @@ every command.
 For PostgreSQL-inline content or an external endpoint:
 
 ```bash
+docker compose config --images
 docker compose pull
 docker compose up -d
 docker compose ps
+curl -fsS https://eneo.example.eu/version
 ```
 
 For the bundled store:
@@ -848,7 +855,7 @@ docker compose \
   --profile object-content \
   -f docker-compose.yml \
   -f docker-compose.object-content.yml \
-  config --quiet
+  config --images
 docker compose \
   --profile object-content \
   -f docker-compose.yml \
@@ -885,8 +892,8 @@ docker image prune -a
 
 <Callout type="info">
 
-**Rollback:** Revert pinned version tags, stop writes, and restore the paired
-backup. PostgreSQL-inline and external-endpoint deployments use plain
+**Rollback:** Restore the previous `.env` digest set, stop writes, and restore
+the paired backup. PostgreSQL-inline and external-endpoint deployments use plain
 `docker compose`. A bundled-store deployment must use the overlay and profile
 for stop, restore, and `up`; otherwise the store and its private network are
 omitted.
@@ -898,7 +905,7 @@ docker compose \
   -f docker-compose.object-content.yml \
   stop backend worker object-content
 # Restore the matching PostgreSQL dump and object-store snapshot as described
-# in the linked procedure, then start the pinned versions:
+# in the linked procedure, then start the previous digest set:
 docker compose \
   --profile object-content \
   -f docker-compose.yml \

@@ -8,7 +8,7 @@ Quick deployment reference for Eneo using Docker Compose.
 
 - `docker-compose.yml` - Complete production stack (Traefik, frontend, backend, worker, PostgreSQL, Redis)
 - `docker-compose.object-content.yml` - Optional bundled SeaweedFS profile
-- `.env.template` - Optional object-store profile, endpoint, and secret inputs
+- `.env.template` - Required image digests and optional object-store inputs
 - `docker-compose.modules.yml` - Optional module overlay (inert unless a `--profile` is passed; see [MODULES.md](MODULES.md))
 - `env_backend.template` - Backend configuration (API keys, OIDC, multi-tenancy)
 - `env_frontend.template` - Frontend configuration (URLs, OIDC)
@@ -26,14 +26,17 @@ cp env_db.template env_db.env
 cp .env.template .env
 chmod 600 .env env_backend.env env_frontend.env env_db.env
 
-# 2. Edit docker-compose.yml (replace your-domain.com with your actual domain):
-#    - Line 55: your-email@domain.com (Let's Encrypt email)
-#    - Lines 88, 91, 116, 119: your-domain.com (4 locations)
+# 2. Set all five base-stack image digest suffixes in .env.
+#    Use the matching release's linux/amd64 entries for Eneo images.
 
-# 3. Configure env_db.env:
+# 3. Edit docker-compose.yml:
+#    - Replace your-email@domain.com with your Let's Encrypt email
+#    - Replace your-domain.com in all 4 locations with your actual domain
+
+# 4. Configure env_db.env:
 #    - POSTGRES_PASSWORD=your-secure-password
 
-# 4. Configure env_backend.env:
+# 5. Configure env_backend.env:
 #    - JWT_SECRET=$(openssl rand -hex 32)
 #    - PUBLIC_ORIGIN=https://your-domain.com
 #    - Add at least one LLM key: OPENAI_API_KEY or ANTHROPIC_API_KEY
@@ -42,11 +45,11 @@ chmod 600 .env env_backend.env env_frontend.env env_db.env
 #        DEFAULT_USER_EMAIL=user@example.com
 #        DEFAULT_USER_PASSWORD=Password1!
 
-# 4b. Optional object storage:
+# 5b. Optional object storage:
 #    - The default deployment uses bounded PostgreSQL-inline content
 #    - Follow https://docs.eneo.ai/guides/object-content-storage before enabling it
 
-# 5. Configure env_frontend.env:
+# 6. Configure env_frontend.env:
 #    - JWT_SECRET=<same as backend>
 #    - ENEO_BACKEND_URL=https://your-domain.com
 #    - ENEO_BACKEND_SERVER_URL=http://backend:8000
@@ -54,15 +57,15 @@ chmod 600 .env env_backend.env env_frontend.env env_db.env
 #    - ORIGIN=https://your-domain.com
 #    - PUBLIC_ORIGIN=https://your-domain.com
 
-# 6. Deploy
+# 7. Deploy
 docker network create proxy_tier
 docker compose up -d
 
-# 7. Verify db-init completed successfully (wait ~30 seconds for startup)
+# 8. Verify db-init completed successfully (wait ~30 seconds for startup)
 docker logs eneo_db_init
 # Should see: "Great! Your Tenant and User are all set up."
 
-# 8. Login with DEFAULT_USER_EMAIL / DEFAULT_USER_PASSWORD (change password immediately!)
+# 9. Login with DEFAULT_USER_EMAIL / DEFAULT_USER_PASSWORD (change password immediately!)
 ```
 
 The default stack does not require a separate object store. Eneo can keep
@@ -81,7 +84,7 @@ The stack uses four Docker networks:
 
 | Network | Services | Purpose |
 |---|---|---|
-| `proxy_tier` (external, created in step 6) | Traefik, frontend, backend, worker | Ingress and outbound access (LLM APIs, OIDC, crawling) |
+| `proxy_tier` (external, created in step 7) | Traefik, frontend, backend, worker | Ingress and outbound access (LLM APIs, OIDC, crawling) |
 | `data_net` (`internal: true`) | db, redis, backend, worker, db-init | Data layer — no internet egress, unreachable from Traefik/frontend |
 | `object_content_net` (`internal: true`) | optional object-content, backend, worker | Private S3-compatible byte plane when enabled; no public route |
 | `module_net` | Traefik, backend, optional modules | Module traffic — modules reach the backend only (see [MODULES.md](MODULES.md)) |
@@ -95,7 +98,9 @@ Traefik containers and have no outbound internet access.
 Installations created from an earlier version of this file had every service on
 `proxy_tier`. Choose the Compose invocation that matches the deployment
 **before the first recreate**, and keep that same invocation in the deployment
-and rollback runbooks:
+and rollback runbooks. Copy the current `.env.template` to `.env`, set all five
+image digest suffixes, and preserve the previous digest set with the deployment
+backup.
 
 ```bash
 # PostgreSQL-inline or an external S3-compatible endpoint:

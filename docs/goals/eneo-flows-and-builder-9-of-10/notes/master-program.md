@@ -277,6 +277,11 @@ ARTIFACT re-checked per slice, not a permanent grep gate.
       domain's existing rate-limit and unavailable codes into Flow's public
       error vocabulary without adding a retry path or third disposition owner;
       Claude gate and final validation recorded with the landing commit.
+- [x] L1b immutable release identity: the production Compose owner now requires
+      five digest suffixes and resolves every base-stack service to an immutable
+      image. One backend digest supplies all six backend roles; the deployment
+      `.env.template` owns operator input, and baked-manifest version precedence
+      remains unchanged and tested.
 
 ## The Ranked Program (v10.3 — execution phase; slice bodies carry
 ## their originating iteration tags)
@@ -738,7 +743,7 @@ sake.
     lifecycle owner. `acks_late` stays untouched; any future change
     needs a process-crash matrix (before claim / after claim / during
     shutdown) first.
-- [ ] L1b Immutable release identity (NEW, iteration 34): production
+- [x] L1b Immutable release identity (completed 2026-08-11; NEW, iteration 34): production
     reads the baked release manifest first — `GIT_COMMIT` is only a
     fallback (`main/config.py:193`) — while every deployment role
     ships mutable `:latest` images. Pin the COMPLETE base-stack
@@ -749,7 +754,16 @@ sake.
     framework; verify the baked version; L5 records the full resolved
     digest set for rollback. Runtime `GIT_COMMIT`
     stamping remains a DEVCONTAINER-ONLY mechanism and is deleted
-    from the production plan.
+    from the production plan. The production Compose now requires five digest
+    suffixes in `.env` and resolves all ten service images immutably; the same
+    backend digest is reused by the API, ARQ worker, both Celery workers, beat
+    and database initializer. Deployment docs describe reviewed digest-set
+    upgrades and rollback, while a characterization test preserves baked
+    release-manifest precedence over local manifests and `GIT_COMMIT`.
+    Follow-up documentation truth work must remove the stale weekly mutable-tag
+    pull from `docs/TROUBLESHOOTING.md:1124`, update the production image list in
+    `docs/ARCHITECTURE.md:830`, and make the digest-set selection explicit in
+    `docs/DEPLOYMENT_WORKFLOW.md:233`; none changes this runtime contract.
 - [x] L1c Capacity envelope — LANDED `355ad6f68` (gate green 8)
     ORIGINAL SPEC: (NEW, iteration 34): max_connections=300
     was a dev-incident value, not policy — the configured envelope is
@@ -922,9 +936,8 @@ not inspect mutable candidate results:
 - Public contracts: FLOW-RETENTION and FLOW-DOC may proceed after
   FLOW-AUTH, in sequence and independently of Builder ownership work.
   BUILDER-API waits for the ownership-tranche checkpoint.
-- Runtime: L2 is complete. L1b, L3 and L5 remain sequential
-  because L1b and L3 share the deployment compose and L5 consumes both
-  outcomes.
+- Runtime: L2 and L1b are complete. L3 is next, then L5 consumes the typed
+  provider failures, immutable image set and health contracts under load.
 
 Dependencies that stay hard (v10.3): FLOW-AUTH before Flow public
 contract work; CP-ADMIT-0 before the next Builder ownership transfer;

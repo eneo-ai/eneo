@@ -4,10 +4,11 @@
 # Complete production stack with Traefik reverse proxy and Let's Encrypt SSL
 #
 # BEFORE DEPLOYING:
-#   1. Replace "your-email@domain.com" (line 55) with your email
-#   2. Replace "your-domain.com" (lines 88, 91, 116, 119) with your domain
-#   3. Configure environment files (env_backend.env, env_frontend.env, env_db.env)
-#   4. Create external network: docker network create proxy_tier
+#   1. Copy .env.template to .env and set every required image digest
+#   2. Replace "your-email@domain.com" with your email
+#   3. Replace "your-domain.com" with your domain
+#   4. Configure environment files (env_backend.env, env_frontend.env, env_db.env)
+#   5. Create external network: docker network create proxy_tier
 #
 # CUSTOMIZATION NOTE:
 #   This is a reference configuration. Customize for your organization's
@@ -50,7 +51,7 @@ name: eneo
 
 services:
   traefik:
-    image: traefik:v3
+    image: traefik@sha256:${TRAEFIK_IMAGE_DIGEST:?Set TRAEFIK_IMAGE_DIGEST in .env}
     container_name: eneo_traefik
     restart: unless-stopped
     command:
@@ -84,7 +85,7 @@ services:
       - "traefik.http.middlewares.redirect-to-https.redirectscheme.permanent=true"
 
   frontend:
-    image: ghcr.io/eneo-ai/eneo-frontend:latest
+    image: ghcr.io/eneo-ai/eneo-frontend@sha256:${ENEO_FRONTEND_IMAGE_DIGEST:?Set ENEO_FRONTEND_IMAGE_DIGEST in .env}
     container_name: eneo_frontend
     restart: unless-stopped
     env_file:
@@ -107,7 +108,7 @@ services:
       - backend
 
   backend:
-    image: ghcr.io/eneo-ai/eneo-backend:latest
+    image: ghcr.io/eneo-ai/eneo-backend@sha256:${ENEO_BACKEND_IMAGE_DIGEST:?Set ENEO_BACKEND_IMAGE_DIGEST in .env}
     container_name: eneo_backend
     restart: unless-stopped
     environment:
@@ -161,7 +162,7 @@ services:
     # Background task processor (crawls, uploads, integrations)
     # Uses same image as backend but runs ARQ worker instead of HTTP server
     # The RUN_AS_WORKER env var tells run.sh to start ARQ instead of Gunicorn
-    image: ghcr.io/eneo-ai/eneo-backend:latest
+    image: ghcr.io/eneo-ai/eneo-backend@sha256:${ENEO_BACKEND_IMAGE_DIGEST:?Set ENEO_BACKEND_IMAGE_DIGEST in .env}
     container_name: eneo_worker
     restart: unless-stopped
     environment:
@@ -186,7 +187,7 @@ services:
 
   celery-worker-flows:
     # Flow execution worker (Celery). Runs alongside ARQ worker during migration.
-    image: ghcr.io/eneo-ai/eneo-backend:latest
+    image: ghcr.io/eneo-ai/eneo-backend@sha256:${ENEO_BACKEND_IMAGE_DIGEST:?Set ENEO_BACKEND_IMAGE_DIGEST in .env}
     container_name: eneo_celery_worker_flows
     restart: unless-stopped
     environment:
@@ -212,7 +213,7 @@ services:
 
   celery-worker-flows-maintenance:
     # Flow maintenance worker for reconciliation and outbox delivery.
-    image: ghcr.io/eneo-ai/eneo-backend:latest
+    image: ghcr.io/eneo-ai/eneo-backend@sha256:${ENEO_BACKEND_IMAGE_DIGEST:?Set ENEO_BACKEND_IMAGE_DIGEST in .env}
     container_name: eneo_celery_worker_flows_maintenance
     restart: unless-stopped
     environment:
@@ -236,7 +237,7 @@ services:
 
   celery-beat-flows:
     # Flow reconciliation scheduler (Celery beat). Required for stale-run reconciliation.
-    image: ghcr.io/eneo-ai/eneo-backend:latest
+    image: ghcr.io/eneo-ai/eneo-backend@sha256:${ENEO_BACKEND_IMAGE_DIGEST:?Set ENEO_BACKEND_IMAGE_DIGEST in .env}
     container_name: eneo_celery_beat_flows
     restart: unless-stopped
     environment:
@@ -257,7 +258,7 @@ services:
       - redis
 
   db:
-    image: pgvector/pgvector:pg16
+    image: pgvector/pgvector@sha256:${PGVECTOR_IMAGE_DIGEST:?Set PGVECTOR_IMAGE_DIGEST in .env}
     container_name: eneo_db
     restart: unless-stopped
     # CONNECTION CEILING. PostgreSQL defaults to 100, which this stack
@@ -292,7 +293,7 @@ services:
       retries: 5
 
   redis:
-    image: redis:7-alpine
+    image: redis@sha256:${REDIS_IMAGE_DIGEST:?Set REDIS_IMAGE_DIGEST in .env}
     container_name: eneo_redis
     restart: unless-stopped
     volumes:
@@ -308,7 +309,7 @@ services:
   db-init:
     # Runs database migrations and creates default tenant/user on first startup
     # Only runs once - exits after completion (restart: "no")
-    image: ghcr.io/eneo-ai/eneo-backend:latest
+    image: ghcr.io/eneo-ai/eneo-backend@sha256:${ENEO_BACKEND_IMAGE_DIGEST:?Set ENEO_BACKEND_IMAGE_DIGEST in .env}
     container_name: eneo_db_init
     command: ["python", "init_db.py"]
     env_file:
