@@ -15,6 +15,7 @@ from eneo.flows.ai_builder.ai_builder_architecture_commit import (
 from eneo.flows.ai_builder.ai_builder_architecture_derivation import (
     derive_architecture_commit_draft,
 )
+from eneo.flows.ai_builder.ai_builder_error_contract import AIBuilderErrorCode
 from eneo.flows.ai_builder.ai_builder_slot_classification_contract import (
     UNKNOWN_SLOT_VALUE,
     ClassifiedSlot,
@@ -22,12 +23,17 @@ from eneo.flows.ai_builder.ai_builder_slot_classification_contract import (
     SlotClassificationResult,
 )
 from eneo.flows.ai_builder.planning_state import (
+    ArchitectureCommitDraft,
+    CheckpointIntent,
+    FileRoleEvidence,
     PlanningState,
     ResolvedSlot,
     SlotConfidence,
     SlotSource,
+    StepTriple,
 )
 from eneo.flows.ai_builder.planning_state_builder import merge_llm_resolved_slots
+from eneo.flows.flow_review_policy import FlowStepReviewMode
 
 
 def _slot_value(slot_name: str) -> str:
@@ -91,6 +97,26 @@ def _state_with_architecture_commit() -> PlanningState:
         now=lambda: datetime(2026, 4, 24, tzinfo=timezone.utc),
     )
     return state
+
+
+def _template_file_role(
+    *,
+    placeholders: list[str] | None,
+) -> FileRoleEvidence:
+    return FileRoleEvidence(
+        file_id="00000000-0000-0000-0000-000000000701",
+        filename="mall.docx",
+        file_type="document",
+        mimetype=(
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        ),
+        has_readable_text=True,
+        coverage="fully_seen",
+        role="template",
+        source="structured_answer",
+        confidence="high",
+        template_placeholders=placeholders,
+    )
 
 
 def test_policy_blocks_commit_and_plan_until_core_architecture_is_resolved() -> None:
@@ -420,8 +446,11 @@ def test_policy_refuses_removed_json_to_text_architecture() -> None:
         selected_discovery_question_ids=(),
     )
 
-    assert policy.allowed_action_kinds == ("refuse_unsupported_architecture",)
+    assert policy.allowed_action_kinds == ("refuse_architecture_commit",)
     assert policy.allowed_ask_question_targets == ()
+    assert (
+        policy.architecture_refusal_code is AIBuilderErrorCode.UNSUPPORTED_ARCHITECTURE
+    )
 
 
 def test_policy_refuses_unsupported_revision_of_committed_architecture() -> None:
@@ -448,7 +477,157 @@ def test_policy_refuses_unsupported_revision_of_committed_architecture() -> None
         requirements_confirmed=True,
     )
 
-    assert policy.allowed_action_kinds == ("refuse_unsupported_architecture",)
+    assert policy.allowed_action_kinds == ("refuse_architecture_commit",)
+    assert (
+        policy.architecture_refusal_code is AIBuilderErrorCode.UNSUPPORTED_ARCHITECTURE
+    )
+
+
+def test_policy_refuses_unsupported_committed_pattern_envelope() -> None:
+    state = PlanningState.empty()
+    state.architecture_commit = finalize_architecture_commit(
+        ArchitectureCommitDraft(
+            tuples_chain=[
+                StepTriple(
+                    input_type="audio",
+                    output_type="docx",
+                    output_mode="pass_through",
+                )
+            ],
+            chosen_patterns=[
+                "audio_to_artifact_report",
+                "text_to_artifact_report",
+            ],
+            required_capabilities=["input_audio", "output_mode_pass_through"],
+        )
+    )
+
+    policy = build_planner_action_policy(
+        session_state=state,
+        selected_discovery_question_ids=(),
+    )
+
+    assert policy.allowed_action_kinds == ("refuse_architecture_commit",)
+    assert (
+        policy.architecture_refusal_code is AIBuilderErrorCode.UNSUPPORTED_ARCHITECTURE
+    )
+
+
+def test_policy_requires_audio_for_a_transcript_checkpoint() -> None:
+    state = _state_with_architecture_commit()
+    state.checkpoint_intents = [
+        CheckpointIntent(
+            producer_kind="transcript",
+            operation="set",
+            mode=FlowStepReviewMode.EDIT,
+            confidence="high",
+            evidence=["quote:user_message:test:transcript-checkpoint"],
+        )
+    ]
+
+    refused = build_planner_action_policy(
+        session_state=state,
+        selected_discovery_question_ids=(),
+    )
+
+    assert refused.allowed_action_kinds == ("refuse_architecture_commit",)
+    assert (
+        refused.architecture_refusal_code
+        is AIBuilderErrorCode.TRANSCRIPT_CHECKPOINT_REQUIRES_AUDIO
+    )
+
+    state.checkpoint_intents = [
+        CheckpointIntent(
+            producer_kind="transcript",
+            operation="clear",
+            mode=None,
+            confidence="high",
+            evidence=["quote:user_message:test:clear-transcript-checkpoint"],
+        )
+    ]
+    allowed_clear = build_planner_action_policy(
+        session_state=state,
+        selected_discovery_question_ids=(),
+    )
+    assert allowed_clear.allowed_action_kinds == ("confirm_requirements",)
+    assert allowed_clear.architecture_refusal_code is None
+
+    audio_state = _state_with_resolved_slots(
+        "primary_runtime_input",
+        "terminal_output",
+    )
+    audio_state.resolved_slots["primary_runtime_input"] = _slot(
+        "primary_runtime_input",
+        "audio",
+    )
+    audio_draft = derive_architecture_commit_draft(audio_state)
+    assert audio_draft is not None
+    audio_state.architecture_commit = finalize_architecture_commit(audio_draft)
+    audio_state.checkpoint_intents = [
+        CheckpointIntent(
+            producer_kind="transcript",
+            operation="set",
+            mode=FlowStepReviewMode.EDIT,
+            confidence="high",
+            evidence=["quote:user_message:test:audio-transcript-checkpoint"],
+        )
+    ]
+    allowed_audio = build_planner_action_policy(
+        session_state=audio_state,
+        selected_discovery_question_ids=(),
+    )
+    assert allowed_audio.allowed_action_kinds == ("confirm_requirements",)
+    assert allowed_audio.architecture_refusal_code is None
+
+
+def test_policy_requires_one_readable_template_for_template_fill() -> None:
+    state = _state_with_resolved_slots(
+        "primary_runtime_input",
+        "terminal_output",
+        "document_material_scope",
+    )
+    state.resolved_slots["terminal_output"] = _slot(
+        "terminal_output",
+        "docx_document",
+    )
+    state.resolved_slots["docx_output_mode"] = _slot(
+        "docx_output_mode",
+        "template_fill_docx",
+    )
+    draft = derive_architecture_commit_draft(state)
+    assert draft is not None
+    state.architecture_commit = finalize_architecture_commit(draft)
+
+    missing = build_planner_action_policy(
+        session_state=state,
+        selected_discovery_question_ids=(),
+    )
+    assert missing.allowed_action_kinds == ("refuse_architecture_commit",)
+    assert (
+        missing.architecture_refusal_code
+        is AIBuilderErrorCode.TEMPLATE_ATTACHMENT_SELECTION_INVALID
+    )
+
+    state.file_roles = [_template_file_role(placeholders=None)]
+    unreadable = build_planner_action_policy(
+        session_state=state,
+        selected_discovery_question_ids=(),
+    )
+    assert unreadable.allowed_action_kinds == ("refuse_architecture_commit",)
+    assert (
+        unreadable.architecture_refusal_code
+        is AIBuilderErrorCode.TEMPLATE_ATTACHMENT_UNREADABLE
+    )
+
+    state.file_roles[0] = state.file_roles[0].model_copy(
+        update={"template_placeholders": []}
+    )
+    readable = build_planner_action_policy(
+        session_state=state,
+        selected_discovery_question_ids=(),
+    )
+    assert readable.allowed_action_kinds == ("confirm_requirements",)
+    assert readable.architecture_refusal_code is None
 
 
 def test_policy_does_not_force_policy_default_docx_mode_into_questions() -> None:
@@ -571,6 +750,7 @@ def test_policy_does_not_ask_report_disposition_for_docx_template_fill() -> None
         "document_material_scope",
         "multiple_documents_case",
     )
+    state.file_roles = [_template_file_role(placeholders=[])]
 
     policy = build_planner_action_policy(
         session_state=state,

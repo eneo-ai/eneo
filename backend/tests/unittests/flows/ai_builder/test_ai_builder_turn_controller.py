@@ -29,6 +29,7 @@ from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
     metadata_for_user_message,
 )
 from eneo.flows.ai_builder.ai_builder_domain_models import ConversationMessage
+from eneo.flows.ai_builder.ai_builder_error_contract import AIBuilderErrorCode
 from eneo.flows.ai_builder.ai_builder_requirements_state import (
     build_requirements_version,
 )
@@ -46,7 +47,7 @@ from eneo.flows.ai_builder.ai_builder_turn_controller import (
     CommitArchitecture,
     ConfirmRequirements,
     GenerateProposal,
-    RefuseUnsupportedArchitecture,
+    RefuseArchitectureCommit,
     ReviseArchitecture,
     _slot_is_key_decision,
     resolve_turn_control,
@@ -182,7 +183,38 @@ def test_unsupported_architecture_returns_localized_refusal(
 
     decision = _decision(state=state, ui_language=ui_language)
 
-    assert decision == RefuseUnsupportedArchitecture(message=expected_message)
+    assert decision == RefuseArchitectureCommit(
+        code=AIBuilderErrorCode.UNSUPPORTED_ARCHITECTURE,
+        message=expected_message,
+    )
+
+
+def test_transcript_checkpoint_refusal_has_actionable_localized_message() -> None:
+    state = _state(
+        primary_runtime_input="documents",
+        terminal_output="structured_text",
+    )
+    state.architecture_commit = _finalized_commit_for_state(state)
+    state.checkpoint_intents = [
+        CheckpointIntent(
+            producer_kind="transcript",
+            operation="set",
+            mode="edit",
+            confidence="high",
+            evidence=["quote:user_message:test:transcript-checkpoint"],
+        )
+    ]
+
+    decision = _decision(state=state, ui_language="sv")
+
+    assert decision == RefuseArchitectureCommit(
+        code=AIBuilderErrorCode.TRANSCRIPT_CHECKPOINT_REQUIRES_AUDIO,
+        message=(
+            "En granskningspunkt för transkribering kräver ljud som indata vid "
+            "körning. Välj ljud som indata eller ta bort granskningen av "
+            "transkriberingen och försök igen."
+        ),
+    )
 
 
 def test_vague_purpose_question_survives_to_the_emitted_turn_decision() -> None:
@@ -558,6 +590,22 @@ def test_server_does_not_project_attachment_structure_as_confirmed_requirement()
         "template_fill_docx",
         source="attachment_structure",
     )
+    state.file_roles = [
+        FileRoleEvidence(
+            file_id="00000000-0000-0000-0000-000000000701",
+            filename="mall.docx",
+            file_type="document",
+            mimetype=(
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+            ),
+            has_readable_text=True,
+            coverage="fully_seen",
+            role="template",
+            source="heuristic",
+            confidence="high",
+            template_placeholders=[],
+        )
+    ]
     state.architecture_commit = _finalized_commit_for_state(state)
 
     decision = _decision(state=state, ui_language="sv")

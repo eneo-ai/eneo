@@ -53,7 +53,7 @@ from eneo.flows.ai_builder.ai_builder_template_attachment_contract import (
     apply_template_attachment_contract,
     template_preparation_stage_limit_exceeded,
 )
-from eneo.flows.ai_builder.pattern_registry import PATTERN_REGISTRY
+from eneo.flows.ai_builder.pattern_registry import pattern_chain_steps
 from eneo.flows.ai_builder.planning_state import (
     AggregationIntent,
     ArchitectureCommit,
@@ -1064,17 +1064,7 @@ def _pattern_chain_steps_from_architecture(
 ) -> tuple[str, ...]:
     if architecture is None:
         return ()
-    chain_steps: list[str] = []
-    seen: set[str] = set()
-    for pattern_id in architecture.chosen_patterns:
-        pattern = PATTERN_REGISTRY.get(pattern_id)
-        if pattern is not None and pattern.chain_steps:
-            for chain_step in pattern.chain_steps:
-                if chain_step in seen:
-                    continue
-                chain_steps.append(chain_step)
-                seen.add(chain_step)
-    return tuple(chain_steps)
+    return pattern_chain_steps(architecture.chosen_patterns)
 
 
 def _pattern_ids_from_architecture(

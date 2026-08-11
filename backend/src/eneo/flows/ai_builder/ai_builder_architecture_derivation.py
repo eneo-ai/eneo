@@ -13,7 +13,16 @@ from eneo.flows.ai_builder.ai_builder_aggregation_intent import (
     report_disposition_is_relevant,
 )
 from eneo.flows.ai_builder.ai_builder_new_step_compiler import derive_output_mode
-from eneo.flows.ai_builder.pattern_registry import PATTERN_REGISTRY
+from eneo.flows.ai_builder.pattern_registry import (
+    EXTRACT_TEMPLATE_VARIABLES_STEP,
+    FLOW_INPUT_AUDIO_TRANSCRIPTION,
+    FLOW_INPUT_DOCUMENT_UPLOAD,
+    PATTERN_REGISTRY,
+    PREPARE_TEMPLATE_CONTENT_STEP,
+    TEMPLATE_FILL_DOCX_STEP,
+    TERMINAL_ARTIFACT_STEP,
+    pattern_chain_steps,
+)
 from eneo.flows.ai_builder.planning_state import (
     ArchitectureCommitDraft,
     PlanningState,
@@ -31,10 +40,46 @@ from eneo.flows.enums import (
 from eneo.flows.flow_authoring_spec import (
     InputType as AuthoringInputType,
 )
+from eneo.flows.flow_authoring_spec import OutputMode as AuthoringOutputMode
 from eneo.flows.flow_authoring_spec import (
     OutputType as AuthoringOutputType,
 )
 from eneo.flows.flow_capability_manifest import resolve_capability_for_tuple
+
+_AUDIO_ARTIFACT_PATTERN_ID = "audio_to_artifact_report"
+_FORM_FIELD_RUNTIME_INPUTS_PATTERN_ID = "form_field_runtime_inputs"
+_AUDIO_PATTERN_IDS_WITH_FORM_FIELDS = frozenset(
+    {
+        "audio_transcription",
+        _AUDIO_ARTIFACT_PATTERN_ID,
+        _FORM_FIELD_RUNTIME_INPUTS_PATTERN_ID,
+    }
+)
+_AUDIO_PATTERN_CHAIN_STEPS = frozenset(
+    {FLOW_INPUT_AUDIO_TRANSCRIPTION, TERMINAL_ARTIFACT_STEP}
+)
+_DOCX_TEMPLATE_PATTERN_ID = "document_to_docx_template"
+_DOCX_TEMPLATE_PATTERN_CHAIN_STEPS = frozenset(
+    {
+        FLOW_INPUT_DOCUMENT_UPLOAD,
+        EXTRACT_TEMPLATE_VARIABLES_STEP,
+        PREPARE_TEMPLATE_CONTENT_STEP,
+        TEMPLATE_FILL_DOCX_STEP,
+    }
+)
+_SUPPORTED_STRUCTURAL_PATTERN_IDS = frozenset(
+    {
+        "comparison",
+        "document_to_pdf_report",
+        "document_to_structured_report",
+        "extract_structured_fields",
+        "form_field_runtime_inputs",
+        "json_to_artifact_report",
+        "json_to_structured_payload",
+        "summarize_text",
+        "text_to_artifact_report",
+    }
+)
 
 
 def derive_architecture_commit_draft(
@@ -91,6 +136,71 @@ def derive_architecture_commit_draft(
         ),
         report_disposition=_report_disposition_from_state(state),
     )
+
+
+def architecture_commit_hints_are_supported(
+    architecture: ArchitectureCommitDraft,
+) -> bool:
+    """Whether one committed pattern envelope has a supported compiler shape."""
+
+    if not architecture.tuples_chain:
+        return False
+    first = architecture.tuples_chain[0]
+    last = architecture.tuples_chain[-1]
+    return architecture_hints_are_supported(
+        runtime_input_type=AuthoringInputType(first.input_type.value),
+        final_output_type=AuthoringOutputType(last.output_type.value),
+        final_output_mode=AuthoringOutputMode(last.output_mode.value),
+        pattern_ids=tuple(architecture.chosen_patterns),
+        chain_steps=pattern_chain_steps(architecture.chosen_patterns),
+    )
+
+
+def architecture_hints_are_supported(
+    *,
+    runtime_input_type: AuthoringInputType,
+    final_output_type: AuthoringOutputType,
+    final_output_mode: AuthoringOutputMode | None,
+    pattern_ids: tuple[str, ...],
+    chain_steps: tuple[str, ...],
+) -> bool:
+    """Validate the pattern envelope used by create assembly."""
+
+    if not pattern_ids and not chain_steps:
+        return True
+    if not chain_steps and set(pattern_ids) <= _SUPPORTED_STRUCTURAL_PATTERN_IDS:
+        return True
+    if runtime_input_type is AuthoringInputType.AUDIO:
+        pattern_id_set = set(pattern_ids)
+        if (
+            _FORM_FIELD_RUNTIME_INPUTS_PATTERN_ID in pattern_id_set
+            and _AUDIO_ARTIFACT_PATTERN_ID not in pattern_id_set
+        ):
+            return False
+        return (
+            pattern_id_set <= _AUDIO_PATTERN_IDS_WITH_FORM_FIELDS
+            and set(chain_steps) <= _AUDIO_PATTERN_CHAIN_STEPS
+        )
+    if (
+        runtime_input_type in {AuthoringInputType.DOCUMENT, AuthoringInputType.FILE}
+        and final_output_type is AuthoringOutputType.DOCX
+        and final_output_mode is AuthoringOutputMode.TEMPLATE_FILL
+    ):
+        pattern_id_set = set(pattern_ids)
+        if (
+            _FORM_FIELD_RUNTIME_INPUTS_PATTERN_ID in pattern_id_set
+            and _DOCX_TEMPLATE_PATTERN_ID not in pattern_id_set
+        ):
+            return False
+        return (
+            pattern_id_set
+            <= {
+                _DOCX_TEMPLATE_PATTERN_ID,
+                _FORM_FIELD_RUNTIME_INPUTS_PATTERN_ID,
+            }
+            and set(chain_steps) <= _DOCX_TEMPLATE_PATTERN_CHAIN_STEPS
+        )
+    return False
 
 
 def _input_type_from_state(state: PlanningState) -> FlowInputType | None:
@@ -246,6 +356,8 @@ def _step_output_mode_value(
 
 
 __all__ = [
+    "architecture_commit_hints_are_supported",
+    "architecture_hints_are_supported",
     "derive_architecture_commit_draft",
     "flow_input_type_from_primary_runtime_input_value",
 ]

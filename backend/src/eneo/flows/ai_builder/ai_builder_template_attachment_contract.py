@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from collections.abc import Mapping
-from typing import cast
+from collections.abc import Mapping, Sequence
+from typing import TypeGuard, cast
 
 from eneo.flows.ai_builder.ai_builder_architecture_errors import (
     AIBuilderArchitectureError,
@@ -89,7 +89,7 @@ def apply_template_attachment_contract(
             failure_code="template_fill_position_invalid",
             detail="A DOCX template-fill step must be the final Flow step.",
         )
-    if selected_template_count != 1:
+    if not template_attachment_selection_is_valid(selected_template_count):
         raise _architecture_error(
             failure_code="template_attachment_selection_invalid",
             detail=(
@@ -98,7 +98,7 @@ def apply_template_attachment_contract(
             ),
             selected_template_count=selected_template_count,
         )
-    if placeholders is None:
+    if not selected_template_is_readable(placeholders):
         raise _architecture_error(
             failure_code="template_attachment_unreadable",
             detail=(
@@ -183,7 +183,17 @@ def apply_template_attachment_contract(
     return spec.model_copy(update={"steps": steps, "form_fields": form_fields})
 
 
-def _normalized_unique_placeholders(placeholders: tuple[str, ...]) -> tuple[str, ...]:
+def template_attachment_selection_is_valid(selected_template_count: int) -> bool:
+    return selected_template_count == 1
+
+
+def selected_template_is_readable(
+    placeholders: Sequence[str] | None,
+) -> TypeGuard[Sequence[str]]:
+    return placeholders is not None
+
+
+def _normalized_unique_placeholders(placeholders: Sequence[str]) -> tuple[str, ...]:
     normalized: list[str] = []
     seen: set[str] = set()
     for raw_placeholder in placeholders:
@@ -419,5 +429,7 @@ def _architecture_error(
 __all__ = [
     "MAX_TEMPLATE_PREPARATION_STAGES",
     "apply_template_attachment_contract",
+    "selected_template_is_readable",
+    "template_attachment_selection_is_valid",
     "template_preparation_stage_limit_exceeded",
 ]

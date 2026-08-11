@@ -25,6 +25,7 @@ from eneo.flows.ai_builder.ai_builder_attachment_context import (
     render_ai_builder_evidence_value,
 )
 from eneo.flows.ai_builder.ai_builder_discovery_models import BackendQuestion
+from eneo.flows.ai_builder.ai_builder_error_contract import AIBuilderErrorCode
 from eneo.flows.ai_builder.ai_builder_event_models import (
     KeyDecisionPayload,
     RequirementsSummaryPayload,
@@ -77,6 +78,43 @@ _UNSUPPORTED_ARCHITECTURE_MESSAGE_SV = (
     "Den här kombinationen av indata och slutresultat stöds inte. Börja om "
     "och välj en annan indata eller ett annat slutresultat."
 )
+_ARCHITECTURE_REFUSAL_MESSAGES: Mapping[AIBuilderErrorCode, Mapping[Locale, str]] = {
+    AIBuilderErrorCode.UNSUPPORTED_ARCHITECTURE: {
+        "en": _UNSUPPORTED_ARCHITECTURE_MESSAGE_EN,
+        "sv": _UNSUPPORTED_ARCHITECTURE_MESSAGE_SV,
+    },
+    AIBuilderErrorCode.TRANSCRIPT_CHECKPOINT_REQUIRES_AUDIO: {
+        "en": (
+            "A transcript review checkpoint requires audio as the runtime input. "
+            "Choose audio input or remove the transcript checkpoint and try again."
+        ),
+        "sv": (
+            "En granskningspunkt för transkribering kräver ljud som indata vid "
+            "körning. Välj ljud som indata eller ta bort granskningen av "
+            "transkriberingen och försök igen."
+        ),
+    },
+    AIBuilderErrorCode.TEMPLATE_ATTACHMENT_SELECTION_INVALID: {
+        "en": (
+            "A template-fill Flow requires exactly one selected DOCX template. "
+            "Attach or select one DOCX template and try again."
+        ),
+        "sv": (
+            "Ett flöde som fyller i en mall kräver exakt en vald DOCX-mall. "
+            "Bifoga eller välj en DOCX-mall och försök igen."
+        ),
+    },
+    AIBuilderErrorCode.TEMPLATE_ATTACHMENT_UNREADABLE: {
+        "en": (
+            "The selected DOCX template could not be inspected safely. Attach a "
+            "valid DOCX file and try again."
+        ),
+        "sv": (
+            "Den valda DOCX-mallen kunde inte läsas på ett säkert sätt. Bifoga en "
+            "giltig DOCX-fil och försök igen."
+        ),
+    },
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -107,7 +145,8 @@ class GenerateProposal:
 
 
 @dataclass(frozen=True, slots=True)
-class RefuseUnsupportedArchitecture:
+class RefuseArchitectureCommit:
+    code: AIBuilderErrorCode
     message: str
 
 
@@ -117,7 +156,7 @@ BuilderTurnDecision: TypeAlias = (
     | ReviseArchitecture
     | ConfirmRequirements
     | GenerateProposal
-    | RefuseUnsupportedArchitecture
+    | RefuseArchitectureCommit
 )
 
 
@@ -146,14 +185,14 @@ def resolve_turn_control(
             confirmed_attachment_evidence_fingerprint == attachment_evidence_fingerprint
         ),
     )
-    if action_policy.allowed_action_kinds == ("refuse_unsupported_architecture",):
+    if action_policy.allowed_action_kinds == ("refuse_architecture_commit",):
+        refusal_code = action_policy.architecture_refusal_code
+        if refusal_code is None:
+            raise ValueError("architecture refusal action requires a public error code")
         return BuilderTurnControl(
-            decision=RefuseUnsupportedArchitecture(
-                message=(
-                    _UNSUPPORTED_ARCHITECTURE_MESSAGE_SV
-                    if locale == "sv"
-                    else _UNSUPPORTED_ARCHITECTURE_MESSAGE_EN
-                )
+            decision=RefuseArchitectureCommit(
+                code=refusal_code,
+                message=_ARCHITECTURE_REFUSAL_MESSAGES[refusal_code][locale],
             )
         )
     if schema_direction_pending:
@@ -1067,7 +1106,7 @@ __all__ = [
     "CommitArchitecture",
     "ConfirmRequirements",
     "GenerateProposal",
-    "RefuseUnsupportedArchitecture",
+    "RefuseArchitectureCommit",
     "ReviseArchitecture",
     "resolve_turn_control",
 ]

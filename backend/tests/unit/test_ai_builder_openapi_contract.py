@@ -414,6 +414,9 @@ def test_openapi_ai_builder_turn_retry_errors_and_recovery_are_documented(
         "planning_state_payload_too_large",
         "session_turn_idempotency_conflict",
         "session_turn_provider_outcome_unknown",
+        "template_attachment_selection_invalid",
+        "template_attachment_unreadable",
+        "transcript_checkpoint_requires_audio",
     }.issubset(error_codes)
     for expected in (
         "same ID",

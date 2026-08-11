@@ -169,6 +169,9 @@ class AIBuilderErrorCode(StrEnum):
     SESSION_TURN_PROVIDER_OUTCOME_UNKNOWN = "session_turn_provider_outcome_unknown"
     STALE_PLAN_REVISION = "stale_plan_revision"
     STALE_REVISION = "stale_revision"
+    TEMPLATE_ATTACHMENT_SELECTION_INVALID = "template_attachment_selection_invalid"
+    TEMPLATE_ATTACHMENT_UNREADABLE = "template_attachment_unreadable"
+    TRANSCRIPT_CHECKPOINT_REQUIRES_AUDIO = "transcript_checkpoint_requires_audio"
     TRANSCRIPTION_MODEL_REQUIRED = "transcription_model_required"
     UNSUPPORTED_ARCHITECTURE = "unsupported_architecture"
     UNSUPPORTED_REVISION_TYPE = "unsupported_revision_type"
@@ -929,6 +932,24 @@ AI_BUILDER_ERROR_REGISTRY: _AIBuilderErrorRegistry = MappingProxyType(
             category=AIBuilderErrorCategory.CONFLICT,
             http_status=409,
             eneo_error_code=ErrorCodes.BAD_REQUEST,
+        ),
+        AIBuilderErrorCode.TEMPLATE_ATTACHMENT_SELECTION_INVALID: _entry(
+            category=AIBuilderErrorCategory.BAD_REQUEST,
+            http_status=400,
+            eneo_error_code=ErrorCodes.BAD_REQUEST,
+            default_phase=AIBuilderErrorPhase.PLANNER,
+        ),
+        AIBuilderErrorCode.TEMPLATE_ATTACHMENT_UNREADABLE: _entry(
+            category=AIBuilderErrorCategory.BAD_REQUEST,
+            http_status=400,
+            eneo_error_code=ErrorCodes.BAD_REQUEST,
+            default_phase=AIBuilderErrorPhase.PLANNER,
+        ),
+        AIBuilderErrorCode.TRANSCRIPT_CHECKPOINT_REQUIRES_AUDIO: _entry(
+            category=AIBuilderErrorCategory.BAD_REQUEST,
+            http_status=400,
+            eneo_error_code=ErrorCodes.BAD_REQUEST,
+            default_phase=AIBuilderErrorPhase.PLANNER,
         ),
         AIBuilderErrorCode.TRANSCRIPTION_MODEL_REQUIRED: _entry(
             category=AIBuilderErrorCategory.BAD_REQUEST,

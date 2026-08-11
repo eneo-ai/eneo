@@ -36,6 +36,7 @@ from eneo.flows.ai_builder.planning_state import (
 from eneo.flows.application.flow_authoring_snapshot import (
     current_flow_authoring_spec,
 )
+from eneo.flows.enums import FlowAuthoringInputType
 from eneo.flows.flow_authoring_spec import (
     FlowDraftSpecCore,
     OutputMode,
@@ -63,6 +64,21 @@ class CheckpointIntentMismatch:
     step_ref: str | None
     expected_mode: FlowStepReviewMode | None
     actual_mode: FlowStepReviewMode | None
+
+
+def transcript_checkpoint_requires_audio(
+    checkpoint_intents: Sequence[CheckpointIntent],
+    *,
+    runtime_input_type: FlowAuthoringInputType | None,
+) -> bool:
+    """Whether a committed transcript checkpoint contradicts the input type."""
+
+    if runtime_input_type is None or runtime_input_type is FlowAuthoringInputType.AUDIO:
+        return False
+    return any(
+        intent.producer_kind == "transcript" and intent.operation == "set"
+        for intent in checkpoint_intents
+    )
 
 
 def project_checkpoint_intents(

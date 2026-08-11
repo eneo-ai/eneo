@@ -231,6 +231,12 @@ ARTIFACT re-checked per slice, not a permanent grep gate.
       all create terminal types retain one compiler postcondition, while
       true edit conversation inference and repair behavior remain intact
       (Claude iteration 102 green 9).
+- [x] CP-ADMIT architecture-commit admissibility: four server-decidable
+      contradictions now refuse before proposal generation through the existing
+      action-policy and durable error lifecycle; compiler-only checks remain
+      postconditions. The impossible review-conflict question direction was
+      corrected to retain the defensive compiler postcondition rather than
+      inventing a second checkpoint state or question path.
 
 ## The Ranked Program (v10.3 — execution phase; slice bodies carry
 ## their originating iteration tags)
@@ -429,19 +435,37 @@ any threshold.
     create non-firing AND edit rejection at the public policy
     interfaces. Any residual create need is owner-fed from the compile
     context, never text re-inference. Closes a post-payment death path.
-- [ ] CP-ADMIT Architecture-commit admissibility — DESIGN GATE FIRST,
-    producing a per-code dependency table for every member of
-    `_NON_MODEL_REPAIRABLE_ARCHITECTURE_FAILURE_CODES`
-    (`ai_builder_create_proposal.py:66`). Only predicates decidable
-    from planning-state/server inputs BEFORE the provider call move to
-    commit or discovery time; `_architecture_hints_are_supported`
-    (`ai_builder_assembly/create.py:967`) is that predicate today and
-    is server-decidable, but runs one LLM call too late. VERIFIED
-    counter-example: the `flow_input_schema` codes run against the
-    COMPILED spec (`ai_builder_create_compiler.py:419` region) and stay
-    as compiler postconditions. Extracts ONLY the gates seam.
-    `assembly_document_report_review_mode_conflict` becomes a USER
-    QUESTION, not an error. No blanket "kills 8 of 10" claim.
+- [x] CP-ADMIT Architecture-commit admissibility (completed 2026-08-11).
+    The design gate classified every member of
+    `_NON_MODEL_REPAIRABLE_ARCHITECTURE_FAILURE_CODES` by its actual inputs.
+    Four server-decidable contradictions moved into the existing commit/action
+    policy lifecycle before proposal generation:
+    `assembly_unsupported_architecture_hints` reuses
+    `unsupported_architecture`; a transcript checkpoint on non-audio input uses
+    `transcript_checkpoint_requires_audio`; template-fill selection and
+    readability use `template_attachment_selection_invalid` and
+    `template_attachment_unreadable`. The exact architecture-hint predicate was
+    moved to the derivation owner and is reused by assembly; checkpoint and
+    template predicates remain in their existing contract owners. One
+    generalized `RefuseArchitectureCommit` decision carries the canonical
+    public error code through the existing durable SSE/replay path. Structured
+    server-known choices refuse without a proposal call or planning mutation;
+    genuine corrective text still reaches classification.
+
+    The following remain compiler or assembly postconditions because they need
+    the compiled semantic topology or bindings:
+    `assembly_document_report_compose_topology_missing`, both
+    `flow_input_schema_*` codes, `section_writer_structured_source_ambiguous`,
+    `terminal_output_type_mismatch`, and `template_placeholder_unresolved`.
+    `assembly_document_report_review_mode_conflict` also remains a defensive
+    non-repairable postcondition: production create strips model-authored
+    review modes and `PlanningState` permits one checkpoint intent per producer,
+    so no typed conflict exists from which to ask the frozen candidate user
+    question. Inventing an ambiguity state would duplicate checkpoint ownership.
+    No module, proposal skeleton, repair path, persistence schema or frontend
+    workflow was added; two proposal-layer tests for the transferred hints
+    failure were deleted in favor of the admission owner, one retained compiler
+    postcondition, and one representative planner lifecycle proof.
 - [x] Edit aggregation-intent wiring correction (severed from
     CP-EDIT): reuse the planning-state compile context, carry its
     `aggregation_intent` through the existing compiled proposal, and pass it
@@ -556,9 +580,10 @@ any threshold.
 4. **CP2, CP1 and edit aggregation-intent wiring complete** — the ownership
    defects have deterministic receipts; CP1 did not absorb D7, and the bounded
    edit wiring correction remains separate from CP-EDIT.
-5. **CP-ADMIT next** — freeze its per-code dependency table in the design gate,
-   then implement only the server-decidable transfers.
-6. **CP2b** — parse attribution; it gates CP3 and CP5.
+5. **CP-ADMIT complete** — its per-code dependency table moved only the four
+   server-decidable contradictions; compiled topology and binding checks remain
+   postconditions.
+6. **CP2b next** — parse attribution; it gates CP3 and CP5.
 7. **CP9b** — land the already-chosen BALANCED question behavior so
    the tranche measures the product behavior intended for release.
 8. **CP3** (+D2 +D4 +D8 +D10) — one proposal-schema and

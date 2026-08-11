@@ -568,7 +568,7 @@ async def build_runtime_discovery_context(
             session_state=state,
             selected_discovery_question_ids=(),
         )
-        if action_policy.allowed_action_kinds == ("refuse_unsupported_architecture",):
+        if action_policy.allowed_action_kinds == ("refuse_architecture_commit",):
             return _complete_runtime_discovery_context(
                 state,
                 attachment_context=attachment_context,

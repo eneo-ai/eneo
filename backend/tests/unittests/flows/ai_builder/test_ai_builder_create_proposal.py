@@ -730,57 +730,6 @@ async def test_outline_audio_to_docx_returns_compiled_proposal() -> None:
 
 
 @pytest.mark.asyncio
-async def test_committed_unsupported_architecture_hints_raise_typed_error() -> None:
-    state = PlanningState.empty()
-    state.architecture_commit = finalize_architecture_commit(
-        ArchitectureCommitDraft(
-            tuples_chain=[
-                StepTriple(
-                    input_type="audio",
-                    output_type="docx",
-                    output_mode="pass_through",
-                )
-            ],
-            chosen_patterns=[
-                "audio_to_artifact_report",
-                "text_to_artifact_report",
-            ],
-            required_capabilities=["input_audio", "output_mode_pass_through"],
-        )
-    )
-
-    with pytest.raises(AIBuilderArchitectureError) as exc_info:
-        await process_create_intent_arguments(
-            turn=_make_turn(),
-            conversation=[
-                ConversationMessage(
-                    role="user",
-                    content="Bygg ett flöde som skapar en DOCX-rapport från ljud.",
-                )
-            ],
-            arguments={
-                "flow_name": "Ljudrapport",
-                "plan_rationale": "Transkribera ljudet och skriv en rapport.",
-                "steps": [
-                    {
-                        "name": "Skriv rapporten",
-                        "instructions": "Skriv rapporten från transkriptionen.",
-                    }
-                ],
-            },
-            tool_call_id="call-unsupported-committed-hints",
-            available_model_refs=None,
-            available_kb_refs=None,
-            planning_state=state,
-        )
-
-    assert exc_info.value.public_code == "architecture_materialization_failed"
-    assert exc_info.value.log_context["failure_code"] == (
-        "assembly_unsupported_architecture_hints"
-    )
-
-
-@pytest.mark.asyncio
 async def test_outline_processing_uses_confirmed_planning_state_field() -> None:
     state = PlanningState.empty()
     state.resolved_slots = {

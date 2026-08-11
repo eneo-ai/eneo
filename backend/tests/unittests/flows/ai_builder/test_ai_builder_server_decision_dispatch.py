@@ -37,6 +37,7 @@ from eneo.flows.ai_builder.ai_builder_turn_controller import (
     BuilderTurnDecision,
     CommitArchitecture,
     ConfirmRequirements,
+    RefuseArchitectureCommit,
     ReviseArchitecture,
     resolve_turn_control,
 )
@@ -171,6 +172,34 @@ async def test_unrenderable_server_question_returns_typed_error_without_commit()
     assert error.details == {"question_id": "structured_analysis_need"}
     repo.commit_turn.assert_not_awaited()
     assert result.new_planning_state_version == 4
+
+
+@pytest.mark.asyncio
+async def test_architecture_refusal_projects_selected_public_code_without_commit() -> (
+    None
+):
+    repo = AsyncMock()
+
+    result = await dispatch_server_decision(
+        _request(
+            repo=repo,
+            decision=RefuseArchitectureCommit(
+                code=AIBuilderErrorCode.TEMPLATE_ATTACHMENT_UNREADABLE,
+                message="Attach a readable DOCX template.",
+            ),
+            conversation=[ConversationMessage(role="user", content="Use the template")],
+        )
+    )
+
+    assert result.action_kind == "refuse_architecture_commit"
+    assert result.new_planning_state_version == 4
+    assert [event.event for event in result.events] == ["error"]
+    error = result.events[0].data
+    assert error.code is AIBuilderErrorCode.TEMPLATE_ATTACHMENT_UNREADABLE
+    assert error.category == "bad_request"
+    assert error.phase == "planner"
+    assert error.message == "Attach a readable DOCX template."
+    repo.commit_turn.assert_not_awaited()
 
 
 @pytest.mark.asyncio

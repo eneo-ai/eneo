@@ -50,7 +50,7 @@ from eneo.flows.ai_builder.ai_builder_turn_controller import (
     CommitArchitecture,
     ConfirmRequirements,
     GenerateProposal,
-    RefuseUnsupportedArchitecture,
+    RefuseArchitectureCommit,
     ReviseArchitecture,
     resolve_turn_control,
 )
@@ -68,7 +68,7 @@ ServerDecisionKind = Literal[
     "commit_architecture",
     "revise_architecture",
     "confirm_requirements",
-    "refuse_unsupported_architecture",
+    "refuse_architecture_commit",
 ]
 
 
@@ -130,13 +130,13 @@ async def dispatch_server_decision(
             )
         case ConfirmRequirements():
             return await _dispatch_requirements_confirmation(request, decision)
-        case RefuseUnsupportedArchitecture():
+        case RefuseArchitectureCommit():
             return ServerDecisionDispatchResult(
-                action_kind="refuse_unsupported_architecture",
+                action_kind="refuse_architecture_commit",
                 events=(
                     build_ai_builder_error_event(
                         message=decision.message,
-                        code=AIBuilderErrorCode.UNSUPPORTED_ARCHITECTURE,
+                        code=decision.code,
                         request_id=request.telemetry.request_id,
                     ),
                 ),

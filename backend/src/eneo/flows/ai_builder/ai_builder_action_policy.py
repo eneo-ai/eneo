@@ -13,9 +13,13 @@ from dataclasses import dataclass
 from typing import Literal
 
 from eneo.flows.ai_builder.ai_builder_architecture_derivation import (
+    architecture_commit_hints_are_supported,
     derive_architecture_commit_draft,
 )
 from eneo.flows.ai_builder.ai_builder_canonicalization import canonical_question_id
+from eneo.flows.ai_builder.ai_builder_checkpoint_contract import (
+    transcript_checkpoint_requires_audio,
+)
 from eneo.flows.ai_builder.ai_builder_commit_invariance import (
     architecture_commit_draft_matches_pinned,
 )
@@ -25,7 +29,13 @@ from eneo.flows.ai_builder.ai_builder_discovery_priority import (
 from eneo.flows.ai_builder.ai_builder_discovery_questions import (
     question_suggestion_for_id,
 )
-from eneo.flows.ai_builder.planning_state import PlanningState
+from eneo.flows.ai_builder.ai_builder_error_contract import AIBuilderErrorCode
+from eneo.flows.ai_builder.ai_builder_template_attachment_contract import (
+    selected_template_is_readable,
+    template_attachment_selection_is_valid,
+)
+from eneo.flows.ai_builder.planning_state import ArchitectureCommitDraft, PlanningState
+from eneo.flows.enums import FlowAuthoringOutputMode
 
 _CORE_ARCHITECTURAL_SLOTS: frozenset[str] = frozenset(
     {"primary_runtime_input", "terminal_output"}
@@ -34,7 +44,7 @@ PlannerActionKind = Literal[
     "ask_question",
     "confirm_requirements",
     "commit_architecture",
-    "refuse_unsupported_architecture",
+    "refuse_architecture_commit",
     "revise_architecture",
     "propose_plan",
 ]
@@ -46,6 +56,7 @@ class PlannerActionPolicy:
 
     allowed_action_kinds: tuple[PlannerActionKind, ...]
     allowed_ask_question_targets: tuple[str, ...] = ()
+    architecture_refusal_code: AIBuilderErrorCode | None = None
 
 
 def build_planner_action_policy(
@@ -65,6 +76,11 @@ def build_planner_action_policy(
     commit_grade_slot_names = _commit_grade_slot_names(session_state)
     unresolved_core_slots = _compute_unresolved_core_slots(session_state)
     derived_commit = derive_architecture_commit_draft(session_state)
+    architecture_refusal_code = _architecture_refusal_code(
+        session_state,
+        derived_commit=derived_commit,
+        unresolved_core_slots=unresolved_core_slots,
+    )
     architecture_committed = session_state.architecture_commit is not None
     pinned_commit_matches_current_slots = architecture_commit_draft_matches_pinned(
         before=session_state.architecture_commit,
@@ -88,8 +104,8 @@ def build_planner_action_policy(
     if ask_targets:
         allowed.append("ask_question")
 
-    if not unresolved_core_slots and derived_commit is None:
-        allowed.append("refuse_unsupported_architecture")
+    if architecture_refusal_code is not None:
+        allowed.append("refuse_architecture_commit")
 
     if (
         not architecture_committed
@@ -117,7 +133,47 @@ def build_planner_action_policy(
     return PlannerActionPolicy(
         allowed_action_kinds=tuple(allowed),
         allowed_ask_question_targets=ask_targets,
+        architecture_refusal_code=architecture_refusal_code,
     )
+
+
+def _architecture_refusal_code(
+    session_state: PlanningState,
+    *,
+    derived_commit: ArchitectureCommitDraft | None,
+    unresolved_core_slots: frozenset[str],
+) -> AIBuilderErrorCode | None:
+    if not unresolved_core_slots and derived_commit is None:
+        return AIBuilderErrorCode.UNSUPPORTED_ARCHITECTURE
+
+    architecture = derived_commit or session_state.architecture_commit
+    if architecture is None:
+        return None
+    if not architecture_commit_hints_are_supported(architecture):
+        return AIBuilderErrorCode.UNSUPPORTED_ARCHITECTURE
+
+    runtime_input_type = (
+        architecture.tuples_chain[0].input_type if architecture.tuples_chain else None
+    )
+    if transcript_checkpoint_requires_audio(
+        session_state.checkpoint_intents,
+        runtime_input_type=runtime_input_type,
+    ):
+        return AIBuilderErrorCode.TRANSCRIPT_CHECKPOINT_REQUIRES_AUDIO
+
+    terminal_mode = (
+        architecture.tuples_chain[-1].output_mode if architecture.tuples_chain else None
+    )
+    if terminal_mode is not FlowAuthoringOutputMode.TEMPLATE_FILL:
+        return None
+    selected_templates = [
+        role for role in session_state.file_roles if role.role == "template"
+    ]
+    if not template_attachment_selection_is_valid(len(selected_templates)):
+        return AIBuilderErrorCode.TEMPLATE_ATTACHMENT_SELECTION_INVALID
+    if not selected_template_is_readable(selected_templates[0].template_placeholders):
+        return AIBuilderErrorCode.TEMPLATE_ATTACHMENT_UNREADABLE
+    return None
 
 
 def _compute_unresolved_core_slots(
@@ -140,7 +196,7 @@ def _phase_priority(candidates: list[PlannerActionKind]) -> list[PlannerActionKi
     """Expose one deterministic phase instead of a broad LLM action menu."""
 
     for action in (
-        "refuse_unsupported_architecture",
+        "refuse_architecture_commit",
         "ask_question",
         "revise_architecture",
         "commit_architecture",

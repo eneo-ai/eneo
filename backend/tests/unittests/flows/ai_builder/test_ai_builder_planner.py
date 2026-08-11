@@ -2365,6 +2365,101 @@ async def test_send_message_refuses_unsupported_architecture_without_provider_or
 
 
 @pytest.mark.asyncio
+async def test_send_message_requires_one_template_before_proposal_without_provider_or_plan_mutation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    planner = _make_planner()
+    session_id = uuid4()
+    persisted_state = PlanningState.empty()
+    persisted_snapshot = persisted_state.model_dump(mode="json")
+    planner.repo.get_session.return_value = SimpleNamespace(
+        conversation=[
+            ConversationMessage(
+                role="user",
+                content="documents",
+                metadata={
+                    "question_answer": {
+                        "question_id": "primary_runtime_input",
+                        "selected_values": ["documents"],
+                    }
+                },
+            ),
+            ConversationMessage(
+                role="user",
+                content="docx document",
+                metadata={
+                    "question_answer": {
+                        "question_id": "terminal_output",
+                        "selected_values": ["docx_document"],
+                    }
+                },
+            ),
+            ConversationMessage(
+                role="user",
+                content="fill a template",
+                metadata={
+                    "question_answer": {
+                        "question_id": "docx_output_mode",
+                        "selected_values": ["template_fill_docx"],
+                    }
+                },
+            ),
+        ],
+        status=SessionStatus.CHATTING,
+        planning_state_version=4,
+        latest_plan_id=None,
+    )
+    planner.repo.load_planning_state.return_value = persisted_state
+    monkeypatch.setattr(
+        "eneo.flows.ai_builder.ai_builder_planner.resolve_plan_edit_context",
+        AsyncMock(return_value=(None, None)),
+    )
+
+    events = [
+        encode_ai_builder_stream_event(event)
+        async for event in planner.send_message(
+            session_id=session_id,
+            client_turn_id=_TEST_CLIENT_TURN_ID,
+            request_fingerprint=_TEST_REQUEST_FINGERPRINT,
+            request_snapshot=_test_request_snapshot("Single document"),
+            message="Single document",
+            question_answer={
+                "kind": "structured_question_answer",
+                "question_id": "document_material_scope",
+                "selected_values": ["single_document_case"],
+            },
+            ui_language="en",
+            completion_model_route=_route(),
+            available_models=None,
+            available_kbs=None,
+            flow=None,
+            assistant_snapshots=None,
+            attachment_files=None,
+            max_input_tokens=4096,
+            max_output_tokens=1024,
+            budget_policy=_budget_policy(),
+        )
+    ]
+
+    assert [event["event"] for event in events] == ["error", "done"]
+    error_payload = json.loads(events[0]["data"])
+    assert error_payload["code"] == "template_attachment_selection_invalid"
+    assert error_payload["category"] == "bad_request"
+    assert error_payload["phase"] == "planner"
+    assert error_payload["message"] == (
+        "A template-fill Flow requires exactly one selected DOCX template. "
+        "Attach or select one DOCX template and try again."
+    )
+    planner.litellm_client.acompletion.assert_not_awaited()
+    planner.repo.mark_session_turn_processing.assert_not_awaited()
+    planner.repo.commit_turn.assert_not_awaited()
+    planner.repo.create_plan.assert_not_awaited()
+    assert persisted_state.model_dump(mode="json") == persisted_snapshot
+    completed_error = planner.repo.complete_session_turn.await_args.kwargs["error"]
+    assert completed_error.model_dump(mode="json", exclude_none=True) == error_payload
+
+
+@pytest.mark.asyncio
 async def test_send_message_releases_lease_when_request_preparation_fails(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

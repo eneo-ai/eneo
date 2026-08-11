@@ -9723,6 +9723,9 @@ export interface components {
       | "session_turn_provider_outcome_unknown"
       | "stale_plan_revision"
       | "stale_revision"
+      | "template_attachment_selection_invalid"
+      | "template_attachment_unreadable"
+      | "transcript_checkpoint_requires_audio"
       | "transcription_model_required"
       | "unsupported_architecture"
       | "unsupported_revision_type";

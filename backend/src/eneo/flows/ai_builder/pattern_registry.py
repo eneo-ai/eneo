@@ -427,6 +427,23 @@ def compiled_chain_pattern_ids(pattern_ids: Iterable[str]) -> frozenset[str]:
     )
 
 
+def pattern_chain_steps(pattern_ids: Iterable[str]) -> tuple[str, ...]:
+    """Return the registry-owned ordered chain for selected patterns."""
+
+    chain_steps: list[str] = []
+    seen: set[str] = set()
+    for pattern_id in pattern_ids:
+        pattern = PATTERN_REGISTRY.get(pattern_id)
+        if pattern is None:
+            continue
+        for chain_step in pattern.chain_steps:
+            if chain_step in seen:
+                continue
+            chain_steps.append(chain_step)
+            seen.add(chain_step)
+    return tuple(chain_steps)
+
+
 def question_template_ids_for_slot(pattern_id: str, slot: str) -> tuple[str, ...]:
     """Return the question-template ids this pattern declares for `slot`.
 

@@ -6,6 +6,9 @@ from collections.abc import Sequence
 from dataclasses import dataclass, replace
 from typing import Literal
 
+from eneo.flows.ai_builder.ai_builder_architecture_derivation import (
+    architecture_hints_are_supported,
+)
 from eneo.flows.ai_builder.ai_builder_architecture_errors import (
     AIBuilderArchitectureError,
 )
@@ -62,14 +65,6 @@ from eneo.flows.ai_builder.ai_builder_source_reader_contracts import (
     structured_fields_have_document_items,
     structured_fields_have_source_leaf,
 )
-from eneo.flows.ai_builder.pattern_registry import (
-    EXTRACT_TEMPLATE_VARIABLES_STEP,
-    FLOW_INPUT_AUDIO_TRANSCRIPTION,
-    FLOW_INPUT_DOCUMENT_UPLOAD,
-    PREPARE_TEMPLATE_CONTENT_STEP,
-    TEMPLATE_FILL_DOCX_STEP,
-    TERMINAL_ARTIFACT_STEP,
-)
 from eneo.flows.ai_builder.planning_state import AggregationIntent, ReportDisposition
 from eneo.flows.flow_authoring_spec import (
     FlowDraftSpecCore,
@@ -95,39 +90,6 @@ _SOURCE_INPUT_TYPES = frozenset(
 )
 _FILE_INPUT_TYPES = frozenset({InputType.DOCUMENT, InputType.FILE})
 _AUDIO_TRANSCRIPTION_PATTERN_ID = "audio_transcription"
-_AUDIO_ARTIFACT_PATTERN_ID = "audio_to_artifact_report"
-_FORM_FIELD_RUNTIME_INPUTS_PATTERN_ID = "form_field_runtime_inputs"
-_AUDIO_PATTERN_IDS = frozenset(
-    {_AUDIO_TRANSCRIPTION_PATTERN_ID, _AUDIO_ARTIFACT_PATTERN_ID}
-)
-_AUDIO_PATTERN_IDS_WITH_FORM_FIELDS = _AUDIO_PATTERN_IDS | frozenset(
-    {_FORM_FIELD_RUNTIME_INPUTS_PATTERN_ID}
-)
-_AUDIO_PATTERN_CHAIN_STEPS = frozenset(
-    {FLOW_INPUT_AUDIO_TRANSCRIPTION, TERMINAL_ARTIFACT_STEP}
-)
-_DOCX_TEMPLATE_PATTERN_ID = "document_to_docx_template"
-_DOCX_TEMPLATE_PATTERN_CHAIN_STEPS = frozenset(
-    {
-        FLOW_INPUT_DOCUMENT_UPLOAD,
-        EXTRACT_TEMPLATE_VARIABLES_STEP,
-        PREPARE_TEMPLATE_CONTENT_STEP,
-        TEMPLATE_FILL_DOCX_STEP,
-    }
-)
-_SUPPORTED_STRUCTURAL_PATTERN_IDS = frozenset(
-    {
-        "comparison",
-        "document_to_pdf_report",
-        "document_to_structured_report",
-        "extract_structured_fields",
-        "form_field_runtime_inputs",
-        "json_to_artifact_report",
-        "json_to_structured_payload",
-        "summarize_text",
-        "text_to_artifact_report",
-    }
-)
 
 CreateAssemblyRejectionReason = Literal[
     "aggregate_requires_text_or_document_output",
@@ -352,7 +314,7 @@ def _assemble_create_intent(
 ) -> FlowAssemblyPlan | CreateAssemblyRejection:
     if runtime_input_type == InputType.JSON and final_output_type == OutputType.TEXT:
         return _reject("unsupported_runtime_output_tuple")
-    if not _architecture_hints_are_supported(
+    if not architecture_hints_are_supported(
         runtime_input_type=runtime_input_type,
         final_output_type=final_output_type,
         final_output_mode=final_output_mode,
@@ -967,46 +929,6 @@ def _mentions_output_artifact_type(
         re.search(rf"(?<![a-z0-9]){artifact_type}(?![a-z0-9])", text.casefold())
         is not None
     )
-
-
-def _architecture_hints_are_supported(
-    *,
-    runtime_input_type: InputType,
-    final_output_type: OutputType,
-    final_output_mode: OutputMode | None,
-    pattern_ids: tuple[str, ...],
-    chain_steps: tuple[str, ...],
-) -> bool:
-    if not pattern_ids and not chain_steps:
-        return True
-    if not chain_steps and set(pattern_ids) <= _SUPPORTED_STRUCTURAL_PATTERN_IDS:
-        return True
-    if runtime_input_type == InputType.AUDIO:
-        pattern_id_set = set(pattern_ids)
-        if (
-            _FORM_FIELD_RUNTIME_INPUTS_PATTERN_ID in pattern_id_set
-            and _AUDIO_ARTIFACT_PATTERN_ID not in pattern_id_set
-        ):
-            return False
-        return pattern_id_set <= _AUDIO_PATTERN_IDS_WITH_FORM_FIELDS and set(
-            chain_steps
-        ) <= set(_AUDIO_PATTERN_CHAIN_STEPS)
-    if (
-        runtime_input_type in _FILE_INPUT_TYPES
-        and final_output_type == OutputType.DOCX
-        and final_output_mode == OutputMode.TEMPLATE_FILL
-    ):
-        pattern_id_set = set(pattern_ids)
-        if (
-            _FORM_FIELD_RUNTIME_INPUTS_PATTERN_ID in pattern_id_set
-            and _DOCX_TEMPLATE_PATTERN_ID not in pattern_id_set
-        ):
-            return False
-        return pattern_id_set <= {
-            _DOCX_TEMPLATE_PATTERN_ID,
-            _FORM_FIELD_RUNTIME_INPUTS_PATTERN_ID,
-        } and set(chain_steps) <= set(_DOCX_TEMPLATE_PATTERN_CHAIN_STEPS)
-    return False
 
 
 def _assemble_docx_template_fill(
