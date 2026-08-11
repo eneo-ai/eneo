@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount } from "svelte";
+  import { onMount, tick } from "svelte";
   import { invalidate } from "$app/navigation";
   import {
     DEPLOYMENT_POLICY_CONFLICT_ERROR_CODE,
@@ -91,6 +91,7 @@
   let knowledgeFileLimitBytes = $state(1);
   let transcriptionAudioLimitBytes = $state(1);
   let policyAlertRef = $state<HTMLElement | null>(null);
+  let policyStatusRef = $state<HTMLElement | null>(null);
   let moveAlertRef = $state<HTMLElement | null>(null);
   let moveStatusAlertRef = $state<HTMLElement | null>(null);
 
@@ -136,11 +137,7 @@
   const saveUnavailable = $derived(
     !dirty || !validDraft || policyMutationPending || stale || saveOutcomeUnknown
   );
-  const pendingMoveCount = $derived(
-    contentMoves?.moves
-      .filter((item) => item.state === "pending" || item.state === "target_verified")
-      .reduce((total, item) => total + item.count, 0) ?? 0
-  );
+  const pauseUnavailable = $derived(moveStatus !== "idle" || policyMutationPending);
   const refreshing = $derived(
     reloading || inventoryStatus === "loading" || moveStatus === "loading"
   );
@@ -179,7 +176,7 @@
     return true;
   }
 
-  function discardPolicyDraft(): void {
+  async function discardPolicyDraft(): Promise<void> {
     if (deploymentPolicy === null) return;
     storageTarget = deploymentPolicy.policy.new_write_storage_target;
     sessionFileLimitBytes = deploymentPolicy.policy.session_file_limit_bytes;
@@ -189,6 +186,8 @@
     stale = false;
     targetUnavailable = false;
     saveOutcomeUnknown = false;
+    await tick();
+    policyStatusRef?.focus();
   }
 
   function updateStorageTarget(value: string): void {
@@ -313,8 +312,10 @@
     saveOutcomeUnknown = false;
     stale = false;
     targetUnavailable = false;
+    let saved = false;
     try {
       applyPolicy(await eneo.objectContentPolicy.replace(replacement));
+      saved = true;
       toast.success(m.storage_settings_save_success());
     } catch (error: unknown) {
       if (hasStatus(error, 403)) {
@@ -335,6 +336,10 @@
     } finally {
       targetConfirmationOpen = false;
       saving = false;
+    }
+    if (saved) {
+      await tick();
+      policyStatusRef?.focus();
     }
   }
 
@@ -372,7 +377,7 @@
   }
 
   async function setMovesPaused() {
-    if (!canEdit || !contentMoves || moveStatus !== "idle" || policyMutationPending) return;
+    if (!canEdit || !contentMoves || pauseUnavailable) return;
 
     const preservePolicyDraft = dirty;
     moveActionPending = "pause";
@@ -1052,8 +1057,17 @@
                 </Collapsible.Content>
               </Collapsible.Root>
 
-              {#if canEdit && !dirty}
-                <p class="text-muted text-sm">{m.storage_settings_no_changes()}</p>
+              {#if canEdit}
+                <p
+                  bind:this={policyStatusRef}
+                  data-testid="policy-save-status"
+                  tabindex="-1"
+                  role="status"
+                  class="text-muted text-sm"
+                  class:sr-only={dirty}
+                >
+                  {dirty ? m.storage_settings_unsaved_changes() : m.storage_settings_no_changes()}
+                </p>
               {/if}
             </PolicySection>
 
@@ -1247,17 +1261,12 @@
                   {/if}
                   {m.storage_moves_queue()}
                 </Button>
-                {#if pendingMoveCount > 0}
+                {#if contentMoves !== null}
                   <Button
                     type="button"
                     variant="outline"
-                    disabled={(contentMoves === null ||
-                      moveStatus !== "idle" ||
-                      policyMutationPending) &&
-                      moveActionPending !== "pause"}
-                    aria-disabled={contentMoves === null ||
-                      moveStatus !== "idle" ||
-                      policyMutationPending}
+                    disabled={pauseUnavailable && moveActionPending !== "pause"}
+                    aria-disabled={pauseUnavailable}
                     aria-busy={moveActionPending === "pause"}
                     class={moveActionPending === "pause"
                       ? "pointer-events-none opacity-50"

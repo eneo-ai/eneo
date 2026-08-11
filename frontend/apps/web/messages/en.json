@@ -216,7 +216,7 @@
   "storage_inventory_allocation_unavailable_title": "Database size could not be read",
   "storage_inventory_allocation_unavailable_description": "File-content size is still available. Refresh storage usage to try again.",
   "storage_inventory_managed_caption": "Stored content breakdown",
-  "storage_inventory_managed_note": "Shows count and content size by product area, storage location, and status. Content marked for deletion is shown here but excluded from the summary.",
+  "storage_inventory_managed_note": "Shows count and content size by product area, storage location, and status. Content whose deletion has completed is shown here but excluded from the summary.",
   "storage_inventory_owner": "Product area",
   "storage_inventory_owner_file_content": "Files and processed file versions",
   "storage_inventory_owner_knowledge_file": "Knowledge files",

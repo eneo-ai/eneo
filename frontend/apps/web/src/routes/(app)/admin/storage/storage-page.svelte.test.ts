@@ -1,4 +1,4 @@
-import { page } from "@vitest/browser/context";
+import { page, userEvent } from "@vitest/browser/context";
 import { EneoError } from "@eneo/eneo-js";
 import { render } from "vitest-browser-svelte";
 import { beforeEach, describe, expect, test, vi } from "vitest";
@@ -223,6 +223,11 @@ function moves(overrides: Record<string, unknown> = {}) {
     ],
     ...overrides
   };
+}
+
+function focusElement(element: Element): void {
+  if (!(element instanceof HTMLElement)) throw new TypeError("Expected a focusable HTML element");
+  element.focus();
 }
 
 async function openPreviousDestination(): Promise<void> {
@@ -1432,6 +1437,29 @@ describe("admin storage settings page", () => {
     });
   });
 
+  test("pauses and resumes moves when the queue is empty", async () => {
+    testUser.canAdministerStorage = true;
+    getPolicy.mockResolvedValue(policy());
+    getMoves.mockResolvedValue(moves({ moves: [] }));
+    setMovesPaused
+      .mockResolvedValueOnce({ policy_revision: 5, paused: true })
+      .mockResolvedValueOnce({ policy_revision: 6, paused: false });
+
+    render(StoragePage);
+
+    await page.getByRole("button", { name: "storage_moves_pause" }).click();
+    expect(setMovesPaused).toHaveBeenNthCalledWith(1, {
+      expected_revision: 4,
+      moves_paused: true
+    });
+
+    await page.getByRole("button", { name: "storage_moves_resume" }).click();
+    expect(setMovesPaused).toHaveBeenNthCalledWith(2, {
+      expected_revision: 5,
+      moves_paused: false
+    });
+  });
+
   test("queues moves to PostgreSQL while object storage is unavailable", async () => {
     testUser.canAdministerStorage = true;
     getPolicy.mockResolvedValue(policy());
@@ -2100,7 +2128,8 @@ describe("admin storage settings page", () => {
     await page.getByRole("radio", { name: /storage_target_object_store/ }).click();
     await page.getByLabelText("storage_limit_session_file", { exact: true }).fill("30");
     const saveButton = page.getByRole("button", { name: "storage_settings_save" });
-    await saveButton.click();
+    focusElement(saveButton.element());
+    await userEvent.keyboard("{Enter}");
     await confirmStorageTargetChange();
 
     await expect
@@ -2130,6 +2159,7 @@ describe("admin storage settings page", () => {
     );
 
     await expect.element(page.getByText("storage_settings_no_changes")).toBeVisible();
+    await expect.element(page.getByTestId("policy-save-status")).toHaveFocus();
     await expect.element(saveButton).not.toBeInTheDocument();
   });
 
@@ -2141,10 +2171,13 @@ describe("admin storage settings page", () => {
 
     const sessionFileInput = page.getByLabelText("storage_limit_session_file", { exact: true });
     await sessionFileInput.fill("30");
-    await page.getByRole("button", { name: "discard_changes" }).click();
+    const discardButton = page.getByRole("button", { name: "discard_changes" });
+    focusElement(discardButton.element());
+    await userEvent.keyboard("{Enter}");
 
     await expect.element(sessionFileInput).toHaveValue(20);
     await expect.element(page.getByText("storage_settings_no_changes")).toBeVisible();
+    await expect.element(page.getByTestId("policy-save-status")).toHaveFocus();
     await expect
       .element(page.getByRole("button", { name: "storage_settings_save" }))
       .not.toBeInTheDocument();
@@ -2489,5 +2522,35 @@ describe("admin storage settings page", () => {
     await expect
       .element(page.getByText("storage_inventory_allocation_unavailable_title"))
       .toBeVisible();
+  });
+
+  test("counts deletion-pending content until deletion has completed", async () => {
+    testUser.canAdministerStorage = true;
+    getPolicy.mockResolvedValue(policy());
+    const currentInventory = inventory();
+    getInventory.mockResolvedValue({
+      ...currentInventory,
+      inventory: [
+        ...currentInventory.inventory,
+        {
+          owner: "file_content",
+          target: "postgres_inline",
+          state: "delete_pending",
+          count: 1,
+          bytes: 2 * 1024,
+          oldest_created_at: "2026-07-19T10:00:00Z"
+        }
+      ]
+    });
+
+    render(StoragePage);
+
+    const overview = page.getByRole("region", { name: "storage_overview_title" });
+    await expect
+      .element(overview.getByText("14 storage_unit_kb", { exact: true }).first())
+      .toBeVisible();
+    await expect
+      .element(overview.getByText("30 storage_unit_kb", { exact: true }))
+      .not.toBeInTheDocument();
   });
 });

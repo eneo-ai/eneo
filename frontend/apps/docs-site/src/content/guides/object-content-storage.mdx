@@ -721,8 +721,8 @@ text and vectors. Both remain necessary for RAG.
 **Admin > Storage** shows related measurements that must not be added together:
 
 - **File content total** is the combined content size recorded by Eneo, excluding
-  content marked for deletion. The PostgreSQL and object-storage figures are
-  parts of this total.
+  content whose deletion has completed (`tombstoned`). The PostgreSQL and
+  object-storage figures are parts of this total.
 - **File content in PostgreSQL** counts the content bytes stored inline in the
   database. **File content in object storage** counts the content bytes recorded
   for the connected endpoint. Neither figure includes searchable RAG data.

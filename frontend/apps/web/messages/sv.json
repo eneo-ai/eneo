@@ -216,7 +216,7 @@
   "storage_inventory_allocation_unavailable_title": "Databasstorleken kunde inte läsas",
   "storage_inventory_allocation_unavailable_description": "Filinnehållets storlek visas fortfarande. Uppdatera lagringsanvändningen för att försöka igen.",
   "storage_inventory_managed_caption": "Fördelning av lagrat innehåll",
-  "storage_inventory_managed_note": "Visar antal och innehållsstorlek per användningsområde, lagringsplats och status. Innehåll som markerats för borttagning visas här men räknas inte med i sammanfattningen.",
+  "storage_inventory_managed_note": "Visar antal och innehållsstorlek per användningsområde, lagringsplats och status. Innehåll vars radering är slutförd visas här men räknas inte med i sammanfattningen.",
   "storage_inventory_owner": "Användningsområde",
   "storage_inventory_owner_file_content": "Filer och bearbetade filversioner",
   "storage_inventory_owner_knowledge_file": "Kunskapsfiler",
