@@ -348,6 +348,67 @@ async def test_finalize_compiled_proposal_does_not_record_success_on_quality_rej
 
 
 @pytest.mark.asyncio
+async def test_unindexed_array_reference_cannot_reach_plan_persistence() -> None:
+    spec = FlowDraftSpecCore(
+        flow_name="Array reference",
+        steps=[
+            StepSpec(
+                plan_step_ref="step_a",
+                name="Extract risks",
+                assistant_spec=AssistantSpec(instructions="Extract risks."),
+                input_source=InputSource.FLOW_INPUT,
+                input_type=InputType.TEXT,
+                output_mode=OutputMode.PASS_THROUGH,
+                output_type=OutputType.JSON,
+                output_contract={
+                    "type": "object",
+                    "properties": {
+                        "risks": {
+                            "type": "array",
+                            "items": {
+                                "type": "object",
+                                "properties": {"title": {"type": "string"}},
+                            },
+                        }
+                    },
+                },
+            ),
+            StepSpec(
+                plan_step_ref="step_b",
+                name="Summarize risk",
+                assistant_spec=AssistantSpec(instructions="Summarize one risk."),
+                input_source=InputSource.PREVIOUS_STEP,
+                input_type=InputType.TEXT,
+                input_bindings={
+                    "question": "{{ step_a.output.structured.risks.title }}"
+                },
+                output_mode=OutputMode.PASS_THROUGH,
+                output_type=OutputType.TEXT,
+            ),
+        ],
+    )
+    compiled = CompiledProposal(
+        content=FlowBuilderProposalContent(spec=spec),
+        validation=validate_spec(spec),
+    )
+    store_plan = AsyncMock(return_value=_stored_plan_result())
+
+    with patch(
+        "eneo.flows.ai_builder.ai_builder_proposal_finalization."
+        "store_plan_and_update_conversation",
+        new=store_plan,
+    ):
+        result = await _make_finalizer().finalize_compiled_proposal(
+            _make_request(compiled=compiled)
+        )
+
+    assert result.events == ()
+    assert result.failure_kind == "validation"
+    assert result.failure_codes == frozenset({"unknown_output_contract_field"})
+    store_plan.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_finalize_compiled_proposal_preserves_contextual_quality_issue_codes() -> (
     None
 ):

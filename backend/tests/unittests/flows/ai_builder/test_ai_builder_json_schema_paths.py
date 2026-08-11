@@ -6,37 +6,7 @@ from eneo.flows.ai_builder.ai_builder_json_schema_paths import (
 )
 
 
-def test_missing_structured_output_path_accepts_numeric_array_indexes() -> None:
-    contract = {
-        "type": "object",
-        "properties": {
-            "risker": {
-                "type": "array",
-                "items": {
-                    "type": "object",
-                    "properties": {
-                        "rubrik": {"type": "string"},
-                    },
-                },
-            }
-        },
-    }
-
-    assert missing_structured_output_path(contract, "risker.0.rubrik") is None
-
-
-def test_missing_structured_output_path_reports_first_missing_segment() -> None:
-    contract = {
-        "type": "object",
-        "properties": {
-            "summary": {"type": "string"},
-        },
-    }
-
-    assert missing_structured_output_path(contract, "details.title") == "details"
-
-
-def test_missing_structured_output_path_rejects_array_field_without_index_when_strict() -> (
+def test_missing_structured_output_path_accepts_whole_arrays_and_numeric_indexes() -> (
     None
 ):
     contract = {
@@ -54,14 +24,38 @@ def test_missing_structured_output_path_rejects_array_field_without_index_when_s
         },
     }
 
-    assert (
-        missing_structured_output_path(
-            contract,
-            "risker.rubrik",
-            require_array_index=True,
-        )
-        == "risker.rubrik"
-    )
+    assert missing_structured_output_path(contract, "risker") is None
+    assert missing_structured_output_path(contract, "risker.0.rubrik") is None
+
+
+def test_missing_structured_output_path_reports_first_missing_segment() -> None:
+    contract = {
+        "type": "object",
+        "properties": {
+            "summary": {"type": "string"},
+        },
+    }
+
+    assert missing_structured_output_path(contract, "details.title") == "details"
+
+
+def test_missing_structured_output_path_rejects_array_field_without_index() -> None:
+    contract = {
+        "type": "object",
+        "properties": {
+            "risker": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "rubrik": {"type": "string"},
+                    },
+                },
+            }
+        },
+    }
+
+    assert missing_structured_output_path(contract, "risker.rubrik") == "risker.rubrik"
 
 
 def test_missing_structured_output_path_accepts_composite_schema_properties() -> None:

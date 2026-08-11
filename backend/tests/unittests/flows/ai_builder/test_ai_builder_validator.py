@@ -799,7 +799,7 @@ class TestSemanticVariableValidation:
         )
         assert result.valid
 
-    def test_structured_access_keeps_lenient_array_property_fallback_for_runtime_templates(
+    def test_structured_access_rejects_array_property_without_numeric_index(
         self,
     ) -> None:
         result = validate_spec(
@@ -835,7 +835,10 @@ class TestSemanticVariableValidation:
                 ]
             )
         )
-        assert result.valid
+        assert not result.valid
+        assert any(
+            error.code == "unknown_output_contract_field" for error in result.errors
+        )
 
     def test_structured_access_accepts_fields_from_composite_output_contracts(
         self,

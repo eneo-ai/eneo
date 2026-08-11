@@ -9,14 +9,11 @@ _COMPOSITE_SCHEMA_KEYWORDS = ("allOf", "anyOf", "oneOf")
 def missing_structured_output_path(
     contract: dict[str, Any],
     field_path: str,
-    *,
-    require_array_index: bool = False,
 ) -> str | None:
     """Return the first missing segment for a JSON-schema-backed structured path.
 
-    When ``require_array_index`` is false, array item properties may be traversed
-    without an explicit numeric index. Runtime template validation keeps that
-    lenient behavior for backwards compatibility with existing flow bindings.
+    Runtime resolves lists only through numeric indexes, so authoring must reject
+    any path that tries to traverse an array item implicitly.
     """
 
     current: dict[str, Any] | None = contract
@@ -28,13 +25,12 @@ def missing_structured_output_path(
 
         schema_type = current.get("type")
         if schema_type == "array":
-            if require_array_index and not part.isdigit():
+            if not part.isdigit():
                 return ".".join(traversed)
             current = _dict_or_none(current.get("items"))
             if current is None:
                 return ".".join(traversed)
-            if part.isdigit():
-                continue
+            continue
 
         properties = resolve_schema_properties(current)
         if part not in properties:
