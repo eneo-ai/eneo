@@ -221,15 +221,15 @@
               {#if managedPostgresqlBytes > 0}
                 <span
                   data-storage-segment="postgresql"
-                  class="bg-accent-default block h-full min-w-[4px] shrink-0"
-                  style={`flex-grow: ${postgresqlShare}; flex-basis: 0`}
+                  class="bg-accent-default block h-full shrink-0"
+                  style={`min-width: 4px; flex-grow: ${postgresqlShare}; flex-basis: 0`}
                 ></span>
               {/if}
               {#if managedObjectStoreBytes > 0}
                 <span
                   data-storage-segment="object-store"
-                  class="bg-positive-default block h-full min-w-[4px] shrink-0"
-                  style={`flex-grow: ${objectStoreShare}; flex-basis: 0`}
+                  class="bg-positive-default block h-full shrink-0"
+                  style={`min-width: 4px; flex-grow: ${objectStoreShare}; flex-basis: 0`}
                 ></span>
               {/if}
             </span>

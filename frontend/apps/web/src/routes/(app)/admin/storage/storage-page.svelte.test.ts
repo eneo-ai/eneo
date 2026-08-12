@@ -1,9 +1,7 @@
 import { page, userEvent } from "@vitest/browser/context";
 import { EneoError } from "@eneo/eneo-js";
 import { render } from "vitest-browser-svelte";
-import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
-
-import "../../../../app.css";
+import { beforeEach, describe, expect, test, vi } from "vitest";
 
 const getPolicy = vi.hoisted(() => vi.fn());
 const getInventory = vi.hoisted(() => vi.fn());
@@ -97,13 +95,6 @@ vi.mock("$lib/paraglide/runtime", () => ({
 }));
 
 import StoragePage from "./+page.svelte";
-
-const originalTheme = document.documentElement.dataset.theme;
-
-afterEach(() => {
-  if (originalTheme === undefined) delete document.documentElement.dataset.theme;
-  else document.documentElement.dataset.theme = originalTheme;
-});
 
 function policy(overrides: Record<string, unknown> = {}) {
   return {
@@ -2719,7 +2710,6 @@ describe("admin storage settings page", () => {
   });
 
   test("labels both storage locations when one share is very small", async () => {
-    document.documentElement.dataset.theme = "light";
     testUser.canAdministerStorage = true;
     getPolicy.mockResolvedValue(policy());
     getInventory.mockResolvedValue({
@@ -2751,8 +2741,12 @@ describe("admin storage settings page", () => {
     const distribution = overview
       .getByRole("img", { name: /storage_overview_distribution_label/ })
       .element();
-    const postgresqlSegment = distribution.querySelector("[data-storage-segment='postgresql']")!;
-    const objectStoreSegment = distribution.querySelector("[data-storage-segment='object-store']")!;
+    const postgresqlSegment = distribution.querySelector<HTMLElement>(
+      "[data-storage-segment='postgresql']"
+    )!;
+    const objectStoreSegment = distribution.querySelector<HTMLElement>(
+      "[data-storage-segment='object-store']"
+    )!;
     const postgresqlSwatch = overview
       .element()
       .querySelector("[data-storage-swatch='postgresql']")!;
@@ -2760,15 +2754,10 @@ describe("admin storage settings page", () => {
       .element()
       .querySelector("[data-storage-swatch='object-store']")!;
 
-    expect(objectStoreSegment.getBoundingClientRect().width).toBeGreaterThanOrEqual(4);
-    expect(getComputedStyle(postgresqlSwatch).backgroundColor).toBe(
-      getComputedStyle(postgresqlSegment).backgroundColor
-    );
-    expect(getComputedStyle(objectStoreSwatch).backgroundColor).toBe(
-      getComputedStyle(objectStoreSegment).backgroundColor
-    );
-    expect(getComputedStyle(postgresqlSwatch).backgroundColor).not.toBe(
-      getComputedStyle(objectStoreSwatch).backgroundColor
-    );
+    expect(objectStoreSegment.style.minWidth).toBe("4px");
+    expect(postgresqlSwatch.classList).toContain("bg-accent-default");
+    expect(postgresqlSegment.classList).toContain("bg-accent-default");
+    expect(objectStoreSwatch.classList).toContain("bg-positive-default");
+    expect(objectStoreSegment.classList).toContain("bg-positive-default");
   });
 });
