@@ -2708,4 +2708,56 @@ describe("admin storage settings page", () => {
       .element(overview.getByText("30 storage_unit_kb", { exact: true }))
       .not.toBeInTheDocument();
   });
+
+  test("labels both storage locations when one share is very small", async () => {
+    testUser.canAdministerStorage = true;
+    getPolicy.mockResolvedValue(policy());
+    getInventory.mockResolvedValue({
+      ...inventory(),
+      inventory: [
+        {
+          owner: "file_content",
+          target: "postgres_inline",
+          state: "available",
+          count: 100,
+          bytes: 100 * 1024 * 1024 * 1024,
+          oldest_created_at: "2026-07-20T10:00:00Z"
+        },
+        {
+          owner: "knowledge_file",
+          target: "object_store",
+          state: "available",
+          count: 1,
+          bytes: 1024 * 1024,
+          oldest_created_at: "2026-07-19T10:00:00Z"
+        }
+      ]
+    });
+
+    render(StoragePage);
+
+    const overview = page.getByRole("region", { name: "storage_overview_title" });
+    await expect.element(overview).toBeVisible();
+    const distribution = overview
+      .getByRole("img", { name: /storage_overview_distribution_label/ })
+      .element();
+    const postgresqlSegment = distribution.querySelector<HTMLElement>(
+      "[data-storage-segment='postgresql']"
+    )!;
+    const objectStoreSegment = distribution.querySelector<HTMLElement>(
+      "[data-storage-segment='object-store']"
+    )!;
+    const postgresqlSwatch = overview
+      .element()
+      .querySelector("[data-storage-swatch='postgresql']")!;
+    const objectStoreSwatch = overview
+      .element()
+      .querySelector("[data-storage-swatch='object-store']")!;
+
+    expect(objectStoreSegment.style.minWidth).toBe("4px");
+    expect(postgresqlSwatch.classList).toContain("bg-accent-default");
+    expect(postgresqlSegment.classList).toContain("bg-accent-default");
+    expect(objectStoreSwatch.classList).toContain("bg-positive-default");
+    expect(objectStoreSegment.classList).toContain("bg-positive-default");
+  });
 });
