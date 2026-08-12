@@ -3,8 +3,8 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any
 
-from eneo.flows.ai_builder.ai_builder_create_compiler import (
-    create_compile_context_from_planning_state,
+from eneo.flows.ai_builder.ai_builder_create_compile_context import (
+    CreateCompileContext,
 )
 from eneo.flows.ai_builder.ai_builder_create_feedback import (
     format_revision_feedback,
@@ -65,6 +65,7 @@ def build_conversation_aware_quality_feedback(
         EMPTY_REQUESTED_OUTPUT_SECTIONS
     ),
     include_edit_topology_advisories: bool = True,
+    compile_context: CreateCompileContext | None = None,
 ) -> str | None:
     context = build_conversation_critic_context(
         conversation,
@@ -74,6 +75,7 @@ def build_conversation_aware_quality_feedback(
         resource_catalog=resource_catalog,
         planning_state=planning_state,
         requested_output_sections=requested_output_sections,
+        compile_context=compile_context,
     )
     return build_quality_feedback_from_critic_context(
         context,
@@ -133,6 +135,7 @@ def build_conversation_critic_context(
     requested_output_sections: RequestedOutputSections = (
         EMPTY_REQUESTED_OUTPUT_SECTIONS
     ),
+    compile_context: CreateCompileContext | None = None,
 ) -> CriticContext:
     answer_signals = extract_answer_signals(conversation)
     text = aggregate_unprompted_user_text(conversation)
@@ -160,8 +163,6 @@ def build_conversation_critic_context(
         planning_state,
     )
     input_intent = resolve_input_intent(text, answer_signals, flow=flow)
-    compile_context = create_compile_context_from_planning_state(planning_state)
-
     return CriticContext(
         spec=spec,
         flow=flow,
@@ -199,9 +200,7 @@ def build_conversation_critic_context(
             )
         ),
         checkpoint_intents=(
-            tuple(planning_state.checkpoint_intents)
-            if planning_state is not None
-            else None
+            compile_context.checkpoint_intents if compile_context is not None else None
         ),
         result_contract=(
             derive_result_contract(planning_state)
@@ -222,7 +221,11 @@ def build_conversation_critic_context(
             else None
         ),
         resource_catalog=resource_catalog,
-        requested_output_sections=requested_output_sections,
+        requested_output_sections=(
+            compile_context.requested_output_sections
+            if compile_context is not None
+            else requested_output_sections
+        ),
     )
 
 

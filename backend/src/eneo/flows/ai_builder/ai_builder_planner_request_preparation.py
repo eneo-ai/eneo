@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, TypeAlias
+from typing import TYPE_CHECKING, Any, TypeAlias, cast
 from uuid import UUID
 
 from eneo.files.file_models import File
@@ -20,7 +20,7 @@ from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
     tool_calls_from_message,
     ui_language_from_metadata,
 )
-from eneo.flows.ai_builder.ai_builder_create_compiler import (
+from eneo.flows.ai_builder.ai_builder_create_compile_context import (
     CreateCompileContext,
     create_compile_context_from_planning_state,
 )
@@ -46,7 +46,6 @@ from eneo.flows.ai_builder.ai_builder_framework_policy import (
     aggregate_unprompted_user_text_preserving_case,
 )
 from eneo.flows.ai_builder.ai_builder_output_sections_signals import (
-    RequestedOutputSections,
     extract_requested_output_sections,
 )
 from eneo.flows.ai_builder.ai_builder_plan_edit_context import (
@@ -90,7 +89,10 @@ from eneo.flows.ai_builder.ai_builder_schema_evidence import (
     merge_declared_schema_candidates,
 )
 from eneo.flows.ai_builder.ai_builder_settings import AIBuilderBudgetPolicy
-from eneo.flows.ai_builder.ai_builder_tools import build_propose_flow_tool_schema
+from eneo.flows.ai_builder.ai_builder_tools import (
+    ProposalToolSchema,
+    build_propose_flow_tool_schema,
+)
 from eneo.flows.ai_builder.ai_builder_turn_controller import (
     BuilderTurnDecision,
     GenerateProposal,
@@ -177,8 +179,8 @@ class ProposalPrepared(_PreparedBase):
     prior_plan_for_revision: BuilderPlan | None
     resource_catalog: AIBuilderResourceCatalog
     planning_state: PlanningState
-    requested_output_sections: RequestedOutputSections
     compile_context: CreateCompileContext | None
+    proposal_tool_schema: ProposalToolSchema
     request_budget: ProposalRequestBudget | None = None
 
     @property
@@ -358,6 +360,10 @@ def build_proposal_prepared(
         ui_language=ui_language,
         requested_output_sections=requested_output_sections,
     )
+    proposal_tool_schema = build_propose_flow_tool_schema(
+        current_steps=current_steps,
+        resource_catalog=resource_catalog,
+    )
     incompatible_field_names = (
         compile_context.incompatible_confirmed_form_field_names
         if compile_context is not None and not is_edit_mode
@@ -389,8 +395,7 @@ def build_proposal_prepared(
     fitted_attachment_context = _fit_proposal_attachment_context(
         attachment_context=attachment_context,
         build_proposal_prompt=build_proposal_prompt,
-        current_steps=current_steps,
-        resource_catalog=resource_catalog,
+        proposal_tool_schema=proposal_tool_schema,
         litellm_model=litellm_model,
         max_input_tokens=max_input_tokens,
         max_output_tokens=max_output_tokens,
@@ -439,8 +444,8 @@ def build_proposal_prepared(
         prior_plan_for_revision=prior_plan_for_revision,
         resource_catalog=resource_catalog,
         planning_state=planning_state,
-        requested_output_sections=requested_output_sections,
         compile_context=compile_context,
+        proposal_tool_schema=proposal_tool_schema,
         request_budget=ProposalRequestBudget(
             context_window_tokens=max_input_tokens,
             output_reserve_tokens=max_output_tokens,
@@ -453,8 +458,7 @@ def _fit_proposal_attachment_context(
     *,
     attachment_context: AIBuilderAttachmentContext | None,
     build_proposal_prompt: Callable[[str | None], str],
-    current_steps: list["FlowStep"] | None,
-    resource_catalog: AIBuilderResourceCatalog,
+    proposal_tool_schema: ProposalToolSchema,
     litellm_model: str,
     max_input_tokens: int,
     max_output_tokens: int,
@@ -463,17 +467,15 @@ def _fit_proposal_attachment_context(
     if attachment_context is None:
         return None
 
-    proposal_tool = build_propose_flow_tool_schema(
-        current_steps=current_steps,
-        resource_catalog=resource_catalog,
-    )
     system_prompt_token_limit = max(
         0,
         max_input_tokens
         - max_output_tokens
         - budget_policy.conversation_safety_buffer_tokens
         - budget_policy.minimum_conversation_budget_tokens
-        - count_tool_tokens([proposal_tool], litellm_model),
+        - count_tool_tokens(
+            [cast(dict[str, Any], proposal_tool_schema)], litellm_model
+        ),
     )
 
     def fits_context(context: str | None) -> bool:

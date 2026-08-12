@@ -42,15 +42,12 @@ from eneo.flows.ai_builder.ai_builder_litellm_completion import (
     call_proposal_completion,
     make_usage_tracked_proposal_completion,
 )
-from eneo.flows.ai_builder.ai_builder_output_sections_signals import (
-    EMPTY_REQUESTED_OUTPUT_SECTIONS,
-    RequestedOutputSections,
-)
 from eneo.flows.ai_builder.ai_builder_plan_edit_context import (
     AIBuilderPlanEditContext,
 )
 from eneo.flows.ai_builder.ai_builder_proposal_capture import (
     capture_malformed_proposal_arguments,
+    capture_rejected_proposal_arguments,
 )
 from eneo.flows.ai_builder.ai_builder_proposal_finalization import (
     CompiledProposalFinalizationRequest,
@@ -95,7 +92,9 @@ from eneo.flows.ai_builder.ai_builder_tool_parsing import (
 )
 from eneo.flows.ai_builder.ai_builder_tools import (
     PROPOSE_FLOW_TOOL_NAME,
-    build_propose_flow_tool_schema,
+    ProposalToolArgumentsError,
+    ProposalToolSchema,
+    validate_propose_flow_tool_arguments,
 )
 from eneo.flows.ai_builder.planning_state import (
     PlanningState,
@@ -107,6 +106,9 @@ from eneo.main.logging import get_logger
 if TYPE_CHECKING:
     from eneo.completion_models.infrastructure.completion_service import (
         ResolvedCompletionModelRoute,
+    )
+    from eneo.flows.ai_builder.ai_builder_create_compile_context import (
+        CreateCompileContext,
     )
     from eneo.flows.domain.flow import Flow
 
@@ -164,19 +166,6 @@ class ProposalSubmissionOwner:
             )
         )
 
-    def _active_submission_tool_schemas(
-        self,
-        *,
-        flow: "Flow | None",
-        resource_catalog: AIBuilderResourceCatalog,
-    ) -> list[dict[str, Any]]:
-        return [
-            build_propose_flow_tool_schema(
-                current_steps=None if flow is None else list(flow.steps),
-                resource_catalog=resource_catalog,
-            )
-        ]
-
     def dispatch_submission_tool_call(
         self,
         *,
@@ -205,6 +194,7 @@ class ProposalSubmissionOwner:
         available_model_refs: set[str] | None,
         available_kb_refs: set[str] | None,
         resource_catalog: AIBuilderResourceCatalog,
+        proposal_tool_schema: ProposalToolSchema,
         max_output_tokens: int,
         proposal_temperature: float,
         request_id: str,
@@ -213,24 +203,18 @@ class ProposalSubmissionOwner:
         assistant_snapshots: AssistantAuthoringSnapshots | None = None,
         assistant_metadata: dict[str, Any] | None = None,
         planning_state: PlanningState | None = None,
-        requested_output_sections: RequestedOutputSections = (
-            EMPTY_REQUESTED_OUTPUT_SECTIONS
-        ),
+        compile_context: "CreateCompileContext | None",
         plan_edit_context: AIBuilderPlanEditContext | None = None,
         prior_plan_for_revision: BuilderPlan | None = None,
         before_provider_call: Callable[[], Awaitable[None]] | None = None,
         proposal_request_budget: ProposalRequestBudget | None = None,
     ) -> AsyncGenerator[AIBuilderStreamEvent, None]:
-        tool_schemas = self._active_submission_tool_schemas(
-            flow=flow,
-            resource_catalog=resource_catalog,
-        )
         ctx = ProposalTurnContext(
             turn=turn,
             conversation=conversation,
             new_messages_start=new_messages_start,
             message_groups=message_groups,
-            tool_schemas=tool_schemas,
+            proposal_tool_schema=proposal_tool_schema,
             route=completion_model_route,
             available_model_refs=available_model_refs,
             available_kb_refs=available_kb_refs,
@@ -241,7 +225,7 @@ class ProposalSubmissionOwner:
             assistant_snapshots=assistant_snapshots,
             assistant_metadata=assistant_metadata,
             planning_state=planning_state,
-            requested_output_sections=requested_output_sections,
+            compile_context=compile_context,
             usage_tracker=usage_tracker,
             plan_edit_context=plan_edit_context,
             prior_plan_for_revision=prior_plan_for_revision,
@@ -381,7 +365,8 @@ class ProposalSubmissionOwner:
         plan_edit_context: AIBuilderPlanEditContext | None,
         prior_plan_for_revision: BuilderPlan | None,
         usage_tracker: ProposalTurnTelemetry | None,
-        requested_output_sections: RequestedOutputSections,
+        proposal_tool_schema: ProposalToolSchema,
+        compile_context: "CreateCompileContext | None",
     ) -> ToolRetryConfig:
         async def _process_tool_invocation(
             invocation: ToolRetryInvocation,
@@ -395,7 +380,8 @@ class ProposalSubmissionOwner:
                 prior_plan_for_revision=prior_plan_for_revision,
                 request_id=request_id,
                 usage_tracker=usage_tracker,
-                requested_output_sections=requested_output_sections,
+                proposal_tool_schema=proposal_tool_schema,
+                compile_context=compile_context,
             )
 
         return ToolRetryConfig(
@@ -419,9 +405,25 @@ class ProposalSubmissionOwner:
         prior_plan_for_revision: BuilderPlan | None,
         request_id: str,
         usage_tracker: ProposalTurnTelemetry | None,
-        requested_output_sections: RequestedOutputSections,
+        proposal_tool_schema: ProposalToolSchema,
+        compile_context: "CreateCompileContext | None",
         metadata_tool_call: RuntimeToolCall | None = None,
     ) -> ToolProcessingResult:
+        try:
+            validate_propose_flow_tool_arguments(
+                arguments=invocation.arguments,
+                tool_schema=proposal_tool_schema,
+            )
+        except ProposalToolArgumentsError as error:
+            capture_rejected_proposal_arguments(
+                invocation.arguments,
+                session_id=str(invocation.turn.session_id),
+                issues=[str(error)],
+            )
+            return ToolProcessingResult(
+                feedback=f"Invalid propose_flow arguments: {error}",
+                failure_kind="parse",
+            )
         if target_kind == TargetKind.CREATE:
             if planning_state is None or planning_state.architecture_commit is None:
                 raise AIBuilderArchitectureError(
@@ -440,10 +442,9 @@ class ProposalSubmissionOwner:
                 available_model_refs=invocation.available_model_refs,
                 available_kb_refs=invocation.available_kb_refs,
                 resource_catalog=invocation.resource_catalog,
-                planning_state=planning_state,
-                requested_output_sections=requested_output_sections,
                 plan_edit_context=plan_edit_context,
                 prior_plan_for_revision=prior_plan_for_revision,
+                compile_context=compile_context,
             )
         else:
             result = await process_edit_arguments(
@@ -458,6 +459,7 @@ class ProposalSubmissionOwner:
                 planning_state=planning_state,
                 plan_edit_context=plan_edit_context,
                 prior_plan_for_revision=prior_plan_for_revision,
+                compile_context=compile_context,
             )
         if result.compiled_proposal is None:
             return result
@@ -470,7 +472,7 @@ class ProposalSubmissionOwner:
             usage_tracker=usage_tracker,
             metadata_tool_call=metadata_tool_call,
             planning_state=planning_state,
-            requested_output_sections=requested_output_sections,
+            compile_context=compile_context,
         )
 
     async def _finalize_invocation_proposal(
@@ -484,7 +486,7 @@ class ProposalSubmissionOwner:
         usage_tracker: ProposalTurnTelemetry | None,
         metadata_tool_call: RuntimeToolCall | None,
         planning_state: PlanningState | None,
-        requested_output_sections: RequestedOutputSections,
+        compile_context: "CreateCompileContext | None",
     ) -> ToolProcessingResult:
         return await self._compiled_proposal_finalizer.finalize_compiled_proposal(
             CompiledProposalFinalizationRequest(
@@ -504,7 +506,7 @@ class ProposalSubmissionOwner:
                 request_id=request_id,
                 usage_tracker=usage_tracker,
                 planning_state=planning_state,
-                requested_output_sections=requested_output_sections,
+                compile_context=compile_context,
             )
         )
 
@@ -610,7 +612,8 @@ class ProposalSubmissionOwner:
             plan_edit_context=ctx.plan_edit_context,
             prior_plan_for_revision=ctx.prior_plan_for_revision,
             usage_tracker=ctx.usage_tracker,
-            requested_output_sections=ctx.requested_output_sections,
+            proposal_tool_schema=ctx.proposal_tool_schema,
+            compile_context=ctx.compile_context,
         )
 
         try:
@@ -650,7 +653,8 @@ class ProposalSubmissionOwner:
                 prior_plan_for_revision=ctx.prior_plan_for_revision,
                 request_id=ctx.request_id,
                 usage_tracker=ctx.usage_tracker,
-                requested_output_sections=ctx.requested_output_sections,
+                proposal_tool_schema=ctx.proposal_tool_schema,
+                compile_context=ctx.compile_context,
                 metadata_tool_call=tool_call,
             )
             if is_create and result.user_message is not None:
@@ -732,7 +736,8 @@ class ProposalSubmissionOwner:
             plan_edit_context=ctx.plan_edit_context,
             prior_plan_for_revision=ctx.prior_plan_for_revision,
             usage_tracker=ctx.usage_tracker,
-            requested_output_sections=ctx.requested_output_sections,
+            proposal_tool_schema=ctx.proposal_tool_schema,
+            compile_context=ctx.compile_context,
         )
         outcome = await run_forced_tool_retry_after_text(
             ForcedToolAfterTextRequest(

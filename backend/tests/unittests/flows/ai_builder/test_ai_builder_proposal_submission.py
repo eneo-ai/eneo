@@ -22,6 +22,10 @@ from eneo.flows.ai_builder.ai_builder_architecture_commit import (
 from eneo.flows.ai_builder.ai_builder_architecture_errors import (
     AIBuilderArchitectureError,
 )
+from eneo.flows.ai_builder.ai_builder_create_compile_context import (
+    CreateCompileContext,
+    create_compile_context_from_planning_state,
+)
 from eneo.flows.ai_builder.ai_builder_domain_models import (
     ConversationMessage,
     TargetKind,
@@ -74,6 +78,7 @@ from eneo.flows.ai_builder.ai_builder_resource_catalog import (
     build_ai_builder_resource_catalog,
 )
 from eneo.flows.ai_builder.ai_builder_tool_names import PROPOSE_FLOW_TOOL_NAME
+from eneo.flows.ai_builder.ai_builder_tools import build_propose_flow_tool_schema
 from eneo.flows.ai_builder.planning_state import (
     ArchitectureCommitDraft,
     CheckpointIntent,
@@ -81,7 +86,7 @@ from eneo.flows.ai_builder.planning_state import (
     PlanningStatePayloadTooLargeError,
     StepTriple,
 )
-from eneo.flows.flow_authoring_spec import OutputMode
+from eneo.flows.flow_authoring_spec import OutputMode, OutputType
 from eneo.flows.flow_review_policy import FlowStepReviewMode
 from tests.unittests.flows.ai_builder.proposal_turn_builders import (
     _compiled_edit_proposal,
@@ -192,22 +197,24 @@ async def test_complex_authoring_spec_submits_once_without_repairs() -> None:
                         "Extract grounded facts, risks, and recommended actions "
                         "from the corrected transcript."
                     ),
-                    "output_type": "json",
                     "output_fields": [
                         {
                             "name": "facts",
                             "field_type": "string",
                             "description": "Grounded facts from the source.",
+                            "required": False,
                         },
                         {
                             "name": "risks",
                             "field_type": "string",
                             "description": "Grounded risks from the source.",
+                            "required": False,
                         },
                         {
                             "name": "actions",
                             "field_type": "string",
                             "description": "Recommended actions grounded in the source.",
+                            "required": False,
                         },
                     ],
                 },
@@ -217,7 +224,6 @@ async def test_complex_authoring_spec_submits_once_without_repairs() -> None:
                         "Write the complete final decision report from the extracted "
                         "facts, risks, and actions."
                     ),
-                    "output_type": "text",
                 },
             ],
         },
@@ -311,12 +317,19 @@ async def test_complex_authoring_spec_submits_once_without_repairs() -> None:
                     available_model_refs=None,
                     available_kb_refs=None,
                     resource_catalog=resource_catalog,
+                    proposal_tool_schema=build_propose_flow_tool_schema(
+                        resource_catalog=resource_catalog
+                    ),
                     max_output_tokens=8_192,
                     proposal_temperature=0.2,
                     request_id="req-complex-authoring-spec",
                     usage_tracker=usage_tracker,
                     planning_state=planning_state,
-                    requested_output_sections=requested_output_sections,
+                    compile_context=create_compile_context_from_planning_state(
+                        planning_state,
+                        ui_language="en",
+                        requested_output_sections=requested_output_sections,
+                    ),
                 )
             ]
         )
@@ -452,7 +465,6 @@ async def test_create_propose_flow_ambiguous_structured_source_returns_event_wit
                 {
                     "name": "Extract source facts",
                     "instructions": "Extract source facts.",
-                    "output_type": "json",
                     "output_fields": [
                         {
                             "name": "source_facts",
@@ -464,7 +476,6 @@ async def test_create_propose_flow_ambiguous_structured_source_returns_event_wit
                 {
                     "name": "Prepare report facts",
                     "instructions": "Prepare report facts.",
-                    "output_type": "json",
                     "output_fields": [
                         {
                             "name": "report_facts",
@@ -476,12 +487,10 @@ async def test_create_propose_flow_ambiguous_structured_source_returns_event_wit
                 {
                     "name": "Write findings",
                     "instructions": "Write the findings section.",
-                    "output_type": "text",
                 },
                 {
                     "name": "Write recommendations",
                     "instructions": "Write the recommendations section.",
-                    "output_type": "text",
                 },
             ],
         },
@@ -1015,6 +1024,10 @@ async def test_proposal_retry_config_finalizes_create_compiled_proposal_with_inv
         sections=("Summary", "Findings", "Risks", "Recommendations"),
         confidence="high",
     )
+    compile_context = CreateCompileContext(
+        final_output_type=OutputType.TEXT,
+        requested_output_sections=requested_output_sections,
+    )
     config = submission._proposal_retry_config(
         target_kind=TargetKind.CREATE,
         assistant_snapshots=None,
@@ -1023,7 +1036,8 @@ async def test_proposal_retry_config_finalizes_create_compiled_proposal_with_inv
         plan_edit_context=None,
         prior_plan_for_revision=None,
         usage_tracker=tracker,
-        requested_output_sections=requested_output_sections,
+        proposal_tool_schema=_make_context().proposal_tool_schema,
+        compile_context=compile_context,
     )
 
     with (
@@ -1040,6 +1054,8 @@ async def test_proposal_retry_config_finalizes_create_compiled_proposal_with_inv
 
     assert [event.event for event in result.events] == ["plan"]
     process_outline.assert_awaited_once()
+    assert process_outline.await_args is not None
+    assert process_outline.await_args.kwargs["compile_context"] is compile_context
     finalize.assert_awaited_once()
     request = finalize.await_args.args[0]
     assert request.turn is invocation.turn
@@ -1057,7 +1073,61 @@ async def test_proposal_retry_config_finalizes_create_compiled_proposal_with_inv
     assert request.flow is flow
     assert request.request_id == "req-outline-retry-finalize"
     assert request.usage_tracker is tracker
-    assert request.requested_output_sections is requested_output_sections
+    assert request.compile_context is compile_context
+    assert (
+        request.compile_context.requested_output_sections is requested_output_sections
+    )
+
+
+@pytest.mark.asyncio
+async def test_repair_invocation_validates_the_prepared_schema_before_compilation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv(REJECTED_PROPOSAL_CAPTURE_DIR_ENV, str(tmp_path))
+    submission = _make_submission()
+    planning_state = _committed_text_planning_state()
+    resource_catalog = build_ai_builder_resource_catalog(
+        available_models=[], available_kbs=[]
+    )
+    schema = build_propose_flow_tool_schema(resource_catalog=resource_catalog)
+    process_create = AsyncMock()
+    config = submission._proposal_retry_config(
+        target_kind=TargetKind.CREATE,
+        assistant_snapshots=None,
+        request_id="req-invalid-repair",
+        planning_state=planning_state,
+        plan_edit_context=None,
+        prior_plan_for_revision=None,
+        usage_tracker=None,
+        proposal_tool_schema=schema,
+        compile_context=create_compile_context_from_planning_state(planning_state),
+    )
+    invalid_arguments = {
+        "flow_name": "Invalid repair",
+        "plan_rationale": "Repair the proposal.",
+        "steps": ["not an object"],
+    }
+    invocation = _make_retry_invocation(
+        resource_catalog=resource_catalog,
+        arguments=invalid_arguments,
+    )
+
+    with patch(
+        "eneo.flows.ai_builder.ai_builder_proposal_submission."
+        "process_create_intent_arguments",
+        new=process_create,
+    ):
+        result = await config.process_tool_invocation(invocation)
+
+    assert result.failure_kind == "parse"
+    assert result.feedback is not None and "steps.0" in result.feedback
+    process_create.assert_not_awaited()
+    captures = list(tmp_path.glob("rejected-proposal-*.json"))
+    assert len(captures) == 1
+    captured = json.loads(captures[0].read_text(encoding="utf-8"))
+    assert captured["session_id"] == str(invocation.turn.session_id)
+    assert captured["arguments"] == invalid_arguments
 
 
 @pytest.mark.asyncio
@@ -1075,7 +1145,6 @@ async def test_create_propose_flow_self_correction_preserves_unknown_provider_ou
         new_messages_start=1,
         request_id="req-self-correction",
         llm_messages=[{"role": "system", "content": "Prompt"}],
-        tool_schemas=[{"function": {"name": PROPOSE_FLOW_TOOL_NAME}}],
     )
 
     litellm_client.acompletion = AsyncMock(
@@ -1214,7 +1283,8 @@ async def test_proposal_retry_config_carries_edit_invocation_context() -> None:
         plan_edit_context=plan_edit_context,
         prior_plan_for_revision=prior_plan_for_revision,
         usage_tracker=None,
-        requested_output_sections=RequestedOutputSections.empty(),
+        proposal_tool_schema=_make_context().proposal_tool_schema,
+        compile_context=None,
     )
 
     assert isinstance(config, ToolRetryConfig)
@@ -1283,7 +1353,8 @@ async def test_edit_propose_flow_retry_preserves_description_advisory_without_co
         plan_edit_context=None,
         prior_plan_for_revision=None,
         usage_tracker=tracker,
-        requested_output_sections=RequestedOutputSections.empty(),
+        proposal_tool_schema=_make_context().proposal_tool_schema,
+        compile_context=None,
     )
     invocation = _make_retry_invocation(
         flow=flow,
@@ -1397,7 +1468,6 @@ async def test__retry_forced_proposal_after_text_uses_create_target_for_create_m
     ctx = _make_context(
         conversation=[ConversationMessage(role="user", content="Bygg ett flöde")],
         new_messages_start=1,
-        tool_schemas=[{"function": {"name": PROPOSE_FLOW_TOOL_NAME}}],
         litellm_model="openai/gpt-5.4",
         litellm_kwargs={},
         max_output_tokens=4096,
@@ -1442,7 +1512,6 @@ async def test__retry_forced_proposal_after_text_uses_edit_target_for_edit_mode(
     ctx = _make_context(
         conversation=[ConversationMessage(role="user", content="Redigera flödet")],
         new_messages_start=1,
-        tool_schemas=[{"function": {"name": PROPOSE_FLOW_TOOL_NAME}}],
         litellm_model="openai/gpt-5.4",
         litellm_kwargs={},
         max_output_tokens=4096,

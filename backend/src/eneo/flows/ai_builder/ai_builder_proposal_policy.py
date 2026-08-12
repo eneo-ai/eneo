@@ -49,6 +49,9 @@ from eneo.flows.flow_authoring_spec import (
 )
 
 if TYPE_CHECKING:
+    from eneo.flows.ai_builder.ai_builder_create_compile_context import (
+        CreateCompileContext,
+    )
     from eneo.flows.ai_builder.ai_builder_plan_edit_context import (
         AIBuilderPlanEditContext,
     )
@@ -160,6 +163,7 @@ def format_contextual_quality_feedback(
     requested_output_sections: RequestedOutputSections = (
         EMPTY_REQUESTED_OUTPUT_SECTIONS
     ),
+    compile_context: "CreateCompileContext | None" = None,
 ) -> str | None:
     return build_conversation_aware_quality_feedback(
         conversation,
@@ -170,6 +174,7 @@ def format_contextual_quality_feedback(
         planning_state=planning_state,
         requested_output_sections=requested_output_sections,
         include_edit_topology_advisories=False,
+        compile_context=compile_context,
     )
 
 
@@ -180,6 +185,7 @@ def evaluate_edit_topology_policy(
     flow: "Flow",
     planning_state: PlanningState | None,
     resource_catalog: "AIBuilderResourceCatalog | None" = None,
+    compile_context: "CreateCompileContext | None" = None,
 ) -> EditTopologyPolicyResult:
     context = build_conversation_critic_context(
         conversation,
@@ -187,6 +193,7 @@ def evaluate_edit_topology_policy(
         flow=flow,
         resource_catalog=resource_catalog,
         planning_state=planning_state,
+        compile_context=compile_context,
     )
     issues = evaluate_edit_topology_invariants(context)
     rejected = tuple(issue for issue in issues if issue.kind == "architecture")
@@ -226,6 +233,7 @@ def build_create_contextual_quality_feedback(
     requested_output_sections: RequestedOutputSections = (
         EMPTY_REQUESTED_OUTPUT_SECTIONS
     ),
+    compile_context: "CreateCompileContext | None" = None,
 ) -> CreateContextualQualityFeedback:
     context = build_conversation_critic_context(
         conversation,
@@ -235,6 +243,7 @@ def build_create_contextual_quality_feedback(
         resource_catalog=resource_catalog,
         planning_state=planning_state,
         requested_output_sections=requested_output_sections,
+        compile_context=compile_context,
     )
     preflight = run_draft_preflight(context)
     enforce_architecture_critic_invariants(context, issues=preflight.issues)

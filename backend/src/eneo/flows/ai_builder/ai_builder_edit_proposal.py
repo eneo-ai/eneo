@@ -10,8 +10,8 @@ from eneo.flows.ai_builder.ai_builder_architecture_errors import (
 from eneo.flows.ai_builder.ai_builder_compiled_spec_preparation import (
     prepare_compiled_spec_for_session,
 )
-from eneo.flows.ai_builder.ai_builder_create_compiler import (
-    create_compile_context_from_planning_state,
+from eneo.flows.ai_builder.ai_builder_create_compile_context import (
+    CreateCompileContext,
 )
 from eneo.flows.ai_builder.ai_builder_domain_models import (
     BuilderPlan,
@@ -27,7 +27,6 @@ from eneo.flows.ai_builder.ai_builder_plan_edit_context import (
 from eneo.flows.ai_builder.ai_builder_proposal_intent import OrderedEditProposal
 from eneo.flows.ai_builder.ai_builder_proposal_policy import (
     evaluate_edit_topology_policy,
-    resolve_ui_language,
     terminal_output_type_for_edit_conversation,
 )
 from eneo.flows.ai_builder.ai_builder_proposal_tool_contracts import (
@@ -68,6 +67,7 @@ async def process_edit_arguments(
     planning_state: PlanningState | None = None,
     plan_edit_context: AIBuilderPlanEditContext | None = None,
     prior_plan_for_revision: BuilderPlan | None = None,
+    compile_context: CreateCompileContext | None = None,
 ) -> ToolProcessingResult:
     if flow is None:
         return ToolProcessingResult(
@@ -100,16 +100,7 @@ async def process_edit_arguments(
             feedback=f"Invalid propose_flow arguments: {exc}",
             failure_kind="parse",
         )
-    ui_language = resolve_ui_language(conversation)
-    compile_context = create_compile_context_from_planning_state(
-        planning_state,
-        ui_language=ui_language,
-    )
-    selected_template_roles = (
-        []
-        if planning_state is None
-        else [role for role in planning_state.file_roles if role.role == "template"]
-    )
+    ui_language = compile_context.ui_language if compile_context is not None else None
     try:
         edit_result = compile_edit_proposal(
             proposal,
@@ -127,12 +118,13 @@ async def process_edit_arguments(
             ),
             ui_language=ui_language,
             selected_template_count=(
-                None if planning_state is None else len(selected_template_roles)
+                compile_context.selected_template_count
+                if compile_context is not None
+                else None
             ),
             selected_template_placeholders=(
-                tuple(selected_template_roles[0].template_placeholders)
-                if len(selected_template_roles) == 1
-                and selected_template_roles[0].template_placeholders is not None
+                compile_context.selected_template_placeholders
+                if compile_context is not None
                 else None
             ),
         )
@@ -206,6 +198,7 @@ async def process_edit_arguments(
         flow=flow,
         planning_state=planning_state,
         resource_catalog=resource_catalog,
+        compile_context=compile_context,
     )
     if topology_policy.rejection_feedback is not None:
         return ToolProcessingResult(

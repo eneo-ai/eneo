@@ -29,10 +29,9 @@ from eneo.flows.ai_builder.ai_builder_attachment_context import (
     AIBuilderAttachmentSchemaDiscovery,
     build_ai_builder_attachment_context,
 )
+from eneo.flows.ai_builder.ai_builder_create_compile_context import CreateCompileContext
 from eneo.flows.ai_builder.ai_builder_create_compiler import (
-    CreateCompileContext,
     compile_create_intent_to_spec,
-    create_compile_context_from_planning_state,
 )
 from eneo.flows.ai_builder.ai_builder_critic_invariants import (
     evaluate_critic_invariants,
@@ -64,9 +63,6 @@ from eneo.flows.ai_builder.ai_builder_events import (
     build_status_event,
     build_text_event,
     encode_ai_builder_stream_event,
-)
-from eneo.flows.ai_builder.ai_builder_output_sections_signals import (
-    RequestedOutputSections,
 )
 from eneo.flows.ai_builder.ai_builder_plan_edit_context import AIBuilderPlanEditContext
 from eneo.flows.ai_builder.ai_builder_plan_quality_critic import (
@@ -121,7 +117,10 @@ from eneo.flows.ai_builder.ai_builder_session_turn import (
     SessionTurnPreparationBaseline,
 )
 from eneo.flows.ai_builder.ai_builder_settings import AIBuilderBudgetPolicy
-from eneo.flows.ai_builder.ai_builder_tools import build_propose_flow_tool_schema
+from eneo.flows.ai_builder.ai_builder_tools import (
+    ProposalToolSchema,
+    build_propose_flow_tool_schema,
+)
 from eneo.flows.ai_builder.ai_builder_turn_controller import (
     AskCanonicalQuestion,
     CommitArchitecture,
@@ -174,6 +173,15 @@ def _route(
 
 _TEST_CLIENT_TURN_ID = UUID("11111111-1111-4111-8111-111111111111")
 _TEST_REQUEST_FINGERPRINT = "a" * 64
+
+
+def _empty_proposal_tool_schema() -> ProposalToolSchema:
+    return build_propose_flow_tool_schema(
+        resource_catalog=build_ai_builder_resource_catalog(
+            available_models=[],
+            available_kbs=[],
+        )
+    )
 
 
 def _test_request_snapshot(message: str) -> FlowPersistedJsonObject:
@@ -530,17 +538,13 @@ def test_named_report_sections_flow_from_request_preparation_into_lowering() -> 
         attachment_file_count=0,
         current_turn_start=0,
     )
-    assert prepared.requested_output_sections.sections == (
+    context = prepared.compile_context
+    assert context is not None
+    assert context.requested_output_sections.sections == (
         "Résumé",
         "Findings",
         "Analysis",
         "Recommendations",
-    )
-
-    context = create_compile_context_from_planning_state(
-        prepared.planning_state,
-        ui_language=prepared.ui_language,
-        requested_output_sections=prepared.requested_output_sections,
     )
     intent = parse_create_flow_intent_arguments(
         {
@@ -550,7 +554,6 @@ def test_named_report_sections_flow_from_request_preparation_into_lowering() -> 
                 {
                     "name": "Read documents",
                     "instructions": "Extract source-grounded evidence.",
-                    "output_type": "json",
                     "output_fields": [
                         {
                             "name": "documents",
@@ -569,19 +572,17 @@ def test_named_report_sections_flow_from_request_preparation_into_lowering() -> 
                 {
                     "name": "Write report",
                     "instructions": "Write the requested report.",
-                    "output_type": "text",
                 },
             ],
         }
     )
-    assert context is not None
     spec = compile_create_intent_to_spec(intent, context=context)
 
     compose_refs = source_ref_bindings(spec.steps[-2].input_bindings)
     assert {
         (ref.field_path, ref.label)
         for ref in compose_refs
-        if ref.label in prepared.requested_output_sections.sections
+        if ref.label in context.requested_output_sections.sections
     } == {
         (("requested_section_1",), "Résumé"),
         (("requested_section_2",), "Findings"),
@@ -593,7 +594,7 @@ def test_named_report_sections_flow_from_request_preparation_into_lowering() -> 
             conversation,
             spec,
             planning_state=prepared.planning_state,
-            requested_output_sections=prepared.requested_output_sections,
+            requested_output_sections=context.requested_output_sections,
         )
     )
     assert "requested_output_sections_require_section_writers" not in {
@@ -1738,13 +1739,11 @@ def test_real_proposal_boundary_fits_attachments_and_protects_current_turn() -> 
         max_input_tokens=100_000,
         current_turn_start=0,
     )
-    tool_schema = build_propose_flow_tool_schema(
-        current_steps=None,
-        resource_catalog=catalog,
-    )
+    tool_schema = baseline.proposal_tool_schema
+    tool_schema_for_budget = cast(dict[str, Any], tool_schema)
     irreducible_request_tokens = (
         count_message_tokens(baseline.llm_messages, model_name)
-        + count_tool_tokens([tool_schema], model_name)
+        + count_tool_tokens([tool_schema_for_budget], model_name)
         + 256
         + policy.conversation_safety_buffer_tokens
     )
@@ -1757,17 +1756,21 @@ def test_real_proposal_boundary_fits_attachments_and_protects_current_turn() -> 
         max_input_tokens=tight_context_window,
         current_turn_start=1,
     )
+    assert prepared.proposal_tool_schema == tool_schema
+    prepared_tool_schema_for_budget = cast(
+        dict[str, Any], prepared.proposal_tool_schema
+    )
 
     assert prepared.request_budget is not None
     fitted_groups = prepared.request_budget.fit(
         message_groups=prepared.message_groups,
-        tool_schemas=[tool_schema],
+        tool_schemas=[prepared_tool_schema_for_budget],
         model_name=model_name,
     )
     fitted_messages = flatten_proposal_message_groups(fitted_groups)
     final_request_tokens = (
         count_message_tokens(fitted_messages, model_name)
-        + count_tool_tokens([tool_schema], model_name)
+        + count_tool_tokens([prepared_tool_schema_for_budget], model_name)
         + prepared.request_budget.output_reserve_tokens
         + prepared.request_budget.safety_buffer_tokens
     )
@@ -1786,7 +1789,7 @@ def test_real_proposal_boundary_fits_attachments_and_protects_current_turn() -> 
     with pytest.raises(AIBuilderKnownProviderRejectionException):
         impossible_budget.fit(
             message_groups=baseline.message_groups,
-            tool_schemas=[tool_schema],
+            tool_schemas=[tool_schema_for_budget],
             model_name=model_name,
         )
 
@@ -2216,8 +2219,8 @@ async def test_send_message_proposal_branch_ignores_in_process_lease_loss(
             slot_classification_metadata=None,
             plan_edit_context=None,
             planning_state=PlanningState.empty(),
-            requested_output_sections=RequestedOutputSections.empty(),
             compile_context=None,
+            proposal_tool_schema=_empty_proposal_tool_schema(),
             resource_catalog=build_ai_builder_resource_catalog(
                 available_models=[],
                 available_kbs=[],
@@ -2586,8 +2589,8 @@ async def test_send_message_releases_lease_when_stream_is_cancelled(
             slot_classification_metadata=None,
             plan_edit_context=None,
             planning_state=PlanningState.empty(),
-            requested_output_sections=RequestedOutputSections.empty(),
             compile_context=None,
+            proposal_tool_schema=_empty_proposal_tool_schema(),
             resource_catalog=build_ai_builder_resource_catalog(
                 available_models=[],
                 available_kbs=[],
@@ -2676,8 +2679,8 @@ async def test_send_message_proposal_catalog_uses_prior_plan_bindings(
             slot_classification_metadata=None,
             plan_edit_context=None,
             planning_state=PlanningState.empty(),
-            requested_output_sections=RequestedOutputSections.empty(),
             compile_context=None,
+            proposal_tool_schema=_empty_proposal_tool_schema(),
             resource_catalog=build_ai_builder_resource_catalog(
                 available_models=[
                     _model_resource(str(local_model_id), "Renamed model")
@@ -2774,8 +2777,8 @@ async def test_stream_proposal_events_dispatches_once_to_the_selected_owner(
         slot_classification_metadata=None,
         plan_edit_context=None,
         planning_state=PlanningState.empty(),
-        requested_output_sections=RequestedOutputSections.empty(),
         compile_context=CreateCompileContext(final_output_type=OutputType.TEXT),
+        proposal_tool_schema=_empty_proposal_tool_schema(),
         resource_catalog=build_ai_builder_resource_catalog(
             available_models=[],
             available_kbs=[],
@@ -2833,10 +2836,11 @@ async def test_stream_proposal_events_dispatches_once_to_the_selected_owner(
     assert events == [build_text_event(expected_text)]
     assert scoped_attempt.await_count == expected_scoped_calls
     if expected_scoped_calls:
-        assert (
-            scoped_attempt.await_args.kwargs["request"].terminal_output_type
-            is OutputType.TEXT
-        )
+        assert scoped_attempt.await_args is not None
+        request = scoped_attempt.await_args.kwargs["request"]
+        assert request.compile_context is proposal_request.compile_context
+        assert request.compile_context is not None
+        assert request.compile_context.final_output_type is OutputType.TEXT
     assert submission_calls == expected_submission_calls
     planner.repo.complete_session_turn.assert_awaited_once()
 
@@ -2862,8 +2866,8 @@ async def test_stream_proposal_events_commits_planning_state_payload_too_large(
         slot_classification_metadata=None,
         plan_edit_context=None,
         planning_state=PlanningState.empty(),
-        requested_output_sections=RequestedOutputSections.empty(),
         compile_context=None,
+        proposal_tool_schema=_empty_proposal_tool_schema(),
         resource_catalog=build_ai_builder_resource_catalog(
             available_models=[],
             available_kbs=[],

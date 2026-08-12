@@ -12,6 +12,7 @@ from typing import (
     Protocol,
     TypeAlias,
     TypedDict,
+    cast,
 )
 from uuid import UUID
 
@@ -26,10 +27,6 @@ from eneo.flows.ai_builder.ai_builder_error_contract import (
     build_ai_builder_request_budget_exhausted_error,
 )
 from eneo.flows.ai_builder.ai_builder_event_models import AIBuilderStreamEvent
-from eneo.flows.ai_builder.ai_builder_output_sections_signals import (
-    EMPTY_REQUESTED_OUTPUT_SECTIONS,
-    RequestedOutputSections,
-)
 from eneo.flows.ai_builder.ai_builder_plan_edit_context import (
     AIBuilderPlanEditContext,
 )
@@ -39,6 +36,7 @@ from eneo.flows.ai_builder.ai_builder_proposal_telemetry import (
 )
 from eneo.flows.ai_builder.ai_builder_resource_catalog import AIBuilderResourceCatalog
 from eneo.flows.ai_builder.ai_builder_session_turn import SessionSendTurn
+from eneo.flows.ai_builder.ai_builder_tools import ProposalToolSchema
 from eneo.flows.ai_builder.ai_builder_validation_common import SpecValidationResult
 from eneo.flows.ai_builder.planning_state import AggregationIntent, PlanningState
 from eneo.flows.assistant_authoring_snapshot import AssistantAuthoringSnapshots
@@ -48,6 +46,9 @@ from eneo.tokens.token_utils import count_message_tokens, count_tool_tokens
 if TYPE_CHECKING:
     from eneo.completion_models.infrastructure.completion_service import (
         ResolvedCompletionModelRoute,
+    )
+    from eneo.flows.ai_builder.ai_builder_create_compile_context import (
+        CreateCompileContext,
     )
     from eneo.flows.ai_builder.ai_builder_litellm_completion import (
         LLMCompletionResponse,
@@ -333,7 +334,7 @@ class ProposalTurnContext:
     conversation: list[ConversationMessage]
     new_messages_start: int
     message_groups: tuple[ProposalMessageGroup, ...]
-    tool_schemas: list[dict[str, Any]]
+    proposal_tool_schema: ProposalToolSchema
     route: ResolvedCompletionModelRoute
     available_model_refs: set[str] | None
     available_kb_refs: set[str] | None
@@ -349,9 +350,9 @@ class ProposalTurnContext:
     plan_edit_context: AIBuilderPlanEditContext | None = None
     prior_plan_for_revision: BuilderPlan | None = None
     before_provider_call: Callable[[], Awaitable[None]] | None = None
-    requested_output_sections: RequestedOutputSections = EMPTY_REQUESTED_OUTPUT_SECTIONS
     proposal_call_budget: ProposalCallBudget = field(default_factory=ProposalCallBudget)
     proposal_request_budget: ProposalRequestBudget | None = None
+    compile_context: "CreateCompileContext | None" = None
 
     @property
     def session_id(self) -> UUID:
@@ -366,18 +367,14 @@ class ProposalTurnContext:
         *,
         temperature: float,
         message_groups: tuple[ProposalMessageGroup, ...] | None = None,
-        tool_schemas: list[dict[str, Any]] | None = None,
         tool_choice: ToolChoiceParam | None = None,
         counts_as_repair: bool = False,
     ) -> ProposalCompletionRequest:
-        request_tool_schemas = (
-            self.tool_schemas if tool_schemas is None else tool_schemas
-        )
         return ProposalCompletionRequest(
             message_groups=(
                 self.message_groups if message_groups is None else message_groups
             ),
-            tool_schemas=request_tool_schemas,
+            tool_schemas=[cast(dict[str, Any], self.proposal_tool_schema)],
             route=self.route,
             max_output_tokens=self.max_output_tokens,
             temperature=temperature,

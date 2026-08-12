@@ -8,9 +8,9 @@ from eneo.flows.ai_builder.ai_builder_architecture_errors import (
 from eneo.flows.ai_builder.ai_builder_compiled_spec_preparation import (
     prepare_compiled_spec_for_session,
 )
+from eneo.flows.ai_builder.ai_builder_create_compile_context import CreateCompileContext
 from eneo.flows.ai_builder.ai_builder_create_compiler import (
     compile_create_intent_to_spec,
-    create_compile_context_from_planning_state,
 )
 from eneo.flows.ai_builder.ai_builder_create_feedback import (
     format_create_intent_quality_feedback,
@@ -21,10 +21,6 @@ from eneo.flows.ai_builder.ai_builder_domain_models import (
     FlowBuilderProposalContent,
     LintWarning,
     TargetKind,
-)
-from eneo.flows.ai_builder.ai_builder_output_sections_signals import (
-    EMPTY_REQUESTED_OUTPUT_SECTIONS,
-    RequestedOutputSections,
 )
 from eneo.flows.ai_builder.ai_builder_plan_edit_context import (
     AIBuilderPlanEditContext,
@@ -37,7 +33,6 @@ from eneo.flows.ai_builder.ai_builder_proposal_intent import (
     CreateFlowIntent,
     ProposalIntentArgumentError,
 )
-from eneo.flows.ai_builder.ai_builder_proposal_policy import resolve_ui_language
 from eneo.flows.ai_builder.ai_builder_proposal_tool_contracts import (
     CompiledProposal,
     ToolProcessingResult,
@@ -48,7 +43,7 @@ from eneo.flows.ai_builder.ai_builder_resource_catalog import (
 )
 from eneo.flows.ai_builder.ai_builder_session_turn import SessionSendTurn
 from eneo.flows.ai_builder.ai_builder_tools import parse_create_flow_intent_arguments
-from eneo.flows.ai_builder.planning_state import AggregationIntent, PlanningState
+from eneo.flows.ai_builder.planning_state import AggregationIntent
 from eneo.flows.flow_authoring_spec import FlowDraftSpecCore, OutputType
 from eneo.main.logging import get_logger
 
@@ -86,20 +81,12 @@ async def process_create_intent_arguments(
     available_model_refs: set[str] | None,
     available_kb_refs: set[str] | None,
     resource_catalog: AIBuilderResourceCatalog | None = None,
-    planning_state: PlanningState | None = None,
-    requested_output_sections: RequestedOutputSections = (
-        EMPTY_REQUESTED_OUTPUT_SECTIONS
-    ),
     plan_edit_context: AIBuilderPlanEditContext | None = None,
     prior_plan_for_revision: BuilderPlan | None = None,
+    compile_context: CreateCompileContext | None = None,
 ) -> ToolProcessingResult:
     try:
         intent = parse_create_flow_intent_arguments(arguments)
-        compile_context = create_compile_context_from_planning_state(
-            planning_state,
-            ui_language=resolve_ui_language(conversation),
-            requested_output_sections=requested_output_sections,
-        )
         field_diagnostics: list[LintWarning] = []
         spec = compile_create_intent_to_spec(
             intent,
@@ -164,6 +151,9 @@ async def process_create_intent_arguments(
         plan_edit_context=plan_edit_context,
         prior_plan_for_revision=prior_plan_for_revision,
         field_diagnostics=field_diagnostics,
+        ui_language=(
+            compile_context.ui_language if compile_context is not None else None
+        ),
     )
 
 
@@ -182,6 +172,7 @@ async def _process_create_spec(
     plan_edit_context: AIBuilderPlanEditContext | None = None,
     prior_plan_for_revision: BuilderPlan | None = None,
     field_diagnostics: list[LintWarning] | None = None,
+    ui_language: str | None = None,
 ) -> ToolProcessingResult:
     prepared = prepare_compiled_spec_for_session(
         spec=spec,
@@ -190,7 +181,7 @@ async def _process_create_spec(
         available_kb_refs=available_kb_refs,
         resource_catalog=resource_catalog,
         terminal_output_type=committed_terminal_output_type,
-        ui_language=resolve_ui_language(conversation),
+        ui_language=ui_language,
     )
     if prepared.failure_feedback is not None:
         if prepared.validation is not None and prepared.validation.errors:

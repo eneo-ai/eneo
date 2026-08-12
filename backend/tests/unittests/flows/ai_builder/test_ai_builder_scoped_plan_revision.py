@@ -13,14 +13,12 @@ from eneo.flows.ai_builder.ai_builder_architecture_errors import (
 from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
     PROVIDER_TOOL_CALL_ID_MAX_LENGTH,
 )
+from eneo.flows.ai_builder.ai_builder_create_compile_context import CreateCompileContext
 from eneo.flows.ai_builder.ai_builder_domain_models import (
     ConversationMessage,
     TargetKind,
 )
 from eneo.flows.ai_builder.ai_builder_events import encode_ai_builder_stream_event
-from eneo.flows.ai_builder.ai_builder_output_sections_signals import (
-    RequestedOutputSections,
-)
 from eneo.flows.ai_builder.ai_builder_plan_edit_context import (
     AIBuilderPlanEditContext,
 )
@@ -90,8 +88,7 @@ def _make_request(**overrides: object) -> ScopedPlanRevisionRequest:
             model="openai/gpt-5.4",
             target_kind=TargetKind.CREATE,
         ),
-        "requested_output_sections": RequestedOutputSections.empty(),
-        "terminal_output_type": None,
+        "compile_context": None,
         "assistant_metadata": None,
         "flow": None,
     }
@@ -314,7 +311,7 @@ async def test_scoped_revision_finalizes_terminal_pdf_revision(message: str) -> 
                     plan_id=prior_plan.id,
                     target_plan_step_ref="step_a",
                 ),
-                terminal_output_type=OutputType.PDF,
+                compile_context=CreateCompileContext(final_output_type=OutputType.PDF),
                 request_id="00000000-0000-0000-0000-000000000001",
             ),
             finalizer=_make_finalizer(),

@@ -4,6 +4,9 @@ import json
 from datetime import datetime, timezone
 from uuid import UUID
 
+from eneo.flows.ai_builder.ai_builder_create_compile_context import (
+    create_compile_context_from_planning_state,
+)
 from eneo.flows.ai_builder.ai_builder_event_models import (
     RequirementsSummaryPayload,
 )
@@ -641,6 +644,7 @@ def test_plan_proposal_prompt_projects_confirmed_runtime_field_contract() -> Non
 
     prompt = build_plan_proposal_system_prompt(
         planning_state=state,
+        compile_context=create_compile_context_from_planning_state(state),
         confirmed_requirements=_requirements(),
         attachment_context=None,
         flow_context=None,
@@ -690,6 +694,7 @@ def test_plan_proposal_prompt_omits_primary_input_shadow_field() -> None:
 
     prompt = build_plan_proposal_system_prompt(
         planning_state=state,
+        compile_context=create_compile_context_from_planning_state(state),
         confirmed_requirements=_requirements(),
         attachment_context=None,
         flow_context=None,
@@ -723,6 +728,7 @@ def test_plan_proposal_prompt_projects_normalized_template_runtime_fields() -> N
 
     prompt = build_plan_proposal_system_prompt(
         planning_state=state,
+        compile_context=create_compile_context_from_planning_state(state),
         confirmed_requirements=_requirements(),
         attachment_context=None,
         flow_context=None,
@@ -1018,6 +1024,7 @@ def test_requested_runtime_fields_block_absent_when_server_owns_the_fields() -> 
 
     prompt = build_plan_proposal_system_prompt(
         planning_state=state,
+        compile_context=create_compile_context_from_planning_state(state),
         confirmed_requirements=None,
         attachment_context=None,
         flow_context=None,

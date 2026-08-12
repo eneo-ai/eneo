@@ -36,6 +36,7 @@ from eneo.flows.ai_builder.ai_builder_session_turn import (
     SessionSendLease,
     SessionSendTurn,
 )
+from eneo.flows.ai_builder.ai_builder_tool_names import PROPOSE_FLOW_TOOL_NAME
 from eneo.flows.ai_builder.ai_builder_validation_common import SpecValidationResult
 from eneo.flows.flow_authoring_spec import (
     AssistantSpec,
@@ -95,7 +96,13 @@ def _make_context(**overrides: object) -> ProposalTurnContext:
         "conversation": [],
         "new_messages_start": 0,
         "message_groups": (),
-        "tool_schemas": [],
+        "proposal_tool_schema": {
+            "type": "function",
+            "function": {
+                "name": PROPOSE_FLOW_TOOL_NAME,
+                "parameters": {"type": "object"},
+            },
+        },
         "route": ResolvedCompletionModelRoute(
             litellm_model=litellm_model,
             provider_type="openai",

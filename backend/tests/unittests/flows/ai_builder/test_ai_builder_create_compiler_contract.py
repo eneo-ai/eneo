@@ -16,10 +16,12 @@ from eneo.flows.ai_builder.ai_builder_architecture_derivation import (
 from eneo.flows.ai_builder.ai_builder_architecture_errors import (
     AIBuilderArchitectureError,
 )
-from eneo.flows.ai_builder.ai_builder_create_compiler import (
+from eneo.flows.ai_builder.ai_builder_create_compile_context import (
     CreateCompileContext,
-    compile_create_intent_to_spec,
     create_compile_context_from_planning_state,
+)
+from eneo.flows.ai_builder.ai_builder_create_compiler import (
+    compile_create_intent_to_spec,
 )
 from eneo.flows.ai_builder.ai_builder_critic_invariants import (
     evaluate_critic_invariants,

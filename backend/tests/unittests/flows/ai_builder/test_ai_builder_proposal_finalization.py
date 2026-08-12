@@ -6,8 +6,8 @@ from uuid import uuid4
 
 import pytest
 
+from eneo.flows.ai_builder.ai_builder_create_compile_context import CreateCompileContext
 from eneo.flows.ai_builder.ai_builder_create_compiler import (
-    CreateCompileContext,
     compile_create_intent_to_spec,
 )
 from eneo.flows.ai_builder.ai_builder_domain_models import (
@@ -236,17 +236,20 @@ def _make_request(**overrides) -> CompiledProposalFinalizationRequest:
             target_kind=TargetKind.CREATE,
         ),
         "planning_state": None,
-        "requested_output_sections": RequestedOutputSections.empty(),
+        "compile_context": None,
     }
     defaults.update(overrides)
     return CompiledProposalFinalizationRequest(**defaults)
 
 
 @pytest.mark.asyncio
-async def test_finalization_passes_same_requested_output_sections_to_quality() -> None:
+async def test_finalization_passes_compile_context_sections_to_quality() -> None:
     requested_output_sections = RequestedOutputSections(
         sections=("Executive summary", "Recommendations"),
         confidence="high",
+    )
+    compile_context = CreateCompileContext(
+        requested_output_sections=requested_output_sections
     )
     finalizer = _make_finalizer()
     contextual_quality = MagicMock(feedback=None, failure_codes=frozenset())
@@ -264,14 +267,13 @@ async def test_finalization_passes_same_requested_output_sections_to_quality() -
         ),
     ):
         result = await finalizer.finalize_compiled_proposal(
-            _make_request(requested_output_sections=requested_output_sections)
+            _make_request(compile_context=compile_context)
         )
 
     assert result.events
-    assert (
-        build_quality.call_args.kwargs["requested_output_sections"]
-        is requested_output_sections
-    )
+    quality_context = build_quality.call_args.kwargs["compile_context"]
+    assert quality_context is compile_context
+    assert quality_context.requested_output_sections is requested_output_sections
 
 
 def test_finalization_request_is_frozen_without_retry_snapshot_payload() -> None:
@@ -515,18 +517,16 @@ async def test_finalize_compiler_lowered_report_enforces_named_section_coverage(
             ],
         }
     )
-    spec = compile_create_intent_to_spec(
-        intent,
-        context=CreateCompileContext(
-            runtime_input_type=InputType.DOCUMENT,
-            final_output_type=OutputType.PDF,
-            final_output_mode=OutputMode.RENDER_VERBATIM,
-            report_disposition=report_disposition,
-            requested_output_sections=requested_output_sections,
-            runtime_max_files=4,
-            ui_language="en",
-        ),
+    compile_context = CreateCompileContext(
+        runtime_input_type=InputType.DOCUMENT,
+        final_output_type=OutputType.PDF,
+        final_output_mode=OutputMode.RENDER_VERBATIM,
+        report_disposition=report_disposition,
+        requested_output_sections=requested_output_sections,
+        runtime_max_files=4,
+        ui_language="en",
     )
+    spec = compile_create_intent_to_spec(intent, context=compile_context)
     if requested_output_sections.sections:
         compose_bindings = str(spec.steps[-2].input_bindings)
         assert all(
@@ -550,7 +550,7 @@ async def test_finalize_compiler_lowered_report_enforces_named_section_coverage(
         result = await _make_finalizer().finalize_compiled_proposal(
             _make_request(
                 compiled=compiled,
-                requested_output_sections=requested_output_sections,
+                compile_context=compile_context,
             )
         )
 

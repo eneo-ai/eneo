@@ -9,9 +9,13 @@ import pytest
 from eneo.flows.ai_builder.ai_builder_architecture_commit import (
     finalize_architecture_commit,
 )
+from eneo.flows.ai_builder.ai_builder_create_compile_context import (
+    create_compile_context_from_planning_state,
+)
 from eneo.flows.ai_builder.ai_builder_domain_models import ConversationMessage
 from eneo.flows.ai_builder.ai_builder_edit_proposal import process_edit_arguments
 from eneo.flows.ai_builder.ai_builder_proposal_intent import FlowInputFieldIntent
+from eneo.flows.ai_builder.ai_builder_proposal_policy import resolve_ui_language
 from eneo.flows.ai_builder.ai_builder_resource_catalog import (
     build_ai_builder_resource_catalog,
 )
@@ -1543,6 +1547,10 @@ async def _process(
         assistant_snapshots=assistant_snapshots,
         resource_catalog=resource_catalog,
         planning_state=planning_state,
+        compile_context=create_compile_context_from_planning_state(
+            planning_state,
+            ui_language=resolve_ui_language(conversation or []),
+        ),
     )
 
 

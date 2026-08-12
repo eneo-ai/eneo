@@ -13,10 +13,6 @@ from eneo.flows.ai_builder.ai_builder_domain_models import (
     TargetKind,
 )
 from eneo.flows.ai_builder.ai_builder_events import build_plan_event
-from eneo.flows.ai_builder.ai_builder_output_sections_signals import (
-    EMPTY_REQUESTED_OUTPUT_SECTIONS,
-    RequestedOutputSections,
-)
 from eneo.flows.ai_builder.ai_builder_plan_store import (
     store_plan_and_update_conversation,
 )
@@ -47,6 +43,9 @@ from eneo.flows.ai_builder.ai_builder_session_turn import SessionSendTurn
 from eneo.main.logging import get_logger
 
 if TYPE_CHECKING:
+    from eneo.flows.ai_builder.ai_builder_create_compile_context import (
+        CreateCompileContext,
+    )
     from eneo.flows.ai_builder.planning_state import PlanningState
     from eneo.flows.domain.flow import Flow
 
@@ -71,7 +70,7 @@ class CompiledProposalFinalizationRequest:
     request_id: str
     usage_tracker: ProposalTurnTelemetry | None
     planning_state: PlanningState | None
-    requested_output_sections: RequestedOutputSections = EMPTY_REQUESTED_OUTPUT_SECTIONS
+    compile_context: "CreateCompileContext | None"
 
     @property
     def session_id(self) -> UUID:
@@ -177,7 +176,7 @@ class CompiledProposalFinalizer:
                 aggregation_intent=compiled.aggregation_intent,
                 resource_catalog=request.resource_catalog,
                 planning_state=request.planning_state,
-                requested_output_sections=request.requested_output_sections,
+                compile_context=request.compile_context,
             )
             hard_feedback = format_validation_feedback(
                 spec=compiled.content.spec,
@@ -217,7 +216,7 @@ class CompiledProposalFinalizer:
             aggregation_intent=compiled.aggregation_intent,
             resource_catalog=request.resource_catalog,
             planning_state=request.planning_state,
-            requested_output_sections=request.requested_output_sections,
+            compile_context=request.compile_context,
         )
         quality_failure_codes = quality_failure_codes | contextual_quality.failure_codes
         combined_quality_feedback = (
@@ -279,7 +278,7 @@ class CompiledProposalFinalizer:
             aggregation_intent=compiled.aggregation_intent,
             resource_catalog=request.resource_catalog,
             planning_state=request.planning_state,
-            requested_output_sections=request.requested_output_sections,
+            compile_context=request.compile_context,
         )
         combined_quality_feedback = "\n\n".join(
             feedback

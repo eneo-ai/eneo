@@ -182,7 +182,7 @@ ARTIFACT re-checked per slice, not a permanent grep gate.
 | # | Fact | Status | Owner |
 |---|---|---|---|
 | D1 | Terminal output type (create) | SELF_CHECK | CP2 (`CreateCompileContext.final_output_type` → create postcondition; conversation derivation isolated to edit) |
-| D2 | Proposal tool schema built at two sites | TRUE | CP3 |
+| D2 | Proposal tool schema built at two sites | LAYERED — one prepared schema | CP3 prerequisite (`ProposalPrepared.proposal_tool_schema`) |
 | D3 | Mixed audio+doc re-inference on create | TRUE | CP-D3 |
 | D4 | Terminal step `output_type` still emit-able | TRUE | CP3 |
 | D5 | Form-field placement A/B exclusion divergence | UNPROVEN | receipt task |
@@ -190,7 +190,7 @@ ARTIFACT re-checked per slice, not a permanent grep gate.
 | D7 | Classifier slot vs merged slot re-ask | UNPROVEN | receipt task |
 | D8 | Runtime-metadata request re-derived | TRUE | CP3 |
 | D9 | Edit terminal type: two derivations, opposite precedence | TRUE | CP-EDIT |
-| D10 | `CreateCompileContext` built 4–5× with different args | TRUE | CP3 (materializer) |
+| D10 | `CreateCompileContext` built 4–5× with different args | LAYERED — one prepared materialization | CP3 prerequisite (`ProposalPrepared.compile_context`) |
 | D11 | `confirmed_form_field_incompatible` implemented twice | HAZARD | split-when-touched |
 | D12 | Rate-limit vocabulary | HAZARD | ruling below; binds L2 |
 
@@ -419,6 +419,21 @@ any threshold.
     the current 19 versus historical 15 repair attempts are diagnostic only,
     not a regression or improvement verdict. The private raw captures were
     reduced to this receipt and cleared.
+- [x] CP3 proposal-schema and compile-context ownership prerequisite (completed
+    2026-08-12; CP3 remains open): preparation now materializes one typed
+    proposal schema and one `CreateCompileContext`. The exact schema instance
+    owns token budgeting, initial and repair provider calls, and raw
+    pre-normalization validation; `_active_submission_tool_schemas` and the
+    second materialization path are deleted. Invalid non-object steps remain a
+    repairable parse failure and use the existing rejected-proposal capture
+    owner, so stricter validation does not lose attribution. The prepared
+    context is required explicitly at lifecycle boundaries, and duplicate
+    downstream carriers for requested sections and scoped terminal output are
+    deleted. D2 and D10 are now LAYERED; D4 and D8 remain TRUE. The frozen CP0
+    replay reproduces all 465 observations and every published count exactly;
+    the final affected suite is 6555 passed, 10 skipped, 1 xfailed. Claude
+    iterations 119–120 converged from 7 to green at 8 after the duplicate
+    carriers and raw-rejection capture gap were closed.
 - [ ] CP3 Runtime-input-field contract (AMENDED, iteration 33).
     `FlowInputFieldIntent` stays the field VALUE schema, but verified
     it carries no citations/confidence
@@ -433,26 +448,16 @@ any threshold.
     derived view; placement defaults to the archetype's one
     deterministic consumer; semantic purpose only for evidence-backed
     multi-consumer cases; never leak physical `PlannedStepRole`
-    upstream. HARD DEPENDENCY (iterations 34+35): before CP3
-    removes fields, pull forward ONE archetype-aware proposal-schema
-    materializer with the CORRECT carrier lifecycle (verified:
-    budgeting finishes before `ProposalTurnContext` exists, and
-    `ProposalPrepared` carries no schema today) — materialize once
-    during preparation, store the schema on `ProposalPrepared`
-    (`ai_builder_planner_request_preparation.py:171`), pass it into
-    submission, and set it on `ProposalTurnContext` for the initial
-    and repair calls; DELETE `_active_submission_tool_schemas`
-    (`ai_builder_proposal_submission.py:164`). The SAME schema (same
-    hash) serves THREE consumers — token budgeting, provider
-    submission (initial AND repair), and SERVER-SIDE validation of
-    the raw tool arguments BEFORE normalization (iteration 37: today
-    the parser normalizes first, silently dropping retired root keys
-    via `_CREATE_INTENT_ROOT_IGNORED_KEYS`
-    (`ai_builder_proposal_intent.py:77`) and stripping backend-owned
-    step keys (`:505`) — a closed surface that still strips is not
-    closed; a supported-row payload carrying an excluded field must
-    FAIL). CP3 and CP5 both consume this one schema; neither invents
-    its own adaptation. Then
+    upstream. The D2/D10 prerequisite is complete: one prepared schema
+    now serves token budgeting, initial and repair provider calls, and
+    raw server validation, while one prepared compile context serves the
+    downstream create lifecycle. CP3 and CP5 consume that owner; neither
+    invents a second materializer. Before implementing D8, its design gate
+    must freeze a closed semantic-purpose vocabulary, reuse the existing
+    `ClassifiedEvidence` identity for cited purpose evidence, and define the
+    deterministic single-consumer placement rule. Purpose is consulted only
+    for an evidence-backed field with multiple possible consumers; code must
+    not guess these missing product semantics. Then
     delete the prompt's mechanical form-field block, the create
     repair mapping, and create-mode responsibility of the four
     form-field invariants (edit guards stay), and remove
@@ -666,8 +671,9 @@ any threshold.
    to CP3 and CP5 without adding a case-specific repair path.
 7. **CP9b complete** — omitted optional runtime metadata uses a visible,
    overridable assumption instead of another interview question.
-8. **CP3 next** (+D2 +D4 +D8 +D10) — one proposal-schema and
-   compile-context materialization lifecycle, not two abstractions.
+8. **CP3 remaining next** (+D4 +D8; D2/D10 prerequisite complete) — close the
+   create surface only after the cited field-purpose and placement contract is
+   frozen; do not add another schema or compile-context owner.
 9. **Ownership-tranche checkpoint** — exploratory
     final-frozen-manifest ×3 after CP1–CP3 and CP9b.
 10. **Critic disposition receipt**, then **CP4 → CP5**, **CP-EDIT**,

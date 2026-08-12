@@ -8,8 +8,8 @@ import pytest
 from eneo.flows.ai_builder.ai_builder_architecture_errors import (
     AIBuilderArchitectureError,
 )
+from eneo.flows.ai_builder.ai_builder_create_compile_context import CreateCompileContext
 from eneo.flows.ai_builder.ai_builder_create_compiler import (
-    CreateCompileContext,
     compile_create_intent_to_spec,
 )
 from eneo.flows.ai_builder.ai_builder_critic_invariants import (

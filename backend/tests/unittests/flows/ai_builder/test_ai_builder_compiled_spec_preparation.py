@@ -11,8 +11,8 @@ from eneo.flows.ai_builder.ai_builder_architecture_errors import (
 from eneo.flows.ai_builder.ai_builder_compiled_spec_preparation import (
     prepare_compiled_spec_for_session,
 )
+from eneo.flows.ai_builder.ai_builder_create_compile_context import CreateCompileContext
 from eneo.flows.ai_builder.ai_builder_create_compiler import (
-    CreateCompileContext,
     compile_create_intent_to_spec,
 )
 from eneo.flows.ai_builder.ai_builder_domain_models import (

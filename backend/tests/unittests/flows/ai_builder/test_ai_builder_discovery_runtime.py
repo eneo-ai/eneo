@@ -38,7 +38,7 @@ from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
     metadata_with_slot_classification,
     slot_classification_metadata_from_attempt,
 )
-from eneo.flows.ai_builder.ai_builder_create_compiler import (
+from eneo.flows.ai_builder.ai_builder_create_compile_context import (
     create_compile_context_from_planning_state,
 )
 from eneo.flows.ai_builder.ai_builder_discovery import (

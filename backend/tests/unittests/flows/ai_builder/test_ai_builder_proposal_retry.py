@@ -238,10 +238,16 @@ def _make_self_correction_request(
             if llm_messages is None
             else llm_messages
         ),
-        tool_schemas=(
-            [{"function": {"name": PROPOSE_FLOW_TOOL_NAME}}]
+        proposal_tool_schema=(
+            {
+                "type": "function",
+                "function": {
+                    "name": PROPOSE_FLOW_TOOL_NAME,
+                    "parameters": {"type": "object"},
+                },
+            }
             if tool_schemas is None
-            else tool_schemas
+            else tool_schemas[0]
         ),
         litellm_model=litellm_model,
         litellm_kwargs={} if litellm_kwargs is None else litellm_kwargs,
@@ -312,10 +318,16 @@ def _make_forced_tool_after_text_request(
         turn=_make_turn() if turn is None else turn,
         conversation=[] if conversation is None else conversation,
         new_messages_start=new_messages_start,
-        tool_schemas=(
-            [{"function": {"name": PROPOSE_FLOW_TOOL_NAME}}]
+        proposal_tool_schema=(
+            {
+                "type": "function",
+                "function": {
+                    "name": PROPOSE_FLOW_TOOL_NAME,
+                    "parameters": {"type": "object"},
+                },
+            }
             if tool_schemas is None
-            else tool_schemas
+            else tool_schemas[0]
         ),
         litellm_model=litellm_model,
         litellm_kwargs={} if litellm_kwargs is None else litellm_kwargs,
@@ -2219,7 +2231,15 @@ async def test_self_correction_repair_architecture_error_uses_sanitized_event_an
         new_messages_start=1,
         error_message="Invalid flow",
         llm_messages=[{"role": "user", "content": "Build"}],
-        tool_schemas=[{"function": {"name": PROPOSE_FLOW_TOOL_NAME}}],
+        tool_schemas=[
+            {
+                "type": "function",
+                "function": {
+                    "name": PROPOSE_FLOW_TOOL_NAME,
+                    "parameters": {"type": "object"},
+                },
+            }
+        ],
         litellm_model="openai/gpt-5.4",
         litellm_kwargs={},
         available_model_refs=None,

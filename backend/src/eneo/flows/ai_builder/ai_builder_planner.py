@@ -214,14 +214,7 @@ class AIBuilderPlanner:
                         prior_plan_for_revision=proposal_request.prior_plan_for_revision,
                         request_id=request_id,
                         usage_tracker=usage_tracker,
-                        requested_output_sections=(
-                            proposal_request.requested_output_sections
-                        ),
-                        terminal_output_type=(
-                            proposal_request.compile_context.final_output_type
-                            if proposal_request.compile_context is not None
-                            else None
-                        ),
+                        compile_context=proposal_request.compile_context,
                         assistant_metadata=assistant_metadata,
                         flow=flow,
                     ),
@@ -244,6 +237,7 @@ class AIBuilderPlanner:
                             proposal_request.resource_catalog.knowledge_base_refs
                         ),
                         resource_catalog=proposal_request.resource_catalog,
+                        proposal_tool_schema=proposal_request.proposal_tool_schema,
                         max_output_tokens=max_output_tokens,
                         proposal_temperature=self.planner_temperature,
                         request_id=request_id,
@@ -252,9 +246,7 @@ class AIBuilderPlanner:
                         assistant_snapshots=assistant_snapshots,
                         assistant_metadata=assistant_metadata,
                         planning_state=proposal_request.planning_state,
-                        requested_output_sections=(
-                            proposal_request.requested_output_sections
-                        ),
+                        compile_context=proposal_request.compile_context,
                         plan_edit_context=proposal_request.plan_edit_context,
                         prior_plan_for_revision=proposal_request.prior_plan_for_revision,
                         before_provider_call=before_provider_call,

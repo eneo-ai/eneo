@@ -18,9 +18,11 @@ from eneo.flows.ai_builder.ai_builder_tool_parsing import (
 )
 from eneo.flows.ai_builder.ai_builder_tools import (
     PROPOSE_FLOW_TOOL_NAME,
+    ProposalToolArgumentsError,
     build_propose_flow_tool_schema,
     extract_assumptions,
     extract_plan_rationale,
+    validate_propose_flow_tool_arguments,
 )
 
 
@@ -131,6 +133,27 @@ class TestBuildToolSchema:
         )
 
         assert "reasoning" not in intent.model_dump()
+
+    def test_active_proposal_schemas_reject_non_object_step_before_normalization(
+        self,
+    ) -> None:
+        schemas = (
+            build_propose_flow_tool_schema(resource_catalog=_empty_catalog()),
+            build_propose_flow_tool_schema(
+                resource_catalog=_empty_catalog(), current_steps=[]
+            ),
+        )
+
+        for schema in schemas:
+            with pytest.raises(ProposalToolArgumentsError, match="steps.0"):
+                validate_propose_flow_tool_arguments(
+                    arguments={
+                        "flow_name": "Report",
+                        "plan_rationale": "Create the report.",
+                        "steps": ["Write the report"],
+                    },
+                    tool_schema=schema,
+                )
 
 
 class TestParseToolCallArguments:

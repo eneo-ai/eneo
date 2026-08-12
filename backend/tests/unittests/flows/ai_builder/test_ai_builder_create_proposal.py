@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from typing import Any
 from unittest.mock import patch
 from uuid import uuid4
 
@@ -11,19 +12,30 @@ from eneo.flows.ai_builder.ai_builder_architecture_commit import (
 from eneo.flows.ai_builder.ai_builder_architecture_errors import (
     AIBuilderArchitectureError,
 )
+from eneo.flows.ai_builder.ai_builder_create_compile_context import (
+    create_compile_context_from_planning_state,
+)
 from eneo.flows.ai_builder.ai_builder_create_proposal import (
-    process_create_intent_arguments,
+    process_create_intent_arguments as _process_create_intent_arguments,
 )
 from eneo.flows.ai_builder.ai_builder_domain_models import (
     ConversationMessage,
+)
+from eneo.flows.ai_builder.ai_builder_output_sections_signals import (
+    EMPTY_REQUESTED_OUTPUT_SECTIONS,
+    RequestedOutputSections,
 )
 from eneo.flows.ai_builder.ai_builder_plan_store import build_flow_builder_proposal
 from eneo.flows.ai_builder.ai_builder_proposal_intent import FlowInputFieldIntent
 from eneo.flows.ai_builder.ai_builder_proposal_policy import (
     build_create_contextual_quality_feedback,
 )
+from eneo.flows.ai_builder.ai_builder_proposal_tool_contracts import (
+    ToolProcessingResult,
+)
 from eneo.flows.ai_builder.ai_builder_resource_catalog import (
     AIBuilderAvailableModelResource,
+    AIBuilderResourceCatalog,
     build_ai_builder_resource_catalog,
 )
 from eneo.flows.ai_builder.ai_builder_runtime_input_fields import (
@@ -55,6 +67,35 @@ from eneo.flows.flow_review_policy import FlowStepReviewMode
 from tests.unittests.flows.ai_builder.authoring_command_assertions import (
     assert_create_spec_prepares_through_authoring_command_async,
 )
+
+
+async def process_create_intent_arguments(
+    *,
+    turn: SessionSendTurn,
+    conversation: list[ConversationMessage],
+    arguments: dict[str, Any],
+    tool_call_id: str,
+    available_model_refs: set[str] | None,
+    available_kb_refs: set[str] | None,
+    resource_catalog: AIBuilderResourceCatalog | None = None,
+    planning_state: PlanningState | None = None,
+    requested_output_sections: RequestedOutputSections = (
+        EMPTY_REQUESTED_OUTPUT_SECTIONS
+    ),
+) -> ToolProcessingResult:
+    return await _process_create_intent_arguments(
+        turn=turn,
+        conversation=conversation,
+        arguments=arguments,
+        tool_call_id=tool_call_id,
+        available_model_refs=available_model_refs,
+        available_kb_refs=available_kb_refs,
+        resource_catalog=resource_catalog,
+        compile_context=create_compile_context_from_planning_state(
+            planning_state,
+            requested_output_sections=requested_output_sections,
+        ),
+    )
 
 
 def _make_turn(

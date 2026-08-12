@@ -93,7 +93,6 @@ PROPOSAL_REPAIR_ALLOWED_ANY_NAMES = frozenset(
 )
 PROPOSAL_SUBMISSION_REQUIRED_PRIVATE_METHODS = frozenset(
     {
-        "_active_submission_tool_schemas",
         "_build_self_correction_request",
         "_finalize_invocation_proposal",
         "_handle_propose_flow_tool_call",
@@ -239,6 +238,9 @@ SCOPED_PLAN_REVISION_PATH = Path(
     "src/eneo/flows/ai_builder/ai_builder_scoped_plan_revision.py"
 )
 CREATE_COMPILER_PATH = Path("src/eneo/flows/ai_builder/ai_builder_create_compiler.py")
+CREATE_COMPILE_CONTEXT_PATH = Path(
+    "src/eneo/flows/ai_builder/ai_builder_create_compile_context.py"
+)
 CREATE_COMPILER_MODULE = ".".join(
     ("eneo", "flows", "ai_builder", "ai_builder_create_compiler")
 )
@@ -260,10 +262,10 @@ REPAIR_TRANSPORT_MODULE = ".".join(
     ("eneo", "flows", "ai_builder", "ai_builder_repair_transport")
 )
 REPAIR_TRANSPORT_PATH = Path("src/eneo/flows/ai_builder/ai_builder_repair_transport.py")
-CREATE_COMPILER_PUBLIC_NAMES = frozenset(
+CREATE_COMPILER_PUBLIC_NAMES = frozenset({"compile_create_intent_to_spec"})
+CREATE_COMPILE_CONTEXT_PUBLIC_NAMES = frozenset(
     {
         "CreateCompileContext",
-        "compile_create_intent_to_spec",
         "create_compile_context_from_planning_state",
     }
 )
@@ -1925,6 +1927,7 @@ def test_create_outline_no_longer_owns_create_compiler_mechanics() -> None:
     backend_root = Path(__file__).resolve().parents[4]
     outline_path = backend_root / PROPOSAL_INTENT_PATH
     compiler_path = backend_root / CREATE_COMPILER_PATH
+    compile_context_path = backend_root / CREATE_COMPILE_CONTEXT_PATH
     outline_tree = ast.parse(outline_path.read_text(), filename=str(outline_path))
     compiler_tree = ast.parse(compiler_path.read_text(), filename=str(compiler_path))
     violations: list[str] = []
@@ -1960,7 +1963,9 @@ def test_create_outline_no_longer_owns_create_compiler_mechanics() -> None:
             imported_names = {
                 alias.name
                 for alias in node.names
-                if alias.name in CREATE_COMPILER_PUBLIC_NAMES or alias.name == "*"
+                if alias.name
+                in CREATE_COMPILER_PUBLIC_NAMES | CREATE_COMPILE_CONTEXT_PUBLIC_NAMES
+                or alias.name == "*"
             }
             if imported_names:
                 names = ", ".join(sorted(imported_names))
@@ -1970,6 +1975,17 @@ def test_create_outline_no_longer_owns_create_compiler_mechanics() -> None:
     missing_public = sorted(CREATE_COMPILER_PUBLIC_NAMES - compiler_public)
     if missing_public:
         violations.append(f"{compiler_path}: missing public names {missing_public}")
+    compile_context_tree = ast.parse(
+        compile_context_path.read_text(), filename=str(compile_context_path)
+    )
+    missing_context_public = sorted(
+        CREATE_COMPILE_CONTEXT_PUBLIC_NAMES
+        - _top_level_public_names(compile_context_tree)
+    )
+    if missing_context_public:
+        violations.append(
+            f"{compile_context_path}: missing public names {missing_context_public}"
+        )
 
     compiler_text = compiler_path.read_text()
     if "build_create_flow_tool_schema" in compiler_text:

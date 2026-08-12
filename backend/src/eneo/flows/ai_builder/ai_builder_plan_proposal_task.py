@@ -13,9 +13,8 @@ from typing import assert_never
 from eneo.flows.ai_builder.ai_builder_attachment_context import (
     render_ai_builder_evidence_value,
 )
-from eneo.flows.ai_builder.ai_builder_create_compiler import (
+from eneo.flows.ai_builder.ai_builder_create_compile_context import (
     CreateCompileContext,
-    create_compile_context_from_planning_state,
 )
 from eneo.flows.ai_builder.ai_builder_event_models import RequirementsSummaryPayload
 from eneo.flows.ai_builder.ai_builder_framework_policy import (
@@ -130,7 +129,7 @@ def build_plan_proposal_system_prompt(
         render_confirmed_requirements_proposal_prompt_block(confirmed_requirements),
     ]
     server_owned_fields_block = _server_owned_runtime_input_fields_block(
-        compile_context or create_compile_context_from_planning_state(planning_state)
+        compile_context
     )
     if not is_edit_mode and server_owned_fields_block is not None:
         lines.extend(

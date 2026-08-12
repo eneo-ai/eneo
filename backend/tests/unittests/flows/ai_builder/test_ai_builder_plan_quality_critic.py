@@ -7,6 +7,9 @@ import pytest
 from eneo.flows.ai_builder.ai_builder_architecture_errors import (
     AIBuilderArchitectureError,
 )
+from eneo.flows.ai_builder.ai_builder_create_compile_context import (
+    create_compile_context_from_planning_state,
+)
 from eneo.flows.ai_builder.ai_builder_critic_invariant_kinds import (
     CRITIC_INVARIANT_KINDS,
 )
@@ -112,6 +115,7 @@ def test_critic_requires_typed_checkpoint_on_the_actual_report_producer() -> Non
             [],
             wrong_target,
             planning_state=planning_state,
+            compile_context=create_compile_context_from_planning_state(planning_state),
         )
     )
     matching_issues = evaluate_critic_invariants(
@@ -119,6 +123,7 @@ def test_critic_requires_typed_checkpoint_on_the_actual_report_producer() -> Non
             [],
             matching,
             planning_state=planning_state,
+            compile_context=create_compile_context_from_planning_state(planning_state),
         )
     )
 
@@ -158,6 +163,9 @@ def _edit_checkpoint_issues(
                 spec,
                 flow=flow,
                 planning_state=planning_state,
+                compile_context=create_compile_context_from_planning_state(
+                    planning_state
+                ),
             )
         )
         if issue.id == "checkpoint_intent_mismatch"
@@ -3417,6 +3425,9 @@ class TestRedundantTerminalJsonFormatTailAfterFinalTextComposer:
                 [{"role": "user", "content": "Use this material."}],
                 spec,
                 planning_state=planning_state,
+                compile_context=create_compile_context_from_planning_state(
+                    planning_state
+                ),
             )
         )
 
@@ -5746,6 +5757,9 @@ class TestRichWorkflowInvariants:
                 conversation,
                 spec,
                 planning_state=planning_state,
+                compile_context=create_compile_context_from_planning_state(
+                    planning_state
+                ),
             )
         )
 

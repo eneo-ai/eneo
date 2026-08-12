@@ -32,9 +32,6 @@ from eneo.flows.ai_builder.ai_builder_error_contract import (
 )
 from eneo.flows.ai_builder.ai_builder_event_models import AIBuilderStreamEvent
 from eneo.flows.ai_builder.ai_builder_events import build_text_event
-from eneo.flows.ai_builder.ai_builder_output_sections_signals import (
-    RequestedOutputSections,
-)
 from eneo.flows.ai_builder.ai_builder_plan_edit_context import (
     AIBuilderPlanEditContext,
     ScopedStepNotice,
@@ -63,6 +60,9 @@ from eneo.flows.flow_authoring_spec import OutputType
 from eneo.main.logging import get_logger
 
 if TYPE_CHECKING:
+    from eneo.flows.ai_builder.ai_builder_create_compile_context import (
+        CreateCompileContext,
+    )
     from eneo.flows.domain.flow import Flow
 
 logger = get_logger(__name__)
@@ -80,8 +80,7 @@ class ScopedPlanRevisionRequest:
     prior_plan_for_revision: BuilderPlan | None
     request_id: str
     usage_tracker: ProposalTurnTelemetry | None
-    requested_output_sections: RequestedOutputSections
-    terminal_output_type: OutputType | None
+    compile_context: "CreateCompileContext | None"
     assistant_metadata: dict[str, object] | None = None
     flow: "Flow | None" = None
 
@@ -99,6 +98,11 @@ async def run_scoped_plan_revision_attempt(
     if request.flow is not None:
         return None
 
+    terminal_output_type = (
+        request.compile_context.final_output_type
+        if request.compile_context is not None
+        else None
+    )
     try:
         result = process_scoped_step_revision_if_requested(
             conversation=request.conversation,
@@ -107,7 +111,7 @@ async def run_scoped_plan_revision_attempt(
             resource_catalog=request.resource_catalog,
             plan_edit_context=request.plan_edit_context,
             prior_plan_for_revision=request.prior_plan_for_revision,
-            terminal_output_type=request.terminal_output_type,
+            terminal_output_type=terminal_output_type,
         )
     except AIBuilderArchitectureError as error:
         record_proposal_architecture_failure(
@@ -153,7 +157,7 @@ async def run_scoped_plan_revision_attempt(
             request_id=request.request_id,
             usage_tracker=request.usage_tracker,
             planning_state=None,
-            requested_output_sections=request.requested_output_sections,
+            compile_context=request.compile_context,
         )
     )
     return _outcome_from_processing_result(finalized, request_id=request.request_id)
