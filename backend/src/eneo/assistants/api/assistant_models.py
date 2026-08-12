@@ -143,6 +143,8 @@ class EffectiveConfigPublic(BaseModel):
         default_factory=_empty_uuid_list
     )
     prompt_locked: bool
+    default_reasoning_effort: str | None
+    reasoning_effort_user_configurable: bool
 
 
 class AssistantBase(BaseModel):

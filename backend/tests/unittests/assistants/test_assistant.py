@@ -318,6 +318,29 @@ async def test_ask_uses_mcp_when_no_knowledge(assistant_with_model):
 
 
 @pytest.mark.asyncio
+async def test_ask_uses_runtime_model_kwargs_without_mutating_assistant(
+    assistant_with_model,
+):
+    assistant_with_model.completion_model_kwargs = ModelKwargs(reasoning_effort="low")
+    runtime_kwargs = ModelKwargs(reasoning_effort="high")
+    completion_service = MagicMock()
+    completion_service.get_response = AsyncMock(return_value=MagicMock())
+
+    await assistant_with_model.ask(
+        question="test",
+        references_service=MagicMock(),
+        completion_service=completion_service,
+        model_kwargs_override=runtime_kwargs,
+    )
+
+    assert (
+        completion_service.get_response.await_args.kwargs["model_kwargs"]
+        == runtime_kwargs
+    )
+    assert assistant_with_model.completion_model_kwargs.reasoning_effort == "low"
+
+
+@pytest.mark.asyncio
 async def test_ask_uses_runtime_prompt_files_without_mutating_attachments(
     assistant_with_model,
 ):

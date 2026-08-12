@@ -2,6 +2,12 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
+import pytest
+
+from eneo.completion_models.domain.model_kwargs_capabilities import (
+    ModelKwargCapability,
+    SupportedModelKwargs,
+)
 from eneo.governance_policy.application.governance_policy_service import (
     GovernancePolicyService,
 )
@@ -9,6 +15,7 @@ from eneo.governance_policy.domain.governance_policy import (
     GovernancePolicy,
     PolicyScope,
 )
+from eneo.main.exceptions import BadRequestException
 from eneo.roles.permissions import Permission
 from eneo.skills.domain.skill import SkillBindingIntent, SkillBindingReference
 
@@ -81,6 +88,83 @@ async def test_update_policy_creates_then_locks_missing_row():
         tenant_id, scope=PolicyScope.PERSONAL_DEFAULT_ASSISTANT
     )
     assert repo.get_by_tenant_for_update.await_count == 2
+
+
+def _reasoning_model(*options: str) -> SimpleNamespace:
+    supported = SupportedModelKwargs(
+        reasoning_effort=ModelKwargCapability(
+            supported=True,
+            control="select",
+            options=list(options),
+        )
+    )
+    return SimpleNamespace(get_supported_model_kwargs=lambda: supported)
+
+
+async def test_update_policy_accepts_reasoning_default_supported_by_a_model():
+    tenant_id = uuid4()
+    policy = GovernancePolicy(
+        id=uuid4(),
+        tenant_id=tenant_id,
+        scope=PolicyScope.PERSONAL_DEFAULT_ASSISTANT,
+    )
+    repo = AsyncMock()
+    repo.get_by_tenant_for_update.return_value = policy
+    repo.save.return_value = policy
+    completion_models = AsyncMock()
+    completion_models.get_available_completion_models.return_value = [
+        _reasoning_model("low", "medium", "high")
+    ]
+    service = GovernancePolicyService(
+        user=_admin(tenant_id),
+        repo=repo,
+        completion_model_crud_service=completion_models,
+        mcp_server_settings_service=AsyncMock(),
+        prompt_library_service=AsyncMock(),
+        model_provider_repository=AsyncMock(),
+        skill_service=AsyncMock(),
+        space_service=AsyncMock(),
+    )
+
+    result = await service.update_policy(reasoning_policy=("medium", True))
+
+    assert result is policy
+    assert policy.default_reasoning_effort == "medium"
+    assert policy.allow_user_reasoning_effort is True
+    repo.save.assert_awaited_once()
+
+
+async def test_update_policy_rejects_reasoning_default_unsupported_by_models():
+    tenant_id = uuid4()
+    policy = GovernancePolicy(
+        id=uuid4(),
+        tenant_id=tenant_id,
+        scope=PolicyScope.PERSONAL_DEFAULT_ASSISTANT,
+    )
+    repo = AsyncMock()
+    repo.get_by_tenant_for_update.return_value = policy
+    completion_models = AsyncMock()
+    completion_models.get_available_completion_models.return_value = [
+        _reasoning_model("low", "medium", "high")
+    ]
+    service = GovernancePolicyService(
+        user=_admin(tenant_id),
+        repo=repo,
+        completion_model_crud_service=completion_models,
+        mcp_server_settings_service=AsyncMock(),
+        prompt_library_service=AsyncMock(),
+        model_provider_repository=AsyncMock(),
+        skill_service=AsyncMock(),
+        space_service=AsyncMock(),
+    )
+
+    with pytest.raises(
+        BadRequestException,
+        match="not supported by an enabled model",
+    ):
+        await service.update_policy(reasoning_policy=("max", False))
+
+    repo.save.assert_not_awaited()
 
 
 async def test_update_policy_replaces_exact_organization_skill_bindings():

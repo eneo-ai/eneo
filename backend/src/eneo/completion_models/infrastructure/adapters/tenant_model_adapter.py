@@ -991,7 +991,7 @@ class TenantModelAdapter(CompletionModelAdapter):
                 )
                 if "reasoning_effort" not in supported_params or model_kwargs_dict[
                     "reasoning_effort"
-                ] in (None, "none", ""):
+                ] in (None, ""):
                     del model_kwargs_dict["reasoning_effort"]
 
             # Ensure max_tokens is set - some APIs (e.g., vLLM, OpenAI-compatible)

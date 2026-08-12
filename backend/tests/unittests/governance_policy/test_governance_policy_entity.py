@@ -26,6 +26,19 @@ def test_default_policy_has_all_restrictions_disabled():
     assert p.mcp_servers == []
     assert p.disabled_mcp_tool_ids == []
     assert p.default_prompt_library_id is None
+    assert p.default_reasoning_effort is None
+    assert p.allow_user_reasoning_effort is False
+    assert p.reasoning_policy_configured is False
+
+
+def test_set_reasoning_policy_stores_default_and_user_choice():
+    p = _empty_policy()
+
+    p.set_reasoning_policy(default_effort="high", allow_user_override=True)
+
+    assert p.default_reasoning_effort == "high"
+    assert p.allow_user_reasoning_effort is True
+    assert p.reasoning_policy_configured is True
 
 
 def test_set_models_restriction_requires_at_least_one_model_when_enabled():

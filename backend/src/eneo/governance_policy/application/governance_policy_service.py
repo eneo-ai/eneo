@@ -113,6 +113,7 @@ class GovernancePolicyService:
         ) = None,
         mcp_restriction: (tuple[bool, list[PolicyMcpServer], list[UUID]] | None) = None,
         prompt_enforcement: tuple[bool, UUID | None] | None = None,
+        reasoning_policy: tuple[str | None, bool] | None = None,
         skill_intents: list[SkillBindingIntent] | None = None,
     ) -> GovernancePolicy:
         policy = await self.get_policy_for_update()
@@ -143,6 +144,15 @@ class GovernancePolicyService:
             if enabled and prompt_id is not None:
                 await self._validate_prompt_belongs_to_tenant(prompt_id)
             policy.set_prompt_enforcement(enabled=enabled, prompt_library_id=prompt_id)
+
+        if reasoning_policy is not None:
+            default_effort, allow_user_override = reasoning_policy
+            if default_effort is not None:
+                await self._validate_reasoning_effort(default_effort)
+            policy.set_reasoning_policy(
+                default_effort=default_effort,
+                allow_user_override=allow_user_override,
+            )
 
         saved = await self.repo.save(policy, updated_by_user_id=self.user.id)
 
@@ -182,6 +192,18 @@ class GovernancePolicyService:
                     f"Completion model {m.completion_model_id} is not "
                     "accessible to this tenant"
                 )
+
+    async def _validate_reasoning_effort(self, effort: str) -> None:
+        tenant_models = (
+            await self.completion_model_crud_service.get_available_completion_models()
+        )
+        if not any(
+            model.get_supported_model_kwargs().reasoning_effort.accepts(effort)
+            for model in tenant_models
+        ):
+            raise BadRequestException(
+                "Default reasoning effort is not supported by an enabled model"
+            )
 
     async def _validate_mcp_servers_and_tools(
         self, servers: list[PolicyMcpServer], disabled_tool_ids: list[UUID]

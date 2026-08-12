@@ -15,6 +15,10 @@ from eneo.assistants.api.assistant_models import (
 )
 from eneo.assistants.assistant import Assistant
 from eneo.assistants.assistant_service import AssistantService
+from eneo.completion_models.domain.model_kwargs_capabilities import (
+    ModelKwargCapability,
+    SupportedModelKwargs,
+)
 from eneo.files.file_models import FileType
 from eneo.main.exceptions import (
     BadRequestException,
@@ -464,6 +468,116 @@ async def test_personal_chat_can_change_personal_default_completion_model(setup:
 
     assistant.update.assert_called_once()
     assert assistant.update.call_args.kwargs["completion_model"] == completion_model
+
+
+async def test_personal_chat_can_change_reasoning_effort_when_policy_allows(
+    setup: Setup,
+):
+    assistant, _ = configure_personal_default_assistant(setup)
+    assistant.completion_model_kwargs = ModelKwargs(
+        temperature=0.7,
+        top_p=0.8,
+        reasoning_effort="low",
+        response_format={"type": "json_object"},
+    )
+    assistant.completion_model = MagicMock()
+    assistant.completion_model.get_supported_model_kwargs.return_value = (
+        SupportedModelKwargs(
+            reasoning_effort=ModelKwargCapability(
+                supported=True,
+                control="select",
+                options=["low", "medium", "high"],
+            )
+        )
+    )
+    setup.service.effective_config_service = AsyncMock()
+    setup.service.effective_config_service.resolve_for.return_value = MagicMock(
+        reasoning_effort_user_configurable=True
+    )
+    kwargs = ModelKwargs(reasoning_effort="high")
+
+    await setup.service.update_assistant(
+        assistant_id=TEST_UUID,
+        completion_model_kwargs=kwargs,
+    )
+
+    assert assistant.update.call_args.kwargs["completion_model_kwargs"] == ModelKwargs(
+        temperature=0.7,
+        top_p=0.8,
+        reasoning_effort="high",
+        response_format={"type": "json_object"},
+    )
+
+
+async def test_personal_chat_cannot_combine_reasoning_effort_with_protected_changes(
+    setup: Setup,
+):
+    assistant, _ = configure_personal_default_assistant(setup)
+
+    with pytest.raises(
+        UnauthorizedException,
+        match="only allows changing the personal assistant's completion model or "
+        "policy-permitted reasoning effort",
+    ):
+        await setup.service.update_assistant(
+            assistant_id=TEST_UUID,
+            name="Renamed",
+            completion_model_kwargs=ModelKwargs(reasoning_effort="high"),
+        )
+
+    assistant.update.assert_not_called()
+
+
+async def test_personal_chat_cannot_change_reasoning_effort_when_policy_forbids_it(
+    setup: Setup,
+):
+    assistant, _ = configure_personal_default_assistant(setup)
+    setup.service.effective_config_service = AsyncMock()
+    setup.service.effective_config_service.resolve_for.return_value = MagicMock(
+        reasoning_effort_user_configurable=False
+    )
+
+    with pytest.raises(
+        BadRequestException,
+        match="managed by the personal assistant policy",
+    ):
+        await setup.service.update_assistant(
+            assistant_id=TEST_UUID,
+            completion_model_kwargs=ModelKwargs(reasoning_effort="high"),
+        )
+
+    assistant.update.assert_not_called()
+
+
+async def test_personal_chat_cannot_store_unsupported_reasoning_effort(
+    setup: Setup,
+):
+    assistant, _ = configure_personal_default_assistant(setup)
+    assistant.completion_model = MagicMock()
+    assistant.completion_model.get_supported_model_kwargs.return_value = (
+        SupportedModelKwargs(
+            reasoning_effort=ModelKwargCapability(
+                supported=True,
+                control="select",
+                options=["low", "medium", "high"],
+            )
+        )
+    )
+    setup.service.effective_config_service = AsyncMock()
+    setup.service.effective_config_service.resolve_for.return_value = MagicMock(
+        reasoning_effort_user_configurable=True
+    )
+
+    with pytest.raises(
+        BadRequestException,
+        match="value unsupported by the selected model",
+    ):
+        await setup.service.update_assistant(
+            assistant_id=TEST_UUID,
+            completion_model_kwargs=ModelKwargs(reasoning_effort="max"),
+        )
+
+    assistant.update.assert_not_called()
 
 
 @pytest.mark.parametrize(
