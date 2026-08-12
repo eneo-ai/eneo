@@ -5763,6 +5763,65 @@ async def test_execute_terminalizes_checksum_drift_before_step_claim(user):
 
 
 @pytest.mark.asyncio
+async def test_execute_terminalizes_wrong_flow_snapshot_before_step_claim(user):
+    executor, _, flow_run_repo, flow_version_repo = _build_executor(user)
+    queued_run = _run(status=FlowRunStatus.QUEUED, user=user)
+
+    flow_run_repo.get = AsyncMock(
+        return_value=queued_run.model_copy(update={"status": FlowRunStatus.RUNNING})
+    )
+    flow_run_repo.mark_running_if_claimable = AsyncMock(return_value=True)
+    flow_run_repo.list_step_results = AsyncMock()
+    flow_run_repo.claim_step_result = AsyncMock()
+    executor._execute_step = AsyncMock()
+    flow_version_repo.get = AsyncMock(
+        return_value=_published_flow_version(
+            flow_id=queued_run.flow_id,
+            version=queued_run.flow_version,
+            tenant_id=user.tenant_id,
+            definition_checksum=None,
+            definition_json={
+                "flow_id": str(uuid4()),
+                "steps": [
+                    {
+                        "step_id": str(uuid4()),
+                        "step_order": 1,
+                        "assistant_id": str(uuid4()),
+                        "input_source": "flow_input",
+                        "output_mode": "pass_through",
+                    }
+                ],
+            },
+            created_at=datetime.now(timezone.utc),
+            updated_at=datetime.now(timezone.utc),
+        )
+    )
+    executor._flow_is_active = AsyncMock(return_value=True)
+
+    result = await executor.execute(
+        run_id=queued_run.id,
+        flow_id=queued_run.flow_id,
+        tenant_id=user.tenant_id,
+        run_revision=queued_run.revision,
+        celery_task_id="task-1",
+        retry_count=0,
+    )
+
+    assert result == {
+        "status": "failed",
+        "error": FlowApiErrorCode.DEFINITION_FLOW_ID_INVALID.value,
+    }
+    flow_run_repo.list_step_results.assert_not_awaited()
+    flow_run_repo.claim_step_result.assert_not_awaited()
+    executor._execute_step.assert_not_awaited()
+    run_error = executor.flow_run_terminalizer.terminalize_run.await_args.kwargs[
+        "error"
+    ]
+    assert run_error.code is FlowApiErrorCode.DEFINITION_FLOW_ID_INVALID
+    assert run_error.source is FlowRunLifecycleSource.INVALID_FLOW_DEFINITION
+
+
+@pytest.mark.asyncio
 async def test_execute_fails_before_claim_when_schema_versioned_snapshot_missing(user):
     executor, _, flow_run_repo, flow_version_repo = _build_executor(user)
     queued_run = _run(status=FlowRunStatus.QUEUED, user=user)

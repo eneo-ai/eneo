@@ -158,8 +158,9 @@ their own run snapshots. Authoring still requires a user principal.
         ),
         404: error_response(
             description=(
-                "Published Flow or run not found in tenant scope. An unpublished "
-                "Flow is hidden from this runtime endpoint."
+                "Published Flow or run not found in tenant scope. Without `run_id`, "
+                "an unpublished Flow is hidden. A version-pinned run graph remains "
+                "readable subject to run access."
             ),
             message="Flow not found.",
             eneo_error_code=ErrorCodes.NOT_FOUND,

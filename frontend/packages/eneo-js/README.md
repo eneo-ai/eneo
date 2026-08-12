@@ -19,7 +19,7 @@ Create an `eneo` object with the `createEneo()` function. It provides convenienc
 
 ### Authentication
 
-Use `apiKey` for a service key. The client sends it as `X-API-Key`. Use `token` for a user access token sent as `Authorization: Bearer ...`. Pass one authentication option, not both; if both are supplied, `apiKey` takes precedence. Keep service keys in server-side code; do not expose them in a browser bundle.
+Use `apiKey` for a service key. The client sends it as `X-API-Key`. Use `token` for a user access token sent as `Authorization: Bearer ...`. For authenticated requests, pass exactly one option. If you supply both, client creation throws a `TypeError` before any request is sent. Keep service keys in server-side code; do not expose them in a browser bundle.
 
 ### Run a published Flow
 

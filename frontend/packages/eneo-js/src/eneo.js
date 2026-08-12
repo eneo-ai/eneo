@@ -43,7 +43,8 @@ import { initObjectStoreConnection } from "./endpoints/object-store-connection.j
 
 /**
  * Create an Eneo.js object to interact with the eneo backend.
- * Requires either an api key or a user token to authenticate requests.
+ * Accepts either an API key or a user token. Supplying both throws a TypeError;
+ * omitting both creates an anonymous client for endpoints that allow it.
  * @param {Object} args
  * @param  {string} [args.apiKey] Eneo API key
  * @param  {string} [args.token] Eneo auth token obtained through logging in

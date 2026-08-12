@@ -258,6 +258,7 @@ class FlowRunService:
         )
         existing_run = await self._find_idempotent_run_or_enforce_creation_limits(
             flow_id=flow_id,
+            flow_version=published.flow_version,
             idempotency_key=idempotency_key,
             principal=principal,
             request_fingerprint=prepared.request_fingerprint,
@@ -401,11 +402,12 @@ class FlowRunService:
         self,
         *,
         flow_id: UUID,
+        flow_version: int,
         idempotency_key: str | None,
         principal: FlowPrincipal,
         request_fingerprint: str,
     ) -> FlowRun | None:
-        # Serialize run creation per tenant to prevent concurrency-limit race conditions.
+        # Keep one lock order across new run creation: tenant first, then target Flow.
         await self.flow_run_repo.acquire_tenant_run_creation_lock(
             tenant_id=self.user.tenant_id
         )
@@ -424,6 +426,25 @@ class FlowRunService:
                         code=FlowApiErrorCode.RUN_IDEMPOTENCY_CONFLICT,
                     )
                 return existing_run
+        locked_published_version = await self.flow_repo.lock_publication_pointer(
+            flow_id=flow_id,
+            tenant_id=self.user.tenant_id,
+        )
+        if locked_published_version is None:
+            raise FlowBadRequestException(
+                "Flow must be published before a run can be created.",
+                code=FlowApiErrorCode.FLOW_NOT_PUBLISHED,
+                context={"flow_id": str(flow_id)},
+            )
+        if locked_published_version != flow_version:
+            raise FlowBadRequestException(
+                "The published flow version changed before the run was accepted.",
+                code=FlowApiErrorCode.RUN_STALE_VERSION,
+                context={
+                    "expected_flow_version": flow_version,
+                    "published_flow_version": locked_published_version,
+                },
+            )
         active_runs = await self.flow_run_repo.count_active_runs(
             tenant_id=self.user.tenant_id
         )
@@ -714,6 +735,7 @@ class FlowRunService:
         for version_ref, flow_version in versions_by_ref.items():
             definition = parse_verified_published_definition(
                 flow_version.definition_json,
+                expected_flow_id=version_ref[0],
                 expected_checksum=flow_version.definition_checksum,
                 flow_version=flow_version.version,
             )

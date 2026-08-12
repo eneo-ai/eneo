@@ -242,6 +242,7 @@ def build_evidence_bundle(
     if definition_integrity.status is PublishedDefinitionIntegrityStatus.VERIFIED:
         definition = parse_verified_published_definition(
             version.definition_json,
+            expected_flow_id=run.flow_id,
             expected_checksum=version.definition_checksum,
             flow_version=version.version,
         )

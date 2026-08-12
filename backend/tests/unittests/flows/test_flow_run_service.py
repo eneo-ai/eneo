@@ -172,6 +172,7 @@ def _seed_flow_repo(flow_repo, flow) -> None:
     double that returned a mock there would withhold every passage.
     """
     flow_repo.get.return_value = flow
+    flow_repo.lock_publication_pointer.return_value = flow.published_version
     flow_repo.get_evidence_access_context.return_value = FlowEvidenceAccessContext(
         flow_id=flow.id,
         space_id=flow.space_id,
@@ -860,6 +861,86 @@ async def test_create_run_creates_preseeded_run(user):
 
 
 @pytest.mark.asyncio
+async def test_create_run_rechecks_unpublished_pointer_after_tenant_lock(user):
+    flow_repo = _flow_repo()
+    flow_run_repo = flow_run_repo_mock()
+    flow_version_repo = AsyncMock()
+    flow = _flow(user=user, published_version=1)
+    _seed_flow_repo(flow_repo, flow)
+    flow_version_repo.get.return_value = _version(user=user, flow=flow, version=1)
+    flow_repo.lock_publication_pointer.return_value = None
+    flow_run_repo.count_active_runs.return_value = 0
+    flow_run_repo.create.return_value = _run(user=user, flow_id=flow.id)
+    lock_order: list[str] = []
+
+    async def _record_tenant_lock(*, tenant_id: UUID) -> None:
+        assert tenant_id == user.tenant_id
+        lock_order.append("tenant")
+
+    async def _record_publication_lock(*, flow_id: UUID, tenant_id: UUID) -> None:
+        assert flow_id == flow.id
+        assert tenant_id == user.tenant_id
+        lock_order.append("flow")
+
+    flow_run_repo.acquire_tenant_run_creation_lock.side_effect = _record_tenant_lock
+    flow_repo.lock_publication_pointer.side_effect = _record_publication_lock
+    service = _flow_run_service(
+        user=user,
+        flow_repo=flow_repo,
+        flow_run_repo=flow_run_repo,
+        flow_run_review_checkpoint_repo=AsyncMock(),
+        flow_version_repo=flow_version_repo,
+        runtime_upload_repo=_runtime_upload_repo(),
+        max_concurrent_runs=5,
+    )
+
+    with pytest.raises(FlowBadRequestException) as exc_info:
+        await service.create_run(flow_id=flow.id, input_payload_json={"x": "y"})
+
+    assert exc_info.value.code is FlowApiErrorCode.FLOW_NOT_PUBLISHED
+    assert lock_order == ["tenant", "flow"]
+    flow_run_repo.get_idempotent_run.assert_not_awaited()
+    flow_run_repo.count_active_runs.assert_not_awaited()
+    flow_run_repo.create.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_create_run_rechecks_changed_pointer_without_client_expected_version(
+    user,
+):
+    flow_repo = _flow_repo()
+    flow_run_repo = flow_run_repo_mock()
+    flow_version_repo = AsyncMock()
+    flow = _flow(user=user, published_version=1)
+    _seed_flow_repo(flow_repo, flow)
+    flow_version_repo.get.return_value = _version(user=user, flow=flow, version=1)
+    flow_repo.lock_publication_pointer.return_value = 2
+    flow_run_repo.count_active_runs.return_value = 0
+    flow_run_repo.create.return_value = _run(user=user, flow_id=flow.id)
+    service = _flow_run_service(
+        user=user,
+        flow_repo=flow_repo,
+        flow_run_repo=flow_run_repo,
+        flow_run_review_checkpoint_repo=AsyncMock(),
+        flow_version_repo=flow_version_repo,
+        runtime_upload_repo=_runtime_upload_repo(),
+        max_concurrent_runs=5,
+    )
+
+    with pytest.raises(FlowBadRequestException) as exc_info:
+        await service.create_run(flow_id=flow.id, input_payload_json={"x": "y"})
+
+    assert exc_info.value.code is FlowApiErrorCode.RUN_STALE_VERSION
+    assert exc_info.value.context == {
+        "expected_flow_version": 1,
+        "published_flow_version": 2,
+    }
+    flow_run_repo.get_idempotent_run.assert_not_awaited()
+    flow_run_repo.count_active_runs.assert_not_awaited()
+    flow_run_repo.create.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_create_run_maps_runtime_upload_binding_race_to_public_error(user):
     flow_repo = _flow_repo()
     flow_run_repo = flow_run_repo_mock()
@@ -972,6 +1053,7 @@ async def test_create_run_replays_existing_run_for_matching_idempotency_key(user
     assert result.created is False
     flow_run_repo.create.assert_not_awaited()
     flow_run_repo.get_idempotent_run.assert_awaited_once()
+    flow_repo.lock_publication_pointer.assert_not_awaited()
 
 
 def test_create_run_idempotency_fingerprint_shape_is_stable(user):
@@ -1380,6 +1462,7 @@ async def test_create_run_ignores_draft_only_form_fields(user):
         max_concurrent_runs=5,
     )
     flow_repo.get.return_value = draft_flow
+    flow_repo.lock_publication_pointer.return_value = draft_flow.published_version
     flow_run_repo.get_idempotent_run.return_value = None
     flow_run_repo.count_active_runs.return_value = 0
     flow_version_repo.get.return_value = _runtime_version(

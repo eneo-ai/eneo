@@ -417,6 +417,26 @@ class FlowRepository:
             policy_conflict=policy_conflict,
         )
 
+    async def lock_publication_pointer(
+        self,
+        *,
+        flow_id: UUID,
+        tenant_id: UUID,
+    ) -> int | None:
+        """Lock the target Flow row and return its fresh publication pointer."""
+        row = (
+            await self.session.execute(
+                sa.select(Flows.published_version)
+                .where(Flows.id == flow_id)
+                .where(Flows.tenant_id == tenant_id)
+                .where(Flows.deleted_at.is_(None))
+                .with_for_update(key_share=True)
+            )
+        ).one_or_none()
+        if row is None:
+            raise NotFoundException("Flow not found.")
+        return row.published_version
+
     async def get_by_space(
         self,
         space_id: UUID,

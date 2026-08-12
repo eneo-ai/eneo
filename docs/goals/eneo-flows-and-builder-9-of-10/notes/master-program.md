@@ -770,18 +770,32 @@ sake.
     The audit also found and fixed a runtime contract defect: the no-run graph
     endpoint now reads the checksum-verified current published snapshot rather
     than mutable draft topology, hides unpublished Flows from user and
-    service-key principals, and keeps run-id graphs version-pinned. The shared
-    published-definition loader replaces duplicate single-version load and
-    checksum paths. An unmounted prompt-revert placeholder that depended on the
-    wrong graph semantics and its unused translations were deleted.
+    service-key principals, while an authorized run-id graph remains readable
+    from its version-pinned snapshot after unpublish. The shared published-
+    definition loader replaces duplicate single-version load and checksum
+    paths. Every verified snapshot now binds the embedded Flow identity to the
+    requested/persisted Flow, not merely its checksum. Run admission
+    preserves an exact idempotent replay, but otherwise rechecks the current
+    publication pointer under a row lock immediately before capacity and
+    insertion. Republish or unpublish therefore cannot race a stale immutable
+    version into the queue even when the client omits `expected_flow_version`.
+    The SDK rejects simultaneous, blank or malformed API-key and bearer
+    credentials instead of silently choosing one or downgrading to anonymous.
+    An unmounted prompt-revert placeholder that depended on the wrong graph
+    semantics and its unused translations were deleted.
 
-    Verification: 227 affected backend docs/OpenAPI/runtime tests; the
-    service-key published-runtime integration test; backend Pyright and
-    targeted Ruff; 66 SDK runtime/client tests and TypeScript type-smoke; docs
-    regeneration stability and production docs build; web Svelte and i18n
-    checks. Claude peer session `eneo-flow-consumer-dx-20260812` closed green at
-    score 8 after its published-graph wording blocker and three focused
-    hardening findings were fixed. No Builder implementation was included.
+    Verification: 503 affected backend docs/OpenAPI/runtime tests; three real
+    PostgreSQL publication and child-lock cases; the full Flow suite at 6,561
+    passed, 10 skipped and one expected failure; backend Pyright and targeted
+    Ruff; 106 SDK tests and TypeScript type-smoke; docs regeneration stability
+    and production docs build; and exact reproduction of all frozen CP0 counts
+    across 465 observations. Claude peer session `flow-runtime-consumer-dx`
+    iterations 126-127 moved from score 7 to green at score 8 after the
+    run-graph lifecycle, lock contention, stale-version guidance, SDK
+    fail-closed validation and OpenAPI wording findings were fixed. The bounded
+    evidence-reader double parse was accepted as a non-blocking follow-up
+    because its tolerant and strict interfaces have different failure
+    contracts. No Builder implementation was included.
 - [ ] BUILDER-API Public authoring contract (after the ownership
     tranche): add the existing retry-safe plan-create operation to the
     required OpenAPI path/operation set; expose one `aiBuilder` SDK

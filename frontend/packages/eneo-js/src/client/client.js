@@ -48,7 +48,7 @@ function isRequestValidationResponse(value) {
 
 /**
  * Creates a client to request eneo resources over a typesafe interface.
- * Requires either an api key or a user token to authenticate requests.
+ * Accepts either an API key or a user token; supplying both throws a TypeError.
  * @param {Object} args
  * @param  {string} args.baseUrl Base URL of the Eneo backend
  * @param  {string} [args.apiKey] Eneo API key
@@ -58,6 +58,22 @@ function isRequestValidationResponse(value) {
  */
 
 export function createClient(args) {
+  if (
+    args.apiKey !== undefined &&
+    (typeof args.apiKey !== "string" || args.apiKey.trim().length === 0)
+  ) {
+    throw new TypeError("apiKey must be a non-empty string.");
+  }
+  if (
+    args.token !== undefined &&
+    (typeof args.token !== "string" || args.token.trim().length === 0)
+  ) {
+    throw new TypeError("token must be a non-empty string.");
+  }
+  if (args.apiKey !== undefined && args.token !== undefined) {
+    throw new TypeError("Configure either apiKey or token, not both.");
+  }
+
   const version = "DEV-20260812T073004Z"; // # Client version auto-updates when running the updater, do not edit this line.
   const baseUrl = args.baseUrl;
   const _fetch = args.fetch ?? fetch;

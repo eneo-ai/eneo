@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import fields
 from unittest.mock import MagicMock
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 
@@ -541,6 +541,7 @@ def test_verified_parser_rejects_checksum_mismatch_with_typed_context() -> None:
     with pytest.raises(FlowBadRequestException) as exc_info:
         published_definition_module.parse_verified_published_definition(
             definition,
+            expected_flow_id=UUID(str(definition["flow_id"])),
             expected_checksum=expected_checksum,
             flow_version=7,
         )
@@ -549,6 +550,32 @@ def test_verified_parser_rejects_checksum_mismatch_with_typed_context() -> None:
     assert exc_info.value.context == {
         "expected_checksum": expected_checksum,
         "current_checksum": published_definition_checksum(definition),
+    }
+
+
+def test_verified_parser_rejects_definition_for_different_flow() -> None:
+    expected_flow_id = uuid4()
+    definition_flow_id = uuid4()
+    definition = build_published_definition_json(
+        flow_id=definition_flow_id,
+        name="Flow",
+        description=None,
+        metadata_json=None,
+        steps=[_step(order=1)],
+    )
+
+    with pytest.raises(BadRequestException) as exc_info:
+        published_definition_module.parse_verified_published_definition(
+            definition,
+            expected_flow_id=expected_flow_id,
+            expected_checksum=published_definition_checksum(definition),
+            flow_version=7,
+        )
+
+    assert exc_info.value.code == FLOW_DEFINITION_FLOW_ID_INVALID
+    assert exc_info.value.context == {
+        "expected_flow_id": str(expected_flow_id),
+        "definition_flow_id": str(definition_flow_id),
     }
 
 
@@ -577,6 +604,7 @@ def test_verified_parser_rejects_matching_checksum_invalid_runtime_step() -> Non
     with pytest.raises(BadRequestException) as exc_info:
         published_definition_module.parse_verified_published_definition(
             definition,
+            expected_flow_id=UUID(str(definition["flow_id"])),
             expected_checksum=published_definition_checksum(definition),
             flow_version=7,
         )
@@ -606,6 +634,7 @@ def test_verified_parser_rejects_legacy_http_post_input_snapshot() -> None:
     with pytest.raises(BadRequestException) as exc_info:
         published_definition_module.parse_verified_published_definition(
             definition,
+            expected_flow_id=UUID(str(definition["flow_id"])),
             expected_checksum=published_definition_checksum(definition),
             flow_version=7,
         )
@@ -646,6 +675,7 @@ def test_verified_parser_rejects_legacy_flow_mcp_snapshot(
     with pytest.raises(BadRequestException) as exc_info:
         published_definition_module.parse_verified_published_definition(
             definition,
+            expected_flow_id=UUID(str(definition["flow_id"])),
             expected_checksum=published_definition_checksum(definition),
             flow_version=7,
         )
@@ -689,6 +719,7 @@ def test_verified_parser_reuses_one_full_validation_result(monkeypatch) -> None:
 
     parsed = published_definition_module.parse_verified_published_definition(
         definition,
+        expected_flow_id=UUID(str(definition["flow_id"])),
         expected_checksum=published_definition_checksum(definition),
         flow_version=7,
     )

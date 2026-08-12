@@ -172,6 +172,7 @@ class FlowRunRerunService:
         )
         published_definition = parse_verified_published_definition(
             version.definition_json,
+            expected_flow_id=run.flow_id,
             expected_checksum=version.definition_checksum,
             flow_version=version.version,
         )

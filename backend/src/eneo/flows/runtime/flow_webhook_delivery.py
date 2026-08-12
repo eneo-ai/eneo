@@ -402,6 +402,7 @@ class FlowRunWebhookDeliveryService:
         )
         definition = parse_verified_published_definition(
             flow_version.definition_json,
+            expected_flow_id=row.flow_id,
             expected_checksum=flow_version.definition_checksum,
             flow_version=flow_version.version,
         )

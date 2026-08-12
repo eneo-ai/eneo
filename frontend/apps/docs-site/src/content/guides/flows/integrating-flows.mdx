@@ -1023,10 +1023,11 @@ Use idempotency, version pins, cancellation, redispatch, polling backoff, and st
 
 1. Reuse the same `Idempotency-Key` only for the same create-run payload.
 2. Send `expected_flow_version` from the run contract so edited published versions do not surprise clients.
-3. Call `runtime_paths.cancel_run_template` when the user intentionally abandons a non-terminal run.
-4. Call `runtime_paths.redispatch_run_template` only for stale queued recovery. For accepted or outcome-unknown exhaustion, send the observed `dispatch_exhausted_at` as `expected_dispatch_exhausted_at` to rearm that epoch. A zero `redispatched_count` means no broker acceptance was confirmed; poll the returned run.
-5. Back off polling when `status_capabilities.should_poll` is false.
-6. Use run and step polling as the source of truth for status changes.
+3. If a Flow is republished while a run is being created, `flow_run_stale_version` tells you to refetch the run contract and resubmit the intended run.
+4. Call `runtime_paths.cancel_run_template` when the user intentionally abandons a non-terminal run.
+5. Call `runtime_paths.redispatch_run_template` only for stale queued recovery. For accepted or outcome-unknown exhaustion, send the observed `dispatch_exhausted_at` as `expected_dispatch_exhausted_at` to rearm that epoch. A zero `redispatched_count` means no broker acceptance was confirmed; poll the returned run.
+6. Back off polling when `status_capabilities.should_poll` is false.
+7. Use run and step polling as the source of truth for status changes.
 
 Endpoint facts:
 

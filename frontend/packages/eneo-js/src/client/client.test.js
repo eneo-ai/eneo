@@ -77,22 +77,38 @@ describe("createClient path parameters", () => {
     expect(requestHeaders.has("X-API-Key")).toBe(false);
   });
 
-  it("uses only X-API-Key when both authentication options are supplied", async () => {
-    const fetch = vi.fn(
-      async () => new Response(JSON.stringify({ statuses: [] }), { status: 200 })
-    );
-    const client = createClient({
-      baseUrl: "https://api.example.test",
-      apiKey: "synthetic-service-key",
-      token: "synthetic-user-access-token",
-      fetch
-    });
+  it("rejects clients configured with both authentication options", () => {
+    const fetch = vi.fn();
 
-    await client.fetch("/api/v1/flows/runs/status-capabilities/", { method: "get" });
+    expect(() =>
+      createClient({
+        baseUrl: "https://api.example.test",
+        apiKey: "synthetic-service-key",
+        token: "synthetic-user-access-token",
+        fetch
+      })
+    ).toThrow(new TypeError("Configure either apiKey or token, not both."));
 
-    const requestHeaders = new Headers(fetch.mock.calls[0][1].headers);
-    expect(requestHeaders.get("X-API-Key")).toBe("synthetic-service-key");
-    expect(requestHeaders.has("Authorization")).toBe(false);
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["apiKey", { apiKey: "" }],
+    ["apiKey", { apiKey: null }],
+    ["apiKey", { apiKey: null, token: null }],
+    ["token", { token: "   " }]
+  ])("rejects an invalid %s credential", (name, auth) => {
+    const fetch = vi.fn();
+
+    expect(() =>
+      createClient({
+        baseUrl: "https://api.example.test",
+        ...auth,
+        fetch
+      })
+    ).toThrow(new TypeError(`${name} must be a non-empty string.`));
+
+    expect(fetch).not.toHaveBeenCalled();
   });
 
   it("forwards typed header parameters and caller headers", async () => {

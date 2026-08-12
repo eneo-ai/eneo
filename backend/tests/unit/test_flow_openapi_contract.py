@@ -4,6 +4,7 @@ import hashlib
 import json
 from collections.abc import Iterator
 from typing import Any, cast
+from uuid import UUID
 
 import pytest
 from fastapi.routing import APIRoute
@@ -3455,6 +3456,18 @@ def test_openapi_functional_definition_reads_document_checksum_mismatch(
     assert "flow_definition_checksum_mismatch" in bad_request.get("description", "")
 
 
+def test_openapi_flow_graph_distinguishes_current_and_run_pinned_visibility(
+    openapi_spec: dict,
+) -> None:
+    operation = _get_operation(openapi_spec, "/api/v1/flows/{id}/graph/", "get")
+    not_found_description = str(
+        operation.get("responses", {}).get("404", {}).get("description", "")
+    )
+
+    assert "Without `run_id`, an unpublished Flow is hidden" in not_found_description
+    assert "A version-pinned run graph remains readable" in not_found_description
+
+
 def test_openapi_flow_evidence_exposes_definition_integrity(
     openapi_spec: dict,
 ) -> None:
@@ -3486,6 +3499,7 @@ def test_openapi_flow_evidence_exposes_definition_integrity(
     )
     parse_verified_published_definition(
         evidence_example["definition_snapshot"],
+        expected_flow_id=UUID(evidence_example["run"]["flow_id"]),
         expected_checksum=example_integrity["expected_checksum"],
         flow_version=evidence_example["run"]["flow_version"],
     )

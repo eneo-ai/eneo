@@ -102,7 +102,10 @@ from tests.unittests.flows.test_flow_router import (
 
 
 @pytest.mark.asyncio
-async def test_get_flow_graph_uses_run_version_snapshot_when_run_id_supplied():
+@pytest.mark.parametrize("principal_kind", ["user", "service_key"])
+async def test_get_flow_graph_keeps_run_version_snapshot_visible_after_unpublish(
+    principal_kind: str,
+):
     container = MagicMock()
     flow_service = AsyncMock()
     flow_run_service = AsyncMock()
@@ -111,7 +114,15 @@ async def test_get_flow_graph_uses_run_version_snapshot_when_run_id_supplied():
     _enable_space_access(container)
 
     flow_id = uuid4()
-    live_flow = _flow(flow_id)
+    live_flow = _flow(flow_id).model_copy(update={"published_version": None})
+    user = SimpleNamespace(
+        id=uuid4(),
+        tenant_id=live_flow.tenant_id,
+        permissions=[Permission.FLOWS],
+    )
+    if principal_kind == "service_key":
+        user.active_api_key = _service_key()
+    container.user.return_value = user
     run = _run(flow_id=flow_id, tenant_id=live_flow.tenant_id)
     snapshot_step_id = uuid4()
     flow_service.get_flow.return_value = live_flow
@@ -165,8 +176,7 @@ async def test_get_flow_graph_uses_run_version_snapshot_when_run_id_supplied():
     assert len(llm_nodes) == 1
     assert llm_nodes[0].id == str(snapshot_step_id)
     assert llm_nodes[0].label == "Snapshot step"
-    # enforce_flow_scope now always loads the flow for space membership checks,
-    # but the graph should still be built from the version snapshot, not live flow.
+    # The live Flow read authorizes access; graph content stays pinned to the run.
     flow_run_service.get_run_versioned_view.assert_awaited_once_with(
         flow_id=flow_id,
         run_id=run.id,
@@ -274,11 +284,14 @@ async def test_get_flow_graph_uses_published_snapshot_when_run_id_missing():
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("principal_kind", ["user", "service_key"])
-async def test_get_flow_graph_hides_unpublished_flow(principal_kind: str):
+async def test_get_flow_graph_hides_unpublished_current_flow(
+    principal_kind: str,
+):
     container = MagicMock()
     flow_service = AsyncMock()
+    flow_run_service = AsyncMock()
     container.flow_service.return_value = flow_service
-    container.flow_run_service.return_value = AsyncMock()
+    container.flow_run_service.return_value = flow_run_service
     user = SimpleNamespace(
         id=uuid4(),
         tenant_id=uuid4(),
@@ -302,6 +315,7 @@ async def test_get_flow_graph_hides_unpublished_flow(principal_kind: str):
             container=container,
         )
 
+    flow_run_service.get_run_versioned_view.assert_not_awaited()
     container.flow_version_repo.assert_not_called()
 
 

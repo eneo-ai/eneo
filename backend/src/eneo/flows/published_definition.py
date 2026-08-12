@@ -775,6 +775,7 @@ def inspect_published_definition_integrity(
 def parse_verified_published_definition(
     definition_json: Mapping[str, object],
     *,
+    expected_flow_id: UUID,
     expected_checksum: str,
     flow_version: int,
 ) -> PublishedFlowDefinition:
@@ -784,6 +785,15 @@ def parse_verified_published_definition(
         flow_version=flow_version,
     )
     if inspection.definition is not None:
+        if inspection.definition.flow_id != expected_flow_id:
+            raise BadRequestException(
+                "Flow definition snapshot has an invalid flow_id.",
+                code=FLOW_DEFINITION_FLOW_ID_INVALID,
+                context={
+                    "expected_flow_id": str(expected_flow_id),
+                    "definition_flow_id": str(inspection.definition.flow_id),
+                },
+            )
         return inspection.definition
     if inspection.parse_error is not None:
         raise inspection.parse_error

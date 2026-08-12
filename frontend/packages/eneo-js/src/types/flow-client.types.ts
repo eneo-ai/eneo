@@ -14,7 +14,10 @@ type GetFlowRunContractResponse =
 type CreateFlowRunResponse =
   operations["create_flow_run"]["responses"][201]["content"]["application/json"];
 
-const flows = createEneo({ baseUrl: "https://api.example.test" }).flows;
+const flows = createEneo({
+  apiKey: "synthetic-flow-consumer-key",
+  baseUrl: "https://api.example.test"
+}).flows;
 
 flows.list({ spaceId: "space-1", limit: 25 });
 flows.runContract.get({ id: "flow-1" });

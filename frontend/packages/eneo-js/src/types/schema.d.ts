@@ -48678,7 +48678,7 @@ export interface operations {
           "application/json": components["schemas"]["GeneralError"];
         };
       };
-      /** @description Published Flow or run not found in tenant scope. An unpublished Flow is hidden from this runtime endpoint. */
+      /** @description Published Flow or run not found in tenant scope. Without `run_id`, an unpublished Flow is hidden. A version-pinned run graph remains readable subject to run access. */
       404: {
         headers: {
           [name: string]: unknown;

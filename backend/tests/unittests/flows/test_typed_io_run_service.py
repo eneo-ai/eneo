@@ -205,6 +205,7 @@ async def test_create_run_stores_step_inputs_as_execution_file_rows(user):
     version = _version(user, flow)
 
     flow_repo.get = AsyncMock(return_value=flow)
+    flow_repo.lock_publication_pointer = AsyncMock(return_value=flow.published_version)
     flow_version_repo.get = AsyncMock(return_value=version)
     flow_run_repo.count_active_runs = AsyncMock(return_value=0)
 
@@ -282,6 +283,7 @@ async def test_create_run_without_step_inputs_preserves_inline_payload(user):
     version = _version(user, flow)
 
     flow_repo.get = AsyncMock(return_value=flow)
+    flow_repo.lock_publication_pointer = AsyncMock(return_value=flow.published_version)
     flow_version_repo.get = AsyncMock(return_value=version)
     flow_run_repo.count_active_runs = AsyncMock(return_value=0)
 
