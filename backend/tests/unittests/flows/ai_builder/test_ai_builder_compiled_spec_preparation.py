@@ -140,7 +140,6 @@ def _assembly_document_pdf_spec() -> FlowDraftSpecCore:
                         "typ av dokument, vilket ämne det handlar om, kategori, "
                         "datum, författare och slutsatser."
                     ),
-                    "output_type": "json",
                     "output_fields": [
                         {
                             "name": "documents",
@@ -158,14 +157,12 @@ def _assembly_document_pdf_spec() -> FlowDraftSpecCore:
                         "Använd den extraherade informationen för att skriva den "
                         "fullständiga rapporttexten för PDF:en."
                     ),
-                    "output_type": "text",
                 },
                 {
                     "name": "Skapa PDF-rapport",
                     "instructions": (
                         "Omvandla den färdiga rapporttexten till en professionell PDF."
                     ),
-                    "output_type": "text",
                 },
             ],
         }

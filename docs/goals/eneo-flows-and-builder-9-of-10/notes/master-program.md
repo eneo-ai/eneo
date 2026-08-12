@@ -184,8 +184,8 @@ ARTIFACT re-checked per slice, not a permanent grep gate.
 | D1 | Terminal output type (create) | SELF_CHECK | CP2 (`CreateCompileContext.final_output_type` → create postcondition; conversation derivation isolated to edit) |
 | D2 | Proposal tool schema built at two sites | LAYERED — one prepared schema | CP3 prerequisite (`ProposalPrepared.proposal_tool_schema`) |
 | D3 | Mixed audio+doc re-inference on create | TRUE | CP-D3 |
-| D4 | Terminal step `output_type` still emit-able | TRUE | CP3 |
-| D5 | Form-field placement A/B exclusion divergence | UNPROVEN | receipt task |
+| D4 | Terminal step `output_type` still emit-able | LAYERED — create output mechanics are server-derived and the retired provider key is rejected | CP3 |
+| D5 | Form-field placement A/B exclusion divergence | UNPROVEN divergence; multi-consumer reachability proven | receipt task + CP3 evidence |
 | D6 | Commit re-derivation at persist | SELF_CHECK — keep `CommitDriftError` | CP-D6 (receipt-gated) |
 | D7 | Classifier slot vs merged slot re-ask | UNPROVEN | receipt task |
 | D8 | Runtime-metadata request re-derived | TRUE | CP3 |
@@ -429,42 +429,79 @@ any threshold.
     owner, so stricter validation does not lose attribution. The prepared
     context is required explicitly at lifecycle boundaries, and duplicate
     downstream carriers for requested sections and scoped terminal output are
-    deleted. D2 and D10 are now LAYERED; D4 and D8 remain TRUE. The frozen CP0
+    deleted. D2 and D10 are now LAYERED; D8 remains TRUE. The frozen CP0
     replay reproduces all 465 observations and every published count exactly;
     the final affected suite is 6555 passed, 10 skipped, 1 xfailed. Claude
     iterations 119–120 converged from 7 to green at 8 after the duplicate
     carriers and raw-rejection capture gap were closed.
-- [ ] CP3 Runtime-input-field contract (AMENDED, iteration 33).
-    `FlowInputFieldIntent` stays the field VALUE schema, but verified
-    it carries no citations/confidence
-    (`ai_builder_proposal_intent.py:80`) and the classifier exposes
-    only boolean form intake
-    (`ai_builder_slot_classification_contract.py:162`) — so the
-    classifier ships a bounded CITED DELTA ENVELOPE (update/clear +
-    per-field citations + confidence; the same transport pattern as
-    ClassifiedNamedResultDelta), a transport contract around the
-    existing value type, never a second owner. Durable owner stays
-    conversation metadata; `PlanningState.input_fields` stays the
-    derived view; placement defaults to the archetype's one
-    deterministic consumer; semantic purpose only for evidence-backed
-    multi-consumer cases; never leak physical `PlannedStepRole`
-    upstream. The D2/D10 prerequisite is complete: one prepared schema
-    now serves token budgeting, initial and repair provider calls, and
-    raw server validation, while one prepared compile context serves the
-    downstream create lifecycle. CP3 and CP5 consume that owner; neither
-    invents a second materializer. Before implementing D8, its design gate
-    must freeze a closed semantic-purpose vocabulary, reuse the existing
-    `ClassifiedEvidence` identity for cited purpose evidence, and define the
-    deterministic single-consumer placement rule. Purpose is consulted only
-    for an evidence-backed field with multiple possible consumers; code must
-    not guess these missing product semantics. Then
-    delete the prompt's mechanical form-field block, the create
-    repair mapping, and create-mode responsibility of the four
-    form-field invariants (edit guards stay), and remove
-    `input_fields`/`uses_form_fields` AND the retired create
-    `review_mode` from that archetype's proposal schema (surface
-    closure; the review-policy transfer itself already shipped —
-    CheckpointIntent + compiler stripping, typed intent wins).
+- [x] CP3 create output and review ownership closure (completed 2026-08-12):
+    create proposal schemas no longer expose step `output_type` or
+    `review_mode`, and the direct parser rejects either key by presence,
+    including `null`. `CreateCompileContext` plus assembly remain the output
+    mechanics owner; typed checkpoint intents remain the create review owner.
+    The model-review stripping fallback and the now-unreachable document-report
+    review-conflict branch are deleted rather than retained as dead production
+    policy. Edit keeps its existing output and review surfaces. D4 is now
+    LAYERED. The affected suite is 6,560 passed, 10 skipped, 1 xfailed; the
+    frozen 465-observation receipt reproduces every published count. Claude
+    iterations 124–125 converged from 7 to green at 8 after dead assembly
+    residue and a misleading helper branch were removed.
+- [ ] CP3 Runtime-input-field contract (D8 DESIGN FROZEN, Claude iterations
+    122–123). The existing `runtime_metadata_field_details` structured answer
+    is the sole durable field-definition evidence owner; do not add a
+    classifier field delta, classifier snapshot, free-text purpose inference,
+    or post-provider question. Activate this deterministic question through
+    `_NON_SLOT_SUPPORTED_STRUCTURED_QUESTION_IDS`, make an `input_fields`
+    payload a real answer, and emit it before requirements confirmation only
+    when the commit-grade runtime-metadata slot is affirmatively
+    `basic_runtime_metadata` or `detailed_runtime_metadata` and no confirmed
+    details exist. Omitted metadata retains CP9b's visible no-extra-fields
+    assumption and must not re-open this question.
+
+    `FlowInputFieldIntent` remains the field VALUE contract. A bounded planning
+    record wraps that value, one semantic purpose, and the structured-answer
+    message id; `PlanningState` rebuilds the latest set from conversation and
+    `CreateCompileContext` projects it. Do not put purpose on the provider/edit
+    value schema and do not add a parallel purpose map. The closed values and
+    user-visible labels are:
+
+    - `interpret_input`: “Use it to understand the input” / “Använd för att
+      förstå indata”.
+    - `shape_result`: “Use it to shape the final result” / “Använd för att forma
+      slutresultatet”.
+    - `whole_flow`: “Use it throughout the flow” / “Använd genom hela flödet”.
+
+    Create assembly is the only placement owner after actual topology exists.
+    Template-only placeholder fields retain their existing deterministic owner:
+    the fixed template-fill target, without an invented purpose. For a
+    structured-answer field whose name is also a selected template placeholder,
+    the selected placeholder always binds that template target because the final
+    template contract does so regardless of semantic placement. Purpose then
+    selects any semantic consumers: `interpret_input` requires the first legal
+    semantic-origin consumer; `shape_result` selects the terminal legal
+    semantic-origin consumer only when no template target exists; `whole_flow`
+    requires and selects every legal semantic-origin consumer exactly once. The
+    placement result is that semantic selection plus the mandatory template
+    target, deduplicated. A single resulting target binds exactly once. Zero
+    targets, or a purpose whose required semantic target does not exist, is a
+    typed unsupported result. Compiler helpers,
+    transcription/renderers and illegal fan-in targets are excluded; invalid or
+    missing purpose fails closed and never falls back to step-name/mention
+    matching.
+
+    The same behavior slice must delete create-provider `input_fields` and
+    `uses_form_fields`, the mechanical prompt and repair branches, mention-first
+    placement, superseded keyword field extraction after its callers move, and
+    create responsibility for the four form-field critic invariants; edit
+    guards stay. The broad Luna receipts establish that this is preservation of
+    general supported behavior, not suite tuning: the 158-observation receipt
+    has 49 fields, including 12 multi-consumer fields across 6 of 18
+    field-bearing observations; the earlier 120-observation receipt has 23
+    fields, including 12 multi-consumer fields across 4 of 8 field-bearing
+    observations. Both have zero unbound accepted fields. Acceptance covers
+    first-only, terminal-only and all-semantic-step placement, exact-once
+    bindings, the pre-provider question and persistence/rebuild, create schema
+    closure, edit preservation, frozen CP0 replay, and the next broad receipt.
 - [ ] CP4 JSON partial-emission diagnosis: why OSE captures some
     user-named fields and misses others (4 JSON cases). Diagnosis
     first; bounded fix gated on attributed mechanism.
@@ -539,11 +576,10 @@ any threshold.
     `assembly_document_report_compose_topology_missing`, both
     `flow_input_schema_*` codes, `section_writer_structured_source_ambiguous`,
     `terminal_output_type_mismatch`, and `template_placeholder_unresolved`.
-    `assembly_document_report_review_mode_conflict` also remains a defensive
-    non-repairable postcondition: production create strips model-authored
-    review modes and `PlanningState` permits one checkpoint intent per producer,
-    so no typed conflict exists from which to ask the frozen candidate user
-    question. Inventing an ambiguity state would duplicate checkpoint ownership.
+    The former `assembly_document_report_review_mode_conflict` candidate was
+    subsequently deleted with CP3's create review-surface closure: once create
+    rejects model-authored review modes, typed checkpoint intents are the sole
+    review owner and no competing conflict state remains to defend.
     No module, proposal skeleton, repair path, persistence schema or frontend
     workflow was added; two proposal-layer tests for the transferred hints
     failure were deleted in favor of the admission owner, one retained compiler
@@ -671,9 +707,10 @@ any threshold.
    to CP3 and CP5 without adding a case-specific repair path.
 7. **CP9b complete** — omitted optional runtime metadata uses a visible,
    overridable assumption instead of another interview question.
-8. **CP3 remaining next** (+D4 +D8; D2/D10 prerequisite complete) — close the
-   create surface only after the cited field-purpose and placement contract is
-   frozen; do not add another schema or compile-context owner.
+8. **CP3 D8 remaining next** (D2/D4/D10 complete) — implement the frozen
+   structured field-details and assembly-placement transfer as one complete
+   ownership slice; do not add another schema, classifier snapshot or
+   compile-context owner.
 9. **Ownership-tranche checkpoint** — exploratory
     final-frozen-manifest ×3 after CP1–CP3 and CP9b.
 10. **Critic disposition receipt**, then **CP4 → CP5**, **CP-EDIT**,

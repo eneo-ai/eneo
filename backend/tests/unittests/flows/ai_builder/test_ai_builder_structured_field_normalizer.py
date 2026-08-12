@@ -248,7 +248,6 @@ def test_misplaced_field_drafts_reattach_to_the_preceding_step() -> None:
                 {
                     "name": "Strukturera underlag",
                     "instructions": "Strukturera beslutsunderlaget.",
-                    "output_type": "json",
                     "output_fields": [_field("decisions")],
                 },
                 _field(
@@ -330,7 +329,6 @@ def test_nested_field_draft_list_in_steps_reattaches() -> None:
                 {
                     "name": "Strukturera underlag",
                     "instructions": "Strukturera beslutsunderlaget.",
-                    "output_type": "json",
                     "output_fields": [_field("decisions")],
                 },
                 [_field("open_questions"), _field("risks")],

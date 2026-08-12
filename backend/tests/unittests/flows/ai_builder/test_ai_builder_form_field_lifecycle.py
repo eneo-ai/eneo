@@ -76,7 +76,6 @@ def test_declared_input_field_without_step_use_fails_create_compilation() -> Non
                 {
                     "name": "Draft answer",
                     "instructions": "Draft the final answer.",
-                    "output_type": "text",
                 },
             ],
         }
@@ -99,7 +98,6 @@ def test_confirmed_input_field_without_semantic_consumer_fails_compilation() -> 
                 {
                     "name": "Review case",
                     "instructions": "Review the submitted case.",
-                    "output_type": "text",
                 }
             ],
         }
@@ -134,7 +132,6 @@ def test_unknown_semantic_form_field_consumer_fails_compilation() -> None:
                     "name": "Review case",
                     "instructions": "Review the submitted case.",
                     "uses_form_fields": ["unknown_case_type"],
-                    "output_type": "text",
                 }
             ],
         }
@@ -158,7 +155,6 @@ def test_confirmed_field_contract_rejects_unknown_semantic_consumer() -> None:
                     "name": "Review case",
                     "instructions": "Review the submitted case.",
                     "uses_form_fields": ["tone"],
-                    "output_type": "text",
                 }
             ],
         }
@@ -196,7 +192,6 @@ def test_inferred_field_context_allows_new_declared_runtime_field() -> None:
                     "name": "Route case",
                     "instructions": "Route the case using its type and tone.",
                     "uses_form_fields": ["case_type", "tone"],
-                    "output_type": "text",
                 }
             ],
         }
@@ -230,7 +225,6 @@ def test_template_field_context_allows_new_declared_runtime_field() -> None:
                     "name": "Prepare report",
                     "instructions": "Prepare the report for the template.",
                     "uses_form_fields": ["template_value", "tone"],
-                    "output_type": "text",
                 }
             ],
         }
@@ -281,12 +275,10 @@ def test_renderer_terminal_form_field_without_step_use_fails_create_compilation(
                 {
                     "name": "Prepare report body",
                     "instructions": "Write the report body from the extracted risks.",
-                    "output_type": "text",
                 },
                 {
                     "name": "Assemble final text",
                     "instructions": "Prepare the final PDF body text.",
-                    "output_type": "text",
                 },
             ],
         }
@@ -323,7 +315,6 @@ def test_single_step_outline_unreferenced_form_field_fails_create_compilation() 
                 {
                     "name": "Write PDF body",
                     "instructions": "Render the submitted material as PDF.",
-                    "output_type": "text",
                 },
             ],
         }
@@ -359,7 +350,6 @@ def test_intermediate_form_field_use_flows_through_derived_structured_underlag()
                 {
                     "name": "Score case",
                     "instructions": "Score the case using the runtime identifier.",
-                    "output_type": "json",
                     "uses_form_fields": ["case_id"],
                     "output_fields": [
                         {
@@ -372,7 +362,6 @@ def test_intermediate_form_field_use_flows_through_derived_structured_underlag()
                 {
                     "name": "Write assessment",
                     "instructions": "Write the assessment from the structured score.",
-                    "output_type": "text",
                     "uses_previous_fields": [
                         {
                             "from_step": 1,
@@ -425,7 +414,6 @@ def test_one_input_field_can_feed_two_step_bindings_once_each() -> None:
                 {
                     "name": "Draft answer",
                     "instructions": "Draft an answer for the selected audience.",
-                    "output_type": "text",
                     "uses_form_fields": ["audience"],
                 },
             ],

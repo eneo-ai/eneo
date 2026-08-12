@@ -80,6 +80,7 @@ class PlannedStep:
     model_ref: str | None = None
     knowledge_refs: tuple[str, ...] = ()
     citations_requested: bool = False
+    # Create review placement is projected from typed checkpoint intents after assembly.
     review_mode: FlowStepReviewMode | None = None
 
     def __post_init__(self) -> None:

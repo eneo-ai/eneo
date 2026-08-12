@@ -75,6 +75,7 @@ _CREATE_INTENT_STEP_BACKEND_OWNED_KEYS = frozenset(
 )
 logger = logging.getLogger(__name__)
 _CREATE_INTENT_ROOT_IGNORED_KEYS = frozenset({"final_output_type", "reasoning"})
+_RETIRED_CREATE_STEP_KEYS = frozenset({"output_type", "review_mode"})
 
 
 class FlowInputFieldIntent(BaseModel):
@@ -118,8 +119,8 @@ class SemanticStepIntent(BaseModel):
 
     name: str
     instructions: str
-    # Older create payloads and current edit payloads may carry this field.
-    # Create compilation derives output types from fields and architecture instead.
+    # Create rejects model-authored values; edit and backend-synthesized create
+    # steps still use this shared semantic representation.
     output_type: OutputType | None = None
     output_fields: list[StructuredFieldDraft] | None = None
     uses_form_fields: list[str] = Field(default_factory=list)
@@ -322,12 +323,15 @@ class CreateFlowIntent(BaseModel):
 
 
 def parse_create_flow_intent_arguments(arguments: dict[str, Any]) -> CreateFlowIntent:
+    retired_step_issues = _retired_create_step_key_issues(arguments)
+    if retired_step_issues:
+        raise ProposalIntentArgumentError(retired_step_issues)
     try:
         return CreateFlowIntent.model_validate(
             _normalize_create_intent_arguments(arguments)
         )
     except ValidationError as error:
-        raise ProposalIntentArgumentError(error) from error
+        raise ProposalIntentArgumentError(safe_validation_issues(error)) from error
 
 
 class ProposalIntentArgumentError(ValueError):
@@ -338,8 +342,8 @@ class ProposalIntentArgumentError(ValueError):
     validation messages.
     """
 
-    def __init__(self, error: ValidationError) -> None:
-        self.issues = safe_validation_issues(error)
+    def __init__(self, issues: tuple[str, ...]) -> None:
+        self.issues = issues
         super().__init__("; ".join(self.issues))
 
 
@@ -355,6 +359,25 @@ def safe_validation_issues(error: ValidationError) -> tuple[str, ...]:
         issue_type = str(item.get("type") or "validation_error")
         issues.append(f"{loc}: {message} [{issue_type}]")
     return tuple(issues) or ("propose_flow validation failed [validation_error]",)
+
+
+def _retired_create_step_key_issues(
+    arguments: dict[str, Any],
+) -> tuple[str, ...]:
+    raw_steps = arguments.get("steps")
+    if not isinstance(raw_steps, list):
+        return ()
+    issues: list[str] = []
+    for index, raw_step in enumerate(cast(list[Any], raw_steps)):
+        if not isinstance(raw_step, dict):
+            continue
+        step_payload = cast(dict[str, Any], raw_step)
+        for key in sorted(_RETIRED_CREATE_STEP_KEYS.intersection(step_payload)):
+            issues.append(
+                f"steps.{index}.{key}: Create derives this field on the server "
+                "[backend_owned_field]"
+            )
+    return tuple(issues)
 
 
 def _normalize_create_intent_arguments(arguments: dict[str, Any]) -> dict[str, Any]:
@@ -579,6 +602,7 @@ def build_create_flow_tool_schema(
                         "maxItems": MAX_PROPOSAL_STEPS,
                         "items": build_semantic_step_schema(
                             include_output_type=False,
+                            include_review_mode=False,
                             model_refs=model_refs,
                             kb_refs=kb_refs,
                         ),
@@ -615,6 +639,7 @@ def _input_field_intent_schema() -> dict[str, Any]:
 def build_semantic_step_schema(
     *,
     include_output_type: bool = True,
+    include_review_mode: bool = True,
     include_previous_refs: bool = False,
     model_refs: list[str] | None = None,
     kb_refs: list[str] | None = None,
@@ -674,7 +699,11 @@ def build_semantic_step_schema(
                 kb_refs=kb_refs,
             ),
             "citations_requested": {"type": "boolean", "default": False},
-            "review_mode": build_review_mode_schema(),
+            **(
+                {"review_mode": build_review_mode_schema()}
+                if include_review_mode
+                else {}
+            ),
         },
         "additionalProperties": False,
     }

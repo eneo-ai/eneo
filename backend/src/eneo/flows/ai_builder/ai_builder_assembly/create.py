@@ -572,7 +572,6 @@ def _assemble_create_intent(
             model_ref=semantic_step.model_ref,
             knowledge_refs=tuple(semantic_step.knowledge_refs),
             citations_requested=semantic_step.citations_requested,
-            review_mode=semantic_step.review_mode,
         )
         planned_steps.append(planned_step)
         placed_form_fields.update(planned_step.form_field_refs)
@@ -695,7 +694,7 @@ def _semantic_steps_without_terminal_document_render_helper(
         return semantic_steps
     if helper_candidate.output_type not in {None, OutputType.TEXT, final_output_type}:
         return semantic_steps
-    if not _is_plain_terminal_document_helper(
+    if not _looks_like_terminal_document_render_helper(
         helper_candidate,
         final_output_type=final_output_type,
     ):
@@ -899,20 +898,13 @@ def _complete_result_contract_output_fields(
     return tuple(completed_fields)
 
 
-def _is_plain_terminal_document_helper(
+def _looks_like_terminal_document_render_helper(
     step: SemanticStepIntent,
     *,
     final_output_type: OutputType,
 ) -> bool:
-    if (
-        step.uses_form_fields
-        or step.knowledge_refs
-        or step.citations_requested
-        or step.review_mode is not None
-    ):
+    if step.uses_form_fields or step.knowledge_refs or step.citations_requested:
         return False
-    if step.output_type == final_output_type:
-        return True
     return _mentions_output_artifact_type(
         f"{step.name} {step.instructions}",
         final_output_type=final_output_type,
@@ -1051,7 +1043,6 @@ def _assemble_docx_template_fill(
             model_ref=semantic_step.model_ref,
             knowledge_refs=tuple(semantic_step.knowledge_refs),
             citations_requested=semantic_step.citations_requested,
-            review_mode=semantic_step.review_mode,
         )
         semantic_steps.append(planned_step)
         previous_step = planned_step
@@ -1267,7 +1258,6 @@ def _assemble_pure_audio_transcription(
         runtime_required=runtime_required,
         runtime_max_files=runtime_max_files,
         ui_language=ui_language,
-        review_mode=semantic_step.review_mode,
     )
     return FlowAssemblyPlan(
         flow_name=intent.flow_name,

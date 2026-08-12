@@ -218,7 +218,6 @@ async def test_create_terminal_uses_committed_architecture_despite_negated_file_
                 {
                     "name": "Sammanfatta remissen",
                     "instructions": "Skriv en tydlig textsammanfattning.",
-                    "output_type": "text",
                 }
             ],
         },
@@ -276,7 +275,6 @@ async def test_create_terminal_postcondition_treats_mismatch_as_compiler_defect(
                     {
                         "name": "Strukturera resultat",
                         "instructions": "Returnera resultatet som JSON.",
-                        "output_type": "json",
                     }
                 ],
             },
@@ -384,7 +382,6 @@ async def test_outline_assembly_rejection_succeeds_after_model_correction() -> N
                 {
                     "name": "Write summary",
                     "instructions": "Write a summary directly from uploaded documents.",
-                    "output_type": "text",
                 }
             ],
         },
@@ -414,7 +411,6 @@ async def test_outline_assembly_rejection_succeeds_after_model_correction() -> N
                 {
                     "name": "Read document",
                     "instructions": "Extract source-grounded facts.",
-                    "output_type": "json",
                     "output_fields": [
                         {
                             "name": "summary",
@@ -426,7 +422,6 @@ async def test_outline_assembly_rejection_succeeds_after_model_correction() -> N
                 {
                     "name": "Write summary",
                     "instructions": "Write a summary from the extracted facts.",
-                    "output_type": "text",
                 },
             ],
         },
@@ -475,7 +470,6 @@ async def test_corrupt_report_context_fails_closed_without_model_repair() -> Non
                     {
                         "name": "Write report",
                         "instructions": "Write the report from the supplied text.",
-                        "output_type": "text",
                     }
                 ],
             },
@@ -524,7 +518,6 @@ async def test_report_citations_degrade_to_one_user_visible_warning() -> None:
                 {
                     "name": "Write cited report",
                     "instructions": "Write the report with citations.",
-                    "output_type": "text",
                     "citations_requested": True,
                 }
             ],
@@ -604,7 +597,6 @@ async def test_combined_report_models_surface_warning_on_stored_plan() -> None:
                 {
                     "name": "Read source",
                     "instructions": "Extract source evidence.",
-                    "output_type": "json",
                     "output_fields": [
                         {
                             "name": "documents",
@@ -623,13 +615,11 @@ async def test_combined_report_models_surface_warning_on_stored_plan() -> None:
                 {
                     "name": "Draft report",
                     "instructions": "Draft the report.",
-                    "output_type": "text",
                     "model_ref": "model.draft",
                 },
                 {
                     "name": "Compose report",
                     "instructions": "Compose the final report.",
-                    "output_type": "text",
                     "model_ref": "model.body",
                 },
             ],
@@ -727,7 +717,6 @@ async def test_outline_audio_to_docx_returns_compiled_proposal() -> None:
                 {
                     "name": "Analysera inspelningen",
                     "instructions": "Extrahera sakuppgifter ur transkriptionen.",
-                    "output_type": "json",
                     "output_fields": [
                         {
                             "name": "sakuppgifter",
@@ -735,13 +724,11 @@ async def test_outline_audio_to_docx_returns_compiled_proposal() -> None:
                             "description": "Sakuppgifter ur inspelningen.",
                         }
                     ],
-                    "review_mode": "edit",
                 },
                 {
                     "name": "Skriv rapporten",
                     "instructions": "Skriv rapporten från sakuppgifterna.",
                     "uses_form_fields": ["arendenummer", "handlaggare"],
-                    "output_type": "text",
                 },
             ],
         },
@@ -879,7 +866,6 @@ async def test_server_owned_json_input_without_consumer_returns_model_feedback()
                 {
                     "name": "Normalize case",
                     "instructions": "Normalize the submitted case.",
-                    "output_type": "json",
                 }
             ],
         },

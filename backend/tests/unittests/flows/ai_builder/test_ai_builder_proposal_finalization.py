@@ -493,7 +493,6 @@ async def test_finalize_compiler_lowered_report_enforces_named_section_coverage(
                 {
                     "name": "Read documents",
                     "instructions": "Extract source-grounded evidence.",
-                    "output_type": "json",
                     "output_fields": [
                         {
                             "name": "documents",
@@ -512,7 +511,6 @@ async def test_finalize_compiler_lowered_report_enforces_named_section_coverage(
                 {
                     "name": "Write report",
                     "instructions": "Write the requested report.",
-                    "output_type": "text",
                 },
             ],
         }

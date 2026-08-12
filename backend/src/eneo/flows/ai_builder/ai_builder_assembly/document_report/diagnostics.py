@@ -92,32 +92,6 @@ def _raise_document_report_compose_topology_missing(
     )
 
 
-def _raise_document_report_review_mode_conflict(
-    *,
-    planned_step: PlannedStep,
-    semantic_step: PlannedStep,
-) -> NoReturn:
-    planned_review_mode = planned_step.review_mode
-    semantic_review_mode = semantic_step.review_mode
-    assert planned_review_mode is not None
-    assert semantic_review_mode is not None
-    raise AIBuilderArchitectureError(
-        public_code="architecture_materialization_failed",
-        detail=(
-            "Multiple human-review checkpoints cannot be lowered into one report "
-            "producer without losing a requested pause."
-        ),
-        log_context={
-            "failure_code": "assembly_document_report_review_mode_conflict",
-            "reason": "document_report_review_mode_conflict",
-            "planned_step_name": planned_step.name,
-            "semantic_step_name": semantic_step.name,
-            "planned_review_mode": planned_review_mode.value,
-            "semantic_review_mode": semantic_review_mode.value,
-        },
-    )
-
-
 append_combined_model_selection_diagnostics = (
     _append_combined_model_selection_diagnostics
 )
@@ -125,4 +99,3 @@ degrade_document_report_citations = _degrade_document_report_citations
 raise_document_report_compose_topology_missing = (
     _raise_document_report_compose_topology_missing
 )
-raise_document_report_review_mode_conflict = _raise_document_report_review_mode_conflict

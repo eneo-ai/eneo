@@ -248,7 +248,6 @@ def test_policy_default_does_not_override_confirmed_runtime_fields() -> None:
                     "name": "Route case",
                     "instructions": "Route the case using its type.",
                     "uses_form_fields": ["case_type"],
-                    "output_type": "text",
                 }
             ],
         }
@@ -274,7 +273,6 @@ def test_confirmed_runtime_field_set_rejects_model_proposed_addition() -> None:
                     "name": "Route case",
                     "instructions": "Route the case using its type and tone.",
                     "uses_form_fields": ["case_type", "tone"],
-                    "output_type": "text",
                 }
             ],
         }
@@ -440,7 +438,6 @@ def test_compiler_applies_distinct_input_and_output_schema_evidence() -> None:
                 {
                     "name": "Normalize case input",
                     "instructions": "Validate the case identifier for processing.",
-                    "output_type": "json",
                     "output_fields": [
                         {
                             "name": "case_id",
@@ -452,7 +449,6 @@ def test_compiler_applies_distinct_input_and_output_schema_evidence() -> None:
                 {
                     "name": "Decide case",
                     "instructions": "Return the decision for the validated case.",
-                    "output_type": "json",
                 },
             ],
         }
@@ -502,7 +498,6 @@ def test_related_document_package_keeps_named_results_as_hints() -> None:
                     "instructions": (
                         "Read the application package and return the requested fields."
                     ),
-                    "output_type": "json",
                     "output_fields": [
                         {
                             "name": "candidate_name",
@@ -563,7 +558,6 @@ def test_compiler_rejects_input_schema_with_composite_flow_input_bindings() -> N
                 {
                     "name": "Normalize case",
                     "instructions": "Validate the case for the selected case type.",
-                    "output_type": "json",
                     "uses_form_fields": ["case_type"],
                 }
             ],
@@ -600,7 +594,6 @@ def test_compiler_rejects_json_to_text_architecture(
                 {
                     "name": "Summarize case",
                     "instructions": "Write a concise case summary.",
-                    "output_type": "text",
                 }
             ],
         }
@@ -877,7 +870,6 @@ def test_compiler_uses_assembly_path_for_single_step_linear_flow() -> None:
                 {
                     "name": "Write answer",
                     "instructions": "Write the answer in the requested tone.",
-                    "output_type": "text",
                     "uses_form_fields": ["tone"],
                 }
             ],
@@ -911,7 +903,6 @@ def test_assembly_plan_value_error_becomes_typed_architecture_failure() -> None:
                 {
                     "name": "Write report",
                     "instructions": "Write the report.",
-                    "output_type": "text",
                 }
             ],
         }
@@ -960,7 +951,6 @@ def test_audio_input_translates_source_reader_obligation_instead_of_dead_ending(
                 {
                     "name": "Skriv beslutsunderlag",
                     "instructions": "Sammanställ transkriptet till ett beslutsunderlag.",
-                    "output_type": "text",
                 }
             ],
         }
@@ -1008,12 +998,10 @@ def test_translated_obligation_survives_dropped_terminal_render_helper() -> None
                 {
                     "name": "Skriv beslutsunderlag",
                     "instructions": "Sammanställ transkriptet till ett beslutsunderlag.",
-                    "output_type": "text",
                 },
                 {
                     "name": "Skapa DOCX",
                     "instructions": "Skapa DOCX-dokumentet.",
-                    "output_type": "docx",
                 },
             ],
         }
@@ -1073,7 +1061,6 @@ def test_committed_report_disposition_lowers_minimal_semantic_intent(
                     "instructions": (
                         "Summarize the confirmed findings and identify open questions."
                     ),
-                    "output_type": "text",
                 }
             ],
         }
@@ -1169,7 +1156,6 @@ def test_compiler_strips_stale_previous_field_refs_and_uses_whole_object_underla
                 {
                     "name": "Extract facts",
                     "instructions": "Extract the relevant facts.",
-                    "output_type": "json",
                     "uses_form_fields": ["case_id"],
                     "output_fields": [
                         {
@@ -1182,7 +1168,6 @@ def test_compiler_strips_stale_previous_field_refs_and_uses_whole_object_underla
                 {
                     "name": "Write summary",
                     "instructions": "Write the final summary.",
-                    "output_type": "text",
                     "uses_previous_fields": [
                         {
                             "from_step": 1,
@@ -1226,7 +1211,6 @@ def test_compiler_uses_assembly_path_for_whole_object_underlag() -> None:
                 {
                     "name": "Extract facts",
                     "instructions": "Extract the relevant facts.",
-                    "output_type": "json",
                     "output_fields": [
                         {
                             "name": "summary",
@@ -1243,7 +1227,6 @@ def test_compiler_uses_assembly_path_for_whole_object_underlag() -> None:
                 {
                     "name": "Write report",
                     "instructions": "Write the final report.",
-                    "output_type": "text",
                     "uses_previous_fields": [
                         {
                             "from_step": 1,
@@ -1281,7 +1264,6 @@ def test_assembly_projects_one_structured_contract_to_each_section_writer() -> N
                 {
                     "name": "Extract facts",
                     "instructions": "Extract the reusable source facts.",
-                    "output_type": "json",
                     "output_fields": [
                         {
                             "name": "background",
@@ -1303,17 +1285,14 @@ def test_assembly_projects_one_structured_contract_to_each_section_writer() -> N
                 {
                     "name": "Write background",
                     "instructions": "Write the background section.",
-                    "output_type": "text",
                 },
                 {
                     "name": "Write findings",
                     "instructions": "Write the findings section.",
-                    "output_type": "text",
                 },
                 {
                     "name": "Write recommendations",
                     "instructions": "Write the recommendations section.",
-                    "output_type": "text",
                 },
             ],
         }
@@ -1350,7 +1329,6 @@ def test_assembly_rejects_ambiguous_structured_sources_before_lowering() -> None
                 {
                     "name": "Extract source facts",
                     "instructions": "Extract source facts.",
-                    "output_type": "json",
                     "output_fields": [
                         {
                             "name": "source_facts",
@@ -1362,7 +1340,6 @@ def test_assembly_rejects_ambiguous_structured_sources_before_lowering() -> None
                 {
                     "name": "Prepare report facts",
                     "instructions": "Prepare report facts.",
-                    "output_type": "json",
                     "output_fields": [
                         {
                             "name": "report_facts",
@@ -1374,12 +1351,10 @@ def test_assembly_rejects_ambiguous_structured_sources_before_lowering() -> None
                 {
                     "name": "Write findings",
                     "instructions": "Write the findings section.",
-                    "output_type": "text",
                 },
                 {
                     "name": "Write recommendations",
                     "instructions": "Write the recommendations section.",
-                    "output_type": "text",
                 },
             ],
         }
@@ -1410,7 +1385,6 @@ def test_assembly_derives_terminal_writer_refs_for_multiple_json_priors() -> Non
                 {
                     "name": "Extract facts",
                     "instructions": "Extract source facts.",
-                    "output_type": "json",
                     "output_fields": [
                         {
                             "name": "summary",
@@ -1422,7 +1396,6 @@ def test_assembly_derives_terminal_writer_refs_for_multiple_json_priors() -> Non
                 {
                     "name": "Find gaps",
                     "instructions": "Find missing information.",
-                    "output_type": "json",
                     "output_fields": [
                         {
                             "name": "missing_information",
@@ -1434,7 +1407,6 @@ def test_assembly_derives_terminal_writer_refs_for_multiple_json_priors() -> Non
                 {
                     "name": "Write report",
                     "instructions": "Write the final report.",
-                    "output_type": "text",
                 },
             ],
         }
@@ -1476,7 +1448,6 @@ def test_compiler_uses_assembly_path_for_generated_document_renderer(
                 {
                     "name": "Write body",
                     "instructions": "Write the document body.",
-                    "output_type": "text",
                 }
             ],
         }
@@ -1520,7 +1491,6 @@ def test_compiler_preserves_result_contract_fields_on_analysis_step() -> None:
                 {
                     "name": "Extract requirements",
                     "instructions": "Extract the application and checklist facts.",
-                    "output_type": "json",
                     "output_fields": [
                         {
                             "name": "requirements",
@@ -1532,7 +1502,6 @@ def test_compiler_preserves_result_contract_fields_on_analysis_step() -> None:
                 {
                     "name": "Compare requirements",
                     "instructions": "Compare the application against the checklist.",
-                    "output_type": "json",
                     "output_fields": [
                         {
                             "name": "comparison_results",
@@ -1561,7 +1530,6 @@ def test_compiler_preserves_result_contract_fields_on_analysis_step() -> None:
                 {
                     "name": "Write decision support",
                     "instructions": "Write the final checklist review.",
-                    "output_type": "text",
                 },
             ],
         }
@@ -1661,7 +1629,6 @@ def test_compiler_uses_server_runtime_hints_as_form_field_owner() -> None:
                 {
                     "name": "Läs ansökan",
                     "instructions": "Extrahera fakta ur ansökan.",
-                    "output_type": "json",
                     "output_fields": [
                         {
                             "name": "application_facts",
@@ -1673,7 +1640,6 @@ def test_compiler_uses_server_runtime_hints_as_form_field_owner() -> None:
                 {
                     "name": "Jämför krav",
                     "instructions": "Jämför ansökan mot checklistan eller regeln.",
-                    "output_type": "json",
                     "uses_form_fields": [
                         "checklista",
                         "regel",
@@ -1689,7 +1655,6 @@ def test_compiler_uses_server_runtime_hints_as_form_field_owner() -> None:
                 {
                     "name": "Skriv rapport",
                     "instructions": "Skriv en tydlig rapport.",
-                    "output_type": "text",
                 },
             ],
         }
@@ -1743,7 +1708,6 @@ def test_compiler_uses_assembly_path_with_structural_pattern_hint() -> None:
                 {
                     "name": "Write briefing",
                     "instructions": "Write the briefing body.",
-                    "output_type": "text",
                 }
             ],
         }
@@ -1777,7 +1741,6 @@ def test_compiler_uses_assembly_path_for_document_source_reader_chain() -> None:
                 {
                     "name": "Extract source facts",
                     "instructions": "Extract the source facts.",
-                    "output_type": "json",
                     "output_fields": [
                         {
                             "name": "finding",
@@ -1789,7 +1752,6 @@ def test_compiler_uses_assembly_path_for_document_source_reader_chain() -> None:
                 {
                     "name": "Write report body",
                     "instructions": "Write the report from the extracted facts.",
-                    "output_type": "text",
                 },
             ],
         }
@@ -1863,7 +1825,6 @@ def test_assembly_drops_source_contract_shadow_form_fields_before_lowering() -> 
                 {
                     "name": "Extract source facts",
                     "instructions": "Extract source facts from the document.",
-                    "output_type": "json",
                     "uses_form_fields": [
                         "manual_case_id",
                         "report_title",
@@ -1890,7 +1851,6 @@ def test_assembly_drops_source_contract_shadow_form_fields_before_lowering() -> 
                 {
                     "name": "Write case summary",
                     "instructions": "Write the final case summary.",
-                    "output_type": "text",
                 },
             ],
         }
@@ -1942,7 +1902,6 @@ def test_assembly_rejects_confirmed_source_contract_shadow_form_field() -> None:
                 {
                     "name": "Write summary",
                     "instructions": "Write the final summary.",
-                    "output_type": "text",
                 },
             ],
         }
@@ -2016,7 +1975,6 @@ def test_assembly_places_explicit_server_owned_runtime_field_consumers() -> None
                 {
                     "name": "Läs ansökan",
                     "instructions": "Extrahera uppgifter från ansökan.",
-                    "output_type": "json",
                     "output_fields": [
                         {
                             "name": "summary",
@@ -2039,7 +1997,6 @@ def test_assembly_places_explicit_server_owned_runtime_field_consumers() -> None
                         "handlaggare",
                         "sista_svarsdatum",
                     ],
-                    "output_type": "text",
                 },
             ],
         }
@@ -2095,7 +2052,6 @@ def test_confirmed_field_definition_overrides_model_redeclaration() -> None:
                     "name": "Route case",
                     "instructions": "Route the case using its type.",
                     "uses_form_fields": ["case_type"],
-                    "output_type": "text",
                 }
             ],
         }
@@ -2141,7 +2097,6 @@ def test_compiler_uses_source_refs_for_structured_terminal_fan_in(
                 {
                     "name": "Extract source facts",
                     "instructions": "Extract the source facts.",
-                    "output_type": "json",
                     "output_fields": [
                         {
                             "name": "source_summary",
@@ -2153,7 +2108,6 @@ def test_compiler_uses_source_refs_for_structured_terminal_fan_in(
                 {
                     "name": "Analyze facts",
                     "instructions": "Analyze the extracted facts.",
-                    "output_type": "json",
                     "output_fields": [
                         {
                             "name": "analysis",
@@ -2165,7 +2119,6 @@ def test_compiler_uses_source_refs_for_structured_terminal_fan_in(
                 {
                     "name": "Write report body",
                     "instructions": "Write the final report body from prior work.",
-                    "output_type": "text",
                 },
             ],
         }
@@ -2215,55 +2168,6 @@ def test_compiler_uses_source_refs_for_structured_terminal_fan_in(
     assert validate_spec(compiled).valid
 
 
-def test_aggregate_document_body_keeps_fan_in_when_prior_contract_is_missing() -> None:
-    intent = parse_create_flow_intent_arguments(
-        {
-            "flow_name": "Aggregate report",
-            "flow_description": "Extract, analyze, and render a PDF report.",
-            "plan_rationale": "The body writer aggregates mixed prior work.",
-            "steps": [
-                {
-                    "name": "Extract source facts",
-                    "instructions": "Extract source facts without a stable schema.",
-                    "output_type": "json",
-                },
-                {
-                    "name": "Analyze facts",
-                    "instructions": "Analyze the extracted facts.",
-                    "output_type": "json",
-                    "output_fields": [
-                        {
-                            "name": "analysis",
-                            "field_type": "string",
-                            "description": "Analysis summary.",
-                        }
-                    ],
-                },
-                {
-                    "name": "Write report body",
-                    "instructions": "Write the final report body from prior work.",
-                    "output_type": "text",
-                },
-            ],
-        }
-    )
-
-    compiled = compile_create_intent_to_spec(
-        intent,
-        context=CreateCompileContext(
-            runtime_input_type=InputType.DOCUMENT,
-            final_output_type=OutputType.PDF,
-            final_output_mode=OutputMode.RENDER_VERBATIM,
-            aggregation_intent=cast(AggregationIntent, "aggregate"),
-        ),
-    )
-
-    body_step = compiled.steps[-2]
-    assert body_step.input_source == InputSource.ALL_PREVIOUS_STEPS
-    assert body_step.input_bindings is None
-    assert validate_spec(compiled).valid
-
-
 def test_aggregate_document_body_uses_previous_step_for_single_prior_reader() -> None:
     intent = parse_create_flow_intent_arguments(
         {
@@ -2274,7 +2178,6 @@ def test_aggregate_document_body_uses_previous_step_for_single_prior_reader() ->
                 {
                     "name": "Extract source facts",
                     "instructions": "Extract the source facts.",
-                    "output_type": "json",
                     "output_fields": [
                         {
                             "name": "facts",
@@ -2286,7 +2189,6 @@ def test_aggregate_document_body_uses_previous_step_for_single_prior_reader() ->
                 {
                     "name": "Write report body",
                     "instructions": "Write the final report body from the facts.",
-                    "output_type": "text",
                 },
             ],
         }
@@ -2326,7 +2228,6 @@ def test_assembly_source_reader_contract_keeps_all_terminal_schema_leaves() -> N
                 {
                     "name": "Extract source facts",
                     "instructions": "Extract the source facts.",
-                    "output_type": "json",
                     "output_fields": [
                         {
                             "name": "field_0",
@@ -2338,7 +2239,6 @@ def test_assembly_source_reader_contract_keeps_all_terminal_schema_leaves() -> N
                 {
                     "name": "Build JSON result",
                     "instructions": "Build the requested JSON result.",
-                    "output_type": "json",
                 },
             ],
         }
@@ -2379,7 +2279,6 @@ def test_compiler_uses_assembly_path_for_pure_audio_transcription() -> None:
                 {
                     "name": "Transcribe meeting audio",
                     "instructions": "Transcribe the uploaded meeting audio.",
-                    "output_type": "text",
                 }
             ],
         }
@@ -2454,7 +2353,6 @@ def test_compiler_projects_typed_checkpoint_intents_onto_actual_producers() -> N
                 {
                     "name": "Extract meeting facts",
                     "instructions": "Extract the decisions and owners from the transcript.",
-                    "output_type": "json",
                     "output_fields": [
                         {
                             "name": "decisions",
@@ -2466,7 +2364,6 @@ def test_compiler_projects_typed_checkpoint_intents_onto_actual_producers() -> N
                 {
                     "name": "Write meeting report",
                     "instructions": "Write the final report from the extracted facts.",
-                    "output_type": "text",
                 },
             ],
         }
@@ -2514,7 +2411,6 @@ def test_structured_checkpoint_lands_on_terminal_json_producer_only() -> None:
                 {
                     "name": "Extract raw facts",
                     "instructions": "Extract raw decisions from the transcript.",
-                    "output_type": "json",
                     "output_fields": [
                         {
                             "name": "raw_decisions",
@@ -2526,7 +2422,6 @@ def test_structured_checkpoint_lands_on_terminal_json_producer_only() -> None:
                 {
                     "name": "Refine decisions",
                     "instructions": "Deduplicate and refine the decisions.",
-                    "output_type": "json",
                     "output_fields": [
                         {
                             "name": "decisions",
@@ -2538,7 +2433,6 @@ def test_structured_checkpoint_lands_on_terminal_json_producer_only() -> None:
                 {
                     "name": "Write report",
                     "instructions": "Write the report from the final decisions.",
-                    "output_type": "text",
                 },
             ],
         }
@@ -2558,63 +2452,6 @@ def test_structured_checkpoint_lands_on_terminal_json_producer_only() -> None:
         step.plan_step_ref for step in compiled.steps if step.review_policy is not None
     ]
     assert reviewed_refs == [terminal_json.plan_step_ref]
-
-
-def test_model_review_modes_are_stripped_before_assembly_lowering() -> None:
-    state = PlanningState.empty()
-    state.resolved_slots = {
-        "primary_runtime_input": _slot("primary_runtime_input", "audio"),
-        "terminal_output": _slot("terminal_output", "docx_document"),
-    }
-    state.checkpoint_intents = [
-        CheckpointIntent(
-            producer_kind="report_text",
-            operation="set",
-            mode=FlowStepReviewMode.EDIT,
-            confidence="high",
-            evidence=["quote:user_message:1:Edit the report before rendering."],
-        )
-    ]
-    _commit_architecture(state)
-    context = create_compile_context_from_planning_state(state, ui_language="en")
-    assert context is not None
-    intent = parse_create_flow_intent_arguments(
-        {
-            "flow_name": "Reviewed meeting report",
-            "plan_rationale": "Extract facts and write the reviewed report.",
-            "steps": [
-                {
-                    "name": "Extract meeting facts",
-                    "instructions": "Extract the decisions from the transcript.",
-                    "output_type": "json",
-                    "review_mode": "view",
-                    "output_fields": [
-                        {
-                            "name": "decisions",
-                            "field_type": "array",
-                            "description": "Decisions made during the meeting.",
-                        }
-                    ],
-                },
-                {
-                    "name": "Write meeting report",
-                    "instructions": "Write the final report from the facts.",
-                    "output_type": "text",
-                    "review_mode": "view",
-                },
-            ],
-        }
-    )
-
-    # Conflicting model-authored review modes must not reach lowering (which
-    # would reject them) or survive projection; the typed intent wins.
-    compiled = compile_create_intent_to_spec(intent, context=context)
-
-    reviewed = [step for step in compiled.steps if step.review_policy is not None]
-    assert len(reviewed) == 1
-    assert reviewed[0].plan_step_ref in (compiled.document_body_writer_step_refs or ())
-    assert reviewed[0].review_policy is not None
-    assert reviewed[0].review_policy.mode is FlowStepReviewMode.EDIT
 
 
 def test_transcript_checkpoint_without_transcription_step_is_a_contradiction() -> None:
@@ -2643,7 +2480,6 @@ def test_transcript_checkpoint_without_transcription_step_is_a_contradiction() -
                 {
                     "name": "Summarize",
                     "instructions": "Summarize the submitted text.",
-                    "output_type": "text",
                 }
             ],
         }
@@ -2685,7 +2521,6 @@ def test_compiler_describes_transcript_input_and_avoids_raw_audio_report_fan_in(
                 {
                     "name": "Extract transcript facts",
                     "instructions": "Extract the key facts from the transcript.",
-                    "output_type": "json",
                     "output_fields": [
                         {
                             "name": "summary",
@@ -2697,7 +2532,6 @@ def test_compiler_describes_transcript_input_and_avoids_raw_audio_report_fan_in(
                 {
                     "name": "Write report body",
                     "instructions": "Write the final report body.",
-                    "output_type": "text",
                     "uses_previous_fields": [
                         {
                             "from_step": 1,
@@ -2819,7 +2653,6 @@ def test_compiler_accepts_audio_artifact_with_runtime_form_field_overlay() -> No
                     "name": "Analysera transkriptionen",
                     "instructions": "Identifiera de viktigaste sakuppgifterna.",
                     "uses_form_fields": ["arendenummer", "handlaggare"],
-                    "output_type": "json",
                     "output_fields": [
                         {
                             "name": "sakuppgifter",
@@ -2827,13 +2660,11 @@ def test_compiler_accepts_audio_artifact_with_runtime_form_field_overlay() -> No
                             "description": "Verifierade sakuppgifter ur ljudet.",
                         }
                     ],
-                    "review_mode": "edit",
                 },
                 {
                     "name": "Skriv rapporten",
                     "instructions": "Skriv en tydlig rapport från sakuppgifterna.",
                     "uses_form_fields": ["arendenummer", "handlaggare"],
-                    "output_type": "text",
                 },
             ],
         }
@@ -2893,7 +2724,6 @@ def test_audio_artifact_overlay_still_rejects_conflicting_patterns(
                 {
                     "name": "Skriv rapporten",
                     "instructions": "Skriv rapporten från transkriptionen.",
-                    "output_type": "text",
                 }
             ],
         }
@@ -2946,7 +2776,6 @@ def test_compiler_binds_human_named_placeholders_from_prepared_terminal(
                 {
                     "name": "Extrahera underlag",
                     "instructions": "Extract source-grounded facts.",
-                    "output_type": "json",
                     "output_fields": [
                         {
                             "name": "sources",
@@ -2958,7 +2787,6 @@ def test_compiler_binds_human_named_placeholders_from_prepared_terminal(
                 {
                     "name": "Förbered malltexter",
                     "instructions": "Write the final template section texts.",
-                    "output_type": "json",
                     "output_fields": [
                         {
                             "name": "sections_arendet_text",
@@ -3041,7 +2869,6 @@ def test_compiler_drops_template_form_field_when_flow_prepares_it() -> None:
                 {
                     "name": "Förbered malltexter",
                     "instructions": "Extract metadata and section texts.",
-                    "output_type": "json",
                     "output_fields": [
                         {
                             "name": "diarienummer",
@@ -3101,7 +2928,6 @@ def test_compiler_admits_three_semantic_steps_before_fixed_template_fill() -> No
                 {
                     "name": "Analyze source facts",
                     "instructions": "Analyze the source facts for the report.",
-                    "output_type": "json",
                     "output_fields": [
                         {
                             "name": "case_summary",
@@ -3113,7 +2939,6 @@ def test_compiler_admits_three_semantic_steps_before_fixed_template_fill() -> No
                 {
                     "name": "Validate source facts",
                     "instructions": "Validate the analyzed facts for consistency.",
-                    "output_type": "json",
                     "output_fields": [
                         {
                             "name": "validated_summary",
@@ -3125,7 +2950,6 @@ def test_compiler_admits_three_semantic_steps_before_fixed_template_fill() -> No
                 {
                     "name": "Write template content",
                     "instructions": "Write the prepared result as template content.",
-                    "output_type": "text",
                 },
             ],
         }
@@ -3236,7 +3060,6 @@ def test_compiler_enforces_template_preparation_stage_limit() -> None:
             {
                 "name": f"Prepare source facts {index}",
                 "instructions": f"Prepare source facts for stage {index}.",
-                "output_type": "json",
                 "output_fields": [
                     {
                         "name": f"prepared_facts_{index}",
@@ -3256,7 +3079,6 @@ def test_compiler_enforces_template_preparation_stage_limit() -> None:
                     {
                         "name": "Write template content",
                         "instructions": "Write the prepared facts as template content.",
-                        "output_type": "text",
                     },
                 ],
             }
@@ -3303,7 +3125,6 @@ def test_docx_template_unsupported_shapes_keep_typed_failure_codes() -> None:
                 {
                     "name": "Write template content",
                     "instructions": "Write the template content.",
-                    "output_type": "text",
                 }
             ],
         }
@@ -3415,8 +3236,6 @@ def test_compiler_accepts_docx_template_with_runtime_form_field_overlay() -> Non
                     "name": "Förbered dokumentinnehåll",
                     "instructions": "Förbered innehållet för dokumentmallen.",
                     "uses_form_fields": ["arendenummer"],
-                    "output_type": "text",
-                    "review_mode": "view",
                 }
             ],
         }
@@ -3479,7 +3298,6 @@ def test_docx_template_placeholders_become_server_owned_form_fields() -> None:
                     "name": "Prepare template content",
                     "instructions": "Prepare the content for the DOCX template.",
                     "uses_form_fields": ["kundnamn", "case_id"],
-                    "output_type": "text",
                 }
             ],
         }
@@ -3532,7 +3350,6 @@ def test_compiler_lowers_runtime_inputs_and_derived_whole_object_underlag() -> N
                 {
                     "name": "Extrahera risker",
                     "instructions": "Extrahera risker och rekommendationer.",
-                    "output_type": "json",
                     "uses_form_fields": ["referensnummer"],
                     "output_fields": [
                         {
@@ -3545,7 +3362,6 @@ def test_compiler_lowers_runtime_inputs_and_derived_whole_object_underlag() -> N
                 {
                     "name": "Skriv slutrapport",
                     "instructions": "Skriv slutrapport med specifika datapunkter.",
-                    "output_type": "text",
                     "uses_previous_fields": [
                         {
                             "from_step": 1,
@@ -3597,7 +3413,6 @@ def test_document_artifact_keeps_body_writer_before_render_verbatim_renderer(
                 {
                     "name": "Extract source facts",
                     "instructions": "Extract document type, date, author, and conclusions.",
-                    "output_type": "json",
                     "output_fields": [
                         {
                             "name": "documents",
@@ -3609,7 +3424,6 @@ def test_document_artifact_keeps_body_writer_before_render_verbatim_renderer(
                 {
                     "name": "Analyze document meaning",
                     "instructions": "Analyze the extracted document facts.",
-                    "output_type": "json",
                     "output_fields": [
                         {
                             "name": "analysis",
@@ -3621,7 +3435,6 @@ def test_document_artifact_keeps_body_writer_before_render_verbatim_renderer(
                 {
                     "name": "Write report body",
                     "instructions": "Write the final report body from all structured work.",
-                    "output_type": "text",
                 },
             ],
         }
@@ -3655,18 +3468,18 @@ def test_document_artifact_keeps_body_writer_before_render_verbatim_renderer(
 
 
 @pytest.mark.parametrize(
-    ("helper_output_type", "helper_instructions"),
+    ("helper_name", "helper_instructions"),
     [
         (
-            "text",
+            "Formatera slutrapporten",
             "Omvandla den färdiga rapporttexten till en professionell PDF "
             "med tydlig struktur och läsbar layout.",
         ),
-        ("pdf", "Skapa slutrapporten från den färdiga rapporttexten."),
+        ("Skapa PDF-rapport", "Skapa slutrapporten från den färdiga rapporttexten."),
     ],
 )
-def test_document_artifact_drops_model_authored_pdf_render_helper(
-    helper_output_type: str,
+def test_document_artifact_drops_explicit_pdf_render_helper(
+    helper_name: str,
     helper_instructions: str,
 ) -> None:
     outline = parse_create_flow_intent_arguments(
@@ -3683,7 +3496,6 @@ def test_document_artifact_drops_model_authored_pdf_render_helper(
                         "typ av dokument, vilket ämne det handlar om, kategori, "
                         "datum, författare och slutsatser."
                     ),
-                    "output_type": "json",
                     "output_fields": [
                         {
                             "name": "documents",
@@ -3703,12 +3515,10 @@ def test_document_artifact_drops_model_authored_pdf_render_helper(
                         "dokument tydligt med titel, år, kategori, dokumenttyp, "
                         "författare, slutsatser och en kort sammanfattning."
                     ),
-                    "output_type": "text",
                 },
                 {
-                    "name": "Skapa PDF-rapport",
+                    "name": helper_name,
                     "instructions": helper_instructions,
-                    "output_type": helper_output_type,
                 },
             ],
         }
@@ -3756,7 +3566,6 @@ def test_document_artifact_folds_terminal_helper_fields_into_body_writer() -> No
                 {
                     "name": "Identifiera dokumentens innehåll",
                     "instructions": "Läs dokumenten och extrahera källfakta.",
-                    "output_type": "json",
                     "output_fields": [
                         {
                             "name": "documents",
@@ -3768,12 +3577,10 @@ def test_document_artifact_folds_terminal_helper_fields_into_body_writer() -> No
                 {
                     "name": "Skriv rapportinnehåll",
                     "instructions": "Skriv den fullständiga rapporttexten.",
-                    "output_type": "text",
                 },
                 {
                     "name": "Skapa PDF-rapport",
                     "instructions": "Skapa slutrapporten som PDF.",
-                    "output_type": "pdf",
                     "output_fields": [
                         {
                             "name": "author_or_source",
@@ -3829,7 +3636,6 @@ def test_document_reader_contract_canonicalizes_items_and_source_scope() -> None
                 {
                     "name": "Identifiera dokumentens innehåll",
                     "instructions": "Läs varje dokument och strukturera fakta.",
-                    "output_type": "json",
                     "output_fields": [
                         {
                             "name": "documents",
@@ -3873,7 +3679,6 @@ def test_document_reader_contract_canonicalizes_items_and_source_scope() -> None
                 {
                     "name": "Skriv rapportinnehåll",
                     "instructions": "Skriv rapporten.",
-                    "output_type": "text",
                 },
             ],
         }
@@ -3939,7 +3744,6 @@ def test_report_disposition_both_uses_deterministic_compose_topology() -> None:
                 {
                     "name": "Läs dokumenten",
                     "instructions": "Läs varje dokument och strukturera fakta.",
-                    "output_type": "json",
                     "output_fields": [
                         {
                             "name": "documents",
@@ -3963,7 +3767,6 @@ def test_report_disposition_both_uses_deterministic_compose_topology() -> None:
                 {
                     "name": "Bygg källavsnitt",
                     "instructions": "Skriv ett rapportavsnitt per källa.",
-                    "output_type": "json",
                     "output_fields": [
                         {
                             "name": "source_sections",
@@ -3987,7 +3790,6 @@ def test_report_disposition_both_uses_deterministic_compose_topology() -> None:
                 {
                     "name": "Skriv översikt",
                     "instructions": "Skriv en samlad översikt över alla källor.",
-                    "output_type": "json",
                     "output_fields": [
                         {
                             "name": "overview",
@@ -4000,10 +3802,8 @@ def test_report_disposition_both_uses_deterministic_compose_topology() -> None:
                     "name": "Sätt ihop slutrapport",
                     "instructions": "Sätt ihop slutrapporten.",
                     "uses_form_fields": ["case_number"],
-                    "output_type": "text",
                     "model_ref": "model.report-writer",
                     "knowledge_refs": ["knowledge.reporting-policy"],
-                    "review_mode": "view",
                 },
             ],
         }
@@ -4066,8 +3866,7 @@ def test_report_disposition_both_uses_deterministic_compose_topology() -> None:
     assert body_writer_step.output_mode == OutputMode.COMPOSE_TEXT
     assert body_writer_step.input_bindings is not None
     assert "{{ flow_input.case_number }}" in _question(body_writer_step.input_bindings)
-    assert body_writer_step.review_policy is not None
-    assert body_writer_step.review_policy.mode.value == "view"
+    assert body_writer_step.review_policy is None
     assert body_writer_step.input_bindings["source_refs"] == [
         {
             "step_ref": "step_b",
@@ -4106,7 +3905,6 @@ def test_report_lowering_converts_intermediate_text_writer_without_repair(
                 {
                     "name": "Extract evidence",
                     "instructions": "Extract grounded evidence from each source.",
-                    "output_type": "json",
                     "output_fields": [
                         {
                             "name": "summary",
@@ -4118,17 +3916,14 @@ def test_report_lowering_converts_intermediate_text_writer_without_repair(
                 {
                     "name": "Draft findings",
                     "instructions": "Draft the evidence-backed findings.",
-                    "output_type": "text",
                 },
                 {
                     "name": "Refine findings",
                     "instructions": "Refine the findings without losing source evidence.",
-                    "output_type": "text",
                 },
                 {
                     "name": "Write report",
                     "instructions": "Write the complete final report.",
-                    "output_type": "text",
                 },
             ],
         }
@@ -4173,7 +3968,6 @@ def test_per_source_requested_section_label_stays_with_canonical_producer() -> N
                 {
                     "name": "Read documents",
                     "instructions": "Extract source-grounded evidence.",
-                    "output_type": "json",
                     "output_fields": [
                         {
                             "name": "documents",
@@ -4192,7 +3986,6 @@ def test_per_source_requested_section_label_stays_with_canonical_producer() -> N
                 {
                     "name": "Build source sections",
                     "instructions": "Write one report section per source.",
-                    "output_type": "json",
                     "output_fields": [
                         {
                             "name": "source_sections",
@@ -4216,7 +4009,6 @@ def test_per_source_requested_section_label_stays_with_canonical_producer() -> N
                 {
                     "name": "Assess risks",
                     "instructions": "Assess risks across the source sections.",
-                    "output_type": "json",
                     "output_fields": [
                         {
                             "name": "requested_section_1",
@@ -4228,7 +4020,6 @@ def test_per_source_requested_section_label_stays_with_canonical_producer() -> N
                 {
                     "name": "Compose report",
                     "instructions": "Compose the complete report.",
-                    "output_type": "text",
                 },
             ],
         }
@@ -4305,7 +4096,6 @@ def test_per_source_report_keeps_first_section_producer_canonical() -> None:
                 {
                     "name": "Read documents",
                     "instructions": "Extract source-grounded evidence.",
-                    "output_type": "json",
                     "output_fields": [
                         {
                             "name": "documents",
@@ -4324,7 +4114,6 @@ def test_per_source_report_keeps_first_section_producer_canonical() -> None:
                 {
                     "name": "Build source sections",
                     "instructions": "Write one report section per source.",
-                    "output_type": "json",
                     "output_fields": [
                         {
                             "name": "source_sections",
@@ -4353,7 +4142,6 @@ def test_per_source_report_keeps_first_section_producer_canonical() -> None:
                 {
                     "name": "Refine sections",
                     "instructions": "Refine the source sections independently.",
-                    "output_type": "json",
                     "output_fields": [
                         {
                             "name": "refined_sections",
@@ -4382,7 +4170,6 @@ def test_per_source_report_keeps_first_section_producer_canonical() -> None:
                 {
                     "name": "Compose report",
                     "instructions": "Compose the complete report.",
-                    "output_type": "text",
                 },
             ],
         }
@@ -4431,7 +4218,6 @@ def test_single_call_custom_section_array_guidance_uses_selected_field(
                 {
                     "name": "Read documents",
                     "instructions": "Extract source-grounded evidence.",
-                    "output_type": "json",
                     "output_fields": [
                         {
                             "name": "documents",
@@ -4450,7 +4236,6 @@ def test_single_call_custom_section_array_guidance_uses_selected_field(
                 {
                     "name": "Build chapters",
                     "instructions": "Build one report chapter per source.",
-                    "output_type": "json",
                     "output_fields": [
                         {
                             "name": "chapters",
@@ -4474,7 +4259,6 @@ def test_single_call_custom_section_array_guidance_uses_selected_field(
                 {
                     "name": "Compose report",
                     "instructions": "Compose the complete report.",
-                    "output_type": "text",
                 },
             ],
         }
@@ -4509,7 +4293,6 @@ def test_create_intent_rejects_fields_outside_structured_contract() -> None:
                 {
                     "name": "Extract risks",
                     "instructions": "Extract the risks.",
-                    "output_type": "json",
                     "output_fields": [
                         {
                             "name": "risk-level",
@@ -4537,7 +4320,6 @@ def test_create_intent_rejects_fields_outside_structured_contract() -> None:
                     {
                         "name": "Extract risks",
                         "instructions": "Extract the risks.",
-                        "output_type": "json",
                         "output_fields": [
                             {
                                 "name": "123",
@@ -4562,7 +4344,6 @@ def test_create_intent_rejects_fields_outside_structured_contract() -> None:
                     {
                         "name": "Extract risks",
                         "instructions": "Extract the risks.",
-                        "output_type": "json",
                         "output_fields": [
                             {
                                 "name": "risk_level",
@@ -4576,77 +4357,6 @@ def test_create_intent_rejects_fields_outside_structured_contract() -> None:
         )
 
 
-@pytest.mark.parametrize(
-    "report_disposition",
-    ["per_source_sections", "synthesized_overview"],
-)
-def test_report_lowering_rejects_multiple_reviews_for_one_producer(
-    report_disposition: ReportDisposition,
-) -> None:
-    intent = parse_create_flow_intent_arguments(
-        {
-            "flow_name": "Reviewed source report",
-            "plan_rationale": "Extract, refine, and review source findings.",
-            "steps": [
-                {
-                    "name": "Extract evidence",
-                    "instructions": "Extract grounded evidence from each source.",
-                    "output_type": "json",
-                    "output_fields": [
-                        {
-                            "name": "documents",
-                            "field_type": "array",
-                            "description": "One evidence record per source.",
-                            "item_fields": [
-                                {
-                                    "name": "summary",
-                                    "field_type": "string",
-                                    "description": "Grounded source summary.",
-                                }
-                            ],
-                        }
-                    ],
-                },
-                {
-                    "name": "Draft findings",
-                    "instructions": "Draft the evidence-backed findings.",
-                    "output_type": "text",
-                    "review_mode": "view",
-                },
-                {
-                    "name": "Refine findings",
-                    "instructions": "Refine the findings after review.",
-                    "output_type": "text",
-                    "review_mode": "edit",
-                },
-                {
-                    "name": "Write report",
-                    "instructions": "Write the complete final report.",
-                    "output_type": "text",
-                },
-            ],
-        }
-    )
-
-    with pytest.raises(AIBuilderArchitectureError) as exc_info:
-        compile_create_intent_to_spec(
-            intent,
-            context=CreateCompileContext(
-                runtime_input_type=InputType.DOCUMENT,
-                final_output_type=OutputType.PDF,
-                final_output_mode=OutputMode.RENDER_VERBATIM,
-                aggregation_intent="linear",
-                report_disposition=report_disposition,
-                runtime_max_files=4,
-                ui_language="en",
-            ),
-        )
-
-    assert exc_info.value.log_context["failure_code"] == (
-        "assembly_document_report_review_mode_conflict"
-    )
-
-
 def test_report_lowering_normalizes_canonical_field_shapes_and_overview_alias() -> None:
     intent = parse_create_flow_intent_arguments(
         {
@@ -4656,7 +4366,6 @@ def test_report_lowering_normalizes_canonical_field_shapes_and_overview_alias() 
                 {
                     "name": "Read sources",
                     "instructions": "Extract one record per source.",
-                    "output_type": "json",
                     "output_fields": [
                         {
                             "name": "documents",
@@ -4675,7 +4384,6 @@ def test_report_lowering_normalizes_canonical_field_shapes_and_overview_alias() 
                 {
                     "name": "Build sections",
                     "instructions": "Build one section per source.",
-                    "output_type": "json",
                     "output_fields": [
                         {
                             "name": "source_sections",
@@ -4718,7 +4426,6 @@ def test_report_lowering_normalizes_canonical_field_shapes_and_overview_alias() 
                 {
                     "name": "Write overview",
                     "instructions": "Write the report overview.",
-                    "output_type": "json",
                     "output_fields": [
                         {
                             "name": "report_title",
@@ -4776,7 +4483,6 @@ def test_report_lowering_normalizes_canonical_field_shapes_and_overview_alias() 
                 {
                     "name": "Compose report",
                     "instructions": "Compose the final report.",
-                    "output_type": "text",
                 },
             ],
         }
@@ -4826,7 +4532,6 @@ def test_report_lowering_combines_json_overview_models_once_and_uses_terminal_mo
                 {
                     "name": "Read source",
                     "instructions": "Extract source evidence.",
-                    "output_type": "json",
                     "output_fields": [
                         {
                             "name": "documents",
@@ -4845,7 +4550,6 @@ def test_report_lowering_combines_json_overview_models_once_and_uses_terminal_mo
                 {
                     "name": "Write overview",
                     "instructions": "Write the overview.",
-                    "output_type": "json",
                     "model_ref": "model.overview",
                     "output_fields": [
                         {
@@ -4858,7 +4562,6 @@ def test_report_lowering_combines_json_overview_models_once_and_uses_terminal_mo
                 {
                     "name": "Compose report",
                     "instructions": "Compose the final report.",
-                    "output_type": "text",
                     "model_ref": "model.body",
                 },
             ],
@@ -4903,7 +4606,6 @@ def test_per_source_sections_combines_distinct_models_once_and_uses_terminal_mod
                 {
                     "name": "Read source",
                     "instructions": "Extract source evidence.",
-                    "output_type": "json",
                     "output_fields": [
                         {
                             "name": "documents",
@@ -4922,19 +4624,16 @@ def test_per_source_sections_combines_distinct_models_once_and_uses_terminal_mod
                 {
                     "name": "Draft report",
                     "instructions": "Draft the report.",
-                    "output_type": "text",
                     "model_ref": "model.draft",
                 },
                 {
                     "name": "Refine report",
                     "instructions": "Refine the report.",
-                    "output_type": "text",
                     "model_ref": "model.refine",
                 },
                 {
                     "name": "Compose report",
                     "instructions": "Compose the final report.",
-                    "output_type": "text",
                     "model_ref": "model.body",
                 },
             ],
@@ -4977,7 +4676,6 @@ def test_report_disposition_both_preserves_distinct_producer_model_selections() 
                 {
                     "name": "Read sources",
                     "instructions": "Extract source evidence.",
-                    "output_type": "json",
                     "output_fields": [
                         {
                             "name": "documents",
@@ -4996,7 +4694,6 @@ def test_report_disposition_both_preserves_distinct_producer_model_selections() 
                 {
                     "name": "Write source sections",
                     "instructions": "Write one section per source.",
-                    "output_type": "json",
                     "model_ref": "model.sections",
                     "output_fields": [
                         {
@@ -5009,7 +4706,6 @@ def test_report_disposition_both_preserves_distinct_producer_model_selections() 
                 {
                     "name": "Draft overview",
                     "instructions": "Draft the synthesized overview.",
-                    "output_type": "json",
                     "model_ref": "model.draft",
                     "output_fields": [
                         {
@@ -5022,7 +4718,6 @@ def test_report_disposition_both_preserves_distinct_producer_model_selections() 
                 {
                     "name": "Compose report",
                     "instructions": "Compose the final report.",
-                    "output_type": "text",
                     "model_ref": "model.overview",
                 },
             ],
@@ -5076,7 +4771,6 @@ def test_report_lowering_does_not_warn_for_compatible_model_selections(
                 {
                     "name": "Read source",
                     "instructions": "Extract source evidence.",
-                    "output_type": "json",
                     "output_fields": [
                         {
                             "name": "summary",
@@ -5088,13 +4782,11 @@ def test_report_lowering_does_not_warn_for_compatible_model_selections(
                 {
                     "name": "Draft report",
                     "instructions": "Draft the report.",
-                    "output_type": "text",
                     "model_ref": draft_model_ref,
                 },
                 {
                     "name": "Compose report",
                     "instructions": "Compose the final report.",
-                    "output_type": "text",
                     "model_ref": body_model_ref,
                 },
             ],
@@ -5127,7 +4819,6 @@ def test_report_lowering_emits_citation_and_model_selection_warnings() -> None:
                 {
                     "name": "Extract cited evidence",
                     "instructions": "Extract evidence with citations.",
-                    "output_type": "json",
                     "citations_requested": True,
                     "model_ref": "model.reader",
                     "output_fields": [
@@ -5141,14 +4832,12 @@ def test_report_lowering_emits_citation_and_model_selection_warnings() -> None:
                 {
                     "name": "Draft cited report",
                     "instructions": "Draft the report with citations.",
-                    "output_type": "text",
                     "citations_requested": True,
                     "model_ref": "model.draft",
                 },
                 {
                     "name": "Write cited report",
                     "instructions": "Write the report with citations.",
-                    "output_type": "text",
                     "model_ref": "model.body",
                 },
             ],
@@ -5192,7 +4881,6 @@ def test_structured_text_citations_keep_sidecar_without_downgrade() -> None:
                 {
                     "name": "Write cited text",
                     "instructions": "Write the text with citations.",
-                    "output_type": "text",
                     "citations_requested": True,
                 }
             ],
@@ -5225,7 +4913,6 @@ def test_report_disposition_both_ignores_source_section_name_without_shape() -> 
                 {
                     "name": "Läs dokumenten",
                     "instructions": "Läs varje dokument och strukturera fakta.",
-                    "output_type": "json",
                     "output_fields": [
                         {
                             "name": "documents",
@@ -5249,7 +4936,6 @@ def test_report_disposition_both_ignores_source_section_name_without_shape() -> 
                 {
                     "name": "Skriv fria källtexter",
                     "instructions": "Skriv källtexter.",
-                    "output_type": "json",
                     "output_fields": [
                         {
                             "name": "source_sections",
@@ -5268,7 +4954,6 @@ def test_report_disposition_both_ignores_source_section_name_without_shape() -> 
                 {
                     "name": "Sätt ihop slutrapport",
                     "instructions": "Sätt ihop slutrapporten.",
-                    "output_type": "text",
                 },
             ],
         }
@@ -5329,7 +5014,6 @@ def test_report_disposition_both_replaces_weak_section_text_writer() -> None:
                 {
                     "name": "Läs dokumenten",
                     "instructions": "Läs varje dokument och strukturera fakta.",
-                    "output_type": "json",
                     "output_fields": [
                         {
                             "name": "documents",
@@ -5354,7 +5038,6 @@ def test_report_disposition_both_replaces_weak_section_text_writer() -> None:
                     "name": "Bygg rapportavsnitt",
                     "instructions": "Skriv ett rapportavsnitt per dokument.",
                     "uses_form_fields": ["case_id"],
-                    "output_type": "json",
                     "output_fields": [
                         {
                             "name": "section_text",
@@ -5366,7 +5049,6 @@ def test_report_disposition_both_replaces_weak_section_text_writer() -> None:
                 {
                     "name": "Skriv samlad översikt",
                     "instructions": "Skriv en samlad översikt.",
-                    "output_type": "json",
                     "output_fields": [
                         {
                             "name": "overview",
@@ -5378,7 +5060,6 @@ def test_report_disposition_both_replaces_weak_section_text_writer() -> None:
                 {
                     "name": "Sätt ihop slutrapport",
                     "instructions": "Sätt ihop slutrapporten.",
-                    "output_type": "text",
                 },
             ],
         }
@@ -5453,7 +5134,6 @@ def test_report_disposition_both_inserts_missing_source_section_map() -> None:
                 {
                     "name": "Läs varje dokument",
                     "instructions": "Läs varje dokument och strukturera fakta.",
-                    "output_type": "json",
                     "output_fields": [
                         {
                             "name": "documents",
@@ -5492,7 +5172,6 @@ def test_report_disposition_both_inserts_missing_source_section_map() -> None:
                 {
                     "name": "Sammanställ översikt",
                     "instructions": "Jämför dokumenten och skapa en samlad översikt.",
-                    "output_type": "json",
                     "output_fields": [
                         {
                             "name": "overview",
@@ -5509,7 +5188,6 @@ def test_report_disposition_both_inserts_missing_source_section_map() -> None:
                 {
                     "name": "Skriv rapporttext",
                     "instructions": "Skriv den kompletta rapporttexten för PDF-dokumentet.",
-                    "output_type": "text",
                 },
             ],
         }
@@ -5612,7 +5290,6 @@ def test_item_map_keeps_source_identity_in_contract_but_not_model_fields() -> No
                 {
                     "name": "Läs dokumenten",
                     "instructions": "Extrahera fakta per dokument.",
-                    "output_type": "json",
                     "output_fields": [
                         {
                             "name": "documents",
@@ -5636,7 +5313,6 @@ def test_item_map_keeps_source_identity_in_contract_but_not_model_fields() -> No
                 {
                     "name": "Bygg källavsnitt",
                     "instructions": "Skriv ett färdigt avsnitt per dokument.",
-                    "output_type": "json",
                     "output_fields": [
                         {
                             "name": "source_sections",
@@ -5670,7 +5346,6 @@ def test_item_map_keeps_source_identity_in_contract_but_not_model_fields() -> No
                 {
                     "name": "Sätt ihop slutrapport",
                     "instructions": "Sätt ihop rapporten.",
-                    "output_type": "text",
                 },
             ],
         }
@@ -5729,7 +5404,6 @@ def test_bare_localized_document_array_gets_source_identity_contract() -> None:
                 {
                     "name": "Identifiera dokumentens innehåll",
                     "instructions": "Läs varje dokument och strukturera fakta.",
-                    "output_type": "json",
                     "output_fields": [
                         {
                             "name": "dokument",
@@ -5741,7 +5415,6 @@ def test_bare_localized_document_array_gets_source_identity_contract() -> None:
                 {
                     "name": "Skriv rapportinnehåll",
                     "instructions": "Skriv rapporten.",
-                    "output_type": "text",
                 },
             ],
         }
@@ -5795,7 +5468,6 @@ def test_terminal_text_writer_fields_are_folded_into_instructions() -> None:
                 {
                     "name": "Läs dokumentet",
                     "instructions": "Extrahera dokumentfakta.",
-                    "output_type": "json",
                     "output_fields": [
                         {
                             "name": "document_title",
@@ -5807,7 +5479,6 @@ def test_terminal_text_writer_fields_are_folded_into_instructions() -> None:
                 {
                     "name": "Skriv rapport",
                     "instructions": "Skriv den slutliga rapporttexten.",
-                    "output_type": "text",
                     "output_fields": [
                         {
                             "name": "short_summary",
@@ -5847,7 +5518,6 @@ def test_single_source_text_report_materializes_missing_reader() -> None:
                 {
                     "name": "Skriv rapport",
                     "instructions": "Skriv en rapport med titel och sammanfattning.",
-                    "output_type": "text",
                 }
             ],
         }
@@ -5946,7 +5616,6 @@ def test_single_call_report_state_to_lowering_matrix(
                     {
                         "name": "Read documents",
                         "instructions": "Extract one summary per source.",
-                        "output_type": "json",
                         "output_fields": [
                             {
                                 "name": "documents",
@@ -5965,7 +5634,6 @@ def test_single_call_report_state_to_lowering_matrix(
                     {
                         "name": "Write report",
                         "instructions": "Write the report.",
-                        "output_type": "text",
                     },
                 ],
             }
@@ -6011,7 +5679,6 @@ def test_requested_section_labels_get_lossless_collision_proof_contracts(
                 {
                     "name": "Read documents",
                     "instructions": "Extract source-grounded evidence.",
-                    "output_type": "json",
                     "output_fields": [
                         {
                             "name": "documents",
@@ -6030,7 +5697,6 @@ def test_requested_section_labels_get_lossless_collision_proof_contracts(
                 {
                     "name": "Write report",
                     "instructions": "Write the requested report.",
-                    "output_type": "text",
                 },
             ],
         }
@@ -6115,7 +5781,6 @@ def test_requested_section_labels_with_braces_compile_for_every_disposition(
                 {
                     "name": "Read documents",
                     "instructions": "Extract source-grounded evidence.",
-                    "output_type": "json",
                     "output_fields": [
                         {
                             "name": "documents",
@@ -6134,7 +5799,6 @@ def test_requested_section_labels_with_braces_compile_for_every_disposition(
                 {
                     "name": "Write report",
                     "instructions": "Write the requested report.",
-                    "output_type": "text",
                 },
             ],
         }
@@ -6204,7 +5868,6 @@ def test_single_call_report_dispositions_keep_bounded_section_ownership(
                 {
                     "name": "Read documents",
                     "instructions": "Extract one summary for each supplied source.",
-                    "output_type": "json",
                     "output_fields": [
                         {
                             "name": "documents",
@@ -6223,7 +5886,6 @@ def test_single_call_report_dispositions_keep_bounded_section_ownership(
                 {
                     "name": "Write report",
                     "instructions": "Write the requested source report.",
-                    "output_type": "text",
                 },
             ],
         }
@@ -6292,7 +5954,6 @@ def test_mapped_reader_canonicalizes_authored_identity_fields_for_runtime() -> N
                 {
                     "name": "Read documents",
                     "instructions": "Extract grounded source evidence.",
-                    "output_type": "json",
                     "output_fields": [
                         {
                             "name": "documents",
@@ -6321,7 +5982,6 @@ def test_mapped_reader_canonicalizes_authored_identity_fields_for_runtime() -> N
                 {
                     "name": "Summarize",
                     "instructions": "Summarize the source evidence.",
-                    "output_type": "text",
                 },
             ],
         }
@@ -6374,7 +6034,6 @@ def test_single_call_reader_removes_authored_runtime_source_file_id() -> None:
                 {
                     "name": "Read documents",
                     "instructions": "Extract grounded source evidence.",
-                    "output_type": "json",
                     "output_fields": [
                         {
                             "name": "documents",
@@ -6403,7 +6062,6 @@ def test_single_call_reader_removes_authored_runtime_source_file_id() -> None:
                 {
                     "name": "Summarize",
                     "instructions": "Summarize the source evidence.",
-                    "output_type": "text",
                 },
             ],
         }
@@ -6462,17 +6120,14 @@ def test_action_followup_all_text_intent_gains_a_followup_contract_step() -> Non
                 {
                     "name": "Lättläst transkript",
                     "instructions": "Gör transkriptet lättläst med talare och stycken.",
-                    "output_type": "text",
                 },
                 {
                     "name": "Sammanfattning och uppföljning",
                     "instructions": "Sammanfatta mötet och lyft beslut och åtgärder.",
-                    "output_type": "text",
                 },
                 {
                     "name": "Skapa PDF",
                     "instructions": "Skapa PDF-dokumentet.",
-                    "output_type": "pdf",
                 },
             ],
         }
@@ -6548,7 +6203,6 @@ def test_action_followup_terminal_json_step_is_completed_without_duplicates() ->
                 {
                     "name": "Extrahera uppföljning",
                     "instructions": "Extrahera uppföljningspunkter ur texten.",
-                    "output_type": "json",
                     "output_fields": [
                         {
                             "name": "beslut",
@@ -6603,7 +6257,6 @@ def test_pinned_terminal_schema_is_never_completed_with_canonical_fields() -> No
                 {
                     "name": "Extrahera",
                     "instructions": "Extrahera fälten enligt schemat.",
-                    "output_type": "json",
                 },
             ],
         }
@@ -6660,7 +6313,6 @@ def test_pinned_schema_action_followup_passes_the_critic_end_to_end() -> None:
                 {
                     "name": "Extrahera",
                     "instructions": "Extrahera fälten enligt schemat.",
-                    "output_type": "json",
                 },
             ],
         }
@@ -6703,7 +6355,6 @@ def test_report_disposition_does_not_duplicate_swedish_result_fields() -> None:
                 {
                     "name": "Sammanställ rapport",
                     "instructions": "Sammanställ rapporten och uppföljningen.",
-                    "output_type": "json",
                     "output_fields": [
                         {
                             "name": "beslut",
@@ -6757,12 +6408,10 @@ def test_secondary_open_questions_alone_does_not_insert_extraction_step() -> Non
                 {
                     "name": "Lättläst transkript",
                     "instructions": "Gör transkriptet lättläst.",
-                    "output_type": "text",
                 },
                 {
                     "name": "Sammanfattning",
                     "instructions": "Sammanfatta mötet.",
-                    "output_type": "text",
                 },
             ],
         }
@@ -6875,7 +6524,6 @@ def test_non_json_named_result_evidence_cannot_change_public_plan_shape(
                 {
                     "name": "Summarize case",
                     "instructions": "Write a clear case summary.",
-                    "output_type": "text",
                 }
             ],
         }
@@ -6954,7 +6602,6 @@ def test_localized_keys_are_admitted_without_a_lexicon() -> None:
                     {
                         "name": "Extrahera",
                         "instructions": "Extrahera dokumentets fält.",
-                        "output_type": "json",
                         "output_fields": [
                             {
                                 "name": name,
@@ -7015,19 +6662,16 @@ def _compare_json_intent(*, with_fields: bool) -> object:
                 {
                     "name": "Läs källor",
                     "instructions": "Läs varje källa och extrahera jämförelsegrunden.",
-                    "output_type": "json",
                     "output_fields": _fields("comparison_basis"),
                 },
                 {
                     "name": "Analysera skillnader",
                     "instructions": "Analysera skillnaderna mellan källorna.",
-                    "output_type": "json",
                     "output_fields": _fields("deviations"),
                 },
                 {
                     "name": "Sammanställ resultat",
                     "instructions": "Sammanställ jämförelsen som strukturerat resultat.",
-                    "output_type": "json",
                 },
             ],
         }
@@ -7057,7 +6701,7 @@ def test_compare_json_terminal_compiles_with_typed_fan_in() -> None:
     assert validate_spec(compiled).valid
 
 
-def test_compare_json_without_structured_producers_rejects_typed() -> None:
+def test_compare_json_without_structured_fields_rejects_source_reader() -> None:
     with pytest.raises(AIBuilderArchitectureError) as excinfo:
         compile_create_intent_to_spec(
             _compare_json_intent(with_fields=False),
@@ -7070,7 +6714,7 @@ def test_compare_json_without_structured_producers_rejects_typed() -> None:
         )
     assert (
         excinfo.value.log_context.get("failure_code")
-        == "assembly_compare_json_requires_structured_producers"
+        == "assembly_source_file_first_step_requires_json"
     )
 
 
@@ -7109,7 +6753,6 @@ def test_unreferenced_form_fields_place_on_the_mentioning_step() -> None:
                 {
                     "name": "Analysera felrapporten",
                     "instructions": "Analysera felrapporten.",
-                    "output_type": "json",
                     "output_fields": [
                         {
                             "name": "analys",

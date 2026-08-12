@@ -2,9 +2,6 @@ from __future__ import annotations
 
 from dataclasses import replace
 
-from eneo.flows.ai_builder.ai_builder_assembly.document_report.diagnostics import (
-    raise_document_report_review_mode_conflict as _raise_document_report_review_mode_conflict,
-)
 from eneo.flows.ai_builder.ai_builder_assembly.document_report.topology import (
     COMPOSE_OVERALL_OVERVIEW_KEY,
     COMPOSE_REPORT_TITLE_KEY,
@@ -26,17 +23,7 @@ def _merge_report_writer_semantics(
     planned_step: PlannedStep,
     *,
     semantic_step: PlannedStep,
-    preserve_review_mode: bool = True,
 ) -> PlannedStep:
-    if (
-        preserve_review_mode
-        and planned_step.review_mode is not None
-        and semantic_step.review_mode is not None
-    ):
-        _raise_document_report_review_mode_conflict(
-            planned_step=planned_step,
-            semantic_step=semantic_step,
-        )
     instructions = planned_step.instructions
     if semantic_step.instructions not in instructions:
         instructions = f"{semantic_step.instructions}\n\n{instructions}"
@@ -54,11 +41,6 @@ def _merge_report_writer_semantics(
         ),
         citations_requested=(
             planned_step.citations_requested or semantic_step.citations_requested
-        ),
-        review_mode=(
-            semantic_step.review_mode
-            if preserve_review_mode and semantic_step.review_mode is not None
-            else planned_step.review_mode
         ),
     )
 

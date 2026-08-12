@@ -414,7 +414,6 @@ def lower_document_report_topology(
                 content_steps[section_index] = _merge_report_writer_semantics(
                     content_steps[section_index],
                     semantic_step=body_writer_step,
-                    preserve_review_mode=False,
                 )
                 if len(distinct_model_refs) > 1:
                     model_ref = content_steps[section_index].model_ref
@@ -491,7 +490,6 @@ def lower_document_report_topology(
             content_steps[overview_index] = _merge_report_writer_semantics(
                 content_steps[overview_index],
                 semantic_step=body_writer_step,
-                preserve_review_mode=False,
             )
             content_steps[overview_index] = replace(
                 content_steps[overview_index],
@@ -860,7 +858,6 @@ def _document_report_compose_step(
         output_mode=OutputMode.COMPOSE_TEXT,
         underlag_channel="whole_object",
         form_field_refs=body_writer_step.form_field_refs,
-        review_mode=body_writer_step.review_mode,
     )
 
 

@@ -22,7 +22,6 @@ _STEP_ASSUMPTIONS_DIAGNOSTIC_INTENT: dict[str, Any] = {
                 "Transkribera inkommande ljud till sammanhängande text som "
                 "grund för vidare analys."
             ),
-            "output_type": "text",
             "model_ref": "model.gpt-5-4-mini",
         },
         {
@@ -33,7 +32,6 @@ _STEP_ASSUMPTIONS_DIAGNOSTIC_INTENT: dict[str, Any] = {
                 "efterfrågas men saknas/är otydliga. Skapa en intern lista "
                 "över kandidater (utan att ännu skriva slutlig struktur)."
             ),
-            "output_type": "json",
             "output_fields": [
                 {
                     "name": "candidate_items",
@@ -83,7 +81,6 @@ _STEP_ASSUMPTIONS_DIAGNOSTIC_INTENT: dict[str, Any] = {
             "citations_requested": False,
             "uses_form_fields": [],
             "knowledge_refs": [],
-            "review_mode": None,
             "assumptions": [
                 (
                     "Det går att avgöra om informationen är explicit i "
@@ -99,7 +96,6 @@ _STEP_ASSUMPTIONS_DIAGNOSTIC_INTENT: dict[str, Any] = {
                 "Inkludera endast värden som stöds av källmaterialet. För "
                 "saknade/otydliga uppgifter, använd tydliga missing-markers."
             ),
-            "output_type": "json",
             "output_fields": [
                 {
                     "name": "extracted_key_information",
@@ -195,7 +191,6 @@ _STEP_ASSUMPTIONS_DIAGNOSTIC_INTENT: dict[str, Any] = {
             "citations_requested": False,
             "uses_form_fields": [],
             "knowledge_refs": [],
-            "review_mode": None,
             "assumptions": [
                 (
                     "Om en uppgift inte kan styrkas av transkriptionen ska den "
@@ -217,7 +212,6 @@ _STEP_ASSUMPTIONS_DIAGNOSTIC_INTENT: dict[str, Any] = {
                 "på tidigare extraktion och att saknade värden använder "
                 "missing-markers."
             ),
-            "output_type": "pdf",
         },
     ],
     "assumptions": [

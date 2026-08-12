@@ -92,12 +92,6 @@ def compile_create_intent_to_spec(
         intent,
         field_names=dropped_form_field_ref_names,
     )
-    if context is not None and context.checkpoint_intents is not None:
-        # Typed checkpoint intents are the only checkpoint owner on create:
-        # model-authored review modes must not reach assembly or lowering.
-        intent_with_admitted_form_refs = _intent_without_review_modes(
-            intent_with_admitted_form_refs
-        )
     prepared_template_field_names = _template_fields_prepared_by_intent(
         intent=intent_with_admitted_form_refs,
         context=context,
@@ -493,21 +487,6 @@ def _raise_for_unplaced_create_form_fields(
             "reason": "unplaced_form_fields",
             "field_names": ",".join(unplaced_field_names),
         },
-    )
-
-
-def _intent_without_review_modes(intent: CreateFlowIntent) -> CreateFlowIntent:
-    if all(step.review_mode is None for step in intent.steps):
-        return intent
-    return intent.model_copy(
-        update={
-            "steps": [
-                step.model_copy(update={"review_mode": None})
-                if step.review_mode is not None
-                else step
-                for step in intent.steps
-            ]
-        }
     )
 
 

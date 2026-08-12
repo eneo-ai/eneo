@@ -6,6 +6,7 @@ import pytest
 
 from eneo.flows.ai_builder import ai_builder_tool_names, ai_builder_tools
 from eneo.flows.ai_builder.ai_builder_proposal_intent import (
+    ProposalIntentArgumentError,
     parse_create_flow_intent_arguments,
 )
 from eneo.flows.ai_builder.ai_builder_resource_catalog import (
@@ -84,12 +85,45 @@ class TestBuildToolSchema:
         assert "input_bindings" not in step_properties
         assert "output_type" not in step_properties
         assert "output_mode" not in step_properties
+        assert "review_mode" not in step_properties
         assert "uses_previous_fields" not in step_properties
         assert "uses_previous_outputs" not in step_properties
         assert "plan_step_ref" not in step_properties
         assert "runtime_input" not in properties
         assert "final_output_type" not in properties
         assert "input_fields" in properties
+
+    @pytest.mark.parametrize(
+        ("retired_key", "retired_value"),
+        [
+            ("output_type", None),
+            ("output_type", "text"),
+            ("review_mode", None),
+            ("review_mode", "view"),
+        ],
+    )
+    def test_create_parser_rejects_retired_step_keys_before_normalization(
+        self,
+        retired_key: str,
+        retired_value: str | None,
+    ) -> None:
+        with pytest.raises(
+            ProposalIntentArgumentError,
+            match=rf"steps\.0\.{retired_key}",
+        ):
+            parse_create_flow_intent_arguments(
+                {
+                    "flow_name": "Report",
+                    "plan_rationale": "Create the report.",
+                    "steps": [
+                        {
+                            "name": "Write",
+                            "instructions": "Write the report.",
+                            retired_key: retired_value,
+                        }
+                    ],
+                }
+            )
 
     def test_create_parser_strips_model_authored_previous_refs(self) -> None:
         intent = parse_create_flow_intent_arguments(
