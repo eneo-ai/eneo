@@ -1,16 +1,26 @@
 import asyncio
+from datetime import UTC, datetime
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
 import pytest
 
+from eneo.ai_models.completion_models.completion_model import ModelKwargs
 from eneo.assistants.assistant_service import AssistantService
+from eneo.completion_models.domain.completion_model import (
+    CompletionModel as DomainCompletionModel,
+)
+from eneo.completion_models.domain.model_kwargs_capabilities import (
+    ModelKwargCapability,
+    SupportedModelKwargs,
+)
 from eneo.completion_models.domain.skill_activation import (
     SKILL_ACTIVATION_TOOL_NAME,
     ProviderToolCall,
 )
 from eneo.completion_models.domain.skill_context import SkillContextMeasurement
+from eneo.governance_policy.domain.policy_resolver import EffectiveConfig
 from eneo.main.exceptions import BadRequestException
 from eneo.services.service import DatastoreResult
 from eneo.sessions.session import SessionInDB
@@ -87,6 +97,40 @@ def _service_with_effective_config(effective_config_service: AsyncMock):
 
 async def test_ask_uses_effective_model_for_session_metadata_and_response():
     assistant_id = uuid4()
+    now = datetime.now(UTC)
+    effective_model = DomainCompletionModel(
+        user=TEST_USER,
+        id=TEST_MODEL_GPT4.id,
+        created_at=now,
+        updated_at=now,
+        nickname=TEST_MODEL_GPT4.nickname,
+        name=TEST_MODEL_GPT4.name,
+        max_input_tokens=TEST_MODEL_GPT4.max_input_tokens,
+        max_output_tokens=TEST_MODEL_GPT4.max_output_tokens,
+        vision=False,
+        family="openai",
+        hosting="usa",
+        org="OpenAI",
+        stability="stable",
+        open_source=False,
+        description=None,
+        nr_billion_parameters=None,
+        hf_link=None,
+        is_deprecated=False,
+        deployment_name=None,
+        is_org_enabled=True,
+        is_org_default=False,
+        reasoning=True,
+        model_kwargs_capabilities=SupportedModelKwargs(
+            reasoning_effort=ModelKwargCapability(
+                supported=True,
+                control="select",
+                options=["high"],
+            )
+        ),
+        tenant_id=TEST_USER.tenant_id,
+        provider_type="openai",
+    )
     session = SessionInDB(
         id=uuid4(),
         name="hello",
@@ -102,6 +146,7 @@ async def test_ask_uses_effective_model_for_session_metadata_and_response():
     assistant.description = None
     assistant.is_default = True
     assistant.completion_model = TEST_MODEL_CHATGPT
+    assistant.completion_model_kwargs = ModelKwargs(reasoning_effort="high")
     assistant.tool_assistants = []
     assistant.ask = AsyncMock(return_value=(response, datastore_result))
 
@@ -114,15 +159,17 @@ async def test_ask_uses_effective_model_for_session_metadata_and_response():
     actor.can_read_assistant.return_value = True
 
     effective_config_service = AsyncMock()
-    effective_config_service.resolve_for.return_value = SimpleNamespace(
+    effective_config_service.resolve_for.return_value = EffectiveConfig(
         models_enforced=True,
-        available_models=[TEST_MODEL_GPT4],
-        policy_default_model=TEST_MODEL_GPT4,
+        available_models=[effective_model],
+        locked_model=None,
+        policy_default_model=effective_model,
         mcp_enforced=False,
         available_mcp_servers=[],
         prompt_enforced=False,
         enforced_prompt_text=None,
-        reasoning_policy_configured=False,
+        reasoning_policy_configured=True,
+        reasoning_effort_user_configurable=True,
         governance_skill_resolution=SkillRuntimeResolution(eligible=(), blocked=()),
     )
     session_service = AsyncMock(
@@ -166,14 +213,21 @@ async def test_ask_uses_effective_model_for_session_metadata_and_response():
     service._handle_response.assert_awaited_once()
     assert (
         service._handle_response.await_args.kwargs["completion_model"]
-        is TEST_MODEL_GPT4
+        is effective_model
     )
-    assert result.completion_model.id == TEST_MODEL_GPT4.id
+    assert result.completion_model.id == effective_model.id
     assert (
         session_service.create_session_with_question_placeholder.await_args.kwargs[
             "completion_model"
         ]
-        is TEST_MODEL_GPT4
+        is effective_model
+    )
+    assert (
+        assistant.ask.await_args.kwargs["completion_model_override"] is effective_model
+    )
+    assert (
+        assistant.ask.await_args.kwargs["model_kwargs_override"].reasoning_effort
+        == "high"
     )
     assert assistant.ask.await_args.kwargs["prompt_override"] is None
     assert (

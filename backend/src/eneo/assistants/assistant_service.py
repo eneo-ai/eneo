@@ -922,9 +922,16 @@ class AssistantService:
 
     @staticmethod
     def _context_model(
-        assistant: Assistant, *, effective_config: "EffectiveConfig | None"
+        assistant: Assistant,
+        *,
+        effective_config: "EffectiveConfig | None",
+        current_model: "CompletionModel | None | NotProvided" = NOT_PROVIDED,
     ) -> "CompletionModel | None":
-        model = assistant.completion_model
+        model = (
+            assistant.completion_model
+            if isinstance(current_model, NotProvided)
+            else current_model
+        )
         if effective_config is None or not effective_config.models_enforced:
             return model
         resolved_model = select_effective_completion_model(
@@ -1336,15 +1343,11 @@ class AssistantService:
             )
 
         update_effective_config: "EffectiveConfig | None | NotProvided" = NOT_PROVIDED
-        if (
-            is_personal_default
-            and reasoning_effort_only_update
-            and not can_edit_assistants
-        ):
+        if is_personal_default and reasoning_effort_only_update:
             update_effective_config = await self._resolve_effective_config(
                 space=space, assistant=assistant
             )
-            if (
+            if not can_edit_assistants and (
                 update_effective_config is None
                 or not update_effective_config.reasoning_effort_user_configurable
             ):
@@ -1397,7 +1400,23 @@ class AssistantService:
             completion_model = space.get_completion_model(completion_model_id)
 
         if completion_model_kwargs is not None:
-            kwargs_model = completion_model or assistant.completion_model
+            kwargs_model = completion_model
+            if (
+                is_personal_default
+                and reasoning_effort_only_update
+                and not isinstance(update_effective_config, NotProvided)
+            ):
+                kwargs_model = self._context_model(
+                    assistant,
+                    effective_config=update_effective_config,
+                    current_model=(
+                        completion_model
+                        if completion_model is not None
+                        else assistant.completion_model
+                    ),
+                )
+            if kwargs_model is None:
+                kwargs_model = assistant.completion_model
             if kwargs_model is None:
                 raise BadRequestException(
                     "Select a completion model before configuring model settings"

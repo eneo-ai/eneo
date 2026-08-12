@@ -20,6 +20,7 @@ from eneo.completion_models.domain.model_kwargs_capabilities import (
     SupportedModelKwargs,
 )
 from eneo.files.file_models import FileType
+from eneo.governance_policy.domain.policy_resolver import EffectiveConfig
 from eneo.main.exceptions import (
     BadRequestException,
     ModelNotAvailableException,
@@ -455,6 +456,37 @@ def configure_personal_default_assistant(
     return assistant, space
 
 
+def reasoning_model(*options: str) -> MagicMock:
+    model = MagicMock(id=uuid4())
+    model.get_supported_model_kwargs.return_value = SupportedModelKwargs(
+        reasoning_effort=ModelKwargCapability(
+            supported=True,
+            control="select",
+            options=list(options),
+        )
+    )
+    return model
+
+
+def governed_reasoning_config(
+    *models: MagicMock,
+    default_model: MagicMock | None = None,
+    user_configurable: bool = True,
+) -> EffectiveConfig:
+    return EffectiveConfig(
+        models_enforced=True,
+        available_models=list(models),
+        locked_model=None,
+        policy_default_model=default_model or (models[0] if models else None),
+        mcp_enforced=False,
+        available_mcp_servers=[],
+        prompt_enforced=False,
+        enforced_prompt_text=None,
+        reasoning_policy_configured=True,
+        reasoning_effort_user_configurable=user_configurable,
+    )
+
+
 async def test_personal_chat_can_change_personal_default_completion_model(setup: Setup):
     assistant, space = configure_personal_default_assistant(setup)
     completion_model_id = uuid4()
@@ -491,8 +523,17 @@ async def test_personal_chat_can_change_reasoning_effort_when_policy_allows(
         )
     )
     setup.service.effective_config_service = AsyncMock()
-    setup.service.effective_config_service.resolve_for.return_value = MagicMock(
-        reasoning_effort_user_configurable=True
+    setup.service.effective_config_service.resolve_for.return_value = EffectiveConfig(
+        models_enforced=False,
+        available_models=[],
+        locked_model=None,
+        policy_default_model=None,
+        mcp_enforced=False,
+        available_mcp_servers=[],
+        prompt_enforced=False,
+        enforced_prompt_text=None,
+        reasoning_policy_configured=True,
+        reasoning_effort_user_configurable=True,
     )
     kwargs = ModelKwargs(reasoning_effort="high")
 
@@ -507,6 +548,160 @@ async def test_personal_chat_can_change_reasoning_effort_when_policy_allows(
         reasoning_effort="high",
         response_format={"type": "json_object"},
     )
+
+
+@pytest.mark.parametrize("can_manage_assistants", [False, True])
+async def test_personal_chat_validates_reasoning_against_governed_model(
+    setup: Setup,
+    can_manage_assistants: bool,
+):
+    assistant, _ = configure_personal_default_assistant(
+        setup, can_manage_assistants=can_manage_assistants
+    )
+    stored_model = reasoning_model("low")
+    governed_model = reasoning_model("high")
+    assistant.completion_model = stored_model
+    assistant.completion_model_kwargs = ModelKwargs(
+        temperature=0.7,
+        reasoning_effort="low",
+    )
+    setup.service.effective_config_service = AsyncMock()
+    setup.service.effective_config_service.resolve_for.return_value = (
+        governed_reasoning_config(governed_model)
+    )
+
+    await setup.service.update_assistant(
+        assistant_id=TEST_UUID,
+        completion_model_kwargs=ModelKwargs(reasoning_effort="high"),
+    )
+
+    assert assistant.update.call_args.kwargs["completion_model_kwargs"] == ModelKwargs(
+        temperature=0.7,
+        reasoning_effort="high",
+    )
+
+
+@pytest.mark.parametrize("can_manage_assistants", [False, True])
+async def test_personal_chat_rejects_effort_only_supported_by_replaced_model(
+    setup: Setup,
+    can_manage_assistants: bool,
+):
+    assistant, _ = configure_personal_default_assistant(
+        setup, can_manage_assistants=can_manage_assistants
+    )
+    stored_model = reasoning_model("low")
+    governed_model = reasoning_model("high")
+    assistant.completion_model = stored_model
+    assistant.completion_model_kwargs = ModelKwargs(reasoning_effort="low")
+    setup.service.effective_config_service = AsyncMock()
+    setup.service.effective_config_service.resolve_for.return_value = (
+        governed_reasoning_config(governed_model)
+    )
+
+    with pytest.raises(
+        BadRequestException,
+        match="value unsupported by the selected model",
+    ):
+        await setup.service.update_assistant(
+            assistant_id=TEST_UUID,
+            completion_model_kwargs=ModelKwargs(reasoning_effort="low"),
+        )
+
+    assistant.update.assert_not_called()
+
+
+async def test_personal_chat_rejects_reasoning_update_without_governed_model(
+    setup: Setup,
+):
+    assistant, _ = configure_personal_default_assistant(setup)
+    assistant.completion_model = MagicMock(id=uuid4())
+    setup.service.effective_config_service = AsyncMock()
+    setup.service.effective_config_service.resolve_for.return_value = (
+        governed_reasoning_config()
+    )
+
+    with pytest.raises(
+        BadRequestException,
+        match="governance policy has no allowed models",
+    ):
+        await setup.service.update_assistant(
+            assistant_id=TEST_UUID,
+            completion_model_kwargs=ModelKwargs(reasoning_effort="high"),
+        )
+
+    assistant.update.assert_not_called()
+
+
+async def test_personal_chat_explicit_model_precedes_governed_model_for_update(
+    setup: Setup,
+):
+    assistant, space = configure_personal_default_assistant(
+        setup, can_manage_assistants=True
+    )
+    governed_model = reasoning_model("high")
+    explicit_model = reasoning_model("max")
+    assistant.completion_model = MagicMock(id=uuid4())
+    assistant.completion_model_kwargs = ModelKwargs(reasoning_effort="high")
+    space.get_completion_model.return_value = explicit_model
+    setup.service.effective_config_service = AsyncMock()
+    setup.service.effective_config_service.resolve_for.return_value = (
+        governed_reasoning_config(
+            governed_model,
+            explicit_model,
+            default_model=governed_model,
+            user_configurable=False,
+        )
+    )
+
+    await setup.service.update_assistant(
+        assistant_id=TEST_UUID,
+        completion_model_id=explicit_model.id,
+        completion_model_kwargs=ModelKwargs(reasoning_effort="max"),
+    )
+
+    assert assistant.update.call_args.kwargs["completion_model"] is explicit_model
+    assert assistant.update.call_args.kwargs["completion_model_kwargs"] == ModelKwargs(
+        reasoning_effort="max"
+    )
+
+
+@pytest.mark.parametrize(
+    ("reasoning_effort", "accepted"),
+    [("high", True), ("low", False)],
+)
+async def test_personal_chat_repeated_excluded_model_uses_governed_capabilities(
+    setup: Setup,
+    reasoning_effort: str,
+    accepted: bool,
+):
+    assistant, space = configure_personal_default_assistant(setup)
+    stored_model = reasoning_model("low")
+    governed_model = reasoning_model("high")
+    assistant.completion_model = stored_model
+    assistant.completion_model_kwargs = ModelKwargs(reasoning_effort="low")
+    space.get_completion_model.return_value = stored_model
+    setup.service.effective_config_service = AsyncMock()
+    setup.service.effective_config_service.resolve_for.return_value = (
+        governed_reasoning_config(governed_model)
+    )
+
+    update = setup.service.update_assistant(
+        assistant_id=TEST_UUID,
+        completion_model_id=stored_model.id,
+        completion_model_kwargs=ModelKwargs(reasoning_effort=reasoning_effort),
+    )
+    if accepted:
+        await update
+        assert assistant.update.call_args.kwargs[
+            "completion_model_kwargs"
+        ] == ModelKwargs(reasoning_effort="high")
+    else:
+        with pytest.raises(
+            BadRequestException,
+            match="value unsupported by the selected model",
+        ):
+            await update
+        assistant.update.assert_not_called()
 
 
 async def test_personal_chat_cannot_combine_reasoning_effort_with_protected_changes(
@@ -564,8 +759,17 @@ async def test_personal_chat_cannot_store_unsupported_reasoning_effort(
         )
     )
     setup.service.effective_config_service = AsyncMock()
-    setup.service.effective_config_service.resolve_for.return_value = MagicMock(
-        reasoning_effort_user_configurable=True
+    setup.service.effective_config_service.resolve_for.return_value = EffectiveConfig(
+        models_enforced=False,
+        available_models=[],
+        locked_model=None,
+        policy_default_model=None,
+        mcp_enforced=False,
+        available_mcp_servers=[],
+        prompt_enforced=False,
+        enforced_prompt_text=None,
+        reasoning_policy_configured=True,
+        reasoning_effort_user_configurable=True,
     )
 
     with pytest.raises(
