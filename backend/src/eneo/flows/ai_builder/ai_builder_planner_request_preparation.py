@@ -389,7 +389,6 @@ def build_proposal_prepared(
             resource_catalog=resource_catalog,
             requested_output_sections=requested_output_sections,
             plan_revision_context=plan_revision_context,
-            compile_context=compile_context,
         )
 
     fitted_attachment_context = _fit_proposal_attachment_context(

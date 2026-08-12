@@ -86,12 +86,13 @@ class TestBuildToolSchema:
         assert "output_type" not in step_properties
         assert "output_mode" not in step_properties
         assert "review_mode" not in step_properties
+        assert "uses_form_fields" not in step_properties
         assert "uses_previous_fields" not in step_properties
         assert "uses_previous_outputs" not in step_properties
         assert "plan_step_ref" not in step_properties
         assert "runtime_input" not in properties
         assert "final_output_type" not in properties
-        assert "input_fields" in properties
+        assert "input_fields" not in properties
 
     @pytest.mark.parametrize(
         ("retired_key", "retired_value"),
@@ -100,6 +101,8 @@ class TestBuildToolSchema:
             ("output_type", "text"),
             ("review_mode", None),
             ("review_mode", "view"),
+            ("uses_form_fields", []),
+            ("uses_form_fields", ["case_id"]),
         ],
     )
     def test_create_parser_rejects_retired_step_keys_before_normalization(
@@ -120,6 +123,32 @@ class TestBuildToolSchema:
                             "name": "Write",
                             "instructions": "Write the report.",
                             retired_key: retired_value,
+                        }
+                    ],
+                }
+            )
+
+    def test_create_parser_rejects_retired_root_input_fields(self) -> None:
+        with pytest.raises(
+            ProposalIntentArgumentError,
+            match=r"input_fields",
+        ):
+            parse_create_flow_intent_arguments(
+                {
+                    "flow_name": "Report",
+                    "plan_rationale": "Create the report.",
+                    "input_fields": [
+                        {
+                            "name": "case_id",
+                            "label": "Case id",
+                            "type": "text",
+                            "required": True,
+                        }
+                    ],
+                    "steps": [
+                        {
+                            "name": "Write",
+                            "instructions": "Write the report.",
                         }
                     ],
                 }

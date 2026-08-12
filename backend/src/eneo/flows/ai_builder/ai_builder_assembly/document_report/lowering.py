@@ -64,20 +64,24 @@ logger = logging.getLogger(__package__)
 
 def admit_document_report_semantic_shape(
     steps: Sequence[SemanticStepIntent],
+    semantic_origin_eligibility: Sequence[bool],
     *,
     runtime_input_type: InputType,
     final_semantic_output_type: OutputType,
     source_reader_required_fields: tuple[SourceCaptureField, ...],
     report_disposition: ReportDisposition | None,
     ui_language: str | None,
-) -> tuple[SemanticStepIntent, ...]:
+) -> tuple[tuple[SemanticStepIntent, ...], tuple[bool, ...]]:
     semantic_steps = tuple(steps)
+    eligibility = tuple(semantic_origin_eligibility)
+    if len(semantic_steps) != len(eligibility):
+        raise ValueError("Semantic origin eligibility must align with semantic steps.")
     if (
         not semantic_steps
         or runtime_input_type not in {InputType.DOCUMENT, InputType.FILE}
         or final_semantic_output_type != OutputType.TEXT
     ):
-        return semantic_steps
+        return semantic_steps, eligibility
 
     if len(semantic_steps) == 1:
         semantic_step = semantic_steps[0]
@@ -88,7 +92,7 @@ def admit_document_report_semantic_shape(
             )
         if not source_fields:
             if report_disposition is None:
-                return semantic_steps
+                return semantic_steps, eligibility
             source_fields = (_default_document_report_source_field(ui_language),)
         source_fields = complete_structured_source_reader_fields(
             source_fields,
@@ -120,10 +124,10 @@ def admit_document_report_semantic_shape(
                 "output_fields": None,
             }
         )
-        return (reader_step, writer_step)
+        return (reader_step, writer_step), (False, eligibility[0])
 
     if report_disposition is None:
-        return semantic_steps
+        return semantic_steps, eligibility
     reader_step = semantic_steps[0]
     source_fields = complete_structured_source_reader_fields(
         tuple(reader_step.output_fields or ())
@@ -141,7 +145,7 @@ def admit_document_report_semantic_shape(
             ),
         }
     )
-    return (admitted_reader, *semantic_steps[1:])
+    return (admitted_reader, *semantic_steps[1:]), eligibility
 
 
 def _admitted_document_report_source_fields(

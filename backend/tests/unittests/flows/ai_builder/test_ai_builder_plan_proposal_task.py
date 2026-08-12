@@ -1,12 +1,8 @@
 from __future__ import annotations
 
-import json
 from datetime import datetime, timezone
 from uuid import UUID
 
-from eneo.flows.ai_builder.ai_builder_create_compile_context import (
-    create_compile_context_from_planning_state,
-)
 from eneo.flows.ai_builder.ai_builder_event_models import (
     RequirementsSummaryPayload,
 )
@@ -16,7 +12,6 @@ from eneo.flows.ai_builder.ai_builder_output_sections_signals import (
 from eneo.flows.ai_builder.ai_builder_plan_proposal_task import (
     build_plan_proposal_system_prompt,
 )
-from eneo.flows.ai_builder.ai_builder_proposal_intent import FlowInputFieldIntent
 from eneo.flows.ai_builder.ai_builder_resource_catalog import (
     AIBuilderResourceCatalog,
     build_ai_builder_resource_catalog,
@@ -415,9 +410,7 @@ def test_plan_proposal_prompt_describes_input_schema_without_directing_docx_outp
     assert "case_id" in prompt
     assert "Output schema evidence:" not in prompt
     assert "Use output_fields consistent with these user-declared fields." not in prompt
-    assert (
-        "Do not turn its primary payload fields into secondary input_fields." in prompt
-    )
+    assert "Do not reinterpret its primary payload fields" in prompt
 
 
 def test_plan_proposal_prompt_treats_example_shape_and_style_as_guidance() -> None:
@@ -551,7 +544,7 @@ def test_plan_proposal_prompt_renders_template_placeholder_evidence() -> None:
             in rendered_prompt
         )
     assert "Prefer source-derived output_fields" in prompt
-    assert "use input_fields only for values the user must provide at runtime" in prompt
+    assert "the backend owns runtime values" in prompt
     assert "Use output_fields consistent with these user-declared fields." not in prompt
 
 
@@ -599,7 +592,7 @@ def test_plan_proposal_prompt_visibly_clips_long_evidence_and_field_names() -> N
     assert "…" in prompt
 
 
-def test_plan_proposal_prompt_identifies_runtime_metadata_as_compiler_policy():
+def test_plan_proposal_prompt_keeps_create_mechanics_backend_owned():
     prompt = build_plan_proposal_system_prompt(
         planning_state=PlanningState.empty(),
         confirmed_requirements=_requirements(
@@ -611,134 +604,14 @@ def test_plan_proposal_prompt_identifies_runtime_metadata_as_compiler_policy():
         resource_catalog=_empty_catalog(),
     )
 
-    assert "input_fields" in prompt
-    # Ownership is state-dependent: server-owned when the compiler has the
-    # fields, model-owned otherwise. A blanket "compiler-owned" claim left
-    # nobody declaring prose-requested metadata (live loop 2026-08-06).
-    assert "Never invent input_fields from defaults" in prompt
-    assert "explicit no-extra-fields decision" in prompt
-    assert "already compiled" in prompt
-    assert "yours to declare" in prompt
+    assert "input_fields" not in prompt
+    assert "uses_form_fields" not in prompt
     assert "source-reading JSON output_fields" in prompt
     assert "folded from the user's own wording" in prompt
     assert "keep key names the user asked for" in prompt
     assert "Do not leave user-named facts only in instructions" in prompt
     assert "generic facts/notes fields" in prompt
     assert "instead of introducing new source-derived facts only in prose" in prompt
-
-
-def test_plan_proposal_prompt_projects_confirmed_runtime_field_contract() -> None:
-    state = PlanningState.empty()
-    long_name = f"case_{'x' * 90}"
-    long_option = f"permit, with conditions {'y' * 90}"
-    state.input_fields = [
-        FlowInputFieldIntent(
-            variable_name=long_name,
-            label='Case type "as submitted"',
-            field_type="select",
-            required=True,
-            options=[long_option, "complaint"],
-            provenance="user_confirmed",
-        )
-    ]
-
-    prompt = build_plan_proposal_system_prompt(
-        planning_state=state,
-        compile_context=create_compile_context_from_planning_state(state),
-        confirmed_requirements=_requirements(),
-        attachment_context=None,
-        flow_context=None,
-        is_edit_mode=False,
-        resource_catalog=_empty_catalog(),
-    )
-
-    assert "Server-owned runtime input fields:" in prompt
-    assert (
-        json.dumps(
-            {
-                "variable_name": long_name,
-                "field_type": "select",
-                "required": True,
-                "label": 'Case type "as submitted"',
-                "options": [long_option, "complaint"],
-                "provenance": "user_confirmed",
-            },
-            ensure_ascii=False,
-        )
-        in prompt
-    )
-    assert "…" not in prompt
-    assert "exact variable_name in uses_form_fields" in prompt
-    assert "Do not redeclare or rename these server-owned fields" in prompt
-
-
-def test_plan_proposal_prompt_omits_primary_input_shadow_field() -> None:
-    state = _state_with_slot(
-        "primary_runtime_input",
-        "text",
-        state=_planning_state_with_architecture(
-            StepTriple(
-                input_type="text",
-                output_type="text",
-                output_mode="pass_through",
-            )
-        ),
-    )
-    state.input_fields = [
-        FlowInputFieldIntent(
-            variable_name="text",
-            label="Text",
-            provenance="user_confirmed",
-        )
-    ]
-
-    prompt = build_plan_proposal_system_prompt(
-        planning_state=state,
-        compile_context=create_compile_context_from_planning_state(state),
-        confirmed_requirements=_requirements(),
-        attachment_context=None,
-        flow_context=None,
-        is_edit_mode=False,
-        resource_catalog=_empty_catalog(),
-    )
-
-    assert "Server-owned runtime input fields:" not in prompt
-    assert '"variable_name": "text"' not in prompt
-
-
-def test_plan_proposal_prompt_projects_normalized_template_runtime_fields() -> None:
-    state = PlanningState.empty()
-    state.file_roles = [
-        FileRoleEvidence(
-            file_id="00000000-0000-0000-0000-000000000703",
-            filename="ärendemall.docx",
-            file_type="document",
-            mimetype=(
-                "application/vnd.openxmlformats-officedocument.wordprocessingml."
-                "document"
-            ),
-            has_readable_text=True,
-            coverage="fully_seen",
-            role="template",
-            source="heuristic",
-            confidence="high",
-            template_placeholders=["kundnamn", "flow_input.case_id", "datum"],
-        )
-    ]
-
-    prompt = build_plan_proposal_system_prompt(
-        planning_state=state,
-        compile_context=create_compile_context_from_planning_state(state),
-        confirmed_requirements=_requirements(),
-        attachment_context=None,
-        flow_context=None,
-        is_edit_mode=False,
-        resource_catalog=_empty_catalog(),
-    )
-
-    assert '"variable_name": "kundnamn"' in prompt
-    assert '"variable_name": "case_id"' in prompt
-    assert '"variable_name": "datum"' not in prompt
 
 
 def test_plan_proposal_prompt_marks_resolved_slot_decision_strength() -> None:
@@ -967,70 +840,3 @@ def test_plan_proposal_prompt_scopes_audio_transcription_to_backend():
     assert "Human review checkpoints are compiler-owned in create mode" in prompt
     assert "Do not set review_mode" in prompt
     assert "separate AI step" in prompt
-
-
-def test_requested_runtime_fields_block_names_the_owner_when_none_are_compiled() -> (
-    None
-):
-    # Verified against the live failing session 2026-08-06: planning state
-    # carried the metadata request but no input_fields, so no server-owned
-    # block rendered and nothing told the model to declare them.
-    state = _planning_state_with_architecture(
-        StepTriple(input_type="text", output_type="text", output_mode="pass_through")
-    )
-    state.resolved_slots["runtime_metadata_fields"] = ResolvedSlot(
-        name="runtime_metadata_fields",
-        value="basic_runtime_metadata",
-        source="model",
-        evidence=["quote:user_message:msg-1:fyller i område och beräknad klartid"],
-        confidence="high",
-        evidence_level="explicit",
-    )
-
-    prompt = build_plan_proposal_system_prompt(
-        planning_state=state,
-        confirmed_requirements=None,
-        attachment_context=None,
-        flow_context=None,
-        is_edit_mode=False,
-        resource_catalog=_empty_catalog(),
-    )
-
-    assert "Requested runtime input fields:" in prompt
-    assert "fyller i område och beräknad klartid" in prompt
-    assert "Server-owned runtime input fields:" not in prompt
-    assert "yours to declare" in prompt
-
-
-def test_requested_runtime_fields_block_absent_when_server_owns_the_fields() -> None:
-    state = _planning_state_with_architecture(
-        StepTriple(input_type="text", output_type="text", output_mode="pass_through")
-    )
-    state.resolved_slots["runtime_metadata_fields"] = ResolvedSlot(
-        name="runtime_metadata_fields",
-        value="basic_runtime_metadata",
-        source="model",
-        evidence=["quote:user_message:msg-1:fyller i område och beräknad klartid"],
-        confidence="high",
-        evidence_level="explicit",
-    )
-    state.input_fields = [
-        FlowInputFieldIntent(
-            name="omrade",
-            label="Område",
-            provenance="user_confirmed",
-        )
-    ]
-
-    prompt = build_plan_proposal_system_prompt(
-        planning_state=state,
-        compile_context=create_compile_context_from_planning_state(state),
-        confirmed_requirements=None,
-        attachment_context=None,
-        flow_context=None,
-        is_edit_mode=False,
-        resource_catalog=_empty_catalog(),
-    )
-
-    assert "Server-owned runtime input fields:" in prompt
-    assert "Requested runtime input fields:" not in prompt

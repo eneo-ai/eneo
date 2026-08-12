@@ -188,7 +188,7 @@ ARTIFACT re-checked per slice, not a permanent grep gate.
 | D5 | Form-field placement A/B exclusion divergence | UNPROVEN divergence; multi-consumer reachability proven | receipt task + CP3 evidence |
 | D6 | Commit re-derivation at persist | SELF_CHECK — keep `CommitDriftError` | CP-D6 (receipt-gated) |
 | D7 | Classifier slot vs merged slot re-ask | UNPROVEN | receipt task |
-| D8 | Runtime-metadata request re-derived | TRUE | CP3 |
+| D8 | Runtime-metadata request re-derived | LAYERED — one confirmed field/purpose record and one final-topology placement owner | CP3 |
 | D9 | Edit terminal type: two derivations, opposite precedence | TRUE | CP-EDIT |
 | D10 | `CreateCompileContext` built 4–5× with different args | LAYERED — one prepared materialization | CP3 prerequisite (`ProposalPrepared.compile_context`) |
 | D11 | `confirmed_form_field_incompatible` implemented twice | HAZARD | split-when-touched |
@@ -446,7 +446,8 @@ any threshold.
     frozen 465-observation receipt reproduces every published count. Claude
     iterations 124–125 converged from 7 to green at 8 after dead assembly
     residue and a misleading helper branch were removed.
-- [ ] CP3 Runtime-input-field contract (D8 DESIGN FROZEN, Claude iterations
+- [x] CP3 Runtime-input-field contract (completed 2026-08-12; D8 design frozen
+    in Claude iterations
     122–123). The existing `runtime_metadata_field_details` structured answer
     is the sole durable field-definition evidence owner; do not add a
     classifier field delta, classifier snapshot, free-text purpose inference,
@@ -502,6 +503,20 @@ any threshold.
     first-only, terminal-only and all-semantic-step placement, exact-once
     bindings, the pre-provider question and persistence/rebuild, create schema
     closure, edit preservation, frozen CP0 replay, and the next broad receipt.
+    The structured field-details answer now owns each confirmed value, closed
+    purpose and answer-message identity. `PlanningState` rebuilds that record,
+    `CreateCompileContext` projects it, and final assembly alone places fields
+    on eligible semantic-origin and mandatory template targets after topology
+    is stable. Create-provider field declarations, mention-first inference,
+    keyword field-name extraction, mechanical prompt/repair branches and four
+    duplicate create critic responsibilities are deleted; edit retains its
+    contract. The final candidate removes 2,930 lines while adding no production
+    module. The AI Builder suite is 3,382 passed; the final full Flow suite is
+    6,538 passed, 10 skipped and 1 expected failure; OpenAPI is 28 passed;
+    frontend is 104 passed; Svelte and Pyright report zero errors; and the frozen
+    CP0 replay reproduces every published count. Claude iteration 134 is green
+    at 8 after exact source review; its requested exhaustiveness guard was added
+    at the closed purpose dispatch.
 - [ ] CP4 JSON partial-emission diagnosis: why OSE captures some
     user-named fields and misses others (4 JSON cases). Diagnosis
     first; bounded fix gated on attributed mechanism.
@@ -707,11 +722,10 @@ any threshold.
    to CP3 and CP5 without adding a case-specific repair path.
 7. **CP9b complete** — omitted optional runtime metadata uses a visible,
    overridable assumption instead of another interview question.
-8. **CP3 D8 remaining next** (D2/D4/D10 complete) — implement the frozen
-   structured field-details and assembly-placement transfer as one complete
-   ownership slice; do not add another schema, classifier snapshot or
-   compile-context owner.
-9. **Ownership-tranche checkpoint** — exploratory
+8. **CP3 D8 complete** — one structured field-details owner and one
+   final-topology assembly placement owner replaced the provider/heuristic
+   paths; no second schema, classifier snapshot or compile-context owner.
+9. **Ownership-tranche checkpoint next** — exploratory
     final-frozen-manifest ×3 after CP1–CP3 and CP9b.
 10. **Critic disposition receipt**, then **CP4 → CP5**, **CP-EDIT**,
     **CP-D6**, **CP7**; the post-CP5 re-attribution loop runs alongside.

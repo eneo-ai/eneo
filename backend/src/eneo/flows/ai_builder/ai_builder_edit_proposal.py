@@ -276,7 +276,8 @@ def _apply_server_owned_input_fields(
     if planning_state is None or not planning_state.input_fields:
         return proposal
     server_fields = {
-        field.variable_name: field for field in planning_state.input_fields
+        record.value.variable_name: record.value
+        for record in planning_state.input_fields
     }
     if proposal.form_fields is None or "form_fields" not in proposal.model_fields_set:
         return proposal.model_copy(update={"form_fields": list(server_fields.values())})
@@ -285,9 +286,9 @@ def _apply_server_owned_input_fields(
     ]
     projected_names = {field.variable_name for field in projected_fields}
     projected_fields.extend(
-        field
-        for field in planning_state.input_fields
-        if field.variable_name not in projected_names
+        record.value
+        for record in planning_state.input_fields
+        if record.value.variable_name not in projected_names
     )
     return proposal.model_copy(update={"form_fields": projected_fields})
 

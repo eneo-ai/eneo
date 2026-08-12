@@ -116,34 +116,18 @@ def test_create_critic_feedback_covers_every_semantic_invariant() -> None:
     }
     covered_ids = set(CREATE_CRITIC_REMEDIATION)
 
-    assert semantic_ids == covered_ids
+    assert covered_ids == semantic_ids - {
+        "runtime_metadata_requires_form_fields",
+        "sectioned_form_intake_requires_form_fields",
+        "rich_workflow_requires_form_fields",
+        "form_fields_declared_must_be_referenced",
+    }
 
 
 def test_create_critic_feedback_remediations_do_not_leak_backend_mechanics() -> None:
-    # A None entry defers to the invariant's own rendered remediation, which
-    # carries the same no-mechanics obligation at its source.
     for remediation in CREATE_CRITIC_REMEDIATION.values():
-        if remediation is None:
-            continue
         for token in _CREATE_FEEDBACK_MECHANICS_TOKENS:
             assert token not in remediation
-
-
-def test_deferred_remediation_uses_the_invariant_wording() -> None:
-    from eneo.flows.ai_builder.ai_builder_critic_invariants import CriticIssue
-
-    feedback = format_create_critic_feedback(
-        (
-            CriticIssue(
-                id="runtime_metadata_requires_form_fields",
-                kind="semantic",
-                remediation="Deklarera ETT input_field per efterfrågat värde.",
-            ),
-        )
-    )
-
-    assert feedback is not None
-    assert "Deklarera ETT input_field per efterfrågat värde." in feedback
 
 
 @pytest.mark.parametrize(

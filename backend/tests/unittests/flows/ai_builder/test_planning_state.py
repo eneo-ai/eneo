@@ -16,6 +16,7 @@ from datetime import datetime, timezone
 import pytest
 from pydantic import ValidationError
 
+from eneo.flows.ai_builder.ai_builder_proposal_intent import FlowInputFieldIntent
 from eneo.flows.ai_builder.ai_builder_schema_evidence import (
     SCHEMA_MAX_JSON_BYTES,
     build_schema_evidence,
@@ -30,6 +31,7 @@ from eneo.flows.ai_builder.planning_state import (
     ArchitectureCommit,
     AttachmentCoverage,
     CheckpointIntent,
+    ConfirmedRuntimeMetadataField,
     ExampleOutputCitation,
     ExampleOutputConstraintEvidence,
     ExampleOutputSourceCoverage,
@@ -46,9 +48,9 @@ _VALID_ARCH_HASH = "a" * ARCHITECTURE_HASH_HEX_LENGTH
 
 
 class TestModuleConstants:
-    def test_builder_schema_version_is_seventeen(self) -> None:
-        # v17: named-result evidence is distinct from schema resolution.
-        assert BUILDER_SCHEMA_VERSION == 17
+    def test_builder_schema_version_is_eighteen(self) -> None:
+        # v18: confirmed runtime fields retain purpose and answer provenance.
+        assert BUILDER_SCHEMA_VERSION == 18
 
     def test_payload_cap_is_512_kibibytes(self) -> None:
         assert PLANNING_STATE_PAYLOAD_CAP_BYTES == 512 * 1024
@@ -80,6 +82,38 @@ class TestEmptyConstruction:
         assert state.input_schema_evidence is None
         assert state.output_schema_evidence is None
         assert state.architecture_commit is None
+
+
+class TestConfirmedRuntimeMetadataFields:
+    def test_state_round_trips_value_purpose_and_structured_answer_message(
+        self,
+    ) -> None:
+        state = PlanningState.empty()
+        state.input_fields = [
+            ConfirmedRuntimeMetadataField(
+                value=FlowInputFieldIntent(
+                    name="case_id",
+                    label="Case id",
+                    provenance="user_confirmed",
+                ),
+                purpose="interpret_input",
+                structured_answer_message_id="answer-2",
+            )
+        ]
+
+        restored = PlanningState.model_validate_json(state.model_dump_json())
+
+        assert restored.input_fields[0].value.variable_name == "case_id"
+        assert restored.input_fields[0].purpose == "interpret_input"
+        assert restored.input_fields[0].structured_answer_message_id == "answer-2"
+
+    def test_state_rejects_non_confirmed_runtime_metadata_value(self) -> None:
+        with pytest.raises(ValidationError):
+            ConfirmedRuntimeMetadataField(
+                value=FlowInputFieldIntent(name="case_id", label="Case id"),
+                purpose="interpret_input",
+                structured_answer_message_id="answer-2",
+            )
 
 
 class TestSchemaEvidence:

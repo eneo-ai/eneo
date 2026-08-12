@@ -56,7 +56,7 @@ from eneo.flows.flow_review_policy import FlowStepReviewMode
 from eneo.json_types import JsonObject
 
 PLANNER_CONTRACT_VERSION: int = 1
-BUILDER_SCHEMA_VERSION: int = 17
+BUILDER_SCHEMA_VERSION: int = 18
 # One state can retain two independently assigned 128-KiB schemas. The persisted
 # envelope leaves the other half for provenance, file roles, slots, and future
 # state growth without coupling the per-schema ceiling to the state ceiling.
@@ -88,6 +88,11 @@ SlotSource = Literal[
 
 SlotConfidence = Literal["high", "medium", "low"]
 SlotEvidenceLevel = Literal["explicit", "inferred"]
+RuntimeMetadataFieldPurpose = Literal[
+    "interpret_input",
+    "shape_result",
+    "whole_flow",
+]
 CheckpointProducerKind = Literal[
     "transcript",
     "structured_result",
@@ -192,6 +197,26 @@ class _PlanningModel(BaseModel):
     """
 
     model_config = ConfigDict(extra="forbid", validate_assignment=True)
+
+
+class ConfirmedRuntimeMetadataField(_PlanningModel):
+    """One confirmed runtime field with its durable placement evidence."""
+
+    value: FlowInputFieldIntent
+    purpose: RuntimeMetadataFieldPurpose
+    structured_answer_message_id: str = Field(min_length=1, max_length=128)
+
+    @field_validator("value", mode="after")
+    @classmethod
+    def require_confirmed_value(
+        cls,
+        value: FlowInputFieldIntent,
+    ) -> FlowInputFieldIntent:
+        if value.provenance != "user_confirmed":
+            raise ValueError(
+                "confirmed runtime metadata fields require user-confirmed values"
+            )
+        return value
 
 
 class PlanningSignal(_PlanningModel):
@@ -722,8 +747,9 @@ class PlanningState(_PlanningModel):
     )
     example_output_constraints: ExampleOutputConstraintEvidence | None = None
     example_output_schema_inference: ExampleOutputSchemaInferenceOutcome | None = None
-    input_fields: list[FlowInputFieldIntent] = Field(
-        default_factory=list[FlowInputFieldIntent]
+    input_fields: list[ConfirmedRuntimeMetadataField] = Field(
+        default_factory=list[ConfirmedRuntimeMetadataField],
+        max_length=20,
     )
     architecture_commit: ArchitectureCommit | None = None
     mapped_file_limit: MappedFileLimit = Field(default_factory=MappedFileLimit)

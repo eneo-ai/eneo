@@ -248,7 +248,10 @@ async def _dispatch_architecture_commit(
         ui_language=request.ui_language,
         discovery_assumptions=request.discovery_assumptions,
     )
-    if isinstance(turn_control.decision, ConfirmRequirements):
+    if isinstance(turn_control.decision, ConfirmRequirements) or (
+        isinstance(turn_control.decision, AskCanonicalQuestion)
+        and turn_control.decision.slot_name == "runtime_metadata_field_details"
+    ):
         chained = await dispatch_server_decision(
             ServerDecisionDispatchRequest(
                 repo=request.repo,

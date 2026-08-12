@@ -18,11 +18,7 @@ from eneo.flows.ai_builder.ai_builder_result_contract import (
     derive_result_contract,
 )
 from eneo.flows.ai_builder.ai_builder_runtime_input_fields import (
-    NO_EXTRA_RUNTIME_METADATA,
     RuntimeInputFieldHint,
-    RuntimeMetadataState,
-    normalize_runtime_metadata_state,
-    runtime_metadata_disables_declared_input_fields,
 )
 from eneo.flows.ai_builder.ai_builder_source_reader_contracts import SourceCaptureField
 from eneo.flows.ai_builder.pattern_registry import pattern_chain_steps
@@ -30,6 +26,7 @@ from eneo.flows.ai_builder.planning_state import (
     AggregationIntent,
     ArchitectureCommit,
     CheckpointIntent,
+    ConfirmedRuntimeMetadataField,
     PlanningState,
     ReportDisposition,
 )
@@ -55,9 +52,7 @@ class CreateCompileContext:
     pattern_ids: tuple[str, ...] = ()
     pattern_chain_steps: tuple[str, ...] = ()
     ui_language: str | None = None
-    runtime_metadata_state: RuntimeMetadataState | None = None
-    runtime_metadata_disables_declared_input_fields: bool = False
-    runtime_input_field_hints: tuple[RuntimeInputFieldHint, ...] = ()
+    runtime_input_fields: tuple[ConfirmedRuntimeMetadataField, ...] = ()
     template_placeholder_field_hints: tuple[RuntimeInputFieldHint, ...] = ()
     selected_template_count: int | None = None
     selected_template_placeholders: tuple[str, ...] | None = None
@@ -83,29 +78,27 @@ class CreateCompileContext:
             )
         if self.runtime_max_files is not None and self.runtime_max_files < 1:
             raise ValueError("runtime_max_files must be at least 1 when provided")
-        if (
-            self.runtime_metadata_disables_declared_input_fields
-            and self.runtime_metadata_state != NO_EXTRA_RUNTIME_METADATA
-        ):
-            raise ValueError(
-                "CreateCompileContext can disable declared input fields only "
-                "for an explicit no-extra-metadata decision"
-            )
 
     @property
-    def admitted_runtime_input_field_hints(
-        self,
-    ) -> tuple[RuntimeInputFieldHint, ...]:
-        if self.runtime_metadata_disables_declared_input_fields:
-            return ()
-        return self.runtime_input_field_hints
+    def runtime_input_field_hints(self) -> tuple[RuntimeInputFieldHint, ...]:
+        return tuple(
+            RuntimeInputFieldHint(
+                variable_name=record.value.variable_name,
+                label=record.value.label,
+                field_type=record.value.field_type,
+                required=record.value.required,
+                options=tuple(record.value.options),
+                provenance=record.value.provenance,
+            )
+            for record in self.runtime_input_fields
+        )
 
     @property
     def admitted_form_field_hints(self) -> tuple[RuntimeInputFieldHint, ...]:
         hints: list[RuntimeInputFieldHint] = []
         seen: set[str] = set()
         for hint in (
-            *self.admitted_runtime_input_field_hints,
+            *self.runtime_input_field_hints,
             *self.template_placeholder_field_hints,
         ):
             if hint.variable_name in seen:
@@ -121,19 +114,12 @@ class CreateCompileContext:
         return tuple(hints)
 
     @property
-    def confirmed_runtime_field_contract_closed(self) -> bool:
-        return any(
-            hint.provenance == "user_confirmed"
-            for hint in self.admitted_runtime_input_field_hints
-        )
-
-    @property
     def incompatible_confirmed_form_field_names(self) -> tuple[str, ...]:
         return tuple(
             dict.fromkeys(
                 hint.variable_name
                 for hint in (
-                    *self.admitted_runtime_input_field_hints,
+                    *self.runtime_input_field_hints,
                     *self.template_placeholder_field_hints,
                 )
                 if hint.provenance == "user_confirmed"
@@ -154,15 +140,7 @@ def create_compile_context_from_planning_state(
         EMPTY_REQUESTED_OUTPUT_SECTIONS
     ),
 ) -> CreateCompileContext | None:
-    runtime_metadata_state = _runtime_metadata_state_from_planning_state(planning_state)
-    metadata_disables_declared_input_fields = (
-        _runtime_metadata_disables_declared_input_fields_from_planning_state(
-            planning_state
-        )
-    )
-    runtime_input_field_hints = _runtime_input_field_hints_from_planning_state(
-        planning_state
-    )
+    runtime_input_fields = _runtime_input_fields_from_planning_state(planning_state)
     template_placeholder_field_hints = (
         _template_placeholder_field_hints_from_planning_state(planning_state)
     )
@@ -174,18 +152,14 @@ def create_compile_context_from_planning_state(
     if planning_state is None:
         if (
             ui_language is None
-            and not runtime_input_field_hints
+            and not runtime_input_fields
             and not template_placeholder_field_hints
             and not requested_output_sections.sections
         ):
             return None
         return CreateCompileContext(
             ui_language=ui_language,
-            runtime_metadata_state=runtime_metadata_state,
-            runtime_metadata_disables_declared_input_fields=(
-                metadata_disables_declared_input_fields
-            ),
-            runtime_input_field_hints=runtime_input_field_hints,
+            runtime_input_fields=runtime_input_fields,
             template_placeholder_field_hints=template_placeholder_field_hints,
             selected_template_count=None,
             requested_output_sections=requested_output_sections,
@@ -201,11 +175,7 @@ def create_compile_context_from_planning_state(
         pattern_ids=_pattern_ids_from_architecture(architecture),
         pattern_chain_steps=_pattern_chain_steps_from_architecture(architecture),
         ui_language=ui_language,
-        runtime_metadata_state=runtime_metadata_state,
-        runtime_metadata_disables_declared_input_fields=(
-            metadata_disables_declared_input_fields
-        ),
-        runtime_input_field_hints=runtime_input_field_hints,
+        runtime_input_fields=runtime_input_fields,
         template_placeholder_field_hints=template_placeholder_field_hints,
         selected_template_count=len(selected_template_roles),
         selected_template_placeholders=(
@@ -395,48 +365,12 @@ def _result_contract_output_field_description(
     raise ValueError(f"Unsupported result contract output field: {field_name}")
 
 
-def _runtime_metadata_state_from_planning_state(
+def _runtime_input_fields_from_planning_state(
     planning_state: PlanningState | None,
-) -> RuntimeMetadataState | None:
-    if planning_state is None:
-        return None
-    slot = planning_state.resolved_slots.get("runtime_metadata_fields")
-    return normalize_runtime_metadata_state(
-        slot.value if slot is not None and slot.is_commit_grade else None
-    )
-
-
-def _runtime_metadata_disables_declared_input_fields_from_planning_state(
-    planning_state: PlanningState | None,
-) -> bool:
-    if planning_state is None:
-        return False
-    slot = planning_state.resolved_slots.get("runtime_metadata_fields")
-    if slot is None or not slot.is_commit_grade:
-        return False
-    return runtime_metadata_disables_declared_input_fields(
-        state=normalize_runtime_metadata_state(slot.value),
-        source=slot.source,
-        confidence=slot.confidence,
-    )
-
-
-def _runtime_input_field_hints_from_planning_state(
-    planning_state: PlanningState | None,
-) -> tuple[RuntimeInputFieldHint, ...]:
+) -> tuple[ConfirmedRuntimeMetadataField, ...]:
     if planning_state is None:
         return ()
-    return tuple(
-        RuntimeInputFieldHint(
-            variable_name=field.variable_name,
-            label=field.label,
-            field_type=field.field_type,
-            required=field.required,
-            options=tuple(field.options),
-            provenance=field.provenance,
-        )
-        for field in planning_state.input_fields
-    )
+    return tuple(planning_state.input_fields)
 
 
 def _template_placeholder_field_hints_from_planning_state(

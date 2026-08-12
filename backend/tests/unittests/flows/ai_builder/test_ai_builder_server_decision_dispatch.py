@@ -303,6 +303,32 @@ async def test_architecture_commit_chains_persisted_requirements_confirmation() 
 
 
 @pytest.mark.asyncio
+async def test_architecture_commit_chains_runtime_metadata_field_question() -> None:
+    repo = AsyncMock()
+    repo.commit_turn.side_effect = [5, 6]
+    state = _confirmed_state()
+    state.resolved_slots["runtime_metadata_fields"] = _slot(
+        "runtime_metadata_fields",
+        "basic_runtime_metadata",
+    )
+    state.architecture_commit = _finalized_commit_for_state(state)
+    repo.load_planning_state.return_value = state
+    conversation = [ConversationMessage(role="user", content="Build a document flow")]
+    decision = CommitArchitecture(architecture_commit=_draft_for_state(state))
+
+    result = await dispatch_server_decision(
+        _request(repo=repo, decision=decision, conversation=conversation)
+    )
+
+    assert [event.event for event in result.events] == ["status", "text", "question"]
+    question = result.events[2]
+    assert isinstance(question, AIBuilderQuestionEvent)
+    assert question.data.question_id == "runtime_metadata_field_details"
+    assert repo.commit_turn.await_count == 2
+    assert result.new_planning_state_version == 6
+
+
+@pytest.mark.asyncio
 async def test_architecture_revision_persists_revised_commit_and_status() -> None:
     repo = AsyncMock()
     repo.commit_turn.side_effect = [5, 6]

@@ -4,7 +4,7 @@ import logging
 import re
 from collections.abc import Sequence
 from dataclasses import dataclass, replace
-from typing import Literal
+from typing import Literal, assert_never
 
 from eneo.flows.ai_builder.ai_builder_architecture_derivation import (
     architecture_hints_are_supported,
@@ -65,7 +65,11 @@ from eneo.flows.ai_builder.ai_builder_source_reader_contracts import (
     structured_fields_have_document_items,
     structured_fields_have_source_leaf,
 )
-from eneo.flows.ai_builder.planning_state import AggregationIntent, ReportDisposition
+from eneo.flows.ai_builder.planning_state import (
+    AggregationIntent,
+    ConfirmedRuntimeMetadataField,
+    ReportDisposition,
+)
 from eneo.flows.flow_authoring_spec import (
     FlowDraftSpecCore,
     FormFieldSpec,
@@ -101,7 +105,9 @@ CreateAssemblyRejectionReason = Literal[
     "document_report_compose_topology_missing",
     "empty_steps",
     "explicit_refs_not_supported",
+    "form_field_no_legal_target",
     "form_field_placement_mismatch",
+    "form_field_required_semantic_target_missing",
     "invalid_template_fill_mode",
     "plan_invariant_failed",
     "pure_audio_transcription_requires_no_reader_fields",
@@ -152,9 +158,16 @@ _REJECTION_FEEDBACK: dict[CreateAssemblyRejectionReason, str] = {
         "uses_previous_outputs. Describe the data needed in instructions and "
         "output_fields instead."
     ),
+    "form_field_no_legal_target": (
+        "A runtime form field has no legal target in the assembled flow topology."
+    ),
     "form_field_placement_mismatch": (
         "Every runtime form field must be referenced by at least one semantic "
         "step, and every referenced field must be declared."
+    ),
+    "form_field_required_semantic_target_missing": (
+        "A runtime form field's purpose requires a semantic target that does not "
+        "exist in the assembled flow topology."
     ),
     "invalid_template_fill_mode": (
         "template_fill output mode is only valid for DOCX template-fill flows."
@@ -243,6 +256,8 @@ def try_compile_create_intent_with_assembly(
     final_output_type: OutputType,
     final_output_mode: OutputMode | None,
     form_fields: Sequence[FormFieldSpec],
+    runtime_input_fields: Sequence[ConfirmedRuntimeMetadataField],
+    template_form_field_names: tuple[str, ...],
     pattern_ids: tuple[str, ...],
     chain_steps: tuple[str, ...],
     aggregation_intent: AggregationIntent,
@@ -266,6 +281,8 @@ def try_compile_create_intent_with_assembly(
             final_output_type=final_output_type,
             final_output_mode=final_output_mode,
             form_fields=form_fields,
+            runtime_input_fields=runtime_input_fields,
+            template_form_field_names=template_form_field_names,
             pattern_ids=pattern_ids,
             chain_steps=chain_steps,
             aggregation_intent=aggregation_intent,
@@ -296,6 +313,8 @@ def _assemble_create_intent(
     final_output_type: OutputType,
     final_output_mode: OutputMode | None,
     form_fields: Sequence[FormFieldSpec],
+    runtime_input_fields: Sequence[ConfirmedRuntimeMetadataField],
+    template_form_field_names: tuple[str, ...],
     pattern_ids: tuple[str, ...],
     chain_steps: tuple[str, ...],
     aggregation_intent: AggregationIntent,
@@ -358,6 +377,8 @@ def _assemble_create_intent(
             intent,
             runtime_input_type=runtime_input_type,
             form_fields=form_fields,
+            runtime_input_fields=runtime_input_fields,
+            template_form_field_names=template_form_field_names,
             source_reader_required_fields=source_reader_required_fields,
             runtime_required=runtime_required,
             runtime_max_files=runtime_max_files,
@@ -377,6 +398,8 @@ def _assemble_create_intent(
         return _assemble_pure_audio_transcription(
             intent,
             form_fields=form_fields,
+            runtime_input_fields=runtime_input_fields,
+            template_form_field_names=template_form_field_names,
             runtime_required=runtime_required,
             runtime_max_files=runtime_max_files,
             ui_language=ui_language,
@@ -391,8 +414,6 @@ def _assemble_create_intent(
     terminal_semantic_output_type = (
         OutputType.TEXT if document_artifact_requested else final_output_type
     )
-    form_field_names = {field.name for field in form_fields}
-    placed_form_fields: set[str] = set()
     planned_steps: list[PlannedStep] = []
     semantic_steps = _semantic_steps_without_terminal_document_render_helper(
         intent.steps,
@@ -400,8 +421,10 @@ def _assemble_create_intent(
         document_artifact_requested=document_artifact_requested,
         ui_language=ui_language,
     )
-    semantic_steps = admit_document_report_semantic_shape(
+    semantic_origin_eligibility = (True,) * len(semantic_steps)
+    semantic_steps, semantic_origin_eligibility = admit_document_report_semantic_shape(
         semantic_steps,
+        semantic_origin_eligibility,
         runtime_input_type=runtime_input_type,
         final_semantic_output_type=terminal_semantic_output_type,
         source_reader_required_fields=source_reader_required_fields,
@@ -430,6 +453,12 @@ def _assemble_create_intent(
                 ui_language=ui_language,
             )
         )
+        if followup_step_index is not None:
+            semantic_origin_eligibility = (
+                *semantic_origin_eligibility[:followup_step_index],
+                False,
+                *semantic_origin_eligibility[followup_step_index:],
+            )
     previous_output_type: OutputType | None = None
     has_source_prefix = False
     if runtime_input_type == InputType.AUDIO:
@@ -489,9 +518,7 @@ def _assemble_create_intent(
             aggregate_terminal_uses_source_refs=bool(aggregate_terminal_previous_refs),
         )
         if input_source == InputSource.ALL_PREVIOUS_STEPS and (
-            semantic_step.uses_form_fields
-            or semantic_step.uses_previous_fields
-            or semantic_step.uses_previous_outputs
+            semantic_step.uses_previous_fields or semantic_step.uses_previous_outputs
         ):
             return _reject(
                 "all_previous_step_cannot_use_explicit_refs",
@@ -565,7 +592,7 @@ def _assemble_create_intent(
                 if index == 0 and runtime_input_type in _FILE_INPUT_TYPES
                 else None
             ),
-            form_field_refs=tuple(semantic_step.uses_form_fields),
+            semantic_origin_eligible=semantic_origin_eligibility[index],
             previous_field_refs=previous_field_refs,
             previous_output_refs=previous_output_refs,
             output_fields=tuple(semantic_step.output_fields or ()),
@@ -574,11 +601,8 @@ def _assemble_create_intent(
             citations_requested=semantic_step.citations_requested,
         )
         planned_steps.append(planned_step)
-        placed_form_fields.update(planned_step.form_field_refs)
         previous_output_type = step_output_type
 
-    if placed_form_fields != form_field_names:
-        return _reject("form_field_placement_mismatch")
     if document_artifact_requested:
         renderer_step = render_verbatim_step(
             output_type=final_output_type,
@@ -627,6 +651,15 @@ def _assemble_create_intent(
             field_diagnostics=field_diagnostics,
         )
     )
+    placement = _place_runtime_form_fields(
+        planned_steps=completed_steps,
+        form_fields=admitted_form_fields,
+        runtime_input_fields=runtime_input_fields,
+        template_form_field_names=template_form_field_names,
+    )
+    if isinstance(placement, CreateAssemblyRejection):
+        return placement
+    completed_steps = placement
     return FlowAssemblyPlan(
         flow_name=intent.flow_name,
         flow_description=intent.flow_description or "",
@@ -903,7 +936,7 @@ def _looks_like_terminal_document_render_helper(
     *,
     final_output_type: OutputType,
 ) -> bool:
-    if step.uses_form_fields or step.knowledge_refs or step.citations_requested:
+    if step.knowledge_refs or step.citations_requested:
         return False
     return _mentions_output_artifact_type(
         f"{step.name} {step.instructions}",
@@ -928,6 +961,8 @@ def _assemble_docx_template_fill(
     *,
     runtime_input_type: InputType,
     form_fields: Sequence[FormFieldSpec],
+    runtime_input_fields: Sequence[ConfirmedRuntimeMetadataField],
+    template_form_field_names: tuple[str, ...],
     source_reader_required_fields: tuple[SourceCaptureField, ...],
     runtime_required: bool,
     runtime_max_files: int | None,
@@ -942,7 +977,6 @@ def _assemble_docx_template_fill(
     # assembles to the same linear template topology.
     if runtime_input_type not in _FILE_INPUT_TYPES:
         return _reject("docx_template_shape_unsupported")
-    form_field_names = {field.name for field in form_fields}
     reader_step = template_variable_reader_step(
         runtime_input_type=runtime_input_type,
         runtime_required=runtime_required,
@@ -982,24 +1016,13 @@ def _assemble_docx_template_fill(
                         "docx_template_shape_unsupported",
                         step_index=step_index,
                     )
-                if not set(semantic_step.uses_form_fields) <= form_field_names:
-                    return _reject(
-                        "docx_template_form_fields_mismatch",
-                        step_index=step_index,
-                    )
                 step_output_type = OutputType.TEXT
                 step_input_type = (
                     InputType.TEXT
-                    if semantic_step.uses_form_fields
-                    or previous_step.output_type == OutputType.TEXT
+                    if previous_step.output_type == OutputType.TEXT
                     else InputType.JSON
                 )
         else:
-            if semantic_step.uses_form_fields:
-                return _reject(
-                    "docx_template_shape_unsupported",
-                    step_index=step_index,
-                )
             step_output_type = _linear_step_output_type(
                 output_type=semantic_step.output_type,
                 output_fields=semantic_step.output_fields,
@@ -1038,7 +1061,7 @@ def _assemble_docx_template_fill(
                 previous_step=previous_step,
                 previous_field_refs=(),
             ),
-            form_field_refs=tuple(semantic_step.uses_form_fields),
+            semantic_origin_eligible=True,
             output_fields=tuple(semantic_step.output_fields or ()),
             model_ref=semantic_step.model_ref,
             knowledge_refs=tuple(semantic_step.knowledge_refs),
@@ -1048,19 +1071,8 @@ def _assemble_docx_template_fill(
         previous_step = planned_step
 
     fixed_template_fill_step = template_fill_step(ui_language=ui_language)
-    # Form fields no semantic step references are consumed by the template
-    # itself: the fill step carries them so their placement stays explicit.
-    referenced_field_names = {
-        field_name
-        for semantic_step in intent.steps
-        for field_name in semantic_step.uses_form_fields
-    }
-    template_bound_field_names = tuple(
-        field.name for field in form_fields if field.name not in referenced_field_names
-    )
     fixed_template_fill_step = replace(
         fixed_template_fill_step,
-        form_field_refs=template_bound_field_names,
         underlag_channel=derive_underlag_channel(
             input_source=fixed_template_fill_step.input_source,
             input_type=fixed_template_fill_step.input_type,
@@ -1086,6 +1098,15 @@ def _assemble_docx_template_fill(
             field_diagnostics=field_diagnostics,
         )
     )
+    placement = _place_runtime_form_fields(
+        planned_steps=completed_steps,
+        form_fields=admitted_form_fields,
+        runtime_input_fields=runtime_input_fields,
+        template_form_field_names=template_form_field_names,
+    )
+    if isinstance(placement, CreateAssemblyRejection):
+        return placement
+    completed_steps = placement
     return FlowAssemblyPlan(
         flow_name=intent.flow_name,
         flow_description=intent.flow_description or "",
@@ -1234,16 +1255,17 @@ def _assemble_pure_audio_transcription(
     intent: CreateFlowIntent,
     *,
     form_fields: Sequence[FormFieldSpec],
+    runtime_input_fields: Sequence[ConfirmedRuntimeMetadataField],
+    template_form_field_names: tuple[str, ...],
     runtime_required: bool,
     runtime_max_files: int | None,
     ui_language: str | None,
 ) -> FlowAssemblyPlan | CreateAssemblyRejection:
-    if len(intent.steps) != 1 or form_fields:
+    if len(intent.steps) != 1:
         return _reject("pure_audio_transcription_shape_unsupported")
     semantic_step = intent.steps[0]
     if (
         semantic_step.output_fields
-        or semantic_step.uses_form_fields
         or semantic_step.uses_previous_fields
         or semantic_step.uses_previous_outputs
         or semantic_step.output_type not in {None, OutputType.TEXT}
@@ -1259,15 +1281,129 @@ def _assemble_pure_audio_transcription(
         runtime_max_files=runtime_max_files,
         ui_language=ui_language,
     )
+    placement = _place_runtime_form_fields(
+        planned_steps=(planned_step,),
+        form_fields=tuple(form_fields),
+        runtime_input_fields=runtime_input_fields,
+        template_form_field_names=template_form_field_names,
+    )
+    if isinstance(placement, CreateAssemblyRejection):
+        return placement
     return FlowAssemblyPlan(
         flow_name=intent.flow_name,
         flow_description=intent.flow_description or "",
-        form_fields=(),
-        steps=(planned_step,),
+        form_fields=tuple(form_fields),
+        steps=placement,
         terminal_output_schema=None,
         source_reader_required_fields=(),
         aggregation_intent="linear",
         ui_language=ui_language,
+    )
+
+
+def _place_runtime_form_fields(
+    *,
+    planned_steps: tuple[PlannedStep, ...],
+    form_fields: tuple[FormFieldSpec, ...],
+    runtime_input_fields: Sequence[ConfirmedRuntimeMetadataField],
+    template_form_field_names: tuple[str, ...],
+) -> tuple[PlannedStep, ...] | CreateAssemblyRejection:
+    """Place server-owned runtime fields on the completed create topology."""
+
+    declared_names = {field.name for field in form_fields}
+    runtime_fields_by_name = {
+        record.value.variable_name: record for record in runtime_input_fields
+    }
+    template_names = set(template_form_field_names) & declared_names
+    semantic_target_indexes = tuple(
+        index
+        for index, step in enumerate(planned_steps)
+        if step.semantic_origin_eligible
+        and step.input_source != InputSource.ALL_PREVIOUS_STEPS
+    )
+    template_target_index = next(
+        (
+            index
+            for index, step in enumerate(planned_steps)
+            if step.role == "template_fill"
+        ),
+        None,
+    )
+    field_names_by_step: list[list[str]] = [[] for _ in planned_steps]
+    for field in form_fields:
+        name = field.name
+        record = runtime_fields_by_name.get(name)
+        has_template_target = (
+            name in template_names and template_target_index is not None
+        )
+        semantic_indexes: tuple[int, ...] = ()
+        if record is not None:
+            match record.purpose:
+                case "interpret_input":
+                    if not semantic_target_indexes:
+                        return _reject(
+                            "form_field_required_semantic_target_missing",
+                            detail=(
+                                f"Runtime form field {name!r} requires an input "
+                                "interpretation target, but none exists."
+                            ),
+                        )
+                    semantic_indexes = semantic_target_indexes[:1]
+                case "shape_result":
+                    if not has_template_target:
+                        if not semantic_target_indexes:
+                            return _reject(
+                                "form_field_required_semantic_target_missing",
+                                detail=(
+                                    f"Runtime form field {name!r} requires a result "
+                                    "shaping target, but none exists."
+                                ),
+                            )
+                        semantic_indexes = semantic_target_indexes[-1:]
+                case "whole_flow":
+                    if not semantic_target_indexes:
+                        return _reject(
+                            "form_field_required_semantic_target_missing",
+                            detail=(
+                                f"Runtime form field {name!r} requires semantic "
+                                "targets, but none exist."
+                            ),
+                        )
+                    semantic_indexes = semantic_target_indexes
+                case _ as unsupported_purpose:
+                    assert_never(unsupported_purpose)
+        elif not has_template_target:
+            return _reject(
+                "form_field_no_legal_target",
+                detail=f"Runtime form field {name!r} has no legal target.",
+            )
+
+        target_indexes = tuple(
+            dict.fromkeys(
+                (
+                    *semantic_indexes,
+                    *(
+                        (template_target_index,)
+                        if has_template_target and template_target_index is not None
+                        else ()
+                    ),
+                )
+            )
+        )
+        if not target_indexes:
+            return _reject(
+                "form_field_no_legal_target",
+                detail=f"Runtime form field {name!r} has no legal target.",
+            )
+        for target_index in target_indexes:
+            field_names_by_step[target_index].append(name)
+
+    return tuple(
+        replace(
+            step,
+            form_field_refs=tuple(dict.fromkeys(field_names_by_step[index])),
+        )
+        for index, step in enumerate(planned_steps)
     )
 
 

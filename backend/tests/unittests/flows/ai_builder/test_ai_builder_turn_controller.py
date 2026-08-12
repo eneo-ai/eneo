@@ -158,6 +158,50 @@ def test_server_builds_ask_question_for_allowed_target() -> None:
 
 
 @pytest.mark.parametrize(
+    "runtime_metadata_state",
+    ["basic_runtime_metadata", "detailed_runtime_metadata"],
+)
+def test_server_collects_runtime_field_details_before_requirements_confirmation(
+    runtime_metadata_state: str,
+) -> None:
+    state = _state(
+        primary_runtime_input="text",
+        terminal_output="structured_text",
+        runtime_metadata_fields=runtime_metadata_state,
+    )
+    state.architecture_commit = _finalized_commit_for_state(state)
+
+    decision = _decision(state=state, ui_language="en")
+
+    assert isinstance(decision, AskCanonicalQuestion)
+    assert decision.slot_name == "runtime_metadata_field_details"
+    assert decision.question is not None
+    assert decision.question.question_data.input_field_collection is True
+    assert [option.value for option in decision.question.question_data.options] == [
+        "interpret_input",
+        "shape_result",
+        "whole_flow",
+    ]
+    assert [option.label for option in decision.question.question_data.options] == [
+        "Use it to understand the input",
+        "Use it to shape the final result",
+        "Use it throughout the flow",
+    ]
+
+
+def test_omitted_runtime_metadata_keeps_visible_no_extra_fields_assumption() -> None:
+    state = _state(
+        primary_runtime_input="text",
+        terminal_output="structured_text",
+    )
+    state.architecture_commit = _finalized_commit_for_state(state)
+
+    decision = _decision(state=state, ui_language="en")
+
+    assert isinstance(decision, ConfirmRequirements)
+
+
+@pytest.mark.parametrize(
     ("ui_language", "expected_message"),
     [
         (

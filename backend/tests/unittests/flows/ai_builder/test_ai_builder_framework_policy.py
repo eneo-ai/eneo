@@ -1048,7 +1048,7 @@ def test_extract_answer_signals_infers_metadata_needs_without_structured_slot() 
     )
 
     assert "structured_analysis_need" not in signals
-    assert "detailed_runtime_metadata" in signals["runtime_metadata_fields"]
+    assert "basic_runtime_metadata" in signals["runtime_metadata_fields"]
 
 
 def test_extract_answer_signals_does_not_emit_structured_analysis_slot() -> None:
@@ -1202,7 +1202,7 @@ def test_extract_answer_signals_infers_common_runtime_metadata_field_names() -> 
         ]
     )
 
-    assert "detailed_runtime_metadata" in signals["runtime_metadata_fields"]
+    assert "basic_runtime_metadata" in signals["runtime_metadata_fields"]
 
 
 def test_extract_answer_signals_does_not_infer_runtime_metadata_from_output_fields() -> (
@@ -2033,6 +2033,7 @@ def test_supported_structured_question_ids_partition_catalog_and_policy_ids() ->
             "final_output_scope",
             "flow_input_architecture",
             "output_reader",
+            "runtime_metadata_field_details",
             "schema_direction",
             "processing_scope",
         }

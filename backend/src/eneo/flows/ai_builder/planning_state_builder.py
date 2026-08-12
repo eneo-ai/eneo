@@ -53,7 +53,6 @@ from eneo.flows.ai_builder.ai_builder_framework_policy import (
 from eneo.flows.ai_builder.ai_builder_input_architecture_policy import (
     resolve_input_intent,
 )
-from eneo.flows.ai_builder.ai_builder_proposal_intent import FlowInputFieldIntent
 from eneo.flows.ai_builder.ai_builder_requirements_state import (
     RequirementsState,
     resolve_requirements_state,
@@ -63,9 +62,7 @@ from eneo.flows.ai_builder.ai_builder_result_contract import (
     RESULT_OBLIGATION_VALUES,
 )
 from eneo.flows.ai_builder.ai_builder_runtime_input_fields import (
-    DETAILED_RUNTIME_METADATA,
     NO_EXTRA_RUNTIME_METADATA,
-    extract_runtime_input_field_hints,
     infer_runtime_metadata_slot,
 )
 from eneo.flows.ai_builder.ai_builder_schema_evidence import (
@@ -92,6 +89,7 @@ from eneo.flows.ai_builder.planning_state import (
     TEMPLATE_PLACEHOLDER_EVIDENCE_PREFIX,
     TEMPLATE_PLACEHOLDER_SOURCE_EVIDENCE_SUFFIX,
     CheckpointIntent,
+    ConfirmedRuntimeMetadataField,
     ExampleOutputConstraintEvidence,
     ExampleOutputSchemaInferenceOutcome,
     FileRole,
@@ -267,7 +265,7 @@ def _mapped_file_limit(
 
 def _confirmed_input_fields(
     conversation: list[ConversationMessage],
-) -> list[FlowInputFieldIntent]:
+) -> list[ConfirmedRuntimeMetadataField]:
     for message in reversed(conversation):
         answer = question_answer_from_metadata(message.metadata)
         if (
@@ -275,7 +273,14 @@ def _confirmed_input_fields(
             and answer.question_id == "runtime_metadata_field_details"
             and answer.input_fields is not None
         ):
-            return list(answer.input_fields)
+            return [
+                ConfirmedRuntimeMetadataField(
+                    value=field.value,
+                    purpose=field.purpose,
+                    structured_answer_message_id=message.message_id,
+                )
+                for field in answer.input_fields
+            ]
     return []
 
 
@@ -1688,11 +1693,6 @@ def _heuristic_slot_confidence(
         if (
             slot_value == NO_EXTRA_RUNTIME_METADATA
             and inferred_runtime_metadata == NO_EXTRA_RUNTIME_METADATA
-        ):
-            return "high"
-        if (
-            slot_value == DETAILED_RUNTIME_METADATA
-            and extract_runtime_input_field_hints(freeform_text)
         ):
             return "high"
     if question_id != "primary_runtime_input" or not freeform_text:

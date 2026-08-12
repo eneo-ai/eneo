@@ -91,6 +91,7 @@ export interface FlowAIBuilderState {
   statusMessage: AIBuilderStatus | null;
   availableModels: AIBuilderModel[];
   selectedModelId: string | null;
+  selectedReasoningEffort: string | null;
   modelLoadStatus: ModelLoadStatus;
   draftSessions: AIBuilderDraftSession[];
   pendingOperation: PendingPlanOperation | null;
@@ -111,6 +112,7 @@ export function createInitialFlowAIBuilderState(): FlowAIBuilderState {
     statusMessage: null,
     availableModels: [],
     selectedModelId: null,
+    selectedReasoningEffort: null,
     modelLoadStatus: "idle",
     draftSessions: [],
     pendingOperation: null,
@@ -145,6 +147,9 @@ function toPersistedQuestionAnswerMetadata(
   }
   if (questionAnswer.custom_value != null) {
     metadata.custom_value = questionAnswer.custom_value;
+  }
+  if (questionAnswer.input_fields != null) {
+    metadata.input_fields = questionAnswer.input_fields;
   }
   return metadata;
 }
@@ -280,6 +285,12 @@ export class FlowAIBuilderDriver {
 
   selectModel(modelId: string): void {
     this.#state.selectedModelId = modelId;
+    this.#state.selectedReasoningEffort = null;
+    this.#notify();
+  }
+
+  selectReasoningEffort(reasoningEffort: string | null): void {
+    this.#state.selectedReasoningEffort = reasoningEffort;
     this.#notify();
   }
 
@@ -538,6 +549,9 @@ export class FlowAIBuilderDriver {
     };
     if (this.#state.selectedModelId) {
       requestBody.model_id = this.#state.selectedModelId;
+    }
+    if (this.#state.selectedReasoningEffort) {
+      requestBody.reasoning_effort = this.#state.selectedReasoningEffort;
     }
     if (questionAnswer) {
       requestBody.question_answer = questionAnswer;
@@ -1227,6 +1241,7 @@ export class FlowAIBuilderDriver {
       if (!this.#ownsSession(owner)) return;
       this.#state.availableModels = result.models;
       this.#state.selectedModelId = result.default_model_id;
+      this.#state.selectedReasoningEffort = null;
       this.#state.modelLoadStatus = "loaded";
       this.#notify();
     } catch {

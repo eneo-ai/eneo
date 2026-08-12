@@ -132,11 +132,14 @@ describe("structured question answer helpers", () => {
 
     const result = buildStructuredQuestionInputFieldsAnswer(question, [
       {
-        name: " category ",
-        label: " Category ",
-        type: "multiselect",
-        required: true,
-        options: ["A", " B "]
+        value: {
+          name: " category ",
+          label: " Category ",
+          type: "multiselect",
+          required: true,
+          options: ["A", " B "]
+        },
+        purpose: "shape_result"
       }
     ]);
 
@@ -147,11 +150,14 @@ describe("structured question answer helpers", () => {
         question_id: "runtime_metadata_field_details",
         input_fields: [
           {
-            name: "category",
-            label: "Category",
-            type: "multiselect",
-            required: true,
-            options: ["A", "B"]
+            value: {
+              name: "category",
+              label: "Category",
+              type: "multiselect",
+              required: true,
+              options: ["A", "B"]
+            },
+            purpose: "shape_result"
           }
         ]
       }

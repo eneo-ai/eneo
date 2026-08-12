@@ -339,6 +339,19 @@ def test_openapi_ai_builder_turn_retry_contract_is_strict(
         ][0]["maxLength"]
         == 500
     )
+    assert structured_answer["properties"]["input_fields"]["anyOf"][0] == {
+        "items": {"$ref": "#/components/schemas/RuntimeMetadataFieldAnswer"},
+        "maxItems": 20,
+        "type": "array",
+    }
+    field_answer = schemas["RuntimeMetadataFieldAnswer"]
+    assert field_answer["additionalProperties"] is False
+    assert field_answer["required"] == ["value", "purpose"]
+    assert field_answer["properties"]["purpose"]["enum"] == [
+        "interpret_input",
+        "shape_result",
+        "whole_flow",
+    ]
     assert lifecycle["additionalProperties"] is False
     assert lifecycle["properties"]["retry_request"] == {
         "$ref": "#/components/schemas/SendMessageRequest"

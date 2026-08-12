@@ -200,14 +200,52 @@ def test_free_text_for_non_classifier_question_remains_response_only() -> None:
     assert "question_answer" not in prepared.metadata
 
 
-def test_free_text_for_unsupported_pending_question_records_no_response() -> None:
+def test_free_text_for_pending_field_details_records_response_only() -> None:
     prepared = prepare_user_question_metadata(
         conversation=_pending_question_conversation("runtime_metadata_field_details"),
         message="Case id",
         question_answer=None,
     )
 
-    assert prepared.metadata is None
+    assert prepared.metadata == {
+        "question_response": {"question_id": "runtime_metadata_field_details"}
+    }
+
+
+def test_runtime_metadata_field_collection_is_accepted_as_a_real_answer() -> None:
+    prepared = prepare_user_question_metadata(
+        conversation=_pending_question_conversation("runtime_metadata_field_details"),
+        message="Case id",
+        question_answer={
+            "kind": "structured_question_answer",
+            "question_id": "runtime_metadata_field_details",
+            "input_fields": [
+                {
+                    "value": {"name": "case_id", "label": "Case id"},
+                    "purpose": "interpret_input",
+                }
+            ],
+        },
+    )
+
+    assert prepared.metadata == {
+        "question_answer": {
+            "question_id": "runtime_metadata_field_details",
+            "input_fields": [
+                {
+                    "value": {
+                        "variable_name": "case_id",
+                        "label": "Case id",
+                        "field_type": "text",
+                        "required": False,
+                        "options": [],
+                        "provenance": "user_confirmed",
+                    },
+                    "purpose": "interpret_input",
+                }
+            ],
+        }
+    }
 
 
 def test_answered_question_is_not_attributed_to_later_free_text() -> None:

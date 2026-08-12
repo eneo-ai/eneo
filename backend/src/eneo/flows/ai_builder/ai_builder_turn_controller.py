@@ -62,6 +62,7 @@ from eneo.flows.ai_builder.question_catalog import (
     legal_slot_values,
     render_question,
     render_summary_label,
+    runtime_metadata_field_details_question,
 )
 from eneo.flows.flow_review_policy import FlowStepReviewMode
 
@@ -209,6 +210,15 @@ def resolve_turn_control(
                 question=question,
             )
         )
+    if action_policy.allowed_action_kinds == (
+        "confirm_requirements",
+    ) and _runtime_input_field_details_required(session_state):
+        return BuilderTurnControl(
+            decision=AskCanonicalQuestion(
+                slot_name="runtime_metadata_field_details",
+                question=_runtime_input_field_details_question(locale),
+            )
+        )
     requirements_payload = _confirm_requirements_payload(
         session_state,
         locale,
@@ -221,6 +231,54 @@ def resolve_turn_control(
             requirements_payload=requirements_payload,
             attachment_evidence_fingerprint=attachment_evidence_fingerprint,
         ),
+    )
+
+
+def _runtime_input_field_details_required(session_state: PlanningState) -> bool:
+    return (
+        session_state.commit_grade_slot_value("runtime_metadata_fields")
+        in {"basic_runtime_metadata", "detailed_runtime_metadata"}
+        and not session_state.input_fields
+    )
+
+
+def _runtime_input_field_details_question(locale: Locale) -> BackendQuestion:
+    purpose_options = (
+        (
+            "interpret_input",
+            "Använd för att förstå indata",
+            "Use it to understand the input",
+        ),
+        (
+            "shape_result",
+            "Använd för att forma slutresultatet",
+            "Use it to shape the final result",
+        ),
+        (
+            "whole_flow",
+            "Använd genom hela flödet",
+            "Use it throughout the flow",
+        ),
+    )
+    question_text = runtime_metadata_field_details_question(locale)
+    return BackendQuestion(
+        question_data=StructuredQuestionPayload(
+            question_id="runtime_metadata_field_details",
+            question=question_text,
+            options=[
+                StructuredQuestionOptionPayload(
+                    id=value,
+                    label=label_sv if locale == "sv" else label_en,
+                    value=value,
+                )
+                for value, label_sv, label_en in purpose_options
+            ],
+            selection_mode="single",
+            allow_custom=False,
+            requires_confirm=True,
+            input_field_collection=True,
+        ),
+        assistant_text=question_text,
     )
 
 

@@ -16,9 +16,12 @@
     buildStructuredQuestionInputFieldsAnswer,
     buildStructuredQuestionSelection,
     getStructuredQuestionOptionKey,
+    isStructuredInputFieldPurpose,
     toggleStructuredQuestionOption,
     type StructuredQuestion,
     type StructuredQuestionAnswerPayload,
+    type StructuredInputFieldAnswer,
+    type StructuredInputFieldPurpose,
     type StructuredInputFieldType,
     type StructuredQuestionOption
   } from "./structuredQuestionAnswer";
@@ -59,7 +62,8 @@
       label: "",
       fieldType: "text" as StructuredInputFieldType,
       required: false,
-      optionsText: ""
+      optionsText: "",
+      purpose: "" as StructuredInputFieldPurpose | ""
     }
   ]);
 
@@ -67,6 +71,9 @@
   const isSchemaDirection = $derived(question.question_id === "schema_direction");
   const requiresConfirm = $derived(question.requires_confirm === true);
   const isInputFieldCollection = $derived(question.input_field_collection === true);
+  const purposeOptions = $derived(
+    question.options.filter((option) => isStructuredInputFieldPurpose(option.value))
+  );
   const matchingOptions = $derived.by(() => {
     if (!isSchemaDirection) return question.options;
     const query = optionFilter.trim().toLocaleLowerCase();
@@ -108,6 +115,7 @@
         (field) =>
           field.variableName.trim().length > 0 &&
           field.label.trim().length > 0 &&
+          isStructuredInputFieldPurpose(field.purpose) &&
           (!["select", "multiselect"].includes(field.fieldType) ||
             field.optionsText.trim().length > 0)
       );
@@ -161,18 +169,21 @@
   function handleConfirm() {
     if (!canConfirm || disabled) return;
     if (isInputFieldCollection) {
-      onanswer?.(
-        buildStructuredQuestionInputFieldsAnswer(
-          question,
-          inputFields.map((field) => ({
+      const completedFields: StructuredInputFieldAnswer[] = [];
+      for (const field of inputFields) {
+        if (!isStructuredInputFieldPurpose(field.purpose)) return;
+        completedFields.push({
+          value: {
             name: field.variableName,
             label: field.label,
             type: field.fieldType,
             required: field.required,
             options: field.optionsText.split(",")
-          }))
-        )
-      );
+          },
+          purpose: field.purpose
+        });
+      }
+      onanswer?.(buildStructuredQuestionInputFieldsAnswer(question, completedFields));
       return;
     }
     if (customSelected) {
@@ -202,7 +213,8 @@
       label: "",
       fieldType: "text",
       required: false,
-      optionsText: ""
+      optionsText: "",
+      purpose: ""
     });
   }
 
@@ -249,6 +261,24 @@
                 <option value="date">{m.flow_form_field_type_date()}</option>
                 <option value="select">{m.flow_form_field_type_select()}</option>
                 <option value="multiselect">{m.flow_form_field_type_multiselect()}</option>
+              </select>
+            </label>
+            <label class="field-purpose">
+              <span class="sr-only">
+                {field.label.trim() ||
+                  field.variableName.trim() ||
+                  m.ai_builder_question_field_label()}:
+                {question.question}
+              </span>
+              <select
+                bind:value={field.purpose}
+                aria-label={`${field.label.trim() || field.variableName.trim() || m.ai_builder_question_field_label()}: ${question.question}`}
+                {disabled}
+              >
+                <option value="" disabled>—</option>
+                {#each purposeOptions as option (getStructuredQuestionOptionKey(option))}
+                  <option value={option.value}>{option.label}</option>
+                {/each}
               </select>
             </label>
             {#if field.fieldType === "select" || field.fieldType === "multiselect"}
@@ -566,6 +596,10 @@
   }
 
   .field-options {
+    @apply col-span-2;
+  }
+
+  .field-purpose {
     @apply col-span-2;
   }
 

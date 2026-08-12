@@ -27426,6 +27426,15 @@ export interface components {
         | "provider_calls"
         | "whole_bundle";
     };
+    /** RuntimeMetadataFieldAnswer */
+    RuntimeMetadataFieldAnswer: {
+      /**
+       * Purpose
+       * @enum {string}
+       */
+      purpose: "interpret_input" | "shape_result" | "whole_flow";
+      value: components["schemas"]["FlowInputFieldIntent"];
+    };
     /** SSEEneoEvent */
     SSEEneoEvent: {
       eneo_event_type: components["schemas"]["EneoEventType"];
@@ -29647,7 +29656,7 @@ export interface components {
       /** Custom Value */
       custom_value?: string | null;
       /** Input Fields */
-      input_fields?: components["schemas"]["FlowInputFieldIntent"][] | null;
+      input_fields?: components["schemas"]["RuntimeMetadataFieldAnswer"][] | null;
       /**
        * @description discriminator enum property added by openapi-typescript
        * @enum {string}

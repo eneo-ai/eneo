@@ -79,7 +79,6 @@ _STEP_ASSUMPTIONS_DIAGNOSTIC_INTENT: dict[str, Any] = {
             ],
             "model_ref": "model.gpt-5-4-2026-03-05",
             "citations_requested": False,
-            "uses_form_fields": [],
             "knowledge_refs": [],
             "assumptions": [
                 (
@@ -189,7 +188,6 @@ _STEP_ASSUMPTIONS_DIAGNOSTIC_INTENT: dict[str, Any] = {
             ],
             "model_ref": "model.gpt-5-4-2026-03-05",
             "citations_requested": False,
-            "uses_form_fields": [],
             "knowledge_refs": [],
             "assumptions": [
                 (

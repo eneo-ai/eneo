@@ -2033,7 +2033,6 @@ def test_create_proposal_does_not_own_runtime_hint_derivation() -> None:
         {
             "runtime_metadata_state_from_planning_state",
             "_runtime_metadata_state_from_planning_state",
-            "extract_runtime_input_field_hints",
             "runtime_metadata_allows_input_fields",
         }
     )

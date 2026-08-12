@@ -13,19 +13,9 @@ def format_revision_feedback(title: str, issues: list[str]) -> str:
 
 
 # Raw critic remediations stay mechanics-oriented for edit/compiled contexts.
-# Create mode translates them here because propose_flow only accepts semantic
-# create steps. A None entry keeps the invariant's own rendered remediation —
-# the single owner of per-context wording (a live journey looped four
-# identical proposals because this table's static "describe the fields" text
-# shadowed the remediation that quotes the user's requested values).
-CREATE_CRITIC_REMEDIATION: dict[str, str | None] = {
-    "runtime_metadata_requires_form_fields": None,
-    "sectioned_form_intake_requires_form_fields": (
-        "Beskriv varje rubrik eller sektion som ett eget inmatningsfält och låt senare semantiska steg använda dessa värden för slutresultatet."
-    ),
-    "rich_workflow_requires_form_fields": (
-        "Lägg till de manuella kompletteringarna som namngivna inmatningsfält i intentionen och beskriv vilka steg som behöver dem."
-    ),
+# Create mode translates its remaining semantic invariants here because
+# propose_flow only accepts semantic create steps.
+CREATE_CRITIC_REMEDIATION: dict[str, str] = {
     "rich_workflow_requires_json_contract_step": (
         'Lägg till ett mellanliggande extraktionssteg med output_type="json" och output_fields med namngivna fält innan analys, rapport eller dokumentleverans.'
     ),
@@ -62,9 +52,6 @@ CREATE_CRITIC_REMEDIATION: dict[str, str | None] = {
     "final_text_step_must_reference_relevant_structured_outputs": (
         "Beskriv ett semantiskt kompositionssteg som väver in relevanta strukturerade resultat från flera tidigare steg, inte bara det senaste."
     ),
-    "form_fields_declared_must_be_referenced": (
-        "Koppla varje deklarerat inmatningsfält till minst ett semantiskt steg som faktiskt behöver värdet, eller ta bort fältet från planen."
-    ),
     "simple_text_transform_must_remain_single_step": (
         "För en direkt textomvandling utan filer, JSON, extra fält eller granskning ska intentionen innehålla ett enda textsteg som gör omvandlingen."
     ),
@@ -86,10 +73,7 @@ def format_create_critic_feedback(issues: tuple[CriticIssue, ...]) -> str | None
                 f"Create critic feedback requires semantic issues; received {issue.id}"
             )
         if issue.id in CREATE_CRITIC_REMEDIATION:
-            translation = CREATE_CRITIC_REMEDIATION[issue.id]
-            remediations.append(
-                translation if translation is not None else issue.remediation
-            )
+            remediations.append(CREATE_CRITIC_REMEDIATION[issue.id])
             continue
         raise ValueError(f"No create-mode critic remediation registered for {issue.id}")
 

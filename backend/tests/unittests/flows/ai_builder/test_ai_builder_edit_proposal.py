@@ -24,6 +24,7 @@ from eneo.flows.ai_builder.ai_builder_schema_evidence import (
 )
 from eneo.flows.ai_builder.planning_state import (
     ArchitectureCommitDraft,
+    ConfirmedRuntimeMetadataField,
     PlanningState,
     ResolvedSlot,
     StepTriple,
@@ -1182,13 +1183,17 @@ async def test_confirmed_edit_field_options_survive_server_owned_projection() ->
     flow = _flow(_flow_step(step_order=1, user_description="Analyze text"))
     state = PlanningState.empty()
     state.input_fields = [
-        FlowInputFieldIntent(
-            variable_name="priority",
-            label="Priority",
-            field_type="select",
-            required=True,
-            options=["Low", "High"],
-            provenance="user_confirmed",
+        ConfirmedRuntimeMetadataField(
+            value=FlowInputFieldIntent(
+                variable_name="priority",
+                label="Priority",
+                field_type="select",
+                required=True,
+                options=["Low", "High"],
+                provenance="user_confirmed",
+            ),
+            purpose="interpret_input",
+            structured_answer_message_id="message-1",
         )
     ]
 
@@ -1226,13 +1231,17 @@ async def test_confirmed_edit_field_survives_when_model_omits_form_fields() -> N
     flow = _flow(_flow_step(step_order=1, user_description="Analyze text"))
     state = PlanningState.empty()
     state.input_fields = [
-        FlowInputFieldIntent(
-            variable_name="priority",
-            label="Priority",
-            field_type="select",
-            required=True,
-            options=["Low", "High"],
-            provenance="user_confirmed",
+        ConfirmedRuntimeMetadataField(
+            value=FlowInputFieldIntent(
+                variable_name="priority",
+                label="Priority",
+                field_type="select",
+                required=True,
+                options=["Low", "High"],
+                provenance="user_confirmed",
+            ),
+            purpose="interpret_input",
+            structured_answer_message_id="message-1",
         )
     ]
 
@@ -1262,10 +1271,14 @@ async def test_confirmed_edit_shadow_field_is_rejected_explicitly() -> None:
     flow = _flow(_flow_step(step_order=1, user_description="Analyze text"))
     state = PlanningState.empty()
     state.input_fields = [
-        FlowInputFieldIntent(
-            variable_name="text",
-            label="Text",
-            provenance="user_confirmed",
+        ConfirmedRuntimeMetadataField(
+            value=FlowInputFieldIntent(
+                variable_name="text",
+                label="Text",
+                provenance="user_confirmed",
+            ),
+            purpose="interpret_input",
+            structured_answer_message_id="message-1",
         )
     ]
 

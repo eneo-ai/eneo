@@ -7,19 +7,12 @@ content through the create/edit tool schema.
 
 from __future__ import annotations
 
-import json
 from typing import assert_never
 
 from eneo.flows.ai_builder.ai_builder_attachment_context import (
     render_ai_builder_evidence_value,
 )
-from eneo.flows.ai_builder.ai_builder_create_compile_context import (
-    CreateCompileContext,
-)
 from eneo.flows.ai_builder.ai_builder_event_models import RequirementsSummaryPayload
-from eneo.flows.ai_builder.ai_builder_framework_policy import (
-    runtime_metadata_allows_input_fields,
-)
 from eneo.flows.ai_builder.ai_builder_new_step_models import (
     MAX_STRUCTURED_FIELD_DEPTH,
 )
@@ -39,14 +32,8 @@ from eneo.flows.ai_builder.ai_builder_result_contract import (
     derive_result_contract,
     render_result_contract_prompt_block,
 )
-from eneo.flows.ai_builder.ai_builder_runtime_input_fields import (
-    normalize_runtime_metadata_state,
-)
 from eneo.flows.ai_builder.ai_builder_schema_evidence import (
     project_schema_fields,
-)
-from eneo.flows.ai_builder.ai_builder_slot_classification_contract import (
-    quoted_texts_from_planning_references,
 )
 from eneo.flows.ai_builder.ai_builder_template_attachment_contract import (
     MAX_TEMPLATE_PREPARATION_STAGES,
@@ -69,7 +56,6 @@ def build_plan_proposal_system_prompt(
     resource_catalog: AIBuilderResourceCatalog,
     plan_revision_context: str | None = None,
     requested_output_sections: RequestedOutputSections | None = None,
-    compile_context: CreateCompileContext | None = None,
 ) -> str:
     submission_tool = PROPOSE_FLOW_TOOL_NAME
     resource_material = build_ai_builder_resource_reference_material(
@@ -78,9 +64,6 @@ def build_plan_proposal_system_prompt(
     create_mode_rules = (
         [
             "- In create mode, describe semantic flow intent in propose_flow; do not choose Flow mechanics.",
-            "- Use input_fields only for secondary inmatningsfält/input variables the user fills in at runtime.",
-            "- Do not add an input_field for the primary text, document, file, or audio material being processed; the backend supplies that from the committed architecture.",
-            "- Never invent input_fields from defaults, and leave them empty when a resolved slot shows an explicit no-extra-fields decision. Fields listed under `Server-owned runtime input fields` are already compiled — do not redeclare them. Otherwise the fields under `Requested runtime input fields` (and any other runtime value the confirmed requirements or the semantic workflow clearly needs) are yours to declare.",
             "- For committed audio input, the backend inserts the first transcription/upload step; start propose_flow steps with the analysis, structuring, or synthesis work after transcription. Transcript review is compiler-owned and stays on that backend-inserted step.",
             "- Human review checkpoints are compiler-owned in create mode: the backend places confirmed review intents on their producing steps. Do not set review_mode, and do not model human review as a separate AI step or as instruction prose.",
             "- Do not author field-level previous-step paths or text-output refs in create mode; the backend owns those underlag channels from the proposed step outputs and committed architecture.",
@@ -106,7 +89,7 @@ def build_plan_proposal_system_prompt(
         "limit. For DOCX template-fill mode, use at most "
         f"{MAX_TEMPLATE_PREPARATION_STAGES} semantic preparation steps before the "
         "backend-owned fill step.",
-        "- Direct text transformations such as translation, rewriting, correction, shortening, or summarizing a supplied snippet default to one text step; add JSON, review, form fields, or extra steps only when the user explicitly asks for them.",
+        "- Direct text transformations such as translation, rewriting, correction, shortening, or summarizing a supplied snippet default to one text step; add JSON, review, or extra steps only when the user explicitly asks for them.",
         "- Prefer a clear multi-step flow for complex work instead of one overloaded step.",
         "- Use JSON output fields when later steps need specific structured facts.",
         "- Name output_fields as ASCII identifiers folded from the user's own wording (å/ä→a, ö→o, spaces and dots→underscores); keep key names the user asked for, and put display wording in descriptions.",
@@ -128,29 +111,6 @@ def build_plan_proposal_system_prompt(
         "Confirmed requirements:",
         render_confirmed_requirements_proposal_prompt_block(confirmed_requirements),
     ]
-    server_owned_fields_block = _server_owned_runtime_input_fields_block(
-        compile_context
-    )
-    if not is_edit_mode and server_owned_fields_block is not None:
-        lines.extend(
-            [
-                "",
-                "Server-owned runtime input fields:",
-                server_owned_fields_block,
-            ]
-        )
-    if not is_edit_mode and server_owned_fields_block is None:
-        requested_runtime_fields_block = _requested_runtime_input_fields_block(
-            planning_state
-        )
-        if requested_runtime_fields_block is not None:
-            lines.extend(
-                [
-                    "",
-                    "Requested runtime input fields:",
-                    requested_runtime_fields_block,
-                ]
-            )
     file_roles_block = _file_roles_block(planning_state)
     if file_roles_block is not None:
         lines.extend(["", "Uploaded file roles:", file_roles_block])
@@ -180,67 +140,6 @@ def build_plan_proposal_system_prompt(
         lines.extend(["", plan_revision_context])
     if attachment_context:
         lines.extend(["", "Attachment context:", attachment_context])
-    return "\n".join(lines)
-
-
-def _requested_runtime_input_fields_block(
-    planning_state: PlanningState,
-) -> str | None:
-    """State who owns runtime metadata fields the server has not compiled.
-
-    The compiler materializes runtime fields only from planning state, so a
-    metadata request that lives in prose has no server-owned block — and a
-    blanket "compiler-owned" rule left nobody declaring the fields while the
-    critic demanded them (a live journey looped four identical proposals,
-    2026-08-06). Naming the request, with the user's own words, puts
-    ownership where it can actually be satisfied.
-    """
-
-    slot = planning_state.resolved_slots.get("runtime_metadata_fields")
-    if slot is None or not runtime_metadata_allows_input_fields(
-        normalize_runtime_metadata_state(slot.value)
-    ):
-        return None
-    quotes = quoted_texts_from_planning_references(slot.evidence)
-    lines = [
-        "- The user asked to supply these values at runtime; the server has "
-        "not compiled them, so declare each one as its own input_field and "
-        "reference it from the consuming step through uses_form_fields."
-    ]
-    lines.extend(
-        f"- user request: {render_ai_builder_evidence_value(quote)}"
-        for quote in quotes[:3]
-    )
-    return "\n".join(lines)
-
-
-def _server_owned_runtime_input_fields_block(
-    compile_context: CreateCompileContext | None,
-) -> str | None:
-    if compile_context is None or not compile_context.admitted_form_field_hints:
-        return None
-
-    lines: list[str] = []
-    for field in compile_context.admitted_form_field_hints:
-        contract: dict[str, object] = {
-            "variable_name": field.variable_name,
-            "field_type": field.field_type,
-            "required": field.required,
-            "label": field.label,
-        }
-        if field.options:
-            contract["options"] = list(field.options)
-        contract["provenance"] = field.provenance
-        lines.append(f"- {json.dumps(contract, ensure_ascii=False)}")
-
-    lines.extend(
-        [
-            "- Do not redeclare or rename these server-owned fields in input_fields.",
-            "- Use each exact variable_name in uses_form_fields only on steps "
-            "whose semantic work directly consumes it; every field needs at "
-            "least one actual consumer.",
-        ]
-    )
     return "\n".join(lines)
 
 
@@ -391,8 +290,8 @@ def _output_schema_evidence_block(planning_state: PlanningState) -> str | None:
                 f"- template placeholder fields: {field_text}",
                 *([coverage_line] if coverage_line is not None else []),
                 "- Prefer source-derived output_fields for placeholders that can be "
-                "extracted from uploaded documents; use input_fields only for values "
-                "the user must provide at runtime.",
+                "extracted from uploaded documents; the backend owns runtime values "
+                "that the user must provide.",
                 "- Keep preparation output_fields FLAT: one string field per "
                 "placeholder (source references belong inside the text, not as "
                 f"nested objects). Nesting deeper than {MAX_STRUCTURED_FIELD_DEPTH} "
@@ -469,8 +368,8 @@ def _input_schema_evidence_block(planning_state: PlanningState) -> str | None:
         [
             f"- source: {evidence.source}, {evidence.confidence} confidence",
             f"- declared top-level fields: {field_text}",
-            "- This schema describes the Flow input boundary. Do not turn its "
-            "primary payload fields into secondary input_fields.",
+            "- This schema describes the Flow input boundary. Do not reinterpret its "
+            "primary payload fields as independent runtime values.",
         ]
     )
 

@@ -133,6 +133,7 @@ from eneo.flows.ai_builder.ai_builder_user_question_metadata import (
 )
 from eneo.flows.ai_builder.planning_state import (
     ArchitectureCommit,
+    ConfirmedRuntimeMetadataField,
     FileRoleEvidence,
     PlanningState,
     PlanningStatePayloadTooLargeError,
@@ -1630,11 +1631,15 @@ async def test_prepare_planner_request_uses_proposal_task_after_confirmation() -
     discovery_analysis = _discovery_analysis()
     state = _document_architecture_state()
     state.input_fields = [
-        FlowInputFieldIntent(
-            variable_name="case_id",
-            label="Case ID",
-            required=True,
-            provenance="user_confirmed",
+        ConfirmedRuntimeMetadataField(
+            value=FlowInputFieldIntent(
+                variable_name="case_id",
+                label="Case ID",
+                required=True,
+                provenance="user_confirmed",
+            ),
+            purpose="interpret_input",
+            structured_answer_message_id="message-runtime-fields",
         )
     ]
     requirements_state = _requirements_state_confirmed_for(state)
@@ -1693,7 +1698,12 @@ async def test_prepare_planner_request_uses_proposal_task_after_confirmation() -
     assert isinstance(prepared, ProposalPrepared)
     assert prepared.llm_messages[0]["role"] == "system"
     assert "Call exactly one `propose_flow` tool" in prepared.llm_messages[0]["content"]
-    assert '"variable_name": "case_id"' in prepared.llm_messages[0]["content"]
+    assert "case_id" not in prepared.llm_messages[0]["content"]
+    assert prepared.compile_context is not None
+    assert [
+        field.value.variable_name
+        for field in prepared.compile_context.runtime_input_fields
+    ] == ["case_id"]
 
 
 def test_real_proposal_boundary_fits_attachments_and_protects_current_turn() -> None:
@@ -1804,10 +1814,14 @@ def test_proposal_boundary_rejects_confirmed_primary_input_shadow() -> None:
         confidence="high",
     )
     state.input_fields = [
-        FlowInputFieldIntent(
-            variable_name="text",
-            label="Text",
-            provenance="user_confirmed",
+        ConfirmedRuntimeMetadataField(
+            value=FlowInputFieldIntent(
+                variable_name="text",
+                label="Text",
+                provenance="user_confirmed",
+            ),
+            purpose="interpret_input",
+            structured_answer_message_id="message-runtime-fields",
         )
     ]
 

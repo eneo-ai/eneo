@@ -73,6 +73,7 @@ class PlannedStep:
     runtime_max_files: int | None = None
     runtime_input_execution_mode: RuntimeInputExecutionMode = "single_call"
     previous_item_map_enabled: bool = False
+    semantic_origin_eligible: bool = False
     form_field_refs: tuple[str, ...] = ()
     previous_field_refs: tuple[PreviousFieldRef, ...] = ()
     previous_output_refs: tuple[PreviousOutputRef, ...] = ()
@@ -344,6 +345,23 @@ def _validate_form_field_placement(
     steps: tuple[PlannedStep, ...],
 ) -> None:
     declared_names = {field.name for field in form_fields}
+    for step in steps:
+        duplicate_names = {
+            field_name
+            for field_name in step.form_field_refs
+            if step.form_field_refs.count(field_name) > 1
+        }
+        if duplicate_names:
+            raise ValueError(
+                f"Planned step {step.name!r} references form fields more than once: "
+                f"{', '.join(sorted(duplicate_names))}."
+            )
+        if step.form_field_refs and not (
+            step.semantic_origin_eligible or step.role == "template_fill"
+        ):
+            raise ValueError(
+                f"Planned step {step.name!r} is not a legal form-field target."
+            )
     placed_names = {field_name for step in steps for field_name in step.form_field_refs}
     unknown_names = placed_names - declared_names
     if unknown_names:

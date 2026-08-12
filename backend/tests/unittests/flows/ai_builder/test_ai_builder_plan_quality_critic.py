@@ -943,7 +943,7 @@ def test_sectioned_form_intake_does_not_require_section_writers() -> None:
     assert "requested_output_sections_require_section_writers" not in issue_ids
 
 
-def test_model_sectioned_form_intake_signal_requires_form_fields() -> None:
+def test_create_critic_leaves_sectioned_form_field_placement_to_assembly() -> None:
     spec = FlowDraftSpecCore(
         flow_name="Formulär till rapport",
         flow_description="",
@@ -979,7 +979,24 @@ def test_model_sectioned_form_intake_signal_requires_form_fields() -> None:
     )
 
     issue_ids = {issue.id for issue in evaluate_critic_invariants(context)}
-    assert "sectioned_form_intake_requires_form_fields" in issue_ids
+    assert "sectioned_form_intake_requires_form_fields" not in issue_ids
+
+
+def test_unreferenced_form_field_guard_is_edit_only() -> None:
+    spec = FlowDraftSpecCore(
+        flow_name="Onboarding",
+        form_fields=[FormFieldSpec(name="prioritet", type="text", label="Prioritet")],
+        steps=[_step("step_a", "Hantera ärende", "Behandla ärendet.")],
+    )
+    create_context = build_conversation_critic_context([], spec)
+    edit_context = build_conversation_critic_context([], spec, flow=_edit_flow())
+
+    assert "form_fields_declared_must_be_referenced" not in {
+        issue.id for issue in evaluate_critic_invariants(create_context)
+    }
+    assert "form_fields_declared_must_be_referenced" in {
+        issue.id for issue in evaluate_critic_invariants(edit_context)
+    }
 
 
 def test_model_sectioned_form_intake_signal_suppresses_section_writer_rule() -> None:
@@ -1324,7 +1341,11 @@ def test_quality_feedback_from_context_keeps_semantic_issues() -> None:
             )
         ],
     )
-    context = build_conversation_critic_context(conversation, spec)
+    context = build_conversation_critic_context(
+        conversation,
+        spec,
+        flow=_edit_flow(),
+    )
 
     feedback = build_quality_feedback_from_critic_context(
         context,
@@ -1482,7 +1503,7 @@ def test_uncommitted_state_keeps_text_derived_intent() -> None:
     assert context.output_intent.terminal_output == "pdf_document"
 
 
-def test_flags_missing_form_fields_when_runtime_metadata_was_requested() -> None:
+def test_runtime_metadata_form_field_guard_is_edit_only() -> None:
     conversation = [
         {
             "role": "user",
@@ -1507,47 +1528,19 @@ def test_flags_missing_form_fields_when_runtime_metadata_was_requested() -> None
         ],
     )
 
-    feedback = build_conversation_aware_quality_feedback(conversation, spec)
-    assert feedback is not None
-    assert "form_fields" in feedback
-
-
-def test_flags_missing_form_fields_when_freeform_runtime_fields_were_requested() -> (
-    None
-):
-    conversation = [
-        {
-            "role": "user",
-            "content": (
-                "Bygg ett ljudflöde där användaren ska fylla i ärendenummer "
-                "och ansvarig enhet vid körning innan ljudet transkriberas."
-            ),
-        }
-    ]
-    spec = FlowDraftSpecCore(
-        flow_name="Ljudrapport",
-        steps=[
-            _step(
-                "step_a",
-                "Transkribera ljud",
-                "Transkribera ljudet.",
-                input_type=InputType.AUDIO,
-                output_mode=OutputMode.TRANSCRIBE_ONLY,
-            ),
-            _step(
-                "step_b",
-                "Skapa rapport",
-                "Skriv rapporten.",
-                input_source=InputSource.PREVIOUS_STEP,
-                output_type=OutputType.DOCX,
-            ),
-        ],
+    create_context = build_conversation_critic_context(conversation, spec)
+    edit_context = build_conversation_critic_context(
+        conversation,
+        spec,
+        flow=_edit_flow(),
     )
 
-    feedback = build_conversation_aware_quality_feedback(conversation, spec)
-
-    assert feedback is not None
-    assert "form_fields" in feedback
+    assert "runtime_metadata_requires_form_fields" not in {
+        issue.id for issue in evaluate_critic_invariants(create_context)
+    }
+    assert "runtime_metadata_requires_form_fields" in {
+        issue.id for issue in evaluate_critic_invariants(edit_context)
+    }
 
 
 def test_no_input_fields_instruction_does_not_request_runtime_form_fields() -> None:
@@ -1650,7 +1643,7 @@ def test_audio_docx_report_fields_from_transcript_do_not_request_runtime_form_fi
     assert feedback is None
 
 
-def test_flags_missing_form_fields_for_sectioned_rubric_intake_flows() -> None:
+def test_edit_flags_missing_form_fields_for_sectioned_rubric_intake_flows() -> None:
     conversation = [
         {
             "role": "user",
@@ -1687,7 +1680,11 @@ def test_flags_missing_form_fields_for_sectioned_rubric_intake_flows() -> None:
         ],
     )
 
-    feedback = build_conversation_aware_quality_feedback(conversation, spec)
+    feedback = build_conversation_aware_quality_feedback(
+        conversation,
+        spec,
+        flow=_edit_flow(),
+    )
 
     assert feedback is not None
     assert "form_fields" in feedback
@@ -5474,6 +5471,7 @@ class TestRichWorkflowInvariants:
         self,
         spec: FlowDraftSpecCore,
         *,
+        flow: "Flow | None" = None,
         rich: bool = True,
         needs_form_fields: bool = False,
         prefers_structured_intermediate: bool = False,
@@ -5506,7 +5504,7 @@ class TestRichWorkflowInvariants:
 
         return CriticContext(
             spec=spec,
-            flow=None,
+            flow=flow,
             answer_signals={},
             text="",
             requirements_text="",
@@ -5544,7 +5542,7 @@ class TestRichWorkflowInvariants:
             output_schema_evidence=output_schema_evidence,
         )
 
-    def test_rich_workflow_requires_form_fields_fires_when_form_fields_missing(
+    def test_create_rich_workflow_leaves_form_fields_to_assembly(
         self,
     ) -> None:
         from eneo.flows.ai_builder.ai_builder_critic_invariants import (
@@ -5563,6 +5561,32 @@ class TestRichWorkflowInvariants:
             ],
         )
         context = self._context_with_signals(spec, needs_form_fields=True)
+
+        issues = render_critic_issues(context)
+
+        assert not any("form_fields" in issue for issue in issues)
+
+    def test_edit_rich_workflow_requires_form_fields_when_missing(self) -> None:
+        from eneo.flows.ai_builder.ai_builder_critic_invariants import (
+            render_critic_issues,
+        )
+
+        spec = FlowDraftSpecCore(
+            flow_name="Rapport",
+            steps=[
+                _step(
+                    "step_a",
+                    "Analysera dokument",
+                    "Läs dokumentet och skriv rapport.",
+                    input_type=InputType.DOCUMENT,
+                )
+            ],
+        )
+        context = self._context_with_signals(
+            spec,
+            flow=_edit_flow(),
+            needs_form_fields=True,
+        )
 
         issues = render_critic_issues(context)
 
@@ -5591,7 +5615,11 @@ class TestRichWorkflowInvariants:
                 )
             ],
         )
-        context = self._context_with_signals(spec, needs_form_fields=True)
+        context = self._context_with_signals(
+            spec,
+            flow=_edit_flow(),
+            needs_form_fields=True,
+        )
 
         issues = render_critic_issues(context)
 
@@ -6383,7 +6411,7 @@ class TestRuntimeMetadataRemediationNamesTheFields:
                     )
                 ],
             ),
-            flow=None,
+            flow=_edit_flow(),
             answer_signals={"runtime_metadata_fields": {"wants_input_fields"}},
             text="",
             requirements_text="",

@@ -19,7 +19,6 @@ from eneo.flows.ai_builder.ai_builder_plan_quality_critic import (
 from eneo.flows.flow_authoring_spec import (
     AssistantSpec,
     FlowDraftSpecCore,
-    FormFieldSpec,
     InputSource,
     InputType,
     OutputMode,
@@ -77,21 +76,6 @@ def test_preflight_passes_a_clean_single_step_draft() -> None:
     assert result.blocks_materialization is False
     assert result.critic_invariant_ids == ()
     assert result.critic_invariant_id is None
-
-
-def test_preflight_flags_form_field_declared_but_never_referenced() -> None:
-    spec = FlowDraftSpecCore(
-        flow_name="Onboarding",
-        flow_description="",
-        form_fields=[FormFieldSpec(name="prioritet", type="text", label="Prioritet")],
-        steps=[_step("step_a", "Hantera ärende", "Behandla det inkomna ärendet.")],
-    )
-
-    result = _preflight(spec)
-
-    assert result.passed is False
-    assert result.can_retry is True
-    assert "form_fields_declared_must_be_referenced" in result.critic_invariant_ids
 
 
 def test_create_preflight_leaves_terminal_alignment_to_compiled_spec() -> None:

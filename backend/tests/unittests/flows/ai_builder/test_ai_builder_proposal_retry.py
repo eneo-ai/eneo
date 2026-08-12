@@ -420,40 +420,6 @@ def test_build_tool_retry_messages_normalizes_oversized_tool_call_ids() -> None:
     assert len(assistant_id) <= PROVIDER_TOOL_CALL_ID_MAX_LENGTH
 
 
-def test_unplaced_form_field_retry_does_not_request_redeclaration() -> None:
-    feedback = proposal_retry_module._build_retry_feedback(
-        target_kind=TargetKind.CREATE,
-        feedback="Create-flow input fields require a consumer: case_type.",
-        failure_codes=frozenset({"unplaced_form_fields"}),
-    )
-
-    assert "exact name in uses_form_fields" in feedback
-    assert "top-level input_fields[]" not in feedback
-
-
-def test_open_unknown_form_field_retry_preserves_valid_declaration_path() -> None:
-    feedback = proposal_retry_module._build_retry_feedback(
-        target_kind=TargetKind.CREATE,
-        feedback="Create-flow steps reference unknown input fields: tone.",
-        failure_codes=frozenset({"unknown_form_field_refs_open"}),
-    )
-
-    assert "exact listed or declared name" in feedback
-    assert "top-level input_fields[]" in feedback
-
-
-def test_closed_unknown_form_field_retry_uses_confirmed_contract() -> None:
-    feedback = proposal_retry_module._build_retry_feedback(
-        target_kind=TargetKind.CREATE,
-        feedback="Create-flow steps reference unknown input fields: tone.",
-        failure_codes=frozenset({"unknown_form_field_refs_closed"}),
-    )
-
-    assert "confirmed and closed" in feedback
-    assert "exact listed name" in feedback
-    assert "top-level input_fields[]" not in feedback
-
-
 def test_invalid_source_ref_retry_preserves_typed_reference_contract() -> None:
     feedback = proposal_retry_module._build_retry_feedback(
         target_kind=TargetKind.EDIT,
@@ -478,18 +444,6 @@ def test_create_invalid_source_ref_retry_uses_create_contract() -> None:
     assert "Every steps[] name must be unique" in feedback
     assert "uses_previous_fields" not in feedback
     assert "uses_previous_outputs" not in feedback
-
-
-def test_unconfirmed_form_field_retry_uses_closed_server_contract() -> None:
-    feedback = proposal_retry_module._build_retry_feedback(
-        target_kind=TargetKind.CREATE,
-        feedback="Create-flow input fields are outside the confirmed contract: tone.",
-        failure_codes=frozenset({"unconfirmed_runtime_form_fields"}),
-    )
-
-    assert "confirmed and closed" in feedback
-    assert "Remove any additional input_fields" in feedback
-    assert "top-level input_fields[]" not in feedback
 
 
 @pytest.mark.asyncio

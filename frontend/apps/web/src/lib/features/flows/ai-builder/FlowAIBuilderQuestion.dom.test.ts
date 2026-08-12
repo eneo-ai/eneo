@@ -95,3 +95,73 @@ describe("FlowAIBuilderQuestion schema direction", () => {
     ]);
   });
 });
+
+describe("FlowAIBuilderQuestion runtime metadata fields", () => {
+  it("requires and submits one purpose per field from the question options", async () => {
+    const onanswer = vi.fn();
+    const question: StructuredQuestion = {
+      question_id: "runtime_metadata_field_details",
+      question: "Which fields should the user fill in?",
+      selection_mode: "single",
+      allow_custom: false,
+      requires_confirm: true,
+      input_field_collection: true,
+      options: [
+        {
+          id: "interpret_input",
+          label: "Use it to understand the input",
+          value: "interpret_input"
+        },
+        {
+          id: "shape_result",
+          label: "Use it to shape the final result",
+          value: "shape_result"
+        },
+        {
+          id: "whole_flow",
+          label: "Use it throughout the flow",
+          value: "whole_flow"
+        }
+      ]
+    };
+    render(FlowAIBuilderQuestion, { question, onanswer });
+
+    await fireEvent.input(screen.getByLabelText(m.ai_builder_question_field_label()), {
+      target: { value: "Case id" }
+    });
+    await fireEvent.input(screen.getByLabelText(m.ai_builder_question_field_name()), {
+      target: { value: "case_id" }
+    });
+    const confirm = screen.getByRole("button", { name: m.ai_builder_question_confirm() });
+    expect((confirm as HTMLButtonElement).disabled).toBe(true);
+
+    await fireEvent.change(
+      screen.getByRole("combobox", {
+        name: "Case id: Which fields should the user fill in?"
+      }),
+      { target: { value: "interpret_input" } }
+    );
+    expect((confirm as HTMLButtonElement).disabled).toBe(false);
+    await fireEvent.click(confirm);
+
+    expect(onanswer).toHaveBeenCalledWith({
+      text: "Case id (case_id)",
+      questionAnswer: {
+        kind: "structured_question_answer",
+        question_id: "runtime_metadata_field_details",
+        input_fields: [
+          {
+            value: {
+              name: "case_id",
+              label: "Case id",
+              type: "text",
+              required: false,
+              options: []
+            },
+            purpose: "interpret_input"
+          }
+        ]
+      }
+    });
+  });
+});

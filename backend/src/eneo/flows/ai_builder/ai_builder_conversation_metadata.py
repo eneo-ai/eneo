@@ -78,6 +78,7 @@ from eneo.flows.ai_builder.planning_state import (
     ExampleOutputConstraintEvidence,
     FileRole,
     NamedResultEvidence,
+    RuntimeMetadataFieldPurpose,
 )
 from eneo.flows.ai_builder.question_catalog import legal_slot_values
 from eneo.flows.domain.flow import FlowPersistedJsonObject
@@ -911,6 +912,21 @@ if set(get_args(LLMResolvableSlotName)) != set(LLM_RESOLVABLE_SLOT_NAMES):
     raise RuntimeError("LLMResolvableSlotName must match LLM_RESOLVABLE_SLOT_NAMES")
 
 
+class RuntimeMetadataFieldAnswer(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    value: FlowInputFieldIntent
+    purpose: RuntimeMetadataFieldPurpose
+
+    @field_validator("value", mode="after")
+    @classmethod
+    def confirm_submitted_value(
+        cls,
+        value: FlowInputFieldIntent,
+    ) -> FlowInputFieldIntent:
+        return value.model_copy(update={"provenance": "user_confirmed"})
+
+
 class StructuredQuestionAnswerMetadata(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -928,7 +944,7 @@ class StructuredQuestionAnswerMetadata(BaseModel):
     selected_value: QuestionAnswerScalar = None
     answer: QuestionAnswerScalar = None
     custom_value: str | None = Field(default=None, max_length=500)
-    input_fields: list[FlowInputFieldIntent] | None = Field(
+    input_fields: list[RuntimeMetadataFieldAnswer] | None = Field(
         default=None,
         max_length=20,
     )
@@ -946,26 +962,36 @@ class StructuredQuestionAnswerMetadata(BaseModel):
         payload.setdefault("kind", "structured_question_answer")
         return normalize_question_answer(payload)
 
-    @field_validator("input_fields", mode="after")
-    @classmethod
-    def confirm_submitted_input_fields(
-        cls, fields: list[FlowInputFieldIntent] | None
-    ) -> list[FlowInputFieldIntent] | None:
-        if fields is None:
-            return None
-        return [
-            field.model_copy(update={"provenance": "user_confirmed"})
-            for field in fields
-        ]
-
     @model_validator(mode="after")
-    def require_field_details_payload(self) -> "StructuredQuestionAnswerMetadata":
-        if (
-            self.question_id == "runtime_metadata_field_details"
-            and not self.input_fields
-        ):
+    def require_answer_specific_payload(self) -> "StructuredQuestionAnswerMetadata":
+        is_field_details = self.question_id == "runtime_metadata_field_details"
+        if is_field_details and not self.input_fields:
             raise ValueError(
                 "runtime metadata field details require at least one field"
+            )
+        if is_field_details and self.input_fields:
+            field_names = [
+                field.value.variable_name.casefold() for field in self.input_fields
+            ]
+            if len(field_names) != len(set(field_names)):
+                raise ValueError(
+                    "runtime metadata field details require unique field names"
+                )
+        if is_field_details and any(
+            value is not None
+            for value in (
+                self.selected_option_ids,
+                self.selected_values,
+                self.selected_option_id,
+                self.selected_value,
+                self.answer,
+                self.custom_value,
+            )
+        ):
+            raise ValueError("runtime metadata field details accept only input_fields")
+        if not is_field_details and self.input_fields is not None:
+            raise ValueError(
+                "input_fields are only valid for runtime metadata field details"
             )
         return self
 
@@ -1635,6 +1661,9 @@ def question_answer_has_real_payload(
     question_id = payload.get("question_id")
     if not isinstance(question_id, str) or not question_id:
         return False
+    input_fields = _object_sequence(payload.get("input_fields"))
+    if input_fields:
+        return True
     for key in (
         "selected_option_id",
         "selected_value",

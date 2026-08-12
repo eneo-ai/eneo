@@ -1193,6 +1193,14 @@ class TestPlannerContextPreparation:
                 "tool_choice": "auto",
                 "function_call": "auto",
             },
+            supported=SupportedModelKwargs(
+                temperature=ModelKwargCapability(supported=True),
+                reasoning_effort=ModelKwargCapability(
+                    supported=True,
+                    control="select",
+                    options=["low", "medium", "high"],
+                ),
+            ),
         )
 
         service = _make_service(
@@ -1207,6 +1215,7 @@ class TestPlannerContextPreparation:
             space=space,
             model_id=model.id,
             tenant_flow_settings=None,
+            reasoning_effort="high",
         )
 
         assert isinstance(result, PreparedMessageContext)
@@ -1217,6 +1226,10 @@ class TestPlannerContextPreparation:
             "temperature": 0.7,
             "additional_drop_params": ["top_p"],
         }
+        assert (
+            result.completion_model_route.requested_model_kwargs.reasoning_effort
+            == "high"
+        )
         assert result.flow is flow
         assert result.assistant_snapshots == snapshots
         assert result.planner_context.available_models == [
@@ -1231,6 +1244,48 @@ class TestPlannerContextPreparation:
         completion_service.resolve_model_route.assert_awaited_once_with(model)
         flow_service.get_flow.assert_awaited_once_with(session.flow_id)
         flow_service.get_flow_assistant_snapshots.assert_awaited_once_with(flow)
+
+    @pytest.mark.anyio
+    async def test_prepare_message_context_rejects_unsupported_reasoning_effort(
+        self,
+    ) -> None:
+        user = _make_user()
+        repo = AsyncMock()
+        repo.list_session_file_ids.return_value = []
+        model = _make_model()
+        model.max_input_tokens = 4096
+        model.max_output_tokens = 2048
+        model.provider_type = "openai"
+        space = MagicMock()
+        space.completion_models = [model]
+        space.collections = []
+        space.get_default_completion_model.return_value = model
+        completion_service = AsyncMock()
+        completion_service.resolve_model_route.return_value = _route(
+            supported=SupportedModelKwargs(
+                reasoning_effort=ModelKwargCapability(
+                    supported=True,
+                    control="select",
+                    options=["low", "medium"],
+                )
+            )
+        )
+        service = _make_service(
+            user=user,
+            repo=repo,
+            completion_service=completion_service,
+        )
+
+        with pytest.raises(AIBuilderBadRequestException) as exc_info:
+            await service.prepare_message_context(
+                session=_make_session(tenant_id=user.tenant_id),
+                space=space,
+                model_id=model.id,
+                tenant_flow_settings=None,
+                reasoning_effort="high",
+            )
+
+        assert exc_info.value.code == AIBuilderErrorCode.BAD_REQUEST
 
     @pytest.mark.anyio
     async def test_prepare_message_context_accepts_exact_merged_attachment_limit(
@@ -2400,12 +2455,12 @@ class TestSendMessageStructuredQuestion:
                 ),
                 ConversationMessage(
                     role="user",
-                    content="Grundläggande metadata",
+                    content="Inga extra metadatafält",
                     metadata={
                         "question_answer": {
                             "question_id": "runtime_metadata_fields",
-                            "selected_option_ids": ["basic_runtime_metadata"],
-                            "selected_values": ["basic_runtime_metadata"],
+                            "selected_option_ids": ["no_extra_metadata"],
+                            "selected_values": ["no_extra_metadata"],
                         },
                         "ui_language": "sv",
                     },

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import re
-import unicodedata
 from dataclasses import dataclass
 from typing import Literal, TypeAlias, assert_never
 
@@ -177,60 +176,7 @@ _NON_USER_ACTOR_TOKENS = frozenset(
         "assistent",
     }
 )
-_LEADING_CONNECTOR_RE = re.compile(
-    r"^\s*(?:for|för|with|med|som|called|named|including|inklusive)\s+",
-    re.IGNORECASE,
-)
-_CLAUSE_BOUNDARIES: tuple[str, ...] = (
-    ".",
-    "\n",
-    ";",
-    " och skapar ",
-    " och skapa ",
-    " och skriver ",
-    " och skriv ",
-    " och genererar ",
-    " och generera ",
-    " and creates ",
-    " and create ",
-    " and writes ",
-    " and write ",
-    " and generates ",
-    " and generate ",
-    " then ",
-    " and then ",
-    " sedan ",
-    " och sedan ",
-    " innan ",
-    " before ",
-    " när ",
-    " nar ",
-    " when ",
-    " som slutresultat ",
-    " as final output ",
-)
-_FIELD_SPLIT_RE = re.compile(
-    r"\s*(?:,|/|\boch\b|\band\b|\bsamt\b|\beller\b|\bor\b)\s*",
-    re.IGNORECASE,
-)
-_TRAILING_CONTEXT_RE = re.compile(
-    r"\s*(?:vid körning|vid korning|at runtime|runtime|som ska användas|som ska anvandas|that should be used|to use)$",
-    re.IGNORECASE,
-)
-_SWEDISH_NAME_OF_RE = re.compile(r"^namn\s+p[åa]\s+(.+)$", re.IGNORECASE)
-_ENGLISH_NAME_OF_RE = re.compile(r"^name\s+of\s+(.+)$", re.IGNORECASE)
 _TOKEN_RE = re.compile(r"\w+", re.UNICODE)
-_GENERIC_FIELD_LABELS = {
-    "field",
-    "fields",
-    "falt",
-    "fält",
-    "form field",
-    "form fields",
-    "input field",
-    "input fields",
-    "metadata",
-}
 _NEGATION_TOKENS = frozenset(
     {
         "inga",
@@ -333,30 +279,6 @@ def runtime_input_fields_requested(text: str) -> bool:
     ) or _has_user_provided_runtime_field_clause(text)
 
 
-def extract_runtime_input_field_hints(text: str) -> tuple[RuntimeInputFieldHint, ...]:
-    if not runtime_input_fields_requested(text):
-        return ()
-
-    hints: list[RuntimeInputFieldHint] = []
-    seen: set[str] = set()
-    for clause in _candidate_field_clauses(text):
-        for label in _candidate_labels(clause):
-            variable_name = _variable_name(label)
-            if not variable_name or variable_name in seen:
-                continue
-            hints.append(
-                RuntimeInputFieldHint(
-                    variable_name=variable_name,
-                    label=label,
-                    provenance="user_confirmed",
-                )
-            )
-            seen.add(variable_name)
-            if len(hints) >= 8:
-                return tuple(hints)
-    return tuple(hints)
-
-
 def normalize_runtime_metadata_state(
     value: str | None,
 ) -> RuntimeMetadataState | None:
@@ -393,8 +315,6 @@ def runtime_metadata_disables_declared_input_fields(
 def infer_runtime_metadata_slot(text: str) -> RuntimeMetadataState | None:
     if runtime_input_fields_declared_absent(text):
         return NO_EXTRA_RUNTIME_METADATA
-    if extract_runtime_input_field_hints(text):
-        return DETAILED_RUNTIME_METADATA
     if runtime_input_fields_requested(text):
         return BASIC_RUNTIME_METADATA
     return None
@@ -489,24 +409,6 @@ def _post_trigger_clause_has_absence_polarity(after: list[str]) -> bool:
         and predicate_index + 1 in negation_indexes
         for predicate_index in predicate_indexes
     )
-
-
-def _clause_starts_with_absence_predicate(clause: str) -> bool:
-    tokens = normalize_discovery_text(clause).split()
-    return bool(tokens) and tokens[0] in _ABSENCE_PREDICATE_TOKENS
-
-
-def _candidate_field_clauses(text: str) -> tuple[str, ...]:
-    clauses: list[str] = []
-    starts = sorted(
-        {*_trigger_end_char_indexes(text), *_user_field_action_end_char_indexes(text)}
-    )
-    for start in starts:
-        window = text[start : start + 180]
-        clause = _truncate_at_boundary(_LEADING_CONNECTOR_RE.sub("", window))
-        if clause and not _clause_starts_with_absence_predicate(clause):
-            clauses.append(clause)
-    return tuple(clauses)
 
 
 def _has_user_provided_runtime_field_clause(text: str) -> bool:
@@ -605,20 +507,6 @@ def _is_allowed_user_actor(
     return token in allowed_actors
 
 
-def _trigger_end_char_indexes(text: str) -> tuple[int, ...]:
-    token_spans = _normalized_token_spans(text)
-    tokens = [token for token, _, _ in token_spans]
-    indexes: set[int] = set()
-    for trigger in _RUNTIME_FIELD_DECLARATION_TRIGGERS:
-        trigger_tokens = normalize_discovery_text(trigger).split()
-        if not trigger_tokens:
-            continue
-        for start_index in _find_token_sequence_indexes(tokens, trigger_tokens):
-            end_index = start_index + len(trigger_tokens) - 1
-            indexes.add(token_spans[end_index][2])
-    return tuple(sorted(indexes))
-
-
 def _normalized_token_spans(text: str) -> tuple[tuple[str, int, int], ...]:
     spans: list[tuple[str, int, int]] = []
     for match in _TOKEN_RE.finditer(text):
@@ -626,116 +514,3 @@ def _normalized_token_spans(text: str) -> tuple[tuple[str, int, int], ...]:
         if normalized:
             spans.append((normalized, match.start(), match.end()))
     return tuple(spans)
-
-
-def _truncate_at_boundary(value: str) -> str:
-    best_index: int | None = None
-    folded = value.casefold()
-    for boundary in _CLAUSE_BOUNDARIES:
-        index = folded.find(boundary.casefold())
-        if index >= 0 and (best_index is None or index < best_index):
-            best_index = index
-    return (
-        value[:best_index].strip(" ,:-")
-        if best_index is not None
-        else value.strip(" ,:-")
-    )
-
-
-def _candidate_labels(clause: str) -> tuple[str, ...]:
-    labels: list[str] = []
-    for raw_part in _FIELD_SPLIT_RE.split(clause):
-        label = _normalize_label(raw_part)
-        if not _is_useful_label(label):
-            continue
-        labels.append(label)
-    return tuple(labels)
-
-
-def _normalize_label(value: str) -> str:
-    normalized = _TRAILING_CONTEXT_RE.sub("", value).strip(" .,:;-")
-    return _simplify_field_label(" ".join(normalized.split()))
-
-
-def _simplify_field_label(label: str) -> str:
-    normalized = normalize_discovery_text(label)
-    tokens = normalized.split()
-    if not tokens:
-        return label
-
-    name_of = _name_of_label(label)
-    if name_of is not None:
-        return name_of
-
-    token_set = set(tokens)
-    if "nuvarande" in token_set and ("lön" in token_set or "lon" in token_set):
-        return "nuvarande lön"
-    if "salary" in token_set and {"current", "present"} & token_set:
-        return "current salary"
-
-    if tokens[0] in {"vilken", "vilket", "which"}:
-        if "roll" in token_set or "role" in token_set:
-            return "roll" if "roll" in token_set else "role"
-        if (
-            "yrke" in token_set
-            or "profession" in token_set
-            or "occupation" in token_set
-        ):
-            return "yrke" if "yrke" in token_set else "profession"
-        words = label.split()
-        if len(words) >= 2:
-            return words[1].strip(" .,:;-")
-
-    if tokens[0] in {"vad", "what"} and ("lön" in token_set or "lon" in token_set):
-        return "lön"
-    if tokens[0] in {"vad", "what"} and "salary" in token_set:
-        return "salary"
-
-    return label
-
-
-def _name_of_label(label: str) -> str | None:
-    match = _SWEDISH_NAME_OF_RE.match(label)
-    if match is not None:
-        subject = _first_subject_token(match.group(1))
-        return f"{subject} namn" if subject else None
-
-    match = _ENGLISH_NAME_OF_RE.match(label)
-    if match is not None:
-        subject = _first_subject_token(match.group(1))
-        return f"{subject} name" if subject else None
-
-    return None
-
-
-def _first_subject_token(value: str) -> str:
-    tokens = normalize_discovery_text(value).split()
-    if not tokens:
-        return ""
-    token = tokens[0].removesuffix("'s")
-    if token.endswith("en") and len(token) > 4:
-        token = token[:-2]
-    return token
-
-
-def _is_useful_label(label: str) -> bool:
-    if not label:
-        return False
-    normalized = normalize_discovery_text(label)
-    if normalized in _GENERIC_FIELD_LABELS:
-        return False
-    if normalized in _ABSENCE_PREDICATE_TOKENS:
-        return False
-    return len(normalized.split()) <= 4 and len(label) <= 48
-
-
-def _variable_name(label: str) -> str:
-    ascii_label = (
-        unicodedata.normalize("NFKD", label).encode("ascii", "ignore").decode("ascii")
-    )
-    variable = re.sub(r"[^a-zA-Z0-9]+", "_", ascii_label.casefold()).strip("_")
-    if not variable:
-        return ""
-    if variable[0].isdigit():
-        variable = f"field_{variable}"
-    return variable[:48].rstrip("_")

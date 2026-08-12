@@ -6,14 +6,27 @@ export type StructuredQuestion = components["schemas"]["StructuredQuestionPayloa
 
 type GeneratedInputField = components["schemas"]["FlowInputFieldIntent"];
 export type StructuredInputFieldType = NonNullable<GeneratedInputField["type"]>;
+export type StructuredInputFieldPurpose =
+  components["schemas"]["RuntimeMetadataFieldAnswer"]["purpose"];
 
-export interface StructuredInputFieldAnswer extends Omit<
+export interface StructuredInputFieldValue extends Omit<
   GeneratedInputField,
   "type" | "required" | "options" | "provenance"
 > {
   type: StructuredInputFieldType;
   required: boolean;
   options: string[];
+}
+
+export interface StructuredInputFieldAnswer {
+  value: StructuredInputFieldValue;
+  purpose: StructuredInputFieldPurpose;
+}
+
+export function isStructuredInputFieldPurpose(
+  value: StructuredQuestionOption["value"] | ""
+): value is StructuredInputFieldPurpose {
+  return value === "interpret_input" || value === "shape_result" || value === "whole_flow";
 }
 
 type StructuredQuestionOptionValue = Exclude<StructuredQuestionOption["value"], undefined>;
@@ -98,16 +111,19 @@ export function buildStructuredQuestionInputFieldsAnswer(
   fields: StructuredInputFieldAnswer[]
 ): StructuredQuestionAnswerPayload {
   const inputFields = fields.map((field) => ({
-    ...field,
-    name: field.name.trim(),
-    label: field.label.trim(),
-    options:
-      field.type === "select" || field.type === "multiselect"
-        ? field.options.map((option) => option.trim()).filter(Boolean)
-        : []
+    value: {
+      ...field.value,
+      name: field.value.name.trim(),
+      label: field.value.label.trim(),
+      options:
+        field.value.type === "select" || field.value.type === "multiselect"
+          ? field.value.options.map((option) => option.trim()).filter(Boolean)
+          : []
+    },
+    purpose: field.purpose
   }));
   return {
-    text: inputFields.map((field) => `${field.label} (${field.name})`).join(", "),
+    text: inputFields.map((field) => `${field.value.label} (${field.value.name})`).join(", "),
     questionAnswer: {
       kind: "structured_question_answer",
       question_id: question.question_id,

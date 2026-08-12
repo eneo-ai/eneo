@@ -2111,6 +2111,47 @@ describe("FlowAIBuilderDriver", () => {
     expect(driver.isQuestionAnswered("source_traceability")).toBe(true);
   });
 
+  it("persists runtime metadata field purpose in the request and optimistic message", async () => {
+    const answer = {
+      kind: "structured_question_answer" as const,
+      question_id: "runtime_metadata_field_details",
+      input_fields: [
+        {
+          value: {
+            name: "case_id",
+            label: "Case id",
+            type: "text" as const,
+            required: true,
+            options: []
+          },
+          purpose: "interpret_input" as const
+        }
+      ]
+    };
+    const { driver } = makeDriver({
+      fetchImpl: vi.fn().mockResolvedValue(makeSession()),
+      streamImpl: vi.fn(async (_path, init, handlers) => {
+        expect(init.requestBody["application/json"].question_answer).toEqual(answer);
+        handlers.onMessage({
+          event: "question",
+          data: JSON.stringify({
+            question_id: "reading_depth",
+            question: "How detailed should the review be?",
+            options: [{ id: "overview", label: "Overview", value: "overview" }],
+            selection_mode: "single",
+            allow_custom: false
+          })
+        });
+        completeStream(handlers);
+      })
+    });
+    driver.seedState({ session: makeSession() });
+
+    await driver.sendMessage("Case id", answer);
+
+    expect(driver.state.messages[0]?.questionAnswer?.input_fields).toEqual(answer.input_fields);
+  });
+
   it("does not refresh a structured-answer turn when the stream already renders the next question", async () => {
     const fetch = vi.fn();
     const { driver } = makeDriver({
@@ -2771,6 +2812,43 @@ describe("FlowAIBuilderDriver conversation hydration", () => {
     });
     // Single owner: structured answers never appear in the metadata dict.
     expect(hydrated?.metadata?.question_answer).toBeUndefined();
+  });
+
+  it("hydrates runtime metadata field purpose from the public conversation", async () => {
+    const { driver } = makeDriver({
+      fetchImpl: vi.fn(async (path: string) => {
+        if (path.endsWith("/models")) return { models: [], default_model_id: null };
+        return makeSession({
+          conversation: [
+            {
+              message_id: "u-fields",
+              role: "user",
+              content: "Case id",
+              timestamp: "2026-07-12T09:00:10Z",
+              question_answer: {
+                kind: "structured_question_answer",
+                question_id: "runtime_metadata_field_details",
+                input_fields: [
+                  {
+                    value: { name: "case_id", label: "Case id" },
+                    purpose: "whole_flow"
+                  }
+                ]
+              }
+            }
+          ]
+        });
+      })
+    });
+
+    await driver.resumeSession("session-1");
+
+    expect(driver.state.messages[0]?.questionAnswer?.input_fields).toEqual([
+      {
+        value: { name: "case_id", label: "Case id" },
+        purpose: "whole_flow"
+      }
+    ]);
   });
 });
 

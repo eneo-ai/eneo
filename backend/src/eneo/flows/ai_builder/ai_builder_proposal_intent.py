@@ -16,7 +16,6 @@ from pydantic import (
 from eneo.flows.ai_builder.ai_builder_flow_schema_values import (
     BuilderFormFieldType,
     FlowInputFieldProvenance,
-    builder_form_field_type_values,
     builder_output_type_values,
 )
 from eneo.flows.ai_builder.ai_builder_new_step_models import (
@@ -75,7 +74,10 @@ _CREATE_INTENT_STEP_BACKEND_OWNED_KEYS = frozenset(
 )
 logger = logging.getLogger(__name__)
 _CREATE_INTENT_ROOT_IGNORED_KEYS = frozenset({"final_output_type", "reasoning"})
-_RETIRED_CREATE_STEP_KEYS = frozenset({"output_type", "review_mode"})
+_RETIRED_CREATE_ROOT_KEYS = frozenset({"input_fields"})
+_RETIRED_CREATE_STEP_KEYS = frozenset(
+    {"output_type", "review_mode", "uses_form_fields"}
+)
 
 
 class FlowInputFieldIntent(BaseModel):
@@ -252,10 +254,6 @@ class OrderedEditProposal(BaseModel):
         return normalized
 
 
-def _empty_semantic_input_fields() -> list[FlowInputFieldIntent]:
-    return []
-
-
 class CreateFlowIntent(BaseModel):
     """Small LLM-facing contract for create mode.
 
@@ -269,9 +267,6 @@ class CreateFlowIntent(BaseModel):
     flow_name: str
     flow_description: str | None = None
     plan_rationale: str
-    input_fields: list[FlowInputFieldIntent] = Field(
-        default_factory=_empty_semantic_input_fields
-    )
     steps: list[SemanticStepIntent]
     assumptions: list[str] = Field(default_factory=list)
 
@@ -323,9 +318,9 @@ class CreateFlowIntent(BaseModel):
 
 
 def parse_create_flow_intent_arguments(arguments: dict[str, Any]) -> CreateFlowIntent:
-    retired_step_issues = _retired_create_step_key_issues(arguments)
-    if retired_step_issues:
-        raise ProposalIntentArgumentError(retired_step_issues)
+    retired_issues = _retired_create_key_issues(arguments)
+    if retired_issues:
+        raise ProposalIntentArgumentError(retired_issues)
     try:
         return CreateFlowIntent.model_validate(
             _normalize_create_intent_arguments(arguments)
@@ -361,13 +356,16 @@ def safe_validation_issues(error: ValidationError) -> tuple[str, ...]:
     return tuple(issues) or ("propose_flow validation failed [validation_error]",)
 
 
-def _retired_create_step_key_issues(
+def _retired_create_key_issues(
     arguments: dict[str, Any],
 ) -> tuple[str, ...]:
+    issues = [
+        f"{key}: Create derives this field on the server [backend_owned_field]"
+        for key in sorted(_RETIRED_CREATE_ROOT_KEYS.intersection(arguments))
+    ]
     raw_steps = arguments.get("steps")
     if not isinstance(raw_steps, list):
-        return ()
-    issues: list[str] = []
+        return tuple(issues)
     for index, raw_step in enumerate(cast(list[Any], raw_steps)):
         if not isinstance(raw_step, dict):
             continue
@@ -427,16 +425,6 @@ def _normalize_create_intent_arguments(arguments: dict[str, Any]) -> dict[str, A
         normalized["steps"] = [
             _strip_backend_owned_semantic_step_keys(raw_step)
             for raw_step in merged_steps
-        ]
-    raw_input_fields = normalized.get("input_fields")
-    if isinstance(raw_input_fields, list):
-        normalized["input_fields"] = [
-            (
-                {**field, "provenance": "model_proposed"}
-                if isinstance(field, dict)
-                else field
-            )
-            for field in cast(list[Any], raw_input_fields)
         ]
     return normalized
 
@@ -587,15 +575,6 @@ def build_create_flow_tool_schema(
                         "minLength": 1,
                         "description": "Short user-visible explanation of the design.",
                     },
-                    "input_fields": {
-                        "type": "array",
-                        "description": (
-                            "Optional secondary inmatningsfält/input variables the "
-                            "user fills in when running the flow. Do not include the "
-                            "primary text/document/file/audio material being processed."
-                        ),
-                        "items": _input_field_intent_schema(),
-                    },
                     "steps": {
                         "type": "array",
                         "minItems": 1,
@@ -603,6 +582,7 @@ def build_create_flow_tool_schema(
                         "items": build_semantic_step_schema(
                             include_output_type=False,
                             include_review_mode=False,
+                            include_form_field_refs=False,
                             model_refs=model_refs,
                             kb_refs=kb_refs,
                         ),
@@ -618,28 +598,11 @@ def build_create_flow_tool_schema(
     }
 
 
-def _input_field_intent_schema() -> dict[str, Any]:
-    return {
-        "type": "object",
-        "required": ["variable_name", "label", "field_type", "required"],
-        "properties": {
-            "variable_name": {"type": "string", "minLength": 1},
-            "label": {"type": "string", "minLength": 1},
-            "field_type": {
-                "type": "string",
-                "enum": builder_form_field_type_values(),
-            },
-            "required": {"type": "boolean"},
-            "options": {"type": "array", "items": {"type": "string"}},
-        },
-        "additionalProperties": False,
-    }
-
-
 def build_semantic_step_schema(
     *,
     include_output_type: bool = True,
     include_review_mode: bool = True,
+    include_form_field_refs: bool = True,
     include_previous_refs: bool = False,
     model_refs: list[str] | None = None,
     kb_refs: list[str] | None = None,
@@ -678,14 +641,20 @@ def build_semantic_step_schema(
                 ),
                 "items": build_structured_field_schema(),
             },
-            "uses_form_fields": {
-                "type": "array",
-                "items": {"type": "string"},
-                "description": (
-                    "Names of input_fields this step should consider. The backend "
-                    "compiles them into underlag/input_bindings."
-                ),
-            },
+            **(
+                {
+                    "uses_form_fields": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": (
+                            "Names of form fields this edit step should consider. "
+                            "The backend compiles them into underlag/input_bindings."
+                        ),
+                    }
+                }
+                if include_form_field_refs
+                else {}
+            ),
             **(
                 {
                     "uses_previous_fields": build_previous_field_refs_schema(),

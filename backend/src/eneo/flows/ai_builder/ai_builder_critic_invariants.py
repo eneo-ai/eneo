@@ -383,6 +383,8 @@ def _non_terminal_steps_adopt_template_fill(context: CriticContext) -> bool:
 
 
 def _runtime_metadata_requires_form_fields_evidence(context: CriticContext) -> bool:
+    if _is_create_context(context):
+        return False
     return (
         runtime_metadata_requested(context.answer_signals)
         and not context.spec.form_fields
@@ -427,6 +429,8 @@ _RUNTIME_METADATA_REQUIRES_FORM_FIELDS = CriticInvariant(
 def _sectioned_form_intake_requires_form_fields_evidence(
     context: CriticContext,
 ) -> bool:
+    if _is_create_context(context):
+        return False
     return (
         context.planner_patterns.sectioned_form_intake and not context.spec.form_fields
     )
@@ -449,6 +453,8 @@ _SECTIONED_FORM_INTAKE_REQUIRES_FORM_FIELDS = CriticInvariant(
 
 
 def _rich_workflow_requires_form_fields_evidence(context: CriticContext) -> bool:
+    if _is_create_context(context):
+        return False
     patterns = context.planner_patterns
     return (
         patterns.rich_document_workflow
@@ -1638,7 +1644,7 @@ _FINAL_TEXT_STEP_MUST_REFERENCE_RELEVANT_STRUCTURED_OUTPUTS = CriticInvariant(
 def _form_fields_declared_must_be_referenced_evidence(
     context: CriticContext,
 ) -> bool:
-    """Fire when the spec declares form_fields no step references.
+    """Fire in edit mode when the spec declares fields no step references.
 
     A declared but unreferenced form_field reaches the user as an
     input control with no effect on flow behaviour. The runtime would
@@ -1646,6 +1652,8 @@ def _form_fields_declared_must_be_referenced_evidence(
     polluting the prompt context. The planner gets a repair turn so it
     can either remove the field or wire it through a step's templates.
     """
+    if _is_create_context(context):
+        return False
     return bool(find_unused_form_fields(context.spec))
 
 
@@ -1662,14 +1670,10 @@ _FORM_FIELDS_DECLARED_MUST_BE_REFERENCED = CriticInvariant(
     remediation=(
         "Ett eller flera deklarerade fält saknar koppling till något steg. "
         "Reparera på något av följande sätt: "
-        "(a) Skapa-läge: lista varje fält i `uses_form_fields` på minst ett "
-        "steg som behöver värdet — kompilatorn injicerar då `{{ <namn> }}` "
-        "automatiskt i stegets underlag/`input_bindings`. Skriv inte själva "
-        "`{{ ... }}`-syntaxen i `instructions`-fältet (det är förbjudet av schemat). "
-        "(b) Redigera-läge: lägg fältet i `uses_form_fields` på minst ett steg "
+        "(a) Lägg fältet i `uses_form_fields` på minst ett steg "
         "och referera det med exakt `{{ <namn> }}` (utan `form.`-prefix) i "
         "stegets `instructions` eller `input_bindings.question`. "
-        "(c) Ta bort fältet helt om ingen ska läsa det. "
+        "(b) Ta bort fältet helt om ingen ska läsa det. "
         "Fält som ingen läser visas som live-kontroller utan effekt på flödets "
         "beteende och riskerar att förorena nedströms prompts vid körning."
     ),

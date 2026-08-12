@@ -43,6 +43,7 @@ def _text_step(
     output_type: OutputType = OutputType.TEXT,
     output_mode: OutputMode = OutputMode.PASS_THROUGH,
     underlag_channel: UnderlagChannel = "flow_input",
+    semantic_origin_eligible: bool = False,
     form_field_refs: tuple[str, ...] = (),
     previous_field_refs: tuple[PreviousFieldRef, ...] = (),
     previous_output_refs: tuple[PreviousOutputRef, ...] = (),
@@ -57,6 +58,7 @@ def _text_step(
         output_type=output_type,
         output_mode=output_mode,
         underlag_channel=underlag_channel,
+        semantic_origin_eligible=semantic_origin_eligible,
         form_field_refs=form_field_refs,
         previous_field_refs=previous_field_refs,
         previous_output_refs=previous_output_refs,
@@ -391,6 +393,53 @@ def test_plan_rejects_unplaced_form_fields() -> None:
             flow_description="",
             form_fields=(form_field,),
             steps=(_text_step(),),
+            terminal_output_schema=None,
+            source_reader_required_fields=(),
+            aggregation_intent="linear",
+            ui_language=None,
+        )
+
+
+def test_plan_rejects_duplicate_form_field_refs_on_one_target() -> None:
+    form_field = FormFieldSpec(
+        name="tone",
+        label="Tone",
+        type="text",
+        required=True,
+    )
+
+    with pytest.raises(ValueError, match="more than once: tone"):
+        FlowAssemblyPlan(
+            flow_name="Test flow",
+            flow_description="",
+            form_fields=(form_field,),
+            steps=(
+                _text_step(
+                    semantic_origin_eligible=True,
+                    form_field_refs=("tone", "tone"),
+                ),
+            ),
+            terminal_output_schema=None,
+            source_reader_required_fields=(),
+            aggregation_intent="linear",
+            ui_language=None,
+        )
+
+
+def test_plan_rejects_form_field_on_ineligible_helper() -> None:
+    form_field = FormFieldSpec(
+        name="tone",
+        label="Tone",
+        type="text",
+        required=True,
+    )
+
+    with pytest.raises(ValueError, match="not a legal form-field target"):
+        FlowAssemblyPlan(
+            flow_name="Test flow",
+            flow_description="",
+            form_fields=(form_field,),
+            steps=(_text_step(form_field_refs=("tone",)),),
             terminal_output_schema=None,
             source_reader_required_fields=(),
             aggregation_intent="linear",

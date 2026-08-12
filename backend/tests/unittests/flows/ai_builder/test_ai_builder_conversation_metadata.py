@@ -23,6 +23,7 @@ from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
     metadata_with_slot_classification,
     provider_safe_tool_call_id,
     question_answer_from_metadata,
+    question_answer_has_real_payload,
     question_answer_question_id,
     question_interaction_id_from_metadata,
     question_response_from_metadata,
@@ -156,6 +157,101 @@ def test_question_answer_request_discriminator_is_not_persisted() -> None:
     answer = question_answer_from_metadata(metadata)
     assert answer is not None
     assert question_answer_question_id(answer) == "primary_runtime_input"
+
+
+def test_runtime_metadata_field_answer_is_real_and_persists_purpose() -> None:
+    metadata = metadata_for_user_message(
+        question_answer={
+            "kind": "structured_question_answer",
+            "question_id": "runtime_metadata_field_details",
+            "input_fields": [
+                {
+                    "value": {
+                        "name": "case_id",
+                        "label": "Case id",
+                        "type": "text",
+                        "required": True,
+                    },
+                    "purpose": "interpret_input",
+                }
+            ],
+        }
+    )
+
+    answer = question_answer_from_metadata(metadata)
+
+    assert answer is not None
+    assert question_answer_has_real_payload(answer)
+    assert answer.input_fields is not None
+    assert answer.input_fields[0].purpose == "interpret_input"
+    assert answer.input_fields[0].value.variable_name == "case_id"
+    assert answer.input_fields[0].value.provenance == "user_confirmed"
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {
+            "question_id": "runtime_metadata_field_details",
+            "input_fields": [{"value": {"name": "case_id", "label": "Case id"}}],
+        },
+        {
+            "question_id": "runtime_metadata_field_details",
+            "input_fields": [
+                {
+                    "value": {"name": "case_id", "label": "Case id"},
+                    "purpose": "invalid",
+                }
+            ],
+        },
+        {
+            "question_id": "runtime_metadata_field_details",
+            "input_fields": [
+                {
+                    "value": {"name": "case_id", "label": "Case id"},
+                    "purpose": "interpret_input",
+                    "unexpected": True,
+                }
+            ],
+        },
+        {
+            "question_id": "runtime_metadata_field_details",
+            "selected_value": "interpret_input",
+            "input_fields": [
+                {
+                    "value": {"name": "case_id", "label": "Case id"},
+                    "purpose": "interpret_input",
+                }
+            ],
+        },
+        {
+            "question_id": "runtime_metadata_field_details",
+            "input_fields": [
+                {
+                    "value": {"name": "case_id", "label": "Case id"},
+                    "purpose": "interpret_input",
+                },
+                {
+                    "value": {"name": "CASE_ID", "label": "Case identifier"},
+                    "purpose": "shape_result",
+                },
+            ],
+        },
+        {
+            "question_id": "terminal_output",
+            "input_fields": [
+                {
+                    "value": {"name": "case_id", "label": "Case id"},
+                    "purpose": "interpret_input",
+                }
+            ],
+        },
+    ],
+)
+def test_runtime_metadata_field_answer_schema_is_closed(
+    payload: dict[str, object],
+) -> None:
+    assert question_answer_from_metadata({"question_answer": payload}) is None
 
 
 def test_question_response_metadata_round_trips_canonical_question_identity() -> None:

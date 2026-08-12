@@ -183,6 +183,51 @@ def test_rebuild_restores_typed_requirements_without_reading_display_copy() -> N
     }
 
 
+def test_rebuild_uses_latest_confirmed_runtime_metadata_field_set() -> None:
+    conversation = [
+        ConversationMessage(
+            message_id="answer-old",
+            role="user",
+            content="Old field",
+            metadata={
+                "question_answer": {
+                    "question_id": "runtime_metadata_field_details",
+                    "input_fields": [
+                        {
+                            "value": {"name": "old", "label": "Old"},
+                            "purpose": "shape_result",
+                        }
+                    ],
+                }
+            },
+        ),
+        ConversationMessage(
+            message_id="answer-latest",
+            role="user",
+            content="Case id",
+            metadata={
+                "question_answer": {
+                    "question_id": "runtime_metadata_field_details",
+                    "input_fields": [
+                        {
+                            "value": {"name": "case_id", "label": "Case id"},
+                            "purpose": "interpret_input",
+                        }
+                    ],
+                }
+            },
+        ),
+    ]
+
+    state = build_planning_state_from_conversation(conversation)
+
+    assert len(state.input_fields) == 1
+    assert state.input_fields[0].value.variable_name == "case_id"
+    assert state.input_fields[0].value.provenance == "user_confirmed"
+    assert state.input_fields[0].purpose == "interpret_input"
+    assert state.input_fields[0].structured_answer_message_id == "answer-latest"
+
+
 def test_rebuild_does_not_admit_unconfirmed_requirements_projection() -> None:
     payload = RequirementsSummaryPayload(
         summary="Checkpoint ready.",
@@ -1645,7 +1690,7 @@ class TestPolicyDefaults:
 
         assert "runtime_metadata_fields" not in state.resolved_slots
 
-    def test_explicit_runtime_input_fields_resolve_heuristically(
+    def test_explicit_runtime_input_fields_remain_non_commit_grade_heuristic(
         self,
     ) -> None:
         state = build_planning_state_from_conversation(
@@ -1662,9 +1707,10 @@ class TestPolicyDefaults:
         )
 
         slot = state.resolved_slots["runtime_metadata_fields"]
-        assert slot.value == "detailed_runtime_metadata"
+        assert slot.value == "basic_runtime_metadata"
         assert slot.source == "heuristic"
-        assert slot.confidence == "high"
+        assert slot.confidence == "medium"
+        assert not slot.is_commit_grade
 
     def test_optional_checklist_or_rule_runtime_fields_require_admissible_evidence(
         self,
@@ -1685,9 +1731,9 @@ class TestPolicyDefaults:
         )
 
         slot = state.resolved_slots["runtime_metadata_fields"]
-        assert slot.value == "detailed_runtime_metadata"
+        assert slot.value == "basic_runtime_metadata"
         assert slot.source == "heuristic"
-        assert slot.confidence == "high"
+        assert slot.confidence == "medium"
         assert not slot.is_commit_grade
 
         policy = build_planner_action_policy(
@@ -1696,7 +1742,7 @@ class TestPolicyDefaults:
         )
         assert "runtime_metadata_fields" in policy.allowed_ask_question_targets
 
-    def test_user_supplies_prompt_resolves_detailed_runtime_metadata(
+    def test_user_supplies_prompt_resolves_basic_runtime_metadata(
         self,
     ) -> None:
         state = build_planning_state_from_conversation(
@@ -1713,7 +1759,7 @@ class TestPolicyDefaults:
         )
 
         slot = state.resolved_slots["runtime_metadata_fields"]
-        assert slot.value == "detailed_runtime_metadata"
+        assert slot.value == "basic_runtime_metadata"
         assert slot.source == "heuristic"
 
     def test_swedish_audio_prompt_with_terminal_word_file_resolves_core_slots(
@@ -2032,8 +2078,9 @@ class TestRuntimeMetadataClassificationBoundaries:
         )
 
         slot = state.resolved_slots["runtime_metadata_fields"]
-        assert slot.value == "detailed_runtime_metadata"
+        assert slot.value == "basic_runtime_metadata"
         assert slot.source == "heuristic"
+        assert slot.confidence == "medium"
 
 
 class TestSlotClassificationMetadataReplay:
