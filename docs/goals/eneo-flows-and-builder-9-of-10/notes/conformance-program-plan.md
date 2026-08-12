@@ -454,9 +454,11 @@ flip pass↔fail; much of the rest alternates first-pass vs repaired. No
 generic "reduce randomness" slice. Deterministic behavior tests own
 correctness; repeated targeted cohorts own incidence.
 
-**Harness gap noted:** `force_new` is passed on every session creation
-but absent from `run_context` identity; add it when the harness is next
-touched.
+**Harness session invariant resolved:** every create-mode observation gets a
+new session without superseding another active session. The battle harness
+therefore submits `force_new=false` and does not expose it as a run-context
+choice. Explicit UI and API callers retain the separately tested ability to
+request supersession.
 
 ---
 

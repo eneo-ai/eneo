@@ -591,7 +591,6 @@ def _parse_args() -> argparse.Namespace:
         default=DEFAULT_CONFIRM_MESSAGE,
         help="Message text for the automatic requirements-confirmation turn.",
     )
-    parser.add_argument("--force-new", action="store_true")
     parser.add_argument(
         "--timeout-seconds",
         type=int,
@@ -2535,7 +2534,6 @@ def _run_case(
         initial_session = _create_session(
             config=config,
             space_id=args.space_id,
-            force_new=args.force_new,
         )
         session_id = _required_string(initial_session, "session_id")
         print(f"created session {session_id}")
@@ -5116,7 +5114,6 @@ def _create_session(
     *,
     config: ApiConfig,
     space_id: str,
-    force_new: bool,
 ) -> JsonObject:
     return _request_json(
         config=config,
@@ -5125,7 +5122,7 @@ def _create_session(
         payload={
             "target_kind": "create",
             "space_id": space_id,
-            "force_new": force_new,
+            "force_new": False,
         },
     )
 

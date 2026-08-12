@@ -31,6 +31,64 @@ def _battle_harness() -> ModuleType:
     return module
 
 
+def test_harness_create_session_never_requests_session_supersession(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    harness = _battle_harness()
+    requests: list[dict[str, object]] = []
+
+    def request_json(**kwargs: object) -> dict[str, str]:
+        requests.append(kwargs)
+        return {"session_id": "session-1"}
+
+    monkeypatch.setattr(harness, "_request_json", request_json)
+
+    result = harness._create_session(
+        config=harness.ApiConfig(
+            base_url="http://localhost/api/v1",
+            api_key="local-test-key",
+            timeout_seconds=1,
+        ),
+        space_id="space-1",
+    )
+
+    assert result == {"session_id": "session-1"}
+    assert requests == [
+        {
+            "config": harness.ApiConfig(
+                base_url="http://localhost/api/v1",
+                api_key="local-test-key",
+                timeout_seconds=1,
+            ),
+            "method": "POST",
+            "path": "/flows/ai-builder/sessions",
+            "payload": {
+                "target_kind": "create",
+                "space_id": "space-1",
+                "force_new": False,
+            },
+        }
+    ]
+
+
+def test_force_new_is_not_a_battle_harness_cli_option(
+    monkeypatch: MonkeyPatch,
+    capsys: CaptureFixture[str],
+) -> None:
+    harness = _battle_harness()
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["ai_builder_api_battle_test.py", "--force-new"],
+    )
+
+    with raises(SystemExit) as exc_info:
+        harness._parse_args()
+
+    assert exc_info.value.code == 2
+    assert "unrecognized arguments: --force-new" in capsys.readouterr().err
+
+
 def test_send_and_fetch_supplies_fresh_caller_owned_turn_identity(
     monkeypatch: MonkeyPatch,
 ) -> None:

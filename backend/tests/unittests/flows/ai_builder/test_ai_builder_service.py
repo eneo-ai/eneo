@@ -677,7 +677,7 @@ class TestCreateSession:
         repo.create_session.assert_not_called()
 
     @pytest.mark.anyio
-    async def test_create_session_does_not_auto_resume_existing_draft(self):
+    async def test_create_session_is_fresh_without_cancelling_existing_draft(self):
         user = _make_user()
         repo = AsyncMock()
         repo.find_latest_resumable_session.return_value = _make_session(
@@ -698,6 +698,7 @@ class TestCreateSession:
         )
 
         repo.find_latest_resumable_session.assert_not_called()
+        repo.cancel_matching_active_sessions.assert_not_called()
         repo.create_session.assert_called_once()
 
     @pytest.mark.anyio
