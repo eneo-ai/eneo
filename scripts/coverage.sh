@@ -20,7 +20,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-CONTAINER="eneo_devcontainer-eneo-1"
+source "${ROOT}/scripts/lib/resolve-devcontainer.sh"
 FULL=0
 DO_FE=1
 DO_BE=1
@@ -42,10 +42,7 @@ fi
 
 if [ "$DO_BE" = 1 ]; then
   docker context use orbstack >/dev/null 2>&1 || true
-  if ! docker ps --format '{{.Names}}' | grep -qx "$CONTAINER"; then
-    echo "✗ backend devcontainer '$CONTAINER' is not running — start it, or use --frontend." >&2
-    exit 1
-  fi
+  CONTAINER="$(resolve_eneo_devcontainer "${ROOT}")"
   # uv lives at /home/vscode/.local/bin; keep it on PATH and point HOME at vscode.
   ENV_PREFIX="export PATH=/home/vscode/.local/bin:\$PATH HOME=/home/vscode"
   if [ "$FULL" = 1 ]; then

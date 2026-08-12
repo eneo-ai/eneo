@@ -7,10 +7,6 @@
 	"dockerComposeFile": "docker-compose.yml",
 	"service": "eneo",
 	"workspaceFolder": "/workspace",
-	"forwardPorts": [
-		3000, // Frontend
-		8123
-	],
 	"features": {
 		"ghcr.io/devcontainers/features/docker-outside-of-docker:1": {
 			"version": "latest",

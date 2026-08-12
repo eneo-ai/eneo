@@ -44,17 +44,35 @@ cd frontend && bun run dev                 # Terminal 2
 cd backend && uv run worker             # Terminal 3
 ```
 
+For a Git worktree checkout, expose only its Git common directory to the
+container with a narrow local mount, or use a plain clone; never mount the
+checkout's whole parent directory.
+
+**Running another checkout concurrently**
+
+When another Eneo checkout already uses the default host ports, create
+`.devcontainer/.env` with unique ports, then point `frontend/apps/web/.env` at
+the API port:
+
+```dotenv
+# .devcontainer/.env
+ENEO_WEB_PORT=3100
+ENEO_API_PORT=8223
+```
+
+```dotenv
+# frontend/apps/web/.env
+ENEO_BACKEND_URL="http://localhost:8223"
+PUBLIC_ENEO_BACKEND_URL="http://localhost:8223"
+PUBLIC_ORIGIN="https://localhost:3100"
+```
+
 **Optional: object storage locally**
 
 Eneo stores file bytes in PostgreSQL by default, which is all most work needs.
 To exercise the S3-compatible path instead, start the bundled SeaweedFS service
 from the `object-content` Compose profile. It is off by default because the
 image is built from upstream source, so the first start takes a few minutes.
-
-```bash
-docker compose -p eneo_devcontainer -f .devcontainer/docker-compose.yml \
-  --profile object-content up -d object-content
-```
 
 To have VS Code bring it up together with the rest of the devcontainer, create
 `.devcontainer/.env` (gitignored, so it stays a per-developer choice) with:

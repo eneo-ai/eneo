@@ -1,6 +1,5 @@
 # Copyright (c) 2026 Sundsvalls Kommun
 #
-version: "3.8"
 services:
   eneo:
     build:
@@ -24,13 +23,18 @@ services:
       - OBJECT_CONTENT_ACCESS_KEY_ID
       - OBJECT_CONTENT_SECRET_ACCESS_KEY
       - OBJECT_CONTENT_DEPLOYMENT_ID
+      # Integration testcontainers join this checkout's Compose network rather
+      # than a global network shared by every devcontainer.
+      - ENEO_TEST_DOCKER_NETWORK=${COMPOSE_PROJECT_NAME}_eneo
+      - ENEO_WEB_PORT=${ENEO_WEB_PORT:-3000}
+      - ENEO_API_PORT=${ENEO_API_PORT:-8123}
       # Plain HTTP is fine for local development; production keeps the
       # HTTPS-only default. Container env wins over backend/.env, so override
       # this from the host environment if you need to test the refusal.
       - OBJECT_CONTENT_ALLOW_INSECURE_HTTP=${OBJECT_CONTENT_ALLOW_INSECURE_HTTP:-true}
     ports:
-      - "3000:3000"
-      - "8123:8123"
+      - "${ENEO_WEB_PORT:-3000}:3000"
+      - "${ENEO_API_PORT:-8123}:8123"
     volumes:
       - ../:/workspace
       # Isolate .venv from host to prevent host-side uv/python from corrupting it
@@ -76,8 +80,6 @@ services:
     image: pgvector/pgvector:pg13
     networks:
       - eneo
-    ports:
-      - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     environment:
@@ -129,5 +131,6 @@ volumes:
   object_content_data:
 
 networks:
+  # Keep service DNS project-scoped so concurrent checkouts cannot resolve one
+  # another's db or redis containers.
   eneo:
-    name: eneo

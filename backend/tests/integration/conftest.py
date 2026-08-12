@@ -152,7 +152,11 @@ from tests.fixtures import mint_v2_api_key
 # Detect if we're in a devcontainer environment
 # If POSTGRES_HOST is set to 'db', we're likely in the devcontainer
 _IN_DEVCONTAINER = os.getenv("POSTGRES_HOST") == "db"
-_TEST_NETWORK = "eneo" if _IN_DEVCONTAINER else None
+_TEST_NETWORK = os.getenv("ENEO_TEST_DOCKER_NETWORK") if _IN_DEVCONTAINER else None
+if _IN_DEVCONTAINER and not _TEST_NETWORK:
+    raise RuntimeError(
+        "ENEO_TEST_DOCKER_NETWORK is required; rebuild or reopen the devcontainer"
+    )
 
 
 def _host_resolves(host: str) -> bool:
