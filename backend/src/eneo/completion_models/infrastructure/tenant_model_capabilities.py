@@ -7,6 +7,10 @@ from typing import Literal, cast
 
 import litellm
 
+from eneo.completion_models.domain.model_kwargs_capabilities import (
+    ModelKwargCapability,
+    SupportedModelKwargs,
+)
 from eneo.main.logging import get_logger
 
 logger = get_logger(__name__)
@@ -114,6 +118,114 @@ def get_supported_openai_params(
         ),
     )
     return tuple(params) if params is not None else None
+
+
+def resolve_reasoning_effort_options(
+    *,
+    litellm_model: str,
+    provider_type: str,
+) -> tuple[str, ...]:
+    """Return the reasoning levels LiteLLM confirms for one model route."""
+    try:
+        supported_params = get_supported_openai_params(
+            model=litellm_model,
+            custom_llm_provider=provider_type,
+        )
+    except Exception:
+        logger.warning(
+            "LiteLLM reasoning parameter metadata unavailable",
+            exc_info=True,
+            extra={
+                "litellm_model": litellm_model,
+                "provider_type": provider_type,
+            },
+        )
+        return ()
+
+    if supported_params is None or "reasoning_effort" not in supported_params:
+        return ()
+
+    try:
+        model_info = cast(
+            Mapping[str, object],
+            getattr(litellm, "get_model_info")(
+                model=litellm_model,
+                custom_llm_provider=provider_type,
+            ),
+        )
+    except Exception:
+        logger.warning(
+            "LiteLLM reasoning level metadata unavailable",
+            exc_info=True,
+            extra={
+                "litellm_model": litellm_model,
+                "provider_type": provider_type,
+            },
+        )
+        return ()
+
+    if model_info.get("supports_reasoning") is not True:
+        return ()
+
+    options: list[str] = []
+    if model_info.get("supports_none_reasoning_effort") is True:
+        options.append("none")
+    if model_info.get("supports_minimal_reasoning_effort") is True:
+        options.append("minimal")
+    if model_info.get("supports_low_reasoning_effort") is not False:
+        options.append("low")
+    options.extend(("medium", "high"))
+    if model_info.get("supports_xhigh_reasoning_effort") is True:
+        options.append("xhigh")
+    if model_info.get("supports_max_reasoning_effort") is True:
+        options.append("max")
+    return tuple(options)
+
+
+def enrich_reasoning_effort_capability(
+    *,
+    supported_model_kwargs: SupportedModelKwargs,
+    has_capability_snapshot: bool,
+    reasoning: bool,
+    litellm_model: str,
+    provider_type: str | None,
+) -> SupportedModelKwargs:
+    """Fill a missing reasoning snapshot from credential-free LiteLLM metadata."""
+    if has_capability_snapshot or not reasoning or not provider_type:
+        return supported_model_kwargs
+
+    reasoning_options = resolve_reasoning_effort_options(
+        litellm_model=litellm_model,
+        provider_type=provider_type,
+    )
+    if not reasoning_options:
+        return supported_model_kwargs
+
+    return supported_model_kwargs.model_copy(
+        update={
+            "reasoning_effort": ModelKwargCapability(
+                supported=True,
+                control="select",
+                options=list(reasoning_options),
+            )
+        }
+    )
+
+
+def selectable_reasoning_effort_options(
+    capability: ModelKwargCapability,
+    *,
+    max_length: int,
+) -> tuple[str, ...]:
+    """Return the exact, request-safe values exposed by a select capability."""
+    if not capability.supported or capability.control != "select":
+        return ()
+
+    return tuple(
+        option
+        for option in dict.fromkeys(capability.options or ())
+        if option and option == option.strip() and len(option) <= max_length
+    )
 
 
 def normalize_reasoning_effort(
@@ -255,9 +367,12 @@ __all__ = [
     "StructuredOutputCapabilityDecision",
     "StructuredOutputDecisionSource",
     "StructuredOutputMode",
+    "enrich_reasoning_effort_capability",
     "get_supported_openai_params",
     "normalize_reasoning_effort",
+    "resolve_reasoning_effort_options",
     "resolve_structured_output_capability",
+    "selectable_reasoning_effort_options",
     "supports_response_schema",
     "unsupported_structured_output_decision",
 ]

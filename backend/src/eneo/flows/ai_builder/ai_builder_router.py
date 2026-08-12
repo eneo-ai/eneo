@@ -20,6 +20,9 @@ from eneo.audit.application.audit_metadata import AuditMetadata
 from eneo.audit.domain.action_types import ActionType
 from eneo.audit.domain.entity_types import EntityType
 from eneo.authentication.auth_dependencies import get_scope_filter
+from eneo.completion_models.infrastructure.tenant_model_capabilities import (
+    enrich_reasoning_effort_capability,
+)
 from eneo.files.file_models import FilePublic
 from eneo.flows.ai_builder.ai_builder_api_models import (
     AIBuilderArchitectureDiagnostic,
@@ -48,10 +51,6 @@ from eneo.flows.ai_builder.ai_builder_api_models import (
 )
 from eneo.flows.ai_builder.ai_builder_api_models import (
     ApplyResultResponse as ApplyResult,
-)
-from eneo.flows.ai_builder.ai_builder_context import (
-    resolve_planner_model,
-    serialize_space_models,
 )
 from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
     question_answer_from_metadata,
@@ -721,8 +720,8 @@ def _ai_builder_json_error_response(
     responses={
         201: {"description": "AI Builder session created."},
         400: _ai_builder_error_response(
-            description="The request payload is valid JSON but cannot start a builder session in its current state.",
-            message="A planner model is required to start an AI Builder session.",
+            description="The request payload is valid JSON but cannot start the requested builder session.",
+            message="The requested AI Builder session cannot be started.",
             code=AIBuilderErrorCode.BAD_REQUEST,
         ),
         403: _ai_builder_error_response(
@@ -746,8 +745,7 @@ async def create_session(
             action=FlowApiAction.BUILDER_SESSION_CREATE,
             space_id=body.space_id,
         )
-        space = _authorized_space(authorization)
-        resolve_planner_model(space)
+        _authorized_space(authorization)
 
         service = _get_ai_builder_service(container)
         session: BuilderSession = await service.create_session(
@@ -936,6 +934,7 @@ async def send_message(
                             session=turn_preflight.session,
                             space=space,
                             model_id=body.model_id,
+                            reasoning_effort=body.reasoning_effort,
                             tenant_flow_settings=(
                                 tenant.flow_settings if tenant else None
                             ),
@@ -1393,12 +1392,39 @@ async def get_session_models(
         require_creator=True,
     )
     space = _authorized_space(authorization)
-    models = serialize_space_models(space)
-    default_model = resolve_planner_model(space)
-    default_model_id = default_model.id if default_model else None
+    active_providers = await container.model_provider_repository().all(active_only=True)
+    active_provider_ids = {provider.id for provider in active_providers}
+    models = [
+        model
+        for model in space.completion_models
+        if model.provider_id in active_provider_ids
+    ]
+    default_model = space.get_default_completion_model()
+    default_model_id = (
+        default_model.id
+        if default_model is not None
+        and default_model.provider_id in active_provider_ids
+        else None
+    )
+
+    resolved_models: list[SessionModelOption] = []
+    for model in models:
+        supported_model_kwargs = enrich_reasoning_effort_capability(
+            supported_model_kwargs=model.supported_model_kwargs,
+            has_capability_snapshot=model.model_kwargs_capabilities is not None,
+            reasoning=model.reasoning,
+            litellm_model=model.get_model_route(provider_type=model.provider_type),
+            provider_type=model.provider_type,
+        )
+        resolved_models.append(
+            SessionModelOption.from_completion_model(
+                model,
+                supported_model_kwargs=supported_model_kwargs,
+            )
+        )
 
     return SessionModelsResponse(
-        models=[SessionModelOption.model_validate(model) for model in models],
+        models=resolved_models,
         default_model_id=default_model_id,
     )
 

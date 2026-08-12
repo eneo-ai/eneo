@@ -1,6 +1,5 @@
 <script lang="ts">
   import { initSpacesManager } from "$lib/features/spaces/SpacesManager";
-  import { initFlowUserMode } from "$lib/features/flows/FlowUserMode";
   import type { Space } from "@eneo/eneo-js";
   import { untrack, type ComponentProps } from "svelte";
   import type { AIBuilderClientTransport, FlowAIBuilderState } from "../FlowAIBuilderDriver";
@@ -11,8 +10,6 @@
     currentSpace: Pick<Space, "completion_models" | "transcription_models"> & Partial<Space>;
     state: Partial<FlowAIBuilderState>;
     transport?: AIBuilderClientTransport;
-    /** Enkel ("user", default) or Avancerad ("power_user"). */
-    userMode?: "user" | "power_user";
     /** Render-time props forwarded to the pane, typed by the component. */
     paneProps?: Partial<ComponentProps<typeof FlowAIBuilderPlanPane>>;
     /** Test hook: receive the service instance to drive live state changes. */
@@ -22,7 +19,6 @@
   let {
     currentSpace,
     state,
-    userMode = "user",
     paneProps = {},
     onservice,
     transport = {
@@ -34,9 +30,6 @@
       }
     }
   }: Props = $props();
-
-  const mode = initFlowUserMode();
-  untrack(() => mode.set(userMode));
 
   const service = untrack(() => {
     const spacesManagerParams: Parameters<typeof initSpacesManager>[0] = {

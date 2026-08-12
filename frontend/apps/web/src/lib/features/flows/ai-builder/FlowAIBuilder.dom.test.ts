@@ -1,5 +1,5 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/svelte";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { m } from "$lib/paraglide/messages";
 
@@ -23,6 +23,19 @@ vi.mock("$lib/core/Eneo", () => ({
 import FlowAIBuilderHarness from "./test-harnesses/FlowAIBuilderHarness.svelte";
 import type { AIBuilderClientTransport } from "./FlowAIBuilderDriver";
 import type { FlowAIBuilderService } from "./FlowAIBuilderService.svelte.ts";
+
+const DEFAULT_MODEL_ID = "11111111-1111-4111-8111-111111111199";
+const DEFAULT_MODEL_RESPONSE = {
+  models: [
+    {
+      id: DEFAULT_MODEL_ID,
+      name: "Test model",
+      provider: "openai",
+      reasoning_effort_options: []
+    }
+  ],
+  default_model_id: DEFAULT_MODEL_ID
+};
 
 function recoveryHarness(
   state: "open" | "processing" | "failed_before_provider" | "provider_outcome_unknown",
@@ -70,7 +83,7 @@ function recoveryHarness(
   let sessionReadCount = 0;
   const fetch = vi.fn();
   fetch.mockImplementation(async (path: string, init?: { method?: string }) => {
-    if (path.endsWith("/models")) return { models: [], default_model_id: null };
+    if (path.endsWith("/models")) return DEFAULT_MODEL_RESPONSE;
     if (path === "/api/v1/flows/ai-builder/sessions" && init?.method === "get") {
       return { sessions: [draft] };
     }
@@ -140,7 +153,7 @@ function resumeFailureHarness(options: { multipleDrafts?: boolean } = {}): {
         params?: { path?: { session_id?: string } };
       }
     ) => {
-      if (path.endsWith("/models")) return { models: [], default_model_id: null };
+      if (path.endsWith("/models")) return DEFAULT_MODEL_RESPONSE;
       if (path === "/api/v1/flows/ai-builder/sessions" && init?.method === "get") {
         return { sessions: options.multipleDrafts ? [draft, otherDraft] : [draft] };
       }
@@ -190,11 +203,21 @@ Element.prototype.animate ??= (() => ({
   finished: Promise.resolve(),
   onfinish: null
 })) as never;
+Element.prototype.hasPointerCapture ??= () => false;
+Element.prototype.setPointerCapture ??= () => undefined;
+Element.prototype.releasePointerCapture ??= () => undefined;
 
 afterEach(() => {
   cleanup();
   // Composer drafts persist per session id; tests share ids across cases.
   localStorage.clear();
+});
+
+beforeEach(() => {
+  Object.defineProperty(Element.prototype, "scrollIntoView", {
+    configurable: true,
+    value: vi.fn()
+  });
 });
 
 // A resumable create session whose latest plan is already proposed: resuming
@@ -258,7 +281,7 @@ function planSessionHarness(): {
     }
   };
   const fetch = vi.fn(async (path: string) => {
-    if (path.endsWith("/models")) return { models: [], default_model_id: null };
+    if (path.endsWith("/models")) return DEFAULT_MODEL_RESPONSE;
     if (path === "/api/v1/flows/ai-builder/sessions") return { sessions: [draft] };
     if (path === "/api/v1/flows/ai-builder/sessions/{session_id}") return session;
     if (path === "/api/v1/flows/ai-builder/plans/{plan_id}") return plan;
@@ -697,57 +720,6 @@ describe("FlowAIBuilder plan-review left pane", () => {
       { id: "file-9", name: "underlag.pdf", size: 2048, mimetype: "application/pdf" }
     ]);
   });
-
-  it("ignores a stale completion while a newer submission is in flight", async () => {
-    const { transport } = twoSessionHarness();
-    const gates: Array<() => void> = [];
-    transport.stream = vi.fn(async () => {
-      await new Promise<void>((resolve) => gates.push(resolve));
-      throw new Error("transport failure");
-    }) as AIBuilderClientTransport["stream"];
-
-    let service: FlowAIBuilderService | undefined;
-    render(FlowAIBuilderHarness, {
-      transport,
-      onservice: (instance: FlowAIBuilderService) => (service = instance)
-    });
-
-    await screen.findByRole("heading", { name: m.ai_builder_task_heading() });
-    const sends = interceptSends(service!);
-    const textbox = () =>
-      screen.getByRole("textbox", { name: m.ai_builder_refine_label() }) as HTMLTextAreaElement;
-
-    // A submits and stays in flight.
-    await fireEvent.input(textbox(), { target: { value: "A:s meddelande" } });
-    await fireEvent.keyDown(textbox(), { key: "Enter", ctrlKey: true });
-
-    // Switch to B and submit there too — B's attempt now owns the slot.
-    await service!.resumeSession("plan-session-b");
-    await waitFor(() => expect(textbox().value).toBe(""));
-    await fireEvent.input(textbox(), { target: { value: "B:s meddelande" } });
-    await fireEvent.keyDown(textbox(), { key: "Enter", ctrlKey: true });
-    expect(
-      JSON.parse(localStorage.getItem("eneo:ai-builder:draft:plan-session-b") ?? "{}").text
-    ).toBe("B:s meddelande");
-
-    // A settles first: a stale completion may not clear B's in-flight guard,
-    // restore A's text, or touch B's durable record.
-    gates[0]!();
-    expect(await sends[0]).toBe("failed");
-    expect(textbox().value).toBe("");
-    // A reactive service update now re-runs the composer's save effect while
-    // B's optimistic clear is live; only an intact in-flight guard keeps the
-    // empty composer from being mirrored over B's durable record.
-    await service!.refreshSession();
-    expect(
-      JSON.parse(localStorage.getItem("eneo:ai-builder:draft:plan-session-b") ?? "{}").text
-    ).toBe("B:s meddelande");
-
-    // B settles as failed: ITS completion restores B's draft.
-    gates[1]!();
-    expect(await sends[1]).toBe("failed");
-    await waitFor(() => expect(textbox().value).toBe("B:s meddelande"));
-  });
 });
 
 describe("FlowAIBuilder clarification history", () => {
@@ -823,7 +795,7 @@ describe("FlowAIBuilder clarification history", () => {
       latest_turn: null
     };
     const fetch = vi.fn(async (path: string, init?: { method?: string }) => {
-      if (path.endsWith("/models")) return { models: [], default_model_id: null };
+      if (path.endsWith("/models")) return DEFAULT_MODEL_RESPONSE;
       if (path === "/api/v1/flows/ai-builder/sessions" && init?.method === "get") {
         return { sessions: [draft] };
       }
@@ -855,6 +827,11 @@ describe("FlowAIBuilder generation wait state", () => {
       created_at: "2026-07-12T09:00:00Z",
       updated_at: "2026-07-12T09:00:00Z"
     };
+    const otherDraft = {
+      ...draft,
+      session_id: "gen-session-other",
+      draft_title: "Annat utkast"
+    };
     const session = {
       ...draft,
       conversation: [
@@ -867,26 +844,40 @@ describe("FlowAIBuilder generation wait state", () => {
       ],
       latest_turn: null
     };
+    let draftListRequestCount = 0;
     const fetch = vi.fn(async (path: string, init?: { method?: string }) => {
-      if (path.endsWith("/models")) return { models: [], default_model_id: null };
+      if (path.endsWith("/models")) return DEFAULT_MODEL_RESPONSE;
       if (path === "/api/v1/flows/ai-builder/sessions" && init?.method === "get") {
-        return { sessions: [draft] };
+        draftListRequestCount += 1;
+        return { sessions: draftListRequestCount === 1 ? [draft] : [draft, otherDraft] };
       }
       if (path === "/api/v1/flows/ai-builder/sessions/{session_id}") return session;
       return {};
     }) as unknown as AIBuilderClientTransport["fetch"];
-    // Emits a real backend phase, then stays open — the wait state persists.
-    const stream = vi.fn(async (_path, _init, handlers) => {
+    let streamHandlers: Parameters<AIBuilderClientTransport["stream"]>[2] | undefined;
+    let finishStream: () => void = () => {};
+    // Emits a real backend phase, then stays open until the assertions complete.
+    const stream = vi.fn((_path, _init, handlers) => {
+      streamHandlers = handlers;
       handlers.onMessage({
         event: "status",
         data: JSON.stringify({ status: "architecture_committed" })
       });
-      await new Promise(() => {});
+      return new Promise<void>((resolve) => {
+        finishStream = resolve;
+      });
     }) as AIBuilderClientTransport["stream"];
 
-    render(FlowAIBuilderHarness, { transport: { fetch, stream } });
+    let service: FlowAIBuilderService | undefined;
+    render(FlowAIBuilderHarness, {
+      transport: { fetch: fetch as unknown as AIBuilderClientTransport["fetch"], stream },
+      onservice: (instance: FlowAIBuilderService) => (service = instance)
+    });
 
     const textbox = (await screen.findByRole("textbox")) as HTMLTextAreaElement;
+    const draftsButtonName = m.ai_builder_view_drafts({ count: "2" });
+    expect(await screen.findByRole("button", { name: draftsButtonName })).toBeTruthy();
+    const sends = interceptSends(service!);
     await fireEvent.input(textbox, { target: { value: "Bygg ett flöde" } });
     await fireEvent.keyDown(textbox, { key: "Enter" });
 
@@ -894,6 +885,7 @@ describe("FlowAIBuilder generation wait state", () => {
     // typing works (draft persists), sending waits for the turn to finish.
     expect(await screen.findByText(m.ai_builder_wait_expectation())).toBeTruthy();
     expect(screen.getByText(m.ai_builder_wait_composer_hint())).toBeTruthy();
+    expect(screen.queryByRole("button", { name: draftsButtonName })).toBeNull();
     expect(textbox.disabled).toBe(false);
     await fireEvent.input(textbox, { target: { value: "Ta med en summering" } });
     expect(JSON.parse(localStorage.getItem("eneo:ai-builder:draft:gen-session") ?? "{}").text).toBe(
@@ -902,6 +894,15 @@ describe("FlowAIBuilder generation wait state", () => {
     expect(
       (screen.getByRole("button", { name: m.ai_builder_send() }) as HTMLButtonElement).disabled
     ).toBe(true);
+
+    const resolvedHandlers = streamHandlers;
+    if (!resolvedHandlers?.onMessage || !resolvedHandlers.onClose) {
+      throw new Error("Expected stream handlers");
+    }
+    resolvedHandlers.onMessage({ id: "", event: "done", data: "" }, new AbortController());
+    resolvedHandlers.onClose();
+    finishStream();
+    await expect(sends[0]).resolves.toBe("delivered");
   });
 });
 
@@ -931,7 +932,7 @@ describe("FlowAIBuilder error presentation", () => {
       latest_turn: null
     };
     const fetch = vi.fn(async (path: string, init?: { method?: string }) => {
-      if (path.endsWith("/models")) return { models: [], default_model_id: null };
+      if (path.endsWith("/models")) return DEFAULT_MODEL_RESPONSE;
       if (path === "/api/v1/flows/ai-builder/sessions" && init?.method === "get") {
         return { sessions: [draft] };
       }
@@ -962,7 +963,9 @@ describe("FlowAIBuilder error presentation", () => {
       handlers.onClose();
     }) as AIBuilderClientTransport["stream"];
 
-    render(FlowAIBuilderHarness, { transport: { fetch, stream } });
+    render(FlowAIBuilderHarness, {
+      transport: { fetch: fetch as unknown as AIBuilderClientTransport["fetch"], stream }
+    });
 
     const textbox = (await screen.findByRole("textbox")) as HTMLTextAreaElement;
     await fireEvent.input(textbox, { target: { value: "Bygg ett flöde" } });
@@ -1045,7 +1048,6 @@ describe("FlowAIBuilder error presentation", () => {
 
 describe("FlowAIBuilder", () => {
   it("keeps model loading visible and recovers in place after a failed first request", async () => {
-    localStorage.setItem("eneo:flow-user-mode", "power_user");
     const modelId = "11111111-1111-4111-8111-111111111113";
     const session = {
       session_id: "model-session",
@@ -1105,6 +1107,164 @@ describe("FlowAIBuilder", () => {
     expect(modelRequestCount).toBe(2);
   });
 
+  it("lets every user search for and choose which model builds the flow", async () => {
+    const defaultModelId = "11111111-1111-4111-8111-111111111121";
+    const alternativeModelId = "11111111-1111-4111-8111-111111111122";
+    const session = {
+      session_id: "model-choice-session",
+      space_id: "space-1",
+      status: "chatting" as const,
+      target_kind: "create" as const,
+      flow_id: null,
+      latest_plan_id: null,
+      conversation: []
+    };
+    const fetch = vi.fn(async (path: string, init?: { method?: string }) => {
+      if (path.endsWith("/models")) {
+        return {
+          models: [
+            { id: defaultModelId, name: "GPT-5.4", provider: "openai" },
+            { id: alternativeModelId, name: "Claude Sonnet 4", provider: "anthropic" }
+          ],
+          default_model_id: defaultModelId
+        };
+      }
+      if (path === "/api/v1/flows/ai-builder/sessions" && init?.method === "post") {
+        return session;
+      }
+      if (path === "/api/v1/flows/ai-builder/sessions/{session_id}") {
+        return session;
+      }
+      if (path === "/api/v1/flows/ai-builder/sessions" && init?.method === "get") {
+        return { sessions: [] };
+      }
+      throw new Error(`Unexpected request: ${path}`);
+    });
+    const stream = vi.fn(async (_path, _init, handlers) => {
+      handlers.onMessage({ event: "done", data: "" });
+      handlers.onClose();
+    }) as AIBuilderClientTransport["stream"];
+
+    render(FlowAIBuilderHarness, {
+      transport: { fetch: fetch as unknown as AIBuilderClientTransport["fetch"], stream }
+    });
+
+    await fireEvent.click(
+      await screen.findByRole("button", {
+        name: `${m.ai_builder_model_label()}: GPT-5.4`
+      })
+    );
+    const search = screen.getByPlaceholderText(m.search_models());
+    await fireEvent.input(search, { target: { value: "Claude" } });
+    await fireEvent.click(await screen.findByRole("option", { name: "Claude Sonnet 4" }));
+
+    expect(
+      screen.getByRole("button", {
+        name: `${m.ai_builder_model_label()}: Claude Sonnet 4`
+      })
+    ).toBeTruthy();
+
+    await fireEvent.input(screen.getByRole("textbox"), {
+      target: { value: "Bygg ett flöde" }
+    });
+    await fireEvent.click(screen.getByRole("button", { name: m.ai_builder_send() }));
+
+    await waitFor(() => expect(stream).toHaveBeenCalledOnce());
+    expect(vi.mocked(stream).mock.calls[0]?.[1].requestBody["application/json"]).toEqual(
+      expect.objectContaining({ model_id: alternativeModelId })
+    );
+  });
+
+  it("offers only the selected model's supported reasoning levels", async () => {
+    const reasoningModelId = "11111111-1111-4111-8111-111111111123";
+    const plainModelId = "11111111-1111-4111-8111-111111111124";
+    const session = {
+      session_id: "reasoning-choice-session",
+      space_id: "space-1",
+      status: "chatting" as const,
+      target_kind: "create" as const,
+      flow_id: null,
+      latest_plan_id: null,
+      conversation: []
+    };
+    const fetch = vi.fn(async (path: string, init?: { method?: string }) => {
+      if (path.endsWith("/models")) {
+        return {
+          models: [
+            {
+              id: reasoningModelId,
+              name: "GPT-5.4",
+              provider: "openai",
+              reasoning_effort_options: ["low", "medium", "high"]
+            },
+            {
+              id: plainModelId,
+              name: "GPT-4.1",
+              provider: "openai",
+              reasoning_effort_options: []
+            }
+          ],
+          default_model_id: reasoningModelId
+        };
+      }
+      if (path === "/api/v1/flows/ai-builder/sessions" && init?.method === "post") {
+        return session;
+      }
+      if (path === "/api/v1/flows/ai-builder/sessions/{session_id}") return session;
+      if (path === "/api/v1/flows/ai-builder/sessions" && init?.method === "get") {
+        return { sessions: [] };
+      }
+      throw new Error(`Unexpected request: ${path}`);
+    });
+    const stream = vi.fn(async (_path, _init, handlers) => {
+      handlers.onMessage({ event: "done", data: "" });
+      handlers.onClose();
+    }) as AIBuilderClientTransport["stream"];
+
+    render(FlowAIBuilderHarness, {
+      transport: { fetch: fetch as unknown as AIBuilderClientTransport["fetch"], stream }
+    });
+
+    const reasoningTrigger = await screen.findByLabelText(
+      `${m.reasoning_effort()}: ${m.default_behavior()}`
+    );
+    await fireEvent.pointerDown(reasoningTrigger);
+    const highOption = await screen.findByRole("option", { name: m.parameter_option_high() });
+    await fireEvent.pointerDown(highOption);
+    await fireEvent.pointerUp(highOption);
+
+    await fireEvent.input(screen.getByRole("textbox"), {
+      target: { value: "Bygg ett flöde med mer analys" }
+    });
+    await fireEvent.click(screen.getByRole("button", { name: m.ai_builder_send() }));
+
+    await waitFor(() => expect(stream).toHaveBeenCalledOnce());
+    expect(vi.mocked(stream).mock.calls[0]?.[1].requestBody["application/json"]).toEqual(
+      expect.objectContaining({
+        model_id: reasoningModelId,
+        reasoning_effort: "high"
+      })
+    );
+
+    await fireEvent.click(
+      screen.getByRole("button", {
+        name: `${m.ai_builder_model_label()}: GPT-5.4`
+      })
+    );
+    await fireEvent.click(await screen.findByRole("option", { name: "GPT-4.1" }));
+
+    expect(screen.queryByLabelText(new RegExp(`^${m.reasoning_effort()}:`))).toBeNull();
+
+    await fireEvent.input(screen.getByRole("textbox"), {
+      target: { value: "Bygg med modellen utan resonemangsnivå" }
+    });
+    await fireEvent.click(screen.getByRole("button", { name: m.ai_builder_send() }));
+    await waitFor(() => expect(stream).toHaveBeenCalledTimes(2));
+    const plainRequest = vi.mocked(stream).mock.calls[1]?.[1].requestBody["application/json"];
+    expect(plainRequest).toEqual(expect.objectContaining({ model_id: plainModelId }));
+    expect(plainRequest).not.toHaveProperty("reasoning_effort");
+  });
+
   it("auto-resumes a single matching create draft instead of starting a new chat", async () => {
     const draft = {
       session_id: "draft-1",
@@ -1116,6 +1276,12 @@ describe("FlowAIBuilder", () => {
       draft_title: "Recovered draft",
       created_at: "2026-03-15T10:00:00Z",
       updated_at: "2026-03-15T10:05:00Z"
+    };
+    const otherDraft = {
+      ...draft,
+      session_id: "draft-2",
+      draft_title: "Another saved draft",
+      updated_at: "2026-03-15T09:55:00Z"
     };
     const fetch = vi
       .fn()
@@ -1130,8 +1296,8 @@ describe("FlowAIBuilder", () => {
           }
         ]
       })
-      .mockResolvedValueOnce({ models: [], default_model_id: null })
-      .mockResolvedValueOnce({ sessions: [draft] });
+      .mockResolvedValueOnce(DEFAULT_MODEL_RESPONSE)
+      .mockResolvedValueOnce({ sessions: [draft, otherDraft] });
 
     render(FlowAIBuilderHarness, {
       transport: {
@@ -1141,6 +1307,16 @@ describe("FlowAIBuilder", () => {
     });
 
     expect(await screen.findByText(m.ai_builder_resumed_from())).toBeTruthy();
+    expect(screen.getByText("Welcome back to your draft.")).toBeTruthy();
+    const draftsButton = screen.getByRole("button", {
+      name: m.ai_builder_view_drafts({ count: "2" })
+    });
+    await fireEvent.click(draftsButton);
+    expect(screen.getByText(m.ai_builder_drafts_title())).toBeTruthy();
+    expect(screen.getByText("Another saved draft")).toBeTruthy();
+    await fireEvent.click(
+      screen.getByRole("button", { name: m.ai_builder_back_to_current_draft() })
+    );
     expect(screen.getByText("Welcome back to your draft.")).toBeTruthy();
     expect(fetch).not.toHaveBeenCalledWith(
       "/api/v1/flows/ai-builder/sessions",
@@ -1280,7 +1456,7 @@ describe("FlowAIBuilder", () => {
         return { sessions: [draft] };
       }
       if (url.includes("/models")) {
-        return { models: [], default_model_id: null };
+        return DEFAULT_MODEL_RESPONSE;
       }
       if (url.includes("{session_id}")) {
         return freshSession;

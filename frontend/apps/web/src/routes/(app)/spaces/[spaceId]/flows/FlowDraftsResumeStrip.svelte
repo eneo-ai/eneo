@@ -1,5 +1,7 @@
 <script lang="ts">
   import { resolve } from "$app/paths";
+  import { Button } from "$lib/components/ui/button/index.js";
+  import * as Card from "$lib/components/ui/card/index.js";
   import { m } from "$lib/paraglide/messages";
   import type { RecoverableAIBuilderDraftSession } from "$lib/features/flows/ai-builder/protocol";
 
@@ -22,9 +24,8 @@
 {#if drafts.length > 0}
   <!-- In-progress AI drafts live on the builder page; without this strip the
        list page gives no way back to them. -->
-  <a
-    href={resolve(`/spaces/${spaceRouteId}/flows/ai-builder`)}
-    class="border-default bg-secondary/40 hover:bg-secondary/60 focus-visible:ring-accent-default/30 group flex items-center justify-between gap-4 rounded-lg border px-4 py-3 transition-colors focus-visible:ring-2 focus-visible:outline-none"
+  <Card.Root
+    class="bg-secondary/40 flex-row items-center justify-between gap-4 px-4 py-3 max-sm:flex-col max-sm:items-stretch"
   >
     <span class="flex min-w-0 flex-col gap-0.5">
       <span class="text-primary text-sm font-medium">
@@ -32,11 +33,13 @@
       </span>
       <span class="text-secondary truncate text-xs">{titles}</span>
     </span>
-    <span
-      class="text-accent-default shrink-0 text-sm font-medium group-hover:underline"
-      aria-hidden="true"
+    <Button
+      href={resolve(`/spaces/${spaceRouteId}/flows/ai-builder`)}
+      variant="outline"
+      size="sm"
+      class="max-sm:w-full"
     >
-      {m.ai_builder_drafts_strip_continue()}
-    </span>
-  </a>
+      {m.ai_builder_view_drafts({ count: String(drafts.length) })}
+    </Button>
+  </Card.Root>
 {/if}

@@ -229,6 +229,20 @@ export class FlowAIBuilderDriver {
     return this.#state.streamState === "streaming";
   }
 
+  get hasValidModelSelection(): boolean {
+    if (this.#state.modelLoadStatus !== "loaded") return false;
+
+    const selectedModel = this.#state.availableModels.find(
+      (model) => model.id === this.#state.selectedModelId
+    );
+    if (!selectedModel) return false;
+
+    return (
+      this.#state.selectedReasoningEffort === null ||
+      (selectedModel.reasoning_effort_options ?? []).includes(this.#state.selectedReasoningEffort)
+    );
+  }
+
   seedState(partial: Partial<FlowAIBuilderState>): void {
     Object.assign(this.#state, partial);
     this.#notify();
@@ -284,12 +298,22 @@ export class FlowAIBuilderDriver {
   }
 
   selectModel(modelId: string): void {
+    if (!this.#state.availableModels.some((model) => model.id === modelId)) return;
     this.#state.selectedModelId = modelId;
     this.#state.selectedReasoningEffort = null;
     this.#notify();
   }
 
   selectReasoningEffort(reasoningEffort: string | null): void {
+    const selectedModel = this.#state.availableModels.find(
+      (model) => model.id === this.#state.selectedModelId
+    );
+    if (
+      reasoningEffort !== null &&
+      !(selectedModel?.reasoning_effort_options ?? []).includes(reasoningEffort)
+    ) {
+      return;
+    }
     this.#state.selectedReasoningEffort = reasoningEffort;
     this.#notify();
   }
@@ -302,7 +326,7 @@ export class FlowAIBuilderDriver {
   }
 
   async createSession(targetKind: TargetKind, options?: { forceNew?: boolean }): Promise<void> {
-    if (this.#state.pendingOperation) return;
+    if (this.isStreaming || this.#state.pendingOperation) return;
     ++this.#initGeneration;
     this.abort();
     this.#resetFlowState();
@@ -385,7 +409,7 @@ export class FlowAIBuilderDriver {
   }
 
   async resumeSession(sessionId: string): Promise<void> {
-    if (this.#state.pendingOperation) return;
+    if (this.isStreaming || this.#state.pendingOperation) return;
     ++this.#initGeneration;
     this.abort();
     const draftSessions = this.#state.draftSessions;
@@ -437,7 +461,7 @@ export class FlowAIBuilderDriver {
   }
 
   async discardSession(sessionId: string): Promise<void> {
-    if (this.#state.pendingOperation) return;
+    if (this.isStreaming || this.#state.pendingOperation) return;
     await this.#transport.fetch(FLOW_AI_BUILDER_ROUTES.sessionCancel, {
       method: "post",
       params: { path: { session_id: sessionId } }
@@ -516,7 +540,8 @@ export class FlowAIBuilderDriver {
       !this.#state.session ||
       this.isStreaming ||
       this.#state.pendingOperation !== null ||
-      !this.canStartNewTurn
+      !this.canStartNewTurn ||
+      !this.hasValidModelSelection
     ) {
       return "not_started";
     }
@@ -1240,12 +1265,19 @@ export class FlowAIBuilderDriver {
       })) as { models: AIBuilderModel[]; default_model_id: string | null };
       if (!this.#ownsSession(owner)) return;
       this.#state.availableModels = result.models;
-      this.#state.selectedModelId = result.default_model_id;
+      this.#state.selectedModelId = result.models.some(
+        (model) => model.id === result.default_model_id
+      )
+        ? result.default_model_id
+        : (result.models[0]?.id ?? null);
       this.#state.selectedReasoningEffort = null;
       this.#state.modelLoadStatus = "loaded";
       this.#notify();
     } catch {
       if (!this.#ownsSession(owner)) return;
+      this.#state.availableModels = [];
+      this.#state.selectedModelId = null;
+      this.#state.selectedReasoningEffort = null;
       this.#state.modelLoadStatus = "failed";
       this.#notify();
     }

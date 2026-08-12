@@ -354,7 +354,9 @@
         {/if}
       </div>
       <div class="hidden lg:contents">
-        <FlowUserModeToggle />
+        {#if activeTab === "builder"}
+          <FlowUserModeToggle />
+        {/if}
       </div>
       {#if $isPublished}
         <Button
@@ -498,7 +500,7 @@
         >
           <!-- Steps — scrollable on small screens -->
           <ol
-            class="flex min-w-0 flex-1 items-center overflow-x-auto [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+            class="flex min-w-0 flex-1 [scrollbar-width:none] items-center overflow-x-auto [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden"
           >
             {#each FLOW_BUILDER_STAGES as stage, i (stage.id)}
               {@const isActive = builderStage === stage.id}

@@ -27806,6 +27806,7 @@ export interface components {
      *           "structured_json"
      *         ]
      *       },
+     *       "reasoning_effort": "high",
      *       "ui_language": "en"
      *     }
      */
@@ -27836,6 +27837,11 @@ export interface components {
             | components["schemas"]["RequirementsConfirmationMetadata"]
           )
         | null;
+      /**
+       * Reasoning Effort
+       * @description Optional reasoning effort advertised by the selected model. Omit it to use provider defaults; unsupported values are rejected before provider work.
+       */
+      reasoning_effort?: string | null;
       /** Ui Language */
       ui_language?: string | null;
     };
@@ -28106,10 +28112,18 @@ export interface components {
        * Format: uuid
        */
       id: string;
-      /** Name */
+      /**
+       * Name
+       * @description Human-readable model nickname, falling back to its name.
+       */
       name: string;
       /** Provider */
       provider: string;
+      /**
+       * Reasoning Effort Options
+       * @description Reasoning efforts accepted for this model. An empty list means the builder must not offer a reasoning control.
+       */
+      reasoning_effort_options?: string[];
     };
     /**
      * SessionModelsResponse
@@ -47293,7 +47307,7 @@ export interface operations {
           "application/json": components["schemas"]["SessionResponse"];
         };
       };
-      /** @description The request payload is valid JSON but cannot start a builder session in its current state. */
+      /** @description The request payload is valid JSON but cannot start the requested builder session. */
       400: {
         headers: {
           [name: string]: unknown;
@@ -47310,7 +47324,7 @@ export interface operations {
            *         "request_id": "req_01HZYXEXAMPLE"
            *       },
            *       "eneo_error_code": 9007,
-           *       "message": "A planner model is required to start an AI Builder session.",
+           *       "message": "The requested AI Builder session cannot be started.",
            *       "phase": "router",
            *       "request_id": "req_01HZYXEXAMPLE",
            *       "schema_version": 2

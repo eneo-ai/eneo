@@ -6,11 +6,24 @@ import type {
   AIBuilderConversationMessage,
   AIBuilderDraftSession,
   AIBuilderError,
+  AIBuilderModel,
   AIBuilderSendMessageRequest,
   AIBuilderSession,
   ApplyResult,
   ProposedPlan
 } from "./protocol";
+
+const DEFAULT_MODEL_ID = "11111111-1111-4111-8111-111111111199";
+
+function makeModel(overrides: Partial<AIBuilderModel> = {}): AIBuilderModel {
+  return {
+    id: DEFAULT_MODEL_ID,
+    name: "Test model",
+    provider: "openai",
+    reasoning_effort_options: [],
+    ...overrides
+  };
+}
 
 function makeSession(overrides: Partial<AIBuilderSession> = {}): AIBuilderSession {
   return {
@@ -150,8 +163,15 @@ function makeDriver(
   const fetch = options.fetchImpl ?? vi.fn();
   const stream = options.streamImpl ?? vi.fn();
 
+  const driver = new FlowAIBuilderDriver({ fetch, stream }, "space-1", "flow-1");
+  driver.seedState({
+    availableModels: [makeModel()],
+    selectedModelId: DEFAULT_MODEL_ID,
+    modelLoadStatus: "loaded"
+  });
+
   return {
-    driver: new FlowAIBuilderDriver({ fetch, stream }, "space-1", "flow-1"),
+    driver,
     fetch,
     stream
   };
@@ -416,6 +436,27 @@ describe("FlowAIBuilderDriver", () => {
     ]);
     expect(driver.state.selectedModelId).toBe(modelId);
     expect(modelRequestCount).toBe(2);
+  });
+
+  it("accepts only an available model and one of its advertised reasoning efforts", async () => {
+    const { driver, stream } = makeDriver();
+    driver.seedState({
+      session: makeSession(),
+      availableModels: [makeModel({ reasoning_effort_options: ["low", "high"] })]
+    });
+
+    driver.selectModel("unknown-model");
+    driver.selectReasoningEffort("unsupported");
+
+    expect(driver.state.selectedModelId).toBe(DEFAULT_MODEL_ID);
+    expect(driver.state.selectedReasoningEffort).toBeNull();
+
+    driver.selectReasoningEffort("high");
+    expect(driver.state.selectedReasoningEffort).toBe("high");
+
+    driver.seedState({ availableModels: [], selectedModelId: null });
+    expect(await driver.sendMessage("Build a flow")).toBe("not_started");
+    expect(stream).not.toHaveBeenCalled();
   });
 
   it("does not install a late model response after the session is replaced", async () => {
@@ -729,6 +770,51 @@ describe("FlowAIBuilderDriver", () => {
     expect(driver.state.error).toBeNull();
   });
 
+  it("keeps the active stream when draft session commands are attempted", async () => {
+    let handlers: Parameters<AIBuilderClientTransport["stream"]>[2] | undefined;
+    let streamAbortController: AbortController | undefined;
+    let finishStream: () => void = () => {};
+    const fetch = vi.fn();
+    const stream = vi.fn(
+      (
+        _path,
+        _init,
+        nextHandlers: Parameters<AIBuilderClientTransport["stream"]>[2],
+        abortController?: AbortController
+      ) => {
+        handlers = nextHandlers;
+        streamAbortController = abortController;
+        return new Promise<void>((resolve) => {
+          finishStream = resolve;
+        });
+      }
+    );
+    const { driver } = makeDriver({ fetchImpl: fetch, streamImpl: stream });
+    driver.seedState({
+      session: makeSession({ session_id: "session-current" }),
+      draftSessions: [makeDraft({ session_id: "session-other" })]
+    });
+
+    const pending = driver.sendMessage("Build a flow");
+    await vi.waitFor(() => expect(stream).toHaveBeenCalledOnce());
+
+    await driver.createSession("create");
+    await driver.startFreshSession("create");
+    await driver.resumeSession("session-other");
+    await driver.discardSession("session-other");
+
+    expect(fetch).not.toHaveBeenCalled();
+    expect(driver.state.session?.session_id).toBe("session-current");
+    expect(driver.state.draftSessions).toEqual([makeDraft({ session_id: "session-other" })]);
+    expect(driver.state.streamState).toBe("streaming");
+    expect(streamAbortController?.signal.aborted).toBe(false);
+
+    if (!handlers) throw new Error("Expected stream handlers");
+    completeStream(handlers);
+    finishStream();
+    await expect(pending).resolves.toBe("delivered");
+  });
+
   it("records protocol validation failures and clears them only through a new clean stream", async () => {
     const stream = vi
       .fn()
@@ -902,149 +988,6 @@ describe("FlowAIBuilderDriver", () => {
     expect(stream).toHaveBeenCalledTimes(2);
     expect(driver.latestTurnState).toBe("committed");
     expect(driver.isRecoveringLatestTurn).toBe(false);
-  });
-
-  it("keeps late stream callbacks and finalization owned by their original session", async () => {
-    const oldSession = makeSession({ session_id: "session-old" });
-    const newSession = makeSession({ session_id: "session-new" });
-    const streamHandlers: Parameters<AIBuilderClientTransport["stream"]>[2][] = [];
-    const streamControllers: AbortController[] = [];
-    const finishStreams: Array<() => void> = [];
-    const fetch = vi.fn(async (path: string, init?: { method?: string }) => {
-      if (path === "/api/v1/flows/ai-builder/sessions/{session_id}") {
-        return newSession;
-      }
-      if (path.endsWith("/models")) {
-        return { models: [], default_model_id: null };
-      }
-      if (path === "/api/v1/flows/ai-builder/sessions" && init?.method === "get") {
-        return { sessions: [] };
-      }
-      throw new Error(`Unexpected fetch: ${path}`);
-    });
-    const { driver, stream } = makeDriver({
-      fetchImpl: fetch,
-      streamImpl: vi.fn(
-        (
-          _path,
-          _init,
-          handlers: Parameters<AIBuilderClientTransport["stream"]>[2],
-          abortController?: AbortController
-        ) =>
-          new Promise<void>((resolve) => {
-            streamHandlers.push(handlers);
-            if (abortController) {
-              streamControllers.push(abortController);
-            }
-            finishStreams.push(resolve);
-          })
-      )
-    });
-    driver.seedState({ session: oldSession });
-
-    const oldSend = driver.sendMessage("Old session request");
-    await driver.resumeSession(newSession.session_id);
-    const currentSend = driver.sendMessage("Current session request");
-    const oldStreamHandlers = streamHandlers[0];
-    const oldStreamController = streamControllers[0];
-    const currentStreamHandlers = streamHandlers[1];
-    const currentStreamController = streamControllers[1];
-    if (
-      !oldStreamHandlers?.onMessage ||
-      !oldStreamHandlers.onClose ||
-      !oldStreamController ||
-      !currentStreamHandlers ||
-      !currentStreamController
-    ) {
-      throw new Error("Expected controlled old and current stream operations");
-    }
-
-    oldStreamHandlers.onMessage(
-      {
-        id: "old-text",
-        event: "text",
-        data: JSON.stringify({ text: "Late old-session text" })
-      },
-      oldStreamController
-    );
-    oldStreamHandlers.onMessage(
-      {
-        id: "old-plan",
-        event: "plan",
-        data: JSON.stringify(makePlan({ plan_id: "plan-old" }))
-      },
-      oldStreamController
-    );
-    oldStreamHandlers.onMessage(
-      {
-        id: "old-usage",
-        event: "usage",
-        data: JSON.stringify({ total_tokens_total: 999 })
-      },
-      oldStreamController
-    );
-    oldStreamHandlers.onMessage(
-      {
-        id: "old-error",
-        event: "error",
-        data: JSON.stringify({
-          schema_version: 2,
-          code: "planner_stream_failed",
-          category: "internal",
-          message: "Late old-session error",
-          phase: "router",
-          request_id: "old-request",
-          eneo_error_code: 9024
-        })
-      },
-      oldStreamController
-    );
-    oldStreamHandlers.onMessage(
-      {
-        id: "old-status",
-        event: "status",
-        data: JSON.stringify({ status: "architecture_committed" })
-      },
-      oldStreamController
-    );
-    oldStreamHandlers.onClose();
-    finishStreams[0]?.();
-    await oldSend;
-
-    const stateAfterOldStream = {
-      sessionId: driver.state.session?.session_id,
-      messages: driver.state.messages.map(({ role, content }) => ({ role, content })),
-      planId: driver.state.currentPlan?.plan_id ?? null,
-      statusMessage: driver.state.statusMessage,
-      errorCode: driver.state.error?.code ?? null,
-      totalTokens: driver.state.session?.telemetry?.total_tokens_total ?? null,
-      isStreaming: driver.isStreaming,
-      currentControllerAborted: currentStreamController.signal.aborted
-    };
-
-    const thirdSend = driver.sendMessage("Must stay blocked while session B streams");
-    const streamCallsWhileCurrentSendIsActive = stream.mock.calls.length;
-
-    if (streamHandlers[2]) {
-      completeStream(streamHandlers[2]);
-      finishStreams[2]?.();
-    }
-    await thirdSend;
-    completeStream(currentStreamHandlers);
-    finishStreams[1]?.();
-    await currentSend;
-
-    expect(stateAfterOldStream).toEqual({
-      sessionId: "session-new",
-      messages: [{ role: "user", content: "Current session request" }],
-      planId: null,
-      statusMessage: null,
-      errorCode: null,
-      totalTokens: null,
-      isStreaming: true,
-      currentControllerAborted: false
-    });
-    expect(streamCallsWhileCurrentSendIsActive).toBe(2);
   });
 
   it("ignores a delayed refresh response after the session is replaced", async () => {
@@ -2914,23 +2857,6 @@ describe("FlowAIBuilderDriver send outcome contract", () => {
     );
     expect(await driver.sendMessage("Hej")).toBe("failed");
     expect(driver.state.streamState).toBe("failed");
-  });
-
-  it("returns 'failed' when stream ownership is lost mid-flight", async () => {
-    let release!: () => void;
-    const gate = new Promise<void>((resolve) => (release = resolve));
-    const { driver } = seeded(
-      vi.fn(async (_path, _init, handlers) => {
-        await gate;
-        completeStream(handlers);
-      })
-    );
-    const pending = driver.sendMessage("Hej");
-    // A fresh session supersedes the in-flight stream; its outcome is
-    // unknowable for the original caller.
-    await driver.startFreshSession("edit");
-    release();
-    expect(await pending).toBe("failed");
   });
 });
 

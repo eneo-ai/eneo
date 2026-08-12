@@ -18,12 +18,8 @@
     isFirst?: boolean;
     isLast?: boolean;
     planStatus?: string;
-    isPowerUser?: boolean;
     onsuggestchange?: (intent: AIBuilderSuggestChangeIntent) => void;
     resolveModelName?: (ref: string | null) => string | null;
-    // Caller-only bridge while PlanPane drops its obsolete resolver plumbing.
-    resolveMcpServerName?: (ref: string) => string | null;
-    resolveMcpToolName?: (ref: string) => string | null;
   }
 
   let {
@@ -34,7 +30,6 @@
     buildDiagnosticReport,
     isFirst = false,
     planStatus = "",
-    isPowerUser = true,
     onsuggestchange,
     resolveModelName
   }: Props = $props();
@@ -96,19 +91,13 @@
   const hasInstructions = $derived(!!step.assistant_spec.instructions?.trim());
   const hasKnowledge = $derived(knowledgeRefs.length > 0);
   const hasDiagnosticCopy = $derived(planStatus === "proposed" && !!buildDiagnosticReport);
-  // Bindings, contracts, model refs, and diagnostics are Avancerad vocabulary;
-  // Enkel reviews the step through its instructions and knowledge only.
   const hasTechnicalDetails = $derived(
     !!resolvedModel || hasBindings || hasInputContract || hasOutputContract || hasDiagnosticCopy
   );
   const hasAnyDetails = $derived(
-    hasInstructions ||
-      usesFlowTranscriptionModel ||
-      hasKnowledge ||
-      (isPowerUser && hasTechnicalDetails)
+    hasInstructions || usesFlowTranscriptionModel || hasKnowledge || hasTechnicalDetails
   );
 
-  // Enkel shows localized plain-language type words instead of raw contract tokens.
   function simpleTypeLabel(value: string): string {
     switch (value) {
       case "json":
@@ -127,8 +116,8 @@
         return value;
     }
   }
-  const inputTypeDisplay = $derived(isPowerUser ? inputType : simpleTypeLabel(inputType));
-  const outputTypeDisplay = $derived(isPowerUser ? outputType : simpleTypeLabel(outputType));
+  const inputTypeDisplay = $derived(simpleTypeLabel(inputType));
+  const outputTypeDisplay = $derived(simpleTypeLabel(outputType));
 
   function requestStepChange() {
     if (!planId) return;
@@ -196,12 +185,6 @@
                 {m.ai_builder_badge_modified()}
               </Badge>
             {/if}
-
-            {#if resolvedModel && isPowerUser}
-              <span class="text-muted ml-auto hidden max-w-[10rem] truncate text-xs sm:inline">
-                {resolvedModel}
-              </span>
-            {/if}
           </div>
 
           <!-- IO line. id references aria-describedby on trigger for screen-reader meta. -->
@@ -221,13 +204,7 @@
               <span class="font-medium">{m.ai_builder_step_output()}</span>
               <span aria-hidden="true">·</span>
               <span class="text-secondary">{outputTypeDisplay}</span>
-              {#if outputMode !== "pass_through" && isPowerUser}
-                <span class="opacity-60">({outputMode})</span>
-              {/if}
             </span>
-            {#if resolvedModel && isPowerUser}
-              <span class="sr-only">· {m.ai_builder_step_model()} {resolvedModel}</span>
-            {/if}
           </div>
         </div>
 
@@ -281,9 +258,9 @@
                 </section>
               {/if}
 
-              {#if (resolvedModel && isPowerUser) || usesFlowTranscriptionModel || hasKnowledge}
+              {#if resolvedModel || usesFlowTranscriptionModel || hasKnowledge}
                 <section class="grid gap-x-6 gap-y-4 sm:grid-cols-2">
-                  {#if resolvedModel && isPowerUser}
+                  {#if resolvedModel}
                     <div class="flex flex-col gap-1">
                       <h4 class="text-muted text-xs font-semibold tracking-[0.06em] uppercase">
                         {m.ai_builder_step_model()}
@@ -314,7 +291,7 @@
                 </section>
               {/if}
 
-              {#if hasBindings && isPowerUser}
+              {#if hasBindings}
                 <section class="flex flex-col gap-2">
                   <h4 class="text-muted text-xs font-semibold tracking-[0.06em] uppercase">
                     {m.ai_builder_step_bindings()}
@@ -328,7 +305,7 @@
                 </section>
               {/if}
 
-              {#if hasOutputContract && isPowerUser}
+              {#if hasOutputContract}
                 <section class="flex flex-col gap-2">
                   <h4 class="text-muted text-xs font-semibold tracking-[0.06em] uppercase">
                     {m.ai_builder_step_output_contract()}
@@ -353,7 +330,7 @@
                 </section>
               {/if}
 
-              {#if hasInputContract && isPowerUser}
+              {#if hasInputContract}
                 <section class="flex flex-col gap-2">
                   <h4 class="text-muted text-xs font-semibold tracking-[0.06em] uppercase">
                     {m.ai_builder_step_input_contract()}
@@ -404,9 +381,7 @@
                     </svg>
                     {m.ai_builder_suggest_change()}
                   </button>
-                  {#if isPowerUser}
-                    <FlowAIBuilderDiagnosticCopyButton buildReport={buildDiagnosticReport} />
-                  {/if}
+                  <FlowAIBuilderDiagnosticCopyButton buildReport={buildDiagnosticReport} />
                 </div>
               {/if}
             </div>

@@ -4,7 +4,6 @@
     initAIBuilderService,
     type FlowAIBuilderService
   } from "../FlowAIBuilderService.svelte.ts";
-  import { initFlowUserMode } from "$lib/features/flows/FlowUserMode";
   import { initSpacesManager } from "$lib/features/spaces/SpacesManager";
   import type { Space } from "@eneo/eneo-js";
   import { untrack } from "svelte";
@@ -28,7 +27,6 @@
     onservice
   }: Props = $props();
 
-  initFlowUserMode();
   untrack(() => {
     // The plan pane reads the current space (models, MCP servers); give the
     // shell harness the same minimal space the plan-pane harness uses.

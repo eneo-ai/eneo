@@ -5,9 +5,7 @@
   import { m } from "$lib/paraglide/messages";
   import { getLocale } from "$lib/paraglide/runtime";
   import { Button } from "$lib/components/ui/button/index.js";
-  import * as DropdownMenu from "$lib/components/ui/dropdown-menu/index.js";
   import { Label } from "$lib/components/ui/label/index.js";
-  import * as Tooltip from "$lib/components/ui/tooltip/index.js";
   import { getAppContext } from "$lib/core/AppContext";
   import { getEneo } from "$lib/core/Eneo";
   import { initAttachmentManager } from "$lib/features/attachments/AttachmentManager";
@@ -18,8 +16,9 @@
   import { IconAttachment } from "@eneo/icons/attachment";
   import { IconCancel } from "@eneo/icons/cancel";
   import { IconTrash } from "@eneo/icons/trash";
-  import { IconCheck } from "@eneo/icons/check";
   import { getAIBuilderService } from "./FlowAIBuilderService.svelte.ts";
+  import FlowAIBuilderModelSelect from "./FlowAIBuilderModelSelect.svelte";
+  import FlowAIBuilderReasoningSelect from "./FlowAIBuilderReasoningSelect.svelte";
   import { getAIBuilderAttachmentRules } from "./builderAttachmentRules";
   import {
     clearComposerDraft,
@@ -27,7 +26,6 @@
     saveComposerDraft,
     type ComposerDraftFile
   } from "./flowAIBuilderComposerDraft";
-  import { getFlowUserMode } from "$lib/features/flows/FlowUserMode";
   import type { AIBuilderPlanEditContext } from "./protocol";
 
   interface Props {
@@ -50,7 +48,6 @@
   }: Props = $props();
 
   const service = getAIBuilderService();
-  const userMode = getFlowUserMode();
   const { limits } = getAppContext();
   const attachmentRules = getAIBuilderAttachmentRules(limits);
   const eneo = getEneo();
@@ -183,14 +180,6 @@
   const persistedAttachments = $derived(service.session?.attachments ?? []);
   const hasAttachments = $derived(
     persistedAttachments.length > 0 || $attachments.length > 0 || restoredFiles.length > 0
-  );
-  const hasMultipleModels = $derived(service.availableModels.length > 1);
-  const selectedModelName = $derived(
-    service.availableModels.find((model) => model.id === service.selectedModelId)?.name ?? null
-  );
-  const selectedOrDefaultModelName = $derived(selectedModelName ?? m.ai_builder_model_default());
-  const modelPillAccessibleLabel = $derived(
-    `${m.ai_builder_model_label()}: ${selectedOrDefaultModelName}`
   );
   const canSubmit = $derived(
     (inputValue.trim().length > 0 || completedUploads.length > 0 || restoredFiles.length > 0) &&
@@ -579,93 +568,8 @@
           <span class="composer-attach-label">{m.attach_files()}</span>
         </button>
 
-        <!-- Model choice is a technical control: visible only in Avancerad. -->
-        {#if $userMode === "power_user"}
-          {#if service.modelLoadStatus === "loading"}
-            <span class="model-load-status" role="status" aria-live="polite" aria-busy="true">
-              {m.loading()}
-            </span>
-          {:else if service.modelLoadStatus === "failed"}
-            <span class="model-load-error" role="alert">
-              <span>{m.failed_to_load_models()}</span>
-              <button
-                type="button"
-                class="model-load-retry"
-                onclick={() => void service.retryModelLoad()}
-              >
-                {m.retry()}
-              </button>
-            </span>
-          {:else if service.modelLoadStatus === "loaded" && hasMultipleModels}
-            <DropdownMenu.Root>
-              <DropdownMenu.Trigger>
-                {#snippet child({ props })}
-                  <button
-                    {...props}
-                    type="button"
-                    class="model-pill"
-                    aria-label={modelPillAccessibleLabel}
-                    title={m.ai_builder_model_usage_hint()}
-                    disabled={service.isCreating}
-                  >
-                    <span class="model-pill-dot" aria-hidden="true"></span>
-                    <span class="model-pill-name">{selectedOrDefaultModelName}</span>
-                    <svg
-                      class="model-pill-chevron"
-                      xmlns="http://www.w3.org/2000/svg"
-                      viewBox="0 0 16 16"
-                      fill="currentColor"
-                      aria-hidden="true"
-                    >
-                      <path
-                        fill-rule="evenodd"
-                        d="M4.22 6.22a.75.75 0 0 1 1.06 0L8 8.94l2.72-2.72a.75.75 0 1 1 1.06 1.06l-3.25 3.25a.75.75 0 0 1-1.06 0L4.22 7.28a.75.75 0 0 1 0-1.06Z"
-                        clip-rule="evenodd"
-                      />
-                    </svg>
-                  </button>
-                {/snippet}
-              </DropdownMenu.Trigger>
-              <DropdownMenu.Content align="start" sideOffset={8}>
-                {#each service.availableModels as model (model.id)}
-                  <DropdownMenu.Item
-                    onmousedown={() => service.selectModel(model.id)}
-                    class="!justify-start !gap-2 !px-2.5 !py-1.5 !text-[0.8125rem]"
-                  >
-                    <span class="flex-1 text-left">{model.name}</span>
-                    {#if model.id === service.selectedModelId}
-                      <IconCheck class="text-accent-default size-3.5" />
-                    {/if}
-                  </DropdownMenu.Item>
-                {/each}
-              </DropdownMenu.Content>
-            </DropdownMenu.Root>
-          {:else if service.modelLoadStatus === "loaded"}
-            <Tooltip.Root>
-              <Tooltip.Trigger>
-                {#snippet child({ props })}
-                  <button
-                    {...props}
-                    type="button"
-                    aria-disabled="true"
-                    aria-label={modelPillAccessibleLabel}
-                    class="model-pill model-pill-static"
-                    onclick={(event) => event.preventDefault()}
-                  >
-                    <span class="model-pill-dot" aria-hidden="true"></span>
-                    <span class="model-pill-name">{selectedOrDefaultModelName}</span>
-                  </button>
-                {/snippet}
-              </Tooltip.Trigger>
-              <Tooltip.Content side="top" sideOffset={6}>
-                <div class="flex max-w-64 flex-col gap-1">
-                  <span>{m.ai_builder_model_only_one()}</span>
-                  <span class="text-muted">{m.ai_builder_model_usage_hint()}</span>
-                </div>
-              </Tooltip.Content>
-            </Tooltip.Root>
-          {/if}
-        {/if}
+        <FlowAIBuilderModelSelect />
+        <FlowAIBuilderReasoningSelect />
       </div>
 
       <Button
@@ -1079,9 +983,6 @@
   /* Compact mobile controls keep the composer usable above the keyboard. */
   @media (max-width: 639px) {
     .composer-attach,
-    .model-pill,
-    .model-load-status,
-    .model-load-error,
     .composer :global(.composer-send) {
       min-height: 2.75rem;
     }
@@ -1095,118 +996,6 @@
       justify-content: center;
       padding: 0;
     }
-  }
-
-  /* --- Model pill --- */
-
-  .model-load-status,
-  .model-load-error {
-    display: inline-flex;
-    align-items: center;
-    min-height: 1.75rem;
-    max-width: 100%;
-    font-size: 0.75rem;
-    line-height: 1.3;
-  }
-
-  .model-load-status {
-    padding: 0 0.625rem;
-    border-radius: 999px;
-    color: var(--text-secondary);
-    background: var(--background-secondary);
-  }
-
-  .model-load-error {
-    flex-wrap: wrap;
-    gap: 0.125rem 0.375rem;
-    padding: 0 0.25rem;
-    color: var(--negative-stronger);
-  }
-
-  .model-load-retry {
-    min-height: 1.75rem;
-    padding: 0 0.25rem;
-    border: 0;
-    border-radius: 0.25rem;
-    color: inherit;
-    background: transparent;
-    font: inherit;
-    font-weight: 600;
-    text-decoration: underline;
-    text-underline-offset: 0.125rem;
-    cursor: pointer;
-  }
-
-  .model-load-retry:hover {
-    text-decoration: none;
-  }
-
-  .model-load-retry:focus-visible {
-    outline: 2px solid var(--negative-stronger);
-    outline-offset: 1px;
-  }
-
-  .model-pill {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.375rem;
-    height: 1.75rem;
-    padding: 0 0.625rem;
-    border-radius: 999px;
-    color: var(--text-secondary);
-    background: var(--background-secondary);
-    border: 1px solid transparent;
-    font-size: 0.75rem;
-    font-weight: 500;
-    line-height: 1;
-    cursor: pointer;
-    max-width: min(100%, 16rem);
-    transition:
-      color 120ms ease,
-      background 120ms ease,
-      border-color 120ms ease;
-  }
-
-  .model-pill:hover,
-  .model-pill[aria-expanded="true"] {
-    color: var(--text-primary);
-    background: var(--background-hover-default);
-  }
-
-  .model-pill:focus-visible {
-    outline: 2px solid var(--accent-default);
-    outline-offset: 2px;
-  }
-
-  .model-pill-static {
-    cursor: default;
-  }
-
-  .model-pill-static:hover {
-    background: var(--background-secondary);
-    color: var(--text-secondary);
-  }
-
-  .model-pill-dot {
-    width: 0.4375rem;
-    height: 0.4375rem;
-    border-radius: 50%;
-    background: var(--accent-default);
-    box-shadow: 0 0 0 2px oklch(from var(--accent-default) l c h / 0.15);
-    flex-shrink: 0;
-  }
-
-  .model-pill-name {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .model-pill-chevron {
-    width: 0.625rem;
-    height: 0.625rem;
-    flex-shrink: 0;
-    opacity: 0.6;
   }
 
   .composer :global(.composer-send) {

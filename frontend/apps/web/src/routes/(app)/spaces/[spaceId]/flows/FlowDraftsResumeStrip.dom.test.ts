@@ -39,10 +39,9 @@ describe("FlowDraftsResumeStrip", () => {
 
     const strip = screen.getByRole("link");
     expect(strip.getAttribute("href")).toMatch(/\/spaces\/personal\/flows\/ai-builder$/);
-    expect(strip.textContent).toContain("Pågående AI-utkast (2)");
-    expect(strip.textContent).toContain("Sammanfatta till PDF");
-    expect(strip.textContent).toContain("Namnlöst utkast");
-    expect(strip.textContent).toContain("Fortsätt där du slutade");
+    expect(screen.getByText("Pågående AI-utkast (2)")).toBeTruthy();
+    expect(screen.getByText(/Sammanfatta till PDF.*Namnlöst utkast/)).toBeTruthy();
+    expect(strip.textContent).toContain("Visa utkast (2)");
   });
 
   it("previews at most three titles and marks the overflow", () => {
@@ -56,8 +55,7 @@ describe("FlowDraftsResumeStrip", () => {
       spaceRouteId: "personal"
     });
 
-    const strip = screen.getByRole("link");
-    expect(strip.textContent).toContain("Alpha · Beta · Gamma …");
-    expect(strip.textContent).not.toContain("Delta");
+    expect(screen.getByText("Alpha · Beta · Gamma …")).toBeTruthy();
+    expect(screen.queryByText(/Delta/)).toBeNull();
   });
 });

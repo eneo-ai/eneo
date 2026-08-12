@@ -198,29 +198,21 @@ describe("FlowAIBuilderPlanPane", () => {
     expect(screen.queryByRole("button", { name: m.ai_builder_plan_suggest_change() })).toBeNull();
   });
 
-  it("keeps token usage visible in the proposal metadata in Enkel and Avancerad", () => {
+  it("keeps token usage visible in the proposal metadata", () => {
     const state = {
       session: makeSession({ telemetry: makeTelemetry() }),
       currentPlan: makePlan()
     };
 
-    const enkel = render(FlowAIBuilderPlanPaneHarness, {
+    render(FlowAIBuilderPlanPaneHarness, {
       currentSpace: makeSpace({ transcriptionModels: [] }),
       state
     });
     expect(screen.getByText(m.ai_builder_plan_meta_nothing_created())).toBeTruthy();
     expect(screen.getByRole("button", { name: m.ai_builder_token_usage_title() })).toBeTruthy();
-    enkel.unmount();
-
-    render(FlowAIBuilderPlanPaneHarness, {
-      currentSpace: makeSpace({ transcriptionModels: [] }),
-      state,
-      userMode: "power_user"
-    });
-    expect(screen.getByRole("button", { name: m.ai_builder_token_usage_title() })).toBeTruthy();
   });
 
-  it("hides technical assumptions in Enkel and shows them collapsed in Avancerad", async () => {
+  it("keeps technical assumptions available through a collapsed disclosure", async () => {
     const state = {
       session: makeSession({ status: "awaiting_approval", target_kind: "create", flow_id: null }),
       currentPlan: makePlan({
@@ -232,18 +224,9 @@ describe("FlowAIBuilderPlanPane", () => {
       })
     };
 
-    const enkel = render(FlowAIBuilderPlanPaneHarness, {
-      currentSpace: makeSpace({ transcriptionModels: [] }),
-      state,
-      userMode: "user"
-    });
-    expect(screen.queryByText(/Tekniska antaganden|Technical assumptions/)).toBeNull();
-    enkel.unmount();
-
     render(FlowAIBuilderPlanPaneHarness, {
       currentSpace: makeSpace({ transcriptionModels: [] }),
-      state,
-      userMode: "power_user"
+      state
     });
     const trigger = screen.getByRole("button", {
       name: new RegExp(
@@ -255,17 +238,16 @@ describe("FlowAIBuilderPlanPane", () => {
     expect(screen.getByText("Underlaget är på svenska.")).toBeTruthy();
   });
 
-  it("hides the execution profile outside Avancerad", () => {
+  it("keeps the execution profile available without a Flow editor mode", () => {
     render(FlowAIBuilderPlanPaneHarness, {
       currentSpace: makeSpace({ transcriptionModels: [] }),
-      state: { session: makeSession(), currentPlan: makePlan() },
-      userMode: "user"
+      state: { session: makeSession(), currentPlan: makePlan() }
     });
 
-    expect(screen.queryByText(m.ai_builder_execution_profile())).toBeNull();
+    expect(screen.getByRole("button", { name: m.ai_builder_execution_profile() })).toBeTruthy();
   });
 
-  it("renders backend execution facts in Avancerad", async () => {
+  it("renders backend execution facts in the collapsed execution profile", async () => {
     const state = {
       session: makeSession({ status: "awaiting_approval", target_kind: "create", flow_id: null }),
       currentPlan: makePlan({
@@ -303,8 +285,7 @@ describe("FlowAIBuilderPlanPane", () => {
 
     render(FlowAIBuilderPlanPaneHarness, {
       currentSpace: makeSpace({ transcriptionModels: [] }),
-      state,
-      userMode: "power_user"
+      state
     });
     const trigger = screen.getByRole("button", { name: m.ai_builder_execution_profile() });
     expect(trigger.getAttribute("aria-expanded")).toBe("false");
@@ -331,8 +312,7 @@ describe("FlowAIBuilderPlanPane", () => {
   it("states when the plan has no mapped steps", async () => {
     render(FlowAIBuilderPlanPaneHarness, {
       currentSpace: makeSpace({ transcriptionModels: [] }),
-      state: { session: makeSession(), currentPlan: makePlan() },
-      userMode: "power_user"
+      state: { session: makeSession(), currentPlan: makePlan() }
     });
 
     await fireEvent.click(screen.getByRole("button", { name: m.ai_builder_execution_profile() }));

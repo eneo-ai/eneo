@@ -125,6 +125,67 @@ async def test_non_streaming_omits_optional_kwargs_when_capabilities_are_missing
 
 
 @pytest.mark.asyncio
+async def test_model_route_infers_reasoning_choices_from_litellm_when_admin_metadata_is_missing():
+    completion_model = _make_completion_model()
+    completion_model.reasoning = True
+    adapter = MagicMock()
+    adapter.provider_type = "openai"
+    adapter.resolve_litellm_params.return_value = ("openai/gpt-5.6-terra", {})
+    service = CompletionService(
+        context_builder=_DummyContextBuilder(),
+        tenant=SimpleNamespace(id=uuid4()),
+        session=AsyncMock(),
+    )
+    service._get_adapter = AsyncMock(return_value=adapter)
+
+    with patch(
+        "eneo.completion_models.infrastructure.tenant_model_capabilities.resolve_reasoning_effort_options",
+        return_value=("low", "medium", "high", "xhigh"),
+    ) as resolve_options:
+        route = await service.resolve_model_route(completion_model)
+
+    capability = route.supported_model_kwargs.reasoning_effort
+    assert capability.supported is True
+    assert capability.control == "select"
+    assert capability.options == ["low", "medium", "high", "xhigh"]
+    resolve_options.assert_called_once_with(
+        litellm_model="openai/gpt-5.6-terra",
+        provider_type="openai",
+    )
+
+
+@pytest.mark.asyncio
+async def test_model_route_preserves_explicit_admin_reasoning_capability():
+    completion_model = _make_completion_model(
+        supported_model_kwargs=SupportedModelKwargs(
+            reasoning_effort=ModelKwargCapability(
+                supported=True,
+                control="select",
+                options=["high"],
+            )
+        )
+    )
+    completion_model.reasoning = True
+    adapter = MagicMock()
+    adapter.provider_type = "openai"
+    adapter.resolve_litellm_params.return_value = ("openai/custom-model", {})
+    service = CompletionService(
+        context_builder=_DummyContextBuilder(),
+        tenant=SimpleNamespace(id=uuid4()),
+        session=AsyncMock(),
+    )
+    service._get_adapter = AsyncMock(return_value=adapter)
+
+    with patch(
+        "eneo.completion_models.infrastructure.tenant_model_capabilities.resolve_reasoning_effort_options"
+    ) as resolve_options:
+        route = await service.resolve_model_route(completion_model)
+
+    assert route.supported_model_kwargs.reasoning_effort.options == ["high"]
+    resolve_options.assert_not_called()
+
+
+@pytest.mark.asyncio
 async def test_non_streaming_omits_temperature_for_legacy_untagged_slider():
     completion_model = _make_completion_model()
     completion_model.reasoning = True

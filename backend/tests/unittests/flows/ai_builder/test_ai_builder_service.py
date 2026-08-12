@@ -1289,6 +1289,46 @@ class TestPlannerContextPreparation:
         assert exc_info.value.code == AIBuilderErrorCode.BAD_REQUEST
 
     @pytest.mark.anyio
+    async def test_prepare_message_context_rejects_malformed_capability_option(
+        self,
+    ) -> None:
+        user = _make_user()
+        repo = AsyncMock()
+        repo.list_session_file_ids.return_value = []
+        model = _make_model()
+        model.max_input_tokens = 4096
+        model.max_output_tokens = 2048
+        model.provider_type = "openai"
+        space = MagicMock()
+        space.completion_models = [model]
+        space.collections = []
+        space.get_default_completion_model.return_value = model
+        completion_service = AsyncMock()
+        completion_service.resolve_model_route.return_value = _route(
+            supported=SupportedModelKwargs(
+                reasoning_effort=ModelKwargCapability(
+                    supported=True,
+                    control="select",
+                    options=["low", " high "],
+                )
+            )
+        )
+        service = _make_service(
+            user=user,
+            repo=repo,
+            completion_service=completion_service,
+        )
+
+        with pytest.raises(AIBuilderBadRequestException):
+            await service.prepare_message_context(
+                session=_make_session(tenant_id=user.tenant_id),
+                space=space,
+                model_id=model.id,
+                tenant_flow_settings=None,
+                reasoning_effort=" high ",
+            )
+
+    @pytest.mark.anyio
     async def test_prepare_message_context_accepts_exact_merged_attachment_limit(
         self,
     ) -> None:

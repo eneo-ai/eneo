@@ -5,6 +5,8 @@
   import { Separator } from "$lib/components/ui/separator/index.js";
   import * as Card from "$lib/components/ui/card/index.js";
   import { m } from "$lib/paraglide/messages";
+  import ArrowLeft from "lucide-svelte/icons/arrow-left";
+  import Trash2 from "lucide-svelte/icons/trash-2";
   import type { RecoverableAIBuilderDraftSession } from "./protocol";
 
   interface Props {
@@ -12,9 +14,10 @@
     onresume: (sessionId: string) => Promise<void> | void;
     onstartfresh: () => Promise<void> | void;
     ondiscard: (sessionId: string) => Promise<void> | void;
+    onclose?: () => void;
   }
 
-  let { drafts, onresume, onstartfresh, ondiscard }: Props = $props();
+  let { drafts, onresume, onstartfresh, ondiscard, onclose }: Props = $props();
 
   let confirmDeleteId = $state<string | null>(null);
   let showDeleteDialog = $state(false);
@@ -81,13 +84,21 @@
   class="flex min-h-0 flex-1 items-start justify-center overflow-y-auto px-6 py-14 max-[480px]:px-4 max-[480px]:py-8"
 >
   <div class="flex w-full max-w-[40rem] flex-col gap-7">
-    <header class="flex flex-col gap-1.5">
-      <h2 class="text-primary text-[1.375rem] leading-tight font-semibold tracking-[-0.01em]">
-        {m.ai_builder_drafts_title()}
-      </h2>
-      <p class="text-secondary text-[0.9375rem] leading-relaxed">
-        {m.ai_builder_drafts_subtitle()}
-      </p>
+    <header class="flex items-start justify-between gap-4 max-[480px]:flex-col">
+      <div class="flex min-w-0 flex-col gap-1.5">
+        <h2 class="text-primary text-[1.375rem] leading-tight font-semibold tracking-[-0.01em]">
+          {m.ai_builder_drafts_title()}
+        </h2>
+        <p class="text-secondary text-[0.9375rem] leading-relaxed">
+          {m.ai_builder_drafts_subtitle()}
+        </p>
+      </div>
+      {#if onclose}
+        <Button variant="ghost" size="sm" class="max-[480px]:w-full" onclick={onclose}>
+          <ArrowLeft aria-hidden="true" />
+          {m.ai_builder_back_to_current_draft()}
+        </Button>
+      {/if}
     </header>
 
     <ol class="flex flex-col gap-2.5" role="list">
@@ -144,26 +155,15 @@
               <div
                 class="flex shrink-0 items-center gap-1.5 self-center max-[480px]:w-full max-[480px]:justify-end"
               >
-                <button
-                  type="button"
-                  class="text-muted hover:bg-negative-dimmer hover:text-negative-stronger flex size-7 shrink-0 items-center justify-center rounded-md transition-colors duration-150"
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  class="text-muted hover:bg-negative-dimmer hover:text-negative-stronger"
                   onclick={() => requestDiscard(draft.session_id)}
                   aria-label={m.ai_builder_discard_draft()}
                 >
-                  <svg
-                    xmlns="http://www.w3.org/2000/svg"
-                    viewBox="0 0 16 16"
-                    fill="currentColor"
-                    class="size-3.5"
-                    aria-hidden="true"
-                  >
-                    <path
-                      fill-rule="evenodd"
-                      d="M5 3.25V4H2.75a.75.75 0 0 0 0 1.5h.3l.815 8.15A1.5 1.5 0 0 0 5.357 15h5.285a1.5 1.5 0 0 0 1.493-1.35l.815-8.15h.3a.75.75 0 0 0 0-1.5H11v-.75A2.25 2.25 0 0 0 8.75 1h-1.5A2.25 2.25 0 0 0 5 3.25Zm2.25-.75a.75.75 0 0 0-.75.75V4h3v-.75a.75.75 0 0 0-.75-.75h-1.5ZM6.05 6a.75.75 0 0 1 .787.713l.275 5.5a.75.75 0 0 1-1.498.075l-.275-5.5A.75.75 0 0 1 6.05 6Zm3.9 0a.75.75 0 0 1 .712.787l-.275 5.5a.75.75 0 0 1-1.498-.075l.275-5.5a.75.75 0 0 1 .786-.711Z"
-                      clip-rule="evenodd"
-                    />
-                  </svg>
-                </button>
+                  <Trash2 class="size-3.5" aria-hidden="true" />
+                </Button>
                 {#if isFirst}
                   <Button variant="default" size="sm" onclick={() => onresume(draft.session_id)}>
                     {m.ai_builder_resume_draft()}

@@ -81,6 +81,7 @@ def _route(
     provider_type: str = "openai",
     kwargs: dict[str, object] | None = None,
     supported: SupportedModelKwargs | None = None,
+    requested: ModelKwargs | None = None,
 ) -> ResolvedCompletionModelRoute:
     return ResolvedCompletionModelRoute(
         litellm_model=model,
@@ -88,6 +89,7 @@ def _route(
         litellm_kwargs=kwargs or {},
         supported_model_kwargs=supported
         or SupportedModelKwargs(temperature=ModelKwargCapability(supported=True)),
+        **({"requested_model_kwargs": requested} if requested is not None else {}),
     )
 
 
@@ -438,6 +440,23 @@ def test_builder_explicit_off_reasoning_preserves_temperature_in_pinned_litellm(
 
     assert provider_kwargs["reasoning_effort"] == "none"
     assert provider_kwargs["temperature"] == 0.0
+
+
+def test_builder_selected_reasoning_effort_is_merged_with_call_parameters() -> None:
+    prepared = _route(
+        requested=ModelKwargs(reasoning_effort="high"),
+        supported=SupportedModelKwargs(
+            temperature=ModelKwargCapability(supported=True),
+            reasoning_effort=ModelKwargCapability(
+                supported=True,
+                control="select",
+                options=["low", "medium", "high"],
+            ),
+        ),
+    ).prepare_provider_kwargs(ModelKwargs(temperature=0.2))
+
+    assert prepared["reasoning_effort"] == "high"
+    assert prepared["temperature"] == 0.2
 
 
 @pytest.mark.asyncio

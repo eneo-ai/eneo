@@ -37,7 +37,7 @@ describe("FlowAIBuilderStepCard", () => {
     ).toBeTruthy();
   });
 
-  it("shows completion model details for pass-through steps", async () => {
+  it("keeps completion model details behind the step disclosure", async () => {
     render(FlowAIBuilderStepCard, {
       step: makeStep({
         assistant_spec: {
@@ -50,7 +50,15 @@ describe("FlowAIBuilderStepCard", () => {
       resolveModelName: (ref) => (ref === "model.gpt-5-4-nano" ? "gpt-5.4 nano" : ref)
     });
 
-    expect(screen.getAllByText("gpt-5.4 nano").length).toBeGreaterThan(0);
+    const disclosure = screen.getByRole("button", {
+      name: /^(Step|Steg) 1: Fetch time \((NEW|NY)\)$/
+    });
+    expect(disclosure.getAttribute("aria-expanded")).toBe("false");
+
+    await fireEvent.click(disclosure);
+
+    expect(disclosure.getAttribute("aria-expanded")).toBe("true");
+    expect(screen.getByText("gpt-5.4 nano")).toBeTruthy();
   });
 
   it("emits structured step edit context instead of relying on button text", async () => {

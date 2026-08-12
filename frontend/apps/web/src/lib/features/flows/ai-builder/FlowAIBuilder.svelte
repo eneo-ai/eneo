@@ -67,6 +67,7 @@
   // split threshold only the active one is displayed.
   let activePane = $state<"task" | "plan">("task");
   let hadPlanContent = false;
+  let draftViewRequested = $state(false);
 
   $effect(() => {
     if (hasPlanContent && !hadPlanContent) {
@@ -102,9 +103,23 @@
     return ids.size;
   });
 
-  // For single-draft: show draft page only when 2+ drafts
   const showDraftPage = $derived(
-    targetKind === "create" && !service.hasSession && service.recoverableCreateDrafts.length >= 2
+    targetKind === "create" &&
+      ((!service.hasSession && service.recoverableCreateDrafts.length >= 2) ||
+        (draftViewRequested && service.recoverableCreateDrafts.length > 0))
+  );
+  const alternativeDraftCount = $derived(
+    service.recoverableCreateDrafts.filter(
+      (draft) => draft.session_id !== service.session?.session_id
+    ).length
+  );
+  const canViewDrafts = $derived(
+    targetKind === "create" &&
+      service.hasSession &&
+      !service.isStreaming &&
+      !service.isCreating &&
+      !draftViewRequested &&
+      alternativeDraftCount > 0
   );
 
   const failedResumeDraft = $derived(
@@ -118,6 +133,7 @@
   async function resumeDraft(sessionId: string) {
     await service.resumeSession(sessionId);
     if (service.session?.session_id === sessionId) {
+      draftViewRequested = false;
       failedResumeDraftId = null;
       wasAutoResumed = true;
     } else if (!service.hasSession && service.error !== null) {
@@ -167,6 +183,7 @@
 
   function handleStartFreshFromResume() {
     wasAutoResumed = false;
+    draftViewRequested = false;
     service.startFreshSession("create");
   }
 
@@ -178,6 +195,7 @@
 
   async function handleStartFreshFromFailedResume() {
     wasAutoResumed = false;
+    draftViewRequested = false;
     try {
       await service.startFreshSession("create");
       failedResumeDraftId = null;
@@ -253,8 +271,12 @@
     <FlowAIBuilderDraftRecovery
       drafts={service.recoverableCreateDrafts}
       onresume={resumeDraft}
-      onstartfresh={() => service.startFreshSession("create")}
+      onstartfresh={() => {
+        draftViewRequested = false;
+        return service.startFreshSession("create");
+      }}
       ondiscard={(sessionId) => service.discardSession(sessionId)}
+      onclose={service.hasSession ? () => (draftViewRequested = false) : undefined}
     />
   </div>
 {:else}
@@ -331,7 +353,7 @@
            page scrolls in the narrow layouts (§1.4); static in split view,
            where the page never scrolls. -->
       <div class="bg-primary sticky top-0 z-20 w-full shrink-0 @[1040px]/builder:static">
-        {#if service.messages.length > 0 || canStartOver}
+        {#if service.messages.length > 0 || canStartOver || canViewDrafts}
           <div class="border-border-default w-full shrink-0 border-b">
             <div
               class="flex w-full items-center @[1760px]/builder:mx-auto @[1760px]/builder:max-w-[1760px]"
@@ -347,16 +369,25 @@
                 <div class="min-h-0 flex-1" aria-hidden="true"></div>
               {/if}
 
-              {#if canStartOver}
-                <div class="shrink-0 pr-4 max-sm:pr-3">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onclick={handleStartOver}
-                    disabled={service.isCreating}
-                  >
-                    {m.ai_builder_start_fresh()}
-                  </Button>
+              {#if canStartOver || canViewDrafts}
+                <div class="flex shrink-0 items-center gap-2 pr-4 max-sm:pr-3">
+                  {#if canViewDrafts}
+                    <Button variant="outline" size="sm" onclick={() => (draftViewRequested = true)}>
+                      {m.ai_builder_view_drafts({
+                        count: String(service.recoverableCreateDrafts.length)
+                      })}
+                    </Button>
+                  {/if}
+                  {#if canStartOver}
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onclick={handleStartOver}
+                      disabled={service.isCreating}
+                    >
+                      {m.ai_builder_start_fresh()}
+                    </Button>
+                  {/if}
                 </div>
               {/if}
             </div>
@@ -424,7 +455,7 @@
         {#if hasPlanContent}
           <div
             id="ai-builder-plan-pane"
-            class="border-border-default bg-primary flex min-w-0 flex-col border-t @[1040px]/builder:min-h-0 @[1040px]/builder:flex-1 @[1040px]/builder:flex @[1040px]/builder:overflow-hidden @[1040px]/builder:border-t-0 @[1040px]/builder:border-l"
+            class="border-border-default bg-primary flex min-w-0 flex-col border-t @[1040px]/builder:flex @[1040px]/builder:min-h-0 @[1040px]/builder:flex-1 @[1040px]/builder:overflow-hidden @[1040px]/builder:border-t-0 @[1040px]/builder:border-l"
             class:hidden={activePane !== "plan"}
           >
             <FlowAIBuilderPlanPane

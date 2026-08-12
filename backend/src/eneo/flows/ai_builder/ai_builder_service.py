@@ -13,9 +13,14 @@ from uuid import UUID
 import litellm
 from pydantic import ValidationError
 
+from eneo.ai_models.completion_models.completion_model import ModelKwargs
 from eneo.authentication.auth_models import ApiKeyPermission, ApiKeyScopeType
+from eneo.completion_models.infrastructure.tenant_model_capabilities import (
+    selectable_reasoning_effort_options,
+)
 from eneo.files.file_models import File
 from eneo.flows.ai_builder.ai_builder_api_models import (
+    AI_BUILDER_REASONING_EFFORT_MAX_LENGTH,
     ApplyResultResponse,
     SessionListItemResponse,
 )
@@ -374,6 +379,7 @@ class AIBuilderService:
         space: "Space",
         model_id: UUID | None,
         tenant_flow_settings: dict[str, Any] | None,
+        reasoning_effort: str | None = None,
         message: str | None = None,
         message_file_ids: list[UUID] | None = None,
     ) -> PreparedMessageContext:
@@ -423,6 +429,21 @@ class AIBuilderService:
             route,
             litellm_kwargs=_sanitize_ai_builder_litellm_kwargs(route.litellm_kwargs),
         )
+        if reasoning_effort is not None:
+            capability = route.supported_model_kwargs.reasoning_effort
+            options = selectable_reasoning_effort_options(
+                capability,
+                max_length=AI_BUILDER_REASONING_EFFORT_MAX_LENGTH,
+            )
+            if reasoning_effort not in options:
+                raise AIBuilderBadRequestException(
+                    "Selected reasoning effort is not available for this model.",
+                    code=AIBuilderErrorCode.BAD_REQUEST,
+                )
+            route = replace(
+                route,
+                requested_model_kwargs=ModelKwargs(reasoning_effort=reasoning_effort),
+            )
 
         flow = None
         assistant_snapshots = None

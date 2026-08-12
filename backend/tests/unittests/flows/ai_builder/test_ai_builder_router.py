@@ -17,6 +17,7 @@ from fastapi.testclient import TestClient
 from eneo.audit.domain.action_types import ActionType
 from eneo.audit.domain.entity_types import EntityType
 from eneo.completion_models.domain.model_kwargs_capabilities import (
+    ModelKwargCapability,
     SupportedModelKwargs,
 )
 from eneo.completion_models.infrastructure.completion_service import (
@@ -429,7 +430,18 @@ def _make_container(
     model_service.get_default_completion_model.return_value = MagicMock()
     container.completion_model_crud_service.return_value = model_service
 
+    model_provider_repository = MagicMock()
+    model_provider_repository.all = AsyncMock(return_value=[])
+    container.model_provider_repository.return_value = model_provider_repository
+
     return container
+
+
+def _activate_model_provider(container: MagicMock, model: MagicMock) -> None:
+    model.provider_id = uuid4()
+    container.model_provider_repository.return_value.all.return_value = [
+        SimpleNamespace(id=model.provider_id)
+    ]
 
 
 def _make_apply_plan_client(container: MagicMock) -> TestClient:
@@ -824,7 +836,7 @@ class TestCreateSessionEndpoint:
         container.ai_builder_service.return_value.create_session.assert_not_called()
 
     @pytest.mark.anyio
-    async def test_fails_closed_when_no_space_planner_model_exists(self):
+    async def test_creates_session_when_space_has_no_planner_model_yet(self):
         container = _make_container()
         body = CreateSessionRequest(
             target_kind=TargetKind.CREATE,
@@ -833,15 +845,20 @@ class TestCreateSessionEndpoint:
         space = container.space_service.return_value.get_space.return_value
         space.get_default_completion_model.return_value = None
         space.completion_models = []
+        session = _make_session_domain(
+            space_id=body.space_id,
+            actor_user_id=container.user.return_value.id,
+        )
+        container.ai_builder_service.return_value.create_session.return_value = session
 
-        with pytest.raises(BadRequestException, match="No AI builder planner model"):
-            await create_session(
-                request=MagicMock(),
-                body=body,
-                container=container,
-            )
+        result = await create_session(
+            request=MagicMock(),
+            body=body,
+            container=container,
+        )
 
-        container.ai_builder_service.return_value.create_session.assert_not_called()
+        assert result.session_id == session.id
+        container.ai_builder_service.return_value.create_session.assert_awaited_once()
 
 
 class TestGetSessionEndpoint:
@@ -1540,7 +1557,19 @@ class TestGetSessionModelsEndpoint:
         model = MagicMock()
         model.id = uuid4()
         model.name = "GPT-4"
+        model.nickname = "Municipal drafting model"
         model.provider_type = "openai"
+        model.reasoning = True
+        model.model_kwargs_capabilities = None
+        model.get_model_route.return_value = "openai/gpt-4"
+        model.supported_model_kwargs = SupportedModelKwargs(
+            reasoning_effort=ModelKwargCapability(
+                supported=True,
+                control="select",
+                options=["low", "medium", "high"],
+            )
+        )
+        _activate_model_provider(container, model)
         space = container.space_service.return_value.get_space.return_value
         space.completion_models = [model]
         space.get_default_completion_model.return_value = model
@@ -1554,9 +1583,153 @@ class TestGetSessionModelsEndpoint:
         assert isinstance(result, SessionModelsResponse)
         assert result.default_model_id == model.id
         assert result.models[0].id == model.id
-        assert result.models[0].name == "GPT-4"
+        assert result.models[0].name == "Municipal drafting model"
+        assert result.models[0].reasoning_effort_options == [
+            "low",
+            "medium",
+            "high",
+        ]
         space_service = container.space_service.return_value
         space_service.get_space.assert_awaited_once_with(session.space_id)
+        service.completion_service.resolve_model_route.assert_not_awaited()
+
+    @pytest.mark.anyio
+    async def test_omits_reasoning_choices_without_select_capability(self):
+        container = _make_container()
+        session = _make_session_domain(actor_user_id=container.user.return_value.id)
+        container.ai_builder_service.return_value.get_session.return_value = session
+
+        model = MagicMock()
+        model.id = uuid4()
+        model.name = "GPT without configurable reasoning"
+        model.nickname = None
+        model.provider_type = "openai"
+        model.reasoning = False
+        model.model_kwargs_capabilities = None
+        model.get_model_route.return_value = "openai/plain-model"
+        model.supported_model_kwargs = SupportedModelKwargs(
+            reasoning_effort=ModelKwargCapability(
+                supported=True,
+                control="slider",
+                minimum=0,
+                maximum=1,
+            )
+        )
+        _activate_model_provider(container, model)
+        space = container.space_service.return_value.get_space.return_value
+        space.completion_models = [model]
+        space.get_default_completion_model.return_value = model
+
+        result = await get_session_models(
+            request=MagicMock(),
+            session_id=session.id,
+            container=container,
+        )
+
+        assert result.models[0].reasoning_effort_options == []
+
+    @pytest.mark.anyio
+    async def test_returns_empty_response_when_an_existing_session_loses_all_models(
+        self,
+    ):
+        container = _make_container()
+        session = _make_session_domain(actor_user_id=container.user.return_value.id)
+        service = container.ai_builder_service.return_value
+        service.get_session.return_value = session
+        space = container.space_service.return_value.get_space.return_value
+        space.completion_models = []
+        space.get_default_completion_model.return_value = None
+
+        result = await get_session_models(
+            request=MagicMock(),
+            session_id=session.id,
+            container=container,
+        )
+
+        assert result.models == []
+        assert result.default_model_id is None
+        service.completion_service.resolve_model_route.assert_not_awaited()
+
+    @pytest.mark.anyio
+    async def test_omits_models_whose_provider_is_inactive(self):
+        container = _make_container()
+        session = _make_session_domain(actor_user_id=container.user.return_value.id)
+        container.ai_builder_service.return_value.get_session.return_value = session
+        model = MagicMock()
+        model.id = uuid4()
+        model.provider_id = uuid4()
+        model.name = "Unavailable model"
+        model.nickname = None
+        model.provider_type = "openai"
+        model.reasoning = False
+        model.model_kwargs_capabilities = None
+        model.supported_model_kwargs = SupportedModelKwargs()
+        space = container.space_service.return_value.get_space.return_value
+        space.completion_models = [model]
+        space.get_default_completion_model.return_value = model
+
+        result = await get_session_models(
+            request=MagicMock(),
+            session_id=session.id,
+            container=container,
+        )
+
+        assert result.models == []
+        assert result.default_model_id is None
+        container.model_provider_repository.return_value.all.assert_awaited_once_with(
+            active_only=True
+        )
+
+    @pytest.mark.anyio
+    async def test_filters_reasoning_choices_that_the_request_contract_cannot_send(
+        self,
+    ):
+        container = _make_container()
+        session = _make_session_domain(actor_user_id=container.user.return_value.id)
+        service = container.ai_builder_service.return_value
+        service.get_session.return_value = session
+        model = MagicMock()
+        model.id = uuid4()
+        model.name = "Reasoning model"
+        model.nickname = None
+        model.provider_type = "openai"
+        model.reasoning = True
+        model.model_kwargs_capabilities = {
+            "reasoning_effort": {
+                "supported": True,
+                "control": "select",
+                "options": ["", "   ", "high", "high", "x" * 33, "xhigh"],
+            }
+        }
+        model.get_model_route.return_value = "openai/reasoning-model"
+        capabilities = SupportedModelKwargs(
+            reasoning_effort=ModelKwargCapability(
+                supported=True,
+                control="select",
+                options=["", "   ", " high ", "high", "high", "x" * 33, "xhigh"],
+            )
+        )
+        model.supported_model_kwargs = capabilities
+        _activate_model_provider(container, model)
+        space = container.space_service.return_value.get_space.return_value
+        space.completion_models = [model]
+        space.get_default_completion_model.return_value = model
+
+        result = await get_session_models(
+            request=MagicMock(),
+            session_id=session.id,
+            container=container,
+        )
+
+        assert result.models[0].reasoning_effort_options == ["high", "xhigh"]
+
+    def test_rejects_reasoning_effort_with_surrounding_whitespace(self):
+        with pytest.raises(ValueError, match="surrounding whitespace"):
+            SendMessageRequest(
+                client_turn_id=uuid4(),
+                message="Build a flow",
+                reasoning_effort=" high ",
+            )
 
     @pytest.mark.anyio
     async def test_checks_flow_edit_permission(self):

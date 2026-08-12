@@ -47,6 +47,7 @@ export class FlowAIBuilderService {
       this.#state.streamState !== "streaming" &&
       this.#state.pendingOperation === null &&
       this.#canStartNewTurn &&
+      this.#hasValidModelSelection &&
       (this.#state.session?.status === "chatting" ||
         this.#state.session?.status === "awaiting_approval")
   );
@@ -85,6 +86,10 @@ export class FlowAIBuilderService {
 
   get #canStartNewTurn(): boolean {
     return this.#driver.canStartNewTurn;
+  }
+
+  get #hasValidModelSelection(): boolean {
+    return this.#driver.hasValidModelSelection;
   }
 
   // Keep "updating plan" copy stable while a re-plan stream briefly clears currentPlan.
@@ -152,6 +157,10 @@ export class FlowAIBuilderService {
 
   get selectedModelId(): string | null {
     return this.#state.selectedModelId;
+  }
+
+  get selectedReasoningEffort(): string | null {
+    return this.#state.selectedReasoningEffort;
   }
 
   get modelLoadStatus(): ModelLoadStatus {
@@ -299,6 +308,10 @@ export class FlowAIBuilderService {
 
   selectModel(modelId: string): void {
     this.#driver.selectModel(modelId);
+  }
+
+  selectReasoningEffort(reasoningEffort: string | null): void {
+    this.#driver.selectReasoningEffort(reasoningEffort);
   }
 
   async retryModelLoad(): Promise<void> {

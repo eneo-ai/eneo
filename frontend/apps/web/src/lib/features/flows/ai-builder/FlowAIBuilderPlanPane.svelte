@@ -12,7 +12,6 @@
   import FlowAIBuilderCanvas from "./FlowAIBuilderCanvas.svelte";
   import FlowAIBuilderTokenUsage from "./FlowAIBuilderTokenUsage.svelte";
   import { getAIBuilderService } from "./FlowAIBuilderService.svelte.ts";
-  import { getFlowUserMode } from "$lib/features/flows/FlowUserMode";
   import type { AIBuilderStatus, AIBuilderSuggestChangeIntent, EditAdvisory } from "./protocol";
   import {
     AIBuilderIssueKind,
@@ -20,10 +19,6 @@
     buildAIBuilderDiagnosticReportPlan,
     buildAIBuilderDiagnosticReportSession
   } from "./aiBuilderDiagnosticReport";
-  import {
-    buildAIBuilderMcpResourceLabelMaps,
-    type AIBuilderMcpServerLike
-  } from "./flowAIBuilderMcpResources";
   import {
     getFirstChangedStepIndex,
     getRemovedStepChanges,
@@ -51,8 +46,6 @@
   }: Props = $props();
 
   const service = getAIBuilderService();
-  const userMode = getFlowUserMode();
-  const isPowerUser = $derived($userMode === "power_user");
   const isCreateMode = $derived(service.session?.target_kind === "create");
   let assumptionsOpen = $state(false);
   let executionProfileOpen = $state(false);
@@ -185,20 +178,6 @@
   function resolveModelName(ref: string | null): string | null {
     if (!ref) return null;
     return service.availableModels.find((model) => model.id === ref)?.name ?? ref;
-  }
-
-  const mcpResourceLabels = $derived(
-    buildAIBuilderMcpResourceLabelMaps(
-      ($currentSpace.mcp_servers ?? []) as unknown as AIBuilderMcpServerLike[]
-    )
-  );
-
-  function resolveMcpServerName(ref: string): string | null {
-    return mcpResourceLabels.serverLabels.get(ref) ?? null;
-  }
-
-  function resolveMcpToolName(ref: string): string | null {
-    return mcpResourceLabels.toolLabels.get(ref) ?? null;
   }
 
   function executionStepLabel(planStepRef: string): string {
@@ -648,7 +627,7 @@
             </section>
           {/if}
 
-          {#if isPowerUser}
+          {#if plan.proposal.execution_shape}
             <section class="border-default border-t px-5 py-4 md:px-6">
               <Collapsible.Root bind:open={executionProfileOpen}>
                 <h3 class="text-sm">
@@ -736,10 +715,7 @@
             </section>
           {/if}
 
-          <!-- Tekniska antaganden (§6): Avancerad only, collapsed by default —
-               the left pane's "Antaganden" is the Enkel-facing section, and
-               two sections may never share a label. -->
-          {#if isPowerUser && planAssumptions.length > 0}
+          {#if planAssumptions.length > 0}
             <section class="border-default border-t px-5 py-4 md:px-6">
               <Collapsible.Root bind:open={assumptionsOpen}>
                 <h3 class="text-sm">
@@ -922,11 +898,8 @@
                         {step}
                         stepNumber={i + 1}
                         planId={plan.plan_id}
-                        {isPowerUser}
                         changeKind={getStepChangeKind(step, plan.proposal.edit?.diff ?? null)}
                         {resolveModelName}
-                        {resolveMcpServerName}
-                        {resolveMcpToolName}
                         isFirst={i === 0}
                         isLast={i === spec.steps.length - 1}
                         planStatus={plan.status}
@@ -1019,7 +992,7 @@
         role="status"
         aria-live="polite"
       >
-        <div class="mx-auto max-w-[800px] @[1400px]/builder:max-w-[840px] px-4 py-3 md:px-6">
+        <div class="mx-auto max-w-[800px] px-4 py-3 md:px-6 @[1400px]/builder:max-w-[840px]">
           <Alert.Title class="text-warning-stronger text-[0.8125rem] font-semibold">
             {m.ai_builder_published_flow_title()}
           </Alert.Title>
@@ -1054,7 +1027,7 @@
         role="status"
         aria-live="polite"
       >
-        <div class="mx-auto max-w-[800px] @[1400px]/builder:max-w-[840px] px-4 py-3 md:px-6">
+        <div class="mx-auto max-w-[800px] px-4 py-3 md:px-6 @[1400px]/builder:max-w-[840px]">
           <Alert.Title class="text-warning-stronger text-[0.8125rem] font-semibold">
             {m.ai_builder_unpublished_apply_failed_title()}
           </Alert.Title>
@@ -1087,7 +1060,7 @@
         role="status"
         aria-live="polite"
       >
-        <div class="mx-auto max-w-[800px] @[1400px]/builder:max-w-[840px] px-4 py-3 md:px-6">
+        <div class="mx-auto max-w-[800px] px-4 py-3 md:px-6 @[1400px]/builder:max-w-[840px]">
           <Alert.Title class="text-warning-stronger text-[0.8125rem] font-semibold">
             {createOutcomeUnknown
               ? m.ai_builder_create_unknown_title()
@@ -1115,7 +1088,7 @@
         role="status"
         aria-live="polite"
       >
-        <div class="mx-auto max-w-[800px] @[1400px]/builder:max-w-[840px] px-4 py-3 md:px-6">
+        <div class="mx-auto max-w-[800px] px-4 py-3 md:px-6 @[1400px]/builder:max-w-[840px]">
           <Alert.Title class="text-warning-stronger text-[0.8125rem] font-semibold">
             {m.ai_builder_apply_failed_title()}
           </Alert.Title>
@@ -1230,7 +1203,7 @@
   {:else if service.isConflict}
     <!-- Conflict state without a plan yet --------------------------------- -->
     <div class="flex flex-1 flex-col overflow-y-auto">
-      <div class="mx-auto w-full max-w-[800px] @[1400px]/builder:max-w-[840px] px-4 py-6 md:px-6">
+      <div class="mx-auto w-full max-w-[800px] px-4 py-6 md:px-6 @[1400px]/builder:max-w-[840px]">
         <Alert.Root class="border-warning-default/40 bg-warning-dimmer rounded-lg">
           <Alert.Title class="text-warning-stronger text-[0.8125rem] font-semibold">
             {m.ai_builder_conflict_title()}

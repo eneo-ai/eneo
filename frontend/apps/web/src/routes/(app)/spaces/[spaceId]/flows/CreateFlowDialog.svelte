@@ -80,8 +80,10 @@
 </Button>
 
 <Dialog.Root bind:open={showDialog}>
-  <Dialog.Content class="!max-w-2xl !p-0">
-    <div class="px-8 pt-10 pb-8 sm:px-10">
+  <Dialog.Content
+    class="flex max-h-[calc(100dvh-1.5rem)] w-[calc(100%-1.5rem)] !max-w-2xl flex-col gap-0 overflow-hidden !p-0 sm:max-h-[min(48rem,calc(100dvh-3rem))]"
+  >
+    <div class="min-h-0 flex-1 overflow-y-auto px-5 pt-8 pb-6 sm:px-10 sm:pt-10 sm:pb-8">
       <Dialog.Title class="pb-1 text-xl font-semibold">{m.flow_create_dialog_title()}</Dialog.Title>
       <Dialog.Description class="text-secondary max-w-[60ch]">
         {mode === "prompt"
@@ -97,21 +99,23 @@
           <Textarea
             id="flow-task-input"
             bind:value={taskDescription}
-            rows={3}
+            rows={5}
+            class="field-sizing-fixed h-32 max-h-[min(20rem,40dvh)] resize-y overflow-y-auto"
             placeholder={m.flow_create_prompt_placeholder()}
           />
           <div class="mt-1 flex flex-wrap items-center gap-2">
             <span class="text-muted text-xs">{m.flow_create_examples_label()}</span>
             {#each taskExamples as example (example)}
-              <button
-                type="button"
-                class="border-default text-secondary hover:border-stronger hover:text-primary focus-visible:ring-accent-default/40 rounded-full border px-3 py-1 text-xs transition-colors focus-visible:ring-2 focus-visible:outline-none"
+              <Button
+                variant="outline"
+                size="xs"
+                class="h-auto rounded-full px-3 py-1 whitespace-normal"
                 onclick={() => {
                   taskDescription = example();
                 }}
               >
                 {example()}
-              </button>
+              </Button>
             {/each}
           </div>
         </div>
@@ -120,15 +124,15 @@
           <Separator class="mt-8 mb-4" />
           <p class="text-secondary text-sm">
             {m.flow_create_manual_more_control()}
-            <button
-              type="button"
-              class="text-accent-default hover:text-accent-stronger font-medium underline-offset-2 hover:underline"
+            <Button
+              variant="link"
+              class="h-auto p-0 align-baseline"
               onclick={() => {
                 mode = "manual";
               }}
             >
               {m.flow_create_configure_manually()}
-            </button>
+            </Button>
           </p>
         {/if}
       {:else}
@@ -142,17 +146,16 @@
           />
         </div>
       {/if}
-    </div>
-
-    {#if createError}
-      <div class="px-8 pb-4 sm:px-10">
+      {#if createError}
         <p class="text-negative-stronger bg-negative-dimmer rounded-lg px-3 py-2 text-sm">
           {createError}
         </p>
-      </div>
-    {/if}
+      {/if}
+    </div>
 
-    <Dialog.Footer class="border-default bg-background !mx-0 !mb-0 rounded-b-xl border-t px-6 py-4">
+    <Dialog.Footer
+      class="border-default bg-background !mx-0 !mb-0 shrink-0 rounded-b-xl border-t px-4 py-3 sm:px-6 sm:py-4"
+    >
       {#if mode === "manual"}
         <label class="flex items-center gap-2 text-sm">
           <Switch bind:checked={openAfterCreation} size="sm" />
@@ -169,22 +172,31 @@
         {/if}
         <Button
           variant="outline"
+          class="w-full sm:w-auto"
           onclick={() => {
             showDialog = false;
             reset();
           }}>{m.cancel()}</Button
         >
-        <Button variant="default" onclick={createFlow}>{m.flow_create()}</Button>
+        <Button class="w-full sm:w-auto" variant="default" onclick={createFlow}>
+          {m.flow_create()}
+        </Button>
       {:else}
         <div class="flex-grow"></div>
         <Button
           variant="outline"
+          class="w-full sm:w-auto"
           onclick={() => {
             showDialog = false;
             reset();
           }}>{m.cancel()}</Button
         >
-        <Button variant="default" disabled={!taskDescription.trim()} onclick={continueToAIBuilder}>
+        <Button
+          class="w-full sm:w-auto"
+          variant="default"
+          disabled={!taskDescription.trim()}
+          onclick={continueToAIBuilder}
+        >
           {m.flow_create_continue_ai()}
         </Button>
       {/if}

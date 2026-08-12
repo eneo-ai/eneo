@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, AsyncGenerator, Literal, Optional, TypeAlias
 from uuid import UUID
 
@@ -32,6 +32,7 @@ from eneo.completion_models.infrastructure.adapters.base_adapter import Provider
 from eneo.completion_models.infrastructure.context_builder import ContextBuilder
 from eneo.completion_models.infrastructure.tenant_model_capabilities import (
     StructuredOutputCapabilityDecision,
+    enrich_reasoning_effort_capability,
     normalize_reasoning_effort,
 )
 from eneo.files.file_models import File, FileType
@@ -165,6 +166,7 @@ class ResolvedCompletionModelRoute:
     provider_type: str
     litellm_kwargs: dict[str, object]
     supported_model_kwargs: SupportedModelKwargs
+    requested_model_kwargs: ModelKwargs = field(default_factory=ModelKwargs)
 
     def prepare_provider_kwargs(
         self,
@@ -175,10 +177,13 @@ class ResolvedCompletionModelRoute:
             for key, value in self.litellm_kwargs.items()
             if key not in SupportedModelKwargs.model_fields
         }
+        effective_request = self.requested_model_kwargs.model_copy(
+            update=requested.model_dump(exclude_none=True)
+        )
         provider_kwargs.update(
-            requested.filter_unsupported(self.supported_model_kwargs).model_dump(
-                exclude_none=True
-            )
+            effective_request.filter_unsupported(
+                self.supported_model_kwargs
+            ).model_dump(exclude_none=True)
         )
         return normalize_reasoning_effort(
             litellm_model=self.litellm_model,
@@ -417,10 +422,17 @@ class CompletionService:
     ) -> ResolvedCompletionModelRoute:
         adapter = await self._get_adapter(model)
         litellm_model, litellm_kwargs = adapter.resolve_litellm_params()
+        supported_model_kwargs = enrich_reasoning_effort_capability(
+            supported_model_kwargs=model.supported_model_kwargs,
+            has_capability_snapshot=model.model_kwargs_capabilities is not None,
+            reasoning=model.reasoning,
+            litellm_model=litellm_model,
+            provider_type=adapter.provider_type,
+        )
         return ResolvedCompletionModelRoute(
             litellm_model=litellm_model,
             litellm_kwargs=litellm_kwargs,
-            supported_model_kwargs=model.supported_model_kwargs,
+            supported_model_kwargs=supported_model_kwargs,
             provider_type=adapter.provider_type,
         )
 

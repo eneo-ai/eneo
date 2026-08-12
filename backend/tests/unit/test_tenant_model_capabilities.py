@@ -6,9 +6,115 @@ from eneo.completion_models.infrastructure.tenant_model_capabilities import (
     StructuredOutputCapabilityDecision,
     StructuredOutputDecisionSource,
     StructuredOutputMode,
+    resolve_reasoning_effort_options,
     resolve_structured_output_capability,
     unsupported_structured_output_decision,
 )
+
+
+def test_reasoning_effort_options_follow_litellm_model_metadata() -> None:
+    with (
+        patch(
+            "eneo.completion_models.infrastructure.tenant_model_capabilities.get_supported_openai_params",
+            return_value=("reasoning_effort", "verbosity"),
+        ),
+        patch(
+            "eneo.completion_models.infrastructure.tenant_model_capabilities.litellm.get_model_info",
+            return_value={
+                "supports_reasoning": True,
+                "supports_none_reasoning_effort": True,
+                "supports_minimal_reasoning_effort": False,
+                "supports_low_reasoning_effort": None,
+                "supports_xhigh_reasoning_effort": True,
+            },
+        ),
+    ):
+        options = resolve_reasoning_effort_options(
+            litellm_model="openai/gpt-5.6-terra",
+            provider_type="openai",
+        )
+
+    assert options == ("none", "low", "medium", "high", "xhigh")
+
+
+def test_reasoning_effort_options_honor_litellm_level_flags() -> None:
+    with (
+        patch(
+            "eneo.completion_models.infrastructure.tenant_model_capabilities.get_supported_openai_params",
+            return_value=("reasoning_effort",),
+        ),
+        patch(
+            "eneo.completion_models.infrastructure.tenant_model_capabilities.litellm.get_model_info",
+            return_value={
+                "supports_reasoning": True,
+                "supports_minimal_reasoning_effort": True,
+                "supports_low_reasoning_effort": False,
+                "supports_xhigh_reasoning_effort": False,
+            },
+        ),
+    ):
+        options = resolve_reasoning_effort_options(
+            litellm_model="openai/reasoning-model",
+            provider_type="openai",
+        )
+
+    assert options == ("minimal", "medium", "high")
+
+
+def test_reasoning_effort_options_include_max_only_when_litellm_confirms_it() -> None:
+    with (
+        patch(
+            "eneo.completion_models.infrastructure.tenant_model_capabilities.get_supported_openai_params",
+            return_value=("reasoning_effort",),
+        ),
+        patch(
+            "eneo.completion_models.infrastructure.tenant_model_capabilities.litellm.get_model_info",
+            return_value={
+                "supports_reasoning": True,
+                "supports_low_reasoning_effort": None,
+                "supports_xhigh_reasoning_effort": False,
+                "supports_max_reasoning_effort": True,
+            },
+        ),
+    ):
+        options = resolve_reasoning_effort_options(
+            litellm_model="anthropic/claude-opus-4-6",
+            provider_type="anthropic",
+        )
+
+    assert options == ("low", "medium", "high", "max")
+
+
+def test_reasoning_effort_options_fail_closed_without_provider_support() -> None:
+    with patch(
+        "eneo.completion_models.infrastructure.tenant_model_capabilities.get_supported_openai_params",
+        return_value=("temperature",),
+    ):
+        options = resolve_reasoning_effort_options(
+            litellm_model="openai/plain-model",
+            provider_type="openai",
+        )
+
+    assert options == ()
+
+
+def test_reasoning_effort_options_fail_closed_when_metadata_is_unavailable() -> None:
+    with (
+        patch(
+            "eneo.completion_models.infrastructure.tenant_model_capabilities.get_supported_openai_params",
+            return_value=("reasoning_effort",),
+        ),
+        patch(
+            "eneo.completion_models.infrastructure.tenant_model_capabilities.litellm.get_model_info",
+            side_effect=RuntimeError("metadata unavailable"),
+        ),
+    ):
+        options = resolve_reasoning_effort_options(
+            litellm_model="openai/custom-model",
+            provider_type="openai",
+        )
+
+    assert options == ()
 
 
 def test_schema_support_selects_strict_json_schema() -> None:

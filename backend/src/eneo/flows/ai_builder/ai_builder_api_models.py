@@ -6,8 +6,15 @@ from datetime import datetime
 from typing import Literal, cast
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from eneo.completion_models.domain import CompletionModel
+from eneo.completion_models.domain.model_kwargs_capabilities import (
+    SupportedModelKwargs,
+)
+from eneo.completion_models.infrastructure.tenant_model_capabilities import (
+    selectable_reasoning_effort_options,
+)
 from eneo.files.file_models import FilePublic
 from eneo.flows.ai_builder.ai_builder_attachment_context import (
     AI_BUILDER_MAX_ATTACHMENTS,
@@ -40,6 +47,8 @@ from eneo.flows.domain.flow import FlowPersistedJsonObject
 from eneo.flows.flow_ai_builder_budget_settings import (
     AI_BUILDER_MAX_MESSAGE_CHARS_HARD_LIMIT,
 )
+
+AI_BUILDER_REASONING_EFFORT_MAX_LENGTH = 32
 
 AI_BUILDER_SESSION_RESPONSE_EXAMPLE: FlowPersistedJsonObject = {
     "session_id": "00000000-0000-0000-0000-000000000701",
@@ -351,6 +360,7 @@ class SendMessageRequest(BaseModel):
                 "client_turn_id": "00000000-0000-0000-0000-000000000703",
                 "message": "Build a flow that extracts key dates from uploaded contracts and returns structured JSON.",
                 "model_id": "00000000-0000-0000-0000-000000000010",
+                "reasoning_effort": "high",
                 "file_ids": ["00000000-0000-0000-0000-000000000099"],
                 "question_answer": {
                     "kind": "structured_question_answer",
@@ -379,6 +389,23 @@ class SendMessageRequest(BaseModel):
     )
     message: str = Field(max_length=AI_BUILDER_MAX_MESSAGE_CHARS_HARD_LIMIT)
     model_id: UUID | None = None
+    reasoning_effort: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=AI_BUILDER_REASONING_EFFORT_MAX_LENGTH,
+        description=(
+            "Optional reasoning effort advertised by the selected model. Omit it "
+            "to use provider defaults; unsupported values are rejected before provider work."
+        ),
+    )
+
+    @field_validator("reasoning_effort")
+    @classmethod
+    def validate_reasoning_effort_shape(cls, value: str | None) -> str | None:
+        if value is not None and value != value.strip():
+            raise ValueError("reasoning_effort must not contain surrounding whitespace")
+        return value
+
     file_ids: list[UUID] | None = Field(
         default=None,
         max_length=AI_BUILDER_MAX_ATTACHMENTS,
@@ -498,8 +525,40 @@ class SessionListResponse(BaseModel):
 
 class SessionModelOption(BaseModel):
     id: UUID
-    name: str
+    name: str = Field(
+        description="Human-readable model nickname, falling back to its name."
+    )
     provider: str
+    reasoning_effort_options: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Reasoning efforts accepted for this model. An empty list means the "
+            "builder must not offer a reasoning control."
+        ),
+    )
+
+    @classmethod
+    def from_completion_model(
+        cls,
+        model: CompletionModel,
+        *,
+        supported_model_kwargs: SupportedModelKwargs | None = None,
+    ) -> "SessionModelOption":
+        capability = (
+            supported_model_kwargs or model.supported_model_kwargs
+        ).reasoning_effort
+        options = list(
+            selectable_reasoning_effort_options(
+                capability,
+                max_length=AI_BUILDER_REASONING_EFFORT_MAX_LENGTH,
+            )
+        )
+        return cls(
+            id=model.id,
+            name=model.nickname or model.name,
+            provider=model.provider_type or "unknown",
+            reasoning_effort_options=options,
+        )
 
 
 class SessionModelsResponse(BaseModel):

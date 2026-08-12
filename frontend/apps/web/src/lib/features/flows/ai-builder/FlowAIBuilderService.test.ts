@@ -177,11 +177,36 @@ describe("FlowAIBuilderService", () => {
 
     service.seedState({
       session: makeSession({ status: "chatting" }),
-      streamState: "idle"
+      streamState: "idle",
+      availableModels: [
+        {
+          id: "model-1",
+          name: "Model",
+          provider: "openai",
+          reasoning_effort_options: []
+        }
+      ],
+      selectedModelId: "model-1",
+      modelLoadStatus: "loaded"
     });
 
     expect(service.session?.session_id).toBe("session-1");
     expect(service.canSendMessage).toBe(true);
+
+    service.seedState({ availableModels: [], selectedModelId: null });
+    expect(service.canSendMessage).toBe(false);
+
+    service.seedState({
+      availableModels: [
+        {
+          id: "model-1",
+          name: "Model",
+          provider: "openai",
+          reasoning_effort_options: []
+        }
+      ],
+      selectedModelId: "model-1"
+    });
 
     service.seedState({ streamState: "streaming" });
 
