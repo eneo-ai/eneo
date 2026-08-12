@@ -122,6 +122,7 @@ async def test_ask_uses_effective_model_for_session_metadata_and_response():
         available_mcp_servers=[],
         prompt_enforced=False,
         enforced_prompt_text=None,
+        reasoning_policy_configured=False,
         governance_skill_resolution=SkillRuntimeResolution(eligible=(), blocked=()),
     )
     session_service = AsyncMock(
@@ -214,6 +215,7 @@ async def test_ask_rejects_empty_model_policy_before_creating_history():
         available_mcp_servers=[],
         prompt_enforced=False,
         enforced_prompt_text=None,
+        reasoning_policy_configured=False,
         governance_skill_resolution=SkillRuntimeResolution(eligible=(), blocked=()),
     )
     session_service = AsyncMock(
@@ -299,6 +301,7 @@ async def test_ask_grants_policy_mcp_servers_to_personal_assistant():
         available_mcp_servers=[policy_server],
         prompt_enforced=False,
         enforced_prompt_text=None,
+        reasoning_policy_configured=False,
         governance_skill_resolution=SkillRuntimeResolution(eligible=(), blocked=()),
     )
 
@@ -379,6 +382,7 @@ async def test_ask_respects_disabled_mcp_server_ids():
         available_mcp_servers=[server_a, server_b],
         prompt_enforced=False,
         enforced_prompt_text=None,
+        reasoning_policy_configured=False,
         governance_skill_resolution=SkillRuntimeResolution(eligible=(), blocked=()),
     )
 
@@ -1026,6 +1030,7 @@ async def test_personal_default_rejects_invalid_direct_bindings_before_history()
         available_mcp_servers=[],
         prompt_enforced=False,
         enforced_prompt_text=None,
+        reasoning_policy_configured=False,
         governance_skill_resolution=SkillRuntimeResolution(eligible=(), blocked=()),
     )
     service, assistant, session_service = _runtime_service(
@@ -1089,6 +1094,7 @@ async def test_governance_skill_composes_after_enforced_prompt():
         available_mcp_servers=[],
         prompt_enforced=True,
         enforced_prompt_text="Enforced tenant base",
+        reasoning_policy_configured=False,
         governance_skill_resolution=SkillRuntimeResolution(
             eligible=(binding,),
             blocked=(blocked,),
@@ -1131,6 +1137,7 @@ async def test_governance_prompt_rechecks_persistent_baseline_on_plain_turn():
         available_mcp_servers=[],
         prompt_enforced=True,
         enforced_prompt_text="Enforced tenant base",
+        reasoning_policy_configured=False,
         governance_skill_resolution=SkillRuntimeResolution(eligible=(), blocked=()),
     )
     service, assistant, _ = _runtime_service(
