@@ -45,9 +45,10 @@ from ai_builder_receipt import (  # noqa: E402
     ReceiptError,
     ReplacementDescriptor,
     acquisition_validity_checks,
-    load_release_receipt,
+    load_recoverable_release_receipt,
     observation_from_row,
     observation_identity_failure_count,
+    observation_is_replacement_eligible,
 )
 from ai_builder_receipt import canonical_sha256 as _canonical_sha256  # noqa: E402
 from ai_builder_receipt import (  # noqa: E402
@@ -505,13 +506,13 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--replacement-suite-dir",
         default=None,
-        help="Release suite whose provider-marked slots will be re-measured.",
+        help="Release suite whose eligible failed slots will be re-measured.",
     )
     parser.add_argument(
         "--replacement-slot",
         action="append",
         default=None,
-        help="Provider-marked slot as CASE_ID:REPETITION. Repeat for a batch.",
+        help="Eligible failed slot as CASE_ID:REPETITION. Repeat for a batch.",
     )
     parser.add_argument(
         "--replacement-reason",
@@ -1617,6 +1618,20 @@ def _suite_evaluator_identity(
     return {**payload, "sha256": _canonical_sha256(payload)}
 
 
+def _failure_execution_provenance(
+    release_identity: Mapping[str, object],
+) -> JsonObject:
+    """Seal verified run identity without claiming a provider observation."""
+
+    provenance: JsonObject = {"mode": "live_execution_failure"}
+    for component in ("source", "build", "model"):
+        value = release_identity.get(component)
+        if not isinstance(value, Mapping):
+            raise ValueError(f"release identity has no {component} component.")
+        provenance[component] = dict(cast(Mapping[str, object], value))
+    return provenance
+
+
 def _acquire_suite_observation(
     *,
     repetition: int,
@@ -1631,6 +1646,7 @@ def _acquire_suite_observation(
     provisioned_fixtures: Mapping[str, JsonObject],
     acquisition_contract: AcquisitionContract,
     release_identity: Mapping[str, object],
+    failure_execution_provenance: Mapping[str, object],
 ) -> JsonObject:
     """Acquire, seal and reference one observation for every suite-shaped run."""
 
@@ -1697,6 +1713,7 @@ def _acquire_suite_observation(
             "repetition": repetition,
             **_failure_error_fields(error),
             "release_identity": dict(release_identity),
+            "live_execution_provenance": dict(failure_execution_provenance),
         }
         failure_path = _write_bundle(
             artifact_output_dir,
@@ -1747,6 +1764,7 @@ def _run_suite(
         require_clean_source=acquisition_contract.require_clean_source,
         config=config if is_release_run else None,
     )
+    failure_execution_provenance = _failure_execution_provenance(release_identity)
     provisioned_fixtures = _provision_fixtures(config=config, cases=cases)
     expected_observations = _expected_observations(cases, args.repetitions)
     run_context = _suite_run_context(args)
@@ -1808,6 +1826,7 @@ def _run_suite(
             provisioned_fixtures=provisioned_fixtures,
             acquisition_contract=acquisition_contract,
             release_identity=release_identity,
+            failure_execution_provenance=failure_execution_provenance,
         )
 
     print(f"\nrunning {total_runs} observation(s) with concurrency {max_concurrency}")
@@ -2026,7 +2045,7 @@ def _run_replacement_batch(
     api_key: str,
     output_dir: Path,
 ) -> int:
-    """Re-measure exactly the provider-marked slots an operator names."""
+    """Re-measure exactly the eligible failed slots an operator names."""
 
     suite_dir = Path(args.replacement_suite_dir)
     replacements_path = suite_dir / REPLACEMENTS_FILE
@@ -2040,7 +2059,7 @@ def _run_replacement_batch(
     if not isinstance(reason, str) or not reason.strip():
         raise ValueError("--replacement-reason is required in replacement mode.")
 
-    receipt = load_release_receipt(suite_dir)
+    receipt = load_recoverable_release_receipt(suite_dir)
     if len(slots) > replacement_limit(len(receipt.observations)):
         raise ValueError(
             f"replacement batch has {len(slots)} slots; this receipt allows "
@@ -2109,9 +2128,10 @@ def _run_replacement_batch(
             raise ValueError(
                 f"base receipt has no {case_id!r} repetition {repetition}."
             )
-        if not original.provider_dispositions:
+        if not observation_is_replacement_eligible(original):
             raise ValueError(
-                f"{case_id!r} repetition {repetition} has no provider disposition."
+                f"{case_id!r} repetition {repetition} is not an execution failure "
+                "and has no provider disposition, so it may not be re-measured."
             )
         case = cases_by_id.get(case_id)
         if case is None:
@@ -2138,6 +2158,7 @@ def _run_replacement_batch(
         raise ValueError(
             "current source, target or model differs from the base receipt."
         )
+    failure_execution_provenance = _failure_execution_provenance(release_identity)
 
     requested_cases = [case for _, _, case in requested]
     provisioned_fixtures = _provision_fixtures(config=config, cases=requested_cases)
@@ -2167,6 +2188,7 @@ def _run_replacement_batch(
             provisioned_fixtures=provisioned_fixtures,
             acquisition_contract=acquisition_contract,
             release_identity=release_identity,
+            failure_execution_provenance=failure_execution_provenance,
         )
 
     if max_concurrency == 1:
@@ -2180,8 +2202,8 @@ def _run_replacement_batch(
         for index, result in enumerate(results)
     ]
     if any(
-        observation.observation_status in {"execution_failure", "invalid_evidence"}
-        or observation.provider_dispositions
+        observation.observation_status == "invalid_evidence"
+        or observation_is_replacement_eligible(observation)
         for observation in replacement_observations
     ):
         raise ValueError(

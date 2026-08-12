@@ -154,9 +154,17 @@ class Observation:
         return (self.case_id, self.repetition)
 
 
+def observation_is_replacement_eligible(observation: Observation) -> bool:
+    """Whether an operator may re-measure this exact failed observation."""
+
+    return bool(observation.provider_dispositions) or (
+        observation.observation_status == "execution_failure"
+    )
+
+
 @dataclass(frozen=True, slots=True)
 class ReplacementDescriptor:
-    """One operator-directed substitution of a provider-faulted slot."""
+    """One operator-directed substitution of an eligible failed slot."""
 
     case_id: str
     repetition: int
@@ -369,8 +377,8 @@ def load_summary_receipt(path: Path) -> Receipt:
     return receipt_from_summary(_read_json(path), where=str(path))
 
 
-def load_release_receipt(suite_dir: Path) -> Receipt:
-    """Read a suite directory and re-derive its integrity from the artifacts.
+def _load_integrity_verified_base_receipt(suite_dir: Path) -> Receipt:
+    """Read and verify the immutable base receipt before any overlay.
 
     The summary carries a `receipt_integrity` block, but the writer computed it
     about itself. A release verdict is the one place that must not take the
@@ -434,12 +442,34 @@ def load_release_receipt(suite_dir: Path) -> Receipt:
                 key="release_identity",
             ),
         )
-    _require_release_identity(
+    _require_base_release_receipt(
         receipt,
         manifest=cast(Mapping[str, Any], manifest),
         where=str(manifest_path),
     )
-    return _apply_replacements(receipt, suite_dir=suite_dir)
+    return receipt
+
+
+def load_recoverable_release_receipt(suite_dir: Path) -> Receipt:
+    """Load an identity-valid base receipt eligible for bounded recovery.
+
+    This does not apply or excuse a replacement. It verifies the immutable base
+    evidence and permits only execution failures as recoverable acquisition
+    faults; identity failures and invalid evidence remain terminal.
+    """
+
+    receipt = _load_integrity_verified_base_receipt(suite_dir)
+    _require_recoverable_release_receipt(receipt, where=str(suite_dir))
+    return receipt
+
+
+def load_release_receipt(suite_dir: Path) -> Receipt:
+    """Load an authoritative receipt whose effective acquisition is valid."""
+
+    base_receipt = _load_integrity_verified_base_receipt(suite_dir)
+    receipt = _apply_replacements(base_receipt, suite_dir=suite_dir)
+    _require_effective_release_receipt(receipt, where=str(suite_dir))
+    return receipt
 
 
 def replacement_descriptors_from_payload(
@@ -553,10 +583,10 @@ def _apply_replacements(receipt: Receipt, *, suite_dir: Path) -> Receipt:
         original = base_by_slot.get(descriptor.slot)
         if original is None:
             raise ReceiptError(f"{where}: no original observation occupies this slot.")
-        if not original.provider_dispositions:
+        if not observation_is_replacement_eligible(original):
             raise ReceiptError(
-                f"{where}: the original observation has no provider disposition "
-                "and may not be re-measured."
+                f"{where}: the original observation is not an execution failure "
+                "and has no provider disposition, so it may not be re-measured."
             )
         if original.bundle_sha256 != descriptor.original_bundle_sha256:
             raise ReceiptError(
@@ -651,7 +681,7 @@ def release_identity_recheck_checks(
     return checks
 
 
-def _require_release_identity(
+def _require_base_release_receipt(
     receipt: Receipt, *, manifest: Mapping[str, Any], where: str
 ) -> None:
     """A release receipt is a specific artifact, not any receipt in a folder.
@@ -801,8 +831,6 @@ def _require_release_identity(
             f"{where}: sentinel_verdict is {reported_sentinel!r}, but the sealed "
             f"acquisition evidence requires {expected_sentinel!r}."
         )
-    if expected_sentinel != "pass":
-        raise ReceiptError(f"{where}: the run failed its acquisition verdict.")
     build = _mapping(identity.get("build"), where=where, key="build")
     model = _mapping(identity.get("model"), where=where, key="model")
     # Equality between two files written by one run proves only that the run
@@ -827,6 +855,74 @@ def _require_release_identity(
                 f"{path.name} hashes to {actual}. The receipt was produced by a "
                 "different instrument or corpus than the one judging it."
             )
+
+
+def _nonrecoverable_acquisition_failures(receipt: Receipt) -> list[str]:
+    identity = _mapping(
+        receipt.summary.get("release_identity"),
+        where="release receipt",
+        key="release_identity",
+    )
+    identity_recheck = _mapping(
+        receipt.summary.get("release_identity_recheck"),
+        where="release receipt",
+        key="release_identity_recheck",
+    )
+    suite_identity_failures = sum(
+        check["passed"] is not True
+        for check in release_identity_recheck_checks(
+            expected=identity,
+            actual=identity_recheck,
+            require_verified_target=True,
+        )
+    )
+    invalid_evidence_count = sum(
+        observation.observation_status == "invalid_evidence"
+        for observation in receipt.observations
+    )
+    observation_identity_failures = sum(
+        observation_identity_failure_count(
+            observation,
+            where=f"release receipt observation {observation.slot}",
+        )
+        for observation in receipt.observations
+    )
+    failures: list[str] = []
+    if suite_identity_failures:
+        failures.append(f"{suite_identity_failures} suite identity failure(s)")
+    if invalid_evidence_count:
+        failures.append(f"{invalid_evidence_count} invalid-evidence observation(s)")
+    if observation_identity_failures:
+        failures.append(
+            f"{observation_identity_failures} observation identity failure(s)"
+        )
+    return failures
+
+
+def _require_recoverable_release_receipt(receipt: Receipt, *, where: str) -> None:
+    failures = _nonrecoverable_acquisition_failures(receipt)
+    if failures:
+        raise ReceiptError(
+            f"{where}: the base receipt is not eligible for recovery: "
+            + ", ".join(failures)
+            + "."
+        )
+
+
+def _require_effective_release_receipt(receipt: Receipt, *, where: str) -> None:
+    failures = _nonrecoverable_acquisition_failures(receipt)
+    execution_failure_count = sum(
+        observation.observation_status == "execution_failure"
+        for observation in receipt.observations
+    )
+    if execution_failure_count:
+        failures.append(f"{execution_failure_count} execution-failure observation(s)")
+    if failures:
+        raise ReceiptError(
+            f"{where}: the effective receipt failed its acquisition verdict: "
+            + ", ".join(failures)
+            + "."
+        )
 
 
 def observation_identity_failure_count(observation: Observation, *, where: str) -> int:

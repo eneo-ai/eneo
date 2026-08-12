@@ -2153,7 +2153,15 @@ def test_release_run_fails_on_benchmark_execution_failure(
         harness,
         case_id=case.case_id,
         prompt=case.prompt,
+        harness_sha256=hashlib.sha256(Path(harness.__file__).read_bytes()).hexdigest(),
+        cases_sha256=hashlib.sha256(
+            harness.DEFAULT_CASES_FILE.read_bytes()
+        ).hexdigest(),
     )
+    release_identity["target"] = {
+        "expected_source_revision": "a" * 40,
+        "verified": True,
+    }
     monkeypatch.setattr(
         harness,
         "_release_run_identity",
@@ -2163,10 +2171,17 @@ def test_release_run_fails_on_benchmark_execution_failure(
     def execute_case(**kwargs: object) -> dict[str, object]:
         selected_case = kwargs["case"]
         assert isinstance(selected_case, harness.BattleCase)
-        bundle = _complete_live_case_bundle(harness, selected_case)
         if not selected_case.required:
-            bundle["artifact_mode"] = "live_execution_failure"
-            bundle["error"] = "HTTP 500 from POST /sessions"
+            raise ValueError("HTTP 404 from POST /sessions")
+        bundle = _complete_live_case_bundle(harness, selected_case)
+        build = release_identity["build"]
+        assert isinstance(build, dict)
+        bundle["live_execution_provenance"] = _live_provenance_fixture(
+            harness,
+            prompt=selected_case.prompt,
+            harness_sha256=str(build["harness_sha256"]),
+            cases_sha256=str(build["cases_sha256"]),
+        )
         return bundle
 
     monkeypatch.setattr(harness, "_run_case", execute_case)
@@ -2198,6 +2213,23 @@ def test_release_run_fails_on_benchmark_execution_failure(
         if check["name"] == "execution_failure_observations"
     )
     assert failed_check["passed"] is False
+    receipt = harness.load_recoverable_release_receipt(suite_dir)
+    assert receipt.observations[1].observation_status == "execution_failure"
+    failure_bundle = json.loads(
+        (suite_dir / receipt.observations[1].bundle_file).read_text()
+    )
+    assert set(failure_bundle["live_execution_provenance"]) == {
+        "mode",
+        "source",
+        "build",
+        "model",
+    }
+    assert failure_bundle["live_execution_provenance"] == {
+        "mode": "live_execution_failure",
+        "source": release_identity["source"],
+        "build": release_identity["build"],
+        "model": release_identity["model"],
+    }
 
 
 def test_release_run_passes_when_a_required_case_dies_in_the_product(
@@ -2334,6 +2366,56 @@ def test_release_run_requires_explicit_model_before_execution(
         )["passed"]
         is False
     )
+
+
+def test_release_run_validates_failure_identity_before_acquisition(
+    tmp_path: Path,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    harness = _battle_harness()
+    case = harness.BattleCase(
+        case_id="required-identity",
+        prompt="Build it.",
+        required=True,
+    )
+    release_identity = _release_identity_fixture(
+        harness,
+        case_id=case.case_id,
+        prompt=case.prompt,
+    )
+    release_identity.pop("model")
+    acquired = False
+
+    monkeypatch.setattr(harness, "_release_run_identity", lambda **_: release_identity)
+
+    def run_case(**_: object) -> dict[str, object]:
+        nonlocal acquired
+        acquired = True
+        return {}
+
+    monkeypatch.setattr(harness, "_run_case", run_case)
+
+    with raises(ValueError, match="release identity has no model component"):
+        harness._run_suite(
+            cases=[case],
+            config=harness.ApiConfig(
+                base_url="http://localhost:8123/api/v1",
+                api_key="test-key",
+                timeout_seconds=1,
+            ),
+            args=SimpleNamespace(
+                repetitions=1,
+                space_id="space-1",
+                model_id="model-1",
+            ),
+            output_dir=tmp_path,
+            acquisition_contract=harness.AcquisitionContract(
+                required_case_ids=(case.case_id,),
+            ),
+        )
+
+    assert acquired is False
+    assert list(tmp_path.iterdir()) == []
 
 
 def test_release_receipt_version_defaults_to_v5_and_rejects_other_versions(
@@ -2806,7 +2888,7 @@ def test_final_identity_probe_failure_still_writes_failed_summary(
 
 @mark.parametrize(
     "scenario",
-    ["success", "confirmation-drift", "target-collision"],
+    ["success", "confirmation-drift", "target-collision", "completed-clean"],
 )
 def test_replacement_batch_reuses_context_and_preflights_publication(
     scenario: str,
@@ -2824,6 +2906,7 @@ def test_replacement_batch_reuses_context_and_preflights_publication(
             attachments=("01_protokoll_bun_2026_02_25.pdf",),
         ),
         harness.BattleCase(case_id="provider-b", prompt="Build B."),
+        harness.BattleCase(case_id="completed-clean", prompt="Build clean."),
     ]
     release_identity = _release_identity_fixture(
         harness, case_id=cases[0].case_id, prompt=cases[0].prompt
@@ -2835,20 +2918,33 @@ def test_replacement_batch_reuses_context_and_preflights_publication(
     provider_slots = {
         ("provider-a", 4): SimpleNamespace(
             slot=("provider-a", 4),
+            observation_status="error_terminated",
             provider_dispositions=("provider_outcome_unknown",),
             bundle_sha256="1" * 64,
             case_contract_sha256=harness._case_contract_sha256(cases[0]),
         ),
         ("provider-b", 2): SimpleNamespace(
             slot=("provider-b", 2),
-            provider_dispositions=("provider_outcome_unknown",),
+            observation_status="execution_failure",
+            provider_dispositions=(),
             bundle_sha256="2" * 64,
             case_contract_sha256=harness._case_contract_sha256(cases[1]),
         ),
+        ("completed-clean", 1): SimpleNamespace(
+            slot=("completed-clean", 1),
+            observation_status="completed",
+            provider_dispositions=(),
+            bundle_sha256="3" * 64,
+            case_contract_sha256=harness._case_contract_sha256(cases[2]),
+        ),
     }
     observations = tuple(provider_slots.values()) + tuple(
-        SimpleNamespace(slot=(f"clean-{index}", 1), provider_dispositions=())
-        for index in range(38)
+        SimpleNamespace(
+            slot=(f"clean-{index}", 1),
+            observation_status="completed",
+            provider_dispositions=(),
+        )
+        for index in range(37)
     )
     receipt = SimpleNamespace(
         observations=observations,
@@ -2869,7 +2965,7 @@ def test_replacement_batch_reuses_context_and_preflights_publication(
             },
         },
     )
-    monkeypatch.setattr(harness, "load_release_receipt", lambda _: receipt)
+    monkeypatch.setattr(harness, "load_recoverable_release_receipt", lambda _: receipt)
     monkeypatch.setattr(harness, "_read_cases_file", lambda _: cases)
     monkeypatch.setattr(harness, "_release_run_identity", lambda **_: release_identity)
     monkeypatch.setattr(
@@ -2951,8 +3047,12 @@ def test_replacement_batch_reuses_context_and_preflights_publication(
     monkeypatch.setattr(harness, "ThreadPoolExecutor", ImmediateExecutor)
     args = SimpleNamespace(
         replacement_suite_dir=str(suite_dir),
-        replacement_slot=["provider-a:4", "provider-b:2"],
-        replacement_reason="provider disposition in original receipt",
+        replacement_slot=(
+            ["completed-clean:1"]
+            if scenario == "completed-clean"
+            else ["provider-a:4", "provider-b:2"]
+        ),
+        replacement_reason="failed observation in original receipt",
         output_dir=str(output_dir),
         cases_file=None,
         confirm_message=(
@@ -2970,7 +3070,11 @@ def test_replacement_batch_reuses_context_and_preflights_publication(
         match = (
             "confirm-message does not match"
             if scenario == "confirmation-drift"
-            else "target already exists"
+            else (
+                "may not be re-measured"
+                if scenario == "completed-clean"
+                else "target already exists"
+            )
         )
         with raises(ValueError, match=match):
             harness._run_replacement_batch(
@@ -2981,7 +3085,7 @@ def test_replacement_batch_reuses_context_and_preflights_publication(
 
         assert not (suite_dir / "replacements.json").exists()
         assert not (suite_dir / "replacement-provider-a-r4.json").exists()
-        if scenario == "confirmation-drift":
+        if scenario in {"confirmation-drift", "completed-clean"}:
             assert provisioned_cases == []
             assert acquired == []
         else:

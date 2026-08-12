@@ -484,19 +484,42 @@ def test_a_provider_marked_receipt_is_not_scored(
     assert any("provider disposition" in reason for reason in verdict.invalidity)
 
 
-def test_a_valid_provider_slot_replacement_is_merged_and_counted(
-    gate: ModuleType, receipts: ModuleType, tmp_path: Path
+@pytest.mark.parametrize("failure_kind", ["provider", "execution"])
+def test_an_eligible_slot_replacement_is_merged_and_counted(
+    failure_kind: str,
+    gate: ModuleType,
+    receipts: ModuleType,
+    tmp_path: Path,
 ) -> None:
     rows = _perfect_rows(4)
-    rows[0] = _observation(
-        "case_0",
-        1,
-        outcome="provider_outcome_unknown",
-        verdict="not_evaluated",
-        provider_disposition="provider_outcome_unknown",
-        status="error_terminated",
-    )
+    if failure_kind == "provider":
+        rows[0] = _observation(
+            "case_0",
+            1,
+            outcome="provider_outcome_unknown",
+            verdict="not_evaluated",
+            provider_disposition="provider_outcome_unknown",
+            status="error_terminated",
+        )
+    else:
+        rows[0] = _observation(
+            "case_0",
+            1,
+            outcome="execution_failure",
+            verdict="not_evaluated",
+            status="execution_failure",
+        )
+        rows[0]["artifact_mode"] = "live_execution_failure"
     suite_dir = _suite_dir(tmp_path, rows)
+
+    if failure_kind == "execution":
+        with pytest.raises(receipts.ReceiptError, match="failed its acquisition"):
+            receipts.load_release_receipt(suite_dir)
+        recoverable = receipts.load_recoverable_release_receipt(suite_dir)
+        assert recoverable.observations[0].observation_status == "execution_failure"
+        assert recoverable.summary["execution_failure_observation_count"] == 1
+        assert recoverable.summary["sentinel_verdict"] == "fail"
+
     replacement = _observation("case_0", 1)
     _write_replacements(suite_dir, [(replacement, {})])
 
@@ -508,6 +531,9 @@ def test_a_valid_provider_slot_replacement_is_merged_and_counted(
     assert verdict.receipt_valid
     assert verdict.diagnostics["replacement_count"] == 1
     assert verdict.diagnostics["replacement_limit"] == 1
+    if failure_kind == "execution":
+        assert receipt.summary["execution_failure_observation_count"] == 1
+        assert receipt.summary["sentinel_verdict"] == "fail"
 
 
 def test_a_replacement_from_another_revision_is_refused(
@@ -598,7 +624,7 @@ def test_a_product_failure_cannot_be_rerolled_as_a_replacement(
     suite_dir = _suite_dir(tmp_path, rows)
     _write_replacements(suite_dir, [(_observation("case_0", 1), {})])
 
-    with pytest.raises(receipts.ReceiptError, match="provider disposition"):
+    with pytest.raises(receipts.ReceiptError, match="may not be re-measured"):
         receipts.load_release_receipt(suite_dir)
 
 
@@ -631,8 +657,8 @@ def test_a_replacement_with_a_sealed_identity_failure_is_refused(
         receipts.load_release_receipt(suite_dir)
 
 
-def test_a_replacement_acquisition_fault_is_not_scored(
-    gate: ModuleType, receipts: ModuleType, tmp_path: Path
+def test_a_replacement_acquisition_fault_is_not_release_ready(
+    receipts: ModuleType, tmp_path: Path
 ) -> None:
     rows = _perfect_rows(4)
     rows[0] = _observation(
@@ -649,12 +675,8 @@ def test_a_replacement_acquisition_fault_is_not_scored(
         [(_observation("case_0", 1, status="execution_failure"), {})],
     )
 
-    receipt = receipts.load_release_receipt(suite_dir)
-    verdict = gate.evaluate(receipt, _matrix(gate), _pin(gate))
-
-    assert verdict.release == "invalid"
-    assert verdict.rows == ()
-    assert any("acquisition fault" in reason for reason in verdict.invalidity)
+    with pytest.raises(receipts.ReceiptError, match="failed its acquisition"):
+        receipts.load_release_receipt(suite_dir)
 
 
 def test_a_replacement_must_seal_the_original_repetition(
@@ -978,6 +1000,23 @@ def test_relabelling_invalid_evidence_as_a_pass_is_refused(
         receipts.load_release_receipt(suite_dir)
 
 
+def test_invalid_evidence_is_not_recoverable(
+    receipts: ModuleType, tmp_path: Path
+) -> None:
+    rows = _perfect_rows(4)
+    rows[0] = _observation(
+        "case_0",
+        1,
+        outcome="invalid_evidence",
+        verdict="not_evaluated",
+        status="invalid_evidence",
+    )
+    suite_dir = _suite_dir(tmp_path, rows)
+
+    with pytest.raises(receipts.ReceiptError, match="invalid-evidence"):
+        receipts.load_recoverable_release_receipt(suite_dir)
+
+
 def test_a_bundle_that_forged_its_own_identity_is_refused(
     receipts: ModuleType, tmp_path: Path
 ) -> None:
@@ -1088,8 +1127,12 @@ def test_a_final_identity_probe_error_is_a_failed_acquisition(
     summary["sentinel_verdict"] = "fail"
     summary_path.write_text(json.dumps(summary), encoding="utf-8")
 
-    with pytest.raises(receipts.ReceiptError, match="failed its acquisition verdict"):
-        receipts.load_release_receipt(suite_dir)
+    for loader in (
+        receipts.load_release_receipt,
+        receipts.load_recoverable_release_receipt,
+    ):
+        with pytest.raises(receipts.ReceiptError, match="suite identity failure"):
+            loader(suite_dir)
 
 
 def test_a_sealed_observation_identity_failure_cannot_be_hidden_by_summary_counts(
@@ -1117,6 +1160,25 @@ def test_a_sealed_observation_identity_failure_cannot_be_hidden_by_summary_count
         receipts.ReceiptError, match="observation_identity_failed_check_count"
     ):
         receipts.load_release_receipt(suite_dir)
+
+
+def test_a_truthful_observation_identity_failure_is_not_recoverable(
+    receipts: ModuleType, tmp_path: Path
+) -> None:
+    rows = _perfect_rows(4)
+    rows[0]["identity_failed_check_count"] = 1
+    rows[0]["identity_failed_checks"] = [
+        {
+            "name": "suite_requested_model_identity",
+            "passed": False,
+            "actual": "other-model",
+            "expected": "model-under-test",
+        }
+    ]
+    suite_dir = _suite_dir(tmp_path, rows)
+
+    with pytest.raises(receipts.ReceiptError, match="observation identity failure"):
+        receipts.load_recoverable_release_receipt(suite_dir)
 
 
 def test_an_unreadable_bundle_is_a_refusal_not_a_crash(
