@@ -892,7 +892,7 @@ def test_cases_file_rejects_misspelled_classifier_expectation(tmp_path: Path) ->
     cases_path.write_text(
         json.dumps(
             {
-                "version": 7,
+                "version": 8,
                 "cases": [
                     {
                         "id": "bad-classifier-expectation",
@@ -923,7 +923,7 @@ def test_cases_file_rejects_unsupported_version(tmp_path: Path) -> None:
         encoding="utf-8",
     )
 
-    with raises(ValueError, match="version must be 7"):
+    with raises(ValueError, match="version must be 8"):
         _battle_harness()._read_cases_file(cases_path)
 
 
@@ -935,7 +935,7 @@ def test_cases_file_rejects_duplicate_case_ids_and_prompts(tmp_path: Path) -> No
     ]
     cases_path = tmp_path / "cases.json"
     cases_path.write_text(
-        json.dumps({"version": 7, "cases": duplicate_cases}), encoding="utf-8"
+        json.dumps({"version": 8, "cases": duplicate_cases}), encoding="utf-8"
     )
 
     with raises(ValueError, match="duplicate prompt"):
@@ -943,7 +943,7 @@ def test_cases_file_rejects_duplicate_case_ids_and_prompts(tmp_path: Path) -> No
 
     duplicate_cases[1] = {"id": "case-a", "prompt": "Build another report."}
     cases_path.write_text(
-        json.dumps({"version": 7, "cases": duplicate_cases}), encoding="utf-8"
+        json.dumps({"version": 8, "cases": duplicate_cases}), encoding="utf-8"
     )
 
     with raises(ValueError, match="duplicate case id"):
@@ -955,7 +955,7 @@ def test_cases_file_rejects_misspelled_evidence_posture_key(tmp_path: Path) -> N
     cases_path.write_text(
         json.dumps(
             {
-                "version": 7,
+                "version": 8,
                 "cases": [
                     {
                         "id": "bad-posture-key",
@@ -2352,7 +2352,7 @@ def test_release_receipt_version_defaults_to_v5_and_rejects_other_versions(
     cases_path.write_text(
         json.dumps(
             {
-                "version": 7,
+                "version": 8,
                 "acquisition_contract": {
                     "artifact_schema_version": "ai-builder-live-release.unsupported",
                     "require_clean_source": False,
@@ -4890,7 +4890,7 @@ def test_release_expectation_typos_fail_closed(tmp_path: Path) -> None:
     cases_path.write_text(
         json.dumps(
             {
-                "version": 7,
+                "version": 8,
                 "cases": [
                     {
                         "id": "typo",
@@ -5543,7 +5543,7 @@ def test_case_loader_merges_synthetic_user_profile_with_case_overrides(
     cases_path.write_text(
         json.dumps(
             {
-                "version": 7,
+                "version": 8,
                 "synthetic_user_profiles": {
                     "document_report_owner": {
                         "description": "Owner building a report from documents.",
@@ -5612,7 +5612,7 @@ def test_case_loader_requires_answers_for_plan_required_question_paths(
     harness = _battle_harness()
     cases_path = tmp_path / "cases.json"
     payload = {
-        "version": 7,
+        "version": 8,
         "synthetic_user_profiles": {
             "document_owner": {
                 "description": "Owner who uploads source documents.",
@@ -5643,6 +5643,154 @@ def test_case_loader_requires_answers_for_plan_required_question_paths(
 
     case = harness._read_cases_file(cases_path)[0]
     assert case.case_id == "plan-required"
+
+
+def test_case_loader_accepts_typed_runtime_input_field_answers(tmp_path: Path) -> None:
+    harness = _battle_harness()
+    cases_path = tmp_path / "cases.json"
+    cases_path.write_text(
+        json.dumps(
+            {
+                "version": harness.SUPPORTED_CASES_FILE_VERSION,
+                "cases": [
+                    {
+                        "id": "runtime-fields",
+                        "prompt": (
+                            "At run time, the user enters a case id that should "
+                            "shape the result."
+                        ),
+                        "question_answer_overrides": {
+                            "runtime_metadata_field_details": {
+                                "input_fields": [
+                                    {
+                                        "value": {
+                                            "name": "case_id",
+                                            "label": "Case id",
+                                            "type": "text",
+                                            "required": True,
+                                            "options": [],
+                                        },
+                                        "purpose": "shape_result",
+                                    }
+                                ]
+                            }
+                        },
+                        "expected": {
+                            "preferred_question_event_ids": [
+                                "runtime_metadata_field_details"
+                            ]
+                        },
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    case = harness._read_cases_file(cases_path)[0]
+
+    assert case.configured_question_answers == {
+        "runtime_metadata_field_details": {
+            "input_fields": [
+                {
+                    "value": {
+                        "name": "case_id",
+                        "label": "Case id",
+                        "type": "text",
+                        "required": True,
+                        "options": [],
+                    },
+                    "purpose": "shape_result",
+                }
+            ]
+        }
+    }
+
+
+def test_case_loader_rejects_duplicate_json_keys(tmp_path: Path) -> None:
+    harness = _battle_harness()
+    cases_path = tmp_path / "cases.json"
+    cases_path.write_text(
+        """{
+          "version": 8,
+          "cases": [{
+            "id": "duplicate-answer",
+            "prompt": "Build a flow with one runtime field.",
+            "question_answer_overrides": {
+              "runtime_metadata_fields": {"selected_option_id": "no_extra_metadata"},
+              "runtime_metadata_fields": {"selected_option_id": "basic_runtime_metadata"}
+            }
+          }]
+        }""",
+        encoding="utf-8",
+    )
+
+    with raises(ValueError, match="Duplicate JSON key: runtime_metadata_fields"):
+        harness._read_cases_file(cases_path)
+
+
+@mark.parametrize(
+    ("question_id", "input_fields", "error"),
+    [
+        (
+            "runtime_metadata_field_details",
+            [
+                {
+                    "value": {"name": "case_id", "label": "Case id"},
+                    "purpose": "interpret_input",
+                },
+                {
+                    "value": {"name": "CASE_ID", "label": "Case identifier"},
+                    "purpose": "shape_result",
+                },
+            ],
+            "unique field names",
+        ),
+        (
+            "runtime_metadata_field_details",
+            [{"value": {"name": "case_id", "label": "Case id"}}],
+            "purpose",
+        ),
+        (
+            "primary_runtime_input",
+            [
+                {
+                    "value": {"name": "case_id", "label": "Case id"},
+                    "purpose": "interpret_input",
+                }
+            ],
+            "only valid for runtime metadata field details",
+        ),
+    ],
+)
+def test_case_loader_rejects_invalid_runtime_input_field_answers(
+    tmp_path: Path,
+    question_id: str,
+    input_fields: list[dict[str, object]],
+    error: str,
+) -> None:
+    harness = _battle_harness()
+    cases_path = tmp_path / "cases.json"
+    cases_path.write_text(
+        json.dumps(
+            {
+                "version": harness.SUPPORTED_CASES_FILE_VERSION,
+                "cases": [
+                    {
+                        "id": "invalid-runtime-fields",
+                        "prompt": "Build a flow with run-time fields.",
+                        "question_answer_overrides": {
+                            question_id: {"input_fields": input_fields}
+                        },
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with raises(ValueError, match=error):
+        harness._read_cases_file(cases_path)
 
 
 def test_configured_answer_uses_exact_option_id_and_never_falls_back() -> None:
@@ -5683,6 +5831,94 @@ def test_configured_answer_uses_exact_option_id_and_never_falls_back() -> None:
             },
             answer_sources={"primary_runtime_input": "case_override"},
         )
+
+
+def test_configured_runtime_input_fields_require_collection_question() -> None:
+    harness = _battle_harness()
+    answer_config = {
+        "runtime_metadata_field_details": {
+            "input_fields": [
+                {
+                    "value": {
+                        "name": "case_id",
+                        "label": "Case id",
+                        "type": "text",
+                        "required": True,
+                        "options": [],
+                    },
+                    "purpose": "shape_result",
+                }
+            ]
+        }
+    }
+    question = {
+        "question_id": "runtime_metadata_field_details",
+        "allow_custom": False,
+        "input_field_collection": True,
+        "options": [],
+    }
+
+    answer = harness._configured_question_answer(
+        question=question,
+        configured_answers=answer_config,
+        answer_sources={"runtime_metadata_field_details": "case_override"},
+    )
+
+    assert answer == {
+        "message": "Case id (case_id)",
+        "answer_source": "case_override",
+        "question_answer": {
+            "kind": "structured_question_answer",
+            "question_id": "runtime_metadata_field_details",
+            "input_fields": [
+                {
+                    "value": {
+                        "name": "case_id",
+                        "label": "Case id",
+                        "type": "text",
+                        "required": True,
+                        "options": [],
+                    },
+                    "purpose": "shape_result",
+                }
+            ],
+        },
+    }
+    with raises(ValueError, match="input-field collection"):
+        harness._configured_question_answer(
+            question={**question, "input_field_collection": False},
+            configured_answers=answer_config,
+            answer_sources={"runtime_metadata_field_details": "case_override"},
+        )
+
+
+def test_plan_required_form_field_cases_have_complete_synthetic_answers() -> None:
+    harness = _battle_harness()
+
+    cases = harness._read_cases_file(harness.DEFAULT_CASES_FILE)
+    field_cases = [
+        case
+        for case in cases
+        if case.expected and case.expected.get("expected_form_field_groups")
+    ]
+
+    assert field_cases
+    for case in field_cases:
+        configured_answers = case.configured_question_answers or {}
+        assert configured_answers.get("runtime_metadata_fields") == {
+            "selected_option_id": "basic_runtime_metadata"
+        }, case.case_id
+        answer_config = configured_answers.get("runtime_metadata_field_details")
+        assert isinstance(answer_config, dict), case.case_id
+        answer = harness.StructuredQuestionAnswerMetadata.model_validate(
+            {
+                "question_id": "runtime_metadata_field_details",
+                "input_fields": answer_config.get("input_fields"),
+            }
+        )
+        assert answer.input_fields, case.case_id
+        allowed_ids = set(case.expected.get("allowed_question_event_ids") or [])
+        assert "runtime_metadata_field_details" in allowed_ids, case.case_id
 
 
 def test_journey_outcome_distinguishes_intended_clarification_from_stall() -> None:
@@ -5979,7 +6215,7 @@ def test_evaluator_identity_carries_measurement_semantics_versions() -> None:
     harness = _battle_harness()
     assert harness.QUESTION_RELEVANCE_SEMANTICS_VERSION == 2
     assert harness.OBSERVATION_INPUT_IDENTITY_SEMANTICS_VERSION == 2
-    assert harness.SUPPORTED_CASES_FILE_VERSION == 7
+    assert harness.SUPPORTED_CASES_FILE_VERSION == 8
     identity = harness._suite_evaluator_identity(
         release_identity={},
         run_context={},

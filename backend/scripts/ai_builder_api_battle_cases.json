@@ -1,5 +1,5 @@
 {
-  "version": 7,
+  "version": 8,
   "description": "A Flow AI Builder benchmark for Swedish municipal work. It combines release and architecture coverage with curated cases grounded in municipal services, including Sundsvall's Open ePlatform catalogue and a plan-authoring tjänsteskrivelse family. The cases balance deliberately vague first requests, controlled single-gap interviews, scripted question-to-plan continuations, complete everyday requests, technically explicit contracts, and applied human-review journeys. Expectations measure structured questioning, topology, input ownership, output fields, delivery format, and review placement without relying on prompt-specific golden prose. Run repeated samples to distinguish model variance from product regressions.",
   "synthetic_user_profiles": {
     "audio_source": {
@@ -149,7 +149,39 @@
       "complexity": "easy",
       "domain": "municipality_service_center",
       "prompt": "Jag vill skapa ett flöde för servicecenter. Vid körning klistrar jag in ett mejl från en invånare och fyller i handläggande förvaltning och önskad svarston. Flödet ska klassificera ärendet, bedöma brådska, lista saknade uppgifter och skriva ett kort förslag på svar till invånaren.",
+      "question_answer_overrides": {
+        "runtime_metadata_fields": {
+          "selected_option_id": "basic_runtime_metadata"
+        },
+        "runtime_metadata_field_details": {
+          "input_fields": [
+            {
+              "value": {
+                "name": "handlaggande_forvaltning",
+                "label": "Handläggande förvaltning",
+                "type": "text",
+                "required": true,
+                "options": []
+              },
+              "purpose": "shape_result"
+            },
+            {
+              "value": {
+                "name": "onskad_svarston",
+                "label": "Önskad svarston",
+                "type": "text",
+                "required": true,
+                "options": []
+              },
+              "purpose": "shape_result"
+            }
+          ]
+        }
+      },
       "expected": {
+        "allowed_question_event_ids": [
+          "runtime_metadata_field_details"
+        ],
         "min_steps": 2,
         "max_steps": 5,
         "terminal_output_types": [
@@ -420,14 +452,43 @@
       "complexity": "medium",
       "domain": "municipality_permits",
       "prompt": "Jag vill bygga ett flöde för bygglovshandläggning. Vid körning laddar jag upp en ansökan och kan även fylla i vilken checklista eller regel som ska användas. Flödet ska läsa ansökan, jämföra mot checklistan, markera vilka krav som uppfylls, vilka som saknas, osäkra punkter och rekommenderad nästa åtgärd. Slutresultatet ska vara en tydlig rapport i text.",
+      "question_answer_overrides": {
+        "runtime_metadata_fields": {
+          "selected_option_id": "basic_runtime_metadata"
+        },
+        "runtime_metadata_field_details": {
+          "input_fields": [
+            {
+              "value": {
+                "name": "checklista_eller_regel",
+                "label": "Checklista eller regel",
+                "type": "text",
+                "required": false,
+                "options": []
+              },
+              "purpose": "interpret_input"
+            }
+          ]
+        }
+      },
       "expected": {
+        "allowed_question_event_ids": ["runtime_metadata_field_details"],
         "min_steps": 2,
         "max_steps": 6,
         "terminal_output_type": "text",
         "min_json_steps": 1,
         "min_source_ref_steps": 1,
+        "min_form_field_count": 1,
         "max_all_previous_steps": 1,
         "forbid_primary_material_form_fields": true,
+        "expected_form_field_groups": [
+          [
+            "checklista_eller_regel",
+            "checklista",
+            "regel",
+            "checklist_or_rule"
+          ]
+        ],
         "expected_leaf_output_field_groups": [
           [
             "krav",
@@ -464,7 +525,47 @@
       "complexity": "medium",
       "domain": "municipality_meetings",
       "prompt": "Jag vill skapa ett flöde för arbetsmöten. Vid körning laddar jag upp en ljudfil och fyller i mötesdatum, nämnd eller arbetsgrupp och ordförande. Flödet ska transkribera, ta fram beslut, åtgärder, ansvariga och öppna frågor och skapa en protokollsliknande PDF.",
+      "question_answer_overrides": {
+        "runtime_metadata_fields": {
+          "selected_option_id": "basic_runtime_metadata"
+        },
+        "runtime_metadata_field_details": {
+          "input_fields": [
+            {
+              "value": {
+                "name": "motesdatum",
+                "label": "Mötesdatum",
+                "type": "date",
+                "required": true,
+                "options": []
+              },
+              "purpose": "shape_result"
+            },
+            {
+              "value": {
+                "name": "namnd_eller_arbetsgrupp",
+                "label": "Nämnd eller arbetsgrupp",
+                "type": "text",
+                "required": true,
+                "options": []
+              },
+              "purpose": "shape_result"
+            },
+            {
+              "value": {
+                "name": "ordforande",
+                "label": "Ordförande",
+                "type": "text",
+                "required": true,
+                "options": []
+              },
+              "purpose": "shape_result"
+            }
+          ]
+        }
+      },
       "expected": {
+        "allowed_question_event_ids": ["runtime_metadata_field_details"],
         "min_steps": 3,
         "max_steps": 6,
         "terminal_output_type": "pdf",
@@ -620,6 +721,45 @@
       "complexity": "medium",
       "domain": "municipality_templates",
       "prompt": "Jag vill bygga ett flöde som fyller i kommunens beslutsbrevsmall. Vid körning laddar jag upp ärendeunderlag och fyller i handläggare, beslutsdatum och diarienummer. Flödet ska hämta rätt motivering, beslut, eventuella villkor och överklagandehänvisning från underlaget och returnera en ifylld DOCX.",
+      "question_answer_overrides": {
+        "runtime_metadata_fields": {
+          "selected_option_id": "basic_runtime_metadata"
+        },
+        "runtime_metadata_field_details": {
+          "input_fields": [
+            {
+              "value": {
+                "name": "diarienummer",
+                "label": "Diarienummer",
+                "type": "text",
+                "required": true,
+                "options": []
+              },
+              "purpose": "shape_result"
+            },
+            {
+              "value": {
+                "name": "beslutsdatum",
+                "label": "Beslutsdatum",
+                "type": "date",
+                "required": true,
+                "options": []
+              },
+              "purpose": "shape_result"
+            },
+            {
+              "value": {
+                "name": "handlaggare",
+                "label": "Handläggare",
+                "type": "text",
+                "required": true,
+                "options": []
+              },
+              "purpose": "shape_result"
+            }
+          ]
+        }
+      },
       "expected": {
         "min_steps": 2,
         "max_steps": 5,
@@ -644,6 +784,9 @@
         ],
         "forbidden_question_event_ids": [
           "docx_output_mode"
+        ],
+        "allowed_question_event_ids": [
+          "runtime_metadata_field_details"
         ],
         "max_all_previous_steps": 0,
         "forbid_input_sources": [
@@ -685,7 +828,47 @@
       "complexity": "easy",
       "domain": "municipality_preschool",
       "prompt": "Jag vill skapa ett flöde för förskolan. Vid körning klistrar pedagog in en kort incidentanteckning och fyller i förskola, avdelning och datum. Flödet ska ta fram vad som hände, berörda roller, om vårdnadshavare behöver kontaktas, föreslagen uppföljning och osäkra uppgifter som JSON.",
+      "question_answer_overrides": {
+        "runtime_metadata_fields": {
+          "selected_option_id": "basic_runtime_metadata"
+        },
+        "runtime_metadata_field_details": {
+          "input_fields": [
+            {
+              "value": {
+                "name": "forskola",
+                "label": "Förskola",
+                "type": "text",
+                "required": true,
+                "options": []
+              },
+              "purpose": "shape_result"
+            },
+            {
+              "value": {
+                "name": "avdelning",
+                "label": "Avdelning",
+                "type": "text",
+                "required": true,
+                "options": []
+              },
+              "purpose": "shape_result"
+            },
+            {
+              "value": {
+                "name": "datum",
+                "label": "Datum",
+                "type": "date",
+                "required": true,
+                "options": []
+              },
+              "purpose": "shape_result"
+            }
+          ]
+        }
+      },
       "expected": {
+        "allowed_question_event_ids": ["runtime_metadata_field_details"],
         "min_steps": 1,
         "max_steps": 4,
         "terminal_output_type": "json",
@@ -897,7 +1080,47 @@
       "complexity": "medium",
       "domain": "municipal_water_company",
       "prompt": "Jag vill skapa ett flöde för kommunens VA-bolag. Vid driftstörning klistrar jag in intern felrapport och fyller i område, beräknad klartid och kontaktväg. Flödet ska ta fram vad som hänt, berörda abonnenter, praktiska råd, risker och skriva ett tydligt meddelande till invånare.",
+      "question_answer_overrides": {
+        "runtime_metadata_fields": {
+          "selected_option_id": "basic_runtime_metadata"
+        },
+        "runtime_metadata_field_details": {
+          "input_fields": [
+            {
+              "value": {
+                "name": "omrade",
+                "label": "Område",
+                "type": "text",
+                "required": true,
+                "options": []
+              },
+              "purpose": "shape_result"
+            },
+            {
+              "value": {
+                "name": "beraknad_klartid",
+                "label": "Beräknad klartid",
+                "type": "text",
+                "required": true,
+                "options": []
+              },
+              "purpose": "shape_result"
+            },
+            {
+              "value": {
+                "name": "kontaktvag",
+                "label": "Kontaktväg",
+                "type": "text",
+                "required": true,
+                "options": []
+              },
+              "purpose": "shape_result"
+            }
+          ]
+        }
+      },
       "expected": {
+        "allowed_question_event_ids": ["runtime_metadata_field_details"],
         "min_steps": 2,
         "max_steps": 5,
         "terminal_output_types": [
@@ -1993,6 +2216,35 @@
       "complexity": "medium",
       "domain": "municipality_templates",
       "prompt": "Jag vill bygga ett flöde som fyller i den bifogade DOCX-mallen. Vid körning ska jag ladda upp underlag och fylla i mallens variabler, till exempel kundnamn och case_id. Flödet ska läsa underlaget, skriva mallinnehållet och returnera en ifylld DOCX.",
+      "question_answer_overrides": {
+        "runtime_metadata_fields": {
+          "selected_option_id": "basic_runtime_metadata"
+        },
+        "runtime_metadata_field_details": {
+          "input_fields": [
+            {
+              "value": {
+                "name": "kundnamn",
+                "label": "Kundnamn",
+                "type": "text",
+                "required": true,
+                "options": []
+              },
+              "purpose": "shape_result"
+            },
+            {
+              "value": {
+                "name": "case_id",
+                "label": "Ärende-ID",
+                "type": "text",
+                "required": true,
+                "options": []
+              },
+              "purpose": "shape_result"
+            }
+          ]
+        }
+      },
       "expected": {
         "min_steps": 2,
         "max_steps": 4,
@@ -2013,6 +2265,9 @@
         ],
         "forbidden_question_event_ids": [
           "docx_output_mode"
+        ],
+        "allowed_question_event_ids": [
+          "runtime_metadata_field_details"
         ],
         "expected_classifier_slots": [
           {
@@ -3640,6 +3895,9 @@
           "primary_runtime_input"
         ],
         "allowed_question_event_ids": [],
+        "forbidden_question_event_ids": [
+          "runtime_metadata_field_details"
+        ],
         "max_reopened_question_count": 0
       },
       "question_answer_overrides": {
@@ -5096,7 +5354,47 @@
       "complexity": "hard",
       "domain": "municipality_information_security",
       "prompt": "Vid körning laddas loggfiler och analytikern fyller i run_reference, owning_unit och analysis_window. Extrahera till JSON med events[] där varje post har timestamp, source, event_type, observed_value och source_reference. Lägg dessutom confirmed_facts[], hypotheses[], evidence_gaps[] och affected_systems[] på toppnivå. Hypoteser får aldrig blandas med bekräftade fakta.",
+      "question_answer_overrides": {
+        "runtime_metadata_fields": {
+          "selected_option_id": "basic_runtime_metadata"
+        },
+        "runtime_metadata_field_details": {
+          "input_fields": [
+            {
+              "value": {
+                "name": "run_reference",
+                "label": "Körningsreferens",
+                "type": "text",
+                "required": true,
+                "options": []
+              },
+              "purpose": "shape_result"
+            },
+            {
+              "value": {
+                "name": "owning_unit",
+                "label": "Ansvarig enhet",
+                "type": "text",
+                "required": true,
+                "options": []
+              },
+              "purpose": "shape_result"
+            },
+            {
+              "value": {
+                "name": "analysis_window",
+                "label": "Analysperiod",
+                "type": "text",
+                "required": true,
+                "options": []
+              },
+              "purpose": "interpret_input"
+            }
+          ]
+        }
+      },
       "expected": {
+        "allowed_question_event_ids": ["runtime_metadata_field_details"],
         "min_steps": 1,
         "max_steps": 4,
         "terminal_output_type": "json",
@@ -5181,7 +5479,47 @@
       "complexity": "hard",
       "domain": "municipality_e_services",
       "prompt": "Användaren laddar upp ett inskickat e-tjänsteärende och fyller i service_reference, owning_unit och received_date vid körning. Returnera JSON med submission_reference, applicant_contact_channels, declared_subject, attachment_inventory[], extracted_answers{} och validation_gaps[]. Primärmaterialet ska vara filindata, inte formulärfält.",
+      "question_answer_overrides": {
+        "runtime_metadata_fields": {
+          "selected_option_id": "basic_runtime_metadata"
+        },
+        "runtime_metadata_field_details": {
+          "input_fields": [
+            {
+              "value": {
+                "name": "service_reference",
+                "label": "Servicereferens",
+                "type": "text",
+                "required": true,
+                "options": []
+              },
+              "purpose": "shape_result"
+            },
+            {
+              "value": {
+                "name": "owning_unit",
+                "label": "Ansvarig enhet",
+                "type": "text",
+                "required": true,
+                "options": []
+              },
+              "purpose": "shape_result"
+            },
+            {
+              "value": {
+                "name": "received_date",
+                "label": "Mottagningsdatum",
+                "type": "date",
+                "required": true,
+                "options": []
+              },
+              "purpose": "shape_result"
+            }
+          ]
+        }
+      },
       "expected": {
+        "allowed_question_event_ids": ["runtime_metadata_field_details"],
         "min_steps": 1,
         "max_steps": 4,
         "terminal_output_type": "json",
@@ -5409,7 +5747,47 @@
       "complexity": "hard",
       "domain": "municipality_school_transport",
       "prompt": "Vid körning laddar handläggaren upp ansökan och bilagor samt fyller i owning_unit, review_date och run_reference. Returnera JSON med applicant_reference, school_unit, requested_period, stated_route{}, attachments[], submitted_reasons[] och missing_information[]. Flödet ska inte mäta avstånd, tillämpa lokala regler eller föreslå bifall eller avslag.",
+      "question_answer_overrides": {
+        "runtime_metadata_fields": {
+          "selected_option_id": "basic_runtime_metadata"
+        },
+        "runtime_metadata_field_details": {
+          "input_fields": [
+            {
+              "value": {
+                "name": "owning_unit",
+                "label": "Ansvarig enhet",
+                "type": "text",
+                "required": true,
+                "options": []
+              },
+              "purpose": "shape_result"
+            },
+            {
+              "value": {
+                "name": "review_date",
+                "label": "Granskningsdatum",
+                "type": "date",
+                "required": true,
+                "options": []
+              },
+              "purpose": "shape_result"
+            },
+            {
+              "value": {
+                "name": "run_reference",
+                "label": "Körningsreferens",
+                "type": "text",
+                "required": true,
+                "options": []
+              },
+              "purpose": "shape_result"
+            }
+          ]
+        }
+      },
       "expected": {
+        "allowed_question_event_ids": ["runtime_metadata_field_details"],
         "min_steps": 1,
         "max_steps": 4,
         "terminal_output_type": "json",
@@ -5743,7 +6121,47 @@
       "complexity": "hard",
       "domain": "municipality_procurement",
       "prompt": "Upphandlaren laddar upp krav, utvärderingsmodell och anbud samt fyller i run_reference, owning_unit och report_date. Bygg först en JSON-matris med supplier_reference, requirement_reference, stated_evidence, rubric_value och uncertainty. Användaren ska granska matrisen i visningsläge innan fortsatt bearbetning. Efter godkännande ska exakt ett skrivsteg skapa en neutral rapporttext och den ska renderas som PDF utan mall. Vinnare eller tilldelningsbeslut får inte föreslås.",
+      "question_answer_overrides": {
+        "runtime_metadata_fields": {
+          "selected_option_id": "basic_runtime_metadata"
+        },
+        "runtime_metadata_field_details": {
+          "input_fields": [
+            {
+              "value": {
+                "name": "run_reference",
+                "label": "Körningsreferens",
+                "type": "text",
+                "required": true,
+                "options": []
+              },
+              "purpose": "shape_result"
+            },
+            {
+              "value": {
+                "name": "owning_unit",
+                "label": "Ansvarig enhet",
+                "type": "text",
+                "required": true,
+                "options": []
+              },
+              "purpose": "shape_result"
+            },
+            {
+              "value": {
+                "name": "report_date",
+                "label": "Rapportdatum",
+                "type": "date",
+                "required": true,
+                "options": []
+              },
+              "purpose": "shape_result"
+            }
+          ]
+        }
+      },
       "expected": {
+        "allowed_question_event_ids": ["runtime_metadata_field_details"],
         "min_steps": 3,
         "max_steps": 5,
         "terminal_output_type": "pdf",
@@ -5825,7 +6243,47 @@
       "domain": "municipality_e_services",
       "apply_plan": true,
       "prompt": "Vid körning laddas ett exporterat Open ePlatform-ärende upp och användaren fyller i run_reference, owning_unit och report_date. Skapa först JSON med service_reference, submission_reference, attachment_inventory, extracted_fields och routing_issues. Användaren ska granska och få redigera JSON-resultatet innan rapporten görs. Efter godkännande ska exakt ett skrivsteg skapa överlämningsrapporten och den ska renderas som PDF utan mall.",
+      "question_answer_overrides": {
+        "runtime_metadata_fields": {
+          "selected_option_id": "basic_runtime_metadata"
+        },
+        "runtime_metadata_field_details": {
+          "input_fields": [
+            {
+              "value": {
+                "name": "run_reference",
+                "label": "Körningsreferens",
+                "type": "text",
+                "required": true,
+                "options": []
+              },
+              "purpose": "shape_result"
+            },
+            {
+              "value": {
+                "name": "owning_unit",
+                "label": "Ansvarig enhet",
+                "type": "text",
+                "required": true,
+                "options": []
+              },
+              "purpose": "shape_result"
+            },
+            {
+              "value": {
+                "name": "report_date",
+                "label": "Rapportdatum",
+                "type": "date",
+                "required": true,
+                "options": []
+              },
+              "purpose": "shape_result"
+            }
+          ]
+        }
+      },
       "expected": {
+        "allowed_question_event_ids": ["runtime_metadata_field_details"],
         "min_steps": 3,
         "max_steps": 5,
         "terminal_output_type": "pdf",
@@ -5903,7 +6361,47 @@
       "complexity": "hard",
       "domain": "municipality_information_security",
       "prompt": "Säkerhetsteamet laddar upp loggar och incidentanteckningar och fyller i run_reference, owning_unit och report_date. Strukturera först JSON med timeline, confirmed_facts, hypotheses, affected_systems och evidence_gaps. En analytiker ska granska JSON i visningsläge innan rapporten skapas. Efter godkännande ska exakt ett skrivsteg skilja fakta från hypoteser i en rapporttext som renderas som PDF utan mall.",
+      "question_answer_overrides": {
+        "runtime_metadata_fields": {
+          "selected_option_id": "basic_runtime_metadata"
+        },
+        "runtime_metadata_field_details": {
+          "input_fields": [
+            {
+              "value": {
+                "name": "run_reference",
+                "label": "Körningsreferens",
+                "type": "text",
+                "required": true,
+                "options": []
+              },
+              "purpose": "shape_result"
+            },
+            {
+              "value": {
+                "name": "owning_unit",
+                "label": "Ansvarig enhet",
+                "type": "text",
+                "required": true,
+                "options": []
+              },
+              "purpose": "shape_result"
+            },
+            {
+              "value": {
+                "name": "report_date",
+                "label": "Rapportdatum",
+                "type": "date",
+                "required": true,
+                "options": []
+              },
+              "purpose": "shape_result"
+            }
+          ]
+        }
+      },
       "expected": {
+        "allowed_question_event_ids": ["runtime_metadata_field_details"],
         "min_steps": 3,
         "max_steps": 5,
         "terminal_output_type": "pdf",
@@ -5981,7 +6479,47 @@
       "complexity": "hard",
       "domain": "municipality_social_services",
       "prompt": "Handläggaren laddar upp en LSS-ansökan med bilagor och fyller i run_reference, owning_unit och report_date. Skapa först JSON med requested_interventions, submitted_facts, attachment_inventory och information_gaps. Handläggaren ska granska och få redigera JSON innan nästa steg. Efter godkännande ska exakt ett skrivsteg skapa en innehållsrapport som renderas som PDF utan mall. Flödet får inte bedöma behov, rätt till insats eller beslut.",
+      "question_answer_overrides": {
+        "runtime_metadata_fields": {
+          "selected_option_id": "basic_runtime_metadata"
+        },
+        "runtime_metadata_field_details": {
+          "input_fields": [
+            {
+              "value": {
+                "name": "run_reference",
+                "label": "Körningsreferens",
+                "type": "text",
+                "required": true,
+                "options": []
+              },
+              "purpose": "shape_result"
+            },
+            {
+              "value": {
+                "name": "owning_unit",
+                "label": "Ansvarig enhet",
+                "type": "text",
+                "required": true,
+                "options": []
+              },
+              "purpose": "shape_result"
+            },
+            {
+              "value": {
+                "name": "report_date",
+                "label": "Rapportdatum",
+                "type": "date",
+                "required": true,
+                "options": []
+              },
+              "purpose": "shape_result"
+            }
+          ]
+        }
+      },
       "expected": {
+        "allowed_question_event_ids": ["runtime_metadata_field_details"],
         "min_steps": 3,
         "max_steps": 5,
         "terminal_output_type": "pdf",
@@ -6105,6 +6643,7 @@
       "apply_plan": true,
       "prompt": "Bygg ett flöde för Sundsvalls kommuns tjänsteskrivelser. Den bifogade DOCX-filen är den enda mallen och ska kopplas vid byggtid. Vid körning laddar handläggaren upp ärendets källdokument och fyller i diarienummer, handläggare, förvaltning, nämnd och beslutsdatum. Källdokumenten är primärmaterial; skapa inga formulärfält för deras innehåll. Planera en uttömmande extraktion till sources[] med source_file_id, source_label, document_type, document_date, relevant_facts[], prior_decisions[] och uncertainties[]. Planera därefter typad JSON med sections där ärendet, bakgrund, bedömning, konsekvenser och förslag_till_beslut var och en innehåller text och source_references[], samt conflicts[] och missing_information[]. Saknade eller motstridiga uppgifter ska vara synliga och får aldrig lösas genom antaganden. Handläggaren ska få redigera detta icke-terminala JSON-resultat. Efter granskningen ska exakt ett terminalt deterministiskt steg fylla den bifogade DOCX-mallen; skapa inget separat skriv- eller städsteg och använd endast riktade källreferenser, aldrig all_previous_steps.",
       "expected": {
+        "allowed_question_event_ids": ["runtime_metadata_field_details"],
         "min_steps": 3,
         "max_steps": 4,
         "terminal_output_type": "docx",
@@ -6381,6 +6920,18 @@
         "tjansteskrivelse_v1"
       ],
       "question_answer_overrides": {
+        "runtime_metadata_fields": {
+          "selected_option_id": "basic_runtime_metadata"
+        },
+        "runtime_metadata_field_details": {
+          "input_fields": [
+            {"value": {"name": "diarienummer", "label": "Diarienummer", "type": "text", "required": true, "options": []}, "purpose": "shape_result"},
+            {"value": {"name": "handlaggare", "label": "Handläggare", "type": "text", "required": true, "options": []}, "purpose": "shape_result"},
+            {"value": {"name": "forvaltning", "label": "Förvaltning", "type": "text", "required": true, "options": []}, "purpose": "shape_result"},
+            {"value": {"name": "namnd", "label": "Nämnd", "type": "text", "required": true, "options": []}, "purpose": "shape_result"},
+            {"value": {"name": "beslutsdatum", "label": "Beslutsdatum", "type": "date", "required": true, "options": []}, "purpose": "shape_result"}
+          ]
+        },
         "docx_output_mode": {
           "selected_option_id": "template_fill_docx"
         }
@@ -6395,6 +6946,18 @@
       "domain": "municipality_school_transport",
       "required": false,
       "prompt": "Jag fattar delegationsbeslut om skolskjuts på barn- och utbildningsförvaltningen i Sundsvall och vill sluta klippa och klistra i vår beslutsbrevsmall, som ligger bifogad. Vid körning laddar jag upp ansökan och skolskjutsutredningen och fyller själv i diarienummer, beslutsdatum och handläggare. Beslutet, motiveringen, eventuella villkor för resan och överklagandehänvisningen ska flödet ta fram ur underlaget — de ska inte vara fält som jag skriver i. Håll det kort: läs underlaget, ta fram uppgifterna och fyll mallen. Inget extra steg som skriver om texten efteråt. Resultatet ska vara den ifyllda mallen som DOCX.",
+      "question_answer_overrides": {
+        "runtime_metadata_fields": {
+          "selected_option_id": "basic_runtime_metadata"
+        },
+        "runtime_metadata_field_details": {
+          "input_fields": [
+            {"value": {"name": "diarienummer", "label": "Diarienummer", "type": "text", "required": true, "options": []}, "purpose": "shape_result"},
+            {"value": {"name": "beslutsdatum", "label": "Beslutsdatum", "type": "date", "required": true, "options": []}, "purpose": "shape_result"},
+            {"value": {"name": "handlaggare", "label": "Handläggare", "type": "text", "required": true, "options": []}, "purpose": "shape_result"}
+          ]
+        }
+      },
       "expected": {
         "min_steps": 2,
         "max_steps": 3,
@@ -6461,6 +7024,9 @@
         "forbidden_question_event_ids": [
           "docx_output_mode"
         ],
+        "allowed_question_event_ids": [
+          "runtime_metadata_field_details"
+        ],
         "max_all_previous_steps": 0,
         "forbid_input_sources": [
           "all_previous_steps"
@@ -6482,6 +7048,17 @@
       "domain": "municipality_service_center",
       "required": false,
       "prompt": "På kontaktcenter i Sundsvall sammanställer vi svar till invånare som hört av sig flera gånger i samma ärende. Vår ärendemall ligger bifogad. Vid körning laddar jag upp de handlingar som hör till ärendet, och flödet ska skriva en sammanhållen text på ungefär en halv sida i löpande prosa — inga punktlistor och inga egna rubriker. Kundnamn och ärende-ID fyller jag i själv vid körning. Jag vill få tillbaka ett färdigt Word-dokument som går att skicka vidare utan efterarbete.",
+      "question_answer_overrides": {
+        "runtime_metadata_fields": {
+          "selected_option_id": "basic_runtime_metadata"
+        },
+        "runtime_metadata_field_details": {
+          "input_fields": [
+            {"value": {"name": "kundnamn", "label": "Kundnamn", "type": "text", "required": true, "options": []}, "purpose": "shape_result"},
+            {"value": {"name": "case_id", "label": "Ärende-ID", "type": "text", "required": true, "options": []}, "purpose": "shape_result"}
+          ]
+        }
+      },
       "expected": {
         "min_steps": 2,
         "max_steps": 4,
@@ -6519,6 +7096,9 @@
         "forbidden_question_event_ids": [
           "docx_output_mode"
         ],
+        "allowed_question_event_ids": [
+          "runtime_metadata_field_details"
+        ],
         "max_all_previous_steps": 0,
         "forbid_input_sources": [
           "all_previous_steps"
@@ -6540,6 +7120,18 @@
       "domain": "municipality_hr",
       "required": false,
       "prompt": "Jag arbetar med HR-administration i Timrå kommun och skriver tjänstgöringsintyg åt medarbetare som slutar. Vi har ingen intygsmall att koppla in, så flödet ska skapa dokumentet från grunden. Vid körning klistrar jag in ett utdrag ur personalsystemet och fyller i medarbetarens namn, anställningsnummer och vilket datum intyget utfärdas. Ur utdraget ska flödet plocka fram befattning, sysselsättningsgrad, anställningsform och anställningsperiod som strukturerad JSON tillsammans med de uppgifter som saknas i utdraget; saknade uppgifter ska stå kvar som saknade och aldrig fyllas i med gissningar. Därefter formuleras intygstexten, och sista steget ska rendera exakt den texten som DOCX utan att skriva om något.",
+      "question_answer_overrides": {
+        "runtime_metadata_fields": {
+          "selected_option_id": "basic_runtime_metadata"
+        },
+        "runtime_metadata_field_details": {
+          "input_fields": [
+            {"value": {"name": "medarbetarnamn", "label": "Medarbetarens namn", "type": "text", "required": true, "options": []}, "purpose": "shape_result"},
+            {"value": {"name": "anstallningsnummer", "label": "Anställningsnummer", "type": "text", "required": true, "options": []}, "purpose": "shape_result"},
+            {"value": {"name": "utfardandedatum", "label": "Utfärdandedatum", "type": "date", "required": true, "options": []}, "purpose": "shape_result"}
+          ]
+        }
+      },
       "expected": {
         "min_steps": 3,
         "max_steps": 4,
@@ -6549,6 +7141,11 @@
         "expected_primary_input_type": "text",
         "min_form_field_count": 3,
         "expected_form_field_groups": [
+          [
+            "medarbetarnamn",
+            "medarbetarens_namn",
+            "employee_name"
+          ],
           [
             "anstallningsnummer",
             "anstallningsnr",
@@ -6603,6 +7200,9 @@
         "forbidden_question_event_ids": [
           "docx_output_mode"
         ],
+        "allowed_question_event_ids": [
+          "runtime_metadata_field_details"
+        ],
         "max_all_previous_steps": 0,
         "forbid_input_sources": [
           "all_previous_steps"
@@ -6620,6 +7220,20 @@
       "domain": "municipality_tjansteskrivelse",
       "required": false,
       "prompt": "Stadsbyggnadskontoret i Sundsvall svarar på remisser från Trafikverket och Länsstyrelsen Västernorrland, och yttrandet skrivs alltid i kommunens tjänsteskrivelsemall som jag bifogar. Vid körning laddar handläggaren upp remissen, tidigare yttranden i samma fråga och de tekniska underlag som finns. Underlagen är primärmaterial och ska aldrig bli formulärfält; det jag fyller i är diarienummer, handläggare, förvaltning, nämnd och beslutsdatum. Flödet ska hålla isär vad varje handling faktiskt säger och därefter skriva ärendet, bakgrund, bedömning, konsekvenser och förslag till beslut var för sig. Säger handlingarna emot varandra ska det synas i texten i stället för att jämkas ihop. Leverera den ifyllda mallen som DOCX.",
+      "question_answer_overrides": {
+        "runtime_metadata_fields": {
+          "selected_option_id": "basic_runtime_metadata"
+        },
+        "runtime_metadata_field_details": {
+          "input_fields": [
+            {"value": {"name": "diarienummer", "label": "Diarienummer", "type": "text", "required": true, "options": []}, "purpose": "shape_result"},
+            {"value": {"name": "handlaggare", "label": "Handläggare", "type": "text", "required": true, "options": []}, "purpose": "shape_result"},
+            {"value": {"name": "forvaltning", "label": "Förvaltning", "type": "text", "required": true, "options": []}, "purpose": "shape_result"},
+            {"value": {"name": "namnd", "label": "Nämnd", "type": "text", "required": true, "options": []}, "purpose": "shape_result"},
+            {"value": {"name": "beslutsdatum", "label": "Beslutsdatum", "type": "date", "required": true, "options": []}, "purpose": "shape_result"}
+          ]
+        }
+      },
       "expected": {
         "min_steps": 2,
         "max_steps": 5,
@@ -6677,6 +7291,9 @@
           "docx_output_mode",
           "report_disposition"
         ],
+        "allowed_question_event_ids": [
+          "runtime_metadata_field_details"
+        ],
         "max_all_previous_steps": 0,
         "forbid_input_sources": [
           "all_previous_steps"
@@ -6698,6 +7315,18 @@
       "domain": "municipality_environmental_health",
       "required": false,
       "prompt": "Jag handlägger anmälningar om värmepump i Ånge kommun och vi skickar beslutet i kommunens beslutsbrevsmall, som är bifogad. Vid körning laddar jag upp anmälan med bilagor och fyller i diarienummer, beslutsdatum och handläggare. Flödet ska ta fram beslutet, motiveringen och de villkor som ska gälla för installationen ur anmälan. Innan mallen fylls måste jag kunna granska och rätta de framtagna uppgifterna i ett eget granskningssteg — det är jag som svarar för innehållet i beslutet. Sista steget ska bara fylla mallen med det jag godkänt, inget omskrivningssteg däremellan.",
+      "question_answer_overrides": {
+        "runtime_metadata_fields": {
+          "selected_option_id": "basic_runtime_metadata"
+        },
+        "runtime_metadata_field_details": {
+          "input_fields": [
+            {"value": {"name": "diarienummer", "label": "Diarienummer", "type": "text", "required": true, "options": []}, "purpose": "shape_result"},
+            {"value": {"name": "beslutsdatum", "label": "Beslutsdatum", "type": "date", "required": true, "options": []}, "purpose": "shape_result"},
+            {"value": {"name": "handlaggare", "label": "Handläggare", "type": "text", "required": true, "options": []}, "purpose": "shape_result"}
+          ]
+        }
+      },
       "expected": {
         "min_steps": 2,
         "max_steps": 4,
@@ -6743,6 +7372,9 @@
         },
         "forbidden_question_event_ids": [
           "docx_output_mode"
+        ],
+        "allowed_question_event_ids": [
+          "runtime_metadata_field_details"
         ],
         "max_all_previous_steps": 0,
         "forbid_input_sources": [
@@ -7005,9 +7637,22 @@
           "docx_output_mode",
           "report_disposition",
           "comparison_scope"
+        ],
+        "allowed_question_event_ids": [
+          "runtime_metadata_field_details"
         ]
       },
       "question_answer_overrides": {
+        "runtime_metadata_fields": {
+          "selected_option_id": "basic_runtime_metadata"
+        },
+        "runtime_metadata_field_details": {
+          "input_fields": [
+            {"value": {"name": "motesdatum", "label": "Mötesdatum", "type": "date", "required": true, "options": []}, "purpose": "shape_result"},
+            {"value": {"name": "klockslag", "label": "Klockslag", "type": "text", "required": true, "options": []}, "purpose": "shape_result"},
+            {"value": {"name": "lokal", "label": "Lokal", "type": "text", "required": true, "options": []}, "purpose": "shape_result"}
+          ]
+        },
         "primary_runtime_input": {
           "selected_option_id": "text"
         },
@@ -7016,9 +7661,6 @@
         },
         "terminal_output": {
           "selected_option_id": "structured_text"
-        },
-        "runtime_metadata_fields": {
-          "selected_option_id": "basic_runtime_metadata"
         }
       },
       "cohorts": [
@@ -7501,6 +8143,9 @@
           "docx_output_mode",
           "mapped_file_limit"
         ],
+        "allowed_question_event_ids": [
+          "runtime_metadata_field_details"
+        ],
         "expected_classifier_slots": [
           {
             "slot_name": "terminal_output",
@@ -7626,6 +8271,15 @@
       ],
       "synthetic_user_profile": "document_source",
       "question_answer_overrides": {
+        "runtime_metadata_fields": {
+          "selected_option_id": "basic_runtime_metadata"
+        },
+        "runtime_metadata_field_details": {
+          "input_fields": [
+            {"value": {"name": "diarienummer", "label": "Diarienummer", "type": "text", "required": true, "options": []}, "purpose": "shape_result"},
+            {"value": {"name": "uppfoljningsdatum", "label": "Uppföljningsdatum", "type": "date", "required": true, "options": []}, "purpose": "shape_result"}
+          ]
+        },
         "terminal_output": {
           "selected_option_id": "pdf_document"
         },
@@ -8689,7 +9343,8 @@
         "forbid_primary_material_form_fields": true,
         "forbidden_question_event_ids": [
           "primary_runtime_input",
-          "terminal_output"
+          "terminal_output",
+          "runtime_metadata_field_details"
         ],
         "expected_classifier_slots": [
           {
@@ -8835,6 +9490,20 @@
       "domain": "municipality_tjansteskrivelse",
       "required": false,
       "prompt": "Två filer är bifogade och de har olika roller, så blanda inte ihop dem. Den första är förvaltningens tjänsteskrivelsemall och den enda fil som ska fyllas i. Den andra är en barnkonsekvensanalys som vi använder som referens för vilka konsekvenser bedömningen alltid måste väga in; den ska styra innehållet men aldrig fyllas i, renderas eller lämnas ut som resultat. Vid körning laddar handläggaren upp ärendets handlingar och fyller i diarienummer, handläggare, förvaltning, nämnd och beslutsdatum. Handlingarnas innehåll är primärmaterial och ska inte bli formulärfält. Slutresultatet är den ifyllda tjänsteskrivelsen som DOCX.",
+      "question_answer_overrides": {
+        "runtime_metadata_fields": {
+          "selected_option_id": "basic_runtime_metadata"
+        },
+        "runtime_metadata_field_details": {
+          "input_fields": [
+            {"value": {"name": "diarienummer", "label": "Diarienummer", "type": "text", "required": true, "options": []}, "purpose": "shape_result"},
+            {"value": {"name": "handlaggare", "label": "Handläggare", "type": "text", "required": true, "options": []}, "purpose": "shape_result"},
+            {"value": {"name": "forvaltning", "label": "Förvaltning", "type": "text", "required": true, "options": []}, "purpose": "shape_result"},
+            {"value": {"name": "namnd", "label": "Nämnd", "type": "text", "required": true, "options": []}, "purpose": "shape_result"},
+            {"value": {"name": "beslutsdatum", "label": "Beslutsdatum", "type": "date", "required": true, "options": []}, "purpose": "shape_result"}
+          ]
+        }
+      },
       "expected": {
         "min_steps": 2,
         "max_steps": 5,
@@ -8869,6 +9538,9 @@
         ],
         "forbidden_question_event_ids": [
           "docx_output_mode"
+        ],
+        "allowed_question_event_ids": [
+          "runtime_metadata_field_details"
         ],
         "max_all_previous_steps": 0,
         "forbid_input_sources": [
@@ -9050,7 +9722,8 @@
         "forbid_primary_material_form_fields": true,
         "forbidden_question_event_ids": [
           "primary_runtime_input",
-          "terminal_output"
+          "terminal_output",
+          "runtime_metadata_field_details"
         ],
         "expected_leaf_output_field_groups": [
           [
@@ -9512,15 +10185,22 @@
           "comparison_scope"
         ],
         "allowed_question_event_ids": [
-          "mapped_file_limit"
+          "mapped_file_limit",
+          "runtime_metadata_field_details"
         ],
-        "max_question_event_count": 1
+        "max_question_event_count": 2
       },
       "cohorts": [
         "complete_everyday",
         "form_fields"
       ],
       "question_answer_overrides": {
+        "runtime_metadata_field_details": {
+          "input_fields": [
+            {"value": {"name": "diarienummer", "label": "Diarienummer", "type": "text", "required": true, "options": []}, "purpose": "shape_result"},
+            {"value": {"name": "sammantradesdatum", "label": "Sammanträdesdatum", "type": "date", "required": true, "options": []}, "purpose": "shape_result"}
+          ]
+        },
         "primary_runtime_input": {
           "selected_option_id": "documents"
         },

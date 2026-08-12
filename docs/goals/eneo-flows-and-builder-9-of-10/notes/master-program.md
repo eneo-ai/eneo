@@ -517,6 +517,24 @@ any threshold.
     CP0 replay reproduces every published count. Claude iteration 134 is green
     at 8 after exact source review; its requested exhaustiveness guard was added
     at the closed purpose dispatch.
+    The first post-D8 broad checkpoint attempt was deliberately stopped after
+    157 of 474 observations: the v7 battle-case contract could express option
+    selections and custom text, but not D8's public typed field-details answer,
+    so valid plan-required cases stalled at an unanswered question. That partial
+    receipt is diagnostic only and must not be scored. The v8 case contract
+    reuses `StructuredQuestionAnswerMetadata` for exact synthetic-user answers,
+    gives complete precursor and typed prompt-backed answers to the 24
+    field-bearing cases, and forbids the details question in three field-free
+    guards, including the two audited false-positive cases, rather than
+    inventing fields. Product policy, the scoring algorithm and provider
+    behavior are unchanged. The case contract and hashes intentionally change;
+    13 cases now opt into question-relevance completeness because D8 introduced
+    a legitimate typed question for them. Their field expectations now measure
+    preservation and placement of explicit user answers, not prompt inference.
+    Purpose coverage is deliberately reported rather than tuned: 69 of 71
+    fields shape the result, 2 interpret input and none currently exercise
+    whole-flow placement. The full final-manifest x3 checkpoint is rerun from a
+    clean source only after that instrument correction passes its review gate.
 - [ ] CP4 JSON partial-emission diagnosis: why OSE captures some
     user-named fields and misses others (4 JSON cases). Diagnosis
     first; bounded fix gated on attributed mechanism.
@@ -544,6 +562,14 @@ any threshold.
     explicitly. The critic may
     survive only as a compiler POSTCONDITION (defect detector), never
     as a normal repair owner on a supported archetype.
+    A manual audio-to-structured-report-to-PDF run added supporting, non-golden
+    evidence for this design gate: its canonical JSON contract duplicated the
+    same concern as `risks_and_concerns` and `risks`, which then repeated content
+    downstream. CP5 must resolve that through general field identity/equivalence
+    ownership, not a case-specific alias. Repeated prose plus full JSON-schema
+    guidance, inferred role/owner grounding and audio cardinality remain inputs
+    to the post-CP5 attribution loop; this single run does not authorize a
+    prompt heuristic or topology rewrite.
 - [x] CP6 Authoring rejects unindexed array paths — LANDED
     `269bc55ee`.
     (RELEASE-CRITICAL, direction FROZEN in v9.1 — "parity" alone could

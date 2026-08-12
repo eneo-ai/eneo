@@ -68,7 +68,7 @@ FIXTURE_MANIFEST_FILE = FIXTURE_DIR / "manifest.json"
 SUPPORTED_FIXTURE_MANIFEST_VERSION = 1
 DEFAULT_CONFIRM_MESSAGE = "Ja, det stämmer. Bygg planen."
 MAX_INTERACTIONS_PER_CASE = 6
-SUPPORTED_CASES_FILE_VERSION = 7
+SUPPORTED_CASES_FILE_VERSION = 8
 # Bump when the meaning of question-relevance checks changes; receipts
 # across different semantics versions must never be compared.
 QUESTION_RELEVANCE_SEMANTICS_VERSION = 2
@@ -86,26 +86,28 @@ OUTCOME_CLASSIFICATION_SEMANTICS_VERSION = 3
 OBSERVATION_INPUT_IDENTITY_SEMANTICS_VERSION = 2
 
 
-def _local_app_version() -> str:
+def _ensure_backend_src_importable() -> None:
     backend_src = Path(__file__).resolve().parents[1] / "src"
-    sys.path.insert(0, str(backend_src))
-    try:
-        from eneo.main.config import get_settings
-
-        return get_settings().app_version
-    finally:
-        try:
-            sys.path.remove(str(backend_src))
-        except ValueError:
-            pass
+    backend_src_path = str(backend_src)
+    if backend_src_path not in sys.path:
+        sys.path.insert(0, backend_src_path)
 
 
+def _local_app_version() -> str:
+    from eneo.main.config import get_settings
+
+    return get_settings().app_version
+
+
+_ensure_backend_src_importable()
 LOCAL_APP_VERSION = os.getenv("ENEO_APP_VERSION") or _local_app_version()
 
-# Import after `_local_app_version`: that path initializes the `eneo` package
-# for standalone script execution, while the pure gate imports its leaf kind
-# catalog through that namespace.
+# Keep standalone script execution on the same production models as the API.
 from ai_builder_release_gate import replacement_limit  # noqa: E402
+
+from eneo.flows.ai_builder.ai_builder_conversation_metadata import (  # noqa: E402
+    StructuredQuestionAnswerMetadata,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -842,8 +844,20 @@ _RUNTIME_EVIDENCE_EXPECTATION_KEYS = frozenset(
 )
 
 
+def _unique_json_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
+    value: dict[str, object] = {}
+    for key, item in pairs:
+        if key in value:
+            raise ValueError(f"Duplicate JSON key: {key}")
+        value[key] = item
+    return value
+
+
 def _read_cases_file(path: Path) -> list[BattleCase]:
-    payload = json.loads(path.read_text(encoding="utf-8"))
+    payload = json.loads(
+        path.read_text(encoding="utf-8"),
+        object_pairs_hook=_unique_json_object,
+    )
     if not isinstance(payload, Mapping):
         raise ValueError(f"{path} must contain a top-level JSON object.")
     version = payload.get("version")
@@ -1084,26 +1098,41 @@ def _validate_question_answers(
             raise ValueError(f"{path} {owner} has an invalid question id.")
         if not isinstance(answer, Mapping):
             raise ValueError(f"{path} {owner}.{question_id} must be an object.")
-        answer_keys = set(answer)
+        answer_map = cast(Mapping[str, object], answer)
+        answer_keys = set(answer_map)
+        typed_input_fields = answer_keys == {"input_fields"}
+        if typed_input_fields:
+            try:
+                StructuredQuestionAnswerMetadata.model_validate(
+                    {
+                        "question_id": question_id,
+                        "input_fields": answer_map.get("input_fields"),
+                    }
+                )
+            except ValueError as exc:
+                raise ValueError(
+                    f"{path} {owner}.{question_id} is not a valid typed answer: {exc}"
+                ) from exc
         valid_shapes = (
-            (
+            typed_input_fields
+            or (
                 answer_keys == {"selected_option_id"}
-                and isinstance(answer.get("selected_option_id"), str)
-                and bool(str(answer["selected_option_id"]).strip())
+                and isinstance(answer_map.get("selected_option_id"), str)
+                and bool(str(answer_map["selected_option_id"]).strip())
             )
             or (
                 answer_keys == {"selected_option_ids"}
-                and isinstance(answer.get("selected_option_ids"), list)
-                and bool(answer["selected_option_ids"])
+                and isinstance(answer_map.get("selected_option_ids"), list)
+                and bool(answer_map["selected_option_ids"])
                 and all(
                     isinstance(option_id, str) and bool(option_id.strip())
-                    for option_id in answer["selected_option_ids"]
+                    for option_id in answer_map["selected_option_ids"]
                 )
             )
             or (
                 answer_keys == {"custom_value"}
-                and isinstance(answer.get("custom_value"), str)
-                and bool(str(answer["custom_value"]).strip())
+                and isinstance(answer_map.get("custom_value"), str)
+                and bool(str(answer_map["custom_value"]).strip())
             )
         )
         if not valid_shapes:
@@ -3048,9 +3077,50 @@ def _configured_question_answer(
     answer_config = configured_answers[question_id]
     if not isinstance(answer_config, Mapping):
         raise ValueError(f"Configured answer for {question_id} must be an object.")
+    answer_config = cast(Mapping[str, object], answer_config)
     answer_source = answer_sources.get(question_id)
     if answer_source not in {"profile", "case_override"}:
         raise ValueError(f"Configured answer for {question_id} has no valid source.")
+
+    if set(answer_config) == {"input_fields"}:
+        if question.get("input_field_collection") is not True:
+            raise ValueError(
+                f"Question {question_id} is not an input-field collection question."
+            )
+        typed_answer = StructuredQuestionAnswerMetadata.model_validate(
+            {
+                "question_id": question_id,
+                "input_fields": answer_config.get("input_fields"),
+            }
+        )
+        if typed_answer.input_fields is None:
+            raise ValueError(
+                f"Configured answer for {question_id} has no input fields."
+            )
+        input_fields = [
+            {
+                "value": field.value.model_dump(
+                    mode="json",
+                    by_alias=True,
+                    exclude={"provenance"},
+                ),
+                "purpose": field.purpose,
+            }
+            for field in typed_answer.input_fields
+        ]
+        message = ", ".join(
+            f"{field.value.label} ({field.value.variable_name})"
+            for field in typed_answer.input_fields
+        )
+        return {
+            "message": message,
+            "answer_source": answer_source,
+            "question_answer": {
+                "kind": typed_answer.kind,
+                "question_id": typed_answer.question_id,
+                "input_fields": input_fields,
+            },
+        }
 
     custom_value = answer_config.get("custom_value")
     if isinstance(custom_value, str) and custom_value.strip():
