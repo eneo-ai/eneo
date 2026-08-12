@@ -718,14 +718,33 @@ sake.
     irreversible cleanup. OpenAPI exposes the same bounds. No cleanup lifecycle,
     precedence, database schema, compatibility reader or documentation metadata
     changed in this slice.
-- [ ] FLOW-DOC Current-source accuracy: re-verify the 2026-08-11
-    endpoint sweep against current `eneo` owners and apply only facts
-    that still hold. Correct consumer authentication, nested step
-    inputs, review/rerun lifecycle, evidence export, Celery topology,
-    retention precedence, links and OpenAPI examples. The old-branch
-    patch is specification evidence, never a patch to apply blindly.
-    Prove documentation-only OpenAPI edits preserve paths, operations,
-    required fields and property sets.
+- [x] FLOW-DOC Current-source accuracy (completed 2026-08-12): re-verified
+    the public Flow runtime journey against current `eneo` owners, OpenAPI and
+    `@eneo/eneo-js`. The consumer entry path now covers authentication,
+    published discovery and pagination, contract-driven forms and MIME policy,
+    nested step inputs, version-pinned idempotent creation, polling,
+    review/resume/rerun/cancel, every final-result kind, signed downloads,
+    evidence and typed failures. The field-heavy page is explicitly the Flow
+    Runtime API Reference; Builder authoring remains owned by the separate
+    `BUILDER-API` task. Corrected stale numeric error examples and the
+    redispatch conflict code. Generated SDK changes preserve endpoint and type
+    shapes while carrying the corrected descriptions.
+
+    The audit also found and fixed a runtime contract defect: the no-run graph
+    endpoint now reads the checksum-verified current published snapshot rather
+    than mutable draft topology, hides unpublished Flows from user and
+    service-key principals, and keeps run-id graphs version-pinned. The shared
+    published-definition loader replaces duplicate single-version load and
+    checksum paths. An unmounted prompt-revert placeholder that depended on the
+    wrong graph semantics and its unused translations were deleted.
+
+    Verification: 227 affected backend docs/OpenAPI/runtime tests; the
+    service-key published-runtime integration test; backend Pyright and
+    targeted Ruff; 66 SDK runtime/client tests and TypeScript type-smoke; docs
+    regeneration stability and production docs build; web Svelte and i18n
+    checks. Claude peer session `eneo-flow-consumer-dx-20260812` closed green at
+    score 8 after its published-graph wording blocker and three focused
+    hardening findings were fixed. No Builder implementation was included.
 - [ ] BUILDER-API Public authoring contract (after the ownership
     tranche): add the existing retry-safe plan-create operation to the
     required OpenAPI path/operation set; expose one `aiBuilder` SDK

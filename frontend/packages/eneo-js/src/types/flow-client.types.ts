@@ -30,6 +30,119 @@ flows.runs.redispatch({
   flowId: "flow-1",
   expected_dispatch_exhausted_at: "2026-07-22T08:30:00Z"
 });
+flows.runs.cancel({ id: "run-to-cancel", flowId: "flow-1" });
+
+async function compilePublishedFlowWebAppJourney(runtimeFile: File) {
+  const flowId = "flow-1";
+  const published = await flows.published.get({ id: flowId });
+  const contract = await flows.runContract.get({ id: published.id });
+  const inputStep = contract.steps_requiring_input?.[0];
+
+  if (!inputStep) return;
+
+  const upload = await flows.steps.runtimeFiles.upload({
+    id: flowId,
+    stepId: inputStep.step_id,
+    file: runtimeFile
+  });
+  const run = await flows.runs.create({
+    flow: { id: flowId },
+    expected_flow_version: contract.published_flow_version,
+    idempotencyKey: "flow-run:request-1",
+    step_inputs: { [inputStep.step_id]: { file_ids: [upload.id] } }
+  });
+  const statusCapabilities = await flows.runs.statusCapabilities.get();
+  const current = await flows.runs.get({ id: run.id, flowId });
+  await flows.graph({ id: flowId });
+  await flows.graph({ id: flowId, run_id: run.id });
+  const status = statusCapabilities.statuses.find((item) => item.status === current.status);
+
+  if (status?.is_awaiting_review) {
+    const checkpoint = await flows.runs.reviewCheckpoints.active({ flowId, runId: run.id });
+    if (checkpoint) {
+      const edited = await flows.runs.reviewCheckpoints.edit({
+        flowId,
+        runId: run.id,
+        checkpointId: checkpoint.id,
+        expectedCheckpointRevision: checkpoint.revision,
+        currentPayloadJson: checkpoint.current_payload_json ?? {}
+      });
+      const approved = await flows.runs.reviewCheckpoints.approve({
+        flowId,
+        runId: run.id,
+        checkpointId: edited.id,
+        expectedCheckpointRevision: edited.revision
+      });
+      await flows.runs.reviewCheckpoints.resume({
+        flowId,
+        runId: run.id,
+        checkpointId: approved.id,
+        expectedCheckpointRevision: approved.revision,
+        idempotencyKey: `flow-review:${approved.id}:${approved.revision}`
+      });
+    }
+  }
+
+  await flows.runs.steps({ flowId, runId: run.id });
+  const completed = await flows.runs.get({ id: run.id, flowId });
+  switch (completed.result?.kind) {
+    case "inline_text":
+      completed.result.text;
+      break;
+    case "file_backed_text":
+      completed.result.preview;
+      break;
+    case "structured":
+      completed.result.value;
+      completed.result.output_contract;
+      break;
+    case "artifact":
+      completed.result.files;
+      break;
+    case "outbound_http":
+      completed.result.delivery_status;
+      break;
+  }
+  const downloadableFiles =
+    completed.result?.kind === "artifact"
+      ? completed.result.files
+      : completed.result?.kind === "file_backed_text"
+        ? [completed.result.file]
+        : [];
+
+  for (const file of downloadableFiles) {
+    if (file.availability === "available") {
+      await flows.runs.artifactSignedUrl({ flowId, runId: run.id, fileId: file.file_id });
+    }
+  }
+
+  await flows.runs.evidence({ id: run.id, flowId });
+  const providerCalls = await flows.runs.providerCalls({ id: run.id, flowId, limit: 50 });
+  if (providerCalls.has_more && providerCalls.next_after_event_id) {
+    await flows.runs.providerCalls({
+      id: run.id,
+      flowId,
+      limit: 50,
+      afterEventId: providerCalls.next_after_event_id
+    });
+  }
+  await flows.runs.exportEvidence({ id: run.id, flowId, format: "json", detail: "redacted" });
+
+  const completedStatus = statusCapabilities.statuses.find(
+    (item) => item.status === completed.status
+  );
+  if (completedStatus?.is_rerun_eligible) {
+    await flows.runs.rerunStep({
+      flowId,
+      runId: run.id,
+      stepId: inputStep.step_id,
+      expected_run_revision: current.revision,
+      reason: "The source file was corrected."
+    });
+  }
+}
+
+void compilePublishedFlowWebAppJourney;
 
 // @ts-expect-error list requires a space id.
 flows.list({ limit: 25 });

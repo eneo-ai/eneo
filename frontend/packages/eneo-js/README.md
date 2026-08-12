@@ -8,18 +8,60 @@ Lightweight and typed JS client for the Eneo backend.
 import { createEneo } from "@eneo/eneo-js";
 
 const eneo = createEneo({
-  apiKey: <token>,
-  baseUrl: <baseUrl>,
+  apiKey: "your-service-key",
+  baseUrl: "https://your-eneo-instance.example"
 });
 
-const groups = await eneo.groups.list()
+const groups = await eneo.groups.list();
 ```
 
 Create an `eneo` object with the `createEneo()` function. It provides convenience wrapper functions around the Eneo API.
 
+### Authentication
+
+Use `apiKey` for a service key. The client sends it as `X-API-Key`. Use `token` for a user access token sent as `Authorization: Bearer ...`. Pass one authentication option, not both; if both are supplied, `apiKey` takes precedence. Keep service keys in server-side code; do not expose them in a browser bundle.
+
+### Run a published Flow
+
+Start from the published run contract. It tells the application which fields and step-scoped files are required, which MIME types are accepted, whether human review can pause the run, and what final result kind to expect.
+
+```js
+async function startPublishedFlow(file) {
+  const flowId = "published-flow-id";
+  const contract = await eneo.flows.runContract.get({ id: flowId });
+  const inputStep = contract.steps_requiring_input?.[0];
+
+  if (!inputStep) throw new Error("This example expects one runtime file input.");
+  if (!inputStep.accepted_mimetypes.includes(file.type)) {
+    throw new Error(`The Flow does not accept ${file.type || "files without a MIME type"}.`);
+  }
+
+  const runtimeFile = await eneo.flows.steps.runtimeFiles.upload({
+    id: flowId,
+    stepId: inputStep.step_id,
+    file
+  });
+
+  const run = await eneo.flows.runs.create({
+    flow: { id: flowId },
+    expected_flow_version: contract.published_flow_version,
+    idempotencyKey: "your-stable-request-key",
+    step_inputs: {
+      [inputStep.step_id]: { file_ids: [runtimeFile.id] }
+    }
+  });
+
+  return eneo.flows.runs.get({ id: run.id, flowId });
+}
+```
+
+Pass a Web-standard `File` whose `type` matches the step contract. In browser code, authenticate with a user token. If you use a service key, run this code on your server.
+
+See the [Flow integration guide](https://docs.eneo.ai/guides/flows/integrating-flows) for polling, review and resume, cancellation, reruns, every final result kind, signed file downloads, evidence, pagination, and error handling.
+
 ### Errors
 
-All Eneo functions can throw an `EneoError`, providing a `stage: "JSON" | "HTTP"` and a `request: { endpoint: string; payload?: object; }`, during which the error occured on top of the error's `message`.
+All Eneo functions can throw an `EneoError`. In addition to `message`, it identifies the failing `stage` (`"JSON"` or `"HTTP"`) and includes the request endpoint and optional payload.
 
 ## Advanced usage
 
@@ -44,17 +86,17 @@ export const load = async (event) => {
 
 ### Typed client
 
-You can query the backend directly through the client's typed fetch function, which migh come in handy if you only need a specific endpoint or need to minimise bundle size.
+You can query the backend directly through the client's typed fetch function when you only need a specific endpoint or want to minimize bundle size.
 
 ```js
 import { createClient } from "@eneo/eneo-js";
 
 const client = createClient({
-  apiKey: <token>,
-  baseUrl: <baseUrl>,
+  apiKey: "your-service-key",
+  baseUrl: "https://your-eneo-instance.example"
 });
 
-const groups = await client.fetch("/api/v1/groups/", { method: "get" })
+const groups = await client.fetch("/api/v1/groups/", { method: "get" });
 ```
 
 ## Development

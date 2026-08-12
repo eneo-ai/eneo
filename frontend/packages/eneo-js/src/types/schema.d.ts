@@ -4232,10 +4232,12 @@ export interface paths {
     };
     /**
      * Get flow graph
-     * @description Return the graph representation for a flow definition or one version-pinned run snapshot.
+     * @description Return the graph representation for the current published Flow version or one version-pinned run.
      *
      *     When `run_id` is provided, the graph is built from the run's published version snapshot and
-     *     annotated with run execution results. Otherwise the current live flow definition is used.
+     *     annotated with run execution results. Without `run_id`, the graph is built from the current
+     *     published snapshot and contains no run annotations. Unpublished draft changes are never exposed
+     *     through this runtime endpoint.
      *
      *     Service-key principals may use this endpoint for published-flow runtime topology and for
      *     their own run snapshots. Authoring still requires a user principal.
@@ -4916,6 +4918,9 @@ export interface paths {
      *
      *     The backend validates the step id, runtime-input enablement, MIME policy, and
      *     effective size limits for the published flow version before storing the file.
+     *     Set the multipart file part's `Content-Type` to one of the step's
+     *     `accepted_mimetypes` from the run contract. Missing, generic, or unsupported
+     *     declared types are rejected even when the file contents can be detected.
      *     Use the returned file id in `step_inputs[step_id].file_ids` when creating the
      *     run. The same file id may be reused for other compatible runtime-input steps
      *     within this Flow. To use the same local source with another Flow, upload it
@@ -48638,7 +48643,7 @@ export interface operations {
           "application/json": components["schemas"]["GraphResponse"];
         };
       };
-      /** @description The version-pinned published snapshot failed integrity verification. The machine-readable code is `flow_definition_checksum_mismatch`. */
+      /** @description The published snapshot failed integrity verification. The machine-readable code is `flow_definition_checksum_mismatch`. */
       400: {
         headers: {
           [name: string]: unknown;
@@ -48673,7 +48678,7 @@ export interface operations {
           "application/json": components["schemas"]["GeneralError"];
         };
       };
-      /** @description Flow or run not found in tenant scope. */
+      /** @description Published Flow or run not found in tenant scope. An unpublished Flow is hidden from this runtime endpoint. */
       404: {
         headers: {
           [name: string]: unknown;

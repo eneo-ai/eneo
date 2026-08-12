@@ -7,7 +7,7 @@ A Flow is a multi-step AI pipeline you build inside a space. You design it as a 
 <Callout type="info">
   If you want to build on Flows from your own application, read this page first
   and then continue with the{" "}
-  <a href="/guides/flows-api-guide">Flows API Guide</a>. If you want to draft a
+  <a href="/guides/flows">Eneo Flows API consumer guide</a>. If you want to draft a
   Flow conversationally, read <a href="/docs/ai-builder">AI Builder</a>.
 </Callout>
 
@@ -132,7 +132,7 @@ The runtime API exposes this through:
 
 That endpoint is the canonical way for a client to discover what a published flow expects before starting a run.
 
-SDK-specific idempotency helpers are covered in the <a href="/guides/flows-api-guide">Flows API Guide</a>.
+SDK-specific idempotency helpers are covered in the <a href="/guides/flows-api-guide">Flow Runtime API Reference</a>.
 
 Runtime files are uploaded through step-scoped paths and passed to run creation in `step_inputs[step_id].file_ids`. A file id can be reused for multiple compatible steps in the same run. Orphan uploads can be deleted before run creation through `DELETE /api/v1/flows/{id}/runtime-files/{file_id}/`; after a file is attached to run input or output state, deletion returns HTTP 409 instead of mutating persisted execution history.
 
@@ -455,7 +455,7 @@ _Once a run exists, what you can see depends on who you are. Evidence is additio
 | Evidence view / export                   | Own runs, policy-gated      | Own runs, policy-gated   | In-scope runs, policy-gated | Tenant-wide, policy-gated | Own runs only, explicit `flow_evidence` capability required |
 | AI Builder                               | Yes                         | n/a                      | Yes                         | Yes                       | No                                                          |
 
-If you need the endpoint-by-endpoint version of this model, use the access matrix in the <a href="/guides/flows-api-guide#access-matrix">Flows API Guide</a>.
+If you need the endpoint-by-endpoint version of this model, use the access matrix in the <a href="/guides/flows-api-guide#access-matrix">Flow Runtime API Reference</a>.
 
 ## Evidence and classification-aware export
 

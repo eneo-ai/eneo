@@ -100,6 +100,25 @@ async def load_published_flow_runtime(
     )
 
 
+async def load_published_definition(
+    *,
+    flow_version_repo: FlowRuntimeVersionSource,
+    flow_id: UUID,
+    version: int,
+    tenant_id: UUID,
+) -> PublishedFlowDefinition:
+    flow_version = await flow_version_repo.get(
+        flow_id=flow_id,
+        version=version,
+        tenant_id=tenant_id,
+    )
+    return parse_verified_published_definition(
+        flow_version.definition_json,
+        expected_checksum=flow_version.definition_checksum,
+        flow_version=flow_version.version,
+    )
+
+
 async def load_published_runtime_inputs(
     *,
     flow_service: FlowRuntimeFlowSource,
@@ -113,15 +132,11 @@ async def load_published_runtime_inputs(
         flow_id=flow_id,
         intent=intent,
     )
-    version = await flow_version_repo.get(
+    definition = await load_published_definition(
+        flow_version_repo=flow_version_repo,
         flow_id=published.flow_id,
         version=published.published_version,
         tenant_id=published.flow.tenant_id,
-    )
-    definition = parse_verified_published_definition(
-        version.definition_json,
-        expected_checksum=version.definition_checksum,
-        flow_version=version.version,
     )
     steps = tuple(definition.runtime_steps())
     limits = await resolve_flow_input_limits_from_source(settings_source)

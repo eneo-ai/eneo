@@ -33,7 +33,7 @@ def render_flow_consumer_section_index_page() -> str:
         "",
         "## Reference owners",
         "",
-        f"- [Flows API Guide]({FLOW_API_GUIDE_HREF}) owns the full runtime API field catalog.",
+        f"- [Flow Runtime API Reference]({FLOW_API_GUIDE_HREF}) owns the full runtime API field catalog.",
         f"- [Flow error reference]({FLOW_CONSUMER_ERROR_REFERENCE_HREF}) owns machine-readable error handling.",
         "- The pages in this section link to those references instead of duplicating request and response shapes.",
     )

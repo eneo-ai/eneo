@@ -1,6 +1,6 @@
 import { Callout } from "nextra/components";
 
-# Flows API Guide
+# Flow Runtime API Reference
 
 This guide is for developers building applications on top of published Eneo Flows, such as transcription services, municipality intake services, or other multi-step AI workflows.
 
@@ -13,7 +13,7 @@ Reference owners: `FlowRuntimePathsPublic` defines runtime links, `FlowRunContra
 A few rules matter up front:
 
 - only **published** flows can be run
-- draft editing and AI Builder require a user principal
+- draft editing requires a user principal
 - a flow run is owned by the execution principal: a user principal or a service key
 - service keys can run published flows, but they can access only **their own** runs and artifacts
 
@@ -63,7 +63,6 @@ That distinction matters because service keys and ordinary human members are int
 | Publish / unpublish                       | Publishing is part of authoring governance                                              |
 | Template management and inspection        | Template configuration belongs to draft authoring                                       |
 | Flow-assistant authoring                  | Step-assistant configuration belongs to draft authoring                                 |
-| AI Builder                                | Session-based user-principal drafting workflow                                          |
 | `GET /api/v1/flows/{id}/`                 | Returns the current draft/current-definition view, not a service-key runtime projection |
 
 ### Service-key runtime endpoint families
@@ -207,12 +206,9 @@ These are admin surfaces, not end-user runtime endpoints:
 | Flow retention policy       | `GET/PATCH/POST .../preview /api/v1/settings/flow-retention-policy`                | Inspect and change organization run-history, never-attached-upload, and debug-evidence settings                          |
 | Classification retention    | `GET/PUT/POST .../preview /api/v1/settings/flow-classification-retention-policies` | Inspect and replace classification-scoped delete-after and barrier state through the same exact-preview gate             |
 
-AI Builder budget settings live at `GET/PATCH /api/v1/settings/ai-builder-budget`.
-They are authoring/admin settings for AI Builder sessions, not Flow runtime controls.
-
 Mapped execution has two independent positive-integer ceilings:
 
-- `max_provider_calls_per_mapped_step` limits the number of per-source or per-item provider calls in one step attempt. New mapped Builder authoring requires this value and may commit to a lower bound; lowering the tenant value clamps future attempts without rewriting published definitions.
+- `max_provider_calls_per_mapped_step` limits the number of per-source or per-item provider calls in one step attempt. Lowering the tenant value clamps future attempts without rewriting published definitions.
 - `max_estimated_input_tokens_per_mapped_step` limits the aggregate estimated packaged input across the same attempt. A null value means no aggregate tenant token ceiling, while each provider call still obeys its model input limit.
 
 PATCH requests distinguish omission from null: omit a field to preserve it, or send null to remove its tenant override. Runtime admission occurs before the first provider call and records the requested, tenant, and effective ceilings together with actual provider-call and token receipts in attempt evidence.
@@ -493,9 +489,14 @@ Example:
 ```bash
 curl -X POST \
   -H "Authorization: Bearer $TOKEN" \
-  -F "upload_file=@citizen-letter.pdf" \
+  -F "upload_file=@review-audio.mp3;type=audio/mpeg" \
   https://your-domain.example/api/v1/flows/$FLOW_ID/steps/$STEP_ID/runtime-files/
 ```
+
+Set the multipart file part's `Content-Type` to one of that step's
+`accepted_mimetypes` from the run contract. Missing, generic, or unsupported declared
+types are rejected even when Eneo can detect the file contents. In browser code, pass a
+`File` with the correct `type`; with curl, append `;type=...` as shown above.
 
 The returned file id belongs under `step_inputs[step_id].file_ids` when starting the run.
 You may reuse the same file id under multiple compatible step ids when several steps should
@@ -1044,7 +1045,7 @@ GET /api/v1/flows/{flow_id}/graph/
 GET /api/v1/flows/{flow_id}/graph/?run_id={run_id}
 ```
 
-Without `run_id`, the API returns the current live flow graph.
+Without `run_id`, the API resolves the graph from the current published Flow version and returns no run annotations. Unpublished draft changes are never exposed; an unpublished Flow returns `404 Not Found`.
 
 With `run_id`, it resolves the graph from that run's published version snapshot and annotates the nodes with run execution results. That is useful when you want to show the exact step topology and status history for a finished run.
 
@@ -1361,7 +1362,6 @@ Use this table as the canonical quick-reference for runtime access decisions.
 | Draft CRUD                                     | No                                                          | Per user-principal authoring policy | No                                   | Yes                         | Yes                       |
 | Publish / unpublish                            | No                                                          | No                                  | No                                   | Yes                         | Yes                       |
 | Template management / flow-assistant authoring | No                                                          | Per user-principal authoring policy | No                                   | Yes                         | Yes                       |
-| AI Builder                                     | No                                                          | Per user-principal authoring policy | No                                   | Yes                         | Yes                       |
 | List published flows in a space                | Yes, published only in scoped space                         | Yes                                 | Yes                                  | Yes                         | Yes                       |
 | `GET /api/v1/flows/{id}/published/`            | Yes                                                         | Yes                                 | Yes                                  | Yes                         | Yes                       |
 | `GET /api/v1/flows/{id}/`                      | No                                                          | Yes                                 | Read-only if visible by human policy | Yes                         | Yes                       |
@@ -1390,7 +1390,7 @@ Flow endpoints use the platform's standard JSON error shape:
 ```json
 {
   "message": "Flow must be published before creating runs.",
-  "eneo_error_code": 4000,
+  "eneo_error_code": 9007,
   "code": "flow_not_published",
   "context": null,
   "request_id": null,
@@ -1402,7 +1402,7 @@ The exact `eneo_error_code` depends on the endpoint, but the envelope shape stay
 
 ### Service-key authorization errors
 
-Service-key clients can read published runtime projections and run published flows. Draft authoring, AI Builder, and user-principal actions remain user-token surfaces.
+Service-key clients can read published runtime projections and run published flows. Draft authoring and other user-principal actions remain user-token surfaces.
 
 | Code                                       | When it appears                                                      | Client action                                                 |
 | ------------------------------------------ | -------------------------------------------------------------------- | ------------------------------------------------------------- |
@@ -1454,35 +1454,6 @@ POST /api/v1/flows/{flow_id}/runs/{run_id}/steps/{step_id}/rerun/      (optional
 POST /api/v1/flows/{flow_id}/runs/{run_id}/artifacts/{file_id}/signed-url/ (optional)
 GET  /api/v1/flows/{flow_id}/runs/{run_id}/evidence/        (optional)
 ```
-
-### Appendix: user-principal authoring and AI Builder surfaces
-
-If your application also needs to create or maintain flows, there are two user-principal authoring surfaces.
-
-#### Direct flow authoring
-
-| Purpose                       | Endpoint                                       |
-| ----------------------------- | ---------------------------------------------- |
-| Create draft                  | `POST /api/v1/flows/`                          |
-| List drafts / published flows | `GET /api/v1/flows/?space_id=...`              |
-| Get draft                     | `GET /api/v1/flows/{flow_id}/`                 |
-| Update draft                  | `PATCH /api/v1/flows/{flow_id}/`               |
-| Publish                       | `POST /api/v1/flows/{flow_id}/publish/`        |
-| Unpublish                     | `POST /api/v1/flows/{flow_id}/unpublish/`      |
-| Delete draft                  | `DELETE /api/v1/flows/{flow_id}/`              |
-| Upload DOCX template asset    | `POST /api/v1/flows/{flow_id}/template-files/` |
-
-#### AI Builder
-
-AI Builder lives under `/api/v1/flows/ai-builder/` and is a user-principal authoring surface. Service keys can run published flows, but they cannot draft or revise flows through AI Builder. For the product mental model and authoring details, see <a href="/docs/ai-builder">AI Builder</a>.
-
-Plan responses expose a single `proposal` object. Use `proposal.spec` as the proposed draft Flow. For edit sessions, use `proposal.edit` for the approved base revision, explicit removed step refs, preview diff, warnings, advisories, risk flags, and confidence. `description_override_manual` records a reviewer decision to keep the current Flow description. Do not integrate against legacy `edit_result` or compiled-edit fields; those are not part of the public API contract.
-
-For template-fill document output, treat the DOCX template asset path as an **accessibility-reviewed template path**. This is especially important for sensitive document workflows:
-
-- upload reusable DOCX templates through the template asset route
-- verify placeholders and mappings before publish
-- prefer templates that have already been reviewed for heading structure, reading order, and table semantics
 
 ## Troubleshooting
 

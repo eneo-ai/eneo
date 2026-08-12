@@ -205,6 +205,9 @@ Upload a file for a specific published runtime-input step.
 
 The backend validates the step id, runtime-input enablement, MIME policy, and
 effective size limits for the published flow version before storing the file.
+Set the multipart file part's `Content-Type` to one of the step's
+`accepted_mimetypes` from the run contract. Missing, generic, or unsupported
+declared types are rejected even when the file contents can be detected.
 Use the returned file id in `step_inputs[step_id].file_ids` when creating the
 run. The same file id may be reused for other compatible runtime-input steps
 within this Flow. To use the same local source with another Flow, upload it

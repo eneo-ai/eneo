@@ -115,6 +115,7 @@ from eneo.flows.runtime.flow_runtime_trace import (
 )
 from eneo.flows.source_identity import RUNTIME_SOURCE_IDENTITY_FIELDS
 from eneo.flows.type_policies import INPUT_TYPE_POLICIES
+from eneo.main.exceptions import ErrorCodes
 from tests.unit.api_key_test_utils import flatten_routes
 
 BACKEND_ROOT = Path(__file__).resolve().parents[3]
@@ -127,6 +128,7 @@ DOCS_SITE_GLOBAL_CSS = (
     REPO_ROOT / "frontend" / "apps" / "docs-site" / "src" / "app" / "globals.css"
 )
 FLOW_GUIDES_DIR = DOCS_SITE_CONTENT_ROOT / "guides"
+FLOW_GUIDES_INDEX = FLOW_GUIDES_DIR / "index.mdx"
 FLOW_GUIDES_META = FLOW_GUIDES_DIR / "_meta.ts"
 FLOW_API_GUIDE = FLOW_GUIDES_DIR / "flows-api-guide.mdx"
 FLOW_CONSUMER_GUIDES_DIR = FLOW_GUIDES_DIR / "flows"
@@ -2853,6 +2855,24 @@ def test_flow_consumer_section_index_is_generated_from_nav_catalog() -> None:
     assert PLACEHOLDER_DOC_PATTERN.search(page) is None
 
 
+def test_flow_consumer_journey_is_the_public_flows_entry_point() -> None:
+    guides_index = _read(FLOW_GUIDES_INDEX)
+    flows_overview = _read(FLOW_OVERVIEW)
+    guides_meta = _read(FLOW_GUIDES_META)
+    api_reference = _read(FLOW_API_GUIDE)
+
+    assert "### [Eneo Flows for API consumers](/guides/flows)" in guides_index
+    assert guides_index.index("/guides/flows)") < guides_index.index(
+        "/guides/flows-api-guide)"
+    )
+    assert 'href="/guides/flows"' in flows_overview
+    assert guides_meta.index('flows: "Eneo Flows"') < guides_meta.index(
+        '"flows-api-guide": "Flow Runtime API Reference"'
+    )
+    assert "# Flow Runtime API Reference" in api_reference
+    assert "AI Builder" not in api_reference
+
+
 def test_flow_consumer_guides_keep_api_guide_as_reference_owner() -> None:
     guide = _read(FLOW_API_GUIDE)
 
@@ -3118,10 +3138,8 @@ def test_flow_consumer_guides_document_unsupported_features_with_alternatives() 
     assert callouts
     assert any(callout.feature == "Image input" for callout in callouts)
     assert any(callout.feature == "Arbitrary mid-run pause" for callout in callouts)
-    assert any(
-        callout.feature == "AI Builder-authored HTTP steps" for callout in callouts
-    )
     assert any(callout.feature == "Run-status webhooks" for callout in callouts)
+    assert all("Builder" not in callout.feature for callout in callouts)
     assert INPUT_TYPE_POLICIES["image"].supported is False
     assert CAPABILITY_REGISTRY["input_image"].exposure == "not_exposed"
     assert CAPABILITY_REGISTRY["input_image"].not_exposed_reason
@@ -3130,6 +3148,7 @@ def test_flow_consumer_guides_document_unsupported_features_with_alternatives() 
         assert callout.feature in pages
         assert callout.supported_alternative in pages
 
+    assert "AI Builder" not in _read(FLOW_CONSUMER_FAQ_GUIDE)
     assert "webhook delivery" not in pages
 
 
@@ -3264,6 +3283,38 @@ def test_flow_api_guide_json_examples_are_valid_json() -> None:
             invalid_blocks.append(f"json block {index}: {exc}")
 
     assert invalid_blocks == []
+
+
+def test_flow_api_guide_upload_and_error_examples_match_runtime_contracts() -> None:
+    guide = _read(FLOW_API_GUIDE)
+
+    assert '-F "upload_file=@review-audio.mp3;type=audio/mpeg"' in guide
+    assert "multipart file part's `Content-Type`" in guide
+
+    graph_section = guide.split("#### Flow graph", maxsplit=1)[1].split(
+        "#### Artifact downloads",
+        maxsplit=1,
+    )[0]
+    assert "current published Flow version" in graph_section
+    assert "returns no run annotations" in graph_section
+    assert "Unpublished draft changes are never exposed" in graph_section
+    assert "an unpublished Flow returns `404 Not Found`" in graph_section
+    assert "current live flow graph" not in graph_section
+
+    error_section = guide.split("### Standard error envelope", maxsplit=1)[1].split(
+        "### Service-key authorization errors",
+        maxsplit=1,
+    )[0]
+    error_match = JSON_CODE_BLOCK_PATTERN.search(error_section)
+    assert error_match is not None
+    assert json.loads(error_match.group(1)) == {
+        "message": "Flow must be published before creating runs.",
+        "eneo_error_code": int(ErrorCodes.BAD_REQUEST),
+        "code": FlowApiErrorCode.FLOW_NOT_PUBLISHED.value,
+        "context": None,
+        "request_id": None,
+        "details": None,
+    }
 
 
 def test_flow_api_guide_pins_canonical_runtime_response_examples() -> None:
@@ -3469,9 +3520,24 @@ def test_flow_consumer_integrating_guide_renders_source_backed_worked_example() 
     assert page.count("Endpoint facts:") == len(generator.ENDPOINT_SEQUENCES)
 
     assert "## Worked end-to-end example" in page
+    assert "## Before you start" in page
+    assert "Authorization: Bearer <user-access-token>" in page
+    assert "X-API-Key: <service-key>" in page
+    assert "Keep service keys in server-side code" in page
+    assert "Do not put a service key in the bearer-token header" in page
+    assert "### Choose a published Flow" in page
+    assert "GET /api/v1/flows/?space_id={space_id}&limit=50&offset=0" in page
+    assert "`count` is the number of items in the current page, not the total" in page
+    assert "increase `offset` while `has_more` is true" in page
+    assert "GET /api/v1/flows/{id}/published/" in page
     assert "## Request shapes" not in page
     assert "multipart/form-data" in page
+    assert "upload_file=@review-audio.mp3;type=audio/mpeg" in page
+    assert "multipart file part's `Content-Type`" in page
     assert "Each response below is a public example for that hop." in page
+    assert "Errors you must handle" not in page
+    assert "Common errors in this sequence" in page
+    assert "/guides/flows/reference/errors" in page
     assert "Idempotency-Key: audio-report-alex-example-2026-03-17" in page
     assert "Idempotency-Key: review-resume-" in page
     assert FlowApiErrorCode.REVIEW_IDEMPOTENCY_KEY_REQUIRED.value in page
@@ -3519,6 +3585,15 @@ def test_flow_consumer_integrating_guide_renders_source_backed_worked_example() 
     }
     for hop in generator.WORKED_EXAMPLE_HOPS:
         contract = endpoint_by_operation_id[hop.operation_id]
+        request_line = (
+            f"{contract.method.upper()} "
+            f"{build_flow_endpoint_template(contract.route_path, api_prefix='/api/v1')}"
+        )
+        hop_section = page.split(f". {hop.title}", maxsplit=1)[1].split(
+            "Response:",
+            maxsplit=1,
+        )[0]
+        assert request_line in hop_section
         assert contract.success_status == expected_success_statuses[hop.operation_id]
         endpoint = build_flow_endpoint_template(
             contract.route_path,

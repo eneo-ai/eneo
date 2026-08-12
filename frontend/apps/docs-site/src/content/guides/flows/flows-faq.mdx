@@ -6,7 +6,7 @@ This page is for teams that need a short answer about Eneo Flows capability or o
 
 You are near the end of the consumer journey, where common design, run, review, file, and failure questions are answered in one place.
 
-Use this FAQ for quick capability and operations answers. Use the reference for schemas: [Flows API Guide](/guides/flows-api-guide).
+Use this FAQ for quick capability and operations answers. Use the reference for schemas: [Flow Runtime API Reference](/guides/flows-api-guide).
 
 ## What can flows do?
 
@@ -15,16 +15,6 @@ Use this FAQ for quick capability and operations answers. Use the reference for 
 - Use different step designs for extraction, comparison, review, and artifact generation.
 - Use step-specific knowledge when the published Flow includes it.
 - Be edited after publish; consumers should pin `expected_flow_version` when creating runs.
-
-<Callout type="warning">
-
-**Not supported: AI Builder-authored HTTP steps.**
-
-Published flows can deliver final output through outbound HTTP; delivery failures surface as flow_webhook_delivery_failed. AI Builder cannot author HTTP steps today.
-
-Closest supported alternative: Configure supported published-flow outputs and use your app or backend to call external APIs around the run.
-
-</Callout>
 
 <Callout type="warning">
 
@@ -98,6 +88,8 @@ Endpoint facts:
 
 Contract coverage: These endpoints are contract-tested.
 
-Errors you must handle: `flow_run_idempotency_conflict`, `flow_run_invalid_step_inputs`, `flow_run_access_denied`.
+Common errors in this sequence: `flow_run_idempotency_conflict`, `flow_run_invalid_step_inputs`, `flow_run_access_denied`.
+
+Use the [Flow error reference](/guides/flows/reference/errors) for the complete code catalog and recovery actions.
 
 Next: [Reference](/guides/flows/reference/errors).

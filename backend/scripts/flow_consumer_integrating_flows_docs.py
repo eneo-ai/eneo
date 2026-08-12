@@ -615,12 +615,16 @@ WORKED_EXAMPLE_HOPS: tuple[WorkedExampleHop, ...] = (
     WorkedExampleHop(
         title="Upload runtime file",
         operation_id="upload_flow_runtime_file",
-        request_intro="Upload the audio file to the step that consumes audio input.",
+        request_intro=(
+            "Upload the audio file to the step that consumes audio input. Set the "
+            "multipart file part's `Content-Type` to one of that step's "
+            "`accepted_mimetypes` from the run contract."
+        ),
         request_language="text",
         request_body=(
             "POST /api/v1/flows/{id}/steps/{step_id}/runtime-files/\n"
             "Content-Type: multipart/form-data\n\n"
-            "upload_file=@review-audio.mp3"
+            "upload_file=@review-audio.mp3;type=audio/mpeg"
         ),
         response_intro="The response returns the file id that will be bound to the step input.",
         response_json=FILE_PUBLIC_EXAMPLE,
@@ -855,9 +859,16 @@ def _render_worked_example_hop(index: int, hop: WorkedExampleHop) -> str:
 def _render_worked_example_request_block(hop: WorkedExampleHop) -> str:
     header_block = _render_worked_example_request_headers(hop)
     if hop.request_language == "json":
-        lines = ["Request:"]
+        contract = flow_runtime_endpoint_by_operation_id()[hop.operation_id]
+        request_line = (
+            f"{contract.method.upper()} "
+            f"{build_flow_endpoint_template(contract.route_path, api_prefix=CONSUMER_DOCS_API_PREFIX)}"
+        )
+        lines = ["Request:", "", "```text", request_line, "```"]
         if header_block:
             lines.extend(("", header_block, "", "Body:"))
+        else:
+            lines.extend(("", "Body:"))
         lines.extend(("", "```json", render_json_example(hop.request_body), "```"))
         return "\n".join(lines)
     lines = ["Request:"]
@@ -893,7 +904,27 @@ def _require_worked_example_text(value: str, label: str) -> None:
 def render_flow_consumer_guide_page() -> str:
     validate_flow_consumer_guide_catalog()
     body = (
-        f"Use this page for flow runtime journeys. Use the reference for full schemas: [Flows API Guide]({FLOW_API_GUIDE_HREF}).",
+        f"Use this page for flow runtime journeys. Use the reference for full schemas: [Flow Runtime API Reference]({FLOW_API_GUIDE_HREF}).",
+        "",
+        "## Before you start",
+        "",
+        "Use your Eneo deployment origin as the base URL. Authenticate every request with exactly one credential:",
+        "",
+        "```text",
+        "Authorization: Bearer <user-access-token>",
+        "```",
+        "",
+        "or:",
+        "",
+        "```text",
+        "X-API-Key: <service-key>",
+        "```",
+        "",
+        "Keep service keys in server-side code; a browser frontend should use a user access token or call through your own backend. Do not put a service key in the bearer-token header. See [Authentication & OIDC](/guides/authentication) for token setup.",
+        "",
+        "### Choose a published Flow",
+        "",
+        "The worked example starts with a known Flow id. If your app needs discovery, call `GET /api/v1/flows/?space_id={space_id}&limit=50&offset=0`. A service key sees only published Flows in its scoped space. `count` is the number of items in the current page, not the total; increase `offset` while `has_more` is true. After choosing an id, `GET /api/v1/flows/{id}/published/` returns the runtime-safe projection and canonical runtime paths. Do not use the draft `GET /api/v1/flows/{id}/` view from a service-key runtime app.",
         "",
         render_sequence_overview(),
         "",

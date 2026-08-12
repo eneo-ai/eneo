@@ -567,9 +567,11 @@ def render_endpoint_sequence(sequence: EndpointSequence) -> str:
         "",
         "Contract coverage: These endpoints are contract-tested.",
         "",
-        "Errors you must handle: "
+        "Common errors in this sequence: "
         + ", ".join(f"`{code.value}`" for code in sequence.error_codes)
         + ".",
+        "",
+        f"Use the [Flow error reference]({FLOW_CONSUMER_ERROR_REFERENCE_HREF}) for the complete code catalog and recovery actions.",
     ]
     return "\n".join(lines)
 

@@ -638,7 +638,7 @@ async def cancel_flow_run(
                             "Flow run dispatch exhaustion changed; refresh the run "
                             "before retrying."
                         ),
-                        "eneo_error_code": int(ErrorCodes.BAD_REQUEST),
+                        "eneo_error_code": int(ErrorCodes.CONFLICT),
                         "code": FlowApiErrorCode.RUN_REDISPATCH_CONFLICT.value,
                         "context": {"run_id": "00000000-0000-4000-8000-000000000101"},
                     },

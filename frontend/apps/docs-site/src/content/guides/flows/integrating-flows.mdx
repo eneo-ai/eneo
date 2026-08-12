@@ -6,7 +6,27 @@ This page is for teams wiring Eneo Flows into an application, and it shows the e
 
 You are in the integration step of the consumer journey, where the published design becomes runtime calls and user-facing states.
 
-Use this page for flow runtime journeys. Use the reference for full schemas: [Flows API Guide](/guides/flows-api-guide).
+Use this page for flow runtime journeys. Use the reference for full schemas: [Flow Runtime API Reference](/guides/flows-api-guide).
+
+## Before you start
+
+Use your Eneo deployment origin as the base URL. Authenticate every request with exactly one credential:
+
+```text
+Authorization: Bearer <user-access-token>
+```
+
+or:
+
+```text
+X-API-Key: <service-key>
+```
+
+Keep service keys in server-side code; a browser frontend should use a user access token or call through your own backend. Do not put a service key in the bearer-token header. See [Authentication & OIDC](/guides/authentication) for token setup.
+
+### Choose a published Flow
+
+The worked example starts with a known Flow id. If your app needs discovery, call `GET /api/v1/flows/?space_id={space_id}&limit=50&offset=0`. A service key sees only published Flows in its scoped space. `count` is the number of items in the current page, not the total; increase `offset` while `has_more` is true. After choosing an id, `GET /api/v1/flows/{id}/published/` returns the runtime-safe projection and canonical runtime paths. Do not use the draft `GET /api/v1/flows/{id}/` view from a service-key runtime app.
 
 ## Sequence overview
 
@@ -139,7 +159,7 @@ Response:
 
 ### 2. Upload runtime file
 
-Upload the audio file to the step that consumes audio input.
+Upload the audio file to the step that consumes audio input. Set the multipart file part's `Content-Type` to one of that step's `accepted_mimetypes` from the run contract.
 
 Request:
 
@@ -147,7 +167,7 @@ Request:
 POST /api/v1/flows/{id}/steps/{step_id}/runtime-files/
 Content-Type: multipart/form-data
 
-upload_file=@review-audio.mp3
+upload_file=@review-audio.mp3;type=audio/mpeg
 ```
 
 The response returns the file id that will be bound to the step input.
@@ -170,6 +190,10 @@ Response:
 Create the run with the version pin and the uploaded file bound to the audio step.
 
 Request:
+
+```text
+POST /api/v1/flows/{id}/runs/
+```
 
 Headers:
 
@@ -352,6 +376,12 @@ Submit the full corrected payload with the revision the reviewer saw.
 
 Request:
 
+```text
+PATCH /api/v1/flows/{id}/runs/{run_id}/review-checkpoints/{checkpoint_id}/
+```
+
+Body:
+
 ```json
 {
   "expected_checkpoint_revision": 1,
@@ -428,6 +458,12 @@ Approve the edited checkpoint with the latest revision.
 
 Request:
 
+```text
+POST /api/v1/flows/{id}/runs/{run_id}/review-checkpoints/{checkpoint_id}/approve/
+```
+
+Body:
+
 ```json
 {
   "expected_checkpoint_revision": 2
@@ -497,6 +533,10 @@ Response:
 Resume the run after approval so the worker can continue.
 
 Request:
+
+```text
+POST /api/v1/flows/{id}/runs/{run_id}/review-checkpoints/{checkpoint_id}/resume/
+```
 
 Headers:
 
@@ -760,6 +800,12 @@ Request a short-lived signed URL for the artifact file id from the final step re
 
 Request:
 
+```text
+POST /api/v1/flows/{id}/runs/{run_id}/artifacts/{file_id}/signed-url/
+```
+
+Body:
+
 ```json
 {
   "expires_in": 3600,
@@ -802,7 +848,9 @@ Endpoint facts:
 
 Contract coverage: These endpoints are contract-tested.
 
-Errors you must handle: `flow_not_published`, `flow_run_idempotency_conflict`, `flow_run_stale_version`.
+Common errors in this sequence: `flow_not_published`, `flow_run_idempotency_conflict`, `flow_run_stale_version`.
+
+Use the [Flow error reference](/guides/flows/reference/errors) for the complete code catalog and recovery actions.
 
 When the contract names file inputs, handle uploads before you create the run.
 
@@ -826,7 +874,9 @@ Endpoint facts:
 
 Contract coverage: These endpoints are contract-tested.
 
-Errors you must handle: `flow_run_required_step_input_missing`, `flow_run_step_input_max_files_exceeded`, `flow_run_step_input_file_too_large`, `flow_run_step_input_mimetype_rejected`, `flow_runtime_file_attached`.
+Common errors in this sequence: `flow_run_required_step_input_missing`, `flow_run_step_input_max_files_exceeded`, `flow_run_step_input_file_too_large`, `flow_run_step_input_mimetype_rejected`, `flow_runtime_file_attached`.
+
+Use the [Flow error reference](/guides/flows/reference/errors) for the complete code catalog and recovery actions.
 
 When a product needs explainability or cost visibility, read the evidence view and page provider calls without losing lifecycle state.
 
@@ -849,7 +899,9 @@ Endpoint facts:
 
 Contract coverage: These endpoints are contract-tested.
 
-Errors you must handle: `flow_provider_call_evidence_persistence_failed`, `flow_evidence_export_too_large`.
+Common errors in this sequence: `flow_provider_call_evidence_persistence_failed`, `flow_evidence_export_too_large`.
+
+Use the [Flow error reference](/guides/flows/reference/errors) for the complete code catalog and recovery actions.
 
 After inputs are bound, plan how the UI behaves when a review-marked step pauses the run.
 
@@ -880,7 +932,9 @@ Endpoint facts:
 
 Contract coverage: These endpoints are contract-tested.
 
-Errors you must handle: `flow_review_stale_revision`, `flow_review_expired`, `flow_review_not_active`, `flow_review_idempotency_key_required`, `flow_review_reject_reason_required`.
+Common errors in this sequence: `flow_review_stale_revision`, `flow_review_expired`, `flow_review_not_active`, `flow_review_idempotency_key_required`, `flow_review_reject_reason_required`.
+
+Use the [Flow error reference](/guides/flows/reference/errors) for the complete code catalog and recovery actions.
 
 If a user asks for files during execution, route the product design through review or rerun instead of inventing an unsupported upload path.
 
@@ -901,7 +955,9 @@ Endpoint facts:
 
 Contract coverage: These endpoints are contract-tested.
 
-Errors you must handle: `flow_review_not_active`, `flow_run_rerun_step_inputs_invalid`.
+Common errors in this sequence: `flow_review_not_active`, `flow_run_rerun_step_inputs_invalid`.
+
+Use the [Flow error reference](/guides/flows/reference/errors) for the complete code catalog and recovery actions.
 
 Once review is resolved, drive the result screen from the run's typed final result and open step details only when needed.
 
@@ -930,7 +986,9 @@ Endpoint facts:
 
 Contract coverage: These endpoints are contract-tested.
 
-Errors you must handle: `flow_run_artifact_not_found`, `flow_run_artifact_content_unavailable`, `flow_run_access_denied`.
+Common errors in this sequence: `flow_run_artifact_not_found`, `flow_run_artifact_content_unavailable`, `flow_run_access_denied`.
+
+Use the [Flow error reference](/guides/flows/reference/errors) for the complete code catalog and recovery actions.
 
 When a user needs to correct completed work, use reruns so lineage and invalidation stay visible.
 
@@ -953,7 +1011,9 @@ Endpoint facts:
 
 Contract coverage: These endpoints are contract-tested.
 
-Errors you must handle: `flow_run_rerun_stale_revision`, `flow_run_rerun_invalid_transition`, `flow_run_rerun_step_not_found`, `flow_run_rerun_step_inputs_invalid`.
+Common errors in this sequence: `flow_run_rerun_stale_revision`, `flow_run_rerun_invalid_transition`, `flow_run_rerun_step_not_found`, `flow_run_rerun_step_inputs_invalid`.
+
+Use the [Flow error reference](/guides/flows/reference/errors) for the complete code catalog and recovery actions.
 
 After the happy path works, add retries and polling rules so the integration behaves well under load.
 
@@ -979,7 +1039,9 @@ Endpoint facts:
 
 Contract coverage: These endpoints are contract-tested.
 
-Errors you must handle: `flow_run_idempotency_conflict`, `flow_run_concurrency_limit_reached`, `flow_run_user_cancelled`, `flow_worker_stalled`.
+Common errors in this sequence: `flow_run_idempotency_conflict`, `flow_run_concurrency_limit_reached`, `flow_run_user_cancelled`, `flow_worker_stalled`.
+
+Use the [Flow error reference](/guides/flows/reference/errors) for the complete code catalog and recovery actions.
 
 When a run or step fails, branch on typed codes and show the user the next action.
 
@@ -1000,7 +1062,9 @@ Endpoint facts:
 
 Contract coverage: These endpoints are contract-tested.
 
-Errors you must handle: `flow_task_failure`, `flow_step_execution_failed`, `typed_io_validation_failed`, `typed_io_output_parse_failed`.
+Common errors in this sequence: `flow_task_failure`, `flow_step_execution_failed`, `typed_io_validation_failed`, `typed_io_output_parse_failed`.
+
+Use the [Flow error reference](/guides/flows/reference/errors) for the complete code catalog and recovery actions.
 
 For backend integrations, finish by checking service-key scope and tenant isolation.
 
@@ -1023,7 +1087,9 @@ Endpoint facts:
 
 Contract coverage: These endpoints are contract-tested.
 
-Errors you must handle: `flow_run_access_denied`, `flow_run_evidence_forbidden`, `flow_service_key_admin_required`.
+Common errors in this sequence: `flow_run_access_denied`, `flow_run_evidence_forbidden`, `flow_service_key_admin_required`.
+
+Use the [Flow error reference](/guides/flows/reference/errors) for the complete code catalog and recovery actions.
 
 <Callout type="warning">
 

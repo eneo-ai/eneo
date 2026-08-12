@@ -83,6 +83,7 @@ from eneo.flows.published_definition import (
     PublishedFlowDefinition,
     parse_verified_published_definition,
 )
+from eneo.flows.published_runtime import load_published_definition
 from eneo.main.config import get_settings
 from eneo.main.exceptions import NotFoundException
 from eneo.settings.setting_service import SettingService
@@ -300,15 +301,11 @@ class FlowRunService:
             )
         flow_version = flow.published_version
 
-        runtime_version = await self.flow_version_repo.get(
+        published_definition = await load_published_definition(
+            flow_version_repo=self.flow_version_repo,
             flow_id=flow_id,
             version=flow_version,
             tenant_id=self.user.tenant_id,
-        )
-        published_definition = parse_verified_published_definition(
-            runtime_version.definition_json,
-            expected_checksum=runtime_version.definition_checksum,
-            flow_version=runtime_version.version,
         )
         return _PublishedRunDefinition(
             flow=flow,
@@ -589,15 +586,11 @@ class FlowRunService:
             flow_id=flow_id,
             access_kind="content",
         )
-        flow_version = await self.flow_version_repo.get(
+        published_definition = await load_published_definition(
+            flow_version_repo=self.flow_version_repo,
             flow_id=run.flow_id,
             version=run.flow_version,
             tenant_id=run.tenant_id,
-        )
-        published_definition = parse_verified_published_definition(
-            flow_version.definition_json,
-            expected_checksum=flow_version.definition_checksum,
-            flow_version=flow_version.version,
         )
         step_results = await self.flow_run_repo.list_step_results(
             run_id=run.id,

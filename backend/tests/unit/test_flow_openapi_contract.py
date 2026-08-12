@@ -2400,6 +2400,9 @@ def test_openapi_flow_run_public_exposes_strict_dispatch_lifecycle(
     assert conflict_examples[FlowApiErrorCode.RUN_REDISPATCH_CONFLICT.value][
         "code"
     ] == (FlowApiErrorCode.RUN_REDISPATCH_CONFLICT.value)
+    assert conflict_examples[FlowApiErrorCode.RUN_REDISPATCH_CONFLICT.value][
+        "eneo_error_code"
+    ] == int(ErrorCodes.CONFLICT)
     audit_unavailable_examples = _error_example_values(
         redispatch_operation,
         status_code="503",
@@ -3204,6 +3207,20 @@ def test_openapi_runtime_file_upload_multipart_schema_uses_upload_file_field(
         assert "upload_file" in required
 
 
+def test_openapi_runtime_file_upload_explains_declared_mime_contract(
+    openapi_spec: dict,
+) -> None:
+    operation = (
+        openapi_spec.get("paths", {})
+        .get("/api/v1/flows/{id}/steps/{step_id}/runtime-files/", {})
+        .get("post", {})
+    )
+
+    description = operation.get("description", "")
+    assert "accepted_mimetypes" in description
+    assert "multipart file part's `Content-Type`" in description
+
+
 def test_openapi_flow_consumer_request_response_schemas(openapi_spec: dict) -> None:
     run_post = (
         openapi_spec.get("paths", {})
@@ -3801,6 +3818,15 @@ def test_openapi_flow_error_responses_include_general_error_examples(
                     and example["message"].strip()
                 )
                 assert "eneo_error_code" in example
+                expected_numeric_code = {
+                    "404": int(ErrorCodes.NOT_FOUND),
+                    "409": int(ErrorCodes.CONFLICT),
+                }.get(status_code)
+                if expected_numeric_code is not None:
+                    assert example["eneo_error_code"] == expected_numeric_code, (
+                        f"{method.upper()} {path} {status_code} example must use "
+                        f"eneo_error_code {expected_numeric_code}"
+                    )
                 assert isinstance(example.get("code"), str) and example["code"].strip()
 
 

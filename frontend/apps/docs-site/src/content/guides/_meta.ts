@@ -2,8 +2,8 @@ import type { MetaRecord } from "nextra";
 
 const meta: MetaRecord = {
   index: "Overview",
-  "flows-api-guide": "Flows API Guide",
   flows: "Eneo Flows",
+  "flows-api-guide": "Flow Runtime API Reference",
   authentication: "Authentication & OIDC",
   "oidc-federation": "OIDC Federation",
   "scim-provisioning": "SCIM Provisioning",

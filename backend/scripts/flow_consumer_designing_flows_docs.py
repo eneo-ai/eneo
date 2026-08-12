@@ -305,7 +305,7 @@ def render_flow_consumer_guide_page() -> str:
         for row in CAPABILITY_MATRIX_ROWS
     )
     body = (
-        f"The reference guide keeps the full field catalog: [Flows API Guide]({FLOW_API_GUIDE_HREF}).",
+        f"The reference guide keeps the full field catalog: [Flow Runtime API Reference]({FLOW_API_GUIDE_HREF}).",
         "",
         "## Building blocks",
         "",

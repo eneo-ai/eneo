@@ -58,7 +58,7 @@ function isRequestValidationResponse(value) {
  */
 
 export function createClient(args) {
-  const version = "DEV-20260811T101240Z"; // # Client version auto-updates when running the updater, do not edit this line.
+  const version = "DEV-20260812T073004Z"; // # Client version auto-updates when running the updater, do not edit this line.
   const baseUrl = args.baseUrl;
   const _fetch = args.fetch ?? fetch;
 

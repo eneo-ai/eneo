@@ -71,6 +71,7 @@ from eneo.flows.enums import (
     FlowRunRerunOperationStatus,
     FlowStepResultStatus,
 )
+from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_run_step_inputs import FlowRunStepInputFiles
 from eneo.flows.infrastructure.flow_run_webhook_delivery_repo import (
     FlowRunWebhookDeliveryRead,
@@ -78,6 +79,7 @@ from eneo.flows.infrastructure.flow_run_webhook_delivery_repo import (
 from eneo.flows.published_definition import (
     FLOW_DEFINITION_SCHEMA_VERSION,
     parse_published_definition,
+    published_definition_checksum,
 )
 from eneo.main.exceptions import (
     BadRequestException,
@@ -213,16 +215,40 @@ async def test_get_flow_graph_rejects_run_snapshot_without_executable_steps():
 
 
 @pytest.mark.asyncio
-async def test_get_flow_graph_uses_live_flow_when_run_id_missing():
+async def test_get_flow_graph_uses_published_snapshot_when_run_id_missing():
     container = MagicMock()
     flow_service = AsyncMock()
+    flow_version_repo = AsyncMock()
     container.flow_service.return_value = flow_service
     container.flow_run_service.return_value = AsyncMock()
+    container.flow_version_repo.return_value = flow_version_repo
     _enable_space_access(container)
 
     flow_id = uuid4()
     live_flow = _flow(flow_id)
+    snapshot_step_id = uuid4()
+    definition_json = {
+        "schema_version": FLOW_DEFINITION_SCHEMA_VERSION,
+        "flow_id": str(flow_id),
+        "steps": [
+            {
+                "step_id": str(snapshot_step_id),
+                "step_order": 1,
+                "assistant_id": str(uuid4()),
+                "user_description": "Published snapshot step",
+                "input_source": "flow_input",
+                "input_type": "text",
+                "output_mode": "pass_through",
+                "output_type": "json",
+            }
+        ],
+    }
     flow_service.get_flow.return_value = live_flow
+    flow_version_repo.get.return_value = SimpleNamespace(
+        version=live_flow.published_version,
+        definition_checksum=published_definition_checksum(definition_json),
+        definition_json=definition_json,
+    )
 
     graph = await get_flow_graph(
         id=flow_id,
@@ -233,9 +259,84 @@ async def test_get_flow_graph_uses_live_flow_when_run_id_missing():
 
     llm_nodes = [node for node in graph.nodes if node.type == "llm"]
     assert len(llm_nodes) == 1
-    assert llm_nodes[0].label == "Step 1"
+    assert llm_nodes[0].id == str(snapshot_step_id)
+    assert llm_nodes[0].label == "Published snapshot step"
+    assert all(node.run_status is None for node in graph.nodes)
+    assert all(node.num_tokens_input is None for node in graph.nodes)
+    assert all(node.num_tokens_output is None for node in graph.nodes)
     container.flow_run_service.return_value.get_run_versioned_view.assert_not_awaited()
+    flow_version_repo.get.assert_awaited_once_with(
+        flow_id=flow_id,
+        version=live_flow.published_version,
+        tenant_id=live_flow.tenant_id,
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("principal_kind", ["user", "service_key"])
+async def test_get_flow_graph_hides_unpublished_flow(principal_kind: str):
+    container = MagicMock()
+    flow_service = AsyncMock()
+    container.flow_service.return_value = flow_service
+    container.flow_run_service.return_value = AsyncMock()
+    user = SimpleNamespace(
+        id=uuid4(),
+        tenant_id=uuid4(),
+        permissions=[Permission.FLOWS],
+    )
+    if principal_kind == "service_key":
+        user.active_api_key = _service_key()
+    container.user.return_value = user
+    _enable_space_access(container)
+
+    flow_id = uuid4()
+    flow_service.get_flow.return_value = _flow(flow_id).model_copy(
+        update={"published_version": None}
+    )
+
+    with pytest.raises(NotFoundException):
+        await get_flow_graph(
+            id=flow_id,
+            request=SimpleNamespace(state=SimpleNamespace()),
+            run_id=None,
+            container=container,
+        )
+
     container.flow_version_repo.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_get_flow_graph_rejects_corrupt_published_snapshot_without_run_id():
+    container = MagicMock()
+    flow_service = AsyncMock()
+    flow_version_repo = AsyncMock()
+    container.flow_service.return_value = flow_service
+    container.flow_run_service.return_value = AsyncMock()
+    container.flow_version_repo.return_value = flow_version_repo
+    _enable_space_access(container)
+
+    flow_id = uuid4()
+    live_flow = _flow(flow_id)
+    flow_service.get_flow.return_value = live_flow
+    flow_version_repo.get.return_value = SimpleNamespace(
+        version=live_flow.published_version,
+        definition_checksum="stored-checksum-does-not-match",
+        definition_json={
+            "schema_version": FLOW_DEFINITION_SCHEMA_VERSION,
+            "flow_id": str(flow_id),
+            "steps": [],
+        },
+    )
+
+    with pytest.raises(BadRequestException) as exc_info:
+        await get_flow_graph(
+            id=flow_id,
+            request=SimpleNamespace(state=SimpleNamespace()),
+            run_id=None,
+            container=container,
+        )
+
+    assert exc_info.value.code is FlowApiErrorCode.DEFINITION_CHECKSUM_MISMATCH
 
 
 @pytest.mark.asyncio

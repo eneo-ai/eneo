@@ -118,11 +118,6 @@ ENDPOINT_SEQUENCES: tuple[EndpointSequence, ...] = (
 )
 
 UNSUPPORTED_CALLOUTS: tuple[UnsupportedCallout, ...] = (
-    UnsupportedCallout(
-        feature="AI Builder-authored HTTP steps",
-        reason="Published flows can deliver final output through outbound HTTP; delivery failures surface as flow_webhook_delivery_failed. AI Builder cannot author HTTP steps today.",
-        supported_alternative="Configure supported published-flow outputs and use your app or backend to call external APIs around the run.",
-    ),
     IMAGE_INPUT_UNSUPPORTED_CALLOUT,
     RUN_STATUS_WEBHOOKS_UNSUPPORTED_CALLOUT,
     UnsupportedCallout(
@@ -142,7 +137,7 @@ def validate_flow_consumer_guide_catalog() -> None:
 def render_flow_consumer_guide_page() -> str:
     validate_flow_consumer_guide_catalog()
     body = (
-        f"Use this FAQ for quick capability and operations answers. Use the reference for schemas: [Flows API Guide]({FLOW_API_GUIDE_HREF}).",
+        f"Use this FAQ for quick capability and operations answers. Use the reference for schemas: [Flow Runtime API Reference]({FLOW_API_GUIDE_HREF}).",
         "",
         "## What can flows do?",
         "",
@@ -153,8 +148,6 @@ def render_flow_consumer_guide_page() -> str:
         "- Be edited after publish; consumers should pin `expected_flow_version` when creating runs.",
         "",
         render_unsupported_callout(UNSUPPORTED_CALLOUTS[0]),
-        "",
-        render_unsupported_callout(UNSUPPORTED_CALLOUTS[1]),
         "",
         "## Can I build this case?",
         "",
@@ -173,9 +166,9 @@ def render_flow_consumer_guide_page() -> str:
         "- Mid-run files: use review design or rerun overrides; do not inject files into an executing step.",
         "- Results: read per-step results as they complete and use final output for the terminal answer.",
         "",
-        render_unsupported_callout(UNSUPPORTED_CALLOUTS[2]),
+        render_unsupported_callout(UNSUPPORTED_CALLOUTS[1]),
         "",
-        render_unsupported_callout(UNSUPPORTED_CALLOUTS[3]),
+        render_unsupported_callout(UNSUPPORTED_CALLOUTS[2]),
         "",
         render_endpoint_sequence(ENDPOINT_SEQUENCES[0]),
     )

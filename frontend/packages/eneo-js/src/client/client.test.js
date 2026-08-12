@@ -63,6 +63,38 @@ describe("createClient path parameters", () => {
     expect(requestHeaders.has("api-key")).toBe(false);
   });
 
+  it("authenticates user tokens with the bearer Authorization header", async () => {
+    const fetch = vi.fn(
+      async () => new Response(JSON.stringify({ statuses: [] }), { status: 200 })
+    );
+    const token = "synthetic-user-access-token";
+    const client = createClient({ baseUrl: "https://api.example.test", token, fetch });
+
+    await client.fetch("/api/v1/flows/runs/status-capabilities/", { method: "get" });
+
+    const requestHeaders = new Headers(fetch.mock.calls[0][1].headers);
+    expect(requestHeaders.get("Authorization")).toBe(`Bearer ${token}`);
+    expect(requestHeaders.has("X-API-Key")).toBe(false);
+  });
+
+  it("uses only X-API-Key when both authentication options are supplied", async () => {
+    const fetch = vi.fn(
+      async () => new Response(JSON.stringify({ statuses: [] }), { status: 200 })
+    );
+    const client = createClient({
+      baseUrl: "https://api.example.test",
+      apiKey: "synthetic-service-key",
+      token: "synthetic-user-access-token",
+      fetch
+    });
+
+    await client.fetch("/api/v1/flows/runs/status-capabilities/", { method: "get" });
+
+    const requestHeaders = new Headers(fetch.mock.calls[0][1].headers);
+    expect(requestHeaders.get("X-API-Key")).toBe("synthetic-service-key");
+    expect(requestHeaders.has("Authorization")).toBe(false);
+  });
+
   it("forwards typed header parameters and caller headers", async () => {
     const fetch = vi.fn(async () => new Response(JSON.stringify({ id: "run-1" }), { status: 200 }));
     const client = createClient({ baseUrl: "https://api.example.test", fetch });

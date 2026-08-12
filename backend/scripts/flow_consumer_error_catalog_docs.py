@@ -91,7 +91,7 @@ def render_flow_consumer_error_reference_page() -> str:
             "",
             render_flow_consumer_error_catalog_table(),
             "",
-            "Next: [Flows API Guide](/guides/flows-api-guide)",
+            "Next: [Flow Runtime API Reference](/guides/flows-api-guide)",
             "",
         )
     )

@@ -13,6 +13,7 @@ from eneo.files.signed_urls import build_signed_download_response
 from eneo.flows.api import flow_access_context
 from eneo.flows.api.flow_api_common import audit_actor_kwargs, error_response
 from eneo.flows.api.flow_assembler import FlowAssembler
+from eneo.flows.api.flow_definition_access import require_flow_published_runtime_access
 from eneo.flows.api.flow_graph import (
     GraphResponse,
     build_graph_response,
@@ -25,9 +26,9 @@ from eneo.flows.api.flow_runtime_paths import (
 )
 from eneo.flows.flow_access_policy import FlowApiAction
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
-from eneo.flows.principal import FlowPrincipal
+from eneo.flows.published_runtime import load_published_definition
 from eneo.main.container.container import Container
-from eneo.main.exceptions import ErrorCodes, NotFoundException
+from eneo.main.exceptions import ErrorCodes
 from eneo.server.dependencies.container import get_container
 
 router = APIRouter()
@@ -128,10 +129,12 @@ async def list_flow_run_steps(
     operation_id="get_flow_graph",
     summary="Get flow graph",
     description="""
-Return the graph representation for a flow definition or one version-pinned run snapshot.
+Return the graph representation for the current published Flow version or one version-pinned run.
 
 When `run_id` is provided, the graph is built from the run's published version snapshot and
-annotated with run execution results. Otherwise the current live flow definition is used.
+annotated with run execution results. Without `run_id`, the graph is built from the current
+published snapshot and contains no run annotations. Unpublished draft changes are never exposed
+through this runtime endpoint.
 
 Service-key principals may use this endpoint for published-flow runtime topology and for
 their own run snapshots. Authoring still requires a user principal.
@@ -139,7 +142,7 @@ their own run snapshots. Authoring still requires a user principal.
     responses={
         400: error_response(
             description=(
-                "The version-pinned published snapshot failed integrity verification. "
+                "The published snapshot failed integrity verification. "
                 "The machine-readable code is `flow_definition_checksum_mismatch`."
             ),
             message="Published Flow definition integrity verification failed.",
@@ -154,7 +157,10 @@ their own run snapshots. Authoring still requires a user principal.
             context={"auth_layer": "api_key_scope"},
         ),
         404: error_response(
-            description="Flow or run not found in tenant scope.",
+            description=(
+                "Published Flow or run not found in tenant scope. An unpublished "
+                "Flow is hidden from this runtime endpoint."
+            ),
             message="Flow not found.",
             eneo_error_code=ErrorCodes.NOT_FOUND,
             code="not_found",
@@ -177,16 +183,15 @@ async def get_flow_graph(
         get_container(with_user=True, with_upload_admission=True)
     ),
 ):
-    await flow_access_context.enforce_flow_scope(
-        request,
-        container,
-        flow_id=id,
-        required_access=FlowApiAction.VIEW,
-        allow_service_key_principals=True,
-    )
-    flow_run_service = container.flow_run_service()
-
     if run_id is not None:
+        await flow_access_context.enforce_flow_scope(
+            request,
+            container,
+            flow_id=id,
+            required_access=FlowApiAction.VIEW,
+            allow_service_key_principals=True,
+        )
+        flow_run_service = container.flow_run_service()
         versioned_view = await flow_run_service.get_run_versioned_view(
             flow_id=id,
             run_id=run_id,
@@ -196,15 +201,18 @@ async def get_flow_graph(
             versioned_view.step_results,
         )
 
-    flow_service = container.flow_service()
-    flow = await flow_service.get_flow(id)
-    if (
-        FlowPrincipal.from_user(container.user()).is_service_key
-        and flow.published_version is None
-    ):
-        raise NotFoundException("Flow not found.")
-    live_steps = [step.model_dump(mode="json") for step in flow.steps]
-    return build_graph_response(live_steps)
+    published_access = await require_flow_published_runtime_access(
+        request,
+        container,
+        flow_id=id,
+    )
+    published_definition = await load_published_definition(
+        flow_version_repo=container.flow_version_repo(),
+        flow_id=id,
+        version=published_access.published_version,
+        tenant_id=published_access.flow.tenant_id,
+    )
+    return build_graph_response(published_definition.steps)
 
 
 @router.post(
