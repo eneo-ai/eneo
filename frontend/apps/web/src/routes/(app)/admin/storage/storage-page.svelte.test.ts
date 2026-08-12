@@ -1,7 +1,9 @@
 import { page, userEvent } from "@vitest/browser/context";
 import { EneoError } from "@eneo/eneo-js";
 import { render } from "vitest-browser-svelte";
-import { beforeEach, describe, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+
+import "../../../../app.css";
 
 const getPolicy = vi.hoisted(() => vi.fn());
 const getInventory = vi.hoisted(() => vi.fn());
@@ -95,6 +97,13 @@ vi.mock("$lib/paraglide/runtime", () => ({
 }));
 
 import StoragePage from "./+page.svelte";
+
+const originalTheme = document.documentElement.dataset.theme;
+
+afterEach(() => {
+  if (originalTheme === undefined) delete document.documentElement.dataset.theme;
+  else document.documentElement.dataset.theme = originalTheme;
+});
 
 function policy(overrides: Record<string, unknown> = {}) {
   return {
@@ -2707,5 +2716,59 @@ describe("admin storage settings page", () => {
     await expect
       .element(overview.getByText("30 storage_unit_kb", { exact: true }))
       .not.toBeInTheDocument();
+  });
+
+  test("labels both storage locations when one share is very small", async () => {
+    document.documentElement.dataset.theme = "light";
+    testUser.canAdministerStorage = true;
+    getPolicy.mockResolvedValue(policy());
+    getInventory.mockResolvedValue({
+      ...inventory(),
+      inventory: [
+        {
+          owner: "file_content",
+          target: "postgres_inline",
+          state: "available",
+          count: 100,
+          bytes: 100 * 1024 * 1024 * 1024,
+          oldest_created_at: "2026-07-20T10:00:00Z"
+        },
+        {
+          owner: "knowledge_file",
+          target: "object_store",
+          state: "available",
+          count: 1,
+          bytes: 1024 * 1024,
+          oldest_created_at: "2026-07-19T10:00:00Z"
+        }
+      ]
+    });
+
+    render(StoragePage);
+
+    const overview = page.getByRole("region", { name: "storage_overview_title" });
+    await expect.element(overview).toBeVisible();
+    const distribution = overview
+      .getByRole("img", { name: /storage_overview_distribution_label/ })
+      .element();
+    const postgresqlSegment = distribution.querySelector("[data-storage-segment='postgresql']")!;
+    const objectStoreSegment = distribution.querySelector("[data-storage-segment='object-store']")!;
+    const postgresqlSwatch = overview
+      .element()
+      .querySelector("[data-storage-swatch='postgresql']")!;
+    const objectStoreSwatch = overview
+      .element()
+      .querySelector("[data-storage-swatch='object-store']")!;
+
+    expect(objectStoreSegment.getBoundingClientRect().width).toBeGreaterThanOrEqual(4);
+    expect(getComputedStyle(postgresqlSwatch).backgroundColor).toBe(
+      getComputedStyle(postgresqlSegment).backgroundColor
+    );
+    expect(getComputedStyle(objectStoreSwatch).backgroundColor).toBe(
+      getComputedStyle(objectStoreSegment).backgroundColor
+    );
+    expect(getComputedStyle(postgresqlSwatch).backgroundColor).not.toBe(
+      getComputedStyle(objectStoreSwatch).backgroundColor
+    );
   });
 });

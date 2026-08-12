@@ -210,29 +210,56 @@
         {#if inventory}
           <p class="text-lg font-semibold tabular-nums">{storageBytes(managedTotalBytes, 2)}</p>
           {#if managedTotalBytes > 0}
-            <div
-              class="bg-secondary flex h-1.5 overflow-hidden rounded-full"
+            <span
+              class="bg-secondary flex h-1.5 gap-px overflow-hidden rounded-full"
               role="img"
               aria-label={m.storage_overview_distribution_label({
                 postgresql: storageBytes(managedPostgresqlBytes, 2),
                 objectStore: storageBytes(managedObjectStoreBytes, 2)
               })}
             >
-              <div class="bg-accent-default h-full" style={`flex-basis: ${postgresqlShare}%`}></div>
-              <div
-                class="bg-positive-default h-full"
-                style={`flex-basis: ${objectStoreShare}%`}
-              ></div>
-            </div>
+              {#if managedPostgresqlBytes > 0}
+                <span
+                  data-storage-segment="postgresql"
+                  class="bg-accent-default block h-full min-w-[4px] shrink-0"
+                  style={`flex-grow: ${postgresqlShare}; flex-basis: 0`}
+                ></span>
+              {/if}
+              {#if managedObjectStoreBytes > 0}
+                <span
+                  data-storage-segment="object-store"
+                  class="bg-positive-default block h-full min-w-[4px] shrink-0"
+                  style={`flex-grow: ${objectStoreShare}; flex-basis: 0`}
+                ></span>
+              {/if}
+            </span>
           {/if}
           <dl class="text-muted grid gap-1 text-xs">
             <div class="flex justify-between gap-3">
-              <dt>{m.storage_target_postgres_inline()}</dt>
-              <dd class="tabular-nums">{storageBytes(managedPostgresqlBytes, 2)}</dd>
+              <dt class="flex min-w-0 items-center gap-2">
+                <span
+                  data-storage-swatch="postgresql"
+                  class="bg-accent-default size-2 shrink-0 rounded-[2px]"
+                  aria-hidden="true"
+                ></span>
+                <span>{m.storage_target_postgres_inline()}</span>
+              </dt>
+              <dd class="shrink-0 tabular-nums">
+                {storageBytes(managedPostgresqlBytes, 2)}
+              </dd>
             </div>
             <div class="flex justify-between gap-3">
-              <dt>{m.storage_target_object_store()}</dt>
-              <dd class="tabular-nums">{storageBytes(managedObjectStoreBytes, 2)}</dd>
+              <dt class="flex min-w-0 items-center gap-2">
+                <span
+                  data-storage-swatch="object-store"
+                  class="bg-positive-default size-2 shrink-0 rounded-[2px]"
+                  aria-hidden="true"
+                ></span>
+                <span>{m.storage_target_object_store()}</span>
+              </dt>
+              <dd class="shrink-0 tabular-nums">
+                {storageBytes(managedObjectStoreBytes, 2)}
+              </dd>
             </div>
           </dl>
         {:else if inventoryStatus === "loading"}
