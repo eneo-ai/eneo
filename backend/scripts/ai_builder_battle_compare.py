@@ -338,11 +338,14 @@ _IDENTITY_FIELDS: tuple[str, ...] = (
 # sessions share provider capacity, and provider_outcome_unknown already
 # accounts for 3-5 cases per pass. Until someone measures whether that rate
 # moves with load, receipts taken at different concurrency are different
-# experiments.
+# experiments. Per-case scheduling and Flow isolation are gated because older
+# harnesses let repeated observations contend with persistent applied Flows.
 _GATED_RUN_CONTEXT_FIELDS: tuple[str, ...] = (
     "auto_confirm_requirements",
     "confirm_message_sha256",
     "max_concurrency",
+    "max_concurrent_observations_per_case",
+    "flow_isolation_semantics_version",
     "ui_language",
 )
 

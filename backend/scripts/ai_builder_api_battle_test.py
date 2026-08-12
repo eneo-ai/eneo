@@ -18,13 +18,15 @@ import subprocess
 import sys
 import time
 import unicodedata
-from collections.abc import Iterator, Mapping
-from concurrent.futures import ThreadPoolExecutor
+from collections import deque
+from collections.abc import Callable, Iterator, Mapping
+from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 from dataclasses import dataclass
 from pathlib import Path
+from threading import Lock
 from typing import Any, cast
 from urllib.error import HTTPError, URLError
-from urllib.parse import urlsplit, urlunsplit
+from urllib.parse import quote, urlsplit, urlunsplit
 from urllib.request import Request, urlopen
 from uuid import uuid4
 
@@ -34,6 +36,12 @@ from uuid import uuid4
 _SCRIPTS_DIR = str(Path(__file__).resolve().parent)
 if _SCRIPTS_DIR not in sys.path:
     sys.path.insert(0, _SCRIPTS_DIR)
+
+_MAX_CONCURRENT_OBSERVATIONS_PER_CASE = 1
+_FLOW_ISOLATION_SEMANTICS_VERSION = 1
+# Flow materialization lists active names before inserting. Serialize that
+# read-then-write operation so concurrent observations cannot select one suffix.
+_FLOW_APPLY_LOCK = Lock()
 
 from ai_builder_receipt import (  # noqa: E402
     BUNDLE_FILE_FIELD,
@@ -126,10 +134,20 @@ class BattleTurnError(ValueError):
         self.client_turn_id = client_turn_id
 
 
+class BattleFlowLifecycleError(ValueError):
+    """An applied benchmark Flow could not complete its owned lifecycle."""
+
+    def __init__(self, *, message: str, flow_lifecycle: JsonObject) -> None:
+        super().__init__(message)
+        self.flow_lifecycle = flow_lifecycle
+
+
 def _failure_error_fields(error: Exception) -> JsonObject:
     fields: JsonObject = {"error": str(error)}
     if isinstance(error, BattleTurnError):
         fields["client_turn_id"] = error.client_turn_id
+    if isinstance(error, BattleFlowLifecycleError):
+        fields["flow_lifecycle"] = dict(error.flow_lifecycle)
     return fields
 
 
@@ -557,12 +575,10 @@ def _parse_args() -> argparse.Namespace:
         type=int,
         default=1,
         help=(
-            "Run this many suite observations at once. Observations are "
-            "independent sessions and provider-latency bound, so this is the "
-            "only lever that changes wall-clock cost. Recorded in run_context "
-            "and gated by the comparator: receipts taken at different "
-            "concurrency are not compared until the effect on provider error "
-            "rate is measured. Default: %(default)s."
+            "Run this many observations from different cases at once. Repetitions "
+            "of one case are serialized so they cannot contend with each other. "
+            "The global limit is recorded in run_context and gated by the "
+            "comparator. Default: %(default)s."
         ),
     )
     parser.add_argument("--model-id", default=None, help="Optional model UUID.")
@@ -1560,6 +1576,41 @@ def _max_concurrency(args: argparse.Namespace) -> int:
     return value
 
 
+def _acquire_observations_with_case_isolation(
+    *,
+    observations: list[tuple[int, int, BattleCase]],
+    max_concurrency: int,
+    acquire: Callable[[tuple[int, int, BattleCase]], JsonObject],
+) -> list[JsonObject]:
+    """Acquire observations concurrently without overlapping one case's repeats."""
+
+    if max_concurrency == 1:
+        return [acquire(observation) for observation in observations]
+    pending_by_case: dict[
+        str,
+        deque[tuple[int, tuple[int, int, BattleCase]]],
+    ] = {}
+    for index, observation in enumerate(observations):
+        _, _, case = observation
+        pending_by_case.setdefault(case.case_id, deque()).append((index, observation))
+    ready_cases = deque(pending_by_case)
+    results_by_index: dict[int, JsonObject] = {}
+    with ThreadPoolExecutor(max_workers=max_concurrency) as executor:
+        in_flight: dict[Future[JsonObject], tuple[str, int]] = {}
+        while ready_cases or in_flight:
+            while ready_cases and len(in_flight) < max_concurrency:
+                case_id = ready_cases.popleft()
+                index, observation = pending_by_case[case_id].popleft()
+                in_flight[executor.submit(acquire, observation)] = (case_id, index)
+            completed, _ = wait(in_flight, return_when=FIRST_COMPLETED)
+            for future in sorted(completed, key=lambda item: in_flight[item][1]):
+                case_id, index = in_flight.pop(future)
+                results_by_index[index] = future.result()
+                if pending_by_case[case_id]:
+                    ready_cases.append(case_id)
+    return [results_by_index[index] for index in range(len(observations))]
+
+
 def _suite_run_context(args: argparse.Namespace) -> JsonObject:
     confirm_message = getattr(args, "confirm_message", DEFAULT_CONFIRM_MESSAGE)
     return {
@@ -1579,7 +1630,35 @@ def _suite_run_context(args: argparse.Namespace) -> JsonObject:
         # open question, so receipts taken under different concurrency are not
         # assumed comparable until someone measures it.
         "max_concurrency": _max_concurrency(args),
+        "max_concurrent_observations_per_case": (_MAX_CONCURRENT_OBSERVATIONS_PER_CASE),
+        "flow_isolation_semantics_version": _FLOW_ISOLATION_SEMANTICS_VERSION,
     }
+
+
+def _require_clean_measurement_space(
+    *,
+    config: ApiConfig,
+    space_id: str,
+) -> None:
+    """Refuse benchmark acquisition when active Flows can affect name allocation."""
+
+    page = _request_json(
+        config=config,
+        method="GET",
+        path=f"/flows/?space_id={quote(space_id, safe='')}&limit=1&offset=0",
+    )
+    raw_items = page.get("items")
+    if (
+        not isinstance(raw_items, list)
+        or page.get("count") != len(cast(list[object], raw_items))
+        or not isinstance(page.get("has_more"), bool)
+    ):
+        raise ValueError("measurement space Flow listing is malformed.")
+    items = cast(list[object], raw_items)
+    if items or page["has_more"] is True:
+        raise ValueError(
+            "measurement space contains active Flows; use a dedicated empty space."
+        )
 
 
 def _suite_evaluator_identity(
@@ -1764,6 +1843,10 @@ def _run_suite(
         config=config if is_release_run else None,
     )
     failure_execution_provenance = _failure_execution_provenance(release_identity)
+    _require_clean_measurement_space(
+        config=config,
+        space_id=args.space_id,
+    )
     provisioned_fixtures = _provision_fixtures(config=config, cases=cases)
     expected_observations = _expected_observations(cases, args.repetitions)
     run_context = _suite_run_context(args)
@@ -1829,15 +1912,11 @@ def _run_suite(
         )
 
     print(f"\nrunning {total_runs} observation(s) with concurrency {max_concurrency}")
-    if max_concurrency == 1:
-        results = [run_observation(item) for item in observations]
-    else:
-        # Cases are independent sessions and provider-latency bound: the
-        # median observation spent 21 of its 23 seconds waiting. Order is
-        # restored from the submitted order so the receipt does not depend on
-        # which observation happened to finish first.
-        with ThreadPoolExecutor(max_workers=max_concurrency) as executor:
-            results = list(executor.map(run_observation, observations))
+    results = _acquire_observations_with_case_isolation(
+        observations=observations,
+        max_concurrency=max_concurrency,
+        acquire=run_observation,
+    )
 
     case_error_count = sum(
         1
@@ -2068,9 +2147,10 @@ def _run_replacement_batch(
     release_identity = summary.get("release_identity")
     if not isinstance(release_identity, Mapping):
         raise ValueError("base receipt has no release_identity.")
-    run_context = summary.get("run_context")
-    if not isinstance(run_context, Mapping):
+    raw_run_context = summary.get("run_context")
+    if not isinstance(raw_run_context, Mapping):
         raise ValueError("base receipt has no run_context.")
+    run_context = cast(Mapping[str, object], raw_run_context)
     expected_confirmation_hash = run_context.get("confirm_message_sha256")
     actual_confirmation_hash = hashlib.sha256(
         str(args.confirm_message).encode("utf-8")
@@ -2086,6 +2166,18 @@ def _run_replacement_batch(
         or max_concurrency < 1
     ):
         raise ValueError("base receipt max_concurrency must be a positive integer.")
+    if (
+        run_context.get("max_concurrent_observations_per_case")
+        != _MAX_CONCURRENT_OBSERVATIONS_PER_CASE
+    ):
+        raise ValueError(
+            "base receipt does not serialize concurrent repetitions of one case."
+        )
+    if (
+        run_context.get("flow_isolation_semantics_version")
+        != _FLOW_ISOLATION_SEMANTICS_VERSION
+    ):
+        raise ValueError("base receipt does not own applied benchmark Flow cleanup.")
     ui_language = run_context.get("ui_language")
     auto_confirm = run_context.get("auto_confirm_requirements")
     if not isinstance(ui_language, str) or not isinstance(auto_confirm, bool):
@@ -2113,6 +2205,11 @@ def _run_replacement_batch(
     args.auto_confirm_requirements = auto_confirm
     args.repetitions = receipt.repetitions
     args.concurrency = max_concurrency
+
+    _require_clean_measurement_space(
+        config=config,
+        space_id=args.space_id,
+    )
 
     cases_path = Path(args.cases_file) if args.cases_file else DEFAULT_CASES_FILE
     all_cases = _read_cases_file(cases_path)
@@ -2190,11 +2287,11 @@ def _run_replacement_batch(
             failure_execution_provenance=failure_execution_provenance,
         )
 
-    if max_concurrency == 1:
-        results = [acquire(item) for item in requested]
-    else:
-        with ThreadPoolExecutor(max_workers=max_concurrency) as executor:
-            results = list(executor.map(acquire, requested))
+    results = _acquire_observations_with_case_isolation(
+        observations=requested,
+        max_concurrency=max_concurrency,
+        acquire=acquire,
+    )
 
     replacement_observations = [
         observation_from_row(result, where=f"replacement result {index}")
@@ -2616,27 +2713,23 @@ def _run_case(
     plan = plan if isinstance(plan, dict) else None
     plan_summary = _summarize_plan(plan)
     applied_flow_evidence = None
+    flow_lifecycle: JsonObject = {"status": "not_applied"}
     plan_id = _optional_string(final_interaction, "plan_id")
     if case.apply_plan and plan_id is not None:
-        applied_flow_evidence = _apply_and_fetch_flow(
-            config=config,
-            plan_id=plan_id,
+        applied_flow_evidence, runtime_evidence, flow_lifecycle = (
+            _apply_execute_and_cleanup_flow(
+                case=case,
+                config=config,
+                plan_id=plan_id,
+                runtime_file_paths=runtime_file_paths,
+                timeout_seconds=args.timeout_seconds,
+                artifact_output_dir=artifact_output_dir,
+            )
         )
-    runtime_evidence = None
-    if case.execute_flow:
-        if not isinstance(applied_flow_evidence, Mapping):
-            raise ValueError(f"case {case.case_id} requires an applied flow.")
-        apply_result = applied_flow_evidence.get("apply_result")
-        if not isinstance(apply_result, Mapping):
-            raise ValueError(f"case {case.case_id} has no apply result.")
-        runtime_evidence = _execute_and_collect_runtime_evidence(
-            config=config,
-            flow_id=_required_string(apply_result, "flow_id"),
-            runtime_file_paths=runtime_file_paths,
-            timeout_seconds=args.timeout_seconds,
-            artifact_output_dir=artifact_output_dir,
-            case_id=case.case_id,
-        )
+    else:
+        runtime_evidence = None
+    if case.execute_flow and applied_flow_evidence is None:
+        raise ValueError(f"case {case.case_id} requires an applied flow.")
     event_summary = _interaction_event_summary(interactions)
     journey = _journey_summary(
         interactions,
@@ -2742,32 +2835,112 @@ def _run_case(
         "classifier_diagnostics": classifier_diagnostics,
         "proposal_telemetry_diagnostics": proposal_telemetry_diagnostics,
         "applied_flow_evidence": applied_flow_evidence,
+        "flow_lifecycle": flow_lifecycle,
         "runtime_evidence": runtime_evidence,
         "runtime_metrics": _runtime_metrics_from_quality_report(quality_report),
         "quality_report": quality_report,
     }
 
 
-def _apply_and_fetch_flow(*, config: ApiConfig, plan_id: str) -> JsonObject:
-    apply_result = _request_json(
-        config=config,
-        method="POST",
-        path=f"/flows/ai-builder/plans/{plan_id}/create",
+def _apply_execute_and_cleanup_flow(
+    *,
+    case: BattleCase,
+    config: ApiConfig,
+    plan_id: str,
+    runtime_file_paths: tuple[Path, ...],
+    timeout_seconds: int,
+    artifact_output_dir: Path,
+) -> tuple[JsonObject, JsonObject | None, JsonObject]:
+    """Own one benchmark Flow from materialization through evidence and deletion."""
+
+    apply_result: JsonObject | None = None
+    applied_flow_evidence: JsonObject | None = None
+    runtime_evidence: JsonObject | None = None
+    flow_id: str | None = None
+    primary_error: Exception | None = None
+    cleanup_error: Exception | None = None
+    try:
+        try:
+            with _FLOW_APPLY_LOCK:
+                apply_result = _request_json(
+                    config=config,
+                    method="POST",
+                    path=f"/flows/ai-builder/plans/{plan_id}/create",
+                )
+            flow_id = _required_string(apply_result, "flow_id")
+            flow = _request_json(
+                config=config,
+                method="GET",
+                path=f"/flows/{flow_id}/",
+            )
+            applied_flow_evidence = {
+                "apply_result": apply_result,
+                "flow": flow,
+                "evidence_scope": (
+                    "compiled_proposal_and_applied_draft_only; "
+                    "does_not_prove_runtime_checkpoint_pause_or_resume"
+                ),
+            }
+            if case.execute_flow:
+                runtime_evidence = _execute_and_collect_runtime_evidence(
+                    config=config,
+                    flow_id=flow_id,
+                    runtime_file_paths=runtime_file_paths,
+                    timeout_seconds=timeout_seconds,
+                    artifact_output_dir=artifact_output_dir,
+                    case_id=case.case_id,
+                )
+        except Exception as error:
+            primary_error = error
+    finally:
+        if flow_id is not None:
+            try:
+                # Do not hide a transient cleanup failure with an implicit retry.
+                # The exact id is retained and replacements require an empty space.
+                _request_no_content(
+                    config=config,
+                    method="DELETE",
+                    path=f"/flows/{flow_id}/",
+                )
+            except Exception as error:
+                cleanup_error = error
+
+    if cleanup_error is not None:
+        lifecycle = {"status": "cleanup_failed", "flow_id": flow_id}
+        message = f"generated Flow cleanup failed: {cleanup_error}"
+        if primary_error is not None:
+            message = f"{primary_error}; {message}"
+        raise BattleFlowLifecycleError(
+            message=message,
+            flow_lifecycle=lifecycle,
+        ) from cleanup_error
+    if primary_error is not None:
+        lifecycle = (
+            {"status": "deleted", "flow_id": flow_id}
+            if flow_id is not None
+            else {
+                "status": (
+                    "flow_identity_missing"
+                    if apply_result is not None
+                    else "creation_failed"
+                )
+            }
+        )
+        if isinstance(primary_error, (HTTPError, URLError, TimeoutError, ValueError)):
+            raise BattleFlowLifecycleError(
+                message=str(primary_error),
+                flow_lifecycle=lifecycle,
+            ) from primary_error
+        raise primary_error
+
+    if applied_flow_evidence is None or flow_id is None:
+        # All ordinary exits above either return complete evidence or raise.
+        raise RuntimeError("applied Flow lifecycle completed without Flow evidence.")
+    return (
+        applied_flow_evidence,
+        runtime_evidence,
+        {"status": "deleted", "flow_id": flow_id},
     )
-    flow_id = _required_string(apply_result, "flow_id")
-    flow = _request_json(
-        config=config,
-        method="GET",
-        path=f"/flows/{flow_id}/",
-    )
-    return {
-        "apply_result": apply_result,
-        "flow": flow,
-        "evidence_scope": (
-            "compiled_proposal_and_applied_draft_only; "
-            "does_not_prove_runtime_checkpoint_pause_or_resume"
-        ),
-    }
 
 
 def _execute_and_collect_runtime_evidence(
@@ -5164,6 +5337,23 @@ def _request_json(
     if not isinstance(parsed, dict):
         raise ValueError(f"Expected object response from {path}.")
     return parsed
+
+
+def _request_no_content(
+    *,
+    config: ApiConfig,
+    method: str,
+    path: str,
+) -> None:
+    request = _request(
+        config=config,
+        method=method,
+        path=path,
+        payload=None,
+        accept="application/json",
+    )
+    with urlopen(request, timeout=config.timeout_seconds) as response:
+        response.read()
 
 
 def _request(

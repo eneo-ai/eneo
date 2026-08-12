@@ -5,8 +5,11 @@ import importlib.util
 import json
 import subprocess
 import sys
+import time
 from collections.abc import Iterator, Mapping
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from threading import Barrier, Lock
 from types import ModuleType, SimpleNamespace
 from typing import Any
 from uuid import UUID
@@ -29,6 +32,17 @@ def _battle_harness() -> ModuleType:
     sys.modules[spec.name] = module
     spec.loader.exec_module(module)
     return module
+
+
+def _allow_clean_measurement_space(
+    harness: ModuleType,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        harness,
+        "_require_clean_measurement_space",
+        lambda **_kwargs: None,
+    )
 
 
 def test_harness_create_session_never_requests_session_supersession(
@@ -87,6 +101,121 @@ def test_force_new_is_not_a_battle_harness_cli_option(
 
     assert exc_info.value.code == 2
     assert "unrecognized arguments: --force-new" in capsys.readouterr().err
+
+
+def test_observation_acquisition_serializes_repetitions_of_one_case() -> None:
+    harness = _battle_harness()
+    first = harness.BattleCase(case_id="first", prompt="Build the first Flow.")
+    second = harness.BattleCase(case_id="second", prompt="Build the second Flow.")
+    observations = [
+        (1, 1, first),
+        (1, 2, second),
+        (2, 1, first),
+    ]
+    different_cases_started = Barrier(2)
+    state_lock = Lock()
+    active_by_case: dict[str, int] = {}
+    maximum_active_by_case: dict[str, int] = {}
+    maximum_total_active = 0
+
+    def acquire(item: tuple[int, int, Any]) -> dict[str, object]:
+        nonlocal maximum_total_active
+        repetition, _, case = item
+        with state_lock:
+            active_by_case[case.case_id] = active_by_case.get(case.case_id, 0) + 1
+            maximum_active_by_case[case.case_id] = max(
+                maximum_active_by_case.get(case.case_id, 0),
+                active_by_case[case.case_id],
+            )
+            maximum_total_active = max(
+                maximum_total_active,
+                sum(active_by_case.values()),
+            )
+        if repetition == 1:
+            different_cases_started.wait(timeout=2)
+        with state_lock:
+            active_by_case[case.case_id] -= 1
+        return {"case_id": case.case_id, "repetition": repetition}
+
+    results = harness._acquire_observations_with_case_isolation(
+        observations=observations,
+        max_concurrency=3,
+        acquire=acquire,
+    )
+
+    assert results == [
+        {"case_id": "first", "repetition": 1},
+        {"case_id": "second", "repetition": 1},
+        {"case_id": "first", "repetition": 2},
+    ]
+    assert maximum_active_by_case == {"first": 1, "second": 1}
+    assert maximum_total_active == 2
+
+
+def test_suite_context_records_per_case_concurrency_limit() -> None:
+    harness = _battle_harness()
+
+    context = harness._suite_run_context(SimpleNamespace(repetitions=3, concurrency=6))
+
+    assert context["max_concurrency"] == 6
+    assert context["max_concurrent_observations_per_case"] == 1
+    assert context["flow_isolation_semantics_version"] == 1
+
+
+def test_measurement_space_must_have_no_active_flows(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    harness = _battle_harness()
+    config = harness.ApiConfig(
+        base_url="http://localhost/api/v1",
+        api_key="local-test-key",
+        timeout_seconds=1,
+    )
+    requests: list[dict[str, object]] = []
+
+    def request_json(**kwargs: object) -> dict[str, object]:
+        requests.append(kwargs)
+        return {"count": 1, "items": [{"id": "existing-flow"}], "has_more": True}
+
+    monkeypatch.setattr(harness, "_request_json", request_json)
+
+    with raises(ValueError, match="dedicated empty space"):
+        harness._require_clean_measurement_space(
+            config=config,
+            space_id="00000000-0000-0000-0000-000000000123",
+        )
+
+    assert requests == [
+        {
+            "config": config,
+            "method": "GET",
+            "path": (
+                "/flows/?space_id=00000000-0000-0000-0000-000000000123&limit=1&offset=0"
+            ),
+        }
+    ]
+
+
+def test_empty_measurement_space_passes_preflight(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    harness = _battle_harness()
+    monkeypatch.setattr(
+        harness,
+        "_request_json",
+        lambda **_kwargs: {"count": 0, "items": [], "has_more": False},
+    )
+
+    baseline = harness._require_clean_measurement_space(
+        config=harness.ApiConfig(
+            base_url="http://localhost/api/v1",
+            api_key="local-test-key",
+            timeout_seconds=1,
+        ),
+        space_id="00000000-0000-0000-0000-000000000123",
+    )
+
+    assert baseline is None
 
 
 def test_send_and_fetch_supplies_fresh_caller_owned_turn_identity(
@@ -2017,6 +2146,7 @@ def test_acquisition_contract_is_non_configurable_and_reported(
     monkeypatch: MonkeyPatch,
 ) -> None:
     harness = _battle_harness()
+    _allow_clean_measurement_space(harness, monkeypatch)
     gate = harness.AcquisitionContract(
         required_case_ids=("required-positive",),
     )
@@ -2125,6 +2255,7 @@ def test_release_run_fails_on_invalid_evidence_even_for_benchmark_cases(
     did not acquire cleanly, regardless of which case broke.
     """
     harness = _battle_harness()
+    _allow_clean_measurement_space(harness, monkeypatch)
     gate = harness.AcquisitionContract(
         required_case_ids=("required-positive",),
     )
@@ -2195,6 +2326,7 @@ def test_release_run_fails_on_benchmark_execution_failure(
 ) -> None:
     """An execution failure on a NON-required case fails acquisition."""
     harness = _battle_harness()
+    _allow_clean_measurement_space(harness, monkeypatch)
     gate = harness.AcquisitionContract(
         required_case_ids=("required-positive",),
     )
@@ -2302,6 +2434,7 @@ def test_release_run_passes_when_a_required_case_dies_in_the_product(
     scores it.
     """
     harness = _battle_harness()
+    _allow_clean_measurement_space(harness, monkeypatch)
     gate = harness.AcquisitionContract(
         required_case_ids=("required-positive",),
     )
@@ -2519,6 +2652,7 @@ def test_suite_receipts_preserve_canonical_case_identity_for_every_outcome(
     monkeypatch: MonkeyPatch,
 ) -> None:
     harness = _battle_harness()
+    _allow_clean_measurement_space(harness, monkeypatch)
     cases = [
         harness.BattleCase(
             case_id="success-case",
@@ -2762,6 +2896,7 @@ def test_suite_identity_rechecks_a_to_b_before_green_summary(
     monkeypatch: MonkeyPatch,
 ) -> None:
     harness = _battle_harness()
+    _allow_clean_measurement_space(harness, monkeypatch)
     case = harness.BattleCase(
         case_id="required-identity",
         prompt="Build the required identity case.",
@@ -2857,6 +2992,7 @@ def test_final_identity_probe_failure_still_writes_failed_summary(
     monkeypatch: MonkeyPatch,
 ) -> None:
     harness = _battle_harness()
+    _allow_clean_measurement_space(harness, monkeypatch)
     case = harness.BattleCase(
         case_id="required-final-probe",
         prompt="Build it.",
@@ -2946,7 +3082,14 @@ def test_final_identity_probe_failure_still_writes_failed_summary(
 
 @mark.parametrize(
     "scenario",
-    ["success", "confirmation-drift", "target-collision", "completed-clean"],
+    [
+        "success",
+        "confirmation-drift",
+        "scheduling-drift",
+        "flow-isolation-drift",
+        "target-collision",
+        "completed-clean",
+    ],
 )
 def test_replacement_batch_reuses_context_and_preflights_publication(
     scenario: str,
@@ -2954,6 +3097,7 @@ def test_replacement_batch_reuses_context_and_preflights_publication(
     monkeypatch: MonkeyPatch,
 ) -> None:
     harness = _battle_harness()
+    _allow_clean_measurement_space(harness, monkeypatch)
     suite_dir = tmp_path / "release-suite"
     suite_dir.mkdir()
     output_dir = tmp_path / "replacement-output"
@@ -3020,6 +3164,8 @@ def test_replacement_batch_reuses_context_and_preflights_publication(
                 ).hexdigest(),
                 "repetitions": 5,
                 "max_concurrency": 2,
+                "max_concurrent_observations_per_case": 1,
+                "flow_isolation_semantics_version": 1,
             },
         },
     )
@@ -3087,22 +3233,6 @@ def test_replacement_batch_reuses_context_and_preflights_publication(
         }
 
     monkeypatch.setattr(harness, "_acquire_suite_observation", acquire)
-    worker_counts: list[int] = []
-
-    class ImmediateExecutor:
-        def __init__(self, *, max_workers: int) -> None:
-            worker_counts.append(max_workers)
-
-        def __enter__(self) -> ImmediateExecutor:
-            return self
-
-        def __exit__(self, *_: object) -> None:
-            return None
-
-        def map(self, function: Any, items: Any) -> list[Any]:
-            return [function(item) for item in items]
-
-    monkeypatch.setattr(harness, "ThreadPoolExecutor", ImmediateExecutor)
     args = SimpleNamespace(
         replacement_suite_dir=str(suite_dir),
         replacement_slot=(
@@ -3121,6 +3251,10 @@ def test_replacement_batch_reuses_context_and_preflights_publication(
         timeout_seconds=1,
     )
     collision_path = suite_dir / "replacement-provider-b-r2.json"
+    if scenario == "scheduling-drift":
+        receipt.summary["run_context"]["max_concurrent_observations_per_case"] = 2
+    if scenario == "flow-isolation-drift":
+        receipt.summary["run_context"]["flow_isolation_semantics_version"] = 0
     if scenario == "target-collision":
         collision_path.write_text("occupied", encoding="utf-8")
 
@@ -3129,9 +3263,17 @@ def test_replacement_batch_reuses_context_and_preflights_publication(
             "confirm-message does not match"
             if scenario == "confirmation-drift"
             else (
-                "may not be re-measured"
-                if scenario == "completed-clean"
-                else "target already exists"
+                "does not serialize concurrent repetitions"
+                if scenario == "scheduling-drift"
+                else (
+                    "does not own applied benchmark Flow cleanup"
+                    if scenario == "flow-isolation-drift"
+                    else (
+                        "may not be re-measured"
+                        if scenario == "completed-clean"
+                        else "target already exists"
+                    )
+                )
             )
         )
         with raises(ValueError, match=match):
@@ -3143,7 +3285,12 @@ def test_replacement_batch_reuses_context_and_preflights_publication(
 
         assert not (suite_dir / "replacements.json").exists()
         assert not (suite_dir / "replacement-provider-a-r4.json").exists()
-        if scenario in {"confirmation-drift", "completed-clean"}:
+        if scenario in {
+            "confirmation-drift",
+            "scheduling-drift",
+            "flow-isolation-drift",
+            "completed-clean",
+        }:
             assert provisioned_cases == []
             assert acquired == []
         else:
@@ -3157,7 +3304,6 @@ def test_replacement_batch_reuses_context_and_preflights_publication(
     )
 
     assert exit_code == 0
-    assert worker_counts == [2]
     assert len(provisioned_cases) == 1
     assert acquired == [
         ("provider-a", 4, provisioned),
@@ -3184,6 +3330,7 @@ def test_required_identity_drift_does_not_become_builder_expectation_failure(
     capsys: CaptureFixture[str],
 ) -> None:
     harness = _battle_harness()
+    _allow_clean_measurement_space(harness, monkeypatch)
     case = harness.BattleCase(
         case_id="required-identity-drift",
         prompt="Build the required identity case.",
@@ -4356,7 +4503,7 @@ def test_review_policy_gate_rejects_wrong_or_unowned_checkpoint_shape() -> None:
     )
 
 
-def test_apply_and_fetch_flow_preserves_compiled_structure_scope(
+def test_applied_flow_lifecycle_preserves_evidence_then_deletes_flow(
     monkeypatch: MonkeyPatch,
 ) -> None:
     harness = _battle_harness()
@@ -4379,16 +4526,31 @@ def test_apply_and_fetch_flow_preserves_compiled_structure_scope(
             }
         return _applied_flow_from_plan(_review_policy_plan())
 
-    monkeypatch.setattr(harness, "_request_json", request_json)
+    def request_no_content(*, method: str, path: str, **_: object) -> None:
+        calls.append((method, path))
 
-    evidence = harness._apply_and_fetch_flow(
+    monkeypatch.setattr(harness, "_request_json", request_json)
+    monkeypatch.setattr(harness, "_request_no_content", request_no_content)
+
+    evidence, runtime_evidence, lifecycle = harness._apply_execute_and_cleanup_flow(
+        case=harness.BattleCase(
+            case_id="review-flow",
+            prompt="Build a review Flow.",
+            apply_plan=True,
+        ),
         config=config,
         plan_id="plan-1",
+        runtime_file_paths=(),
+        timeout_seconds=1,
+        artifact_output_dir=Path("/unused"),
     )
 
+    assert runtime_evidence is None
+    assert lifecycle == {"status": "deleted", "flow_id": "flow-1"}
     assert calls == [
         ("POST", "/flows/ai-builder/plans/plan-1/create"),
         ("GET", "/flows/flow-1/"),
+        ("DELETE", "/flows/flow-1/"),
     ]
     assert evidence["apply_result"]["flow_id"] == "flow-1"
     assert evidence["flow"]["steps"][0]["review_policy"] == {"mode": "view"}
@@ -4396,6 +4558,227 @@ def test_apply_and_fetch_flow_preserves_compiled_structure_scope(
         "compiled_proposal_and_applied_draft_only; "
         "does_not_prove_runtime_checkpoint_pause_or_resume"
     )
+
+
+def test_applied_flow_lifecycle_deletes_flow_when_fetch_fails(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    harness = _battle_harness()
+    config = harness.ApiConfig(
+        base_url="http://localhost:8123/api/v1",
+        api_key="test-key",
+        timeout_seconds=1,
+    )
+    deleted_paths: list[str] = []
+
+    def request_json(*, path: str, **_: object) -> dict[str, object]:
+        if path.endswith("/create"):
+            return {"flow_id": "flow-created"}
+        raise TimeoutError("flow fetch timed out")
+
+    monkeypatch.setattr(harness, "_request_json", request_json)
+    monkeypatch.setattr(
+        harness,
+        "_request_no_content",
+        lambda *, path, **_kwargs: deleted_paths.append(path),
+    )
+
+    with raises(harness.BattleFlowLifecycleError) as exc_info:
+        harness._apply_execute_and_cleanup_flow(
+            case=harness.BattleCase(
+                case_id="fetch-failure",
+                prompt="Build a Flow.",
+                apply_plan=True,
+            ),
+            config=config,
+            plan_id="plan-1",
+            runtime_file_paths=(),
+            timeout_seconds=1,
+            artifact_output_dir=Path("/unused"),
+        )
+
+    assert deleted_paths == ["/flows/flow-created/"]
+    assert harness._failure_error_fields(exc_info.value) == {
+        "error": "flow fetch timed out",
+        "flow_lifecycle": {"status": "deleted", "flow_id": "flow-created"},
+    }
+
+
+def test_applied_flow_without_identity_fails_closed_without_guessing_cleanup(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    harness = _battle_harness()
+    cleanup_calls: list[object] = []
+    monkeypatch.setattr(harness, "_request_json", lambda **_kwargs: {})
+    monkeypatch.setattr(
+        harness,
+        "_request_no_content",
+        lambda **kwargs: cleanup_calls.append(kwargs),
+    )
+
+    with raises(harness.BattleFlowLifecycleError) as exc_info:
+        harness._apply_execute_and_cleanup_flow(
+            case=harness.BattleCase(
+                case_id="missing-flow-id",
+                prompt="Build a Flow.",
+                apply_plan=True,
+            ),
+            config=harness.ApiConfig(
+                base_url="http://localhost:8123/api/v1",
+                api_key="test-key",
+                timeout_seconds=1,
+            ),
+            plan_id="plan-1",
+            runtime_file_paths=(),
+            timeout_seconds=1,
+            artifact_output_dir=Path("/unused"),
+        )
+
+    assert cleanup_calls == []
+    assert harness._failure_error_fields(exc_info.value)["flow_lifecycle"] == {
+        "status": "flow_identity_missing"
+    }
+
+
+def test_applied_flow_lifecycle_deletes_flow_when_runtime_times_out(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    harness = _battle_harness()
+    config = harness.ApiConfig(
+        base_url="http://localhost:8123/api/v1",
+        api_key="test-key",
+        timeout_seconds=1,
+    )
+    deleted_paths: list[str] = []
+
+    monkeypatch.setattr(
+        harness,
+        "_request_json",
+        lambda *, path, **_kwargs: (
+            {"flow_id": "flow-runtime"}
+            if path.endswith("/create")
+            else _applied_flow_from_plan(_review_policy_plan())
+        ),
+    )
+    monkeypatch.setattr(
+        harness,
+        "_execute_and_collect_runtime_evidence",
+        lambda **_kwargs: (_ for _ in ()).throw(TimeoutError("runtime timed out")),
+    )
+    monkeypatch.setattr(
+        harness,
+        "_request_no_content",
+        lambda *, path, **_kwargs: deleted_paths.append(path),
+    )
+
+    with raises(harness.BattleFlowLifecycleError, match="runtime timed out"):
+        harness._apply_execute_and_cleanup_flow(
+            case=harness.BattleCase(
+                case_id="runtime-failure",
+                prompt="Build and run a Flow.",
+                apply_plan=True,
+                execute_flow=True,
+            ),
+            config=config,
+            plan_id="plan-1",
+            runtime_file_paths=(Path("runtime.pdf"),),
+            timeout_seconds=1,
+            artifact_output_dir=Path("/unused"),
+        )
+
+    assert deleted_paths == ["/flows/flow-runtime/"]
+
+
+def test_cleanup_failure_invalidates_an_otherwise_successful_observation(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    harness = _battle_harness()
+    config = harness.ApiConfig(
+        base_url="http://localhost:8123/api/v1",
+        api_key="test-key",
+        timeout_seconds=1,
+    )
+    monkeypatch.setattr(
+        harness,
+        "_request_json",
+        lambda *, path, **_kwargs: (
+            {"flow_id": "flow-leaked"}
+            if path.endswith("/create")
+            else _applied_flow_from_plan(_review_policy_plan())
+        ),
+    )
+    monkeypatch.setattr(
+        harness,
+        "_request_no_content",
+        lambda **_kwargs: (_ for _ in ()).throw(TimeoutError("delete timed out")),
+    )
+
+    with raises(harness.BattleFlowLifecycleError) as exc_info:
+        harness._apply_execute_and_cleanup_flow(
+            case=harness.BattleCase(
+                case_id="cleanup-failure",
+                prompt="Build a Flow.",
+                apply_plan=True,
+            ),
+            config=config,
+            plan_id="plan-1",
+            runtime_file_paths=(),
+            timeout_seconds=1,
+            artifact_output_dir=Path("/unused"),
+        )
+
+    assert harness._failure_error_fields(exc_info.value) == {
+        "error": "generated Flow cleanup failed: delete timed out",
+        "flow_lifecycle": {"status": "cleanup_failed", "flow_id": "flow-leaked"},
+    }
+
+
+def test_plan_application_is_serialized_across_different_cases(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    harness = _battle_harness()
+    config = harness.ApiConfig(
+        base_url="http://localhost:8123/api/v1",
+        api_key="test-key",
+        timeout_seconds=1,
+    )
+    state_lock = Lock()
+    active_applies = 0
+    maximum_active_applies = 0
+
+    def request_json(*, method: str, path: str, **_: object) -> dict[str, object]:
+        nonlocal active_applies, maximum_active_applies
+        if method == "POST":
+            with state_lock:
+                active_applies += 1
+                maximum_active_applies = max(maximum_active_applies, active_applies)
+            time.sleep(0.02)
+            with state_lock:
+                active_applies -= 1
+            return {"flow_id": f"flow-{path.rsplit('/', 2)[-2]}"}
+        return _applied_flow_from_plan(_review_policy_plan())
+
+    monkeypatch.setattr(harness, "_request_json", request_json)
+    monkeypatch.setattr(harness, "_request_no_content", lambda **_kwargs: None)
+
+    def apply(plan_id: str) -> object:
+        return harness._apply_execute_and_cleanup_flow(
+            case=harness.BattleCase(
+                case_id=plan_id,
+                prompt="Build a Flow.",
+                apply_plan=True,
+            ),
+            config=config,
+            plan_id=plan_id,
+            runtime_file_paths=(),
+            timeout_seconds=1,
+            artifact_output_dir=Path("/unused"),
+        )
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        list(executor.map(apply, ("plan-a", "plan-b")))
+
+    assert maximum_active_applies == 1
 
 
 def test_runtime_sentinel_checks_persisted_named_results_and_plan_invariants() -> None:
@@ -5515,6 +5898,7 @@ def test_benchmark_quality_failure_is_reported_without_failing_required_gate(
     tmp_path: Path, monkeypatch: MonkeyPatch
 ) -> None:
     harness = _battle_harness()
+    _allow_clean_measurement_space(harness, monkeypatch)
 
     def fail_quality_check(*, case: Any, **_: Any) -> dict[str, Any]:
         bundle = _complete_live_case_bundle(

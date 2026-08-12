@@ -47,6 +47,8 @@ def _summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
                 "auto_confirm_requirements": True,
                 "confirm_message_sha256": "c" * 64,
                 "max_concurrency": 1,
+                "max_concurrent_observations_per_case": 1,
+                "flow_isolation_semantics_version": 1,
                 "repetitions": 3,
                 "ui_language": "sv",
             },
@@ -428,7 +430,15 @@ def test_missing_identity_field_fails_closed(tmp_path: Path, field: str) -> None
     assert f"{field} (missing)" in str(excinfo.value)
 
 
-@pytest.mark.parametrize("field", ["ui_language", "auto_confirm_requirements"])
+@pytest.mark.parametrize(
+    "field",
+    [
+        "ui_language",
+        "auto_confirm_requirements",
+        "flow_isolation_semantics_version",
+        "max_concurrent_observations_per_case",
+    ],
+)
 def test_changed_run_context_refuses_comparison(tmp_path: Path, field: str) -> None:
     # Language and auto-confirm change what the builder was asked to do.
     module = _compare_module()
