@@ -4,8 +4,16 @@ from unittest.mock import Mock, patch
 import pytest
 
 from eneo.ai_models.completion_models.completion_model import ModelKwargs
+from eneo.completion_models.domain.model_kwargs_capabilities import (
+    reasoning_effort_options_from_model_info,
+    snapshot_supported_model_kwargs,
+)
 from eneo.completion_models.infrastructure.adapters.tenant_model_adapter import (
     TenantModelAdapter,
+)
+from eneo.governance_policy.domain.policy_resolver import (
+    EffectiveConfig,
+    select_effective_reasoning_effort,
 )
 
 
@@ -81,6 +89,37 @@ def test_legacy_none_effort_is_omitted_without_explicit_route_support(
 
 
 def test_none_effort_reaches_litellm_with_explicit_route_support() -> None:
+    model_info = {
+        "supports_reasoning": True,
+        "supports_none_reasoning_effort": True,
+    }
+    supported_kwargs = snapshot_supported_model_kwargs(
+        ["reasoning_effort"],
+        reasoning=True,
+        reasoning_effort_options=reasoning_effort_options_from_model_info(model_info),
+    )
+    selected_model = SimpleNamespace(
+        get_supported_model_kwargs=lambda: supported_kwargs
+    )
+    selected_effort = select_effective_reasoning_effort(
+        selected_model=selected_model,
+        stored_effort="none",
+        effective_config=EffectiveConfig(
+            models_enforced=False,
+            available_models=[],
+            locked_model=None,
+            policy_default_model=None,
+            mcp_enforced=False,
+            available_mcp_servers=[],
+            prompt_enforced=False,
+            enforced_prompt_text=None,
+            reasoning_policy_configured=True,
+            default_reasoning_effort="high",
+            reasoning_effort_user_configurable=True,
+        ),
+    )
+    assert selected_effort == "none"
+
     adapter = object.__new__(TenantModelAdapter)
     adapter.credential_resolver = Mock()
     adapter.litellm_model = "openai/reasoning-model"
@@ -101,11 +140,11 @@ def test_none_effort_reaches_litellm_with_explicit_route_support() -> None:
         patch(
             "eneo.completion_models.infrastructure.adapters.tenant_model_adapter."
             "litellm_transport.get_model_info",
-            return_value={"supports_none_reasoning_effort": True},
+            return_value=model_info,
         ),
     ):
         kwargs = adapter._prepare_kwargs(
-            model_kwargs=ModelKwargs(reasoning_effort="none")
+            model_kwargs=ModelKwargs(reasoning_effort=selected_effort)
         )
 
     assert kwargs["reasoning_effort"] == "none"
