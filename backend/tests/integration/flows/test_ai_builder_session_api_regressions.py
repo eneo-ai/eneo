@@ -3,8 +3,9 @@ from __future__ import annotations
 import asyncio
 import io
 import json
-from collections.abc import AsyncGenerator
-from dataclasses import replace
+from collections.abc import AsyncGenerator, AsyncIterator
+from contextlib import asynccontextmanager
+from dataclasses import dataclass, replace
 from datetime import datetime, timedelta, timezone
 from typing import cast
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -681,31 +682,30 @@ async def _create_proposed_ai_builder_plan(
         return session_id, tenant_id, stored_plan.plan.id, turn.lease
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
-async def test_create_session_is_committed_at_final_response_body_boundary(
+@dataclass(frozen=True)
+class _PausedResponseBoundary:
+    status: int
+    payload: dict[str, object]
+    request_task: asyncio.Task[None]
+
+
+@asynccontextmanager
+async def _pause_request_cleanup_after_final_response(
+    *,
     app,
-    client,
+    method: str,
+    path: str,
     bearer_token: str,
-    completion_model_factory,
-    db_container,
-) -> None:
-    space_id = await _create_space_with_planner_model(
-        client=client,
-        bearer_token=bearer_token,
-        db_container=db_container,
-        completion_model_factory=completion_model_factory,
-        space_name="AI Builder response boundary durability",
-    )
-    request_body = json.dumps({"target_kind": "create", "space_id": space_id}).encode()
+    body: bytes,
+) -> AsyncIterator[_PausedResponseBoundary]:
     scope: Scope = {
         "type": "http",
         "asgi": {"version": "3.0"},
         "http_version": "1.1",
-        "method": "POST",
+        "method": method,
         "scheme": "http",
-        "path": "/api/v1/flows/ai-builder/sessions",
-        "raw_path": b"/api/v1/flows/ai-builder/sessions",
+        "path": path,
+        "raw_path": path.encode(),
         "query_string": b"",
         "root_path": "",
         "headers": [
@@ -723,11 +723,8 @@ async def test_create_session_is_committed_at_final_response_body_boundary(
     response_status: int | None = None
     response_body = bytearray()
 
-    def is_create_session_request(request: Request) -> bool:
-        return (
-            request.method == "POST"
-            and request.url.path == "/api/v1/flows/ai-builder/sessions"
-        )
+    def is_target_request(request: Request) -> bool:
+        return request.method == method and request.url.path == path
 
     async def gated_transaction_session(
         request: Request,
@@ -736,7 +733,7 @@ async def test_create_session_is_committed_at_final_response_body_boundary(
             try:
                 yield session
             finally:
-                if is_create_session_request(request):
+                if is_target_request(request):
                     cleanup_started.set()
                     await release_cleanup.wait()
 
@@ -747,7 +744,7 @@ async def test_create_session_is_committed_at_final_response_body_boundary(
             try:
                 yield session
             finally:
-                if is_create_session_request(request):
+                if is_target_request(request):
                     cleanup_started.set()
                     await release_cleanup.wait()
 
@@ -762,11 +759,7 @@ async def test_create_session_is_committed_at_final_response_body_boundary(
         nonlocal request_received
         if not request_received:
             request_received = True
-            return {
-                "type": "http.request",
-                "body": request_body,
-                "more_body": False,
-            }
+            return {"type": "http.request", "body": body, "more_body": False}
         await release_cleanup.wait()
         return {"type": "http.disconnect"}
 
@@ -781,7 +774,7 @@ async def test_create_session_is_committed_at_final_response_body_boundary(
         if not message.get("more_body", False):
             final_body_received.set()
 
-    post_task = asyncio.create_task(app(scope, receive, send))
+    request_task = asyncio.create_task(app(scope, receive, send))
 
     async def wait_for_response_boundary() -> None:
         await final_body_received.wait()
@@ -790,15 +783,65 @@ async def test_create_session_is_committed_at_final_response_body_boundary(
     response_boundary_wait = asyncio.create_task(wait_for_response_boundary())
     try:
         completed, _ = await asyncio.wait(
-            {post_task, response_boundary_wait},
+            {request_task, response_boundary_wait},
             return_when=asyncio.FIRST_COMPLETED,
         )
         assert response_boundary_wait in completed
-        assert not post_task.done()
-        assert response_status == 201
+        assert not request_task.done()
+        assert response_status is not None
+        yield _PausedResponseBoundary(
+            status=response_status,
+            payload=cast(dict[str, object], json.loads(response_body)),
+            request_task=request_task,
+        )
+    finally:
+        release_cleanup.set()
+        try:
+            await request_task
+        finally:
+            if not response_boundary_wait.done():
+                response_boundary_wait.cancel()
+            try:
+                await response_boundary_wait
+            except asyncio.CancelledError:
+                pass
+            if previous_transaction_override is None:
+                app.dependency_overrides.pop(get_session_with_transaction, None)
+            else:
+                app.dependency_overrides[get_session_with_transaction] = (
+                    previous_transaction_override
+                )
+            if previous_session_override is None:
+                app.dependency_overrides.pop(get_session, None)
+            else:
+                app.dependency_overrides[get_session] = previous_session_override
 
-        response_payload = cast(dict[str, object], json.loads(response_body))
-        session_id = UUID(cast(str, response_payload["session_id"]))
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_create_session_is_committed_at_final_response_body_boundary(
+    app,
+    client,
+    bearer_token: str,
+    completion_model_factory,
+    db_container,
+) -> None:
+    space_id = await _create_space_with_planner_model(
+        client=client,
+        bearer_token=bearer_token,
+        db_container=db_container,
+        completion_model_factory=completion_model_factory,
+        space_name="AI Builder response boundary durability",
+    )
+    async with _pause_request_cleanup_after_final_response(
+        app=app,
+        method="POST",
+        path="/api/v1/flows/ai-builder/sessions",
+        bearer_token=bearer_token,
+        body=json.dumps({"target_kind": "create", "space_id": space_id}).encode(),
+    ) as response:
+        assert response.status == 201
+        session_id = UUID(cast(str, response.payload["session_id"]))
         headers = {"Authorization": f"Bearer {bearer_token}"}
         session_response, models_response = await asyncio.gather(
             client.get(
@@ -828,28 +871,7 @@ async def test_create_session_is_committed_at_final_response_body_boundary(
             )
 
         assert audit_count == 1
-        assert not post_task.done()
-    finally:
-        release_cleanup.set()
-        try:
-            await post_task
-        finally:
-            if not response_boundary_wait.done():
-                response_boundary_wait.cancel()
-            try:
-                await response_boundary_wait
-            except asyncio.CancelledError:
-                pass
-            if previous_transaction_override is None:
-                app.dependency_overrides.pop(get_session_with_transaction, None)
-            else:
-                app.dependency_overrides[get_session_with_transaction] = (
-                    previous_transaction_override
-                )
-            if previous_session_override is None:
-                app.dependency_overrides.pop(get_session, None)
-            else:
-                app.dependency_overrides[get_session] = previous_session_override
+        assert not response.request_task.done()
 
 
 @pytest.mark.integration
@@ -8334,6 +8356,84 @@ async def test_ai_builder_api_audio_report_confirms_core_output_before_runtime_m
     assert any(event["event"] == "requirements_summary" for event in third_events), (
         _builder_event_outline(third_events)
     )
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_approve_and_create_commits_flow_at_final_response_body_boundary(
+    app,
+    client,
+    bearer_token: str,
+    completion_model_factory,
+    db_container,
+) -> None:
+    space_id = await _create_space_with_planner_model(
+        client=client,
+        bearer_token=bearer_token,
+        db_container=db_container,
+        completion_model_factory=completion_model_factory,
+        space_name="AI Builder create response boundary durability",
+    )
+    session_id, tenant_id, plan_id, _ = await _create_proposed_ai_builder_plan(
+        client=client,
+        bearer_token=bearer_token,
+        db_container=db_container,
+        space_id=space_id,
+    )
+    async with _pause_request_cleanup_after_final_response(
+        app=app,
+        method="POST",
+        path=f"/api/v1/flows/ai-builder/plans/{plan_id}/create",
+        bearer_token=bearer_token,
+        body=b"",
+    ) as response:
+        assert response.status == 200
+        flow_id = UUID(cast(str, response.payload["flow_id"]))
+        flow_response = await client.get(
+            f"/api/v1/flows/{flow_id}/",
+            headers={"Authorization": f"Bearer {bearer_token}"},
+        )
+
+        assert flow_response.status_code == 200, flow_response.text
+        assert flow_response.json()["id"] == str(flow_id)
+        async with db_container() as container:
+            persisted = (
+                await container.session().execute(
+                    select(
+                        Flows.space_id,
+                        BuilderPlans.status,
+                        BuilderSessions.status,
+                        BuilderSessions.flow_id,
+                    )
+                    .select_from(BuilderPlans)
+                    .join(
+                        BuilderSessions, BuilderSessions.id == BuilderPlans.session_id
+                    )
+                    .join(Flows, Flows.id == BuilderSessions.flow_id)
+                    .where(
+                        BuilderPlans.id == plan_id,
+                        BuilderPlans.tenant_id == tenant_id,
+                        BuilderSessions.id == session_id,
+                    )
+                )
+            ).one()
+            audit_count = await container.session().scalar(
+                select(sa.func.count(AuditLogTable.id)).where(
+                    AuditLogTable.tenant_id == tenant_id,
+                    AuditLogTable.action == ActionType.AI_BUILDER_FLOW_APPLIED.value,
+                    AuditLogTable.entity_type == EntityType.FLOW.value,
+                    AuditLogTable.entity_id == flow_id,
+                )
+            )
+
+        assert persisted == (
+            UUID(space_id),
+            PlanStatus.APPLIED.value,
+            SessionStatus.APPLIED.value,
+            flow_id,
+        )
+        assert audit_count == 1
+        assert not response.request_task.done()
 
 
 @pytest.mark.integration
