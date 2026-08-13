@@ -33,10 +33,8 @@ dependencies = [
     "bcrypt>=4.1.2,<5",
     "dependency-injector>=4.41.0,<5",
     "docx2python>=3.5.0,<4",
-    "scrapy>=2.14.2,<3",
     "html2text>=2024.2.26,<2025",
     "beautifulsoup4>=4.12.3,<5",
-    "crochet>=2.1.1,<3",
     "pgvector>=0.2.5,<0.3",
     "sqlalchemy-mixins>=2.0.5,<3",
     "python-magic>=0.4.27,<0.5",
@@ -164,7 +162,7 @@ extend_exclude = ["src/eneo/server/example_mcp_server.py"]
 # sentry-sdk is declared for the planned Sentry integration but not yet wired up
 # (no sentry_sdk.init call) — kept available rather than dropping observability.
 [tool.deptry.per_rule_ignores]
-DEP003 = ["sqlalchemy", "starlette", "aiohttp", "twisted", "pdfminer", "pydantic_core", "yaml"]
+DEP003 = ["sqlalchemy", "starlette", "aiohttp", "pdfminer", "pydantic_core", "yaml"]
 DEP002 = [
     "alembic",
     "asyncpg",
