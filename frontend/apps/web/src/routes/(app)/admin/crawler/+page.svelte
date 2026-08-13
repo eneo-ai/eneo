@@ -64,7 +64,7 @@
             </p>
           </div>
 
-          <div class="grid gap-4 md:grid-cols-3">
+          <div class="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
             <Card.Root>
               <Card.Header class="space-y-3">
                 <div
@@ -75,6 +75,32 @@
                 <div>
                   <Card.Title class="text-base">{m.crawler_admin_ready()}</Card.Title>
                   <Card.Description>{m.crawler_admin_ready_description()}</Card.Description>
+                </div>
+              </Card.Header>
+            </Card.Root>
+            <Card.Root>
+              <Card.Header class="space-y-3">
+                <div
+                  class="bg-accent-dimmer text-accent-stronger flex size-9 items-center justify-center rounded-lg"
+                >
+                  <Activity class="size-5" aria-hidden="true" />
+                </div>
+                <div>
+                  <Card.Title class="text-base">
+                    {m.crawler_admin_crawl_capacity({
+                      count: data.diagnostics.capacity.max_concurrent_crawl_jobs
+                    })}
+                  </Card.Title>
+                  <Card.Description>
+                    {#if data.diagnostics.capacity.reserved_worker_jobs !== null}
+                      {m.crawler_admin_reserved_jobs({
+                        reserved: data.diagnostics.capacity.reserved_worker_jobs,
+                        total: data.diagnostics.capacity.worker_jobs_per_process
+                      })}
+                    {:else}
+                      {m.crawler_admin_cluster_override()}
+                    {/if}
+                  </Card.Description>
                 </div>
               </Card.Header>
             </Card.Root>

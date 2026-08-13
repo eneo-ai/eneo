@@ -282,7 +282,7 @@ class TestWatchdogSlotRelease:
         job_id = uuid4()
 
         redis_mock = MagicMock()
-        redis_mock.get = AsyncMock(return_value=str(tenant_id).encode())
+        redis_mock.get = AsyncMock(side_effect=[str(tenant_id).encode(), None])
         redis_mock.delete = AsyncMock()
 
         settings_mock = MagicMock()

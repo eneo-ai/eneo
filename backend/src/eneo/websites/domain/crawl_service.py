@@ -19,6 +19,8 @@ from eneo.jobs.job_manager import job_manager
 from eneo.main.config import get_settings
 from eneo.main.logging import get_logger
 from eneo.websites.domain.crawl_run import CrawlRun
+from eneo.worker.feeder.capacity import CapacityManager
+from eneo.worker.redis.lua_scripts import LuaScripts
 
 if TYPE_CHECKING:
     from eneo.jobs.task_service import TaskService
@@ -42,47 +44,6 @@ class CrawlService:
     when at capacity (instead of retry storms).
     """
 
-    # Lua script for atomic slot acquisition (same as TenantConcurrencyLimiter)
-    # FIX: Only refresh TTL on SUCCESS path - prevents zombie counters when acquire fails
-    # Bug: Previous version refreshed TTL on both success AND failure, keeping counter alive forever
-    _acquire_slot_lua: str = (
-        "local key = KEYS[1]\n"
-        "local limit = tonumber(ARGV[1])\n"
-        "local ttl = tonumber(ARGV[2])\n"
-        "if limit <= 0 then\n"
-        "  return 1\n"
-        "end\n"
-        "local current = redis.call('INCR', key)\n"
-        "if current > limit then\n"
-        "  local after_decr = redis.call('DECR', key)\n"
-        "  if after_decr <= 0 then\n"
-        "    redis.call('DEL', key)\n"
-        "  end\n"
-        "  -- DO NOT refresh TTL on failure - let counter expire naturally if unused\n"
-        "  return 0\n"
-        "end\n"
-        "-- Success: refresh TTL only after confirming slot acquired\n"
-        "redis.call('EXPIRE', key, ttl)\n"
-        "return current\n"
-    )
-
-    # Lua script for safe slot release (same as TenantConcurrencyLimiter)
-    _release_slot_lua: str = (
-        "local key = KEYS[1]\n"
-        "local ttl = tonumber(ARGV[1])\n"
-        "local current = redis.call('GET', key)\n"
-        "if not current then\n"
-        "  return 0\n"
-        "end\n"
-        "current = redis.call('DECR', key)\n"
-        "if not current or current <= 0 then\n"
-        "  redis.call('DEL', key)\n"
-        "  return 0\n"
-        "end\n"
-        "redis.call('EXPIRE', key, ttl)\n"
-        "return current\n"
-    )
-
     def __init__(
         self,
         repo: "CrawlRunRepository",
@@ -96,54 +57,10 @@ class CrawlService:
         self.settings = get_settings()
 
     async def _try_acquire_slot(self, tenant_id: UUID) -> bool:
-        """Atomically try to acquire a concurrency slot for this tenant.
-
-        Uses same Lua script as TenantConcurrencyLimiter for atomic INCR-then-check.
-
-        Args:
-            tenant_id: Tenant identifier
-
-        Returns:
-            True if slot acquired, False if at capacity
-        """
-        key = f"tenant:{tenant_id}:active_jobs"
-        max_concurrent = self.settings.tenant_worker_concurrency_limit
-        ttl = self.settings.tenant_worker_semaphore_ttl_seconds
-
-        try:
-            result = await cast(
-                Awaitable[int | bytes | None],
-                self.redis_client.eval(
-                    self._acquire_slot_lua,
-                    1,
-                    key,
-                    str(max_concurrent),
-                    str(ttl),
-                ),
-            )
-
-            if isinstance(result, bytes):
-                result = int(result)
-
-            acquired = bool(result and int(result) > 0)
-
-            if not acquired:
-                logger.debug(
-                    "Slot acquisition failed (at capacity)",
-                    extra={
-                        "tenant_id": str(tenant_id),
-                        "max_concurrent": max_concurrent,
-                    },
-                )
-
-            return acquired
-
-        except Exception as exc:
-            logger.warning(
-                "Failed to acquire slot in CrawlService",
-                extra={"tenant_id": str(tenant_id), "error": str(exc)},
-            )
-            return False
+        """Atomically acquire tenant and cluster-wide crawl capacity."""
+        return await CapacityManager(
+            self.redis_client, self.settings
+        ).try_acquire_crawl_slot(tenant_id)
 
     async def _mark_slot_preacquired(self, job_id: UUID, tenant_id: UUID) -> None:
         """Mark that we pre-acquired a slot for this job.
@@ -158,28 +75,15 @@ class CrawlService:
 
         Raises on failure - caller must handle rollback to prevent double-acquire.
         """
-        key = f"job:{job_id}:slot_preacquired"
-        # Store tenant_id (same as Feeder) so worker can release slot on failure
-        # Let exception propagate - caller handles rollback
-        await self.redis_client.set(
-            key, str(tenant_id), ex=self.settings.tenant_worker_semaphore_ttl_seconds
-        )
+        await CapacityManager(
+            self.redis_client, self.settings
+        ).mark_crawl_slot_preacquired(job_id, tenant_id)
 
     async def _release_slot(self, tenant_id: UUID) -> None:
         """Release a previously acquired slot (used when enqueue fails)."""
-        key = f"tenant:{tenant_id}:active_jobs"
-        ttl = self.settings.tenant_worker_semaphore_ttl_seconds
-
-        try:
-            await cast(
-                Awaitable[int | bytes | None],
-                self.redis_client.eval(self._release_slot_lua, 1, key, str(ttl)),
-            )
-        except Exception as exc:
-            logger.warning(
-                "Failed to release slot",
-                extra={"tenant_id": str(tenant_id), "error": str(exc)},
-            )
+        await CapacityManager(self.redis_client, self.settings).release_crawl_slot(
+            tenant_id
+        )
 
     async def release_job_resources(self, job_id: UUID, tenant_id: UUID) -> None:
         """Release slot and clean up flag for a failed/preempted job.
@@ -192,15 +96,14 @@ class CrawlService:
             job_id: Job ID to clean up flag for
             tenant_id: Tenant ID for slot release
         """
-        # Release slot using Redis EVAL for atomic Lua script execution (best-effort)
-        key = f"tenant:{tenant_id}:active_jobs"
+        # Release slot using Redis Lua scripts atomically (best-effort).
         ttl = self.settings.tenant_worker_semaphore_ttl_seconds
+        global_flag_key = LuaScripts.global_crawl_flag_key(job_id)
         try:
-            # Note: redis_client.eval runs Lua script atomically on Redis server
-            await cast(
-                Awaitable[int | bytes | None],
-                self.redis_client.eval(self._release_slot_lua, 1, key, str(ttl)),
-            )
+            if await self.redis_client.get(global_flag_key):
+                await LuaScripts.release_crawl_slots(self.redis_client, tenant_id, ttl)
+            else:
+                await LuaScripts.release_slot(self.redis_client, tenant_id, ttl)
         except Exception as exc:
             logger.warning(
                 "Failed to release slot for preempted job",
@@ -214,7 +117,7 @@ class CrawlService:
         # Delete pre-acquired flag (harmless if doesn't exist)
         flag_key = f"job:{job_id}:slot_preacquired"
         try:
-            await self.redis_client.delete(flag_key)
+            await self.redis_client.delete(flag_key, global_flag_key)
         except Exception as flag_exc:
             logger.debug(
                 "Failed to delete slot_preacquired flag during preemption",
@@ -372,9 +275,9 @@ class CrawlService:
                 except Exception as exc:
                     # Rollback: delete flag (if it was set) and release slot
                     try:
-                        await self.redis_client.delete(
-                            f"job:{crawl_job.id}:slot_preacquired"
-                        )
+                        await CapacityManager(
+                            self.redis_client, self.settings
+                        ).clear_crawl_preacquired_flags(crawl_job.id)
                     except Exception as flag_exc:
                         logger.debug(
                             "Failed to delete slot_preacquired flag during rollback",

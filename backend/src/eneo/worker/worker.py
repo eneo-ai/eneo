@@ -119,6 +119,11 @@ def _log_startup_diagnostics(settings: Settings) -> None:
             "redis_health_check_interval": settings.redis_health_check_interval,
             "redis_max_connections": settings.redis_max_connections,
             # Concurrency settings
+            "worker_max_jobs": settings.worker_max_jobs,
+            "crawl_job_concurrency_limit": (
+                settings.effective_crawl_job_concurrency_limit
+            ),
+            "reserved_worker_jobs": settings.reserved_worker_jobs,
             "tenant_worker_concurrency_limit": settings.tenant_worker_concurrency_limit,
             "tenant_worker_semaphore_ttl_seconds": settings.tenant_worker_semaphore_ttl_seconds,
             # Crawl settings

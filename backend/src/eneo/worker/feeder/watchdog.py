@@ -267,6 +267,11 @@ class OrphanWatchdog:
                     )
                     continue
 
+            if await self._reconcile_global_crawl_counter(
+                session, Jobs, CrawlRuns, Status, func, select
+            ):
+                reconciled_count += 1
+
             if reconciled_count > 0:
                 logger.info(
                     f"Phase 0: Reconciled {reconciled_count} zombie counters",
@@ -280,6 +285,60 @@ class OrphanWatchdog:
             )
 
         return {"reconciled_count": reconciled_count}
+
+    async def _reconcile_global_crawl_counter(
+        self,
+        session: AsyncSession,
+        Jobs: Any,
+        CrawlRuns: Any,
+        Status: Any,
+        func: Any,
+        select: Any,
+    ) -> bool:
+        """Reconcile the cluster-wide admission counter conservatively."""
+        key = LuaScripts.global_crawl_slot_key()
+        redis_value = await self._redis.get(key)
+        if not redis_value:
+            return False
+        observed = int(
+            redis_value.decode() if isinstance(redis_value, bytes) else redis_value
+        )
+        if observed <= 0:
+            return False
+
+        active_jobs = cast(
+            int,
+            await session.scalar(
+                select(func.count())
+                .select_from(Jobs)
+                .join(CrawlRuns, CrawlRuns.job_id == Jobs.id)
+                .where(
+                    Jobs.task == Task.CRAWL.value,
+                    Jobs.status.in_([Status.QUEUED, Status.IN_PROGRESS]),
+                )
+            ),
+        )
+        if observed <= active_jobs:
+            return False
+
+        result = await LuaScripts.reconcile_key(
+            self._redis,
+            key,
+            observed,
+            active_jobs,
+            self._settings.tenant_worker_semaphore_ttl_seconds,
+        )
+        if result.startswith("ok:"):
+            logger.warning(
+                "Global crawl capacity counter reconciled",
+                extra={
+                    "redis_count": observed,
+                    "active_jobs": active_jobs,
+                    "released": observed - active_jobs,
+                },
+            )
+            return True
+        return False
 
     async def _reconcile_single_counter(
         self,
@@ -880,6 +939,7 @@ class OrphanWatchdog:
 
         for slot in slots:
             flag_key = f"job:{slot.job_id}:slot_preacquired"
+            global_flag_key = LuaScripts.global_crawl_flag_key(slot.job_id)
             try:
                 # IN_PROGRESS jobs definitely had a slot - always release
                 # QUEUED jobs might not have acquired a slot - check flag first
@@ -887,11 +947,13 @@ class OrphanWatchdog:
 
                 if should_release:
                     await LuaScripts.release_slot(self._redis, slot.tenant_id, ttl)
+                    if await self._redis.get(global_flag_key):
+                        await LuaScripts.release_global_crawl_slot(self._redis, ttl)
                     released += 1
 
                     # Best-effort flag cleanup
                     try:
-                        await self._redis.delete(flag_key)
+                        await self._redis.delete(flag_key, global_flag_key)
                     except Exception as flag_exc:
                         logger.debug(
                             "Failed to delete slot_preacquired flag",

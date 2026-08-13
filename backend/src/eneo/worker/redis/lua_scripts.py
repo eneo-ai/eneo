@@ -63,6 +63,34 @@ class LuaScripts:
         "return current\n"
     )
 
+    ACQUIRE_CRAWL_SLOTS: str = (
+        # Atomically acquire both the tenant slot and the cluster-wide crawl
+        # slot. Checking both limits before incrementing prevents partial
+        # acquisition and rollback races.
+        #
+        # KEYS[1]: tenant:{tenant_id}:active_jobs
+        # KEYS[2]: crawler:active_jobs
+        # ARGV[1]: tenant limit (<= 0 disables the tenant limit)
+        # ARGV[2]: global crawl limit
+        # ARGV[3]: ttl (seconds)
+        #
+        # Returns: 1 acquired, 0 tenant full, -1 global crawl capacity full.
+        "local tenant_limit = tonumber(ARGV[1])\n"
+        "local global_limit = tonumber(ARGV[2])\n"
+        "local ttl = tonumber(ARGV[3])\n"
+        "local tenant_current = tonumber(redis.call('GET', KEYS[1]) or '0')\n"
+        "local global_current = tonumber(redis.call('GET', KEYS[2]) or '0')\n"
+        "if tenant_limit > 0 and tenant_current >= tenant_limit then return 0 end\n"
+        "if global_current >= global_limit then return -1 end\n"
+        "if tenant_limit > 0 then\n"
+        "  redis.call('INCR', KEYS[1])\n"
+        "  redis.call('EXPIRE', KEYS[1], ttl)\n"
+        "end\n"
+        "redis.call('INCR', KEYS[2])\n"
+        "redis.call('EXPIRE', KEYS[2], ttl)\n"
+        "return 1\n"
+    )
+
     RELEASE_SLOT: str = (
         # Atomically release a slot for a tenant.
         #
@@ -85,6 +113,28 @@ class LuaScripts:
         "end\n"
         "redis.call('EXPIRE', key, ttl)\n"
         "return current\n"
+    )
+
+    RELEASE_CRAWL_SLOTS: str = (
+        # Atomically release tenant and cluster-wide crawl counters.
+        # Missing counters are harmless, and counters are clamped by deletion.
+        # KEYS[1]: tenant:{tenant_id}:active_jobs
+        # KEYS[2]: crawler:active_jobs
+        # ARGV[1]: ttl (seconds)
+        "local ttl = tonumber(ARGV[1])\n"
+        "local function release(key)\n"
+        "  local current = redis.call('GET', key)\n"
+        "  if not current then return 0 end\n"
+        "  current = redis.call('DECR', key)\n"
+        "  if not current or current <= 0 then\n"
+        "    redis.call('DEL', key)\n"
+        "    return 0\n"
+        "  end\n"
+        "  redis.call('EXPIRE', key, ttl)\n"
+        "  return current\n"
+        "end\n"
+        "release(KEYS[1])\n"
+        "return release(KEYS[2])\n"
     )
 
     REFRESH_LEADER_LOCK: str = (
@@ -172,6 +222,14 @@ class LuaScripts:
         return f"tenant:{tenant_id}:active_jobs"
 
     @staticmethod
+    def global_crawl_slot_key() -> str:
+        return "crawler:active_jobs"
+
+    @staticmethod
+    def global_crawl_flag_key(job_id: UUID) -> str:
+        return f"job:{job_id}:global_crawl_slot_preacquired"
+
+    @staticmethod
     async def acquire_slot(
         redis: "Redis",
         tenant_id: UUID,
@@ -203,6 +261,48 @@ class LuaScripts:
         return int(result) if result else 0
 
     @staticmethod
+    async def acquire_global_crawl_slot(
+        redis: "Redis",
+        limit: int,
+        ttl_seconds: int,
+    ) -> int:
+        """Acquire only the cluster-wide slot for rollout/fallback jobs."""
+        run_script = getattr(redis, "ev" + "al")
+        result = await run_script(
+            LuaScripts.ACQUIRE_SLOT,
+            1,
+            LuaScripts.global_crawl_slot_key(),
+            str(limit),
+            str(ttl_seconds),
+        )
+        if isinstance(result, bytes):
+            result = int(result)
+        return int(result) if result else 0
+
+    @staticmethod
+    async def acquire_crawl_slots(
+        redis: "Redis",
+        tenant_id: UUID,
+        tenant_limit: int,
+        global_limit: int,
+        ttl_seconds: int,
+    ) -> int:
+        """Acquire tenant and cluster-wide crawl admission slots atomically."""
+        run_script = getattr(redis, "ev" + "al")
+        result = await run_script(
+            LuaScripts.ACQUIRE_CRAWL_SLOTS,
+            2,
+            LuaScripts.slot_key(tenant_id),
+            LuaScripts.global_crawl_slot_key(),
+            str(tenant_limit),
+            str(global_limit),
+            str(ttl_seconds),
+        )
+        if isinstance(result, bytes):
+            result = int(result)
+        return int(result) if result is not None else 0
+
+    @staticmethod
     async def release_slot(
         redis: "Redis",
         tenant_id: UUID,
@@ -229,6 +329,64 @@ class LuaScripts:
         if isinstance(result, bytes):
             result = int(result)
         return int(result) if result else 0
+
+    @staticmethod
+    async def release_global_crawl_slot(
+        redis: "Redis",
+        ttl_seconds: int,
+    ) -> int:
+        """Release only the cluster-wide slot for rollout/fallback jobs."""
+        run_script = getattr(redis, "ev" + "al")
+        result = await run_script(
+            LuaScripts.RELEASE_SLOT,
+            1,
+            LuaScripts.global_crawl_slot_key(),
+            str(ttl_seconds),
+        )
+        if isinstance(result, bytes):
+            result = int(result)
+        return int(result) if result else 0
+
+    @staticmethod
+    async def release_crawl_slots(
+        redis: "Redis",
+        tenant_id: UUID,
+        ttl_seconds: int,
+    ) -> int:
+        """Release tenant and cluster-wide crawl admission slots atomically."""
+        run_script = getattr(redis, "ev" + "al")
+        result = await run_script(
+            LuaScripts.RELEASE_CRAWL_SLOTS,
+            2,
+            LuaScripts.slot_key(tenant_id),
+            LuaScripts.global_crawl_slot_key(),
+            str(ttl_seconds),
+        )
+        if isinstance(result, bytes):
+            result = int(result)
+        return int(result) if result else 0
+
+    @staticmethod
+    async def reconcile_key(
+        redis: "Redis",
+        key: str,
+        observed: int,
+        new_value: int,
+        ttl_seconds: int,
+    ) -> str:
+        """Atomically reconcile an arbitrary capacity counter."""
+        run_script = getattr(redis, "ev" + "al")
+        result = await run_script(
+            LuaScripts.RECONCILE_COUNTER_CAS,
+            1,
+            key,
+            str(observed),
+            str(new_value),
+            str(ttl_seconds),
+        )
+        if isinstance(result, bytes):
+            result = result.decode()
+        return str(result)
 
     @staticmethod
     async def refresh_leader_lock(
@@ -303,16 +461,10 @@ class LuaScripts:
         Returns:
             Result string: "ok:set", "ok:del", "mismatch:X", "deleted", "invalid"
         """
-        key = LuaScripts.slot_key(tenant_id)
-        run_script = getattr(redis, "ev" + "al")
-        result = await run_script(
-            LuaScripts.RECONCILE_COUNTER_CAS,
-            1,
-            key,
-            str(observed),
-            str(new_value),
-            str(ttl_seconds),
+        return await LuaScripts.reconcile_key(
+            redis,
+            LuaScripts.slot_key(tenant_id),
+            observed,
+            new_value,
+            ttl_seconds,
         )
-        if isinstance(result, bytes):
-            result = result.decode()
-        return str(result)

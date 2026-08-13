@@ -128,9 +128,11 @@ class CrawlFeeder:
         )
 
         # Check available capacity (read-only hint for batch sizing)
-        available = await self._capacity_manager.get_available_capacity(
+        tenant_available = await self._capacity_manager.get_available_capacity(
             tenant_id, tenant_crawler_settings
         )
+        global_available = await self._capacity_manager.get_global_available_capacity()
+        available = min(tenant_available, global_available)
 
         if available <= 0:
             return  # No capacity, skip this tenant
@@ -153,6 +155,8 @@ class CrawlFeeder:
             extra={
                 "tenant_id": str(tenant_id),
                 "available_capacity": available,
+                "tenant_available_capacity": tenant_available,
+                "global_available_capacity": global_available,
                 "pending_count": len(pending_jobs),
             },
         )
@@ -199,7 +203,7 @@ class CrawlFeeder:
                 continue
 
             # Atomically acquire slot BEFORE enqueueing to eliminate race condition
-            slot_acquired = await self._capacity_manager.try_acquire_slot(
+            slot_acquired = await self._capacity_manager.try_acquire_crawl_slot(
                 tenant_id, tenant_crawler_settings
             )
 
@@ -219,7 +223,7 @@ class CrawlFeeder:
 
             # Mark flag BEFORE enqueueing for safe hand-off to worker
             try:
-                await self._capacity_manager.mark_slot_preacquired(
+                await self._capacity_manager.mark_crawl_slot_preacquired(
                     job_id, tenant_id, tenant_crawler_settings
                 )
             except Exception as mark_exc:
@@ -232,7 +236,7 @@ class CrawlFeeder:
                         "error": str(mark_exc),
                     },
                 )
-                await self._capacity_manager.release_slot(tenant_id)
+                await self._capacity_manager.release_crawl_slot(tenant_id)
                 failed_count += 1
                 continue
 
@@ -255,7 +259,7 @@ class CrawlFeeder:
                     # the worker will acquire a new slot (thinking none was pre-acquired)
                     # and the original slot will leak. The flag must remain so the
                     # worker knows to skip slot acquisition and release the original.
-                    await self._capacity_manager.release_slot(tenant_id)
+                    await self._capacity_manager.release_crawl_slot(tenant_id)
                     duplicate_count += 1
                     # Don't increment enqueued_count - job wasn't newly enqueued
                 else:
@@ -263,13 +267,13 @@ class CrawlFeeder:
             else:
                 # Enqueue failed - rollback: delete flag and release slot
                 try:
-                    await redis_client_any.delete(f"job:{job_id}:slot_preacquired")
+                    await self._capacity_manager.clear_crawl_preacquired_flags(job_id)
                 except Exception as flag_exc:
                     logger.debug(
                         "Failed to delete slot_preacquired flag during rollback",
                         extra={"job_id": str(job_id), "error": str(flag_exc)},
                     )
-                await self._capacity_manager.release_slot(tenant_id)
+                await self._capacity_manager.release_crawl_slot(tenant_id)
                 failed_count += 1
 
         if (
@@ -315,6 +319,10 @@ class CrawlFeeder:
             extra={
                 "interval_seconds": self.settings.crawl_feeder_interval_seconds,
                 "batch_size": self.settings.crawl_feeder_batch_size,
+                "crawl_job_concurrency_limit": (
+                    self.settings.effective_crawl_job_concurrency_limit
+                ),
+                "reserved_worker_jobs": self.settings.reserved_worker_jobs,
             },
         )
         self._running = True

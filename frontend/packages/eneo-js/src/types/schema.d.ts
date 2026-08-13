@@ -10997,6 +10997,12 @@ export interface components {
       requests_per_crawl: number;
       /** Crawl Jobs Per Tenant */
       crawl_jobs_per_tenant: number;
+      /** Worker Jobs Per Process */
+      worker_jobs_per_process: number;
+      /** Max Concurrent Crawl Jobs */
+      max_concurrent_crawl_jobs: number;
+      /** Reserved Worker Jobs */
+      reserved_worker_jobs: number | null;
     };
     /** CrawlerDiagnosticsModel */
     CrawlerDiagnosticsModel: {

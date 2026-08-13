@@ -162,6 +162,34 @@ class TestCapacityManager:
 
         await redis_client.delete(f"tenant:{tenant_id}:active_jobs")
 
+    async def test_global_admission_reserves_worker_capacity_across_tenants(
+        self, redis_client: aioredis.Redis, test_settings
+    ):
+        """Crawls cannot consume the worker slots reserved for other tasks."""
+        settings = test_settings.model_copy(
+            update={
+                "worker_max_jobs": 3,
+                "crawl_job_concurrency_limit": None,
+                "tenant_worker_concurrency_limit": 3,
+            }
+        )
+        tenants = [uuid4(), uuid4(), uuid4()]
+        await redis_client.delete(
+            "crawler:active_jobs",
+            *(f"tenant:{tenant_id}:active_jobs" for tenant_id in tenants),
+        )
+        capacity_mgr = CapacityManager(redis_client, settings)
+
+        assert await capacity_mgr.try_acquire_crawl_slot(tenants[0])
+        assert await capacity_mgr.try_acquire_crawl_slot(tenants[1])
+        assert not await capacity_mgr.try_acquire_crawl_slot(tenants[2])
+
+        await capacity_mgr.release_crawl_slot(tenants[0])
+        assert await capacity_mgr.try_acquire_crawl_slot(tenants[2])
+
+        await capacity_mgr.release_crawl_slot(tenants[1])
+        await capacity_mgr.release_crawl_slot(tenants[2])
+
 
 @pytest.mark.integration
 @pytest.mark.asyncio

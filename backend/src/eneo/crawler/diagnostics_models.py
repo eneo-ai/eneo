@@ -12,6 +12,9 @@ class CrawlerCapacity(BaseModel):
     max_http_requests_per_process: int
     requests_per_crawl: int
     crawl_jobs_per_tenant: int
+    worker_jobs_per_process: int
+    max_concurrent_crawl_jobs: int
+    reserved_worker_jobs: int | None
 
 
 class CrawlerLimitsModel(BaseModel):

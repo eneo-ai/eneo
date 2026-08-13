@@ -289,7 +289,6 @@ def test_settings(
         using_access_management=False,
         using_iam=False,
         using_image_generation=False,
-        using_crawl=False,
         tenant_credentials_enabled=False,  # Disable for integration tests (tests can override if needed)
         federation_enabled=True,
         # Note: Set to False for integration tests that need full app functionality

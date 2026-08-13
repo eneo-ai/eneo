@@ -76,6 +76,11 @@ async def test_diagnostics_lists_only_rows_from_tenant_scoped_query() -> None:
     assert result.execution == "in_process"
     assert [item.id for item in result.websites] == [website_id]
     assert result.capacity.max_http_requests_per_process > 0
+    assert result.capacity.max_concurrent_crawl_jobs > 0
+    assert result.capacity.worker_jobs_per_process >= (
+        result.capacity.max_concurrent_crawl_jobs
+    )
+    assert result.capacity.reserved_worker_jobs
 
 
 async def test_probe_rejects_website_missing_from_current_tenant() -> None:

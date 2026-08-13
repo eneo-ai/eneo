@@ -145,11 +145,15 @@ class HeartbeatMonitor:
 
         concurrency_key = f"tenant:{self._tenant.id}:active_jobs"
         flag_key = f"job:{self._job_id}:slot_preacquired"
+        global_concurrency_key = "crawler:active_jobs"
+        global_flag_key = f"job:{self._job_id}:global_crawl_slot_preacquired"
 
         try:
             pipe = self._redis_client.pipeline(transaction=True)
             pipe.expire(concurrency_key, self._semaphore_ttl_seconds)
             pipe.expire(flag_key, self._semaphore_ttl_seconds)
+            pipe.expire(global_concurrency_key, self._semaphore_ttl_seconds)
+            pipe.expire(global_flag_key, self._semaphore_ttl_seconds)
             results: list[object] = cast(list[object], await pipe.execute())
 
             self._consecutive_failures = 0
@@ -163,6 +167,16 @@ class HeartbeatMonitor:
             )
             flag_refreshed = (
                 int(flag_refreshed_raw) if isinstance(flag_refreshed_raw, int) else 0
+            )
+            global_counter_refreshed = (
+                int(results[2])
+                if len(results) > 2 and isinstance(results[2], int)
+                else 0
+            )
+            global_flag_refreshed = (
+                int(results[3])
+                if len(results) > 3 and isinstance(results[3], int)
+                else 0
             )
 
             if counter_refreshed == 0:
@@ -180,6 +194,16 @@ class HeartbeatMonitor:
                         "job_id": str(self._job_id),
                         "flag_key": flag_key,
                     },
+                )
+            if global_counter_refreshed == 0:
+                logger.warning(
+                    "Heartbeat: global crawl counter missing or expired",
+                    extra={"job_id": str(self._job_id)},
+                )
+            if global_flag_refreshed == 0:
+                logger.warning(
+                    "Heartbeat: global crawl flag missing or expired",
+                    extra={"job_id": str(self._job_id)},
                 )
 
         except Exception:

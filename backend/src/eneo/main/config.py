@@ -279,6 +279,9 @@ class Settings(BaseSettings):
 
     # Background worker configuration
     worker_max_jobs: int = 15
+    # Optional cluster-wide override. When unset, reserve 20% (at least one)
+    # of this worker's ARQ slots for uploads and other non-crawl work.
+    crawl_job_concurrency_limit: int | None = Field(default=None, gt=0)
     tenant_worker_concurrency_limit: int = 4
     # IMPORTANT: Must be >= crawl_max_length to prevent semaphore expiry mid-crawl
     # Heartbeat refreshes TTL during crawls, but this provides defense-in-depth
@@ -465,14 +468,6 @@ class Settings(BaseSettings):
     crawl_sitemap_skip_enabled: bool = True
     crawl_sitemap_skip_max_age_hours: int = Field(default=168, gt=0, le=24 * 365)
     autothrottle_enabled: bool = True  # Pace bounded request batches conservatively
-    using_crawl: bool = True  # Enable/disable crawling feature globally
-
-    # Crawl retry configuration
-    crawl_page_max_retries: int = 3  # Maximum retries for failed pages during crawl
-    crawl_page_retry_delay: float = (
-        1.0  # Initial retry delay in seconds (exponential backoff)
-    )
-
     # Crawl job age limit (prevents infinite retry loops)
     crawl_job_max_age_seconds: int = 1800  # Maximum retry window (30 minutes)
 
@@ -592,10 +587,8 @@ class Settings(BaseSettings):
                 )
                 sys.exit(1)
 
-        # Warn if crawling is enabled but no encryption key (HTTP auth will be disabled)
-        if self.using_crawl and (
-            not self.encryption_key or not self.encryption_key.strip()
-        ):
+        # HTTP authentication for protected crawl targets requires encryption.
+        if not self.encryption_key or not self.encryption_key.strip():
             logging.warning(
                 "⚠️  ENCRYPTION_KEY not set. HTTP authentication for crawling will be disabled.\n"
                 "To enable HTTP auth for protected websites, generate key:\n"
@@ -639,6 +632,12 @@ class Settings(BaseSettings):
                 self.worker_max_jobs,
             )
             sys.exit(1)
+
+        if self.worker_max_jobs == 1 and self.crawl_job_concurrency_limit is None:
+            logging.warning(
+                "WORKER_MAX_JOBS=1 cannot reserve capacity for non-crawl jobs. "
+                "Increase WORKER_MAX_JOBS to prevent long crawls from delaying uploads."
+            )
 
         if self.tenant_worker_concurrency_limit < 0:
             logging.error(
@@ -712,6 +711,28 @@ class Settings(BaseSettings):
             )
 
         return self
+
+    @property
+    def effective_crawl_job_concurrency_limit(self) -> int:
+        """Cluster-wide crawl admission limit.
+
+        The derived default targets the standard single-worker deployment. An
+        explicit value can represent aggregate capacity when operators scale
+        the worker service horizontally.
+        """
+        if self.crawl_job_concurrency_limit is not None:
+            return self.crawl_job_concurrency_limit
+        if self.worker_max_jobs == 1:
+            return 1
+        reserved_jobs = max(1, (self.worker_max_jobs + 4) // 5)
+        return max(1, self.worker_max_jobs - reserved_jobs)
+
+    @property
+    def reserved_worker_jobs(self) -> int | None:
+        """Return locally reserved slots, or None for a cluster override."""
+        if self.crawl_job_concurrency_limit is not None:
+            return None
+        return self.worker_max_jobs - self.effective_crawl_job_concurrency_limit
 
     @model_validator(mode="after")
     def validate_redis_settings(self):

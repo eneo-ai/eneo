@@ -434,9 +434,11 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
     tenant = None
     limiter = None
     acquired = False
+    global_acquired = False
     redis_client: aioredis.Redis | None = None
     # Track pre-acquired slot for guaranteed cleanup even if tenant injection fails
     preacquired_tenant_id: UUID | None = None
+    global_slot_preacquired = False
 
     # Track sessions for cleanup (addresses session lifecycle leak on recovery)
     # When we recover from invalid transaction, we create new sessions that must be
@@ -463,6 +465,9 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                 "Pre-acquired slot detected, will ensure release",
                 extra={"job_id": str(job_id), "tenant_id": str(preacquired_tenant_id)},
             )
+        global_slot_preacquired = bool(
+            await _early_redis.get(LuaScripts.global_crawl_flag_key(job_id))
+        )
     except Exception as exc:
         logger.warning(
             "Failed to check pre-acquired slot early",
@@ -501,6 +506,14 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                     )
             except Exception:
                 pass  # Best effort - will acquire normally if this fails too
+
+        if not global_slot_preacquired and redis_client:
+            try:
+                global_slot_preacquired = bool(
+                    await redis_client.get(LuaScripts.global_crawl_flag_key(job_id))
+                )
+            except Exception:
+                pass  # Global acquisition below fails closed if Redis is unavailable
 
         # Check if we already detected a pre-acquired slot in early check
         # The early check happens BEFORE tenant injection to ensure cleanup even if injection fails
@@ -570,6 +583,48 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
         else:
             # No pre-acquired slot, acquire normally
             acquired = await limiter.acquire(tenant.id)
+
+        if acquired:
+            if global_slot_preacquired:
+                global_acquired = True
+                if redis_client:
+                    try:
+                        await redis_client.expire(
+                            LuaScripts.global_crawl_slot_key(),
+                            settings.tenant_worker_semaphore_ttl_seconds,
+                        )
+                    except Exception:
+                        pass
+            else:
+                # Jobs queued before global admission was introduced (or while
+                # the feeder was disabled) acquire the reserved-capacity permit
+                # when they start. If capacity is full they are deferred below.
+                global_acquired = bool(
+                    redis_client
+                    and await CapacityManager(
+                        redis_client, settings
+                    ).try_acquire_global_crawl_slot()
+                )
+                if global_acquired and redis_client:
+                    try:
+                        await redis_client.set(
+                            LuaScripts.global_crawl_flag_key(job_id),
+                            "1",
+                            ex=settings.tenant_worker_semaphore_ttl_seconds,
+                        )
+                    except Exception:
+                        await LuaScripts.release_global_crawl_slot(
+                            redis_client,
+                            settings.tenant_worker_semaphore_ttl_seconds,
+                        )
+                        global_acquired = False
+
+            if not global_acquired:
+                await limiter.release(tenant.id)
+                acquired = False
+                if preacquired_tenant_id is not None and redis_client:
+                    await redis_client.delete(f"job:{job_id}:slot_preacquired")
+                    preacquired_tenant_id = None
 
         if not acquired:
             # Enforce max age limit with exponential backoff to prevent infinite retry loops.
@@ -652,7 +707,7 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
             )
 
             logger.warning(
-                "Tenant concurrency limit reached, requeueing crawl (busy wait)",
+                "Crawl capacity reached, requeueing crawl (busy wait)",
                 extra={
                     "job_id": str(job_id),
                     "tenant_id": str(tenant.id),
@@ -660,6 +715,7 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                     "website_id": str(params.website_id),
                     "url": params.url,
                     "max_concurrent": concurrency_limit,
+                    "global_crawl_limit": settings.effective_crawl_job_concurrency_limit,
                     "failure_count": failure_count,
                     "retry_delay_seconds": retry_delay,
                     "job_age_seconds": job_age,
@@ -1899,6 +1955,11 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
         # Primary path: normal release when everything worked
         if limiter is not None and tenant is not None and acquired:
             await limiter.release(tenant.id)
+            if global_acquired and redis_client is not None:
+                await LuaScripts.release_global_crawl_slot(
+                    redis_client,
+                    settings.tenant_worker_semaphore_ttl_seconds,
+                )
             await reset_tenant_retry_delay(
                 tenant_id=tenant.id, redis_client=redis_client
             )
@@ -1907,7 +1968,10 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
             # Deleting here (not earlier) ensures flag exists for entire crawl lifecycle
             if redis_client and job_id:
                 try:
-                    await redis_client.delete(f"job:{job_id}:slot_preacquired")
+                    await redis_client.delete(
+                        f"job:{job_id}:slot_preacquired",
+                        LuaScripts.global_crawl_flag_key(job_id),
+                    )
                 except Exception:
                     pass  # Best effort cleanup
         # Fallback path: release pre-acquired slot if tenant injection failed
@@ -1934,22 +1998,24 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                     except Exception:
                         pass
                 if _fallback_redis is not None:
-                    release_key = f"tenant:{preacquired_tenant_id}:active_jobs"
-                    # Redis eval executes Lua script atomically (not Python eval)
-                    await cast(
-                        Any,
-                        _fallback_redis.eval(
-                            LuaScripts.RELEASE_SLOT,
-                            1,
-                            release_key,
-                            str(settings.tenant_worker_semaphore_ttl_seconds),
-                        ),
-                    )
+                    if global_slot_preacquired:
+                        await LuaScripts.release_crawl_slots(
+                            _fallback_redis,
+                            preacquired_tenant_id,
+                            settings.tenant_worker_semaphore_ttl_seconds,
+                        )
+                    else:
+                        await LuaScripts.release_slot(
+                            _fallback_redis,
+                            preacquired_tenant_id,
+                            settings.tenant_worker_semaphore_ttl_seconds,
+                        )
                     # Delete pre-acquired flag after fallback slot release
                     if job_id:
                         try:
                             await _fallback_redis.delete(
-                                f"job:{job_id}:slot_preacquired"
+                                f"job:{job_id}:slot_preacquired",
+                                LuaScripts.global_crawl_flag_key(job_id),
                             )
                         except Exception:
                             pass  # Best effort cleanup

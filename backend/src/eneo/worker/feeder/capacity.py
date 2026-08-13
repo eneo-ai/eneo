@@ -142,6 +142,60 @@ class CapacityManager:
             )
             return False
 
+    async def try_acquire_crawl_slot(
+        self,
+        tenant_id: UUID,
+        tenant_settings: dict[str, Any] | None = None,
+    ) -> bool:
+        """Atomically admit a crawl against tenant and cluster capacity."""
+        tenant_limit = self.get_max_concurrent(tenant_settings)
+        global_limit = self._settings.effective_crawl_job_concurrency_limit
+        ttl = self.get_slot_ttl(tenant_settings)
+
+        try:
+            result = await LuaScripts.acquire_crawl_slots(
+                self._redis,
+                tenant_id,
+                tenant_limit,
+                global_limit,
+                ttl,
+            )
+            if result == 1:
+                return True
+
+            logger.debug(
+                "Crawl admission denied",
+                extra={
+                    "tenant_id": str(tenant_id),
+                    "tenant_limit": tenant_limit,
+                    "global_limit": global_limit,
+                    "capacity": "tenant" if result == 0 else "global",
+                },
+            )
+            return False
+        except Exception as exc:
+            logger.warning(
+                "Failed to acquire crawl admission slot",
+                extra={"tenant_id": str(tenant_id), "error": str(exc)},
+            )
+            return False
+
+    async def try_acquire_global_crawl_slot(self) -> bool:
+        """Acquire only global capacity for a job queued before admission."""
+        try:
+            result = await LuaScripts.acquire_global_crawl_slot(
+                self._redis,
+                self._settings.effective_crawl_job_concurrency_limit,
+                self._settings.tenant_worker_semaphore_ttl_seconds,
+            )
+            return result > 0
+        except Exception as exc:
+            logger.warning(
+                "Failed to acquire global crawl admission slot",
+                extra={"error": str(exc)},
+            )
+            return False
+
     async def release_slot(
         self,
         tenant_id: UUID,
@@ -160,6 +214,21 @@ class CapacityManager:
         except Exception as exc:
             logger.warning(
                 "Failed to release slot",
+                extra={"tenant_id": str(tenant_id), "error": str(exc)},
+            )
+
+    async def release_crawl_slot(
+        self,
+        tenant_id: UUID,
+        tenant_settings: dict[str, Any] | None = None,
+    ) -> None:
+        """Release tenant and cluster-wide capacity held by a crawl."""
+        ttl = self.get_slot_ttl(tenant_settings)
+        try:
+            await LuaScripts.release_crawl_slots(self._redis, tenant_id, ttl)
+        except Exception as exc:
+            logger.warning(
+                "Failed to release crawl admission slot",
                 extra={"tenant_id": str(tenant_id), "error": str(exc)},
             )
 
@@ -201,6 +270,24 @@ class CapacityManager:
             )
             return 0  # Conservative: assume no capacity
 
+    async def get_global_available_capacity(self) -> int:
+        """Return available cluster-wide crawl admission capacity."""
+        limit = self._settings.effective_crawl_job_concurrency_limit
+        try:
+            active_raw = await self._redis.get(LuaScripts.global_crawl_slot_key())
+            if not active_raw:
+                return limit
+            active = int(
+                active_raw.decode() if isinstance(active_raw, bytes) else active_raw
+            )
+            return max(0, limit - max(0, min(active, limit)))
+        except Exception as exc:
+            logger.warning(
+                "Failed to check global crawl capacity",
+                extra={"error": str(exc)},
+            )
+            return 0
+
     async def mark_slot_preacquired(
         self,
         job_id: UUID,
@@ -224,6 +311,23 @@ class CapacityManager:
         ttl = self.get_slot_ttl(tenant_settings)
         await self._redis.set(key, str(tenant_id), ex=ttl)
 
+    async def mark_crawl_slot_preacquired(
+        self,
+        job_id: UUID,
+        tenant_id: UUID,
+        tenant_settings: dict[str, Any] | None = None,
+    ) -> None:
+        """Mark both admission permits for worker hand-off and recovery."""
+        ttl = self.get_slot_ttl(tenant_settings)
+        tenant_flag = f"job:{job_id}:slot_preacquired"
+        global_flag = LuaScripts.global_crawl_flag_key(job_id)
+        await self._redis.set(tenant_flag, str(tenant_id), ex=ttl)
+        try:
+            await self._redis.set(global_flag, "1", ex=ttl)
+        except Exception:
+            await self._redis.delete(tenant_flag)
+            raise
+
     async def clear_preacquired_flag(self, job_id: UUID) -> None:
         """Clear the pre-acquired flag for a job.
 
@@ -235,6 +339,16 @@ class CapacityManager:
             await self._redis.delete(key)
         except Exception:
             pass  # Best effort cleanup
+
+    async def clear_crawl_preacquired_flags(self, job_id: UUID) -> None:
+        """Clear tenant and global crawl admission hand-off flags."""
+        try:
+            await self._redis.delete(
+                f"job:{job_id}:slot_preacquired",
+                LuaScripts.global_crawl_flag_key(job_id),
+            )
+        except Exception:
+            pass
 
     async def get_preacquired_tenant(self, job_id: UUID) -> UUID | None:
         """Get the tenant ID from a pre-acquired flag.
@@ -356,15 +470,22 @@ class CapacityManager:
 
             tenant_id = UUID(flag_value.decode())
 
-            # Release slot using centralized Lua script
-            await LuaScripts.release_slot(
-                self._redis,
-                tenant_id,
-                self._settings.tenant_worker_semaphore_ttl_seconds,
-            )
+            global_flag_key = LuaScripts.global_crawl_flag_key(job_id)
+            has_global_slot = bool(await self._redis.get(global_flag_key))
+            if has_global_slot:
+                await LuaScripts.release_crawl_slots(
+                    self._redis,
+                    tenant_id,
+                    self._settings.tenant_worker_semaphore_ttl_seconds,
+                )
+            else:
+                await LuaScripts.release_slot(
+                    self._redis,
+                    tenant_id,
+                    self._settings.tenant_worker_semaphore_ttl_seconds,
+                )
 
-            # Clear the flag
-            await self._redis.delete(flag_key)
+            await self._redis.delete(flag_key, global_flag_key)
 
             logger.info(
                 "Emergency slot release via flag read succeeded",

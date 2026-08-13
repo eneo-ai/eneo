@@ -16,7 +16,78 @@ def mock_settings():
     settings.tenant_worker_concurrency_limit = 10
     settings.tenant_worker_semaphore_ttl_seconds = 300
     settings.crawl_feeder_interval_seconds = 10
+    settings.effective_crawl_job_concurrency_limit = 8
     return settings
+
+
+class TestGlobalCrawlCapacity:
+    async def test_acquires_tenant_and_global_capacity_atomically(self, mock_settings):
+        from eneo.worker.feeder.capacity import CapacityManager
+
+        redis_mock = MagicMock()
+        tenant_id = uuid4()
+        manager = CapacityManager(redis_mock, settings=mock_settings)
+
+        with patch(
+            "eneo.worker.feeder.capacity.LuaScripts.acquire_crawl_slots",
+            new=AsyncMock(return_value=1),
+        ) as acquire:
+            assert await manager.try_acquire_crawl_slot(
+                tenant_id,
+                {
+                    "tenant_worker_concurrency_limit": 10,
+                    "tenant_worker_semaphore_ttl_seconds": 300,
+                },
+            )
+
+        acquire.assert_awaited_once_with(redis_mock, tenant_id, 10, 8, 300)
+
+    async def test_rejects_when_global_crawl_capacity_is_full(self, mock_settings):
+        from eneo.worker.feeder.capacity import CapacityManager
+
+        redis_mock = MagicMock()
+        manager = CapacityManager(redis_mock, settings=mock_settings)
+
+        with patch(
+            "eneo.worker.feeder.capacity.LuaScripts.acquire_crawl_slots",
+            new=AsyncMock(return_value=-1),
+        ):
+            assert not await manager.try_acquire_crawl_slot(uuid4())
+
+    async def test_reports_remaining_global_capacity(self, mock_settings):
+        from eneo.worker.feeder.capacity import CapacityManager
+        from eneo.worker.redis.lua_scripts import LuaScripts
+
+        redis_mock = MagicMock()
+        redis_mock.get = AsyncMock(return_value=b"6")
+        manager = CapacityManager(redis_mock, settings=mock_settings)
+
+        assert await manager.get_global_available_capacity() == 2
+        redis_mock.get.assert_awaited_once_with(LuaScripts.global_crawl_slot_key())
+
+    async def test_marks_both_preacquired_permits(self, mock_settings):
+        from eneo.worker.feeder.capacity import CapacityManager
+        from eneo.worker.redis.lua_scripts import LuaScripts
+
+        redis_mock = MagicMock()
+        redis_mock.set = AsyncMock()
+        tenant_id = uuid4()
+        job_id = uuid4()
+        manager = CapacityManager(redis_mock, settings=mock_settings)
+
+        await manager.mark_crawl_slot_preacquired(
+            job_id,
+            tenant_id,
+            {"tenant_worker_semaphore_ttl_seconds": 300},
+        )
+
+        assert redis_mock.set.await_count == 2
+        redis_mock.set.assert_any_await(
+            f"job:{job_id}:slot_preacquired", str(tenant_id), ex=300
+        )
+        redis_mock.set.assert_any_await(
+            LuaScripts.global_crawl_flag_key(job_id), "1", ex=300
+        )
 
 
 class TestCapacityManagerInit:

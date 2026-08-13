@@ -297,11 +297,16 @@ DB_POOL_PRE_PING=true
 #   - eneo_temp_files:/tmp  # Also used for audit log exports (/tmp/exports)
 # ----------------------------------------------------------------------------
 # ⚠️  WORKER_MAX_JOBS ≤ 0.6 × (DB_POOL_SIZE + DB_POOL_MAX_OVERFLOW)
-# Crawl jobs hold DB connections for hours. See "Database Connection Pool" above.
+# Crawl jobs occupy ARQ slots for their full duration.
 # ----------------------------------------------------------------------------
 # Max concurrent jobs across all tenants
 # Memory: 100-500MB per job. With default pool (30), safe max is 18.
 WORKER_MAX_JOBS=15
+
+# Optional cluster-wide crawl admission limit. When unset, Eneo reserves 20%
+# (at least one worker slot) for uploads and other background jobs. Set this
+# explicitly only when the worker service has multiple replicas.
+# CRAWL_JOB_CONCURRENCY_LIMIT=12
 
 # Max concurrent jobs per tenant (prevents "noisy neighbor" problem)
 # In multi-tenant deployments, prevents one tenant from monopolizing all worker slots
@@ -352,10 +357,6 @@ CRAWL_SITEMAP_SKIP_MAX_AGE_HOURS=168
 # Pages saved per database write. Lower = less data loss on crash, higher = faster
 CRAWL_PAGE_BATCH_SIZE=100
 
-# Retry configuration for failed pages during crawl
-# CRAWL_PAGE_MAX_RETRIES=3           # Maximum retries per page (default: 3)
-# CRAWL_PAGE_RETRY_DELAY=1.0         # Initial retry delay in seconds (exponential backoff)
-
 # Parallel embedding API calls per crawl
 CRAWL_EMBEDDING_CONCURRENCY=3
 
@@ -382,29 +383,6 @@ CRAWL_JOB_MAX_AGE_SECONDS=1800
 CRAWL_FEEDER_ENABLED=true
 CRAWL_FEEDER_INTERVAL_SECONDS=10
 CRAWL_FEEDER_BATCH_SIZE=10
-
-# ----------------------------------------------------------------------------
-# Web Crawling Configuration
-# ----------------------------------------------------------------------------
-# [OPTIONAL] Max crawl duration (default: 14400 = 4 hours)
-CRAWL_MAX_LENGTH=14400
-# [OPTIONAL] Max items before stopping (default: 20000)
-CLOSESPIDER_ITEMCOUNT=20000
-# [OPTIONAL] Max file download size in bytes (default: 10485760 = 10MB)
-# This controls crawler downloads, not the upload policy in Admin > Storage.
-DOWNLOAD_MAX_SIZE=10485760
-# [OPTIONAL] Respect robots.txt (default: True)
-OBEY_ROBOTS=True
-# [OPTIONAL] Auto-throttle requests (default: True)
-AUTOTHROTTLE_ENABLED=True
-# [OPTIONAL] Async HTTP concurrency per crawl / process-wide
-CRAWL_FETCH_CONCURRENCY=4
-CRAWL_GLOBAL_HTTP_CONCURRENCY=20
-# [OPTIONAL] Maximum HTML/JSON response body size (default: 10MB)
-CRAWL_PAGE_MAX_SIZE=10485760
-# [OPTIONAL] Scheduled sitemap lastmod shortcut
-CRAWL_SITEMAP_SKIP_ENABLED=True
-CRAWL_SITEMAP_SKIP_MAX_AGE_HOURS=168
 
 # ----------------------------------------------------------------------------
 # Audit Log Export Configuration
@@ -442,7 +420,6 @@ USING_ACCESS_MANAGEMENT=true
 USING_AZURE_MODELS=false
 USING_IAM=false
 USING_IMAGE_GENERATION=false
-USING_CRAWL=true
 TESTING=false
 DEV=false
 
