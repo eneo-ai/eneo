@@ -35,6 +35,7 @@ def _request(
     max_pages: int = 10,
     max_seconds: float = 10,
     download_files: bool = True,
+    concurrency: int = 2,
     conditional_gets: tuple[ConditionalGet, ...] = (),
 ) -> CrawlRequest:
     return CrawlRequest(
@@ -47,7 +48,7 @@ def _request(
             max_seconds=max_seconds,
             request_timeout_seconds=2,
             max_response_bytes=max_response_bytes,
-            concurrency=2,
+            concurrency=concurrency,
             retries=1,
         ),
         conditional_gets=conditional_gets,
@@ -302,6 +303,94 @@ async def test_downloaded_file_exists_until_event_consumer_resumes() -> None:
 
     assert downloaded_path is not None
     assert not downloaded_path.exists()
+
+
+async def test_file_downloads_use_bounded_concurrency() -> None:
+    active = 0
+    peak = 0
+
+    async def start(_: web.Request) -> web.Response:
+        links = "".join(
+            f'<a href="/file-{index}.pdf">File {index}</a>' for index in range(4)
+        )
+        return web.Response(text=f"<main>{links}</main>", content_type="text/html")
+
+    async def download(request: web.Request) -> web.Response:
+        nonlocal active, peak
+        active += 1
+        peak = max(peak, active)
+        try:
+            await asyncio.sleep(0.05)
+            return web.Response(
+                body=request.path.encode(), content_type="application/pdf"
+            )
+        finally:
+            active -= 1
+
+    app = web.Application()
+    app.router.add_get("/start", start)
+    app.router.add_get("/file-{index}.pdf", download)
+
+    async with _serve(app) as base_url:
+        events = [
+            event
+            async for event in PythonCrawlEngine(allow_private_network=True).crawl(
+                _request(f"{base_url}/start", concurrency=2)
+            )
+        ]
+
+    downloads = [event for event in events if isinstance(event, FileDownloaded)]
+    assert len(downloads) == 4
+    assert peak == 2
+    assert events[-1] == CrawlFinished(
+        status="completed",
+        pages_crawled=1,
+        pages_failed=0,
+        files_downloaded=4,
+    )
+
+
+async def test_file_downloads_are_emitted_in_completion_order() -> None:
+    both_started = asyncio.Event()
+    started = 0
+
+    async def start(_: web.Request) -> web.Response:
+        return web.Response(
+            text=(
+                '<main><a href="/a-slow.pdf">Slow</a>'
+                '<a href="/b-fast.pdf">Fast</a></main>'
+            ),
+            content_type="text/html",
+        )
+
+    async def download(request: web.Request) -> web.Response:
+        nonlocal started
+        started += 1
+        if started == 2:
+            both_started.set()
+        await both_started.wait()
+        if request.path == "/a-slow.pdf":
+            await asyncio.sleep(0.05)
+        return web.Response(body=b"file", content_type="application/pdf")
+
+    app = web.Application()
+    app.router.add_get("/start", start)
+    app.router.add_get("/a-slow.pdf", download)
+    app.router.add_get("/b-fast.pdf", download)
+
+    async with _serve(app) as base_url:
+        events = [
+            event
+            async for event in PythonCrawlEngine(allow_private_network=True).crawl(
+                _request(f"{base_url}/start", concurrency=2)
+            )
+        ]
+
+    downloads = [event for event in events if isinstance(event, FileDownloaded)]
+    assert [event.url for event in downloads] == [
+        f"{base_url}/b-fast.pdf",
+        f"{base_url}/a-slow.pdf",
+    ]
 
 
 async def test_process_wide_http_capacity_bounds_concurrent_crawls(monkeypatch) -> None:

@@ -374,35 +374,23 @@ class PythonCrawlEngine:
                 )
 
                 if request.download_files and file_links:
-                    taken_names: set[str] = set()
-                    for file_url in sorted(file_links):
-                        remaining = request.limits.max_seconds - (
-                            monotonic() - started_at
-                        )
-                        if remaining <= 0:
-                            termination_reason = "timeout"
-                            break
-                        try:
-                            result = await asyncio.wait_for(
-                                self._download_file(
-                                    session,
-                                    file_url,
-                                    seed_url,
-                                    request,
-                                    Path(files_dir.name),
-                                    taken_names,
-                                    origin_authorization,
-                                ),
-                                timeout=remaining,
-                            )
-                        except TimeoutError:
-                            termination_reason = "timeout"
-                            break
-                        if isinstance(result, FileDownloaded):
-                            files_downloaded += 1
-                        else:
-                            files_failed += 1
-                        yield result
+                    try:
+                        async for result in self._download_files(
+                            session=session,
+                            file_links=file_links,
+                            scope_url=seed_url,
+                            request=request,
+                            directory=Path(files_dir.name),
+                            origin_authorization=origin_authorization,
+                            started_at=started_at,
+                        ):
+                            if isinstance(result, FileDownloaded):
+                                files_downloaded += 1
+                            else:
+                                files_failed += 1
+                            yield result
+                    except TimeoutError:
+                        termination_reason = "timeout"
 
             yield CrawlFinished(
                 status="partial" if termination_reason else "completed",
@@ -584,6 +572,65 @@ class PythonCrawlEngine:
                 await asyncio.sleep(min(2**attempt, 10))
 
         raise AssertionError("retry loop exhausted without a result")
+
+    async def _download_files(
+        self,
+        *,
+        session: aiohttp.ClientSession,
+        file_links: set[str],
+        scope_url: str,
+        request: CrawlRequest,
+        directory: Path,
+        origin_authorization: str | None,
+        started_at: float,
+    ) -> AsyncIterator[FileDownloaded | FileFailed]:
+        """Download files concurrently without creating an unbounded task set."""
+
+        urls = iter(sorted(file_links))
+        taken_names: set[str] = set()
+        pending: set[asyncio.Task[FileDownloaded | FileFailed]] = set()
+
+        def fill_capacity() -> None:
+            while len(pending) < request.limits.concurrency:
+                try:
+                    file_url = next(urls)
+                except StopIteration:
+                    return
+                pending.add(
+                    asyncio.create_task(
+                        self._download_file(
+                            session,
+                            file_url,
+                            scope_url,
+                            request,
+                            directory,
+                            taken_names,
+                            origin_authorization,
+                        )
+                    )
+                )
+
+        fill_capacity()
+        try:
+            while pending:
+                done, pending = await asyncio.wait(
+                    pending,
+                    timeout=self._remaining_seconds(started_at, request),
+                    return_when=asyncio.FIRST_COMPLETED,
+                )
+                if not done:
+                    raise TimeoutError
+
+                # Refill before yielding so file processing by the consumer does
+                # not unnecessarily leave HTTP capacity idle.
+                results = [task.result() for task in done]
+                fill_capacity()
+                for result in results:
+                    yield result
+        finally:
+            for task in pending:
+                task.cancel()
+            await asyncio.gather(*pending, return_exceptions=True)
 
     async def _download_file(
         self,
