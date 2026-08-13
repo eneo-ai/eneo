@@ -1200,6 +1200,10 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
             num_not_modified_pages = 0
             new_sitemap_state: dict[str, Any] | None = None
             sitemap_skipped = False
+
+            # Session-per-batch page processing: persist_batch opens a fresh,
+            # short-lived persistence session for each flushed batch. The
+            # bootstrap session has already been returned to the pool above.
             page_buffer: list[CrawlPageData] = []
             page_buffer_bytes = 0
             processing_page_seconds = 0.0
