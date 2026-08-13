@@ -70,7 +70,7 @@ from eneo.completion_models.infrastructure.completion_service import CompletionS
 from eneo.completion_models.infrastructure.context_builder import ContextBuilder
 from eneo.completion_models.presentation import CompletionModelAssembler
 from eneo.conversations.application.conversation_service import ConversationService
-from eneo.crawler.crawler import Crawler
+from eneo.crawler.python_engine import PythonCrawlEngine
 from eneo.data_retention.infrastructure.data_retention_service import (
     DataRetentionService,
 )
@@ -421,6 +421,12 @@ def _build_tenant_limiter(redis_client: aioredis.Redis) -> TenantConcurrencyLimi
         redis=redis_client,
         max_concurrent=settings.tenant_worker_concurrency_limit,
         ttl_seconds=settings.tenant_worker_semaphore_ttl_seconds,
+    )
+
+
+def _build_crawl_engine() -> PythonCrawlEngine:
+    return PythonCrawlEngine(
+        global_concurrency=get_settings().crawl_global_http_concurrency
     )
 
 
@@ -1608,7 +1614,7 @@ class Container(containers.DeclarativeContainer):
         encryption_service=encryption_service,
         session=session,
     )
-    crawler = providers.Factory(Crawler)
+    crawler = providers.Singleton(_build_crawl_engine)
 
     # Worker dependent services
     app_service = providers.Factory(

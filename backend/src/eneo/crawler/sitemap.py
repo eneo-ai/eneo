@@ -1,6 +1,7 @@
 """Bounded parsing helpers for sitemap indexes and URL sets."""
 
 import gzip
+import hashlib
 from dataclasses import dataclass
 from io import BytesIO
 from xml.etree import ElementTree
@@ -13,7 +14,36 @@ class InvalidSitemap(ValueError):
 @dataclass(frozen=True, slots=True)
 class ParsedSitemap:
     kind: str
-    locations: tuple[str, ...]
+    entries: tuple["SitemapEntry", ...]
+
+    @property
+    def locations(self) -> tuple[str, ...]:
+        return tuple(entry.location for entry in self.entries)
+
+
+@dataclass(frozen=True, slots=True)
+class SitemapEntry:
+    location: str
+    last_modified: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class SitemapSnapshot:
+    fingerprint: str
+    entry_count: int
+
+
+def snapshot_sitemap(entries: list[SitemapEntry]) -> SitemapSnapshot | None:
+    if not entries or any(entry.last_modified is None for entry in entries):
+        return None
+    canonical = "\n".join(
+        f"{entry.location}\t{entry.last_modified}"
+        for entry in sorted(entries, key=lambda item: item.location)
+    )
+    return SitemapSnapshot(
+        fingerprint=hashlib.sha256(canonical.encode("utf-8")).hexdigest(),
+        entry_count=len(entries),
+    )
 
 
 def parse_sitemap(
@@ -45,10 +75,20 @@ def parse_sitemap(
     if root_name not in {"sitemapindex", "urlset"}:
         raise InvalidSitemap(f"unsupported sitemap root: {root_name}")
 
-    locations: list[str] = []
-    for element in root.iter():
-        if element.tag.rsplit("}", 1)[-1].lower() != "loc":
+    entries: list[SitemapEntry] = []
+    item_name = "sitemap" if root_name == "sitemapindex" else "url"
+    for item in root:
+        if item.tag.rsplit("}", 1)[-1].lower() != item_name:
             continue
-        if element.text and element.text.strip():
-            locations.append(element.text.strip())
-    return ParsedSitemap(kind=root_name, locations=tuple(locations))
+        location: str | None = None
+        last_modified: str | None = None
+        for child in item:
+            child_name = child.tag.rsplit("}", 1)[-1].lower()
+            text = child.text.strip() if child.text else None
+            if child_name == "loc":
+                location = text
+            elif child_name == "lastmod":
+                last_modified = text
+        if location:
+            entries.append(SitemapEntry(location=location, last_modified=last_modified))
+    return ParsedSitemap(kind=root_name, entries=tuple(entries))

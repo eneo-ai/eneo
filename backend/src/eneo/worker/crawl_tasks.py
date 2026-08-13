@@ -1,3 +1,4 @@
+import asyncio
 import hashlib
 import random
 import socket
@@ -13,6 +14,17 @@ from arq import Retry
 from dependency_injector import providers
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from eneo.crawler.engine import (
+    ConditionalGet,
+    CrawlFinished,
+    CrawlLimits,
+    CrawlRequest,
+    FileDownloaded,
+    FileFailed,
+    PageCrawled,
+    PageFailed,
+    PageUnchanged,
+)
 from eneo.database.affected_rows import affected_row_count
 from eneo.database.tables.model_providers_table import ModelProviders
 from eneo.main.config import get_settings
@@ -231,6 +243,7 @@ async def queue_website_crawls(container: Container):
                             "url": website.url,
                             "download_files": website.download_files,
                             "crawl_type": website.crawl_type.value,
+                            "origin": "scheduled",
                         }
 
                         # Step 5: Add to pending queue with orphaning protection
@@ -287,7 +300,9 @@ async def queue_website_crawls(container: Container):
                         from eneo.websites.domain.website import Website
 
                         crawl_service = container.crawl_service()
-                        await crawl_service.crawl(cast(Website, website))
+                        await crawl_service.crawl(
+                            cast(Website, website), origin="scheduled"
+                        )
                         successful_crawls += 1
 
                         logger.debug(f"Successfully queued crawl for {website.url}")
@@ -728,6 +743,8 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
             crawl_context: CrawlContext
             existing_titles: list[str] = []
             existing_publications: dict[str, tuple[bytes, UUID]] = {}
+            existing_validators: dict[str, tuple[str | None, str | None]] = {}
+            stored_sitemap_state: dict[str, Any] | None = None
             website_url: str = ""  # For logging after session closes
 
             start = time.time()
@@ -742,9 +759,13 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
 
                 from eneo.database.tables.websites_table import Websites
 
+                current_tenant = container.tenant()
                 website_stmt = (
                     sa.select(Websites)
-                    .where(Websites.id == params.website_id)
+                    .where(
+                        Websites.id == params.website_id,
+                        Websites.tenant_id == current_tenant.id,
+                    )
                     .options(selectinload(Websites.embedding_model))
                 )
                 result = await bootstrap_session.execute(website_stmt)
@@ -755,9 +776,9 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
 
                 website: Any = website_row
                 website_url = website_row.url  # Save for logging after session closes
+                stored_sitemap_state = website_row.sitemap_state
 
                 # CRITICAL: Verify tenant isolation
-                current_tenant = container.tenant()
                 if website_row.tenant_id != current_tenant.id:
                     logger.error(
                         "Tenant isolation violation detected",
@@ -918,17 +939,24 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                     InfoBlobs.title,
                     InfoBlobs.content_hash,
                     InfoBlobs.embedding_model_id,
+                    InfoBlobs.http_etag,
+                    InfoBlobs.http_last_modified,
                 ).where(
                     InfoBlobs.website_id == params.website_id,
+                    InfoBlobs.tenant_id == current_tenant.id,
                     active_info_blob_version(),
                 )
                 blob_result = await bootstrap_session.execute(stmt)
 
                 # Build lookups for O(1) operations
-                for title, hash_bytes, model_id in blob_result:
+                for title, hash_bytes, model_id, etag, last_modified in blob_result:
+                    if title is None:
+                        continue
                     existing_titles.append(title)
                     if hash_bytes is not None and model_id is not None:
                         existing_publications[title] = (hash_bytes, model_id)
+                    if etag is not None or last_modified is not None:
+                        existing_validators[title] = (etag, last_modified)
 
             finally:
                 # Always close the bootstrap session to return connection to pool
@@ -985,8 +1013,7 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                 default=settings.tenant_worker_semaphore_ttl_seconds,
             )
 
-            # Create heartbeat monitor BEFORE crawl starts
-            # This allows heartbeat to run during the Scrapy crawl phase (which can take 30+ minutes)
+            # Start heartbeats before the HTTP stream; large sites can run for hours.
             heartbeat_monitor = HeartbeatMonitor(
                 job_id=job_id,
                 redis_client=redis_client,
@@ -996,232 +1023,382 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                 semaphore_ttl_seconds=semaphore_ttl_seconds,
             )
 
-            # Use Scrapy crawler to process website content
-            # Measure crawl and parse phase
-            start = time.time()
-            async with crawler.crawl(
+            tenant_crawler_settings = tenant.crawler_settings if tenant else None
+            crawl_request = CrawlRequest(
                 url=params.url,
-                download_files=params.download_files,
                 crawl_type=params.crawl_type,
-                http_user=crawl_context.http_auth_user or "",  # From bootstrap DTO
-                http_pass=crawl_context.http_auth_pass or "",  # From bootstrap DTO
-                # Pass tenant settings for tenant-aware Scrapy configuration
-                tenant_crawler_settings=tenant.crawler_settings if tenant else None,
-                # Pass heartbeat callback for liveness during Scrapy crawl phase
-                heartbeat_callback=heartbeat_monitor.tick,
-                heartbeat_interval=float(heartbeat_interval_seconds),
-            ) as crawl:
-                timings["crawl_and_parse"] = time.time() - start
-
-                # Track partial completion status for logging
-                crawl_is_partial = crawl.is_partial
-                crawl_termination_reason = crawl.termination_reason
-
-                if crawl_is_partial:
-                    logger.warning(
-                        f"Crawl timed out but has partial results - salvaging {crawl.pages_count} pages",
-                        extra={
-                            "job_id": str(job_id),
-                            "website_id": str(params.website_id),
-                            "url": params.url,
-                            "pages_collected": crawl.pages_count,
-                            "termination_reason": crawl_termination_reason,
-                        },
+                download_files=params.download_files,
+                obey_robots=get_crawler_setting("obey_robots", tenant_crawler_settings),
+                http_user=crawl_context.http_auth_user,
+                http_pass=crawl_context.http_auth_pass,
+                conditional_gets=tuple(
+                    ConditionalGet(
+                        url=url,
+                        etag=validators[0],
+                        last_modified=validators[1],
                     )
-
-                # Measure page processing time
-                process_start = time.time()
-
-                # Session-per-batch page processing (NO main session held)
-                # Bootstrap already returned session to pool. All DB operations
-                # use session_scope() or persist_batch() which manage their own sessions.
-                # NOTE: embedding_model was extracted during bootstrap phase
-
-                # Page buffer for batching (primitives only, NO ORM objects!)
-                page_buffer: list[CrawlPageData] = []
-
-                for page in crawl.pages:
-                    num_pages += 1
-
-                    # Heartbeat: touches DB, refreshes Redis TTL, checks preemption
-                    try:
-                        await heartbeat_monitor.tick()
-                    except HeartbeatFailedError as e:
-                        return {
-                            "status": "heartbeat_failed",
-                            "pages_crawled": num_pages,
-                            "consecutive_failures": e.consecutive_failures,
-                        }
-                    except JobPreemptedError:
-                        logger.warning(
-                            "Detected job preemption during heartbeat",
-                            extra={
-                                "job_id": str(job_id),
-                                "website_id": str(params.website_id),
-                                "pages_processed": num_pages,
-                            },
+                    for url, validators in existing_validators.items()
+                ),
+                limits=CrawlLimits(
+                    max_pages=get_crawler_setting(
+                        "closespider_itemcount", tenant_crawler_settings
+                    ),
+                    max_seconds=get_crawler_setting(
+                        "crawl_max_length", tenant_crawler_settings
+                    ),
+                    request_timeout_seconds=get_crawler_setting(
+                        "download_timeout", tenant_crawler_settings
+                    ),
+                    max_response_bytes=settings.crawl_page_max_size,
+                    max_file_bytes=get_crawler_setting(
+                        "download_max_size", tenant_crawler_settings
+                    ),
+                    dns_timeout_seconds=get_crawler_setting(
+                        "dns_timeout", tenant_crawler_settings
+                    ),
+                    concurrency=settings.crawl_fetch_concurrency,
+                    request_delay_seconds=max(
+                        settings.crawl_request_delay_seconds,
+                        0.1
+                        if get_crawler_setting(
+                            "autothrottle_enabled", tenant_crawler_settings
                         )
-                        return {
-                            "status": "preempted_during_crawl",
-                            "pages_crawled": num_pages,
-                        }
+                        else 0.0,
+                    ),
+                    retries=get_crawler_setting("retry_times", tenant_crawler_settings),
+                ),
+            )
 
-                    # Buffer page as dict (primitives only!)
-                    page_buffer.append(
-                        {
-                            "url": page.url,
-                            "content": page.content,
-                        }
-                    )
+            crawl_is_partial = False
+            crawl_termination_reason = "completed"
+            num_not_modified_pages = 0
+            new_sitemap_state: dict[str, Any] | None = None
+            sitemap_skipped = False
+            page_buffer: list[CrawlPageData] = []
+            processing_page_seconds = 0.0
+            processing_file_seconds = 0.0
 
-                    # Flush when buffer is full
-                    if len(page_buffer) >= crawl_context.batch_size:
-                        (
-                            success_count,
-                            failed_count,
-                            successful_urls,
-                            batch_failures_by_reason,
-                        ) = await persist_batch(
-                            page_buffer=page_buffer,
-                            ctx=crawl_context,
-                            embedding_model=embedding_model_spec,
-                            container=container,
-                            existing_publications=existing_publications,
-                        )
-                        crawled_titles.update(successful_urls)
-                        # Aggregate failure reasons and track failed URLs
-                        for reason, urls in batch_failures_by_reason.items():
-                            failure_counts[reason] += len(urls)
-                            failed_titles.update(urls)
-                        num_failed_pages += failed_count
-                        page_buffer.clear()
+            async def _flush_pages() -> None:
+                nonlocal num_failed_pages, processing_page_seconds
+                if not page_buffer:
+                    return
+                batch = list(page_buffer)
+                page_buffer.clear()
+                flush_started = time.time()
+                (
+                    success_count,
+                    failed_count,
+                    successful_urls,
+                    batch_failures_by_reason,
+                ) = await persist_batch(
+                    page_buffer=batch,
+                    ctx=crawl_context,
+                    embedding_model=embedding_model_spec,
+                    container=container,
+                    existing_publications=existing_publications,
+                )
+                processing_page_seconds += time.time() - flush_started
+                crawled_titles.update(successful_urls)
+                for reason, urls in batch_failures_by_reason.items():
+                    failure_counts[reason] += len(urls)
+                    failed_titles.update(urls)
+                num_failed_pages += failed_count
+                logger.debug(
+                    "Flushed crawled page batch",
+                    extra={
+                        "job_id": str(job_id),
+                        "batch_size": len(batch),
+                        "success": success_count,
+                        "failed": failed_count,
+                        "total_pages": num_pages,
+                    },
+                )
 
-                        logger.debug(
-                            f"Flushed batch of {crawl_context.batch_size} pages",
-                            extra={
-                                "job_id": str(job_id),
-                                "success": success_count,
-                                "failed": failed_count,
-                                "total_pages": num_pages,
-                            },
-                        )
-
-                # Final flush for remaining pages
-                if page_buffer:
-                    (
-                        success_count,
-                        failed_count,
-                        successful_urls,
-                        batch_failures_by_reason,
-                    ) = await persist_batch(
-                        page_buffer=page_buffer,
-                        ctx=crawl_context,
-                        embedding_model=embedding_model_spec,
-                        container=container,
-                        existing_publications=existing_publications,
-                    )
-                    crawled_titles.update(successful_urls)
-                    # Aggregate failure reasons and track failed URLs
-                    for reason, urls in batch_failures_by_reason.items():
-                        failure_counts[reason] += len(urls)
-                        failed_titles.update(urls)
-                    num_failed_pages += failed_count
-
-                    logger.debug(
-                        f"Final flush of {len(page_buffer)} pages",
-                        extra={
-                            "job_id": str(job_id),
-                            "success": success_count,
-                            "failed": failed_count,
-                            "total_pages": num_pages,
-                        },
-                    )
-
-                timings["process_pages"] = time.time() - process_start
-
-                # Measure file processing time
-                file_start = time.time()
-                # Process downloaded files with content hash checking
-                # Uses session-per-file pattern: each file gets its own short-lived session
-                for file in crawl.files or []:
-                    num_files += 1
-                    filename = file.stem
-                    try:
-                        # ✅ PERFORMANCE OPTIMIZATION: Hash checking for files
-                        # Hash raw bytes directly (no HTML normalization for files)
-                        file_bytes = file.read_bytes()
-                        new_file_hash = hashlib.sha256(file_bytes).digest()
-
-                        existing_file = existing_publications.get(filename)
-
-                        if embedding_model_spec is not None and existing_file == (
-                            new_file_hash,
-                            embedding_model_spec.id,
-                        ):
-                            # File unchanged - skip processing
-                            num_skipped_files += 1
-                            crawled_titles.add(filename)
-                            logger.debug(
-                                f"Skipping unchanged file: {filename}",
-                                extra={
-                                    "website_id": str(params.website_id),
-                                    "file_name": filename,
-                                },
-                            )
-                            continue
-
-                        # File changed or new - process with session-per-file pattern
-                        # Each file gets its own short-lived session (~50-300ms)
-                        async def _process_single_file(sess: AsyncSession) -> None:
-                            # Get fresh text processor with this session
-                            session_provider = cast(Any, container.session)
-                            session_provider.override(providers.Object(sess))
-                            file_uploader = container.text_processor()
-                            embedding_model_repo = container.embedding_model_repo2()
-                            embedding_model_id = crawl_context.embedding_model_id
-                            assert embedding_model_id is not None
-                            file_embedding_model = await embedding_model_repo.one(
-                                embedding_model_id
-                            )
-                            await file_uploader.process_file(
-                                filepath=file,
-                                filename=filename,
-                                website_id=params.website_id,
-                                embedding_model=file_embedding_model,
-                                content_hash=new_file_hash,
-                            )
-
-                        await execute_with_recovery(
-                            container=container,
-                            session_holder=session_holder,
-                            created_sessions=created_sessions,
-                            operation_name=f"process_file_{filename}",
-                            operation=_process_single_file,
-                        )
+            async def _process_file(event: FileDownloaded) -> None:
+                nonlocal num_files, num_failed_files, num_skipped_files
+                nonlocal processing_file_seconds
+                file_started = time.time()
+                num_files += 1
+                filename = event.path.stem
+                try:
+                    file_bytes = event.path.read_bytes()
+                    new_file_hash = hashlib.sha256(file_bytes).digest()
+                    existing_file = existing_publications.get(filename)
+                    if embedding_model_spec is not None and existing_file == (
+                        new_file_hash,
+                        embedding_model_spec.id,
+                    ):
+                        num_skipped_files += 1
                         crawled_titles.add(filename)
+                        return
 
-                    except Exception:
-                        failed_titles.add(filename)
-                        logger.exception(
-                            "Exception while uploading file",
-                            extra={
-                                "website_id": str(params.website_id),
-                                "tenant_id": str(crawl_context.tenant_id),
-                                "crawled_filename": filename,
-                                "embedding_model": crawl_context.embedding_model_name,
-                            },
+                    async def _process_single_file(sess: AsyncSession) -> None:
+                        session_provider = cast(Any, container.session)
+                        session_provider.override(providers.Object(sess))
+                        file_uploader = container.text_processor()
+                        embedding_model_repo = container.embedding_model_repo2()
+                        embedding_model_id = crawl_context.embedding_model_id
+                        assert embedding_model_id is not None
+                        file_embedding_model = await embedding_model_repo.one(
+                            embedding_model_id
                         )
-                        num_failed_files += 1
-                timings["process_files"] = time.time() - file_start
+                        await file_uploader.process_file(
+                            filepath=event.path,
+                            filename=filename,
+                            website_id=params.website_id,
+                            embedding_model=file_embedding_model,
+                            content_hash=new_file_hash,
+                        )
+
+                    await execute_with_recovery(
+                        container=container,
+                        session_holder=session_holder,
+                        created_sessions=created_sessions,
+                        operation_name=f"process_file_{filename}",
+                        operation=_process_single_file,
+                    )
+                    crawled_titles.add(filename)
+                except Exception:
+                    failed_titles.add(filename)
+                    num_failed_files += 1
+                    logger.exception(
+                        "Exception while uploading crawled file",
+                        extra={
+                            "website_id": str(params.website_id),
+                            "tenant_id": str(crawl_context.tenant_id),
+                            "file_url": event.url,
+                            "filename": filename,
+                        },
+                    )
+                finally:
+                    processing_file_seconds += time.time() - file_started
+
+            queue: asyncio.Queue[tuple[object, asyncio.Event | None]] = asyncio.Queue(
+                maxsize=max(crawl_context.batch_size * 2, 2)
+            )
+            stream_complete = object()
+
+            if (
+                params.crawl_type.value == "sitemap"
+                and params.origin == "scheduled"
+                and settings.crawl_sitemap_skip_enabled
+                and stored_sitemap_state is not None
+            ):
+                try:
+                    sitemap_probe = await crawler.probe_sitemap(crawl_request)
+                except Exception:
+                    sitemap_probe = None
+                    logger.warning(
+                        "Sitemap change probe failed; running the scheduled crawl",
+                        exc_info=True,
+                        extra={"website_id": str(params.website_id)},
+                    )
+                captured_at_raw = stored_sitemap_state.get("captured_at")
+                captured_at: datetime | None = None
+                if isinstance(captured_at_raw, str):
+                    try:
+                        captured_at = datetime.fromisoformat(captured_at_raw)
+                    except ValueError:
+                        captured_at = None
+                if captured_at is not None and captured_at.tzinfo is None:
+                    captured_at = captured_at.replace(tzinfo=timezone.utc)
+                state_fresh = bool(
+                    captured_at is not None
+                    and datetime.now(timezone.utc) - captured_at
+                    < timedelta(hours=settings.crawl_sitemap_skip_max_age_hours)
+                )
+                sitemap_skipped = bool(
+                    sitemap_probe is not None
+                    and state_fresh
+                    and stored_sitemap_state.get("fingerprint")
+                    == sitemap_probe.fingerprint
+                )
+                if sitemap_skipped:
+                    crawled_titles.update(existing_titles)
+                    num_not_modified_pages = len(existing_titles)
+                    logger.info(
+                        "Skipping scheduled crawl because sitemap is unchanged",
+                        extra={
+                            "website_id": str(params.website_id),
+                            "sitemap_entries": sitemap_probe.entry_count
+                            if sitemap_probe
+                            else 0,
+                        },
+                    )
+
+            async def _produce_events() -> None:
+                try:
+                    if sitemap_skipped:
+                        await queue.put(
+                            (
+                                CrawlFinished(
+                                    status="completed",
+                                    pages_crawled=0,
+                                    pages_failed=0,
+                                    pages_unchanged=num_not_modified_pages,
+                                ),
+                                None,
+                            )
+                        )
+                        return
+                    async for event in crawler.crawl(crawl_request):
+                        acknowledgement = (
+                            asyncio.Event()
+                            if isinstance(event, FileDownloaded)
+                            else None
+                        )
+                        await queue.put((event, acknowledgement))
+                        if acknowledgement is not None:
+                            await acknowledgement.wait()
+                finally:
+                    await queue.put((stream_complete, None))
+
+            heartbeat_stop = asyncio.Event()
+
+            async def _heartbeat_loop() -> None:
+                while not heartbeat_stop.is_set():
+                    await heartbeat_monitor.tick()
+                    try:
+                        await asyncio.wait_for(
+                            heartbeat_stop.wait(),
+                            timeout=float(heartbeat_interval_seconds),
+                        )
+                    except TimeoutError:
+                        pass
+
+            crawl_started = time.time()
+            producer_task = asyncio.create_task(_produce_events())
+            heartbeat_task = asyncio.create_task(_heartbeat_loop())
+            try:
+                while True:
+                    queue_get_task = asyncio.create_task(queue.get())
+                    done, _ = await asyncio.wait(
+                        {queue_get_task, heartbeat_task},
+                        return_when=asyncio.FIRST_COMPLETED,
+                    )
+                    if heartbeat_task in done:
+                        queue_get_task.cancel()
+                        await asyncio.gather(queue_get_task, return_exceptions=True)
+                        heartbeat_task.result()
+                    event, acknowledgement = queue_get_task.result()
+                    if event is stream_complete:
+                        break
+                    try:
+                        if isinstance(event, PageCrawled):
+                            num_pages += 1
+                            page_buffer.append(
+                                {
+                                    "url": event.url,
+                                    "content": event.content,
+                                    "etag": event.etag,
+                                    "last_modified": event.last_modified,
+                                }
+                            )
+                            if len(page_buffer) >= crawl_context.batch_size:
+                                await _flush_pages()
+                        elif isinstance(event, PageUnchanged):
+                            num_not_modified_pages += 1
+                            crawled_titles.add(event.url)
+                        elif isinstance(event, PageFailed):
+                            num_failed_pages += 1
+                            failed_titles.add(event.url)
+                            failure_counts[event.reason] += 1
+                        elif isinstance(event, FileDownloaded):
+                            await _process_file(event)
+                        elif isinstance(event, FileFailed):
+                            num_failed_files += 1
+                            failure_counts[event.reason] += 1
+                        elif isinstance(event, CrawlFinished):
+                            crawl_is_partial = event.status == "partial"
+                            crawl_termination_reason = event.reason or event.status
+                            if event.sitemap_fingerprint is not None:
+                                new_sitemap_state = {
+                                    "fingerprint": event.sitemap_fingerprint,
+                                    "entry_count": event.sitemap_entries,
+                                    "captured_at": datetime.now(
+                                        timezone.utc
+                                    ).isoformat(),
+                                }
+                    finally:
+                        if acknowledgement is not None:
+                            acknowledgement.set()
+
+                await producer_task
+                await _flush_pages()
+            except HeartbeatFailedError as exc:
+                return {
+                    "status": "heartbeat_failed",
+                    "pages_crawled": num_pages,
+                    "consecutive_failures": exc.consecutive_failures,
+                }
+            except JobPreemptedError:
+                logger.warning(
+                    "Detected job preemption during crawl",
+                    extra={
+                        "job_id": str(job_id),
+                        "website_id": str(params.website_id),
+                        "pages_processed": num_pages,
+                    },
+                )
+                return {
+                    "status": "preempted_during_crawl",
+                    "pages_crawled": num_pages,
+                }
+            finally:
+                heartbeat_stop.set()
+                for task in (producer_task, heartbeat_task):
+                    if not task.done():
+                        task.cancel()
+                await asyncio.gather(
+                    producer_task,
+                    heartbeat_task,
+                    return_exceptions=True,
+                )
+
+            total_crawl_seconds = time.time() - crawl_started
+            timings["process_pages"] = processing_page_seconds
+            timings["process_files"] = processing_file_seconds
+            timings["crawl_and_parse"] = max(
+                total_crawl_seconds - processing_page_seconds - processing_file_seconds,
+                0.0,
+            )
+
+            if (
+                new_sitemap_state is not None
+                and not crawl_is_partial
+                and not sitemap_skipped
+            ):
+
+                async def _store_sitemap_state(sess: AsyncSession) -> None:
+                    await sess.execute(
+                        sa.update(WebsitesTable)
+                        .where(
+                            WebsitesTable.id == params.website_id,
+                            WebsitesTable.tenant_id == crawl_context.tenant_id,
+                        )
+                        .values(sitemap_state=new_sitemap_state)
+                    )
+
+                await execute_with_recovery(
+                    container=container,
+                    session_holder=session_holder,
+                    created_sessions=created_sessions,
+                    operation_name="sitemap_state_update",
+                    operation=_store_sitemap_state,
+                )
 
             # Cleanup phase: delete stale blobs (batch for performance)
             cleanup_start = time.time()
             # Exclude failed_titles - their original data was preserved by transaction rollback
-            stale_titles = [
-                title
-                for title in existing_titles
-                if title not in crawled_titles and title not in failed_titles
-            ]
+            stale_titles = (
+                []
+                if crawl_is_partial
+                else [
+                    title
+                    for title in existing_titles
+                    if title not in crawled_titles and title not in failed_titles
+                ]
+            )
 
             # Batch delete using session-per-operation pattern
             if stale_titles:
@@ -1272,13 +1449,17 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                     sa.select(sa.func.coalesce(sa.func.sum(InfoBlobsTable.size), 0))
                     .where(
                         InfoBlobsTable.website_id == crawl_context.website_id,
+                        InfoBlobsTable.tenant_id == crawl_context.tenant_id,
                         active_info_blob_version(),
                     )
                     .scalar_subquery()
                 )
                 stmt = (
                     sa.update(WebsitesTable)
-                    .where(WebsitesTable.id == crawl_context.website_id)
+                    .where(
+                        WebsitesTable.id == crawl_context.website_id,
+                        WebsitesTable.tenant_id == crawl_context.tenant_id,
+                    )
                     .values(size=update_size_stmt)
                 )
                 await sess.execute(stmt)
@@ -1334,7 +1515,8 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                 "=" * 60,
                 f"{status_label}: {params.url}",
                 "-" * 60,
-                f"Pages:   {num_pages} crawled, {num_failed_pages} failed",
+                f"Pages:   {num_pages} fetched, {num_not_modified_pages} not modified, "
+                f"{num_failed_pages} failed",
                 f"Files:   {num_files} downloaded, {num_failed_files} failed, {num_skipped_files} skipped ({file_skip_rate:.1f}%)",
                 f"Cleanup: {num_deleted_blobs} stale entries removed",
             ]
@@ -1359,6 +1541,7 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                 extra={
                     "timings": timings,
                     "pages_crawled": num_pages,
+                    "pages_not_modified": num_not_modified_pages,
                     "pages_failed": num_failed_pages,
                     "files_crawled": num_files,
                     "files_failed": num_failed_files,
@@ -1414,7 +1597,10 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                 # Session provided by execute_with_recovery (session-per-operation pattern)
                 stmt = (
                     sa.update(CrawlRuns)
-                    .where(CrawlRuns.id == params.run_id)
+                    .where(
+                        CrawlRuns.id == params.run_id,
+                        CrawlRuns.tenant_id == crawl_context.tenant_id,
+                    )
                     .values(
                         pages_crawled=num_pages,
                         files_downloaded=num_files,
@@ -1437,7 +1623,7 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
 
             # Determine if crawl was successful
             # Success = at least one item (page or file) AND not everything failed
-            total_items = num_pages + num_files
+            total_items = num_pages + num_not_modified_pages + num_files
             total_failed = num_failed_pages + num_failed_files
             crawl_successful = total_items > 0 and total_failed < total_items
 

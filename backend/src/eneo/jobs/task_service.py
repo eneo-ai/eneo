@@ -27,7 +27,7 @@ from eneo.object_content.deployment_policy import (
     UploadLimitUseCase,
 )
 from eneo.users.user import UserInDB
-from eneo.websites.crawl_dependencies.crawl_models import CrawlTask
+from eneo.websites.crawl_dependencies.crawl_models import CrawlOrigin, CrawlTask
 from eneo.websites.domain.crawl_run import CrawlType
 
 
@@ -169,6 +169,7 @@ class TaskService:
         crawl_type: CrawlType = CrawlType.CRAWL,
         website_id: UUID | None = None,
         enqueue: bool = True,
+        origin: CrawlOrigin = "manual",
     ) -> JobInDb:
         # CrawlTask.website_id is UUID (non-optional); callers always provide a value
         assert website_id is not None, "website_id is required for crawl tasks"
@@ -179,6 +180,7 @@ class TaskService:
             download_files=download_files,
             crawl_type=crawl_type,
             website_id=website_id,
+            origin=origin,
         )
 
         return await self.job_service.queue_job(

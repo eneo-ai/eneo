@@ -1,3 +1,4 @@
+import asyncio
 import socket
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -6,9 +7,11 @@ from aiohttp import web
 
 from eneo.crawler.engine import (
     ConditionalGet,
+    CrawlEvent,
     CrawlFinished,
     CrawlLimits,
     CrawlRequest,
+    FileDownloaded,
     PageCrawled,
     PageFailed,
     PageUnchanged,
@@ -259,3 +262,92 @@ async def test_crawl_rejects_oversized_response() -> None:
         ]
 
     assert events[0] == PageFailed(url=f"{base_url}/start", reason="response_too_large")
+
+
+async def test_downloaded_file_exists_until_event_consumer_resumes() -> None:
+    async def start(_: web.Request) -> web.Response:
+        return web.Response(
+            text='<main><a href="/guide.pdf">Guide</a></main>',
+            content_type="text/html",
+        )
+
+    async def guide(_: web.Request) -> web.Response:
+        return web.Response(body=b"document bytes", content_type="application/pdf")
+
+    app = web.Application()
+    app.router.add_get("/start", start)
+    app.router.add_get("/guide.pdf", guide)
+
+    async with _serve(app) as base_url:
+        downloaded_path = None
+        async for event in PythonCrawlEngine().crawl(_request(f"{base_url}/start")):
+            if isinstance(event, FileDownloaded):
+                downloaded_path = event.path
+                assert event.path.read_bytes() == b"document bytes"
+
+    assert downloaded_path is not None
+    assert not downloaded_path.exists()
+
+
+async def test_process_wide_http_capacity_bounds_concurrent_crawls() -> None:
+    active = 0
+    peak = 0
+
+    async def slow(_: web.Request) -> web.Response:
+        nonlocal active, peak
+        active += 1
+        peak = max(peak, active)
+        try:
+            await asyncio.sleep(0.05)
+            return web.Response(text="<main>ok</main>", content_type="text/html")
+        finally:
+            active -= 1
+
+    app = web.Application()
+    app.router.add_get("/one", slow)
+    app.router.add_get("/two", slow)
+
+    async with _serve(app) as base_url:
+        engine = PythonCrawlEngine(global_concurrency=1)
+
+        async def collect(path: str) -> list[CrawlEvent]:
+            return [
+                event async for event in engine.crawl(_request(f"{base_url}/{path}"))
+            ]
+
+        await asyncio.gather(collect("one"), collect("two"))
+
+    assert peak == 1
+
+
+async def test_sitemap_lastmod_emits_stable_snapshot() -> None:
+    async def sitemap(request: web.Request) -> web.Response:
+        origin = f"{request.scheme}://{request.host}"
+        return web.Response(
+            body=(
+                '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">'
+                f"<url><loc>{origin}/page</loc><lastmod>2026-08-01</lastmod></url>"
+                "</urlset>"
+            ),
+            content_type="application/xml",
+        )
+
+    async def page(_: web.Request) -> web.Response:
+        return web.Response(text="<main>ok</main>", content_type="text/html")
+
+    app = web.Application()
+    app.router.add_get("/sitemap.xml", sitemap)
+    app.router.add_get("/page", page)
+
+    async with _serve(app) as base_url:
+        events = [
+            event
+            async for event in PythonCrawlEngine().crawl(
+                _request(f"{base_url}/sitemap.xml", crawl_type=CrawlType.SITEMAP)
+            )
+        ]
+
+    finished = events[-1]
+    assert isinstance(finished, CrawlFinished)
+    assert finished.sitemap_entries == 1
+    assert finished.sitemap_fingerprint is not None

@@ -448,7 +448,7 @@ class Settings(BaseSettings):
     testing: bool = False
     dev: bool = False
 
-    # Crawl - Scrapy crawler settings
+    # Crawl - in-process async Python crawler settings
     # IMPORTANT: Must be <= tenant_worker_semaphore_ttl_seconds
     # Otherwise the concurrency slot could expire before crawl completes
     # See validate_worker_settings() which enforces this constraint
@@ -456,7 +456,15 @@ class Settings(BaseSettings):
     closespider_itemcount: int = 20000  # Maximum number of pages to crawl per website
     download_max_size: int = 10485760  # Max file download size in bytes (10MB default)
     obey_robots: bool = True  # Respect robots.txt rules
-    autothrottle_enabled: bool = True  # Enable automatic request throttling
+    crawl_fetch_concurrency: int = Field(default=4, gt=0, le=32)
+    crawl_global_http_concurrency: int = Field(default=20, gt=0, le=512)
+    crawl_request_delay_seconds: float = Field(default=0.0, ge=0.0, le=60.0)
+    crawl_page_max_size: int = Field(
+        default=10 * 1024 * 1024, ge=64 * 1024, le=1024 * 1024 * 1024
+    )
+    crawl_sitemap_skip_enabled: bool = True
+    crawl_sitemap_skip_max_age_hours: int = Field(default=168, gt=0, le=24 * 365)
+    autothrottle_enabled: bool = True  # Pace bounded request batches conservatively
     using_crawl: bool = True  # Enable/disable crawling feature globally
 
     # Crawl retry configuration

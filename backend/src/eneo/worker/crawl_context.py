@@ -158,6 +158,8 @@ class PreparedPage:
     # Content data
     content: str
     content_hash: bytes  # SHA-256 for change detection (future deduplication)
+    http_etag: str | None
+    http_last_modified: str | None
 
     # Pre-computed embeddings (Phase 1 result)
     chunks: list[str]  # Text chunks

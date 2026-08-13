@@ -18,7 +18,7 @@ from uuid import UUID, uuid4
 import sqlalchemy as sa
 from dependency_injector import providers
 from langchain_text_splitters import RecursiveCharacterTextSplitter
-from typing_extensions import TypedDict
+from typing_extensions import NotRequired, TypedDict
 
 from eneo.admin.quota_service import ensure_quota_capacity
 from eneo.completion_models.infrastructure.context_builder import count_tokens
@@ -65,6 +65,43 @@ _embedding_semaphore: asyncio.Semaphore | None = None
 class CrawlPageData(TypedDict):
     url: str
     content: str
+    etag: NotRequired[str | None]
+    last_modified: NotRequired[str | None]
+
+
+async def _refresh_http_validators(
+    *,
+    ctx: CrawlContext,
+    rows: list[CrawlPageData],
+) -> None:
+    if not rows:
+        return
+
+    from eneo.database.database import sessionmanager
+
+    values = [
+        {
+            "b_title": row["url"],
+            "b_etag": row.get("etag"),
+            "b_last_modified": row.get("last_modified"),
+        }
+        for row in rows
+    ]
+    async with sessionmanager.session() as session, session.begin():
+        await session.execute(
+            sa.update(InfoBlobs)
+            .where(
+                InfoBlobs.website_id == ctx.website_id,
+                InfoBlobs.tenant_id == ctx.tenant_id,
+                InfoBlobs.title == sa.bindparam("b_title"),
+                active_info_blob_version(),
+            )
+            .values(
+                http_etag=sa.bindparam("b_etag"),
+                http_last_modified=sa.bindparam("b_last_modified"),
+            ),
+            values,
+        )
 
 
 def _get_embedding_semaphore() -> asyncio.Semaphore:
@@ -180,6 +217,7 @@ async def persist_batch(
     successful_urls: list[str] = []
     prepared_pages: list[PreparedPage] = []
     buffer_embedding_bytes = 0
+    validator_refreshes: list[CrawlPageData] = []
 
     # Create a short-lived session for embedding service to load provider credentials
     embedding_session = sessionmanager.create_session()
@@ -249,6 +287,7 @@ async def persist_batch(
                 ):
                     success_count += 1
                     successful_urls.append(url)
+                    validator_refreshes.append(page_data)
                     continue
 
                 # 2. Chunk the text (local operation)
@@ -331,6 +370,8 @@ async def persist_batch(
                     title=url,  # URL as title, matching existing crawler pattern
                     content=content,
                     content_hash=content_hash,
+                    http_etag=page_data.get("etag"),
+                    http_last_modified=page_data.get("last_modified"),
                     chunks=chunks,
                     embeddings=embeddings,
                     tenant_id=ctx.tenant_id,
@@ -370,6 +411,7 @@ async def persist_batch(
         await embedding_session.close()
 
     confirmed_unchanged_urls = successful_urls.copy()
+    await _refresh_http_validators(ctx=ctx, rows=validator_refreshes)
     if not prepared_pages:
         log = logger.debug if successful_urls else logger.warning
         log(
@@ -447,6 +489,7 @@ async def persist_batch(
                                 .where(
                                     InfoBlobs.title == prepared.title,
                                     InfoBlobs.website_id == prepared.website_id,
+                                    InfoBlobs.tenant_id == prepared.tenant_id,
                                     active_info_blob_version(),
                                 )
                                 .with_for_update()
@@ -458,6 +501,18 @@ async def persist_batch(
                             and existing.embedding_model_id
                             == prepared.embedding_model_id
                         ):
+                            await session.execute(
+                                sa.update(InfoBlobs)
+                                .where(
+                                    InfoBlobs.id == existing.id,
+                                    InfoBlobs.tenant_id == prepared.tenant_id,
+                                    active_info_blob_version(),
+                                )
+                                .values(
+                                    http_etag=prepared.http_etag,
+                                    http_last_modified=prepared.http_last_modified,
+                                )
+                            )
                             await savepoint.commit()
                             success_count += 1
                             successful_urls.append(prepared.url)
@@ -488,6 +543,7 @@ async def persist_batch(
                                 sa.update(InfoBlobs)
                                 .where(
                                     InfoBlobs.id == existing.id,
+                                    InfoBlobs.tenant_id == prepared.tenant_id,
                                     active_info_blob_version(),
                                 )
                                 .values(
@@ -503,6 +559,8 @@ async def persist_batch(
                             "url": prepared.url,
                             "size": stored_size,
                             "content_hash": prepared.content_hash,
+                            "http_etag": prepared.http_etag,
+                            "http_last_modified": prepared.http_last_modified,
                             "user_id": prepared.user_id,
                             "tenant_id": prepared.tenant_id,
                             "website_id": prepared.website_id,

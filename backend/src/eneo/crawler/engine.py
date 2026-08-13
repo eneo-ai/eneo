@@ -8,6 +8,7 @@ requiring every engine to build a complete spool before ingestion starts.
 
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Literal, Protocol
 
 from eneo.websites.domain.crawl_run import CrawlType
@@ -19,6 +20,8 @@ class CrawlLimits:
     max_seconds: float
     request_timeout_seconds: float
     max_response_bytes: int
+    max_file_bytes: int = 10 * 1024 * 1024
+    dns_timeout_seconds: float = 30.0
     concurrency: int = 4
     request_delay_seconds: float = 0.0
     retries: int = 2
@@ -29,6 +32,8 @@ class CrawlLimits:
             "max_seconds": self.max_seconds,
             "request_timeout_seconds": self.request_timeout_seconds,
             "max_response_bytes": self.max_response_bytes,
+            "max_file_bytes": self.max_file_bytes,
+            "dns_timeout_seconds": self.dns_timeout_seconds,
             "concurrency": self.concurrency,
         }
         for name, value in positive.items():
@@ -86,16 +91,44 @@ class PageUnchanged:
 
 
 @dataclass(frozen=True, slots=True)
+class FileDownloaded:
+    url: str
+    filename: str
+    path: Path
+    type: Literal["file"] = "file"
+
+
+@dataclass(frozen=True, slots=True)
+class FileFailed:
+    url: str
+    reason: str
+    status_code: int | None = None
+    retryable: bool = False
+    type: Literal["file_failed"] = "file_failed"
+
+
+@dataclass(frozen=True, slots=True)
 class CrawlFinished:
     status: Literal["completed", "partial"]
     pages_crawled: int
     pages_failed: int
     pages_unchanged: int = 0
+    files_downloaded: int = 0
+    files_failed: int = 0
+    sitemap_fingerprint: str | None = None
+    sitemap_entries: int = 0
     reason: str | None = None
     type: Literal["done"] = "done"
 
 
-CrawlEvent = PageCrawled | PageFailed | PageUnchanged | CrawlFinished
+CrawlEvent = (
+    PageCrawled
+    | PageFailed
+    | PageUnchanged
+    | FileDownloaded
+    | FileFailed
+    | CrawlFinished
+)
 
 
 class CrawlEngine(Protocol):

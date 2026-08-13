@@ -99,7 +99,7 @@ CRAWLER_SETTING_SPECS: dict[str, dict[str, Any]] = {
     "autothrottle_enabled": {
         "type": bool,
         "env_attr": "autothrottle_enabled",
-        "description": "Enable automatic request throttling based on server response times",
+        "description": "Enable conservative pacing between bounded request batches",
     },
     "tenant_worker_concurrency_limit": {
         "type": int,

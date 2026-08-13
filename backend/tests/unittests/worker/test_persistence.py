@@ -9,7 +9,7 @@ Tests the crawl/persistence.py module directly to ensure:
 Run with: pytest tests/unittests/worker/test_persistence.py -v
 """
 
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
 import pytest
@@ -122,7 +122,9 @@ class TestPersistenceModuleSemantics:
             embedding_model_dimensions=1536,
         )
 
-        page_buffer = [
+        from eneo.worker.crawl.persistence import CrawlPageData
+
+        page_buffer: list[CrawlPageData] = [
             {"url": "https://example.com/page1", "content": "Test content 1"},
             {"url": "https://example.com/page2", "content": "Test content 2"},
         ]
@@ -170,6 +172,8 @@ class TestPreparedPageDataclass:
             title="Test Page",
             content="Test content",
             content_hash=b"\x00" * 32,  # 32-byte hash
+            http_etag=None,
+            http_last_modified=None,
             chunks=["chunk1", "chunk2"],
             embeddings=[[0.1, 0.2], [0.3, 0.4]],
             tenant_id=uuid4(),
@@ -182,6 +186,66 @@ class TestPreparedPageDataclass:
         assert prepared.title == "Test Page"
         assert len(prepared.chunks) == 2
         assert len(prepared.embeddings) == 2
+
+
+class _AsyncContext:
+    def __init__(self, value):
+        self.value = value
+
+    async def __aenter__(self):
+        return self.value
+
+    async def __aexit__(self, *_args):
+        return None
+
+
+async def test_validator_refresh_is_tenant_and_website_scoped(monkeypatch):
+    from eneo.database.database import sessionmanager
+    from eneo.worker.crawl.persistence import _refresh_http_validators
+
+    ctx = CrawlContext(
+        website_id=uuid4(),
+        tenant_id=uuid4(),
+        tenant_slug="test",
+        user_id=uuid4(),
+        embedding_model_id=uuid4(),
+        embedding_model_name="test-model",
+        embedding_model_open_source=False,
+        embedding_model_family=None,
+        embedding_model_dimensions=1536,
+    )
+    session = MagicMock()
+    session.execute = AsyncMock()
+    session.begin.return_value = _AsyncContext(None)
+    monkeypatch.setattr(
+        sessionmanager,
+        "session",
+        lambda: _AsyncContext(session),
+    )
+
+    await _refresh_http_validators(
+        ctx=ctx,
+        rows=[
+            {
+                "url": "https://example.se/page",
+                "content": "same",
+                "etag": '"v2"',
+                "last_modified": "Thu, 13 Aug 2026 10:00:00 GMT",
+            }
+        ],
+    )
+
+    statement, values = session.execute.await_args.args
+    compiled_values = statement.compile().params.values()
+    assert ctx.tenant_id in compiled_values
+    assert ctx.website_id in compiled_values
+    assert values == [
+        {
+            "b_title": "https://example.se/page",
+            "b_etag": '"v2"',
+            "b_last_modified": "Thu, 13 Aug 2026 10:00:00 GMT",
+        }
+    ]
 
 
 class TestCrawlContextDataclass:
@@ -203,7 +267,7 @@ class TestCrawlContextDataclass:
 
         # Attempting to modify should raise FrozenInstanceError
         with pytest.raises(Exception):  # dataclasses.FrozenInstanceError
-            ctx.website_id = uuid4()
+            ctx.website_id = uuid4()  # pyright: ignore[reportAttributeAccessIssue]
 
     def test_crawl_context_default_batch_settings(self):
         """CrawlContext should have sensible default batch settings."""

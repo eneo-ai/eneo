@@ -22,6 +22,7 @@ from eneo.websites.domain.crawl_run import CrawlRun
 
 if TYPE_CHECKING:
     from eneo.jobs.task_service import TaskService
+    from eneo.websites.crawl_dependencies.crawl_models import CrawlOrigin
     from eneo.websites.domain.crawl_run_repo import CrawlRunRepository
     from eneo.websites.domain.website import Website
 
@@ -227,6 +228,7 @@ class CrawlService:
         user_id: UUID,
         website: "Website",
         run_id: UUID,
+        origin: "CrawlOrigin",
     ) -> None:
         """Add job to pending queue for feeder to process later.
 
@@ -242,6 +244,7 @@ class CrawlService:
             "url": website.url,
             "download_files": website.download_files,
             "crawl_type": website.crawl_type.value,
+            "origin": origin,
         }
 
         try:
@@ -290,6 +293,7 @@ class CrawlService:
         job_id: UUID,
         website: "Website",
         run_id: UUID,
+        origin: "CrawlOrigin",
     ) -> None:
         """Enqueue crawl job directly to ARQ."""
         from eneo.jobs.job_models import Task
@@ -302,6 +306,7 @@ class CrawlService:
             url=website.url,
             download_files=website.download_files,
             crawl_type=website.crawl_type,
+            origin=origin,
         )
 
         await job_manager.enqueue(
@@ -310,7 +315,9 @@ class CrawlService:
             params=params,
         )
 
-    async def crawl(self, website: "Website") -> CrawlRun:
+    async def crawl(
+        self, website: "Website", origin: "CrawlOrigin" = "manual"
+    ) -> CrawlRun:
         """Start a crawl for a website with optimistic slot acquisition.
 
         When feeder is enabled:
@@ -337,6 +344,7 @@ class CrawlService:
                 download_files=website.download_files,
                 crawl_type=website.crawl_type,
                 enqueue=False,  # Don't enqueue yet - we'll decide based on capacity
+                origin=origin,
             )
 
             # Step 2: Try to acquire slot atomically
@@ -350,7 +358,9 @@ class CrawlService:
                     await self._mark_slot_preacquired(crawl_job.id, website.tenant_id)
 
                     # Enqueue directly to ARQ
-                    await self._enqueue_to_arq(crawl_job.id, website, crawl_run.id)
+                    await self._enqueue_to_arq(
+                        crawl_job.id, website, crawl_run.id, origin
+                    )
                     logger.debug(
                         "Crawl enqueued directly (slot pre-acquired)",
                         extra={
@@ -399,6 +409,7 @@ class CrawlService:
                     user_id=website.user_id,
                     website=website,
                     run_id=crawl_run.id,
+                    origin=origin,
                 )
 
             # Update crawl run with job ID
@@ -414,6 +425,7 @@ class CrawlService:
                 url=website.url,
                 download_files=website.download_files,
                 crawl_type=website.crawl_type,
+                origin=origin,
             )
 
             crawl_run.update(job_id=crawl_job.id)

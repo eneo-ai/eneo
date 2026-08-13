@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Optional
+from typing import Literal, Optional
 from uuid import UUID
 
 from pydantic import AliasChoices, AliasPath, BaseModel, Field
@@ -8,6 +8,8 @@ from eneo.jobs.task_models import TaskParams
 from eneo.main.models import InDB, Status
 from eneo.websites.domain.crawl_run import CrawlType
 
+CrawlOrigin = Literal["scheduled", "manual"]
+
 
 class CrawlTask(TaskParams):
     website_id: UUID
@@ -15,6 +17,7 @@ class CrawlTask(TaskParams):
     url: str
     download_files: bool = False
     crawl_type: CrawlType = CrawlType.CRAWL
+    origin: CrawlOrigin = "manual"
 
 
 class CrawlRunBase(BaseModel):

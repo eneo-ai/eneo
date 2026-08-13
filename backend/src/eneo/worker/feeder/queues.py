@@ -10,7 +10,7 @@ import json
 from typing import TYPE_CHECKING, Any, cast
 from uuid import UUID
 
-from typing_extensions import TypedDict
+from typing_extensions import NotRequired, TypedDict
 
 from eneo.jobs.job_manager import job_manager
 from eneo.main.logging import get_logger
@@ -29,6 +29,7 @@ class CrawlPendingJobData(TypedDict):
     url: str
     download_files: bool
     crawl_type: str
+    origin: NotRequired[str]
 
 
 class PendingQueue:
@@ -209,6 +210,7 @@ class JobEnqueuer:
         try:
             from eneo.jobs.job_models import Task
             from eneo.websites.crawl_dependencies.crawl_models import (
+                CrawlOrigin,
                 CrawlTask,
                 CrawlType,
             )
@@ -220,6 +222,7 @@ class JobEnqueuer:
                 url=job_data["url"],
                 download_files=job_data["download_files"],
                 crawl_type=CrawlType(job_data["crawl_type"]),
+                origin=cast(CrawlOrigin, job_data.get("origin", "manual")),
             )
 
             await job_manager.enqueue(

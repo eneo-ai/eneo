@@ -43,6 +43,12 @@ class InfoBlobs(BasePublic):
         LargeBinary(length=32),
         comment="SHA-256 hash of normalized content for change detection",
     )
+    http_etag: Mapped[Optional[str]] = mapped_column(
+        comment="ETag sent as If-None-Match on the next crawl",
+    )
+    http_last_modified: Mapped[Optional[str]] = mapped_column(
+        comment="Last-Modified sent as If-Modified-Since on the next crawl",
+    )
     source_id: Mapped[UUID] = mapped_column(nullable=False)
     version_state: Mapped[str] = mapped_column(String(16), nullable=False)
 
