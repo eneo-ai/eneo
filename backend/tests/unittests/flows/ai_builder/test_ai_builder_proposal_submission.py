@@ -189,6 +189,7 @@ async def test_complex_authoring_spec_submits_once_without_repairs() -> None:
         PROPOSE_FLOW_TOOL_NAME,
         {
             "flow_name": "Decision report",
+            "flow_description": None,
             "plan_rationale": "Ground, draft, review, and finalize one report.",
             "steps": [
                 {
@@ -217,6 +218,9 @@ async def test_complex_authoring_spec_submits_once_without_repairs() -> None:
                             "required": False,
                         },
                     ],
+                    "model_ref": None,
+                    "knowledge_refs": [],
+                    "citations_requested": False,
                 },
                 {
                     "name": "Write and review decision report",
@@ -224,8 +228,13 @@ async def test_complex_authoring_spec_submits_once_without_repairs() -> None:
                         "Write the complete final decision report from the extracted "
                         "facts, risks, and actions."
                     ),
+                    "output_fields": None,
+                    "model_ref": None,
+                    "knowledge_refs": [],
+                    "citations_requested": False,
                 },
             ],
+            "assumptions": [],
         },
         tool_call_id="call-complex-authoring-spec",
     )
@@ -1105,8 +1114,10 @@ async def test_repair_invocation_validates_the_prepared_schema_before_compilatio
     )
     invalid_arguments = {
         "flow_name": "Invalid repair",
+        "flow_description": None,
         "plan_rationale": "Repair the proposal.",
         "steps": ["not an object"],
+        "assumptions": [],
     }
     invocation = _make_retry_invocation(
         resource_catalog=resource_catalog,

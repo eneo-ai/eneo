@@ -15905,9 +15905,9 @@ export interface components {
     FlowInputLimitsPublic: {
       /**
        * Audio Max Files Per Run
-       * @description Null means no tenant-level audio file count ceiling.
+       * @description Effective tenant-level audio file count ceiling for each Flow run. Resetting the stored override to null restores the default; this response always returns the resolved positive integer.
        */
-      audio_max_files_per_run: number | null;
+      audio_max_files_per_run: number;
       /** Audio Max Size Bytes */
       audio_max_size_bytes: number;
       /**

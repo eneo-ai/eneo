@@ -24,6 +24,7 @@ from eneo.flows.domain.flow import (
 )
 from eneo.flows.domain.runtime import RunExecutionState, RuntimeStep, StepInputValue
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
+from eneo.flows.flow_input_limits import DEFAULT_MAX_AUDIO_FILES_PER_RUN
 from eneo.flows.flow_validators import validate_steps
 from eneo.flows.runtime.http_orchestration import FlowHttpInputResolution
 from eneo.flows.runtime.step_definition_parser import parse_runtime_steps
@@ -131,7 +132,7 @@ def _resolution_deps(
         audit_service=None,
         actor=None,
         max_generic_files=None,
-        max_audio_files=None,
+        max_audio_files=DEFAULT_MAX_AUDIO_FILES_PER_RUN,
         max_inline_text_bytes=1024 * 1024,
         logger=MagicMock(),
     )

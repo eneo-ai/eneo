@@ -145,9 +145,10 @@ class StructuredFieldDraft(BaseModel):
             raise ValueError(
                 f"Only object fields may declare nested fields ({self.name!r})."
             )
-        if self.field_type == "array" and self.fields is not None:
+        if self.field_type == "array" and self.item_fields == []:
             raise ValueError(
-                f"Array field {self.name!r} must use item_fields, not fields."
+                f"Array field {self.name!r} must declare non-empty item_fields "
+                "or set item_fields to null for primitive items."
             )
         if self.field_type != "array" and self.item_fields is not None:
             raise ValueError(
@@ -277,8 +278,16 @@ def ensure_structured_field_depth(
     # Naming the offending branch is what makes the rejection repairable:
     # a bare depth message sent a live repair loop through five attempts
     # because the model could not find which branch to flatten.
+    sibling_names: set[str] = set()
     for field in fields:
         field_path = f"{parent_path}.{field.name}" if parent_path else field.name
+        folded_name = fold_result_field_name(field.name)
+        if folded_name in sibling_names:
+            raise ValueError(
+                f"{field_path}: structured field names must be unique among "
+                "siblings after normalization."
+            )
+        sibling_names.add(folded_name)
         if depth > MAX_STRUCTURED_FIELD_DEPTH:
             raise ValueError(
                 f"{field_path}: structured field nesting depth cannot exceed "

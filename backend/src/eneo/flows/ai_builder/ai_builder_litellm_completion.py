@@ -115,6 +115,7 @@ async def call_proposal_completion(
             messages=messages,
             tools=request.tool_schemas,
             tool_choice=request.tool_choice,
+            parallel_tool_calls=False,
             stream=False,
             drop_params=True,
             max_tokens=request.max_output_tokens,
@@ -173,6 +174,11 @@ def _proposal_request_evidence(
             name="tool_choice",
             json_type=completion_evidence_json_type(request.tool_choice),
             domain="tool_selection",
+        ),
+        CompletionEvidenceField(
+            name="parallel_tool_calls",
+            json_type="boolean",
+            domain="transport_control",
         ),
         CompletionEvidenceField(
             name="stream",

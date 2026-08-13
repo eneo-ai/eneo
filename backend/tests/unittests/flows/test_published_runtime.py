@@ -12,7 +12,11 @@ from eneo.flows.domain.flow_invariant_exceptions import FlowPersistedIdMissingEr
 from eneo.flows.domain.mapped_execution_policy import FlowMappedExecutionPolicy
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_api_exceptions import FlowBadRequestException
-from eneo.flows.flow_input_limits import FlowInputLimits
+from eneo.flows.flow_input_limits import (
+    DEFAULT_MAX_AUDIO_FILES_PER_RUN,
+    FlowInputLimits,
+    resolve_flow_input_limits,
+)
 from eneo.flows.published_definition import (
     FLOW_DEFINITION_SCHEMA_VERSION,
     published_definition_checksum,
@@ -26,17 +30,19 @@ from eneo.main.exceptions import ErrorCodes
 from eneo.main.models import GeneralError
 
 
-def _step(*, input_type: str = "document") -> FlowStep:
+def _step(*, input_type: str = "document", max_files: int | None = 3) -> FlowStep:
     input_config = None
     if input_type in {"audio", "document", "file"}:
+        runtime_input: dict[str, object] = {
+            "enabled": True,
+            "required": True,
+            "input_format": input_type,
+            "label": "Upload",
+        }
+        if max_files is not None:
+            runtime_input["max_files"] = max_files
         input_config = {
-            "runtime_input": {
-                "enabled": True,
-                "required": True,
-                "input_format": input_type,
-                "max_files": 3,
-                "label": "Upload",
-            }
+            "runtime_input": runtime_input,
         }
     return FlowStep(
         id=uuid4(),
@@ -193,6 +199,43 @@ async def test_load_published_runtime_inputs_builds_published_runtime_specs() ->
         tenant_id=flow.tenant_id,
     )
     settings_service.get_mapped_execution_policy_resolved.assert_awaited_once_with()
+
+
+@pytest.mark.asyncio
+async def test_null_tenant_audio_limit_publishes_with_default_admission() -> None:
+    flow_service = AsyncMock()
+    flow_version_repo = AsyncMock()
+    settings_service = AsyncMock()
+    step = _step(input_type="audio", max_files=None)
+    flow = _flow(step=step, published_version=5)
+    assert flow.id is not None
+    flow_service.get_flow.return_value = flow
+    flow_version_repo.get.return_value = _version(
+        version=5,
+        definition_json=_definition_json(flow=flow, step=step),
+    )
+    settings_service.get_flow_input_limits_resolved.return_value = (
+        resolve_flow_input_limits(
+            {"input_limits": {"audio_max_files_per_run": None}},
+            defaults=SimpleNamespace(
+                session_file_maximum_bytes=12_000_000,
+                session_audio_maximum_bytes=25_000_000,
+            ),
+        )
+    )
+    settings_service.get_mapped_execution_policy_resolved.return_value = (
+        FlowMappedExecutionPolicy()
+    )
+
+    result = await load_published_runtime_inputs(
+        flow_service=flow_service,
+        flow_version_repo=flow_version_repo,
+        settings_source=settings_service,
+        flow_id=flow.id,
+        intent=FlowRuntimePublicationIntent.RUNTIME_UPLOAD,
+    )
+
+    assert result.input_specs[step.id].max_files == DEFAULT_MAX_AUDIO_FILES_PER_RUN
 
 
 @pytest.mark.asyncio

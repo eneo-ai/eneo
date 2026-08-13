@@ -32,6 +32,10 @@ from eneo.flows.ai_builder.ai_builder_result_contract import (
     derive_result_contract,
     render_result_contract_prompt_block,
 )
+from eneo.flows.ai_builder.ai_builder_runtime_input_requirements import (
+    ConfirmedRuntimeInputRequirement,
+    render_confirmed_runtime_input_requirements,
+)
 from eneo.flows.ai_builder.ai_builder_schema_evidence import (
     project_schema_fields,
 )
@@ -53,18 +57,30 @@ def build_plan_proposal_system_prompt(
     attachment_context: str | None,
     flow_context: str | None,
     is_edit_mode: bool,
+    is_pure_audio_transcription: bool = False,
     resource_catalog: AIBuilderResourceCatalog,
     plan_revision_context: str | None = None,
     requested_output_sections: RequestedOutputSections | None = None,
+    confirmed_runtime_inputs: tuple[ConfirmedRuntimeInputRequirement, ...] = (),
 ) -> str:
     submission_tool = PROPOSE_FLOW_TOOL_NAME
     resource_material = build_ai_builder_resource_reference_material(
         catalog=resource_catalog,
     )
+    audio_create_rule = (
+        "- For this pure audio transcription flow, propose exactly one semantic "
+        "transcription step with only `name` and `instructions`; the backend owns "
+        "upload and transcription mechanics."
+        if is_pure_audio_transcription
+        else "- For committed audio input, the backend inserts the first "
+        "transcription/upload step; start propose_flow steps with the analysis, "
+        "structuring, or synthesis work after transcription. Transcript review is "
+        "compiler-owned and stays on that backend-inserted step."
+    )
     create_mode_rules = (
         [
             "- In create mode, describe semantic flow intent in propose_flow; do not choose Flow mechanics.",
-            "- For committed audio input, the backend inserts the first transcription/upload step; start propose_flow steps with the analysis, structuring, or synthesis work after transcription. Transcript review is compiler-owned and stays on that backend-inserted step.",
+            audio_create_rule,
             "- Human review checkpoints are compiler-owned in create mode: the backend places confirmed review intents on their producing steps. Do not set review_mode, and do not model human review as a separate AI step or as instruction prose.",
             "- Do not author field-level previous-step paths or text-output refs in create mode; the backend owns those underlag channels from the proposed step outputs and committed architecture.",
             "- The backend compiles step topology, backend-owned refs, underlag/input_bindings, runtime input, step refs, output modes, and document delivery.",
@@ -111,6 +127,17 @@ def build_plan_proposal_system_prompt(
         "Confirmed requirements:",
         render_confirmed_requirements_proposal_prompt_block(confirmed_requirements),
     ]
+    if confirmed_runtime_inputs and not is_edit_mode:
+        lines.extend(
+            [
+                "",
+                "Confirmed runtime inputs:",
+                render_confirmed_runtime_input_requirements(confirmed_runtime_inputs),
+                "- Keep these exact identities as server-owned runtime inputs; "
+                "do not repeat an identity as a source output field. Preserve "
+                "each listed purpose when designing semantic work.",
+            ]
+        )
     file_roles_block = _file_roles_block(planning_state)
     if file_roles_block is not None:
         lines.extend(["", "Uploaded file roles:", file_roles_block])

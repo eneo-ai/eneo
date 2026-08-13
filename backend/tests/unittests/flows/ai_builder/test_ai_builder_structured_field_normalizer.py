@@ -33,7 +33,7 @@ def test_none_and_empty_list_admit_as_no_fields() -> None:
 def test_canonical_fields_are_preserved_losslessly() -> None:
     admitted = normalize_structured_field_list(
         [
-            _field("beslut", field_type="array", item_fields=[]),
+            _field("beslut", field_type="array", item_fields=None),
             _field(
                 "atgard",
                 field_type="object",
@@ -49,8 +49,8 @@ def test_canonical_fields_are_preserved_losslessly() -> None:
 
 
 def test_omitted_required_flag_admits_with_the_typed_default() -> None:
-    # `required` has a canonical default on StructuredFieldDraft — omitting
-    # it loses nothing and must not cost a repair round.
+    # Backend-owned field drafts use the typed default. Provider output is
+    # separately constrained by the create tool schema.
     field = _field("beslut")
     del field["required"]
 
@@ -144,6 +144,10 @@ def test_container_shape_rules_are_enforced() -> None:
         normalize_structured_field_list(
             [_field("skalar", item_fields=[_field("barn")])]
         )
+    with pytest.raises(StructuredFieldAdmissionError, match="non-empty item_fields"):
+        normalize_structured_field_list(
+            [_field("tom_lista", field_type="array", item_fields=[])]
+        )
 
 
 def test_depth_rejection_names_the_offending_branch() -> None:
@@ -210,6 +214,40 @@ def test_non_ascii_field_names_fold_instead_of_rejecting() -> None:
     ]
 
 
+@pytest.mark.parametrize(
+    "output_fields",
+    [
+        [_field("åtgärder"), _field("atgarder")],
+        [
+            _field(
+                "grupp",
+                field_type="object",
+                fields=[_field("Öppna frågor"), _field("oppna_fragor")],
+            )
+        ],
+        [
+            _field(
+                "poster",
+                field_type="array",
+                item_fields=[_field("Beslut"), _field("beslut")],
+            )
+        ],
+    ],
+)
+def test_sibling_names_must_be_unique_after_recursive_folding(
+    output_fields: list[dict[str, object]],
+) -> None:
+    with pytest.raises(PydanticValidationError, match="unique among siblings"):
+        SemanticStepIntent.model_validate(
+            {
+                "name": "Strukturera",
+                "instructions": "Strukturera underlaget.",
+                "output_type": "json",
+                "output_fields": output_fields,
+            }
+        )
+
+
 def test_unfoldable_field_names_still_reject() -> None:
     with pytest.raises(PydanticValidationError, match="ASCII identifiers"):
         SemanticStepIntent.model_validate(
@@ -234,40 +272,6 @@ def test_object_shape_rejection_names_the_field() -> None:
         )
 
 
-def test_misplaced_field_drafts_reattach_to_the_preceding_step() -> None:
-    # Dominant parse-failure family of the 2026-08-06 checkpoint (12 of
-    # 14 rejections): the model's JSON nesting slips and a whole field
-    # list lands in `steps` after its producing step. A step never has
-    # field_type, so the shape is unambiguous and admission reattaches
-    # the drafts instead of burning a repair round.
-    intent = parse_create_flow_intent_arguments(
-        {
-            "flow_name": "Beslutsunderlag",
-            "plan_rationale": "Strukturera underlaget.",
-            "steps": [
-                {
-                    "name": "Strukturera underlag",
-                    "instructions": "Strukturera beslutsunderlaget.",
-                    "output_fields": [_field("decisions")],
-                },
-                _field(
-                    "open_questions",
-                    item_fields=[_field("question")],
-                    field_type="array",
-                ),
-                _field("risks"),
-            ],
-        }
-    )
-
-    assert len(intent.steps) == 1
-    assert [field.name for field in intent.steps[0].output_fields or []] == [
-        "decisions",
-        "open_questions",
-        "risks",
-    ]
-
-
 def test_leading_field_draft_still_fails_visibly() -> None:
     with pytest.raises(ProposalIntentArgumentError, match="instructions"):
         parse_create_flow_intent_arguments(
@@ -279,69 +283,9 @@ def test_leading_field_draft_still_fails_visibly() -> None:
         )
 
 
-def test_stray_step_keys_on_fields_are_dropped_not_fatal() -> None:
-    # Live captures 2026-08-06 (flagship + hard_many_source): the model
-    # sprinkles step-level model_ref into field objects, which used to
-    # reject the whole output_fields list.
-    step = SemanticStepIntent.model_validate(
-        {
-            "name": "Läs handlingar",
-            "instructions": "Läs och strukturera varje handling.",
-            "output_type": "json",
-            "output_fields": [
-                _field("titel", model_ref="model.gpt-test"),
-            ],
-        }
-    )
-    assert [field.name for field in step.output_fields or []] == ["titel"]
-
-
-def test_step_level_assumptions_hoist_to_the_root() -> None:
-    intent = parse_create_flow_intent_arguments(
-        {
-            "flow_name": "Handlingsläsning",
-            "plan_rationale": "Strukturera underlaget.",
-            "assumptions": ["Root-antagande."],
-            "steps": [
-                {
-                    "name": "Läs handlingar",
-                    "instructions": "Läs och strukturera varje handling.",
-                    "assumptions": ["Stegets antagande hör hemma i roten."],
-                }
-            ],
-        }
-    )
-    assert intent.assumptions == [
-        "Root-antagande.",
-        "Stegets antagande hör hemma i roten.",
-    ]
-
-
-def test_nested_field_draft_list_in_steps_reattaches() -> None:
-    # Regression run 2026-08-06: five rejections of "steps.N: Input should
-    # be a valid dictionary" — the model nests a whole LIST of field drafts
-    # in the steps array, not just a single draft.
-    intent = parse_create_flow_intent_arguments(
-        {
-            "flow_name": "Beslutsunderlag",
-            "plan_rationale": "Strukturera underlaget.",
-            "steps": [
-                {
-                    "name": "Strukturera underlag",
-                    "instructions": "Strukturera beslutsunderlaget.",
-                    "output_fields": [_field("decisions")],
-                },
-                [_field("open_questions"), _field("risks")],
-            ],
-        }
-    )
-
-    assert len(intent.steps) == 1
-    assert [field.name for field in intent.steps[0].output_fields or []] == [
-        "decisions",
-        "open_questions",
-        "risks",
-    ]
+def test_stray_step_keys_on_fields_reject_the_whole_list() -> None:
+    with pytest.raises(StructuredFieldAdmissionError, match="model_ref"):
+        normalize_structured_field_list([_field("titel", model_ref="model.gpt-test")])
 
 
 def test_non_field_list_in_steps_still_fails_visibly() -> None:
@@ -361,42 +305,8 @@ def test_non_field_list_in_steps_still_fails_visibly() -> None:
         )
 
 
-def test_missing_field_type_infers_from_the_declared_shape() -> None:
-    # Live capture 2026-08-06: the model omitted field_type on one field
-    # of a long list, which rejected the whole list. A field's own shape
-    # already states its type.
-    step = SemanticStepIntent.model_validate(
-        {
-            "name": "Strukturera",
-            "instructions": "Strukturera underlaget.",
-            "output_type": "json",
-            "output_fields": [
-                {"name": "titel", "description": "Dokumentets titel."},
-                {
-                    "name": "poster",
-                    "description": "Rader ur underlaget.",
-                    "item_fields": [
-                        {
-                            "name": "rad",
-                            "description": "En rad.",
-                            "field_type": "string",
-                        }
-                    ],
-                },
-                {
-                    "name": "metadata",
-                    "description": "Metadata om dokumentet.",
-                    "fields": [
-                        {
-                            "name": "datum",
-                            "description": "Datum.",
-                            "field_type": "string",
-                        }
-                    ],
-                },
-            ],
-        }
-    )
-
-    types = {field.name: field.field_type for field in step.output_fields or []}
-    assert types == {"titel": "string", "poster": "array", "metadata": "object"}
+def test_missing_field_type_rejects_the_whole_list() -> None:
+    with pytest.raises(StructuredFieldAdmissionError, match="field_type"):
+        normalize_structured_field_list(
+            [{"name": "titel", "description": "Dokumentets titel."}]
+        )

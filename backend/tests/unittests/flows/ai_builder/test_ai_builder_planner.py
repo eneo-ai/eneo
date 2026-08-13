@@ -98,6 +98,10 @@ from eneo.flows.ai_builder.ai_builder_resource_catalog import (
     AIBuilderResourceCatalog,
     build_ai_builder_resource_catalog,
 )
+from eneo.flows.ai_builder.ai_builder_runtime_input_requirements import (
+    ConfirmedRuntimeInputRequirement,
+    render_confirmed_runtime_input_requirements,
+)
 from eneo.flows.ai_builder.ai_builder_schema_evidence import (
     SCHEMA_MAX_JSON_BYTES,
     DeclaredSchemaCandidate,
@@ -135,6 +139,7 @@ from eneo.flows.ai_builder.planning_state import (
     ArchitectureCommit,
     ConfirmedRuntimeMetadataField,
     FileRoleEvidence,
+    PlanningSignal,
     PlanningState,
     PlanningStatePayloadTooLargeError,
     ResolvedSlot,
@@ -490,6 +495,180 @@ def _budget_policy() -> AIBuilderBudgetPolicy:
         conversation_safety_buffer_tokens=128,
         minimum_conversation_budget_tokens=256,
     )
+
+
+def _build_create_proposal_for_architecture(
+    state: PlanningState,
+) -> ProposalPrepared:
+    return build_proposal_prepared(
+        requirements_state=RequirementsState(),
+        ui_language="en",
+        slot_classification_metadata=None,
+        conversation=[ConversationMessage(role="user", content="Build the flow.")],
+        planning_state=state,
+        attachment_context=None,
+        flow_context=None,
+        is_edit_mode=False,
+        resource_catalog=build_ai_builder_resource_catalog(
+            available_models=[], available_kbs=[], prior_bindings=()
+        ),
+        current_steps=None,
+        plan_edit_context=None,
+        prior_plan_for_revision=None,
+        litellm_model="openai/gpt-5.4",
+        max_input_tokens=4096,
+        max_output_tokens=1024,
+        budget_policy=_budget_policy(),
+        attachment_file_count=0,
+        current_turn_start=0,
+    )
+
+
+def _audio_text_transcription_state(
+    *,
+    post_processing_goal: str | None,
+    secondary_obligation: str | None = None,
+) -> PlanningState:
+    state = PlanningState.empty()
+    state.architecture_commit = ArchitectureCommit(
+        tuples_chain=[
+            StepTriple(
+                input_type="audio",
+                output_type="text",
+                output_mode="transcribe_only",
+            )
+        ],
+        chosen_patterns=["audio_transcription"],
+        required_capabilities=["input_audio", "output_mode_transcribe_only"],
+        committed_at=datetime(2026, 8, 13, tzinfo=timezone.utc),
+        architecture_hash="c" * 64,
+    )
+    if post_processing_goal is not None:
+        state.resolved_slots["post_processing_goal"] = ResolvedSlot(
+            name="post_processing_goal",
+            value=post_processing_goal,
+            source="structured_answer",
+            confidence="high",
+        )
+    if secondary_obligation is not None:
+        state.signals.append(
+            PlanningSignal(
+                question_id="result_obligation",
+                value=secondary_obligation,
+                confidence="high",
+                source="model",
+            )
+        )
+    return state
+
+
+def test_create_preparation_projects_explicit_transcript_only_context() -> None:
+    state = _audio_text_transcription_state(
+        post_processing_goal="stop_after_primary_operation"
+    )
+
+    prepared = _build_create_proposal_for_architecture(state)
+
+    assert prepared.compile_context is not None
+    assert prepared.compile_context.is_pure_audio_transcription is True
+    prompt = prepared.llm_messages[0]["content"]
+    assert isinstance(prompt, str)
+    assert "exactly one semantic transcription step" in prompt
+    steps_schema = prepared.proposal_tool_schema["function"]["parameters"][
+        "properties"
+    ]["steps"]
+    assert steps_schema["maxItems"] == 1
+    assert set(steps_schema["items"]["properties"]) == {"name", "instructions"}
+
+
+@pytest.mark.parametrize(
+    ("post_processing_goal", "secondary_obligation"),
+    [
+        (None, None),
+        ("summarize_or_overview", None),
+        ("action_followup", None),
+        ("stop_after_primary_operation", "summary"),
+    ],
+)
+def test_audio_text_post_processing_fails_before_proposal(
+    post_processing_goal: str | None,
+    secondary_obligation: str | None,
+) -> None:
+    state = _audio_text_transcription_state(
+        post_processing_goal=post_processing_goal,
+        secondary_obligation=secondary_obligation,
+    )
+
+    with pytest.raises(AIBuilderBadRequestException) as exc_info:
+        _build_create_proposal_for_architecture(state)
+
+    assert exc_info.value.code is AIBuilderErrorCode.ARCHITECTURE_MATERIALIZATION_FAILED
+    assert exc_info.value.context == {
+        "reason": "audio_transcription_post_processing_unsupported",
+        "post_processing_goal": post_processing_goal,
+        "secondary_obligations": (
+            [secondary_obligation] if secondary_obligation is not None else []
+        ),
+    }
+
+
+def test_create_preparation_keeps_audio_report_prompt_and_generic_schema() -> None:
+    state = PlanningState.empty()
+    state.architecture_commit = ArchitectureCommit(
+        tuples_chain=[
+            StepTriple(
+                input_type="audio",
+                output_type="text",
+                output_mode="transcribe_only",
+            ),
+            StepTriple(
+                input_type="text",
+                output_type="pdf",
+                output_mode="render_verbatim",
+            ),
+        ],
+        chosen_patterns=["audio_transcription", "audio_to_artifact_report"],
+        required_capabilities=["input_audio", "output_pdf"],
+        committed_at=datetime(2026, 8, 13, tzinfo=timezone.utc),
+        architecture_hash="d" * 64,
+    )
+    state.resolved_slots["post_processing_goal"] = ResolvedSlot(
+        name="post_processing_goal",
+        value="action_followup",
+        source="structured_answer",
+        confidence="high",
+    )
+
+    prepared = _build_create_proposal_for_architecture(state)
+
+    assert prepared.compile_context is not None
+    assert prepared.compile_context.is_pure_audio_transcription is False
+    assert prepared.proposal_tool_schema == build_propose_flow_tool_schema(
+        resource_catalog=prepared.resource_catalog
+    )
+    prompt = prepared.llm_messages[0]["content"]
+    assert isinstance(prompt, str)
+    assert "start propose_flow steps with the analysis" in prompt
+    assert "exactly one semantic transcription step" not in prompt
+    assert "Next steps or actions" in prompt
+
+
+def test_create_preparation_without_runtime_fields_keeps_generic_provider_contract() -> (
+    None
+):
+    state = _document_architecture_state()
+
+    prepared = _build_create_proposal_for_architecture(state)
+    baseline_schema = build_propose_flow_tool_schema(
+        resource_catalog=prepared.resource_catalog
+    )
+
+    assert prepared.compile_context is not None
+    assert prepared.compile_context.confirmed_runtime_input_requirements == ()
+    assert prepared.proposal_tool_schema == baseline_schema
+    prompt = prepared.llm_messages[0]["content"]
+    assert isinstance(prompt, str)
+    assert "Confirmed runtime inputs:" not in prompt
 
 
 def test_named_report_sections_flow_from_request_preparation_into_lowering() -> None:
@@ -1698,7 +1877,19 @@ async def test_prepare_planner_request_uses_proposal_task_after_confirmation() -
     assert isinstance(prepared, ProposalPrepared)
     assert prepared.llm_messages[0]["role"] == "system"
     assert "Call exactly one `propose_flow` tool" in prepared.llm_messages[0]["content"]
-    assert "case_id" not in prepared.llm_messages[0]["content"]
+    rendered_requirement = render_confirmed_runtime_input_requirements(
+        (
+            ConfirmedRuntimeInputRequirement(
+                name="case_id",
+                purpose="interpret_input",
+            ),
+        )
+    )
+    assert rendered_requirement in prepared.llm_messages[0]["content"]
+    output_fields_description = prepared.proposal_tool_schema["function"]["parameters"][
+        "properties"
+    ]["steps"]["items"]["properties"]["output_fields"]["description"]
+    assert rendered_requirement in output_fields_description
     assert prepared.compile_context is not None
     assert [
         field.value.variable_name
@@ -1854,6 +2045,54 @@ def test_proposal_boundary_rejects_confirmed_primary_input_shadow() -> None:
         )
 
     assert exc_info.value.code is AIBuilderErrorCode.ARCHITECTURE_MATERIALIZATION_FAILED
+    assert exc_info.value.context == {
+        "reason": "confirmed_form_field_incompatible",
+        "field_names": ["text"],
+    }
+
+
+def test_proposal_boundary_defaults_missing_runtime_type_to_text() -> None:
+    state = PlanningState.empty()
+    state.input_fields = [
+        ConfirmedRuntimeMetadataField(
+            value=FlowInputFieldIntent(
+                variable_name="text",
+                label="Text",
+                provenance="user_confirmed",
+            ),
+            purpose="interpret_input",
+            structured_answer_message_id="message-runtime-fields",
+        )
+    ]
+
+    with pytest.raises(AIBuilderBadRequestException) as exc_info:
+        build_proposal_prepared(
+            requirements_state=RequirementsState(),
+            ui_language="en",
+            slot_classification_metadata=None,
+            conversation=[ConversationMessage(role="user", content="Summarize text")],
+            planning_state=state,
+            attachment_context=None,
+            flow_context=None,
+            is_edit_mode=False,
+            resource_catalog=build_ai_builder_resource_catalog(
+                available_models=None,
+                available_kbs=None,
+            ),
+            current_steps=None,
+            plan_edit_context=None,
+            prior_plan_for_revision=None,
+            litellm_model="gpt-4o-mini",
+            max_input_tokens=4096,
+            max_output_tokens=256,
+            budget_policy=AIBuilderBudgetPolicy(
+                conversation_safety_buffer_tokens=128,
+                minimum_conversation_budget_tokens=256,
+            ),
+            attachment_file_count=0,
+            current_turn_start=0,
+        )
+
     assert exc_info.value.context == {
         "reason": "confirmed_form_field_incompatible",
         "field_names": ["text"],

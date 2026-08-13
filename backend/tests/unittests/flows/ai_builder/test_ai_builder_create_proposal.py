@@ -13,6 +13,7 @@ from eneo.flows.ai_builder.ai_builder_architecture_errors import (
     AIBuilderArchitectureError,
 )
 from eneo.flows.ai_builder.ai_builder_create_compile_context import (
+    CreateCompileContext,
     create_compile_context_from_planning_state,
 )
 from eneo.flows.ai_builder.ai_builder_create_proposal import (
@@ -960,3 +961,57 @@ async def test_confirmed_create_shadow_field_is_rejected_explicitly() -> None:
     assert result.compiled_proposal is None
     assert result.failure_kind == "validation"
     assert result.failure_codes == frozenset({"confirmed_form_field_incompatible"})
+
+
+@pytest.mark.asyncio
+async def test_confirmed_source_output_collision_is_model_repairable() -> None:
+    result = await _process_create_intent_arguments(
+        turn=_make_turn(),
+        conversation=[],
+        arguments={
+            "flow_name": "Document case summary",
+            "plan_rationale": "Extract and summarize the case.",
+            "steps": [
+                {
+                    "name": "Extract source facts",
+                    "instructions": "Extract the case id from the document.",
+                    "output_fields": [
+                        {
+                            "name": "case_id",
+                            "field_type": "string",
+                            "description": "Case id found in the source.",
+                        }
+                    ],
+                },
+                {
+                    "name": "Write summary",
+                    "instructions": "Write the final summary.",
+                },
+            ],
+        },
+        tool_call_id="call-source-output-collision",
+        available_model_refs=None,
+        available_kb_refs=None,
+        compile_context=CreateCompileContext(
+            runtime_input_type=InputType.DOCUMENT,
+            runtime_input_fields=(
+                ConfirmedRuntimeMetadataField(
+                    value=FlowInputFieldIntent(
+                        variable_name="case_id",
+                        label="Case id",
+                        provenance="user_confirmed",
+                    ),
+                    purpose="shape_result",
+                    structured_answer_message_id="message-runtime-fields",
+                ),
+            ),
+        ),
+    )
+
+    assert result.compiled_proposal is None
+    assert result.failure_kind == "validation"
+    assert result.failure_codes == frozenset(
+        {"confirmed_runtime_input_source_output_collision"}
+    )
+    assert result.feedback is not None
+    assert "case_id" in result.feedback

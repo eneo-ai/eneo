@@ -27,6 +27,7 @@ from eneo.flows.ai_builder.ai_builder_assembly.fixed_steps import (
 )
 from eneo.flows.ai_builder.ai_builder_assembly.lower import lower_assembly_plan
 from eneo.flows.ai_builder.ai_builder_assembly.plan import (
+    SOURCE_READER_INPUT_TYPES,
     FlowAssemblyPlan,
     PlannedStep,
     PlannedStepRole,
@@ -34,6 +35,7 @@ from eneo.flows.ai_builder.ai_builder_assembly.plan import (
     planned_step_is_source_reader,
 )
 from eneo.flows.ai_builder.ai_builder_domain_models import LintWarning
+from eneo.flows.ai_builder.ai_builder_field_identity import fold_result_field_name
 from eneo.flows.ai_builder.ai_builder_flow_schema_values import (
     FlowInputFieldProvenance,
 )
@@ -93,12 +95,11 @@ _SOURCE_INPUT_TYPES = frozenset(
     }
 )
 _FILE_INPUT_TYPES = frozenset({InputType.DOCUMENT, InputType.FILE})
-_AUDIO_TRANSCRIPTION_PATTERN_ID = "audio_transcription"
-
 CreateAssemblyRejectionReason = Literal[
     "aggregate_requires_text_or_document_output",
     "all_previous_step_cannot_use_explicit_refs",
     "compare_json_requires_structured_producers",
+    "confirmed_runtime_input_source_output_collision",
     "audio_requires_linear",
     "docx_template_form_fields_mismatch",
     "docx_template_shape_unsupported",
@@ -137,6 +138,10 @@ _REJECTION_FEEDBACK: dict[CreateAssemblyRejectionReason, str] = {
         "A compare flow delivering JSON needs every earlier semantic step to "
         "declare structured output_fields so the terminal can consume them "
         "through typed references."
+    ),
+    "confirmed_runtime_input_source_output_collision": (
+        "A confirmed runtime input field has the same identity as a source output "
+        "field. Keep the runtime input field and rename the source output field."
     ),
     "audio_requires_linear": "Audio create flows must be linear.",
     "docx_template_form_fields_mismatch": (
@@ -221,10 +226,14 @@ class CreateAssemblyRejection:
     reason: CreateAssemblyRejectionReason
     step_index: int | None = None
     detail: str | None = None
+    field_names: tuple[str, ...] = ()
 
     @property
     def failure_code(self) -> str:
-        if self.reason == "section_writer_structured_source_ambiguous":
+        if self.reason in {
+            "confirmed_runtime_input_source_output_collision",
+            "section_writer_structured_source_ambiguous",
+        }:
             return self.reason
         return f"assembly_{self.reason}"
 
@@ -241,11 +250,13 @@ def _reject(
     *,
     step_index: int | None = None,
     detail: str | None = None,
+    field_names: tuple[str, ...] = (),
 ) -> CreateAssemblyRejection:
     return CreateAssemblyRejection(
         reason=reason,
         step_index=step_index,
         detail=detail,
+        field_names=field_names,
     )
 
 
@@ -255,6 +266,7 @@ def try_compile_create_intent_with_assembly(
     runtime_input_type: InputType,
     final_output_type: OutputType,
     final_output_mode: OutputMode | None,
+    is_pure_audio_transcription: bool,
     form_fields: Sequence[FormFieldSpec],
     runtime_input_fields: Sequence[ConfirmedRuntimeMetadataField],
     template_form_field_names: tuple[str, ...],
@@ -280,6 +292,7 @@ def try_compile_create_intent_with_assembly(
             runtime_input_type=runtime_input_type,
             final_output_type=final_output_type,
             final_output_mode=final_output_mode,
+            is_pure_audio_transcription=is_pure_audio_transcription,
             form_fields=form_fields,
             runtime_input_fields=runtime_input_fields,
             template_form_field_names=template_form_field_names,
@@ -312,6 +325,7 @@ def _assemble_create_intent(
     runtime_input_type: InputType,
     final_output_type: OutputType,
     final_output_mode: OutputMode | None,
+    is_pure_audio_transcription: bool,
     form_fields: Sequence[FormFieldSpec],
     runtime_input_fields: Sequence[ConfirmedRuntimeMetadataField],
     template_form_field_names: tuple[str, ...],
@@ -347,6 +361,22 @@ def _assemble_create_intent(
         return _reject("empty_steps")
     if runtime_input_type not in _SOURCE_INPUT_TYPES:
         return _reject("unsupported_runtime_input_type")
+    provider_collision_names = _provider_source_output_collision_names(
+        intent=intent,
+        runtime_input_type=runtime_input_type,
+        final_output_type=final_output_type,
+        final_output_mode=final_output_mode,
+        runtime_input_fields=runtime_input_fields,
+    )
+    if provider_collision_names:
+        return _reject(
+            "confirmed_runtime_input_source_output_collision",
+            detail=(
+                "Rename the source output field(s) that duplicate confirmed "
+                "runtime input: " + ", ".join(provider_collision_names) + "."
+            ),
+            field_names=provider_collision_names,
+        )
     if runtime_input_type == InputType.AUDIO and aggregation_intent != "linear":
         return _reject("audio_requires_linear")
     document_artifact_requested = final_output_type in _DOCUMENT_OUTPUT_TYPES
@@ -387,12 +417,7 @@ def _assemble_create_intent(
             field_provenance=field_provenance,
             field_diagnostics=field_diagnostics,
         )
-    if _is_pure_audio_transcription_request(
-        runtime_input_type=runtime_input_type,
-        final_output_type=final_output_type,
-        final_output_mode=final_output_mode,
-        pattern_ids=pattern_ids,
-    ):
+    if is_pure_audio_transcription:
         if source_reader_required_fields:
             return _reject("pure_audio_transcription_requires_no_reader_fields")
         return _assemble_pure_audio_transcription(
@@ -411,9 +436,7 @@ def _assemble_create_intent(
     ):
         return _reject("unsupported_output_mode")
 
-    terminal_semantic_output_type = (
-        OutputType.TEXT if document_artifact_requested else final_output_type
-    )
+    terminal_semantic_output_type = _terminal_semantic_output_type(final_output_type)
     planned_steps: list[PlannedStep] = []
     semantic_steps = _semantic_steps_without_terminal_document_render_helper(
         intent.steps,
@@ -430,6 +453,9 @@ def _assemble_create_intent(
         source_reader_required_fields=source_reader_required_fields,
         report_disposition=report_disposition,
         ui_language=ui_language,
+        reserved_source_output_field_names=frozenset(
+            record.value.variable_name for record in runtime_input_fields
+        ),
     )
     semantic_steps = _semantic_steps_with_terminal_obligation(
         semantic_steps,
@@ -617,6 +643,9 @@ def _assemble_create_intent(
         completed_steps,
         terminal_output_schema=terminal_output_schema,
         required_fields=source_reader_required_fields,
+        reserved_field_names=frozenset(
+            record.value.variable_name for record in runtime_input_fields
+        ),
     )
     section_contracts = (
         requested_output_section_contracts(requested_output_sections)
@@ -700,6 +729,53 @@ def _semantic_steps_with_terminal_obligation(
     return (*steps[:-1], updated)
 
 
+def _provider_source_output_collision_names(
+    *,
+    intent: CreateFlowIntent,
+    runtime_input_type: InputType,
+    final_output_type: OutputType,
+    final_output_mode: OutputMode | None,
+    runtime_input_fields: Sequence[ConfirmedRuntimeMetadataField],
+) -> tuple[str, ...]:
+    """Return exact confirmed-field collisions in provider-authored source output.
+
+    Only the first semantic step can read the primary source directly in create
+    assembly. This check runs before server-owned reader completion, preserving
+    the provenance needed to make the failure model-repairable.
+    """
+
+    if (
+        runtime_input_type not in SOURCE_READER_INPUT_TYPES
+        or not intent.steps
+        or (
+            runtime_input_type is InputType.TEXT
+            and len(intent.steps) == 1
+            and final_output_mode is not OutputMode.TEMPLATE_FILL
+            and _terminal_step_output_fields_fold_to_text(
+                intent.steps[0],
+                final_semantic_output_type=_terminal_semantic_output_type(
+                    final_output_type
+                ),
+            )
+        )
+    ):
+        return ()
+    first_step_fields = tuple(intent.steps[0].output_fields or ())
+    if not first_step_fields:
+        return ()
+    source_identities = {
+        fold_result_field_name(name)
+        for name in structured_field_draft_names(first_step_fields)
+    }
+    return tuple(
+        dict.fromkeys(
+            record.value.variable_name
+            for record in runtime_input_fields
+            if fold_result_field_name(record.value.variable_name) in source_identities
+        )
+    )
+
+
 def _semantic_steps_without_terminal_document_render_helper(
     steps: Sequence[SemanticStepIntent],
     *,
@@ -765,16 +841,16 @@ def _semantic_steps_with_terminal_text_fields_folded(
     ui_language: str | None,
 ) -> tuple[SemanticStepIntent, ...]:
     semantic_steps = tuple(steps)
-    if not semantic_steps or final_semantic_output_type != OutputType.TEXT:
+    if not semantic_steps:
         return semantic_steps
 
     terminal_step = semantic_steps[-1]
-    if not terminal_step.output_fields or terminal_step.output_type not in {
-        None,
-        OutputType.TEXT,
-        OutputType.JSON,
-    }:
+    if not _terminal_step_output_fields_fold_to_text(
+        terminal_step,
+        final_semantic_output_type=final_semantic_output_type,
+    ):
         return semantic_steps
+    assert terminal_step.output_fields is not None
 
     folded_terminal_step = terminal_step.model_copy(
         update={
@@ -788,6 +864,24 @@ def _semantic_steps_with_terminal_text_fields_folded(
         }
     )
     return (*semantic_steps[:-1], folded_terminal_step)
+
+
+def _terminal_semantic_output_type(final_output_type: OutputType) -> OutputType:
+    if final_output_type in _DOCUMENT_OUTPUT_TYPES:
+        return OutputType.TEXT
+    return final_output_type
+
+
+def _terminal_step_output_fields_fold_to_text(
+    terminal_step: SemanticStepIntent,
+    *,
+    final_semantic_output_type: OutputType,
+) -> bool:
+    return bool(
+        final_semantic_output_type is OutputType.TEXT
+        and terminal_step.output_fields
+        and terminal_step.output_type in {None, OutputType.TEXT, OutputType.JSON}
+    )
 
 
 def _semantic_steps_with_result_contract_fields(
@@ -1089,6 +1183,9 @@ def _assemble_docx_template_fill(
         completed_steps,
         terminal_output_schema=None,
         required_fields=source_reader_required_fields,
+        reserved_field_names=frozenset(
+            record.value.variable_name for record in runtime_input_fields
+        ),
     )
     completed_steps, admitted_form_fields = (
         _drop_planned_source_contract_shadow_form_fields(
@@ -1231,23 +1328,6 @@ def _aggregate_terminal_previous_structured_refs(
         PreviousFieldRef(from_step=index, field_path=field.name)
         for index, step in enumerate(planned_steps, start=1)
         for field in step.output_fields
-    )
-
-
-def _is_pure_audio_transcription_request(
-    *,
-    runtime_input_type: InputType,
-    final_output_type: OutputType,
-    final_output_mode: OutputMode | None,
-    pattern_ids: tuple[str, ...],
-) -> bool:
-    return (
-        runtime_input_type == InputType.AUDIO
-        and final_output_type == OutputType.TEXT
-        and (
-            final_output_mode == OutputMode.TRANSCRIBE_ONLY
-            or _AUDIO_TRANSCRIPTION_PATTERN_ID in pattern_ids
-        )
     )
 
 
@@ -1487,6 +1567,7 @@ def _complete_planned_source_reader_contracts(
     *,
     terminal_output_schema: JsonObject | None,
     required_fields: tuple[SourceCaptureField, ...],
+    reserved_field_names: frozenset[str],
 ) -> tuple[PlannedStep, ...]:
     source_reader_indexes = tuple(
         index
@@ -1548,6 +1629,7 @@ def _complete_planned_source_reader_contracts(
             planned_step.output_fields,
             required_fields=tuple(fields),
             runtime_input_execution_mode=(planned_step.runtime_input_execution_mode),
+            reserved_field_names=reserved_field_names,
         )
         if completed_fields == planned_step.output_fields:
             continue

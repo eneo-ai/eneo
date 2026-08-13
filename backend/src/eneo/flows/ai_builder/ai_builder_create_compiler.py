@@ -65,9 +65,7 @@ def compile_create_intent_to_spec(
     field_diagnostics: list[LintWarning] | None = None,
 ) -> FlowDraftSpecCore:
     runtime_input_type = (
-        context.runtime_input_type
-        if context is not None and context.runtime_input_type is not None
-        else InputType.TEXT
+        context.effective_runtime_input_type if context is not None else InputType.TEXT
     )
     final_output_type = (
         context.final_output_type
@@ -127,6 +125,9 @@ def compile_create_intent_to_spec(
         runtime_input_type=runtime_input_type,
         final_output_type=final_output_type,
         final_output_mode=final_output_mode,
+        is_pure_audio_transcription=(
+            context.is_pure_audio_transcription if context is not None else False
+        ),
         form_fields=form_fields,
         runtime_input_fields=(
             context.runtime_input_fields if context is not None else ()
@@ -178,6 +179,7 @@ def compile_create_intent_to_spec(
                 "pattern_ids": ",".join(pattern_ids),
                 "chain_steps": ",".join(chain_steps),
                 "semantic_step_count": len(intent.steps),
+                "field_names": ",".join(assembly_spec.field_names),
             },
         )
     else:

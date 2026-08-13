@@ -360,9 +360,35 @@ def build_proposal_prepared(
         ui_language=ui_language,
         requested_output_sections=requested_output_sections,
     )
+    is_pure_audio_transcription = (
+        not is_edit_mode
+        and compile_context is not None
+        and compile_context.is_pure_audio_transcription
+    )
+    if (
+        not is_edit_mode
+        and compile_context is not None
+        and compile_context.is_audio_transcription_envelope
+        and not is_pure_audio_transcription
+    ):
+        raise AIBuilderBadRequestException(
+            "Audio-to-text post-processing requires a downstream semantic step.",
+            code=AIBuilderErrorCode.ARCHITECTURE_MATERIALIZATION_FAILED,
+            context={
+                "reason": "audio_transcription_post_processing_unsupported",
+                "post_processing_goal": compile_context.post_processing_goal,
+                "secondary_obligations": list(compile_context.secondary_obligations),
+            },
+        )
     proposal_tool_schema = build_propose_flow_tool_schema(
         current_steps=current_steps,
         resource_catalog=resource_catalog,
+        is_pure_audio_transcription=is_pure_audio_transcription,
+        confirmed_runtime_inputs=(
+            compile_context.confirmed_runtime_input_requirements
+            if compile_context is not None and not is_edit_mode
+            else ()
+        ),
     )
     incompatible_field_names = (
         compile_context.incompatible_confirmed_form_field_names
@@ -386,9 +412,15 @@ def build_proposal_prepared(
             attachment_context=attachment_text,
             flow_context=flow_context,
             is_edit_mode=is_edit_mode,
+            is_pure_audio_transcription=is_pure_audio_transcription,
             resource_catalog=resource_catalog,
             requested_output_sections=requested_output_sections,
             plan_revision_context=plan_revision_context,
+            confirmed_runtime_inputs=(
+                compile_context.confirmed_runtime_input_requirements
+                if compile_context is not None and not is_edit_mode
+                else ()
+            ),
         )
 
     fitted_attachment_context = _fit_proposal_attachment_context(

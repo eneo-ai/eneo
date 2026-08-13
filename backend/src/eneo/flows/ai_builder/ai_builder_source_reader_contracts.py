@@ -8,12 +8,14 @@ from typing import Any, cast
 from eneo.flows.ai_builder.ai_builder_discovery_text_matcher import (
     normalize_discovery_text,
 )
+from eneo.flows.ai_builder.ai_builder_field_identity import fold_result_field_name
 from eneo.flows.ai_builder.ai_builder_json_schema_paths import (
     schema_leaf_property_names,
 )
 from eneo.flows.ai_builder.ai_builder_new_step_models import (
     NewStepDraft,
     StructuredFieldDraft,
+    structured_field_draft_names,
 )
 from eneo.flows.domain.flow import FlowPersistedJsonObject, RuntimeInputExecutionMode
 from eneo.flows.flow_authoring_spec import (
@@ -23,6 +25,7 @@ from eneo.flows.flow_authoring_spec import (
     OutputType,
     StepSpec,
 )
+from eneo.flows.source_identity import RUNTIME_SOURCE_IDENTITY_FIELDS
 from eneo.json_types import JsonObject
 
 logger = logging.getLogger(__name__)
@@ -30,30 +33,6 @@ logger = logging.getLogger(__name__)
 _SOURCE_CAPTURE_INPUT_TYPES = frozenset(
     {InputType.DOCUMENT, InputType.FILE, InputType.TEXT}
 )
-_SOURCE_CONTRACT_FORM_FIELD_PREFIX_TOKENS = frozenset(
-    {
-        "manual",
-        "manuell",
-        "manuella",
-        "provided",
-        "runtime",
-        "user",
-    }
-)
-_SOURCE_CONTRACT_FORM_FIELD_CONTEXT_TOKENS = frozenset(
-    {
-        "document",
-        "dokument",
-        "hint",
-        "report",
-        "rapport",
-    }
-)
-_SOURCE_CONTRACT_TOKEN_ALIASES = {
-    "år": "date",
-    "ar": "date",
-    "year": "date",
-}
 _SOURCE_CAPTURE_FIELD_TOKEN_ALIASES = {
     "ar": "date",
     "author": "author",
@@ -209,10 +188,12 @@ def complete_structured_source_reader_fields(
     *,
     required_fields: tuple[SourceCaptureField, ...],
     runtime_input_execution_mode: RuntimeInputExecutionMode = "single_call",
+    reserved_field_names: frozenset[str] = frozenset(),
 ) -> tuple[StructuredFieldDraft, ...]:
     completed = _add_missing_source_reader_fields(
         list(fields),
         required_fields=_dedupe_capture_fields(list(required_fields)),
+        reserved_field_names=reserved_field_names,
     )
     return tuple(
         _with_source_identity_contract(
@@ -239,22 +220,22 @@ def source_contract_shadow_form_field_names(
 ) -> tuple[str, ...]:
     if not form_fields:
         return ()
-    source_contract_token_sets: set[frozenset[str]] = set()
+    source_contract_names: set[str] = set()
     for output_fields in output_fields_by_step:
-        source_contract_token_sets.update(
-            _structured_field_token_sets(list(output_fields))
+        source_contract_names.update(
+            fold_result_field_name(name)
+            for name in structured_field_draft_names(output_fields)
         )
-    if not source_contract_token_sets:
+    source_contract_names.difference_update(
+        fold_result_field_name(name) for name in RUNTIME_SOURCE_IDENTITY_FIELDS
+    )
+    if not source_contract_names:
         return ()
-    frozen_source_contract_token_sets = frozenset(source_contract_token_sets)
     return tuple(
         sorted(
             field.name
             for field in form_fields
-            if _form_field_shadows_source_contract(
-                field,
-                source_contract_token_sets=frozen_source_contract_token_sets,
-            )
+            if fold_result_field_name(field.name) in source_contract_names
         )
     )
 
@@ -300,10 +281,31 @@ def source_capture_field_satisfied(field_name: str, required_name: str) -> bool:
     return _field_name_matches_required_leaf(field_name, required_name)
 
 
+def allocate_injected_source_field_name(
+    preferred_name: str,
+    *,
+    reserved_field_names: frozenset[str],
+    occupied_field_names: frozenset[str] = frozenset(),
+) -> str:
+    """Allocate a non-conflicting identity for one server-injected source field."""
+
+    folded = fold_result_field_name(preferred_name)
+    reserved = {fold_result_field_name(name) for name in reserved_field_names}
+    occupied = {fold_result_field_name(name) for name in occupied_field_names}
+    if folded not in reserved and folded not in occupied:
+        return preferred_name
+    occupied.update(reserved)
+    candidate = f"source_{folded}"
+    while candidate in occupied:
+        candidate = f"source_{candidate}"
+    return candidate
+
+
 def _add_missing_source_reader_fields(
     fields: list[StructuredFieldDraft],
     *,
     required_fields: tuple[SourceCaptureField, ...],
+    reserved_field_names: frozenset[str],
 ) -> list[StructuredFieldDraft]:
     fields = _normalize_source_reader_fields(fields)
     missing_fields = [
@@ -313,6 +315,11 @@ def _add_missing_source_reader_fields(
     ]
     if not missing_fields:
         return fields
+    missing_fields = _rename_injected_capture_collisions(
+        missing_fields,
+        existing_fields=fields,
+        reserved_field_names=reserved_field_names,
+    )
 
     if len(fields) == 1:
         field = fields[0]
@@ -346,6 +353,29 @@ def _add_missing_source_reader_fields(
     return _normalize_source_reader_fields(
         _append_structured_leaf_fields(fields, missing_fields=missing_fields),
     )
+
+
+def _rename_injected_capture_collisions(
+    fields: list[SourceCaptureField],
+    *,
+    existing_fields: list[StructuredFieldDraft],
+    reserved_field_names: frozenset[str],
+) -> list[SourceCaptureField]:
+    occupied = set(structured_field_draft_names(existing_fields))
+    renamed: list[SourceCaptureField] = []
+    for field in fields:
+        candidate = allocate_injected_source_field_name(
+            field.name,
+            reserved_field_names=reserved_field_names,
+            occupied_field_names=frozenset(occupied),
+        )
+        renamed.append(
+            field
+            if candidate == field.name
+            else SourceCaptureField(name=candidate, description=field.description)
+        )
+        occupied.add(candidate)
+    return renamed
 
 
 def _normalize_source_reader_fields(
@@ -636,63 +666,6 @@ def _leaf_field_name(field_path: str) -> str:
         ),
         "",
     )
-
-
-def _structured_field_token_sets(
-    fields: list[StructuredFieldDraft] | None,
-) -> set[frozenset[str]]:
-    token_sets: set[frozenset[str]] = set()
-    for field in fields or []:
-        tokens = _source_contract_name_tokens(field.name)
-        if tokens:
-            token_sets.add(frozenset(tokens))
-        token_sets.update(_structured_field_token_sets(field.fields))
-        token_sets.update(_structured_field_token_sets(field.item_fields))
-    return token_sets
-
-
-def _form_field_shadows_source_contract(
-    field: FormFieldSpec,
-    *,
-    source_contract_token_sets: frozenset[frozenset[str]],
-) -> bool:
-    candidates = (
-        _form_field_source_contract_tokens(field.name),
-        _form_field_source_contract_tokens(field.label),
-    )
-    return any(
-        candidate
-        and any(
-            candidate.issubset(source_tokens) or source_tokens.issubset(candidate)
-            for source_tokens in source_contract_token_sets
-        )
-        for candidate in candidates
-    )
-
-
-def _form_field_source_contract_tokens(value: str) -> frozenset[str]:
-    return _source_contract_name_token_set(
-        value,
-        ignored_tokens=_SOURCE_CONTRACT_FORM_FIELD_CONTEXT_TOKENS,
-    )
-
-
-def _source_contract_name_tokens(value: str) -> frozenset[str]:
-    return _source_contract_name_token_set(value, ignored_tokens=frozenset())
-
-
-def _source_contract_name_token_set(
-    value: str,
-    *,
-    ignored_tokens: frozenset[str],
-) -> frozenset[str]:
-    normalized = normalize_discovery_text(value.replace("_", " ").replace("-", " "))
-    tokens = tuple(
-        _SOURCE_CONTRACT_TOKEN_ALIASES.get(token, token) for token in normalized.split()
-    )
-    while tokens and tokens[0] in _SOURCE_CONTRACT_FORM_FIELD_PREFIX_TOKENS:
-        tokens = tokens[1:]
-    return frozenset(token for token in tokens if token not in ignored_tokens)
 
 
 def _is_source_capture_step(step: NewStepDraft) -> bool:

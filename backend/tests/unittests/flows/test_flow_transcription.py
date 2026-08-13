@@ -15,6 +15,7 @@ from eneo.authentication.principal_types import PrincipalType
 from eneo.files.file_models import File, FileType
 from eneo.files.file_service import FileService
 from eneo.flows.domain.flow import FlowRun, FlowRunStatus
+from eneo.flows.flow_input_limits import resolve_flow_input_limits
 from eneo.flows.flow_run_input_envelope import (
     FLOW_INPUT_TRANSCRIPTION_KEY,
     FlowRunInputEnvelopePatch,
@@ -137,7 +138,12 @@ def _patch_run_input_payload(flow_run_repo: AsyncMock, run: FlowRun) -> None:
     flow_run_repo.update_input_payload = AsyncMock(side_effect=_update_input_payload)
 
 
-def _build_executor(user, *, max_inline_text_bytes: int = 1024):
+def _build_executor(
+    user,
+    *,
+    max_inline_text_bytes: int = 1024,
+    max_audio_files: int = 10,
+):
     flow_repo = AsyncMock()
     session = AsyncMock()
     session.commit = AsyncMock()
@@ -172,6 +178,7 @@ def _build_executor(user, *, max_inline_text_bytes: int = 1024):
         encryption_service=encryption_service,
         flow_run_terminalizer=AsyncMock(),
         max_inline_text_bytes=max_inline_text_bytes,
+        max_audio_files=max_audio_files,
         transcriber=transcriber,
     )
     return executor, flow_run_repo, space_repo, file_service, transcriber
@@ -256,6 +263,53 @@ async def test_audio_resolve_transcribes_in_request_order_and_persists_transcrip
     assert resolved.transcription_metadata is not None
     assert resolved.transcription_metadata["files_count"] == 2
     assert resolved.transcription_metadata["language"] == "sv"
+
+
+@pytest.mark.asyncio
+async def test_null_tenant_audio_limit_executes_with_default_capacity(user) -> None:
+    limits = resolve_flow_input_limits(
+        {"input_limits": {"audio_max_files_per_run": None}},
+        defaults=SimpleNamespace(
+            session_file_maximum_bytes=12_000_000,
+            session_audio_maximum_bytes=25_000_000,
+        ),
+    )
+    executor, _, space_repo, file_service, transcriber = _build_executor(
+        user,
+        max_audio_files=limits.audio_max_files_per_run,
+    )
+    files = [_audio_file(name=f"audio-{index}.wav") for index in range(11)]
+    file_ids = [file.id for file in files]
+    file_service.get_files_by_ids.return_value = files
+    model = SimpleNamespace(
+        id=uuid4(), name="whisper-1", model_name="whisper-1", can_access=True
+    )
+    space_repo.get_space_by_assistant = AsyncMock(
+        return_value=_SpaceStub(models=[model], default_model=model)
+    )
+    run = _run(user=user, payload={})
+
+    with pytest.raises(TypedIOValidationException, match="11, max 10") as exc_info:
+        await executor._resolve_step_input(
+            step=_runtime_step(),
+            context=executor.variable_resolver.build_context(
+                run.input_payload_json, []
+            ),
+            run=run,
+            prior_results=[],
+            state=_state(),
+            version_metadata={
+                "wizard": {
+                    "transcription_enabled": True,
+                    "transcription_model": {"id": str(model.id)},
+                    "transcription_language": "sv",
+                }
+            },
+            requested_file_ids=file_ids,
+        )
+
+    assert exc_info.value.code == "typed_io_audio_too_many_files"
+    transcriber.transcribe.assert_not_awaited()
 
 
 @pytest.mark.asyncio

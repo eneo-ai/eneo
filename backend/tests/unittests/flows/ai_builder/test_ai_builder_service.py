@@ -1193,6 +1193,7 @@ class TestPlannerContextPreparation:
                 "tools": [{"type": "function"}],
                 "tool_choice": "auto",
                 "function_call": "auto",
+                "parallel_tool_calls": True,
             },
             supported=SupportedModelKwargs(
                 temperature=ModelKwargCapability(supported=True),

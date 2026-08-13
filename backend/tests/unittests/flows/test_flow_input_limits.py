@@ -187,6 +187,23 @@ def test_resolve_uses_tenant_file_count_overrides() -> None:
     assert limits.audio_max_files_per_run == 20
 
 
+def test_resolve_treats_null_audio_count_as_default_and_generic_count_as_unlimited() -> (
+    None
+):
+    limits = resolve_flow_input_limits(
+        {
+            "input_limits": {
+                "max_files_per_run": None,
+                "audio_max_files_per_run": None,
+            }
+        },
+        defaults=_app_settings(upload=10_000_000, transcription=25_000_000),
+    )
+
+    assert limits.max_files_per_run is None
+    assert limits.audio_max_files_per_run == DEFAULT_MAX_AUDIO_FILES_PER_RUN
+
+
 def test_resolve_rejects_malformed_file_count() -> None:
     with pytest.raises(BadRequestException, match="max_files_per_run"):
         resolve_flow_input_limits(
@@ -287,6 +304,30 @@ def test_effective_runtime_max_files_uses_stricter_step_or_tenant_limit() -> Non
             input_type="audio", step_max_files=10, limits=limits
         )
         == 3
+    )
+
+
+@pytest.mark.parametrize(
+    ("tenant_audio_limit", "step_limit", "expected"),
+    [(2, 3, 2), (20, 3, 3)],
+)
+def test_effective_runtime_audio_max_files_clamps_step_against_tenant(
+    tenant_audio_limit: int,
+    step_limit: int,
+    expected: int,
+) -> None:
+    limits = resolve_flow_input_limits(
+        {"input_limits": {"audio_max_files_per_run": tenant_audio_limit}},
+        defaults=_app_settings(upload=10_000_000, transcription=25_000_000),
+    )
+
+    assert (
+        effective_runtime_max_files(
+            input_type="audio",
+            step_max_files=step_limit,
+            limits=limits,
+        )
+        == expected
     )
 
 

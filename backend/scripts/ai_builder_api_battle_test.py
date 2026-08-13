@@ -21,7 +21,7 @@ import unicodedata
 from collections import deque
 from collections.abc import Callable, Iterator, Mapping
 from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from threading import Lock
 from typing import Any, cast
@@ -88,11 +88,18 @@ QUESTION_RELEVANCE_SEMANTICS_VERSION = 2
 # so a case can no longer silently drop out of the corpus because someone did
 # not export an environment variable — the flagship runtime sentinel skipped
 # itself that way through six full suite runs.
-OUTCOME_CLASSIFICATION_SEMANTICS_VERSION = 3
+# v4: typed terminal Builder errors remain scoreable product outcomes when an
+# execute-flow case never produced a plan. Runtime and model observations that
+# can exist only after completion no longer turn that outcome into an
+# acquisition failure; selected release identity remains fail-closed.
+OUTCOME_CLASSIFICATION_SEMANTICS_VERSION = 4
+_ERROR_TERMINATED_OUTCOME_CLASSES = frozenset(
+    {"builder_error", "provider_outcome_unknown"}
+)
 # v2: raw fixture bytes and the extracted runtime content are separate input
 # identities. Runtime lineage records the content the step consumed; it must
 # not be compared to the original upload digest.
-OBSERVATION_INPUT_IDENTITY_SEMANTICS_VERSION = 2
+OBSERVATION_INPUT_IDENTITY_SEMANTICS_VERSION = 3
 
 
 def _ensure_backend_src_importable() -> None:
@@ -366,6 +373,84 @@ def _fixture_file_ids(
     return tuple(resolved)
 
 
+def _fixture_attachment_bindings(
+    *,
+    case: BattleCase,
+    attached_file_ids: tuple[str, ...],
+    provisioned_fixtures: Mapping[str, object],
+) -> list[JsonObject] | None:
+    """Bind each tracked attachment fixture to the exact uploaded file id used."""
+
+    direct_count = len(case.file_ids)
+    if (
+        len(attached_file_ids) != direct_count + len(case.attachments)
+        or attached_file_ids[:direct_count] != case.file_ids
+    ):
+        return None
+    manifest = _fixture_manifest()
+    bindings: list[JsonObject] = []
+    for name, file_id in zip(
+        case.attachments,
+        attached_file_ids[direct_count:],
+        strict=True,
+    ):
+        entry = provisioned_fixtures.get(name)
+        if (
+            not isinstance(entry, Mapping)
+            or entry.get("file_id") != file_id
+            or entry.get("content_sha256") != manifest.get(name)
+        ):
+            return None
+        bindings.append(
+            {
+                "name": name,
+                "content_sha256": manifest[name],
+                "file_id": file_id,
+            }
+        )
+    return bindings
+
+
+def _attachment_fixture_bindings_match(
+    *,
+    bindings: object,
+    attached_file_ids: object,
+    direct_file_slot_count: object,
+    declared_attachments: object,
+) -> bool:
+    if (
+        not isinstance(bindings, list)
+        or not isinstance(attached_file_ids, list)
+        or not isinstance(declared_attachments, list)
+        or not isinstance(direct_file_slot_count, int)
+        or isinstance(direct_file_slot_count, bool)
+        or direct_file_slot_count < 0
+        or len(attached_file_ids) != direct_file_slot_count + len(declared_attachments)
+        or len(bindings) != len(declared_attachments)
+    ):
+        return False
+    for binding, fixture, file_id in zip(
+        bindings,
+        declared_attachments,
+        attached_file_ids[direct_file_slot_count:],
+        strict=True,
+    ):
+        if (
+            not isinstance(binding, Mapping)
+            or set(binding) != {"name", "content_sha256", "file_id"}
+            or not isinstance(fixture, Mapping)
+            or set(fixture) != {"name", "content_sha256"}
+            or binding.get("name") != fixture.get("name")
+            or binding.get("content_sha256") != fixture.get("content_sha256")
+            or binding.get("file_id") != file_id
+            or not isinstance(file_id, str)
+            or not file_id
+            or not _is_sha256(binding.get("content_sha256"))
+        ):
+            return False
+    return True
+
+
 @dataclass(frozen=True, slots=True)
 class AcquisitionContract:
     required_case_ids: tuple[str, ...]
@@ -421,14 +506,16 @@ def main() -> int:
     )
     try:
         cases = _cases_from_args(args)
-        if args.run_suite or len(cases) > 1:
+        if args.run_suite or args.sealed_targeted_suite or len(cases) > 1:
             return _run_suite(
                 cases=cases,
                 config=config,
                 args=args,
                 output_dir=output_dir,
                 acquisition_contract=(
-                    _acquisition_contract_from_args(args) if args.run_suite else None
+                    _acquisition_contract_from_args(args, selected_cases=cases)
+                    if args.run_suite or args.sealed_targeted_suite
+                    else None
                 ),
             )
         case = cases[0]
@@ -516,10 +603,19 @@ def _parse_args() -> argparse.Namespace:
             "all named cohorts."
         ),
     )
-    parser.add_argument(
+    suite_mode = parser.add_mutually_exclusive_group()
+    suite_mode.add_argument(
         "--run-suite",
         action="store_true",
         help="Run all selected cases from --cases-file.",
+    )
+    suite_mode.add_argument(
+        "--sealed-targeted-suite",
+        action="store_true",
+        help=(
+            "Run an explicitly selected case/cohort subset under the same sealed "
+            "release acquisition contract as --run-suite."
+        ),
     )
     parser.add_argument(
         "--replacement-suite-dir",
@@ -637,7 +733,31 @@ def _read_prompt(args: argparse.Namespace) -> str:
 
 
 def _cases_from_args(args: argparse.Namespace) -> list[BattleCase]:
-    if getattr(args, "run_suite", False) and (
+    run_suite = getattr(args, "run_suite", False)
+    sealed_targeted_suite = getattr(args, "sealed_targeted_suite", False)
+    selected_case_ids = getattr(args, "case_id", None)
+    selected_cohorts = getattr(args, "cohort", None)
+    if run_suite and sealed_targeted_suite:
+        raise ValueError("Use either --run-suite or --sealed-targeted-suite, not both.")
+    if sealed_targeted_suite and not (selected_case_ids or selected_cohorts):
+        raise ValueError(
+            "--sealed-targeted-suite requires at least one --case-id or --cohort."
+        )
+    sealed_exploratory_options = [
+        option
+        for option, present in (
+            ("--max-cases", getattr(args, "max_cases", None) is not None),
+            ("--file-id", bool(getattr(args, "file_ids", None))),
+        )
+        if present
+    ]
+    if sealed_targeted_suite and sealed_exploratory_options:
+        raise ValueError(
+            "--sealed-targeted-suite cannot use exploratory option(s): "
+            + ", ".join(sealed_exploratory_options)
+            + "."
+        )
+    if run_suite and (
         getattr(args, "case_id", None)
         or getattr(args, "cohort", None)
         or getattr(args, "max_cases", None) is not None
@@ -652,16 +772,16 @@ def _cases_from_args(args: argparse.Namespace) -> list[BattleCase]:
     cases_file = _cases_path_from_args(args)
     if cases_file is not None:
         cases = _read_cases_file(cases_file)
-        selected_cohorts = set(getattr(args, "cohort", None) or ())
-        if selected_cohorts:
+        requested_cohorts = set(_string_list(selected_cohorts))
+        if requested_cohorts:
             known_cohorts = {cohort for case in cases for cohort in case.cohorts}
-            missing_cohorts = selected_cohorts - known_cohorts
+            missing_cohorts = requested_cohorts - known_cohorts
             if missing_cohorts:
                 raise ValueError(
                     "Unknown battle cohort(s): " + ", ".join(sorted(missing_cohorts))
                 )
-            cases = [case for case in cases if selected_cohorts.issubset(case.cohorts)]
-        selected = set(args.case_id or ())
+            cases = [case for case in cases if requested_cohorts.issubset(case.cohorts)]
+        selected = set(_string_list(selected_case_ids))
         if selected:
             cases = [case for case in cases if case.case_id in selected]
             missing = selected - {case.case_id for case in cases}
@@ -673,6 +793,8 @@ def _cases_from_args(args: argparse.Namespace) -> list[BattleCase]:
             cases = cases[: args.max_cases]
         if not cases:
             raise ValueError("No battle cases selected.")
+        if sealed_targeted_suite:
+            cases = [replace(case, required=True) for case in cases]
         return cases
 
     return [
@@ -1158,9 +1280,25 @@ def _validate_question_answers(
             )
 
 
-def _acquisition_contract_from_args(args: argparse.Namespace) -> AcquisitionContract:
+def _acquisition_contract_from_args(
+    args: argparse.Namespace,
+    *,
+    selected_cases: list[BattleCase] | None = None,
+) -> AcquisitionContract:
     path = Path(args.cases_file) if args.cases_file else DEFAULT_CASES_FILE
-    return _read_acquisition_contract(path, cases=_read_cases_file(path))
+    contract = _read_acquisition_contract(path, cases=_read_cases_file(path))
+    if not getattr(args, "sealed_targeted_suite", False):
+        return contract
+    if selected_cases is None or not selected_cases:
+        raise ValueError("Sealed targeted acquisition requires selected cases.")
+    if not contract.require_clean_source:
+        raise ValueError(
+            "Sealed targeted acquisition requires a clean-source release contract."
+        )
+    return replace(
+        contract,
+        required_case_ids=tuple(case.case_id for case in selected_cases),
+    )
 
 
 def _read_acquisition_contract(
@@ -1760,10 +1898,16 @@ def _acquire_suite_observation(
                 raise ValueError(
                     f"required case {case.case_id} has no evaluable evidence."
                 )
+            typed_provenance = cast(Mapping[str, object], provenance)
             bundle["release_identity_checks"] = _required_case_identity_checks(
                 case=case,
                 release_identity=release_identity,
-                provenance=provenance,
+                provenance=typed_provenance,
+                journey_outcome=(
+                    _optional_string(bundle["journey"], "outcome_class")
+                    if isinstance(bundle.get("journey"), Mapping)
+                    else None
+                ),
                 observation_input_identity=(
                     bundle.get("observation_input_identity")
                     if isinstance(bundle.get("observation_input_identity"), Mapping)
@@ -2502,12 +2646,19 @@ def _required_case_identity_checks(
     case: BattleCase,
     release_identity: Mapping[str, object],
     provenance: Mapping[str, object],
+    journey_outcome: str | None = None,
     observation_input_identity: Mapping[str, object] | None = None,
 ) -> list[JsonObject]:
-    release_source = release_identity.get("source")
-    release_source = release_source if isinstance(release_source, Mapping) else {}
-    live_source = provenance.get("source")
-    live_source = live_source if isinstance(live_source, Mapping) else {}
+    def identity_component(
+        identity: Mapping[str, object],
+        name: str,
+    ) -> Mapping[str, object]:
+        value = identity.get(name)
+        return cast(Mapping[str, object], value) if isinstance(value, Mapping) else {}
+
+    error_terminated = journey_outcome in _ERROR_TERMINATED_OUTCOME_CLASSES
+    release_source = identity_component(release_identity, "source")
+    live_source = identity_component(provenance, "source")
     release_revision = release_source.get("revision")
     live_revision = live_source.get("revision")
     source_identity_matches = (
@@ -2517,48 +2668,71 @@ def _required_case_identity_checks(
         == hashlib.sha256(release_revision.encode("utf-8")).hexdigest()
         and live_source.get("revision_sha256")
         == hashlib.sha256(release_revision.encode("utf-8")).hexdigest()
+        and release_source.get("tracked_clean") is True
+        and live_source.get("tracked_clean") is True
     )
 
-    release_build = release_identity.get("build")
-    release_build = release_build if isinstance(release_build, Mapping) else {}
-    live_build = provenance.get("build")
-    live_build = live_build if isinstance(live_build, Mapping) else {}
+    release_build = identity_component(release_identity, "build")
+    live_build = identity_component(provenance, "build")
     stable_build_keys = (
         "source_revision",
         "harness_sha256",
         "cases_sha256",
     )
-    release_build_payload = {key: release_build.get(key) for key in stable_build_keys}
-    live_build_payload = {key: live_build.get(key) for key in stable_build_keys}
+    release_build_payload: dict[str, object | None] = {
+        key: release_build.get(key) for key in stable_build_keys
+    }
+    live_build_payload: dict[str, object | None] = {
+        key: live_build.get(key) for key in stable_build_keys
+    }
     build_identity_matches = (
         release_build_payload == live_build_payload
         and release_build.get("sha256") == _canonical_sha256(release_build_payload)
         and live_build.get("sha256") == _canonical_sha256(live_build_payload)
     )
 
-    release_model = release_identity.get("model")
-    release_model = release_model if isinstance(release_model, Mapping) else {}
-    live_model = provenance.get("model")
-    live_model = live_model if isinstance(live_model, Mapping) else {}
-    release_model_payload = {"requested_id": release_model.get("requested_id")}
-    requested_model_id = release_model.get("requested_id")
-    model_identity_matches = (
+    release_model = identity_component(release_identity, "model")
+    live_model = identity_component(provenance, "model")
+    release_model_payload: dict[str, object | None] = {
+        "requested_id": release_model.get("requested_id")
+    }
+    requested_model_id: object | None = release_model.get("requested_id")
+    live_model_payload: dict[str, object] = dict(live_model)
+    live_model_sha256 = live_model_payload.pop("sha256", None)
+    resolved_name = _optional_string(live_model, "resolved_name")
+    resolved_provider = _optional_string(live_model, "resolved_provider")
+    expected_observed_ids = (
+        [f"{resolved_provider}/{resolved_name}"]
+        if resolved_provider is not None and resolved_name is not None
+        else []
+    )
+    requested_model_identity_matches = (
         isinstance(requested_model_id, str)
         and bool(requested_model_id)
         and release_model.get("sha256") == _canonical_sha256(release_model_payload)
         and requested_model_id == live_model.get("requested_id")
         and requested_model_id == live_model.get("resolved_id")
-        and live_model.get("observed_matches_resolved") is True
+        and live_model_sha256 == _canonical_sha256(live_model_payload)
+        and live_model.get("expected_observed_ids") == expected_observed_ids
+        and bool(expected_observed_ids)
+    )
+    terminal_model_evidence_matches = error_terminated and (
+        _terminal_model_evidence_matches(
+            live_model=live_model,
+            expected_observed_ids=expected_observed_ids,
+        )
+    )
+    model_identity_matches = requested_model_identity_matches and (
+        live_model.get("observed_matches_resolved") is True
+        or terminal_model_evidence_matches
     )
 
-    release_prompts = release_identity.get("prompts")
-    release_prompts = release_prompts if isinstance(release_prompts, Mapping) else {}
-    release_prompt_hashes = release_prompts.get("case_sha256_by_id")
-    release_prompt_hashes = (
-        release_prompt_hashes if isinstance(release_prompt_hashes, Mapping) else {}
+    release_prompts = identity_component(release_identity, "prompts")
+    release_prompt_hashes = identity_component(
+        release_prompts,
+        "case_sha256_by_id",
     )
-    live_prompt = provenance.get("prompt")
-    live_prompt = live_prompt if isinstance(live_prompt, Mapping) else {}
+    live_prompt = identity_component(provenance, "prompt")
     case_prompt_sha256 = hashlib.sha256(case.prompt.encode("utf-8")).hexdigest()
     prompt_identity_matches = (
         release_prompts.get("sha256") == _canonical_sha256(dict(release_prompt_hashes))
@@ -2566,7 +2740,7 @@ def _required_case_identity_checks(
         and live_prompt.get("case_sha256") == case_prompt_sha256
     )
 
-    checks = [
+    checks: list[JsonObject] = [
         {
             "name": "suite_source_revision_identity",
             "passed": source_identity_matches,
@@ -2592,20 +2766,188 @@ def _required_case_identity_checks(
             "expected": release_prompt_hashes.get(case.case_id),
         },
     ]
-    observation_input_identity = observation_input_identity or {}
+    observation_input: Mapping[str, object] = observation_input_identity or {}
+    raw_attachment_evidence_sha256s = observation_input.get(
+        "attachment_evidence_sha256s"
+    )
+    attachment_evidence_sha256s = (
+        cast(list[object], raw_attachment_evidence_sha256s)
+        if isinstance(raw_attachment_evidence_sha256s, list)
+        else None
+    )
+    runtime_fixture_sha256s = observation_input.get("runtime_fixture_sha256s")
+    raw_runtime_source_sha256s = observation_input.get("runtime_source_sha256s")
+    runtime_source_sha256s = (
+        cast(list[object], raw_runtime_source_sha256s)
+        if isinstance(raw_runtime_source_sha256s, list)
+        else None
+    )
+    expected_runtime_fixture_sha256s: list[str] = []
+    if error_terminated and case.runtime_files:
+        manifest = _fixture_manifest()
+        expected_runtime_fixture_sha256s = [
+            manifest[name] for name in case.runtime_files
+        ]
+    attachment_file_ids = observation_input.get("attachment_file_ids")
+    attachment_fixture_bindings = observation_input.get("attachment_fixture_bindings")
+    declared_attachment_fixtures = _fixture_contract(case.attachments)
+    fixture_attachments_bound = _attachment_fixture_bindings_match(
+        bindings=attachment_fixture_bindings,
+        attached_file_ids=attachment_file_ids,
+        direct_file_slot_count=len(case.file_ids),
+        declared_attachments=declared_attachment_fixtures,
+    )
+    terminal_runtime_observation_absent = error_terminated and (
+        _terminal_input_evidence_matches(
+            observation_input=observation_input,
+            attachment_evidence_sha256s=attachment_evidence_sha256s,
+            attachment_file_ids=attachment_file_ids,
+            fixture_attachments_bound=fixture_attachments_bound,
+            has_direct_file_ids=bool(case.file_ids),
+            declared_attachment_fixtures=declared_attachment_fixtures,
+            expected_runtime_fixture_sha256s=expected_runtime_fixture_sha256s,
+            runtime_fixture_sha256s=runtime_fixture_sha256s,
+            runtime_source_sha256s=runtime_source_sha256s,
+        )
+    )
     checks.append(
         {
             "name": "suite_observation_input_identity",
-            "passed": observation_input_identity.get("verified") is True
-            and _is_sha256(observation_input_identity.get("sha256")),
-            "actual": dict(observation_input_identity),
+            "passed": (
+                observation_input.get("verified") is True
+                and _is_sha256(observation_input.get("sha256"))
+            )
+            or terminal_runtime_observation_absent,
+            "actual": dict(observation_input),
             "expected": (
-                "fixture bytes and observed attachment/runtime projections are "
-                "complete and internally consistent"
+                "fixture bytes and observed projections are internally consistent; "
+                "runtime projection may be absent only after a typed terminal error"
             ),
         }
     )
     return checks
+
+
+def _terminal_input_evidence_matches(
+    *,
+    observation_input: Mapping[str, object],
+    attachment_evidence_sha256s: list[object] | None,
+    attachment_file_ids: object,
+    fixture_attachments_bound: bool,
+    has_direct_file_ids: bool,
+    declared_attachment_fixtures: list[JsonObject],
+    expected_runtime_fixture_sha256s: list[str],
+    runtime_fixture_sha256s: object,
+    runtime_source_sha256s: list[object] | None,
+) -> bool:
+    """Accept only phase-appropriate missing evidence after a terminal error."""
+
+    if (
+        has_direct_file_ids
+        or not fixture_attachments_bound
+        or not isinstance(attachment_file_ids, list)
+        or attachment_evidence_sha256s is None
+        or len(attachment_evidence_sha256s) != len(attachment_file_ids)
+        or observation_input.get("attachment_fixtures") != declared_attachment_fixtures
+    ):
+        return False
+
+    attachment_status = observation_input.get("attachment_evidence_status")
+    expected_mismatches: list[str] = []
+    if not attachment_file_ids:
+        attachment_valid = (
+            attachment_status == "not_required" and attachment_evidence_sha256s == []
+        )
+    elif attachment_status == "not_observed":
+        attachment_valid = all(value is None for value in attachment_evidence_sha256s)
+        expected_mismatches.append("attachment_evidence")
+    elif attachment_status == "complete":
+        attachment_valid = all(
+            _is_sha256(value) for value in attachment_evidence_sha256s
+        )
+    else:
+        attachment_valid = False
+    if not attachment_valid:
+        return False
+
+    if expected_runtime_fixture_sha256s:
+        runtime_valid = (
+            runtime_fixture_sha256s == expected_runtime_fixture_sha256s
+            and runtime_source_sha256s is not None
+            and len(runtime_source_sha256s) == len(expected_runtime_fixture_sha256s)
+            and all(value is None for value in runtime_source_sha256s)
+            and observation_input.get("runtime_evidence_status") == "missing"
+        )
+        expected_mismatches.append("runtime_evidence")
+    else:
+        runtime_valid = (
+            runtime_fixture_sha256s == []
+            and runtime_source_sha256s == []
+            and observation_input.get("runtime_evidence_status") == "not_required"
+        )
+    return (
+        runtime_valid
+        and bool(expected_mismatches)
+        and observation_input.get("verified") is False
+        and observation_input.get("mismatches") == expected_mismatches
+        and observation_input.get("sha256") is None
+    )
+
+
+def _terminal_model_evidence_matches(
+    *,
+    live_model: Mapping[str, object],
+    expected_observed_ids: list[str],
+) -> bool:
+    """Allow exactly the final typed-error turn to lack a usage observation."""
+
+    interaction_count = live_model.get("planner_interaction_count")
+    observations = live_model.get("planner_observations")
+    planner_ids = live_model.get("planner_observed_ids")
+    classifier_ids = live_model.get("classifier_observed_ids")
+    observed_ids = live_model.get("observed_ids")
+    if (
+        not isinstance(interaction_count, int)
+        or isinstance(interaction_count, bool)
+        or interaction_count < 1
+        or not isinstance(observations, list)
+        or not isinstance(planner_ids, list)
+        or not isinstance(classifier_ids, list)
+        or not isinstance(observed_ids, list)
+        or not expected_observed_ids
+        or live_model.get("missing_planner_interaction_indices") != []
+        or live_model.get("terminal_error_interaction_indices") != [interaction_count]
+        or live_model.get("observed_matches_resolved") is not False
+    ):
+        return False
+    actual_prior_indices: list[int] = []
+    actual_prior_models: list[str] = []
+    for observation in observations:
+        if not isinstance(observation, Mapping):
+            return False
+        interaction_index = observation.get("interaction_index")
+        model_id = observation.get("model_id")
+        if (
+            not isinstance(interaction_index, int)
+            or isinstance(interaction_index, bool)
+            or not isinstance(model_id, str)
+        ):
+            return False
+        actual_prior_indices.append(interaction_index)
+        actual_prior_models.append(model_id)
+    expected_planner_ids = list(dict.fromkeys(actual_prior_models))
+    expected_all_ids = list(dict.fromkeys([*expected_planner_ids, *classifier_ids]))
+    return (
+        actual_prior_indices == sorted(set(actual_prior_indices))
+        and all(1 <= index < interaction_count for index in actual_prior_indices)
+        and all(model_id in expected_observed_ids for model_id in actual_prior_models)
+        and all(
+            isinstance(model_id, str) and model_id in expected_observed_ids
+            for model_id in classifier_ids
+        )
+        and planner_ids == expected_planner_ids
+        and observed_ids == expected_all_ids
+    )
 
 
 def _run_case(
@@ -2728,8 +3070,6 @@ def _run_case(
         )
     else:
         runtime_evidence = None
-    if case.execute_flow and applied_flow_evidence is None:
-        raise ValueError(f"case {case.case_id} requires an applied flow.")
     event_summary = _interaction_event_summary(interactions)
     journey = _journey_summary(
         interactions,
@@ -2742,6 +3082,8 @@ def _run_case(
         method="GET",
         path=(f"/flows/ai-builder/sessions/{session_id}/_diagnostics/classifier-slots"),
     )
+    if _optional_string(classifier_diagnostics, "session_id") != session_id:
+        raise ValueError("Classifier diagnostics do not belong to the session.")
     proposal_telemetry_diagnostics = _optional_request_json(
         config=config,
         path=(
@@ -2754,9 +3096,11 @@ def _run_case(
     )
     observation_input_identity = _observation_input_identity(
         case=case,
+        session_id=session_id,
         attached_file_ids=file_ids,
         classifier_diagnostics=classifier_diagnostics,
         runtime_evidence=runtime_evidence,
+        provisioned_fixtures=provisioned_fixtures,
     )
     quality_report = _quality_report(
         plan=plan,
@@ -3518,12 +3862,40 @@ def _attachment_evidence_sha256s(
     ]
 
 
+def _attachment_evidence_status(
+    *,
+    expected_session_id: str,
+    attached_file_ids: tuple[str, ...],
+    classifier_diagnostics: Mapping[str, object] | None,
+    evidence_sha256s: list[str | None],
+) -> str:
+    """Distinguish an unobserved classifier from malformed attachment evidence."""
+
+    if (
+        not _classifier_evidence_contract_is_valid(classifier_diagnostics)
+        or _optional_string(classifier_diagnostics or {}, "session_id")
+        != expected_session_id
+    ):
+        return "invalid"
+    if not attached_file_ids:
+        return "not_required"
+    if not _classifier_runs(classifier_diagnostics):
+        return "not_observed"
+    return (
+        "complete"
+        if all(_is_sha256(value) for value in evidence_sha256s)
+        else "incomplete"
+    )
+
+
 def _observation_input_identity(
     *,
     case: BattleCase,
+    session_id: str,
     attached_file_ids: tuple[str, ...],
     classifier_diagnostics: Mapping[str, object] | None,
     runtime_evidence: Mapping[str, object] | None,
+    provisioned_fixtures: Mapping[str, object] | None = None,
 ) -> JsonObject:
     # What the attached bytes were is settled offline, by the manifest hash the
     # harness verified before uploading. The extracted-text digest below is an
@@ -3533,6 +3905,17 @@ def _observation_input_identity(
     observed_attachment_evidence_sha256s = _attachment_evidence_sha256s(
         attached_file_ids=attached_file_ids,
         classifier_diagnostics=classifier_diagnostics,
+    )
+    attachment_evidence_status = _attachment_evidence_status(
+        expected_session_id=session_id,
+        attached_file_ids=attached_file_ids,
+        classifier_diagnostics=classifier_diagnostics,
+        evidence_sha256s=observed_attachment_evidence_sha256s,
+    )
+    attachment_fixture_bindings = _fixture_attachment_bindings(
+        case=case,
+        attached_file_ids=attached_file_ids,
+        provisioned_fixtures=provisioned_fixtures or {},
     )
     attachment_evidence_complete = all(
         _is_sha256(value) for value in observed_attachment_evidence_sha256s
@@ -3545,8 +3928,12 @@ def _observation_input_identity(
     )
 
     mismatches: list[str] = []
-    if attached_file_ids and not attachment_evidence_complete:
+    if attachment_evidence_status == "invalid" or (
+        attached_file_ids and not attachment_evidence_complete
+    ):
         mismatches.append("attachment_evidence")
+    if case.attachments and attachment_fixture_bindings is None:
+        mismatches.append("attachment_fixture_binding")
     if runtime_fixture_sha256s and runtime_evidence_status != "complete":
         mismatches.append("runtime_evidence")
 
@@ -3555,12 +3942,21 @@ def _observation_input_identity(
         "runtime_fixture_sha256s": runtime_fixture_sha256s,
         "runtime_source_sha256s": runtime_sha256s,
     }
-    fingerprint_complete = all(
-        value is not None for value in observed_attachment_evidence_sha256s
-    ) and all(_is_sha256(value) for value in runtime_sha256s)
+    fingerprint_complete = (
+        attachment_evidence_status in {"not_required", "complete"}
+        and attachment_fixture_bindings is not None
+        and all(value is not None for value in observed_attachment_evidence_sha256s)
+        and all(_is_sha256(value) for value in runtime_sha256s)
+    )
     return {
         **fingerprint_payload,
+        "attachment_file_ids": list(attached_file_ids),
+        "classifier_session_id": _optional_string(
+            classifier_diagnostics or {}, "session_id"
+        ),
+        "attachment_fixture_bindings": attachment_fixture_bindings,
         "attachment_fixtures": _fixture_contract(case.attachments),
+        "attachment_evidence_status": attachment_evidence_status,
         "runtime_evidence_status": runtime_evidence_status,
         "verified": not mismatches and fingerprint_complete,
         "mismatches": mismatches,
@@ -3693,6 +4089,7 @@ def _resolved_model_identity(
     planner_interaction_count: int | None = None,
     planner_observations: list[JsonObject] | None = None,
     missing_planner_interaction_indices: list[int] | None = None,
+    terminal_error_interaction_indices: list[int] | None = None,
 ) -> JsonObject:
     session_models = session_models or {}
     raw_models = session_models.get("models")
@@ -3730,6 +4127,7 @@ def _resolved_model_identity(
     )
     planner_observations = planner_observations or []
     missing_planner_interaction_indices = missing_planner_interaction_indices or []
+    terminal_error_interaction_indices = terminal_error_interaction_indices or []
     planner_evidence_complete = bool(planner_observed_model_ids)
     if planner_interaction_count is not None:
         planner_evidence_complete = (
@@ -3746,6 +4144,7 @@ def _resolved_model_identity(
         "planner_interaction_count": planner_interaction_count,
         "planner_observations": planner_observations,
         "missing_planner_interaction_indices": (missing_planner_interaction_indices),
+        "terminal_error_interaction_indices": terminal_error_interaction_indices,
         "planner_observed_ids": planner_observed_model_ids,
         "classifier_observed_ids": classifier_observed_model_ids,
         "observed_ids": observed_model_ids,
@@ -3757,12 +4156,13 @@ def _resolved_model_identity(
 
 def _planner_model_evidence_from_interactions(
     interactions: object,
-) -> tuple[list[str], list[JsonObject], list[int], int]:
+) -> tuple[list[str], list[JsonObject], list[int], list[int], int]:
     if not isinstance(interactions, list):
-        return [], [], [], 0
+        return [], [], [], [], 0
     observed: list[str] = []
     observations: list[JsonObject] = []
     missing_indices: list[int] = []
+    terminal_error_indices: list[int] = []
     for interaction_index, interaction in enumerate(interactions, start=1):
         if not isinstance(interaction, Mapping):
             missing_indices.append(interaction_index)
@@ -3786,6 +4186,11 @@ def _planner_model_evidence_from_interactions(
             if model is not None and model not in interaction_models:
                 interaction_models.append(model)
         if usage_event_count == 0:
+            if any(
+                isinstance(event, Mapping) and event.get("event") == "error"
+                for event in events
+            ):
+                terminal_error_indices.append(interaction_index)
             # Server-resolved turns (auto-resolved slots, confirmations)
             # legitimately make zero planner calls: identity-neutral, not
             # identity-missing. A bundle observing no planner model at all
@@ -3798,7 +4203,13 @@ def _planner_model_evidence_from_interactions(
         observations.append({"interaction_index": interaction_index, "model_id": model})
         if model not in observed:
             observed.append(model)
-    return observed, observations, missing_indices, len(interactions)
+    return (
+        observed,
+        observations,
+        missing_indices,
+        terminal_error_indices,
+        len(interactions),
+    )
 
 
 def _classifier_model_ids(
@@ -3892,6 +4303,7 @@ def _live_execution_provenance(
         planner_observed_model_ids,
         planner_observations,
         missing_planner_interaction_indices,
+        terminal_error_interaction_indices,
         planner_interaction_count,
     ) = _planner_model_evidence_from_interactions(interactions)
     if interactions is None:
@@ -3903,6 +4315,7 @@ def _live_execution_provenance(
         )
         planner_interaction_count = 1
         missing_planner_interaction_indices = [] if planner_observed_model_ids else [1]
+        terminal_error_interaction_indices = []
     classifier_observed_model_ids = _classifier_model_ids(classifier_diagnostics)
     model_identity = _resolved_model_identity(
         session_models=session_models,
@@ -3912,6 +4325,7 @@ def _live_execution_provenance(
         planner_interaction_count=planner_interaction_count,
         planner_observations=planner_observations,
         missing_planner_interaction_indices=(missing_planner_interaction_indices),
+        terminal_error_interaction_indices=terminal_error_interaction_indices,
     )
     classifier_prompt_hashes = _classifier_prompt_hashes(classifier_diagnostics)
     classifier_request_composite_fingerprint = (
@@ -4306,6 +4720,7 @@ def _observation_evidence_report(bundle: Mapping[str, object]) -> JsonObject:
         planner_model_ids,
         planner_observations,
         missing_planner_indices,
+        terminal_error_indices,
         planner_interaction_count,
     ) = _planner_model_evidence_from_interactions(interactions)
     classifier_diagnostics = bundle.get("classifier_diagnostics")
@@ -4339,6 +4754,7 @@ def _observation_evidence_report(bundle: Mapping[str, object]) -> JsonObject:
         and model.get("planner_interaction_count") == planner_interaction_count
         and model.get("planner_observations") == planner_observations
         and model.get("missing_planner_interaction_indices") == missing_planner_indices
+        and model.get("terminal_error_interaction_indices") == terminal_error_indices
         and model.get("planner_observed_ids") == planner_model_ids
         and model.get("classifier_observed_ids") == classifier_model_ids
         and model.get("observed_ids") == observed_model_ids
@@ -4383,6 +4799,8 @@ def _observation_evidence_report(bundle: Mapping[str, object]) -> JsonObject:
         observation_input if isinstance(observation_input, Mapping) else {}
     )
     attachment_sha256s = observation_input.get("attachment_evidence_sha256s")
+    attachment_file_ids = observation_input.get("attachment_file_ids")
+    attachment_fixture_bindings = observation_input.get("attachment_fixture_bindings")
     runtime_sha256s = observation_input.get("runtime_source_sha256s")
     runtime_fixture_sha256s = observation_input.get("runtime_fixture_sha256s")
     attached_file_ids = tuple(_string_list(case.get("file_ids")))
@@ -4399,6 +4817,12 @@ def _observation_evidence_report(bundle: Mapping[str, object]) -> JsonObject:
     recomputed_attachment_sha256s = _attachment_evidence_sha256s(
         attached_file_ids=attached_file_ids,
         classifier_diagnostics=classifier_diagnostics,
+    )
+    recomputed_attachment_status = _attachment_evidence_status(
+        expected_session_id=str(bundle.get("session_id") or ""),
+        attached_file_ids=attached_file_ids,
+        classifier_diagnostics=classifier_diagnostics,
+        evidence_sha256s=recomputed_attachment_sha256s,
     )
     runtime_evidence = bundle.get("runtime_evidence")
     recomputed_runtime_sha256s, recomputed_runtime_status = _runtime_lineage_sha256s(
@@ -4417,15 +4841,31 @@ def _observation_evidence_report(bundle: Mapping[str, object]) -> JsonObject:
     attachment_evidence_complete = all(
         _is_sha256(value) for value in recomputed_attachment_sha256s
     )
-    if attached_file_ids and not attachment_evidence_complete:
+    if recomputed_attachment_status == "invalid" or (
+        attached_file_ids and not attachment_evidence_complete
+    ):
         expected_mismatches.append("attachment_evidence")
+    attachment_bindings_match = _attachment_fixture_bindings_match(
+        bindings=attachment_fixture_bindings,
+        attached_file_ids=attachment_file_ids,
+        direct_file_slot_count=direct_file_slot_count,
+        declared_attachments=declared_attachments,
+    )
+    if declared_attachments and not attachment_bindings_match:
+        expected_mismatches.append("attachment_fixture_binding")
     if expected_runtime_fixture_sha256s and recomputed_runtime_status != "complete":
         expected_mismatches.append("runtime_evidence")
-    fingerprint_complete = all(
-        _is_sha256(value) for value in recomputed_attachment_sha256s
-    ) and all(_is_sha256(value) for value in recomputed_runtime_sha256s)
+    fingerprint_complete = (
+        recomputed_attachment_status in {"not_required", "complete"}
+        and attachment_bindings_match
+        and all(_is_sha256(value) for value in recomputed_attachment_sha256s)
+        and all(_is_sha256(value) for value in recomputed_runtime_sha256s)
+    )
     input_complete = (
         isinstance(attachment_sha256s, list)
+        and observation_input.get("classifier_session_id") == bundle.get("session_id")
+        and attachment_file_ids == list(attached_file_ids)
+        and attachment_bindings_match
         and isinstance(runtime_sha256s, list)
         and declared_attachments is not None
         and observation_input.get("attachment_fixtures") == declared_attachments
@@ -4433,6 +4873,8 @@ def _observation_evidence_report(bundle: Mapping[str, object]) -> JsonObject:
         and all(_is_sha256(value) for value in attachment_sha256s)
         and all(_is_sha256(value) for value in runtime_sha256s)
         and attachment_sha256s == recomputed_attachment_sha256s
+        and observation_input.get("attachment_evidence_status")
+        == recomputed_attachment_status
         and runtime_sha256s == recomputed_runtime_sha256s
         and observation_input.get("runtime_evidence_status")
         == recomputed_runtime_status
@@ -4480,6 +4922,7 @@ def _observation_evidence_report(bundle: Mapping[str, object]) -> JsonObject:
                 "planner_interaction_count": planner_interaction_count,
                 "planner_observations": planner_observations,
                 "missing_planner_interaction_indices": missing_planner_indices,
+                "terminal_error_interaction_indices": terminal_error_indices,
                 "classifier_observed_ids": classifier_model_ids,
             },
         },
@@ -4773,7 +5216,7 @@ def _observation_projection(bundle: JsonObject) -> JsonObject:
         expectation_verdict = "not_evaluated"
     elif completed_live_execution and evidence_valid is not True:
         journey_outcome = journey.get("outcome_class")
-        if journey_outcome in {"builder_error", "provider_outcome_unknown"}:
+        if journey_outcome in _ERROR_TERMINATED_OUTCOME_CLASSES:
             # An error-terminated turn has no provenance to validate; the
             # journey outcome is the truth and must not be masked as an
             # observation problem (13 masked rows in the 2026-08-06 run).
@@ -7858,7 +8301,7 @@ def _runtime_evidence_checks(
         },
         {
             "name": "runtime_source_record_fields",
-            "passed": missing_record_field_groups == {},
+            "passed": bool(documents) and missing_record_field_groups == {},
             "actual": missing_record_field_groups,
             "expected": expected_field_groups,
         },
@@ -7871,7 +8314,9 @@ def _runtime_evidence_checks(
         {
             "name": "runtime_per_source_artifact_fields",
             "passed": (
-                len(artifact_source_sections) == len(source_labels)
+                final_artifact_present
+                and bool(source_labels)
+                and len(artifact_source_sections) == len(source_labels)
                 and missing_artifact_field_groups_by_source == {}
             ),
             "actual": {

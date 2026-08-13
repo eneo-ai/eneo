@@ -2987,6 +2987,90 @@ async def test_ai_builder_repo_accept_session_turn_can_reclaim_expired_open_leas
 
 @pytest.mark.integration
 @pytest.mark.asyncio
+async def test_ai_builder_turn_baseline_orders_tied_attachments_deterministically(
+    client,
+    bearer_token,
+    db_container,
+):
+    space_id = await _create_space_via_api(
+        client=client,
+        bearer_token=bearer_token,
+        name="AI Builder Stable Attachment Order",
+    )
+    async with db_container() as container:
+        repo = AIBuilderRepository(container.session())
+        user = container.user()
+        session = await repo.create_session(
+            tenant_id=user.tenant_id,
+            space_id=UUID(space_id),
+            actor_user_id=user.id,
+            target_kind=TargetKind.CREATE,
+            flow_id=None,
+        )
+        file_service = container.file_service()
+        files = [
+            await file_service.save_generated_file(
+                payload=f"attachment-{index}".encode(),
+                name=f"attachment-{index}.txt",
+                mimetype="text/plain",
+                file_type=FileType.TEXT,
+            )
+            for index in range(6)
+        ]
+        expected_file_ids = tuple(sorted(file.id for file in files))
+        tied_created_at = datetime(2026, 1, 1, tzinfo=timezone.utc)
+        await container.session().execute(
+            insert(BuilderSessionFiles).values(
+                [
+                    {
+                        "session_id": session.id,
+                        "file_id": file_id,
+                        "tenant_id": user.tenant_id,
+                        "created_at": tied_created_at,
+                    }
+                    for file_id in reversed(expected_file_ids)
+                ]
+            )
+        )
+
+        listed_file_ids = await repo.list_session_file_ids(
+            session_id=session.id,
+            tenant_id=user.tenant_id,
+        )
+        client_turn_id = uuid4()
+        preflight = await repo.preflight_session_turn(
+            session_id=session.id,
+            tenant_id=user.tenant_id,
+            client_turn_id=client_turn_id,
+            request_fingerprint="a" * 64,
+            acknowledge_duplicate_provider_spend=False,
+        )
+
+        assert listed_file_ids == list(expected_file_ids)
+        assert preflight.baseline.attachment_file_ids == expected_file_ids
+
+        message = ConversationMessage(role="user", content="Use all attachments")
+        await repo.accept_session_turn(
+            session_id=session.id,
+            tenant_id=user.tenant_id,
+            lease=SessionSendLease(request_id=uuid4(), lock_token=uuid4()),
+            lock_lease_seconds=30,
+            acceptance=SessionTurnAcceptance(
+                client_turn_id=client_turn_id,
+                request_fingerprint="a" * 64,
+                request={
+                    "client_turn_id": str(client_turn_id),
+                    "message": message.content,
+                },
+                user_message=message,
+                file_ids=(),
+            ),
+            preparation_baseline=preflight.baseline,
+        )
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
 async def test_ai_builder_session_reload_projects_expired_turn_recovery_state(
     client,
     bearer_token,

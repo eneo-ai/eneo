@@ -73,6 +73,7 @@ from eneo.model_providers.infrastructure.litellm_provider import (
     ResolvedLiteLLMProvider,
 )
 from eneo.tenants.tenant import TenantInDB
+from tests.unittests.flows.ai_builder.proposal_turn_builders import _make_context
 
 
 def _route(
@@ -200,6 +201,29 @@ def test_forced_tool_choice_builds_provider_shape_once() -> None:
     }
 
 
+def test_proposal_turn_context_forces_sole_prepared_tool_for_every_request() -> None:
+    proposal_tool_schema = {
+        "type": "function",
+        "function": {
+            "name": PROPOSE_FLOW_TOOL_NAME,
+            "parameters": {"type": "object"},
+        },
+    }
+    ctx = _make_context(proposal_tool_schema=proposal_tool_schema)
+
+    initial_request = ctx.completion_request(temperature=0.2)
+    repair_request = ctx.completion_request(
+        temperature=0.4,
+        counts_as_repair=True,
+    )
+
+    expected_tool_choice = forced_tool_choice(PROPOSE_FLOW_TOOL_NAME)
+    assert initial_request.tool_schemas == [proposal_tool_schema]
+    assert repair_request.tool_schemas == [proposal_tool_schema]
+    assert initial_request.tool_choice == expected_tool_choice
+    assert repair_request.tool_choice == expected_tool_choice
+
+
 @pytest.mark.asyncio
 async def test_proposal_omits_temperature_without_persisted_route_capability() -> None:
     route = await _resolved_route(None)
@@ -306,7 +330,7 @@ async def test_call_proposal_completion_forces_drop_params_true_on_provider_call
 
 
 @pytest.mark.asyncio
-async def test_call_proposal_completion_passes_string_tool_choice() -> None:
+async def test_call_proposal_completion_disables_parallel_tool_calls() -> None:
     response = _make_response_with_text("ok")
     litellm_client = SimpleNamespace(acompletion=AsyncMock(return_value=response))
 
@@ -318,12 +342,12 @@ async def test_call_proposal_completion_passes_string_tool_choice() -> None:
             route=_route(),
             max_output_tokens=1024,
             temperature=0.2,
-            tool_choice="auto",
+            tool_choice=forced_tool_choice(PROPOSE_FLOW_TOOL_NAME),
         ),
     )
 
     call_kwargs = litellm_client.acompletion.await_args.kwargs
-    assert call_kwargs["tool_choice"] == "auto"
+    assert call_kwargs["parallel_tool_calls"] is False
 
 
 @pytest.mark.asyncio
@@ -744,6 +768,11 @@ async def test_proposal_failure_emits_one_allowlisted_incident_evidence() -> Non
     }
     assert outgoing_by_name["messages"]["json_type"] == "array"
     assert outgoing_by_name["tools"]["json_type"] == "array"
+    assert outgoing_by_name["parallel_tool_calls"] == {
+        "name": "parallel_tool_calls",
+        "json_type": "boolean",
+        "domain": "transport_control",
+    }
     assert outgoing_by_name["api_key"] == {
         "name": "api_key",
         "json_type": "string",

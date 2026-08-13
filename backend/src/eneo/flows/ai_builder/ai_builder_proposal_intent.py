@@ -1,11 +1,10 @@
 from __future__ import annotations
 
-import logging
-from functools import cache
 from typing import Annotated, Any, Literal, cast
 
 from pydantic import (
     BaseModel,
+    BeforeValidator,
     ConfigDict,
     Field,
     ValidationError,
@@ -29,7 +28,12 @@ from eneo.flows.ai_builder.ai_builder_new_step_models import (
 from eneo.flows.ai_builder.ai_builder_resource_catalog import (
     AIBuilderResourceCatalog,
 )
+from eneo.flows.ai_builder.ai_builder_runtime_input_requirements import (
+    ConfirmedRuntimeInputRequirement,
+    render_confirmed_runtime_input_requirements,
+)
 from eneo.flows.ai_builder.ai_builder_step_tool_schema_fragments import (
+    build_create_structured_field_schema,
     build_previous_field_refs_schema,
     build_previous_output_refs_schema,
     build_resource_ref_property_schemas,
@@ -51,33 +55,6 @@ from eneo.flows.flow_review_policy import FlowStepReviewMode
 # Safety guard against runaway tool output. This should not be a practical
 # product cap for legitimate advanced flows.
 MAX_PROPOSAL_STEPS = 256
-
-_CREATE_INTENT_STEP_BACKEND_OWNED_KEYS = frozenset(
-    {
-        "aggregate_prior_outputs",
-        "document_delivery_mode",
-        "input_bindings",
-        "input_config",
-        "input_contract",
-        "input_source",
-        "input_strategy",
-        "input_type",
-        "output_config",
-        "output_contract",
-        "output_mode",
-        "plan_step_ref",
-        "runtime_max_files",
-        "runtime_required",
-        "uses_previous_fields",
-        "uses_previous_outputs",
-    }
-)
-logger = logging.getLogger(__name__)
-_CREATE_INTENT_ROOT_IGNORED_KEYS = frozenset({"final_output_type", "reasoning"})
-_RETIRED_CREATE_ROOT_KEYS = frozenset({"input_fields"})
-_RETIRED_CREATE_STEP_KEYS = frozenset(
-    {"output_type", "review_mode", "uses_form_fields"}
-)
 
 
 class FlowInputFieldIntent(BaseModel):
@@ -126,8 +103,8 @@ class SemanticStepIntent(BaseModel):
     output_type: OutputType | None = None
     output_fields: list[StructuredFieldDraft] | None = None
     uses_form_fields: list[str] = Field(default_factory=list)
-    # Create-mode parsing strips these stale mechanical keys before validation;
-    # edit mode still uses the same semantic step model and schema.
+    # The create argument model excludes explicit wiring. Edit and
+    # backend-synthesized steps retain it on this compiler-facing model.
     uses_previous_fields: list[PreviousFieldRef] = Field(
         default_factory=lambda: cast(list[PreviousFieldRef], [])
     )
@@ -149,7 +126,7 @@ class SemanticStepIntent(BaseModel):
             raise ValueError("Semantic steps must not contain template variables.")
         return normalized
 
-    @field_validator("output_type", mode="before")
+    @field_validator("output_type", mode="before", check_fields=False)
     @classmethod
     def _validate_output_type(cls, value: Any) -> Any:
         if value is None:
@@ -169,7 +146,7 @@ class SemanticStepIntent(BaseModel):
     def _normalize_output_fields(cls, value: Any) -> Any:
         return normalize_structured_field_list(value)
 
-    @field_validator("uses_form_fields", "knowledge_refs")
+    @field_validator("uses_form_fields", "knowledge_refs", check_fields=False)
     @classmethod
     def _normalize_string_list(cls, values: list[str]) -> list[str]:
         return normalize_authoring_string_list(values)
@@ -187,6 +164,29 @@ class SemanticStepIntent(BaseModel):
         if self.output_fields:
             ensure_structured_field_depth(self.output_fields)
         return self
+
+
+class _CreateSemanticStepArguments(BaseModel):
+    """Closed provider-authored subset of ``SemanticStepIntent``."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str
+    instructions: str
+    output_fields: list[StructuredFieldDraft] | None = None
+    model_ref: str | None = None
+    knowledge_refs: list[str] = Field(default_factory=list)
+    citations_requested: bool = False
+
+
+def _validate_create_semantic_step(value: object) -> dict[str, object]:
+    return _CreateSemanticStepArguments.model_validate(value).model_dump()
+
+
+CreateSemanticStepIntent = Annotated[
+    SemanticStepIntent,
+    BeforeValidator(_validate_create_semantic_step),
+]
 
 
 class AssistantSpecPatch(BaseModel):
@@ -267,7 +267,7 @@ class CreateFlowIntent(BaseModel):
     flow_name: str
     flow_description: str | None = None
     plan_rationale: str
-    steps: list[SemanticStepIntent]
+    steps: list[CreateSemanticStepIntent]
     assumptions: list[str] = Field(default_factory=list)
 
     @field_validator("flow_name", "plan_rationale")
@@ -293,8 +293,8 @@ class CreateFlowIntent(BaseModel):
     @field_validator("steps")
     @classmethod
     def _validate_steps(
-        cls, value: list[SemanticStepIntent]
-    ) -> list[SemanticStepIntent]:
+        cls, value: list[CreateSemanticStepIntent]
+    ) -> list[CreateSemanticStepIntent]:
         if not value:
             raise ValueError("propose_flow requires at least one step.")
         if len(value) > MAX_PROPOSAL_STEPS:
@@ -318,13 +318,8 @@ class CreateFlowIntent(BaseModel):
 
 
 def parse_create_flow_intent_arguments(arguments: dict[str, Any]) -> CreateFlowIntent:
-    retired_issues = _retired_create_key_issues(arguments)
-    if retired_issues:
-        raise ProposalIntentArgumentError(retired_issues)
     try:
-        return CreateFlowIntent.model_validate(
-            _normalize_create_intent_arguments(arguments)
-        )
+        return CreateFlowIntent.model_validate(arguments)
     except ValidationError as error:
         raise ProposalIntentArgumentError(safe_validation_issues(error)) from error
 
@@ -356,191 +351,46 @@ def safe_validation_issues(error: ValidationError) -> tuple[str, ...]:
     return tuple(issues) or ("propose_flow validation failed [validation_error]",)
 
 
-def _retired_create_key_issues(
-    arguments: dict[str, Any],
-) -> tuple[str, ...]:
-    issues = [
-        f"{key}: Create derives this field on the server [backend_owned_field]"
-        for key in sorted(_RETIRED_CREATE_ROOT_KEYS.intersection(arguments))
-    ]
-    raw_steps = arguments.get("steps")
-    if not isinstance(raw_steps, list):
-        return tuple(issues)
-    for index, raw_step in enumerate(cast(list[Any], raw_steps)):
-        if not isinstance(raw_step, dict):
-            continue
-        step_payload = cast(dict[str, Any], raw_step)
-        for key in sorted(_RETIRED_CREATE_STEP_KEYS.intersection(step_payload)):
-            issues.append(
-                f"steps.{index}.{key}: Create derives this field on the server "
-                "[backend_owned_field]"
-            )
-    return tuple(issues)
-
-
-def _normalize_create_intent_arguments(arguments: dict[str, Any]) -> dict[str, Any]:
-    """Strip fields outside the semantic create-intent contract before validation.
-
-    Create mode is semantic. Some model outputs may still include fields
-    outside that contract, but those fields must never become the source of
-    truth for Flow wiring.
-    """
-
-    normalized = {
-        key: value
-        for key, value in arguments.items()
-        if key not in _create_intent_root_ignored_keys()
-    }
-    raw_steps = normalized.get("steps")
-    if isinstance(raw_steps, list):
-        merged_steps = _steps_with_misplaced_field_drafts_reattached(
-            cast(list[Any], raw_steps)
-        )
-        hoisted_assumptions: list[str] = []
-        for raw_step in merged_steps:
-            if not isinstance(raw_step, dict):
-                continue
-            step_payload = cast(dict[str, Any], raw_step)
-            raw_assumptions = step_payload.pop("assumptions", None)
-            if isinstance(raw_assumptions, list):
-                hoisted_assumptions.extend(
-                    item
-                    for item in cast(list[Any], raw_assumptions)
-                    if isinstance(item, str)
-                )
-        if hoisted_assumptions:
-            # Assumptions are a root concern; a step-level list is the same
-            # content misplaced, so it hoists instead of failing the parse.
-            raw_root_assumptions = normalized.get("assumptions")
-            root_assumptions = (
-                [
-                    item
-                    for item in cast(list[Any], raw_root_assumptions)
-                    if isinstance(item, str)
-                ]
-                if isinstance(raw_root_assumptions, list)
-                else []
-            )
-            normalized["assumptions"] = [*root_assumptions, *hoisted_assumptions]
-        normalized["steps"] = [
-            _strip_backend_owned_semantic_step_keys(raw_step)
-            for raw_step in merged_steps
-        ]
-    return normalized
-
-
-def _steps_with_misplaced_field_drafts_reattached(
-    raw_steps: list[Any],
-) -> list[Any]:
-    """Reattach structured field drafts the model emitted as steps.
-
-    A semantic step never declares `field_type`; a structured field draft
-    always does. When the model's JSON nesting slips, a whole field list
-    lands in `steps` directly after its producing step — the dominant
-    parse-failure family in the 2026-08-06 checkpoint (12 of 14 parse
-    rejections, each costing a full repair round). Field-shaped entries
-    are appended to the preceding step's output_fields; one with no
-    preceding step stays put and fails visibly.
-    """
-
-    merged: list[Any] = []
-    moved = 0
-    for raw_step in raw_steps:
-        drafts = _misplaced_field_drafts(raw_step)
-        if drafts and merged and isinstance(merged[-1], dict):
-            target = cast(dict[str, Any], merged[-1])
-            raw_fields = target.get("output_fields")
-            fields = (
-                list(cast(list[Any], raw_fields))
-                if isinstance(raw_fields, list)
-                else []
-            )
-            target["output_fields"] = [*fields, *drafts]
-            moved += len(drafts)
-            continue
-        merged.append(
-            dict(cast(dict[str, Any], raw_step))
-            if isinstance(raw_step, dict)
-            else raw_step
-        )
-    if moved:
-        logger.info(
-            "ai_builder_create_intent_misplaced_field_drafts_reattached",
-            extra={"moved_count": moved},
-        )
-    return merged
-
-
-def _misplaced_field_drafts(raw_step: Any) -> list[Any]:
-    """Return field drafts a step slot holds, one draft or a nested list.
-
-    A semantic step never declares `field_type`; a structured field draft
-    always does. The model's nesting slips both ways — a single draft in
-    the steps array, or a whole list of them (five live rejections in the
-    2026-08-06 regression run, each costing a repair round).
-    """
-
-    if isinstance(raw_step, dict):
-        payload = cast(dict[str, Any], raw_step)
-        if "field_type" in payload and "instructions" not in payload:
-            return [payload]
-        return []
-    if isinstance(raw_step, list):
-        items = cast(list[Any], raw_step)
-        if items and all(
-            isinstance(item, dict)
-            and "field_type" in cast(dict[str, Any], item)
-            and "instructions" not in cast(dict[str, Any], item)
-            for item in items
-        ):
-            return list(items)
-    return []
-
-
-@cache
-def _create_intent_root_ignored_keys() -> frozenset[str]:
-    return (
-        _CREATE_INTENT_STEP_BACKEND_OWNED_KEYS
-        | _semantic_step_only_keys()
-        | _CREATE_INTENT_ROOT_IGNORED_KEYS
-    )
-
-
-@cache
-def _semantic_step_only_keys() -> frozenset[str]:
-    return frozenset(SemanticStepIntent.model_fields.keys()) - frozenset(
-        CreateFlowIntent.model_fields.keys()
-    )
-
-
-def _strip_backend_owned_semantic_step_keys(
-    value: Any,
-) -> Any:
-    if not isinstance(value, dict):
-        return value
-    raw = cast(dict[str, Any], value)
-    stripped_keys = sorted(
-        key for key in raw if key in _CREATE_INTENT_STEP_BACKEND_OWNED_KEYS
-    )
-    if stripped_keys:
-        logger.info(
-            "ai_builder_create_intent_backend_step_keys_stripped",
-            extra={"keys": stripped_keys},
-        )
-    return {
-        key: step_value
-        for key, step_value in raw.items()
-        if key not in _CREATE_INTENT_STEP_BACKEND_OWNED_KEYS
-    }
-
-
 def build_create_flow_tool_schema(
     *,
     resource_catalog: AIBuilderResourceCatalog,
     tool_name: str,
+    is_pure_audio_transcription: bool = False,
+    confirmed_runtime_inputs: tuple[ConfirmedRuntimeInputRequirement, ...] = (),
 ) -> dict[str, Any]:
     model_refs = resource_catalog.small_ref_enum_for_kind("model")
     kb_refs = resource_catalog.small_ref_enum_for_kind("knowledge_base")
+    step_schema = build_semantic_step_schema(
+        include_output_type=False,
+        include_review_mode=False,
+        include_form_field_refs=False,
+        model_refs=model_refs,
+        kb_refs=kb_refs,
+    )
+    if is_pure_audio_transcription:
+        step_schema["properties"] = {
+            name: step_schema["properties"][name] for name in ("name", "instructions")
+        }
+    else:
+        step_schema["properties"]["output_fields"].update(
+            {
+                "minItems": 1,
+                "items": build_create_structured_field_schema(),
+            }
+        )
+    step_schema["required"] = list(step_schema["properties"])
+    if confirmed_runtime_inputs and not is_pure_audio_transcription:
+        rendered_runtime_inputs = render_confirmed_runtime_input_requirements(
+            confirmed_runtime_inputs
+        )
+        output_fields_description = step_schema["properties"]["output_fields"][
+            "description"
+        ]
+        step_schema["properties"]["output_fields"]["description"] = (
+            f"{output_fields_description} Confirmed server-owned runtime inputs: "
+            f"{rendered_runtime_inputs}. Do not repeat any exact runtime-input "
+            "identity as a source output field."
+        )
     return {
         "type": "function",
         "function": {
@@ -555,8 +405,10 @@ def build_create_flow_tool_schema(
                 "type": "object",
                 "required": [
                     "flow_name",
+                    "flow_description",
                     "plan_rationale",
                     "steps",
+                    "assumptions",
                 ],
                 "properties": {
                     "flow_name": {
@@ -578,14 +430,10 @@ def build_create_flow_tool_schema(
                     "steps": {
                         "type": "array",
                         "minItems": 1,
-                        "maxItems": MAX_PROPOSAL_STEPS,
-                        "items": build_semantic_step_schema(
-                            include_output_type=False,
-                            include_review_mode=False,
-                            include_form_field_refs=False,
-                            model_refs=model_refs,
-                            kb_refs=kb_refs,
+                        "maxItems": (
+                            1 if is_pure_audio_transcription else MAX_PROPOSAL_STEPS
                         ),
+                        "items": step_schema,
                     },
                     "assumptions": {
                         "type": "array",

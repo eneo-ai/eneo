@@ -43,6 +43,7 @@ from eneo.flows.ai_builder.ai_builder_proposal_intent import (
     parse_create_flow_intent_arguments,
 )
 from eneo.flows.ai_builder.ai_builder_result_contract import (
+    ResultObligation,
     ResultOutputFieldRole,
 )
 from eneo.flows.ai_builder.ai_builder_runtime_input_fields import (
@@ -158,6 +159,12 @@ def test_compile_context_bridges_flow_input_type_to_authoring_input_type() -> No
     assert context is not None
     assert context.runtime_input_type == InputType.DOCUMENT
     assert context.final_output_type == OutputType.TEXT
+
+
+def test_compile_context_defaults_missing_runtime_architecture_to_text() -> None:
+    context = CreateCompileContext()
+
+    assert context.effective_runtime_input_type is InputType.TEXT
 
 
 def test_compile_context_does_not_derive_uncommitted_architecture() -> None:
@@ -1076,9 +1083,7 @@ def test_committed_report_disposition_lowers_minimal_semantic_intent(
     assert validation.valid, validation.errors
 
 
-def test_compiler_strips_stale_previous_field_refs_and_uses_whole_object_underlag() -> (
-    None
-):
+def test_compiler_derives_whole_object_underlag() -> None:
     intent = parse_create_flow_intent_arguments(
         {
             "flow_name": "Case summary",
@@ -1099,13 +1104,6 @@ def test_compiler_strips_stale_previous_field_refs_and_uses_whole_object_underla
                 {
                     "name": "Write summary",
                     "instructions": "Write the final summary.",
-                    "uses_previous_fields": [
-                        {
-                            "from_step": 1,
-                            "field_path": "summary",
-                            "label": "Summary",
-                        }
-                    ],
                 },
             ],
         }
@@ -1165,18 +1163,6 @@ def test_compiler_uses_assembly_path_for_whole_object_underlag() -> None:
                 {
                     "name": "Write report",
                     "instructions": "Write the final report.",
-                    "uses_previous_fields": [
-                        {
-                            "from_step": 1,
-                            "field_path": "summary",
-                            "label": "Summary",
-                        },
-                        {
-                            "from_step": 1,
-                            "field_path": "details",
-                            "label": "Details",
-                        },
-                    ],
                 },
             ],
         }
@@ -1742,9 +1728,472 @@ def test_assembly_rejects_confirmed_source_contract_shadow_form_field() -> None:
         )
 
     assert exc_info.value.log_context["failure_code"] == (
-        "confirmed_form_field_incompatible"
+        "confirmed_runtime_input_source_output_collision"
     )
     assert exc_info.value.log_context["field_names"] == "case_id"
+
+
+def test_source_output_collision_is_exact_not_fuzzy() -> None:
+    intent = parse_create_flow_intent_arguments(
+        {
+            "flow_name": "Document case summary",
+            "plan_rationale": "Keep runtime and source values distinct.",
+            "steps": [
+                {
+                    "name": "Extract source facts",
+                    "instructions": "Extract the source case id.",
+                    "output_fields": [
+                        {
+                            "name": "source_case_id",
+                            "field_type": "string",
+                            "description": "Case id found in the source.",
+                        }
+                    ],
+                },
+                {
+                    "name": "Write summary",
+                    "instructions": "Write the final summary.",
+                },
+            ],
+        }
+    )
+
+    compiled = compile_create_intent_to_spec(
+        intent,
+        context=CreateCompileContext(
+            runtime_input_type=InputType.DOCUMENT,
+            runtime_input_fields=(_confirmed_runtime_field("case_id", "Case id"),),
+        ),
+    )
+
+    assert compiled.form_fields is not None
+    assert [field.name for field in compiled.form_fields] == ["case_id"]
+    assert compiled.steps[0].output_contract is not None
+    assert "source_case_id" in compiled.steps[0].output_contract["properties"]
+
+
+@pytest.mark.parametrize(
+    ("final_output_type", "final_output_mode", "expected_output_types"),
+    [
+        (OutputType.TEXT, None, [OutputType.TEXT]),
+        (
+            OutputType.PDF,
+            OutputMode.RENDER_VERBATIM,
+            [OutputType.TEXT, OutputType.PDF],
+        ),
+        (
+            OutputType.DOCX,
+            OutputMode.RENDER_VERBATIM,
+            [OutputType.TEXT, OutputType.DOCX],
+        ),
+    ],
+)
+def test_single_text_step_terminal_fields_do_not_conflict_with_runtime_inputs(
+    final_output_type: OutputType,
+    final_output_mode: OutputMode | None,
+    expected_output_types: list[OutputType],
+) -> None:
+    intent = parse_create_flow_intent_arguments(
+        {
+            "flow_name": "Text case summary",
+            "plan_rationale": "Write one prose result from the supplied text.",
+            "steps": [
+                {
+                    "name": "Write summary",
+                    "instructions": "Write the final summary.",
+                    "output_fields": [
+                        {
+                            "name": "case_id",
+                            "field_type": "string",
+                            "description": "Display the supplied case id.",
+                        }
+                    ],
+                }
+            ],
+        }
+    )
+
+    compiled = compile_create_intent_to_spec(
+        intent,
+        context=CreateCompileContext(
+            runtime_input_type=InputType.TEXT,
+            final_output_type=final_output_type,
+            final_output_mode=final_output_mode,
+            runtime_input_fields=(_confirmed_runtime_field("case_id", "Case id"),),
+        ),
+    )
+
+    assert compiled.form_fields is not None
+    assert [field.name for field in compiled.form_fields] == ["case_id"]
+    assert [step.output_type for step in compiled.steps] == expected_output_types
+    assert compiled.steps[0].output_contract is None
+    assert validate_spec(compiled).valid
+
+
+def test_multi_step_text_source_output_collision_remains_repairable() -> None:
+    intent = parse_create_flow_intent_arguments(
+        {
+            "flow_name": "Text case analysis",
+            "plan_rationale": "Extract the case id before writing the result.",
+            "steps": [
+                {
+                    "name": "Extract source facts",
+                    "instructions": "Extract the case id from the supplied text.",
+                    "output_fields": [
+                        {
+                            "name": "case_id",
+                            "field_type": "string",
+                            "description": "Case id extracted from the source.",
+                        }
+                    ],
+                },
+                {
+                    "name": "Write summary",
+                    "instructions": "Write the final summary.",
+                },
+            ],
+        }
+    )
+
+    with pytest.raises(AIBuilderArchitectureError) as exc_info:
+        compile_create_intent_to_spec(
+            intent,
+            context=CreateCompileContext(
+                runtime_input_type=InputType.TEXT,
+                final_output_type=OutputType.TEXT,
+                runtime_input_fields=(_confirmed_runtime_field("case_id", "Case id"),),
+            ),
+        )
+
+    assert exc_info.value.log_context["failure_code"] == (
+        "confirmed_runtime_input_source_output_collision"
+    )
+
+
+def test_single_document_step_source_output_collision_remains_repairable() -> None:
+    intent = parse_create_flow_intent_arguments(
+        {
+            "flow_name": "Document case analysis",
+            "plan_rationale": "Read the source before writing the result.",
+            "steps": [
+                {
+                    "name": "Analyze document",
+                    "instructions": "Extract the case id and write the result.",
+                    "output_fields": [
+                        {
+                            "name": "case_id",
+                            "field_type": "string",
+                            "description": "Case id extracted from the document.",
+                        }
+                    ],
+                }
+            ],
+        }
+    )
+
+    with pytest.raises(AIBuilderArchitectureError) as exc_info:
+        compile_create_intent_to_spec(
+            intent,
+            context=CreateCompileContext(
+                runtime_input_type=InputType.DOCUMENT,
+                final_output_type=OutputType.TEXT,
+                runtime_input_fields=(_confirmed_runtime_field("case_id", "Case id"),),
+            ),
+        )
+
+    assert exc_info.value.log_context["failure_code"] == (
+        "confirmed_runtime_input_source_output_collision"
+    )
+
+
+def test_template_fill_source_output_collision_remains_repairable() -> None:
+    intent = parse_create_flow_intent_arguments(
+        {
+            "flow_name": "Template case report",
+            "plan_rationale": "Prepare the case id for the document template.",
+            "steps": [
+                {
+                    "name": "Prepare template content",
+                    "instructions": "Prepare the template values.",
+                    "output_fields": [
+                        {
+                            "name": "case_id",
+                            "field_type": "string",
+                            "description": "Case id prepared for the template.",
+                        }
+                    ],
+                }
+            ],
+        }
+    )
+
+    with pytest.raises(AIBuilderArchitectureError) as exc_info:
+        compile_create_intent_to_spec(
+            intent,
+            context=CreateCompileContext(
+                runtime_input_type=InputType.DOCUMENT,
+                final_output_type=OutputType.DOCX,
+                final_output_mode=OutputMode.TEMPLATE_FILL,
+                pattern_ids=("document_to_docx_template",),
+                pattern_chain_steps=(
+                    FLOW_INPUT_DOCUMENT_UPLOAD,
+                    EXTRACT_TEMPLATE_VARIABLES_STEP,
+                    PREPARE_TEMPLATE_CONTENT_STEP,
+                    TEMPLATE_FILL_DOCX_STEP,
+                ),
+                runtime_input_fields=(_confirmed_runtime_field("case_id", "Case id"),),
+            ),
+        )
+
+    assert exc_info.value.log_context["failure_code"] == (
+        "confirmed_runtime_input_source_output_collision"
+    )
+
+
+@pytest.mark.parametrize(
+    ("runtime_name", "output_name", "purpose"),
+    [
+        ("case_id", "CASE-ID", "interpret_input"),
+        ("arende_id", "Ärende id", "shape_result"),
+        ("policy_level", "policy.level", "whole_flow"),
+        ("source_file_id", "source-file-id", "interpret_input"),
+    ],
+)
+def test_provider_source_output_collision_uses_folded_identity_for_all_purposes(
+    runtime_name: str,
+    output_name: str,
+    purpose: RuntimeMetadataFieldPurpose,
+) -> None:
+    intent = parse_create_flow_intent_arguments(
+        {
+            "flow_name": "Document analysis",
+            "plan_rationale": "Extract source facts.",
+            "steps": [
+                {
+                    "name": "Extract source facts",
+                    "instructions": "Extract the named field.",
+                    "output_fields": [
+                        {
+                            "name": output_name,
+                            "field_type": "string",
+                            "description": "Value found in the source.",
+                        }
+                    ],
+                },
+                {
+                    "name": "Write summary",
+                    "instructions": "Write the final summary.",
+                },
+            ],
+        }
+    )
+
+    with pytest.raises(AIBuilderArchitectureError) as exc_info:
+        compile_create_intent_to_spec(
+            intent,
+            context=CreateCompileContext(
+                runtime_input_type=InputType.DOCUMENT,
+                runtime_input_fields=(
+                    _confirmed_runtime_field(
+                        runtime_name,
+                        runtime_name,
+                        purpose=purpose,
+                    ),
+                ),
+            ),
+        )
+
+    assert exc_info.value.log_context["failure_code"] == (
+        "confirmed_runtime_input_source_output_collision"
+    )
+    assert exc_info.value.log_context["field_names"] == runtime_name
+
+
+@pytest.mark.parametrize("runtime_name", ["source_label", "source_file_id"])
+def test_provider_authored_runtime_identity_collision_remains_repairable(
+    runtime_name: str,
+) -> None:
+    intent = parse_create_flow_intent_arguments(
+        {
+            "flow_name": "Document source identities",
+            "plan_rationale": "Extract a source record.",
+            "steps": [
+                {
+                    "name": "Read documents",
+                    "instructions": "Extract source-grounded facts.",
+                    "output_fields": [
+                        {
+                            "name": "documents",
+                            "field_type": "array",
+                            "description": "One record per source.",
+                            "item_fields": [
+                                {
+                                    "name": runtime_name,
+                                    "field_type": "string",
+                                    "description": "Provider-authored source identity.",
+                                }
+                            ],
+                        }
+                    ],
+                },
+                {
+                    "name": "Write summary",
+                    "instructions": "Write the final summary.",
+                },
+            ],
+        }
+    )
+
+    with pytest.raises(AIBuilderArchitectureError) as exc_info:
+        compile_create_intent_to_spec(
+            intent,
+            context=CreateCompileContext(
+                runtime_input_type=InputType.DOCUMENT,
+                runtime_input_fields=(
+                    _confirmed_runtime_field(runtime_name, runtime_name),
+                ),
+            ),
+        )
+
+    assert exc_info.value.log_context["failure_code"] == (
+        "confirmed_runtime_input_source_output_collision"
+    )
+    assert exc_info.value.log_context["field_names"] == runtime_name
+
+
+def test_injected_source_output_collision_keeps_confirmed_runtime_field() -> None:
+    intent = parse_create_flow_intent_arguments(
+        {
+            "flow_name": "Document case summary",
+            "plan_rationale": "Add the server-owned source contract.",
+            "steps": [
+                {
+                    "name": "Write summary",
+                    "instructions": "Write the final summary.",
+                }
+            ],
+        }
+    )
+
+    compiled = compile_create_intent_to_spec(
+        intent,
+        context=CreateCompileContext(
+            runtime_input_type=InputType.DOCUMENT,
+            runtime_input_fields=(_confirmed_runtime_field("case_id", "Case id"),),
+            source_reader_required_fields=(
+                SourceCaptureField(
+                    name="case_id",
+                    description="Case id extracted from the source.",
+                ),
+            ),
+        ),
+    )
+
+    assert compiled.form_fields is not None
+    assert [field.name for field in compiled.form_fields] == ["case_id"]
+    assert compiled.steps[0].output_contract is not None
+    assert "source_case_id" in compiled.steps[0].output_contract["properties"]
+
+
+@pytest.mark.parametrize(
+    ("runtime_name", "expected_source_name"),
+    [
+        ("source_material", "source_source_material"),
+    ],
+)
+def test_document_report_injected_field_collision_keeps_confirmed_runtime_field(
+    runtime_name: str,
+    expected_source_name: str,
+) -> None:
+    intent = parse_create_flow_intent_arguments(
+        {
+            "flow_name": "Document report",
+            "plan_rationale": "Build the server-owned document report shape.",
+            "steps": [
+                {
+                    "name": "Write report",
+                    "instructions": "Write the final report.",
+                }
+            ],
+        }
+    )
+
+    compiled = compile_create_intent_to_spec(
+        intent,
+        context=CreateCompileContext(
+            runtime_input_type=InputType.DOCUMENT,
+            final_output_type=OutputType.PDF,
+            final_output_mode=OutputMode.RENDER_VERBATIM,
+            report_disposition="synthesized_overview",
+            runtime_input_fields=(
+                _confirmed_runtime_field(runtime_name, runtime_name),
+            ),
+        ),
+    )
+
+    assert compiled.form_fields is not None
+    assert [field.name for field in compiled.form_fields] == [runtime_name]
+    assert compiled.steps[0].output_contract is not None
+    source_properties = compiled.steps[0].output_contract["properties"]["documents"][
+        "items"
+    ]["properties"]
+    assert expected_source_name in source_properties
+    assert validate_spec(compiled).valid
+
+
+@pytest.mark.parametrize("runtime_name", ["source_label", "source_file_id"])
+def test_runtime_identity_injection_does_not_conflict_with_confirmed_field(
+    runtime_name: str,
+) -> None:
+    intent = parse_create_flow_intent_arguments(
+        {
+            "flow_name": "Multi-source report",
+            "plan_rationale": "Build one source record per document.",
+            "steps": [
+                {
+                    "name": "Read documents",
+                    "instructions": "Extract source-grounded facts.",
+                    "output_fields": [
+                        {
+                            "name": "documents",
+                            "field_type": "array",
+                            "description": "One record per source.",
+                            "item_fields": [
+                                {
+                                    "name": "summary",
+                                    "field_type": "string",
+                                    "description": "Source summary.",
+                                }
+                            ],
+                        }
+                    ],
+                },
+                {
+                    "name": "Write report",
+                    "instructions": "Write the final report.",
+                },
+            ],
+        }
+    )
+
+    compiled = compile_create_intent_to_spec(
+        intent,
+        context=CreateCompileContext(
+            runtime_input_type=InputType.DOCUMENT,
+            runtime_max_files=4,
+            runtime_input_fields=(
+                _confirmed_runtime_field(runtime_name, "External source identity"),
+            ),
+        ),
+    )
+
+    assert compiled.form_fields is not None
+    assert [field.name for field in compiled.form_fields] == [runtime_name]
+    reader_properties = compiled.steps[0].output_contract["properties"]["documents"][
+        "items"
+    ]["properties"]
+    assert runtime_name in reader_properties
+    assert validate_spec(compiled).valid
 
 
 def test_confirmed_field_definition_is_the_compiled_value_owner() -> None:
@@ -1976,6 +2425,66 @@ def test_assembly_source_reader_contract_keeps_all_terminal_schema_leaves() -> N
     assert validate_spec(compiled).valid
 
 
+@pytest.mark.parametrize(
+    ("context", "expected"),
+    [
+        (
+            CreateCompileContext(
+                runtime_input_type=InputType.AUDIO,
+                final_output_type=OutputType.TEXT,
+                final_output_mode=OutputMode.TRANSCRIBE_ONLY,
+                post_processing_goal="stop_after_primary_operation",
+            ),
+            True,
+        ),
+        (
+            CreateCompileContext(
+                runtime_input_type=InputType.AUDIO,
+                final_output_type=OutputType.TEXT,
+                final_output_mode=OutputMode.TRANSCRIBE_ONLY,
+                pattern_ids=("audio_transcription",),
+                post_processing_goal="summarize_or_overview",
+            ),
+            False,
+        ),
+        (
+            CreateCompileContext(
+                runtime_input_type=InputType.AUDIO,
+                final_output_type=OutputType.TEXT,
+                final_output_mode=OutputMode.TRANSCRIBE_ONLY,
+                post_processing_goal="stop_after_primary_operation",
+                secondary_obligations=("summary",),
+            ),
+            False,
+        ),
+        (
+            CreateCompileContext(
+                runtime_input_type=InputType.TEXT,
+                final_output_type=OutputType.TEXT,
+                final_output_mode=OutputMode.TRANSCRIBE_ONLY,
+                pattern_ids=("audio_transcription",),
+                post_processing_goal="stop_after_primary_operation",
+            ),
+            False,
+        ),
+        (
+            CreateCompileContext(
+                runtime_input_type=InputType.AUDIO,
+                final_output_type=OutputType.TEXT,
+                pattern_ids=("audio_transcription",),
+                post_processing_goal="stop_after_primary_operation",
+            ),
+            False,
+        ),
+    ],
+)
+def test_create_compile_context_owns_pure_audio_transcription_classification(
+    context: CreateCompileContext,
+    expected: bool,
+) -> None:
+    assert context.is_pure_audio_transcription is expected
+
+
 def test_compiler_uses_assembly_path_for_pure_audio_transcription() -> None:
     intent = parse_create_flow_intent_arguments(
         {
@@ -1998,6 +2507,7 @@ def test_compiler_uses_assembly_path_for_pure_audio_transcription() -> None:
             final_output_type=OutputType.TEXT,
             final_output_mode=OutputMode.TRANSCRIBE_ONLY,
             pattern_ids=("audio_transcription",),
+            post_processing_goal="stop_after_primary_operation",
             runtime_max_files=1,
         ),
     )
@@ -2015,6 +2525,87 @@ def test_compiler_uses_assembly_path_for_pure_audio_transcription() -> None:
     assert runtime_input["max_files"] == 1
     assert runtime_input["input_format"] == "audio"
     assert validate_spec(compiled).valid
+
+
+def test_compiler_rejects_structured_shape_for_pure_audio_transcription() -> None:
+    intent = parse_create_flow_intent_arguments(
+        {
+            "flow_name": "Meeting transcript",
+            "flow_description": "Transcribe uploaded meeting audio.",
+            "plan_rationale": "The runtime transcription step is the output.",
+            "steps": [
+                {
+                    "name": "Transcribe meeting audio",
+                    "instructions": "Transcribe the uploaded meeting audio.",
+                    "output_fields": [
+                        {
+                            "name": "transcript",
+                            "field_type": "string",
+                            "description": "The transcript text.",
+                            "required": True,
+                        }
+                    ],
+                }
+            ],
+        }
+    )
+
+    with pytest.raises(AIBuilderArchitectureError) as exc_info:
+        compile_create_intent_to_spec(
+            intent,
+            context=CreateCompileContext(
+                runtime_input_type=InputType.AUDIO,
+                final_output_type=OutputType.TEXT,
+                final_output_mode=OutputMode.TRANSCRIBE_ONLY,
+                post_processing_goal="stop_after_primary_operation",
+            ),
+        )
+
+    assert exc_info.value.log_context["failure_code"] == (
+        "assembly_pure_audio_transcription_shape_unsupported"
+    )
+
+
+@pytest.mark.parametrize(
+    ("post_processing_goal", "secondary_obligations"),
+    [
+        ("summarize_or_overview", ()),
+        ("action_followup", ()),
+        ("stop_after_primary_operation", ("summary",)),
+    ],
+)
+def test_compiler_never_downgrades_audio_post_processing_to_transcript_only(
+    post_processing_goal: str,
+    secondary_obligations: tuple[ResultObligation, ...],
+) -> None:
+    intent = parse_create_flow_intent_arguments(
+        {
+            "flow_name": "Meeting result",
+            "plan_rationale": "Produce the requested result from meeting audio.",
+            "steps": [
+                {
+                    "name": "Process meeting audio",
+                    "instructions": "Produce the requested source-grounded result.",
+                }
+            ],
+        }
+    )
+
+    with pytest.raises(AIBuilderArchitectureError) as exc_info:
+        compile_create_intent_to_spec(
+            intent,
+            context=CreateCompileContext(
+                runtime_input_type=InputType.AUDIO,
+                final_output_type=OutputType.TEXT,
+                final_output_mode=OutputMode.TRANSCRIBE_ONLY,
+                post_processing_goal=post_processing_goal,
+                secondary_obligations=secondary_obligations,
+            ),
+        )
+
+    assert exc_info.value.log_context["failure_code"] == (
+        "assembly_unsupported_output_mode"
+    )
 
 
 def test_compiler_projects_typed_checkpoint_intents_onto_actual_producers() -> None:
@@ -2239,13 +2830,6 @@ def test_compiler_describes_transcript_input_and_avoids_raw_audio_report_fan_in(
                 {
                     "name": "Write report body",
                     "instructions": "Write the final report body.",
-                    "uses_previous_fields": [
-                        {
-                            "from_step": 1,
-                            "field_path": "summary",
-                            "label": "Summary",
-                        }
-                    ],
                 },
             ],
         }
@@ -3048,13 +3632,6 @@ def test_compiler_lowers_runtime_inputs_and_derived_whole_object_underlag() -> N
                 {
                     "name": "Skriv slutrapport",
                     "instructions": "Skriv slutrapport med specifika datapunkter.",
-                    "uses_previous_fields": [
-                        {
-                            "from_step": 1,
-                            "field_path": "summary",
-                            "label": "Sammanfattning",
-                        }
-                    ],
                 },
             ],
         }

@@ -79,7 +79,6 @@ from eneo.flows.ai_builder.ai_builder_proposal_tool_contracts import (
     ToolProcessingResult,
     ToolRetryConfig,
     ToolRetryInvocation,
-    forced_tool_choice,
 )
 from eneo.flows.ai_builder.ai_builder_repo import AIBuilderRepository
 from eneo.flows.ai_builder.ai_builder_resource_catalog import (
@@ -239,7 +238,6 @@ class ProposalSubmissionOwner:
                 call_kind="proposal_initial",
                 request=ctx.completion_request(
                     temperature=proposal_temperature,
-                    tool_choice=forced_tool_choice(PROPOSE_FLOW_TOOL_NAME),
                 ),
                 before_provider_call=before_provider_call,
             )

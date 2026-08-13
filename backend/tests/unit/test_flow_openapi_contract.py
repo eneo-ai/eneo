@@ -976,6 +976,26 @@ def test_openapi_flow_settings_update_requests_reject_unknown_fields(
     assert missing_strict_contract == []
 
 
+def test_openapi_flow_input_audio_count_separates_effective_response_from_reset(
+    openapi_spec: dict,
+) -> None:
+    schemas = openapi_spec.get("components", {}).get("schemas", {})
+    public_schema = schemas["FlowInputLimitsPublic"]
+    update_schema = schemas["FlowInputLimitsUpdate"]
+
+    public_audio_count = public_schema["properties"]["audio_max_files_per_run"]
+    assert "audio_max_files_per_run" in public_schema["required"]
+    assert public_audio_count["type"] == "integer"
+    assert public_audio_count["minimum"] == 1
+    assert public_audio_count["maximum"] == 100
+    assert not _schema_allows_null(public_audio_count)
+
+    update_audio_count = update_schema["properties"]["audio_max_files_per_run"]
+    assert "audio_max_files_per_run" not in update_schema.get("required", [])
+    assert _schema_allows_null(update_audio_count)
+    assert "use the default audio ceiling" in update_audio_count["description"]
+
+
 def test_openapi_tenant_update_public_does_not_expose_raw_flow_settings(
     openapi_spec: dict,
 ) -> None:

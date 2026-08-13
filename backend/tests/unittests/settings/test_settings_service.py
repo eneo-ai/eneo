@@ -436,6 +436,39 @@ async def test_get_flow_input_limits_reads_tenant_override():
     assert limits.audio_max_size_bytes == 28_000_000
 
 
+async def test_get_flow_input_limits_resolves_stored_null_audio_count_to_default():
+    repo = MockRepo()
+    tenant_repo = MockTenantRepo()
+    tenant = await tenant_repo.get(TEST_USER.tenant_id)
+    tenant_repo.tenant = tenant.model_copy(
+        update={
+            "flow_settings": {
+                "input_limits": {
+                    "max_files_per_run": None,
+                    "audio_max_files_per_run": None,
+                }
+            }
+        }
+    )
+
+    service = SettingService(
+        repo=repo,
+        user=TEST_USER,
+        ai_models_service=MockRepo(),
+        feature_flag_service=MockFeatureFlagService(),
+        tenant_repo=tenant_repo,
+        audit_service=MockAuditService(),
+        data_retention_service=MockDataRetentionService(),
+        skill_repo=MagicMock(),
+        upload_admission=_upload_admission(),
+    )
+
+    limits = await service.get_flow_input_limits()
+
+    assert limits.max_files_per_run is None
+    assert limits.audio_max_files_per_run == 10
+
+
 async def test_get_flow_input_limits_resolved_returns_domain_limits():
     repo = MockRepo()
     tenant_repo = MockTenantRepo()
