@@ -367,6 +367,7 @@ def build_create_flow_tool_schema(
         model_refs=model_refs,
         kb_refs=kb_refs,
     )
+    step_schema["properties"]["knowledge_refs"].pop("uniqueItems")
     if is_pure_audio_transcription:
         step_schema["properties"] = {
             name: step_schema["properties"][name] for name in ("name", "instructions")

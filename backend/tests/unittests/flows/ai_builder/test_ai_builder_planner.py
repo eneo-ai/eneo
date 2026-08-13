@@ -11,6 +11,7 @@ from typing import Any, cast
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import UUID, uuid4
 
+import jsonschema
 import pytest
 from pydantic import ValidationError
 
@@ -124,6 +125,7 @@ from eneo.flows.ai_builder.ai_builder_settings import AIBuilderBudgetPolicy
 from eneo.flows.ai_builder.ai_builder_tools import (
     ProposalToolSchema,
     build_propose_flow_tool_schema,
+    validate_propose_flow_tool_arguments,
 )
 from eneo.flows.ai_builder.ai_builder_turn_controller import (
     AskCanonicalQuestion,
@@ -521,6 +523,158 @@ def _build_create_proposal_for_architecture(
         budget_policy=_budget_policy(),
         attachment_file_count=0,
         current_turn_start=0,
+    )
+
+
+_UNSUPPORTED_NATIVE_STRICT_SCHEMA_KEYWORDS = frozenset(
+    {
+        "allOf",
+        "contains",
+        "dependentRequired",
+        "dependentSchemas",
+        "else",
+        "if",
+        "maxContains",
+        "maxProperties",
+        "minContains",
+        "minProperties",
+        "not",
+        "oneOf",
+        "patternProperties",
+        "propertyNames",
+        "then",
+        "unevaluatedItems",
+        "unevaluatedProperties",
+        "uniqueItems",
+    }
+)
+
+
+def _assert_native_strict_schema(node: object, *, path: str = "$") -> None:
+    if isinstance(node, list):
+        for index, item in enumerate(node):
+            _assert_native_strict_schema(item, path=f"{path}[{index}]")
+        return
+    if not isinstance(node, dict):
+        return
+
+    schema_type = node.get("type")
+    schema_types = schema_type if isinstance(schema_type, list) else [schema_type]
+    if schema_type is not None:
+        assert all(isinstance(value, str) for value in schema_types), path
+        assert set(schema_types) <= {
+            "array",
+            "boolean",
+            "integer",
+            "null",
+            "number",
+            "object",
+            "string",
+        }, path
+
+    if "object" in schema_types:
+        properties = node.get("properties")
+        required = node.get("required")
+        assert isinstance(properties, dict), path
+        assert isinstance(required, list), path
+        assert all(isinstance(name, str) for name in required), path
+        assert set(required) == set(properties), path
+        assert node.get("additionalProperties") is False, path
+
+    any_of = node.get("anyOf")
+    if any_of is not None:
+        assert isinstance(any_of, list) and len(any_of) >= 2, path
+        assert all(isinstance(branch, dict) for branch in any_of), path
+    assert not (_UNSUPPORTED_NATIVE_STRICT_SCHEMA_KEYWORDS & node.keys()), path
+
+    for key, value in node.items():
+        _assert_native_strict_schema(value, path=f"{path}.{key}")
+
+
+def test_prepared_create_schema_is_native_strict_compatible() -> None:
+    prepared = _build_create_proposal_for_architecture(_document_architecture_state())
+    tool_schema = prepared.proposal_tool_schema
+    parameters = tool_schema["function"]["parameters"]
+
+    assert "strict" not in tool_schema["function"]
+    jsonschema.Draft202012Validator.check_schema(parameters)
+    _assert_native_strict_schema(parameters)
+
+    raw_create_payload = {
+        "flow_name": "Case assessment",
+        "flow_description": None,
+        "plan_rationale": "Extract the case facts and prepare a decision summary.",
+        "steps": [
+            {
+                "name": "Assess case",
+                "instructions": "Assess the submitted case material.",
+                "output_fields": [
+                    {
+                        "name": "assessment",
+                        "field_type": "object",
+                        "description": "The structured case assessment.",
+                        "required": True,
+                        "fields": [
+                            {
+                                "name": "summary",
+                                "field_type": "string",
+                                "description": "A concise case summary.",
+                                "required": True,
+                            },
+                            {
+                                "name": "actions",
+                                "field_type": "array",
+                                "description": "Recommended follow-up actions.",
+                                "required": True,
+                                "item_fields": [
+                                    {
+                                        "name": "owner",
+                                        "field_type": "string",
+                                        "description": "The action owner.",
+                                        "required": True,
+                                    }
+                                ],
+                            },
+                        ],
+                    }
+                ],
+                "model_ref": None,
+                "knowledge_refs": [
+                    " knowledge.policy ",
+                    "knowledge.policy",
+                ],
+                "citations_requested": False,
+            }
+        ],
+        "assumptions": [],
+    }
+    validate_propose_flow_tool_arguments(
+        arguments=raw_create_payload,
+        tool_schema=tool_schema,
+    )
+    parsed = parse_create_flow_intent_arguments(raw_create_payload)
+    assert parsed.steps[0].knowledge_refs == ["knowledge.policy"]
+
+
+def test_prepared_edit_schema_remains_byte_equal_to_pre_strict_baseline() -> None:
+    tool_schema = build_propose_flow_tool_schema(
+        resource_catalog=build_ai_builder_resource_catalog(
+            available_models=[],
+            available_kbs=[],
+        ),
+        current_steps=[],
+    )
+    encoded = json.dumps(
+        tool_schema,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode()
+
+    assert "strict" not in tool_schema["function"]
+    assert "uniqueItems" in encoded.decode()
+    assert hashlib.sha256(encoded).hexdigest() == (
+        "1a1cd6b231c656691f8028eff3ffb5f837963386d3afb6e85bdfdb45cc7ba377"
     )
 
 

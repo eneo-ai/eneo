@@ -167,6 +167,7 @@ class ResolvedCompletionModelRoute:
     litellm_kwargs: dict[str, object]
     supported_model_kwargs: SupportedModelKwargs
     requested_model_kwargs: ModelKwargs = field(default_factory=ModelKwargs)
+    resolved_model_id: UUID | None = None
 
     def prepare_provider_kwargs(
         self,
@@ -434,6 +435,7 @@ class CompletionService:
             litellm_kwargs=litellm_kwargs,
             supported_model_kwargs=supported_model_kwargs,
             provider_type=adapter.provider_type,
+            resolved_model_id=model.id,
         )
 
     async def resolve_structured_output_capability(

@@ -7,6 +7,7 @@ import sys
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
 from typing import cast
+from uuid import UUID
 
 import httpx
 import litellm
@@ -22,6 +23,7 @@ from eneo.completion_models.infrastructure.completion_service import (
     ResolvedCompletionModelRoute,
 )
 from eneo.flows.ai_builder.ai_builder_litellm_completion import (
+    PINNED_LUNA_NATIVE_STRICT_TOOLS_ROUTE,
     CompletionTokenUsage,
     LLMCompletionChoice,
     LLMCompletionMessage,
@@ -64,6 +66,17 @@ def _probe() -> ModuleType:
     sys.modules[spec.name] = module
     spec.loader.exec_module(module)
     return module
+
+
+def test_shipping_strict_route_matches_sealed_probe_protocol() -> None:
+    probe = _probe()
+
+    assert PINNED_LUNA_NATIVE_STRICT_TOOLS_ROUTE == (
+        UUID(probe.PROBE_MODEL_ID),
+        "openai",
+        probe.PROBE_MODEL_ROUTE,
+        None,
+    )
 
 
 def _route(*, kwargs: dict[str, object] | None = None) -> ResolvedCompletionModelRoute:

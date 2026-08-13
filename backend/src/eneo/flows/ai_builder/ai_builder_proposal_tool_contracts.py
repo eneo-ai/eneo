@@ -277,6 +277,7 @@ class ProposalCompletionRequest:
     message_groups: tuple[ProposalMessageGroup, ...]
     tool_schemas: list[dict[str, Any]]
     route: ResolvedCompletionModelRoute
+    target_kind: TargetKind
     max_output_tokens: int
     temperature: float
     tool_choice: ForcedToolChoiceParam = field(
@@ -364,6 +365,10 @@ class ProposalTurnContext:
     def base_planning_state_version(self) -> int:
         return self.turn.base_planning_state_version
 
+    @property
+    def target_kind(self) -> TargetKind:
+        return TargetKind.EDIT if self.flow is not None else TargetKind.CREATE
+
     def completion_request(
         self,
         *,
@@ -377,6 +382,7 @@ class ProposalTurnContext:
             ),
             tool_schemas=[cast(dict[str, Any], self.proposal_tool_schema)],
             route=self.route,
+            target_kind=self.target_kind,
             max_output_tokens=self.max_output_tokens,
             temperature=temperature,
             tool_choice=forced_tool_choice(PROPOSE_FLOW_TOOL_NAME),

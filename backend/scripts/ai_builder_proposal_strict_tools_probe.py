@@ -62,6 +62,7 @@ from eneo.flows.ai_builder import (  # noqa: E402
 from eneo.flows.ai_builder import (
     ai_builder_service as ai_builder_service_module,
 )
+from eneo.flows.ai_builder.ai_builder_domain_models import TargetKind  # noqa: E402
 from eneo.flows.ai_builder.ai_builder_error_contract import (  # noqa: E402
     AIBuilderProviderRequestEvidence,
     classify_ai_builder_provider_failure,
@@ -491,6 +492,7 @@ class _RecordingLiteLLMClient:
         evidence = _proposal_request_evidence(
             request=self._proposal_request,
             messages=cast(list[dict[str, Any]], kwargs["messages"]),
+            tool_schemas=cast(list[dict[str, Any]], kwargs["tools"]),
             provider_kwargs=provider_kwargs,
         )
         safe_request = _effective_values_identity(
@@ -792,6 +794,7 @@ async def run_probe_call(
         ),
         tool_schemas=cast(list[dict[str, Any]], [synthetic_tool_schema()]),
         route=replace(probe_route, litellm_kwargs=dict(provider_kwargs)),
+        target_kind=TargetKind.CREATE,
         max_output_tokens=_MAX_OUTPUT_TOKENS,
         temperature=0.0,
         tool_choice=forced_tool_choice(PROBE_TOOL_NAME),
