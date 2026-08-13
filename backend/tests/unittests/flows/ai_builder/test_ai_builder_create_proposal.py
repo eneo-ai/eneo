@@ -355,6 +355,60 @@ async def test_outline_validation_failure_preserves_duplicate_step_name_code() -
 
 
 @pytest.mark.asyncio
+async def test_outline_validation_failure_preserves_citation_family() -> None:
+    invalid_spec = FlowDraftSpecCore(
+        flow_name="Invalid cited JSON",
+        steps=[
+            StepSpec(
+                plan_step_ref="step_a",
+                name="Extract JSON",
+                assistant_spec=AssistantSpec(instructions="Extract structured data."),
+                input_source=InputSource.FLOW_INPUT,
+                input_type=InputType.TEXT,
+                output_mode=OutputMode.PASS_THROUGH,
+                output_type=OutputType.JSON,
+                output_contract={
+                    "type": "object",
+                    "properties": {"summary": {"type": "string"}},
+                },
+                output_config={"citation_mode": "inline_inref_sidecar"},
+            )
+        ],
+    )
+
+    with patch(
+        "eneo.flows.ai_builder.ai_builder_create_proposal."
+        "compile_create_intent_to_spec",
+        return_value=invalid_spec,
+    ):
+        result = await _process_create_intent_arguments(
+            turn=_make_turn(),
+            conversation=[],
+            arguments={
+                "flow_name": "Invalid cited JSON",
+                "plan_rationale": "Exercise final validation telemetry.",
+                "steps": [
+                    {
+                        "name": "Extract JSON",
+                        "instructions": "Extract structured data.",
+                    }
+                ],
+            },
+            tool_call_id="call-invalid-citation",
+            available_model_refs=None,
+            available_kb_refs=None,
+            compile_context=CreateCompileContext(
+                final_output_type=OutputType.JSON,
+            ),
+        )
+
+    assert result.compiled_proposal is not None
+    assert [error.code for error in result.compiled_proposal.validation.errors] == [
+        "citation_mode_unsupported"
+    ]
+
+
+@pytest.mark.asyncio
 async def test_outline_assembly_rejection_succeeds_after_model_correction() -> None:
     state = PlanningState.empty()
     state.architecture_commit = finalize_architecture_commit(
@@ -538,18 +592,19 @@ async def test_report_citations_degrade_to_one_user_visible_warning() -> None:
     warnings = [
         warning
         for warning in compiled.validation.warnings
-        if warning.code == "document_report_citations_downgraded"
+        if warning.code == "citation_mode_unsupported"
     ]
     assert len(warnings) == 1
     assert warnings[0].message == (
-        "Rapporten kommer inte att innehålla källhänvisningar."
+        "Källhänvisningar inaktiverades eftersom resultatet inte kan innehålla "
+        "infogade källhänvisningar."
     )
 
     stored = build_flow_builder_proposal(compiled)
     assert [
         (warning.code, warning.severity.value)
         for warning in stored.content.lint_warnings
-    ] == [("document_report_citations_downgraded", "warning")]
+    ] == [("citation_mode_unsupported", "warning")]
 
 
 @pytest.mark.asyncio

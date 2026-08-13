@@ -248,7 +248,7 @@ def collect_step_graph_issues(
         )
         _capture_flow_step_validation(
             issues,
-            FlowGraphIssueCode.FLOW_STEP_INVALID,
+            FlowGraphIssueCode.CITATION_MODE_UNSUPPORTED,
             lambda: _validate_citation_mode(step),
         )
         if step.input_source == "http_get":

@@ -107,6 +107,7 @@ class TestBuildToolSchema:
         assert set(parameters["required"]) == set(parameters["properties"])
         assert step_schema["additionalProperties"] is False
         assert set(step_schema["required"]) == set(step_schema["properties"])
+        assert "default" not in step_schema["properties"]["citations_requested"]
 
     def test_create_schema_projects_runtime_identity_without_argument_shape_change(
         self,

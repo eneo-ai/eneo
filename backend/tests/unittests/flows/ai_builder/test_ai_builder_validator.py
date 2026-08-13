@@ -1048,7 +1048,7 @@ class TestProductionParityValidation:
         )
         assert not result.valid
         assert any(
-            e.code == "flow_step_invalid"
+            e.code == "citation_mode_unsupported"
             and "citation_mode 'inline_inref_sidecar'" in e.message
             and "LLM-backed text step" in e.message
             for e in result.errors

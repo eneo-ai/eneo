@@ -48,7 +48,7 @@ class StepNormalizationChange:
     code: str
     field_suffix: str
     message: str
-    severity: Literal["info", "warning", "error"] = "info"
+    severity: Literal["info", "warning"] = "info"
 
 
 def normalize_ai_builder_spec(
@@ -69,7 +69,10 @@ def normalize_ai_builder_spec(
     mutated = False
 
     for step in spec.steps:
-        normalized_step, step_changes = normalize_ai_builder_step(step)
+        normalized_step, step_changes = normalize_ai_builder_step(
+            step,
+            ui_language=ui_language,
+        )
         normalized_steps.append(normalized_step)
         mutated = mutated or normalized_step is not step
         changes.extend((normalized_step, change) for change in step_changes)
@@ -421,6 +424,8 @@ def _can_rewire_all_previous_to_previous_step(
 
 def normalize_ai_builder_step(
     step: StepSpec,
+    *,
+    ui_language: str | None = None,
 ) -> tuple[StepSpec, list[StepNormalizationChange]]:
     changes: list[StepNormalizationChange] = []
     output_mode = step.output_mode
@@ -461,24 +466,6 @@ def normalize_ai_builder_step(
                         ),
                     )
                 )
-
-        citation_mode = resolve_citation_mode(next_output_config)
-        if citation_mode == "inline_inref_sidecar" and not is_citation_capable_step(
-            output_type=output_type,
-            output_mode=FlowOutputMode(output_mode.value),
-            output_config=next_output_config,
-        ):
-            del next_output_config["citation_mode"]
-            changes.append(
-                StepNormalizationChange(
-                    code="output_config_citation_mode_cleared",
-                    field_suffix="output_config.citation_mode",
-                    message=(
-                        "Removed citation_mode because only LLM-backed text steps can keep "
-                        "inline citation tracking."
-                    ),
-                )
-            )
 
         normalized_output_config = next_output_config or None
         if normalized_output_config != step.output_config:
@@ -529,9 +516,52 @@ def normalize_ai_builder_step(
             )
         )
 
-    if not updates:
-        return step, changes
-    return step.model_copy(update=updates), changes
+    normalized_step = step.model_copy(update=updates) if updates else step
+    normalized_step, citation_change = normalize_ai_builder_step_citation_mode(
+        normalized_step,
+        ui_language=ui_language,
+    )
+    if citation_change is not None:
+        changes.append(citation_change)
+    return normalized_step, changes
+
+
+def normalize_ai_builder_step_citation_mode(
+    step: StepSpec,
+    *,
+    ui_language: str | None = None,
+    flow_supports_inline_citations: bool = True,
+) -> tuple[StepSpec, StepNormalizationChange | None]:
+    output_config = _as_output_config_dict(step.output_config)
+    if output_config is None:
+        return step, None
+    if resolve_citation_mode(output_config) != "inline_inref_sidecar":
+        return step, None
+    if flow_supports_inline_citations and is_citation_capable_step(
+        output_type=step.output_type,
+        output_mode=FlowOutputMode(step.output_mode.value),
+        output_config=output_config,
+    ):
+        return step, None
+
+    next_output_config = dict(output_config)
+    del next_output_config["citation_mode"]
+    message = (
+        "Source citations were disabled because the output cannot include "
+        "inline citations."
+        if ui_language == "en"
+        else "Källhänvisningar inaktiverades eftersom resultatet inte kan "
+        "innehålla infogade källhänvisningar."
+    )
+    return (
+        step.model_copy(update={"output_config": next_output_config or None}),
+        StepNormalizationChange(
+            code="citation_mode_unsupported",
+            field_suffix="output_config.citation_mode",
+            message=message,
+            severity="warning",
+        ),
+    )
 
 
 def _dedupe_input_binding_source_refs(

@@ -5126,13 +5126,14 @@ def test_report_lowering_emits_citation_and_model_selection_warnings() -> None:
         for step in compiled.steps
     )
     assert [warning.code for warning in diagnostics] == [
-        "document_report_citations_downgraded",
         "document_report_model_selection_combined",
+        "citation_mode_unsupported",
     ]
     assert [warning.message for warning in diagnostics] == [
-        "The report will not include source citations.",
         "The steps specified different model selections; they were combined and "
         "the combined report-writing step uses model selection model.body.",
+        "Source citations were disabled because the output cannot include "
+        "inline citations.",
     ]
 
 
@@ -5166,6 +5167,50 @@ def test_structured_text_citations_keep_sidecar_without_downgrade() -> None:
         {"citation_mode": "inline_inref_sidecar"}
     ]
     assert diagnostics == []
+
+
+def test_structured_json_citations_are_downgraded_before_flow_validation() -> None:
+    intent = parse_create_flow_intent_arguments(
+        {
+            "flow_name": "Structured record",
+            "plan_rationale": "Extract a structured record.",
+            "steps": [
+                {
+                    "name": "Extract record",
+                    "instructions": "Extract the requested fields.",
+                    "citations_requested": True,
+                    "output_fields": [
+                        {
+                            "name": "summary",
+                            "field_type": "string",
+                            "description": "Source summary.",
+                        }
+                    ],
+                }
+            ],
+        }
+    )
+
+    diagnostics = []
+    compiled = compile_create_intent_to_spec(
+        intent,
+        context=CreateCompileContext(
+            runtime_input_type=InputType.TEXT,
+            final_output_type=OutputType.JSON,
+            ui_language="en",
+        ),
+        field_diagnostics=diagnostics,
+    )
+
+    assert validate_spec(compiled).valid
+    assert compiled.steps[0].output_config is None
+    assert [(warning.code, warning.message) for warning in diagnostics] == [
+        (
+            "citation_mode_unsupported",
+            "Source citations were disabled because the output cannot include "
+            "inline citations.",
+        )
+    ]
 
 
 def test_report_disposition_both_ignores_source_section_name_without_shape() -> None:

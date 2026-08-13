@@ -9,9 +9,6 @@ from eneo.flows.ai_builder.ai_builder_assembly.document_report.diagnostics impor
     append_combined_model_selection_diagnostics as _append_combined_model_selection_diagnostics,
 )
 from eneo.flows.ai_builder.ai_builder_assembly.document_report.diagnostics import (
-    degrade_document_report_citations as _degrade_document_report_citations,
-)
-from eneo.flows.ai_builder.ai_builder_assembly.document_report.diagnostics import (
     raise_document_report_compose_topology_missing as _raise_document_report_compose_topology_missing,
 )
 from eneo.flows.ai_builder.ai_builder_assembly.document_report.merge import (
@@ -297,12 +294,6 @@ def lower_document_report_topology(
         or planned_steps[-2].role != "body_writer"
     ):
         fail_closed()
-
-    planned_steps = _degrade_document_report_citations(
-        planned_steps,
-        field_diagnostics=field_diagnostics,
-        ui_language=ui_language,
-    )
 
     combined_producer_model_refs: list[str] = []
     renderer_step = planned_steps[-1]

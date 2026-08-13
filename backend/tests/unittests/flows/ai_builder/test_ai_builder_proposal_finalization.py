@@ -358,6 +358,36 @@ async def test_finalize_compiled_proposal_does_not_record_success_on_quality_rej
 
 
 @pytest.mark.asyncio
+async def test_finalize_compiled_proposal_preserves_citation_validation_family() -> (
+    None
+):
+    validation = SpecValidationResult()
+    validation.add_error(
+        step_ref="step_a",
+        code="citation_mode_unsupported",
+        message=(
+            "Step 1: citation_mode 'inline_inref_sidecar' requires output_type 'text'."
+        ),
+    )
+    store_plan = AsyncMock(return_value=_stored_plan_result())
+
+    with patch(
+        "eneo.flows.ai_builder.ai_builder_proposal_finalization."
+        "store_plan_and_update_conversation",
+        new=store_plan,
+    ):
+        result = await _make_finalizer().finalize_compiled_proposal(
+            _make_request(
+                compiled=_compiled_outline_proposal_with_validation(validation),
+            )
+        )
+
+    assert result.failure_kind == "validation"
+    assert result.failure_codes == frozenset({"citation_mode_unsupported"})
+    store_plan.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_unindexed_array_reference_cannot_reach_plan_persistence() -> None:
     spec = FlowDraftSpecCore(
         flow_name="Array reference",

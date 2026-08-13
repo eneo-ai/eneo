@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from dataclasses import replace
 
 import pytest
 
@@ -22,6 +23,7 @@ from eneo.flows.ai_builder.ai_builder_new_step_models import (
     StructuredFieldDraft,
 )
 from eneo.flows.ai_builder.ai_builder_source_reader_contracts import SourceCaptureField
+from eneo.flows.ai_builder.ai_builder_validator import validate_spec
 from eneo.flows.ai_builder.planning_state import AggregationIntent
 from eneo.flows.flow_authoring_spec import (
     FormFieldSpec,
@@ -113,6 +115,73 @@ def test_lowering_preserves_explicit_compose_output_mode() -> None:
     lowered = lower_assembly_plan(plan)
 
     assert lowered.steps[0].output_mode == OutputMode.COMPOSE_TEXT
+
+
+@pytest.mark.parametrize(
+    ("output_type", "output_mode", "citations_requested", "citation_mode_kept"),
+    [
+        (OutputType.TEXT, OutputMode.PASS_THROUGH, False, False),
+        (OutputType.TEXT, OutputMode.PASS_THROUGH, True, True),
+        (OutputType.JSON, OutputMode.PASS_THROUGH, False, False),
+        (OutputType.JSON, OutputMode.PASS_THROUGH, True, False),
+        (OutputType.PDF, OutputMode.RENDER_VERBATIM, True, False),
+        (OutputType.DOCX, OutputMode.RENDER_VERBATIM, True, False),
+    ],
+)
+def test_create_lowering_resolves_citation_capability_before_validation(
+    output_type: OutputType,
+    output_mode: OutputMode,
+    citations_requested: bool,
+    citation_mode_kept: bool,
+) -> None:
+    diagnostics = []
+    step = _text_step(output_type=output_type, output_mode=output_mode)
+    step = replace(step, citations_requested=citations_requested)
+
+    lowered = lower_assembly_plan(
+        _plan(steps=(step,)),
+        field_diagnostics=diagnostics,
+    )
+
+    assert (
+        lowered.steps[0].output_config == {"citation_mode": "inline_inref_sidecar"}
+    ) is citation_mode_kept
+    assert [warning.code for warning in diagnostics] == (
+        []
+        if not citations_requested or citation_mode_kept
+        else ["citation_mode_unsupported"]
+    )
+    assert validate_spec(lowered).valid
+
+
+def test_create_lowering_uses_terminal_delivery_for_citations_once_per_flow() -> None:
+    diagnostics = []
+    cited_text_step = replace(
+        _text_step(name="Write cited text"),
+        citations_requested=True,
+    )
+    cited_json_terminal = replace(
+        _text_step(
+            name="Structure final result",
+            input_source=InputSource.PREVIOUS_STEP,
+            input_type=InputType.TEXT,
+            output_type=OutputType.JSON,
+            underlag_channel="implicit_previous",
+        ),
+        citations_requested=True,
+    )
+
+    lowered = lower_assembly_plan(
+        _plan(steps=(cited_text_step, cited_json_terminal)),
+        field_diagnostics=diagnostics,
+    )
+
+    assert [step.output_config for step in lowered.steps] == [None, None]
+    assert [
+        (warning.code, warning.severity.value, warning.step_ref)
+        for warning in diagnostics
+    ] == [("citation_mode_unsupported", "warning", "step_a")]
+    assert validate_spec(lowered).valid
 
 
 def test_fixed_assembly_steps_default_to_swedish_copy() -> None:

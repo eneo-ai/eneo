@@ -314,7 +314,7 @@ def try_compile_create_intent_with_assembly(
         )
         if isinstance(plan, CreateAssemblyRejection):
             return plan
-        return lower_assembly_plan(plan)
+        return lower_assembly_plan(plan, field_diagnostics=field_diagnostics)
     except ValueError as error:
         return _reject("plan_invariant_failed", detail=str(error))
 
