@@ -146,7 +146,7 @@ async def test_ask_uses_effective_model_for_session_metadata_and_response():
     assistant.description = None
     assistant.is_default = True
     assistant.completion_model = TEST_MODEL_CHATGPT
-    assistant.completion_model_kwargs = ModelKwargs(reasoning_effort="high")
+    assistant.completion_model_kwargs = ModelKwargs()
     assistant.tool_assistants = []
     assistant.ask = AsyncMock(return_value=(response, datastore_result))
 
@@ -169,6 +169,7 @@ async def test_ask_uses_effective_model_for_session_metadata_and_response():
         prompt_enforced=False,
         enforced_prompt_text=None,
         reasoning_policy_configured=True,
+        default_reasoning_effort="high",
         reasoning_effort_user_configurable=True,
         governance_skill_resolution=SkillRuntimeResolution(eligible=(), blocked=()),
     )
