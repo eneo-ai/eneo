@@ -11,6 +11,7 @@
     BookText,
     ChartPie,
     Cloud,
+    CircleGauge,
     Cpu,
     Fingerprint,
     HardDrive,
@@ -74,6 +75,7 @@
         navItem("/admin/help-assistants", Sparkles, m.admin_help_assistants_nav_label()),
         navItem("/admin/mcp-servers", Plug, m.mcp()),
         navItem("/admin/integrations", Cloud, m.integrations()),
+        navItem("/admin/crawler", CircleGauge, m.crawler_admin_nav()),
         navItem("/admin/storage", HardDrive, m.storage_settings_nav())
       ]
     },

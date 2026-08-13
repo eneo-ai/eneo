@@ -21,6 +21,46 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/crawler/diagnostics/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get Crawler Diagnostics
+     * @description Get tenant-scoped native crawler configuration and probe targets.
+     */
+    get: operations["get_crawler_diagnostics_api_v1_crawler_diagnostics__get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/crawler/diagnostics/{website_id}/probe/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Probe Crawler Website
+     * @description Run a bounded, read-only native crawler probe against one configured website owned by the current tenant.
+     */
+    get: operations["probe_crawler_website_api_v1_crawler_diagnostics__website_id__probe__get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/apps/{id}/": {
     parameters: {
       query?: never;
@@ -10948,6 +10988,41 @@ export interface components {
       /** Delta */
       delta?: number | null;
     };
+    /** CrawlerCapacity */
+    CrawlerCapacity: {
+      /** Max Http Requests Per Process */
+      max_http_requests_per_process: number;
+      /** Requests Per Crawl */
+      requests_per_crawl: number;
+      /** Crawl Jobs Per Tenant */
+      crawl_jobs_per_tenant: number;
+    };
+    /** CrawlerDiagnosticsModel */
+    CrawlerDiagnosticsModel: {
+      /**
+       * Engine
+       * @default python_async
+       * @constant
+       */
+      engine?: "python_async";
+      /**
+       * Execution
+       * @default in_process
+       * @constant
+       */
+      execution?: "in_process";
+      /**
+       * Ready
+       * @default true
+       */
+      ready?: boolean;
+      capacity: components["schemas"]["CrawlerCapacity"];
+      limits: components["schemas"]["CrawlerLimitsModel"];
+      /** Sitemap Change Detection */
+      sitemap_change_detection: boolean;
+      /** Websites */
+      websites: components["schemas"]["CrawlerWebsiteModel"][];
+    };
     /**
      * CrawlerHealthResponse
      * @description Crawler health status with operator-friendly signals.
@@ -10971,6 +11046,56 @@ export interface components {
       pending?: components["schemas"]["PendingQueueSummary"];
       thresholds: components["schemas"]["HealthThresholds"];
       debug?: components["schemas"]["DebugInfo"];
+    };
+    /** CrawlerLimitsModel */
+    CrawlerLimitsModel: {
+      /** Max Pages */
+      max_pages: number;
+      /** Max Crawl Seconds */
+      max_crawl_seconds: number;
+      /** Request Timeout Seconds */
+      request_timeout_seconds: number;
+      /** Max Page Bytes */
+      max_page_bytes: number;
+      /** Max File Bytes */
+      max_file_bytes: number;
+      /** Retries */
+      retries: number;
+      /** Obey Robots */
+      obey_robots: boolean;
+    };
+    /** CrawlerProbeModel */
+    CrawlerProbeModel: {
+      /**
+       * Website Id
+       * Format: uuid
+       */
+      website_id: string;
+      /** Url */
+      url: string;
+      crawl_type: components["schemas"]["CrawlType"];
+      /**
+       * Outcome
+       * @enum {string}
+       */
+      outcome: "reachable" | "unchanged" | "partial" | "failed";
+      /** Duration Ms */
+      duration_ms: number;
+      /** Pages Crawled */
+      pages_crawled: number;
+      /** Pages Unchanged */
+      pages_unchanged: number;
+      /** Pages Failed */
+      pages_failed: number;
+      /** Sample Title */
+      sample_title?: string | null;
+      /** Reason */
+      reason?: string | null;
+      /**
+       * Sitemap Snapshot Available
+       * @default false
+       */
+      sitemap_snapshot_available?: boolean;
     };
     /**
      * CrawlerSettingsResponse
@@ -11174,6 +11299,21 @@ export interface components {
        * @example 1800
        */
       crawl_job_max_age_seconds?: number | null;
+    };
+    /** CrawlerWebsiteModel */
+    CrawlerWebsiteModel: {
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /** Name */
+      name: string;
+      /** Url */
+      url: string;
+      crawl_type: components["schemas"]["CrawlType"];
+      /** Requires Http Auth */
+      requires_http_auth: boolean;
     };
     /** CreateGroupRequest */
     CreateGroupRequest: {
@@ -20948,6 +21088,85 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["eneo__websites__crawl_dependencies__crawl_models__CrawlRunPublic"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  get_crawler_diagnostics_api_v1_crawler_diagnostics__get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["CrawlerDiagnosticsModel"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  probe_crawler_website_api_v1_crawler_diagnostics__website_id__probe__get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Configured website identifier */
+        website_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["CrawlerProbeModel"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Not Found */

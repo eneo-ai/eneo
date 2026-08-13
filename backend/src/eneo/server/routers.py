@@ -33,6 +33,7 @@ from eneo.completion_models.presentation.tenant_completion_models_router import 
 )
 from eneo.conversations.conversations_router import router as conversations_router
 from eneo.crawler.crawl_run_router import router as crawl_run_router
+from eneo.crawler.diagnostics_router import router as crawler_diagnostics_router
 from eneo.dashboard.api.dashboard_router import router as dashboard_router
 from eneo.embedding_models.presentation.embedding_model_router import (
     router as embedding_models_router,
@@ -162,6 +163,15 @@ router.include_router(
         Depends(
             require_api_key_scope_check(resource_type="crawl_run", path_param="id")
         ),
+    ],
+)
+router.include_router(
+    crawler_diagnostics_router,
+    prefix="/crawler",
+    tags=["crawler"],
+    dependencies=[
+        *TENANT_ADMIN_API_KEY_GUARDS,
+        Depends(require_resource_permission_for_method("knowledge")),
     ],
 )
 router.include_router(
