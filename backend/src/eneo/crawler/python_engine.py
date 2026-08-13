@@ -6,8 +6,10 @@ inside Eneo's existing worker or a dedicated crawl worker using the same image.
 
 import asyncio
 import hashlib
+import ipaddress
 import logging
 import re
+import socket
 from collections import deque
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
@@ -21,6 +23,8 @@ from urllib.robotparser import RobotFileParser
 
 import aiofiles
 import aiohttp
+from aiohttp.abc import AbstractResolver, ResolveResult
+from aiohttp.resolver import DefaultResolver
 
 from eneo.crawler.engine import (
     ConditionalGet,
@@ -53,6 +57,12 @@ logger = logging.getLogger(__name__)
 _USER_AGENT = "EneoCrawler/1.0"
 _RETRYABLE_STATUSES = frozenset({408, 425, 429, 500, 502, 503, 504})
 _FILENAME_SANITIZE = re.compile(r"[^A-Za-z0-9._-]+")
+_REDIRECT_STATUSES = frozenset({301, 302, 303, 307, 308})
+_MAX_REDIRECTS = 10
+
+_process_capacity: asyncio.Semaphore | None = None
+_process_capacity_loop: asyncio.AbstractEventLoop | None = None
+_process_capacity_limit: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -65,21 +75,110 @@ class _ResponseTooLarge(Exception):
     pass
 
 
+class _UnsafeTarget(aiohttp.ClientError):
+    pass
+
+
+class _RedirectRejected(aiohttp.ClientError):
+    pass
+
+
+def _address_is_allowed(address: str, *, allow_private_network: bool) -> bool:
+    if allow_private_network:
+        return True
+    try:
+        parsed = ipaddress.ip_address(address)
+        return parsed.is_global and not parsed.is_multicast
+    except ValueError:
+        return False
+
+
+def _reject_disallowed_literal(url: str, *, allow_private_network: bool) -> None:
+    hostname = urlsplit(url).hostname
+    if hostname is None:
+        raise _UnsafeTarget("Crawler target has no hostname")
+    try:
+        ipaddress.ip_address(hostname)
+    except ValueError:
+        return
+    if not _address_is_allowed(hostname, allow_private_network=allow_private_network):
+        raise _UnsafeTarget("Crawler target uses a non-global IP address")
+
+
+class _SafeResolver(AbstractResolver):
+    """Resolve hostnames while preventing DNS rebinding to local networks."""
+
+    def __init__(self, *, allow_private_network: bool) -> None:
+        self._delegate = DefaultResolver()
+        self._allow_private_network = allow_private_network
+
+    async def resolve(
+        self,
+        host: str,
+        port: int = 0,
+        family: socket.AddressFamily = socket.AF_INET,
+    ) -> list[ResolveResult]:
+        results = await self._delegate.resolve(host, port, family)
+        if not results or any(
+            not _address_is_allowed(
+                result["host"], allow_private_network=self._allow_private_network
+            )
+            for result in results
+        ):
+            raise _UnsafeTarget(
+                f"Crawler target resolves to a non-global address: {host}"
+            )
+        return results
+
+    async def close(self) -> None:
+        await self._delegate.close()
+
+
+def _process_http_capacity(limit: int) -> asyncio.Semaphore:
+    """Return the HTTP semaphore shared by every crawl container in this process."""
+
+    global _process_capacity
+    global _process_capacity_limit
+    global _process_capacity_loop
+
+    loop = asyncio.get_running_loop()
+    if _process_capacity is None or _process_capacity_loop is not loop:
+        _process_capacity = asyncio.Semaphore(limit)
+        _process_capacity_loop = loop
+        _process_capacity_limit = limit
+    elif _process_capacity_limit != limit:
+        logger.warning(
+            "Ignoring crawler HTTP capacity change after process initialization",
+            extra={"active_limit": _process_capacity_limit, "requested_limit": limit},
+        )
+    return _process_capacity
+
+
 class PythonCrawlEngine:
     """Bounded HTTP crawler implemented on Eneo's existing Python runtime."""
 
-    def __init__(self, *, global_concurrency: int = 20) -> None:
+    def __init__(
+        self,
+        *,
+        global_concurrency: int = 20,
+        allow_private_network: bool = False,
+    ) -> None:
         if global_concurrency <= 0:
             raise ValueError("global_concurrency must be greater than zero")
-        self._capacity = asyncio.Semaphore(global_concurrency)
+        self._global_concurrency = global_concurrency
+        self._allow_private_network = allow_private_network
+
+    @property
+    def _capacity(self) -> asyncio.Semaphore:
+        return _process_http_capacity(self._global_concurrency)
 
     async def crawl(self, request: CrawlRequest) -> AsyncIterator[CrawlEvent]:
         seed_url = normalize_url(request.url)
         if seed_url is None:
             raise ValueError(f"Unsupported crawl URL: {request.url}")
 
-        auth = (
-            aiohttp.BasicAuth(request.http_user, request.http_pass or "")
+        origin_authorization = (
+            aiohttp.encode_basic_auth(request.http_user, request.http_pass or "")
             if request.http_user
             else None
         )
@@ -111,18 +210,52 @@ class PythonCrawlEngine:
 
         files_dir = TemporaryDirectory(prefix="eneo-crawl-")
         try:
+            connector = aiohttp.TCPConnector(
+                resolver=_SafeResolver(
+                    allow_private_network=self._allow_private_network
+                )
+            )
             async with aiohttp.ClientSession(
-                auth=auth,
                 headers=headers,
                 timeout=timeout,
+                connector=connector,
             ) as session:
-                robots = await self._load_robots(session, seed_url, request)
+                try:
+                    robots = await asyncio.wait_for(
+                        self._load_robots(
+                            session, seed_url, request, origin_authorization
+                        ),
+                        timeout=self._remaining_seconds(started_at, request),
+                    )
+                    if request.crawl_type == CrawlType.SITEMAP:
+                        (
+                            sitemap_urls,
+                            sitemap_failures,
+                            sitemap_snapshot,
+                            sitemap_truncated,
+                        ) = await asyncio.wait_for(
+                            self._sitemap_urls(
+                                session, seed_url, request, origin_authorization
+                            ),
+                            timeout=self._remaining_seconds(started_at, request),
+                        )
+                    else:
+                        sitemap_urls = []
+                        sitemap_failures = []
+                        sitemap_truncated = False
+                except TimeoutError:
+                    yield CrawlFinished(
+                        status="partial",
+                        pages_crawled=pages_crawled,
+                        pages_failed=pages_failed,
+                        pages_unchanged=pages_unchanged,
+                        files_downloaded=files_downloaded,
+                        files_failed=files_failed,
+                        reason="timeout",
+                    )
+                    return
+
                 if request.crawl_type == CrawlType.SITEMAP:
-                    (
-                        sitemap_urls,
-                        sitemap_failures,
-                        sitemap_snapshot,
-                    ) = await self._sitemap_urls(session, seed_url, request)
                     for failure in sitemap_failures:
                         pages_failed += 1
                         yield failure
@@ -176,19 +309,25 @@ class PythonCrawlEngine:
                                     request,
                                     robots,
                                     validators,
+                                    origin_authorization,
                                     path_scope=follow_page_links,
                                 )
                             )
                             for url in urls
                         ]
+                        batch_future = asyncio.gather(*tasks)
                         try:
                             results = await asyncio.wait_for(
-                                asyncio.gather(*tasks), timeout=remaining
+                                batch_future, timeout=remaining
                             )
                         except BaseException:
                             for task in tasks:
                                 task.cancel()
                             await asyncio.gather(*tasks, return_exceptions=True)
+                            try:
+                                await batch_future
+                            except BaseException:
+                                pass
                             raise
 
                         for result in results:
@@ -212,7 +351,12 @@ class PythonCrawlEngine:
                                     frontier.append(discovered_url)
 
                         if request_delay and frontier:
-                            await asyncio.sleep(request_delay)
+                            await asyncio.sleep(
+                                min(
+                                    request_delay,
+                                    self._remaining_seconds(started_at, request),
+                                )
+                            )
                 except TimeoutError:
                     yield CrawlFinished(
                         status="partial",
@@ -225,17 +369,35 @@ class PythonCrawlEngine:
                     )
                     return
 
+                termination_reason = (
+                    "page_limit" if frontier or sitemap_truncated else None
+                )
+
                 if request.download_files and file_links:
                     taken_names: set[str] = set()
                     for file_url in sorted(file_links):
-                        result = await self._download_file(
-                            session,
-                            file_url,
-                            seed_url,
-                            request,
-                            Path(files_dir.name),
-                            taken_names,
+                        remaining = request.limits.max_seconds - (
+                            monotonic() - started_at
                         )
+                        if remaining <= 0:
+                            termination_reason = "timeout"
+                            break
+                        try:
+                            result = await asyncio.wait_for(
+                                self._download_file(
+                                    session,
+                                    file_url,
+                                    seed_url,
+                                    request,
+                                    Path(files_dir.name),
+                                    taken_names,
+                                    origin_authorization,
+                                ),
+                                timeout=remaining,
+                            )
+                        except TimeoutError:
+                            termination_reason = "timeout"
+                            break
                         if isinstance(result, FileDownloaded):
                             files_downloaded += 1
                         else:
@@ -243,7 +405,7 @@ class PythonCrawlEngine:
                         yield result
 
             yield CrawlFinished(
-                status="completed",
+                status="partial" if termination_reason else "completed",
                 pages_crawled=pages_crawled,
                 pages_failed=pages_failed,
                 pages_unchanged=pages_unchanged,
@@ -255,6 +417,7 @@ class PythonCrawlEngine:
                 sitemap_entries=(
                     sitemap_snapshot.entry_count if sitemap_snapshot else 0
                 ),
+                reason=termination_reason,
             )
         finally:
             files_dir.cleanup()
@@ -264,6 +427,7 @@ class PythonCrawlEngine:
         session: aiohttp.ClientSession,
         seed_url: str,
         request: CrawlRequest,
+        origin_authorization: str | None,
     ) -> RobotFileParser | None:
         if not request.obey_robots:
             return None
@@ -273,13 +437,25 @@ class PythonCrawlEngine:
         parser.set_url(robots_url)
         try:
             async with self._capacity:
-                async with session.get(robots_url) as response:
+                response, _ = await self._request_with_redirects(
+                    session,
+                    robots_url,
+                    seed_url,
+                    origin_authorization,
+                    path_scope=False,
+                )
+                async with response:
                     if response.status != 200:
                         return None
                     body = await self._read_bounded(
                         response, request.limits.max_response_bytes
                     )
-        except (aiohttp.ClientError, asyncio.TimeoutError, _ResponseTooLarge):
+        except (
+            aiohttp.ClientError,
+            asyncio.TimeoutError,
+            _ResponseTooLarge,
+            LookupError,
+        ):
             return None
         parser.parse(
             body.decode(response.charset or "utf-8", errors="replace").splitlines()
@@ -294,6 +470,7 @@ class PythonCrawlEngine:
         request: CrawlRequest,
         robots: RobotFileParser | None,
         validators: dict[str, ConditionalGet],
+        origin_authorization: str | None,
         *,
         path_scope: bool,
     ) -> _FetchResult:
@@ -312,32 +489,15 @@ class PythonCrawlEngine:
                     request_headers["If-Modified-Since"] = validator.last_modified
 
                 async with self._capacity:
-                    async with session.get(
-                        url, allow_redirects=True, headers=request_headers
-                    ) as response:
-                        final_url = normalize_url(str(response.url))
-                        if final_url is None:
-                            return _FetchResult(
-                                PageFailed(
-                                    url=url,
-                                    status_code=response.status,
-                                    reason="invalid_redirect_url",
-                                )
-                            )
-                        in_scope = (
-                            is_in_scope(final_url, scope_url)
-                            if path_scope
-                            else is_same_origin(final_url, scope_url)
-                        )
-                        if not in_scope:
-                            return _FetchResult(
-                                PageFailed(
-                                    url=url,
-                                    status_code=response.status,
-                                    reason="redirect_out_of_scope",
-                                )
-                            )
-
+                    response, final_url = await self._request_with_redirects(
+                        session,
+                        url,
+                        scope_url,
+                        origin_authorization,
+                        path_scope=path_scope,
+                        headers=request_headers,
+                    )
+                    async with response:
                         if (
                             response.status in _RETRYABLE_STATUSES
                             and attempt + 1 < attempts
@@ -410,6 +570,8 @@ class PythonCrawlEngine:
 
             except _ResponseTooLarge:
                 return _FetchResult(PageFailed(url=url, reason="response_too_large"))
+            except (_UnsafeTarget, _RedirectRejected, LookupError) as exc:
+                return _FetchResult(PageFailed(url=url, reason=type(exc).__name__))
             except (aiohttp.ClientError, asyncio.TimeoutError) as exc:
                 if attempt + 1 == attempts:
                     return _FetchResult(
@@ -431,6 +593,7 @@ class PythonCrawlEngine:
         request: CrawlRequest,
         directory: Path,
         taken_names: set[str],
+        origin_authorization: str | None,
     ) -> FileDownloaded | FileFailed:
         normalized = normalize_url(url)
         if normalized is None or not is_same_origin(normalized, scope_url):
@@ -441,14 +604,14 @@ class PythonCrawlEngine:
         partial = target.with_suffix(f"{target.suffix}.part")
         try:
             async with self._capacity:
-                async with session.get(normalized, allow_redirects=True) as response:
-                    final_url = normalize_url(str(response.url))
-                    if final_url is None or not is_same_origin(final_url, scope_url):
-                        return FileFailed(
-                            url=normalized,
-                            status_code=response.status,
-                            reason="file_redirect_out_of_scope",
-                        )
+                response, final_url = await self._request_with_redirects(
+                    session,
+                    normalized,
+                    scope_url,
+                    origin_authorization,
+                    path_scope=False,
+                )
+                async with response:
                     if response.status >= 400:
                         return FileFailed(
                             url=final_url,
@@ -511,7 +674,8 @@ class PythonCrawlEngine:
         session: aiohttp.ClientSession,
         sitemap_url: str,
         request: CrawlRequest,
-    ) -> tuple[list[str], list[PageFailed], SitemapSnapshot | None]:
+        origin_authorization: str | None,
+    ) -> tuple[list[str], list[PageFailed], SitemapSnapshot | None, bool]:
         sitemap_frontier = deque([sitemap_url])
         seen_sitemaps = {sitemap_url}
         page_urls: list[str] = []
@@ -524,13 +688,15 @@ class PythonCrawlEngine:
             current = sitemap_frontier.popleft()
             try:
                 async with self._capacity:
-                    async with session.get(current, allow_redirects=True) as response:
-                        final_url = normalize_url(str(response.url))
-                        if (
-                            response.status >= 400
-                            or final_url is None
-                            or not is_same_origin(final_url, sitemap_url)
-                        ):
+                    response, final_url = await self._request_with_redirects(
+                        session,
+                        current,
+                        sitemap_url,
+                        origin_authorization,
+                        path_scope=False,
+                    )
+                    async with response:
+                        if response.status >= 400:
                             failures.append(
                                 PageFailed(
                                     url=current,
@@ -571,7 +737,8 @@ class PythonCrawlEngine:
                         sitemap_frontier.append(normalized)
                 continue
 
-            for location in parsed.locations:
+            for original_entry in parsed.entries:
+                location = original_entry.location
                 normalized = normalize_url(location, base_url=final_url)
                 if (
                     normalized is not None
@@ -580,9 +747,6 @@ class PythonCrawlEngine:
                 ):
                     seen_pages.add(normalized)
                     page_urls.append(normalized)
-                    original_entry = next(
-                        entry for entry in parsed.entries if entry.location == location
-                    )
                     sitemap_entries.append(
                         SitemapEntry(
                             location=normalized,
@@ -590,10 +754,10 @@ class PythonCrawlEngine:
                         )
                     )
                     if len(page_urls) >= request.limits.max_pages:
-                        return page_urls, failures, None
+                        return page_urls, failures, None, True
 
         snapshot = snapshot_sitemap(sitemap_entries) if not failures else None
-        return page_urls, failures, snapshot
+        return page_urls, failures, snapshot, False
 
     async def probe_sitemap(self, request: CrawlRequest) -> SitemapSnapshot | None:
         if request.crawl_type != CrawlType.SITEMAP:
@@ -601,8 +765,8 @@ class PythonCrawlEngine:
         seed_url = normalize_url(request.url)
         if seed_url is None:
             return None
-        auth = (
-            aiohttp.BasicAuth(request.http_user, request.http_pass or "")
+        origin_authorization = (
+            aiohttp.encode_basic_auth(request.http_user, request.http_pass or "")
             if request.http_user
             else None
         )
@@ -613,13 +777,100 @@ class PythonCrawlEngine:
                 request.limits.request_timeout_seconds,
             ),
         )
+        connector = aiohttp.TCPConnector(
+            resolver=_SafeResolver(allow_private_network=self._allow_private_network)
+        )
         async with aiohttp.ClientSession(
-            auth=auth,
             headers={"User-Agent": _USER_AGENT},
             timeout=timeout,
+            connector=connector,
         ) as session:
-            _, failures, snapshot = await self._sitemap_urls(session, seed_url, request)
+            try:
+                _, failures, snapshot, _ = await asyncio.wait_for(
+                    self._sitemap_urls(
+                        session, seed_url, request, origin_authorization
+                    ),
+                    timeout=request.limits.max_seconds,
+                )
+            except TimeoutError:
+                return None
         return None if failures else snapshot
+
+    async def _request_with_redirects(
+        self,
+        session: aiohttp.ClientSession,
+        url: str,
+        scope_url: str,
+        origin_authorization: str | None,
+        *,
+        path_scope: bool,
+        headers: dict[str, str] | None = None,
+    ) -> tuple[aiohttp.ClientResponse, str]:
+        current = normalize_url(url)
+        if current is None:
+            raise _RedirectRejected("invalid request URL")
+
+        original_origin = urlsplit(scope_url)
+        for redirect_count in range(_MAX_REDIRECTS + 1):
+            in_scope = (
+                is_in_scope(current, scope_url)
+                if path_scope
+                else is_same_origin(current, scope_url)
+            )
+            if not in_scope:
+                raise _RedirectRejected("redirect target is outside crawl scope")
+
+            _reject_disallowed_literal(
+                current, allow_private_network=self._allow_private_network
+            )
+
+            parsed = urlsplit(current)
+            request_authorization = (
+                origin_authorization
+                if (
+                    parsed.scheme,
+                    parsed.hostname,
+                    parsed.port,
+                )
+                == (
+                    original_origin.scheme,
+                    original_origin.hostname,
+                    original_origin.port,
+                )
+                else None
+            )
+            request_headers = dict(headers or {})
+            if request_authorization is not None:
+                request_headers["Authorization"] = request_authorization
+            else:
+                request_headers.pop("Authorization", None)
+            response = await session.get(
+                current,
+                allow_redirects=False,
+                headers=request_headers,
+            )
+            if response.status not in _REDIRECT_STATUSES:
+                return response, current
+
+            location = response.headers.get("Location")
+            response.release()
+            if not location:
+                raise _RedirectRejected("redirect response has no Location header")
+            if redirect_count >= _MAX_REDIRECTS:
+                raise _RedirectRejected("redirect limit exceeded")
+            redirected = normalize_url(location, base_url=current)
+            if redirected is None:
+                raise _RedirectRejected("invalid redirect URL")
+            current = redirected
+
+        raise AssertionError("redirect loop exhausted without a result")
+
+    @staticmethod
+    def _remaining_seconds(started_at: float, request: CrawlRequest) -> float:
+        remaining = request.limits.max_seconds - (monotonic() - started_at)
+        if remaining <= 0:
+            raise TimeoutError
+        return remaining
 
     @staticmethod
     async def _read_bounded(response: aiohttp.ClientResponse, max_bytes: int) -> bytes:

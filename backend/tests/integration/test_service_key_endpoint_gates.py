@@ -228,6 +228,18 @@ async def test_chat_turn_diagnostics_reject_service_keys(
 
 @pytest.mark.integration
 @pytest.mark.asyncio
+async def test_crawler_probe_rejects_service_keys(client, tenant_admin_service_secret):
+    response = await client.post(
+        f"/api/v1/crawler/diagnostics/{uuid4()}/probe/",
+        headers={"X-API-Key": tenant_admin_service_secret},
+    )
+
+    assert response.status_code == 403, response.text
+    assert "session token" in response.text.lower()
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
 async def test_chat_turn_diagnostics_reject_user_owned_api_keys(client, admin_token):
     response = await client.post(
         "/api/v1/api-keys",

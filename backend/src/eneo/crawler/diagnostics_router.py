@@ -6,7 +6,13 @@ import sqlalchemy as sa
 from fastapi import APIRouter, Depends, HTTPException, Path
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from eneo.authentication.auth_dependencies import require_permission
+from eneo.audit.application.audit_metadata import AuditMetadata
+from eneo.audit.domain.action_types import ActionType
+from eneo.audit.domain.entity_types import EntityType
+from eneo.authentication.auth_dependencies import (
+    require_permission,
+    require_session_auth,
+)
 from eneo.crawler.diagnostics_models import (
     CrawlerCapacity,
     CrawlerDiagnosticsModel,
@@ -95,18 +101,45 @@ async def get_crawler_diagnostics(container: ContainerDep) -> CrawlerDiagnostics
     )
 
 
-@router.get(
+async def _audit_probe(
+    *,
+    container: Container,
+    website: Websites,
+    result: CrawlerProbeModel,
+) -> None:
+    user = container.user()
+    await container.audit_service().log_async(
+        tenant_id=user.tenant_id,
+        user=user,
+        action=ActionType.WEBSITE_CRAWL_PROBED,
+        entity_type=EntityType.WEBSITE,
+        entity_id=website.id,
+        description=f"Probed website crawler connectivity for '{website.url}'",
+        metadata=AuditMetadata.standard(
+            actor=user,
+            target=website,
+            extra={
+                "outcome": result.outcome,
+                "duration_ms": result.duration_ms,
+                "reason": result.reason,
+            },
+        ),
+    )
+
+
+@router.post(
     "/diagnostics/{website_id}/probe/",
     response_model=CrawlerProbeModel,
     responses=responses.get_responses([403, 404]),
     description=(
-        "Run a bounded, read-only native crawler probe against one configured "
-        "website owned by the current tenant."
+        "Run a bounded, audited native crawler connectivity probe against one "
+        "configured website owned by the current tenant."
     ),
 )
 async def probe_crawler_website(
     website_id: Annotated[UUID, Path(description="Configured website identifier")],
     container: ContainerDep,
+    _session_guard: None = Depends(require_session_auth),
 ) -> CrawlerProbeModel:
     settings = get_settings()
     tenant = container.tenant()
@@ -129,7 +162,7 @@ async def probe_crawler_website(
                 website.encrypted_auth_password
             )
         except Exception:
-            return CrawlerProbeModel(
+            result = CrawlerProbeModel(
                 website_id=website.id,
                 url=website.url,
                 crawl_type=website.crawl_type,
@@ -140,6 +173,8 @@ async def probe_crawler_website(
                 pages_failed=1,
                 reason="http_auth_unavailable",
             )
+            await _audit_probe(container=container, website=website, result=result)
+            return result
 
     effective = _effective_limits(container)
     request = CrawlRequest(
@@ -199,7 +234,7 @@ async def probe_crawler_website(
     else:
         outcome = "failed"
 
-    return CrawlerProbeModel(
+    result = CrawlerProbeModel(
         website_id=website.id,
         url=website.url,
         crawl_type=website.crawl_type,
@@ -212,3 +247,5 @@ async def probe_crawler_website(
         reason=reason,
         sitemap_snapshot_available=sitemap_snapshot_available,
     )
+    await _audit_probe(container=container, website=website, result=result)
+    return result

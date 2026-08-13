@@ -40,6 +40,12 @@ def _container(*, tenant_id: UUID, session: object) -> MagicMock:
     tenant = SimpleNamespace(id=tenant_id, crawler_settings=None)
     container.tenant.return_value = tenant
     container.session.return_value = session
+    container.user.return_value = SimpleNamespace(
+        id=uuid4(), tenant_id=tenant_id, username="admin", email="admin@example.se"
+    )
+    audit_service = MagicMock()
+    audit_service.log_async = AsyncMock()
+    container.audit_service.return_value = audit_service
     return container
 
 
@@ -112,3 +118,7 @@ async def test_probe_returns_bounded_page_summary_without_content() -> None:
     assert result.pages_crawled == 1
     assert result.sample_title == "Exempel"
     assert "content" not in result.model_dump()
+    container.audit_service.return_value.log_async.assert_awaited_once()
+    audit_call = container.audit_service.return_value.log_async.await_args.kwargs
+    assert audit_call["action"].value == "website_crawl_probed"
+    assert audit_call["entity_id"] == website_id

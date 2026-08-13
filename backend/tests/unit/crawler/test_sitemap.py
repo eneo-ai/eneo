@@ -35,3 +35,30 @@ def test_parse_sitemap_bounds_gzip_expansion() -> None:
 
     with pytest.raises(InvalidSitemap, match="size limit"):
         parse_sitemap(body, max_decompressed_bytes=100)
+
+
+def test_parse_sitemap_rejects_declaration_padded_past_prefix() -> None:
+    body = b" " * 5000 + (
+        b"<!DOCTYPE urlset [<!ENTITY x 'https://example.se/expanded'>]>"
+        b"<urlset><url><loc>&x;</loc></url></urlset>"
+    )
+
+    with pytest.raises(InvalidSitemap, match="entity"):
+        parse_sitemap(body)
+
+
+def test_parse_sitemap_rejects_utf16_declaration_bypass() -> None:
+    body = (
+        "<!DOCTYPE urlset [<!ENTITY x 'https://example.se/expanded'>]>"
+        "<urlset><url><loc>&x;</loc></url></urlset>"
+    ).encode("utf-16")
+
+    with pytest.raises(InvalidSitemap, match="encoding"):
+        parse_sitemap(body)
+
+
+def test_parse_sitemap_normalizes_truncated_gzip() -> None:
+    body = gzip.compress(b"<urlset />")[:-4]
+
+    with pytest.raises(InvalidSitemap, match="invalid gzip"):
+        parse_sitemap(body)

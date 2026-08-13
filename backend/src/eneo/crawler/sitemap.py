@@ -57,13 +57,18 @@ def parse_sitemap(
                     if max_decompressed_bytes is None
                     else max_decompressed_bytes + 1
                 )
-        except gzip.BadGzipFile as exc:
+        except (gzip.BadGzipFile, EOFError, OSError) as exc:
             raise InvalidSitemap("invalid gzip sitemap") from exc
         if max_decompressed_bytes is not None and len(body) > max_decompressed_bytes:
             raise InvalidSitemap("decompressed sitemap exceeds size limit")
 
-    lowered_prefix = body[:4096].lower()
-    if b"<!doctype" in lowered_prefix or b"<!entity" in lowered_prefix:
+    # ElementTree expands declared internal entities. Scan the complete bounded
+    # document rather than a prefix so declarations cannot be hidden behind a
+    # long comment or whitespace preamble.
+    lowered_body = body.lower()
+    if b"\x00" in body:
+        raise InvalidSitemap("sitemaps must use an ASCII-compatible encoding")
+    if b"<!doctype" in lowered_body or b"<!entity" in lowered_body:
         raise InvalidSitemap("DTD and entity declarations are not allowed")
 
     try:

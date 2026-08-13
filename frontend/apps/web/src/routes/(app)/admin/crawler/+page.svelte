@@ -1,22 +1,20 @@
 <script lang="ts">
+  import type { CrawlerProbe } from "@eneo/eneo-js";
   import { Activity, CheckCircle2, CircleGauge, Globe2, Loader2, ShieldCheck } from "lucide-svelte";
+  import { enhance } from "$app/forms";
   import { Page, Settings } from "$lib/components/layout";
   import * as Alert from "$lib/components/ui/alert/index.js";
   import { Badge } from "$lib/components/ui/badge/index.js";
   import { Button } from "$lib/components/ui/button/index.js";
   import * as Card from "$lib/components/ui/card/index.js";
-  import { getEneo } from "$lib/core/Eneo";
   import { m } from "$lib/paraglide/messages";
   import type { PageProps } from "./$types";
 
-  const { data }: PageProps = $props();
-  const eneo = getEneo();
-
-  type Probe = Awaited<ReturnType<typeof eneo.crawler.probe>>;
+  const { data, form }: PageProps = $props();
 
   let selectedWebsiteId = $state("");
   let probing = $state(false);
-  let probeResult = $state<Probe | null>(null);
+  let probeResult = $state<CrawlerProbe | null>(null);
   let probeError = $state(false);
 
   const selectedWebsite = $derived(
@@ -24,8 +22,14 @@
   );
 
   $effect(() => {
-    if (!selectedWebsiteId && data.diagnostics.websites[0]) {
+    if (form?.websiteId) {
+      selectedWebsiteId = form.websiteId;
+    } else if (!selectedWebsiteId && data.diagnostics.websites[0]) {
       selectedWebsiteId = data.diagnostics.websites[0].id;
+    }
+    if (form) {
+      probeResult = form.probeResult ?? null;
+      probeError = Boolean(form.probeFailed);
     }
   });
 
@@ -36,20 +40,6 @@
       unitDisplay: "short",
       maximumFractionDigits: 1
     }).format(value / (value >= 1024 * 1024 ? 1024 * 1024 : 1024));
-  }
-
-  async function runProbe(): Promise<void> {
-    if (!selectedWebsiteId || probing) return;
-    probing = true;
-    probeError = false;
-    probeResult = null;
-    try {
-      probeResult = await eneo.crawler.probe(selectedWebsiteId);
-    } catch {
-      probeError = true;
-    } finally {
-      probing = false;
-    }
   }
 </script>
 
@@ -190,7 +180,24 @@
                   <Alert.Description>{m.crawler_admin_no_websites_description()}</Alert.Description>
                 </Alert.Root>
               {:else}
-                <div class="flex flex-col gap-3 sm:flex-row sm:items-end">
+                <form
+                  method="POST"
+                  action="?/probe"
+                  class="flex flex-col gap-3 sm:flex-row sm:items-end"
+                  use:enhance={() => {
+                    probing = true;
+                    probeError = false;
+                    probeResult = null;
+                    return async ({ result }) => {
+                      probing = false;
+                      if (result.type === "success" && result.data?.probeResult) {
+                        probeResult = result.data.probeResult as CrawlerProbe;
+                        return;
+                      }
+                      probeError = true;
+                    };
+                  }}
+                >
                   <label
                     class="flex min-w-0 flex-1 flex-col gap-2 text-sm font-medium"
                     for="crawler-website"
@@ -198,6 +205,7 @@
                     {m.crawler_admin_website()}
                     <select
                       id="crawler-website"
+                      name="website_id"
                       bind:value={selectedWebsiteId}
                       class="border-input bg-background ring-offset-background focus-visible:ring-ring h-10 w-full rounded-md border px-3 text-sm focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:outline-none"
                       disabled={probing}
@@ -208,7 +216,7 @@
                     </select>
                   </label>
                   <Button
-                    onclick={runProbe}
+                    type="submit"
                     disabled={!selectedWebsiteId || probing}
                     aria-busy={probing}
                   >
@@ -220,7 +228,7 @@
                       {m.crawler_admin_run_probe()}
                     {/if}
                   </Button>
-                </div>
+                </form>
 
                 {#if selectedWebsite?.requires_http_auth}
                   <p class="text-muted text-xs">

@@ -3,6 +3,7 @@ import socket
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
+import pytest
 from aiohttp import web
 
 from eneo.crawler.engine import (
@@ -16,7 +17,12 @@ from eneo.crawler.engine import (
     PageFailed,
     PageUnchanged,
 )
-from eneo.crawler.python_engine import PythonCrawlEngine
+from eneo.crawler.python_engine import (
+    PythonCrawlEngine,
+    _address_is_allowed,
+    _reject_disallowed_literal,
+    _UnsafeTarget,
+)
 from eneo.websites.domain.crawl_run import CrawlType
 
 
@@ -26,16 +32,19 @@ def _request(
     crawl_type: CrawlType = CrawlType.CRAWL,
     obey_robots: bool = False,
     max_response_bytes: int = 100_000,
+    max_pages: int = 10,
+    max_seconds: float = 10,
+    download_files: bool = True,
     conditional_gets: tuple[ConditionalGet, ...] = (),
 ) -> CrawlRequest:
     return CrawlRequest(
         url=url,
         crawl_type=crawl_type,
-        download_files=True,
+        download_files=download_files,
         obey_robots=obey_robots,
         limits=CrawlLimits(
-            max_pages=10,
-            max_seconds=10,
+            max_pages=max_pages,
+            max_seconds=max_seconds,
             request_timeout_seconds=2,
             max_response_bytes=max_response_bytes,
             concurrency=2,
@@ -83,7 +92,9 @@ async def test_crawl_emits_pages_incrementally_and_follows_scoped_links() -> Non
     async with _serve(app) as base_url:
         events = [
             event
-            async for event in PythonCrawlEngine().crawl(_request(f"{base_url}/start"))
+            async for event in PythonCrawlEngine(allow_private_network=True).crawl(
+                _request(f"{base_url}/start")
+            )
         ]
 
     pages = [event for event in events if isinstance(event, PageCrawled)]
@@ -118,7 +129,7 @@ async def test_crawl_honors_robots_rules() -> None:
     async with _serve(app) as base_url:
         events = [
             event
-            async for event in PythonCrawlEngine().crawl(
+            async for event in PythonCrawlEngine(allow_private_network=True).crawl(
                 _request(f"{base_url}/start", obey_robots=True)
             )
         ]
@@ -170,7 +181,7 @@ async def test_sitemap_crawl_follows_nested_indexes_but_not_page_links() -> None
     async with _serve(app) as base_url:
         events = [
             event
-            async for event in PythonCrawlEngine().crawl(
+            async for event in PythonCrawlEngine(allow_private_network=True).crawl(
                 _request(f"{base_url}/sitemap.xml", crawl_type=CrawlType.SITEMAP)
             )
         ]
@@ -197,7 +208,7 @@ async def test_conditional_frontier_keeps_known_children_when_seed_is_304() -> N
     async with _serve(app) as base_url:
         events = [
             event
-            async for event in PythonCrawlEngine().crawl(
+            async for event in PythonCrawlEngine(allow_private_network=True).crawl(
                 _request(
                     f"{base_url}/start",
                     conditional_gets=(
@@ -236,7 +247,9 @@ async def test_crawl_retries_service_unavailable_with_retry_after() -> None:
     async with _serve(app) as base_url:
         events = [
             event
-            async for event in PythonCrawlEngine().crawl(_request(f"{base_url}/start"))
+            async for event in PythonCrawlEngine(allow_private_network=True).crawl(
+                _request(f"{base_url}/start")
+            )
         ]
 
     assert attempts == 2
@@ -256,7 +269,7 @@ async def test_crawl_rejects_oversized_response() -> None:
     async with _serve(app) as base_url:
         events = [
             event
-            async for event in PythonCrawlEngine().crawl(
+            async for event in PythonCrawlEngine(allow_private_network=True).crawl(
                 _request(f"{base_url}/start", max_response_bytes=10)
             )
         ]
@@ -280,7 +293,9 @@ async def test_downloaded_file_exists_until_event_consumer_resumes() -> None:
 
     async with _serve(app) as base_url:
         downloaded_path = None
-        async for event in PythonCrawlEngine().crawl(_request(f"{base_url}/start")):
+        async for event in PythonCrawlEngine(allow_private_network=True).crawl(
+            _request(f"{base_url}/start")
+        ):
             if isinstance(event, FileDownloaded):
                 downloaded_path = event.path
                 assert event.path.read_bytes() == b"document bytes"
@@ -289,7 +304,10 @@ async def test_downloaded_file_exists_until_event_consumer_resumes() -> None:
     assert not downloaded_path.exists()
 
 
-async def test_process_wide_http_capacity_bounds_concurrent_crawls() -> None:
+async def test_process_wide_http_capacity_bounds_concurrent_crawls(monkeypatch) -> None:
+    monkeypatch.setattr("eneo.crawler.python_engine._process_capacity", None)
+    monkeypatch.setattr("eneo.crawler.python_engine._process_capacity_loop", None)
+    monkeypatch.setattr("eneo.crawler.python_engine._process_capacity_limit", None)
     active = 0
     peak = 0
 
@@ -308,14 +326,21 @@ async def test_process_wide_http_capacity_bounds_concurrent_crawls() -> None:
     app.router.add_get("/two", slow)
 
     async with _serve(app) as base_url:
-        engine = PythonCrawlEngine(global_concurrency=1)
+        first_engine = PythonCrawlEngine(
+            global_concurrency=1, allow_private_network=True
+        )
+        second_engine = PythonCrawlEngine(
+            global_concurrency=1, allow_private_network=True
+        )
 
-        async def collect(path: str) -> list[CrawlEvent]:
+        async def collect(engine: PythonCrawlEngine, path: str) -> list[CrawlEvent]:
             return [
                 event async for event in engine.crawl(_request(f"{base_url}/{path}"))
             ]
 
-        await asyncio.gather(collect("one"), collect("two"))
+        await asyncio.gather(
+            collect(first_engine, "one"), collect(second_engine, "two")
+        )
 
     assert peak == 1
 
@@ -342,7 +367,7 @@ async def test_sitemap_lastmod_emits_stable_snapshot() -> None:
     async with _serve(app) as base_url:
         events = [
             event
-            async for event in PythonCrawlEngine().crawl(
+            async for event in PythonCrawlEngine(allow_private_network=True).crawl(
                 _request(f"{base_url}/sitemap.xml", crawl_type=CrawlType.SITEMAP)
             )
         ]
@@ -351,3 +376,265 @@ async def test_sitemap_lastmod_emits_stable_snapshot() -> None:
     assert isinstance(finished, CrawlFinished)
     assert finished.sitemap_entries == 1
     assert finished.sitemap_fingerprint is not None
+
+
+def test_non_global_network_targets_are_rejected() -> None:
+    assert not _address_is_allowed("127.0.0.1", allow_private_network=False)
+    assert not _address_is_allowed("169.254.169.254", allow_private_network=False)
+    assert not _address_is_allowed("10.0.0.1", allow_private_network=False)
+    assert not _address_is_allowed("224.0.0.1", allow_private_network=False)
+    assert not _address_is_allowed("::1", allow_private_network=False)
+    assert _address_is_allowed("8.8.8.8", allow_private_network=False)
+    with pytest.raises(_UnsafeTarget):
+        _reject_disallowed_literal(
+            "http://169.254.169.254/latest/meta-data/",
+            allow_private_network=False,
+        )
+
+
+async def test_private_seed_becomes_a_safe_page_failure() -> None:
+    events = [
+        event
+        async for event in PythonCrawlEngine().crawl(
+            _request("http://127.0.0.1:9/private")
+        )
+    ]
+
+    assert isinstance(events[0], PageFailed)
+    assert events[0].reason == "_UnsafeTarget"
+
+
+async def test_redirect_is_validated_before_out_of_scope_target_is_requested() -> None:
+    target_requested = False
+
+    async def redirect(_: web.Request) -> web.Response:
+        return web.Response(status=302, headers={"Location": "http://169.254.169.254/"})
+
+    async def target(_: web.Request) -> web.Response:
+        nonlocal target_requested
+        target_requested = True
+        return web.Response(text="never", content_type="text/html")
+
+    app = web.Application()
+    app.router.add_get("/start", redirect)
+    app.router.add_get("/target", target)
+
+    async with _serve(app) as base_url:
+        events = [
+            event
+            async for event in PythonCrawlEngine(allow_private_network=True).crawl(
+                _request(f"{base_url}/start")
+            )
+        ]
+
+    assert not target_requested
+    assert isinstance(events[0], PageFailed)
+    assert events[0].reason == "_RedirectRejected"
+
+
+async def test_basic_auth_is_not_sent_after_origin_change() -> None:
+    seen_authorization: list[str | None] = []
+
+    async def attacker(request: web.Request) -> web.Response:
+        seen_authorization.append(request.headers.get("Authorization"))
+        return web.Response(text="never", content_type="text/html")
+
+    attacker_app = web.Application()
+    attacker_app.router.add_get("/target", attacker)
+    async with _serve(attacker_app) as attacker_url:
+
+        async def redirect(_: web.Request) -> web.Response:
+            return web.Response(
+                status=302, headers={"Location": f"{attacker_url}/target"}
+            )
+
+        origin_app = web.Application()
+        origin_app.router.add_get("/start", redirect)
+        async with _serve(origin_app) as base_url:
+            request = _request(f"{base_url}/start")
+            request = CrawlRequest(
+                url=request.url,
+                crawl_type=request.crawl_type,
+                download_files=request.download_files,
+                obey_robots=request.obey_robots,
+                limits=request.limits,
+                http_user="user",
+                http_pass="secret",
+            )
+            engine = PythonCrawlEngine(allow_private_network=True)
+            events = [event async for event in engine.crawl(request)]
+
+    assert seen_authorization == []
+    assert isinstance(events[0], PageFailed)
+    assert events[0].reason == "_RedirectRejected"
+
+
+async def test_page_limit_marks_crawl_partial() -> None:
+    async def start(_: web.Request) -> web.Response:
+        return web.Response(
+            text='<main><a href="/start/child">child</a></main>',
+            content_type="text/html",
+        )
+
+    app = web.Application()
+    app.router.add_get("/start", start)
+    async with _serve(app) as base_url:
+        events = [
+            event
+            async for event in PythonCrawlEngine(allow_private_network=True).crawl(
+                _request(f"{base_url}/start", max_pages=1)
+            )
+        ]
+
+    assert events[-1] == CrawlFinished(
+        status="partial",
+        pages_crawled=1,
+        pages_failed=0,
+        reason="page_limit",
+    )
+
+
+async def test_max_seconds_marks_slow_crawl_partial() -> None:
+    async def slow(_: web.Request) -> web.Response:
+        await asyncio.sleep(0.1)
+        return web.Response(text="<main>late</main>", content_type="text/html")
+
+    app = web.Application()
+    app.router.add_get("/start", slow)
+    async with _serve(app) as base_url:
+        events = [
+            event
+            async for event in PythonCrawlEngine(allow_private_network=True).crawl(
+                _request(f"{base_url}/start", max_seconds=0.01)
+            )
+        ]
+
+    assert events == [
+        CrawlFinished(
+            status="partial",
+            pages_crawled=0,
+            pages_failed=0,
+            reason="timeout",
+        )
+    ]
+
+
+async def test_max_seconds_includes_robots_fetch() -> None:
+    async def slow_robots(_: web.Request) -> web.Response:
+        await asyncio.sleep(0.1)
+        return web.Response(text="User-agent: *", content_type="text/plain")
+
+    app = web.Application()
+    app.router.add_get("/robots.txt", slow_robots)
+    async with _serve(app) as base_url:
+        events = [
+            event
+            async for event in PythonCrawlEngine(allow_private_network=True).crawl(
+                _request(
+                    f"{base_url}/start",
+                    obey_robots=True,
+                    max_seconds=0.01,
+                )
+            )
+        ]
+
+    assert events[-1] == CrawlFinished(
+        status="partial",
+        pages_crawled=0,
+        pages_failed=0,
+        reason="timeout",
+    )
+
+
+async def test_file_downloads_share_the_overall_crawl_deadline() -> None:
+    async def start(_: web.Request) -> web.Response:
+        return web.Response(
+            text='<main><a href="/slow.pdf">file</a></main>',
+            content_type="text/html",
+        )
+
+    async def slow_file(_: web.Request) -> web.Response:
+        await asyncio.sleep(0.2)
+        return web.Response(body=b"late", content_type="application/pdf")
+
+    app = web.Application()
+    app.router.add_get("/start", start)
+    app.router.add_get("/slow.pdf", slow_file)
+    async with _serve(app) as base_url:
+        events = [
+            event
+            async for event in PythonCrawlEngine(allow_private_network=True).crawl(
+                _request(f"{base_url}/start", max_seconds=0.05)
+            )
+        ]
+
+    finished = events[-1]
+    assert isinstance(finished, CrawlFinished)
+    assert finished.status == "partial"
+    assert finished.reason == "timeout"
+    assert not any(isinstance(event, FileDownloaded) for event in events)
+
+
+async def test_bogus_response_charset_becomes_page_failure() -> None:
+    async def bogus(_: web.Request) -> web.Response:
+        return web.Response(
+            body=b"<main>content</main>",
+            headers={"Content-Type": "text/html; charset=not-a-real-charset"},
+        )
+
+    app = web.Application()
+    app.router.add_get("/start", bogus)
+    async with _serve(app) as base_url:
+        events = [
+            event
+            async for event in PythonCrawlEngine(allow_private_network=True).crawl(
+                _request(f"{base_url}/start")
+            )
+        ]
+
+    assert isinstance(events[0], PageFailed)
+    assert events[0].reason == "LookupError"
+
+
+async def test_cancellation_propagates_and_stops_in_flight_fetches() -> None:
+    request_started = asyncio.Event()
+    release_request = asyncio.Event()
+
+    async def blocked(_: web.Request) -> web.Response:
+        request_started.set()
+        await release_request.wait()
+        return web.Response(text="released", content_type="text/html")
+
+    app = web.Application()
+    app.router.add_get("/start", blocked)
+    async with _serve(app) as base_url:
+
+        async def collect() -> list[CrawlEvent]:
+            return [
+                event
+                async for event in PythonCrawlEngine(allow_private_network=True).crawl(
+                    _request(f"{base_url}/start")
+                )
+            ]
+
+        crawl_task = asyncio.create_task(collect())
+        await asyncio.wait_for(request_started.wait(), timeout=1)
+        crawl_task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await crawl_task
+        release_request.set()
+
+
+def test_crawl_request_repr_redacts_password() -> None:
+    request = _request("https://example.se/")
+    authenticated = CrawlRequest(
+        url=request.url,
+        crawl_type=request.crawl_type,
+        download_files=request.download_files,
+        obey_robots=request.obey_robots,
+        limits=request.limits,
+        http_user="admin",
+        http_pass="top-secret",
+    )
+
+    assert "top-secret" not in repr(authenticated)

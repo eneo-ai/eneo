@@ -3,9 +3,9 @@ import hashlib
 import random
 import socket
 import time
-from collections import defaultdict
+from collections import defaultdict, deque
 from datetime import datetime, timedelta, timezone
-from typing import Any, cast
+from typing import Any, Generic, TypeVar, cast
 from uuid import UUID
 
 import redis.asyncio as aioredis
@@ -54,6 +54,76 @@ logger = get_logger(__name__)
 
 SCHEDULER_LOCK_KEY = "crawl_scheduler:leader"
 SCHEDULER_LOCK_TTL_SECONDS = 1800
+
+QueueItem = TypeVar("QueueItem")
+
+
+class _ByteBoundedQueue(Generic[QueueItem]):
+    """Async queue bounded by both event count and retained content bytes."""
+
+    def __init__(self, *, max_items: int, max_bytes: int) -> None:
+        if max_items <= 0 or max_bytes <= 0:
+            raise ValueError("queue limits must be positive")
+        self._max_items = max_items
+        self._max_bytes = max_bytes
+        self._items: deque[tuple[QueueItem, int]] = deque()
+        self._retained_bytes = 0
+        self._condition = asyncio.Condition()
+
+    async def put(self, item: QueueItem, *, weight: int = 0) -> None:
+        if weight < 0:
+            raise ValueError("queue item weight cannot be negative")
+        async with self._condition:
+            await self._condition.wait_for(
+                lambda: len(self._items) < self._max_items
+                and (
+                    not self._items or self._retained_bytes + weight <= self._max_bytes
+                )
+            )
+            self._items.append((item, weight))
+            self._retained_bytes += weight
+            self._condition.notify_all()
+
+    async def get(self) -> QueueItem:
+        async with self._condition:
+            await self._condition.wait_for(self._items.__len__)
+            item, weight = self._items.popleft()
+            self._retained_bytes -= weight
+            self._condition.notify_all()
+            return item
+
+
+def _crawl_was_successful(
+    *,
+    pages: int,
+    unchanged_pages: int,
+    files: int,
+    failed_pages: int,
+    failed_files: int,
+    sitemap_skipped: bool,
+) -> bool:
+    if sitemap_skipped:
+        return True
+    total_items = pages + unchanged_pages + files
+    total_failed = failed_pages + failed_files
+    return total_items > 0 and total_failed < total_items
+
+
+def _should_store_sitemap_state(
+    *,
+    has_new_state: bool,
+    crawl_is_partial: bool,
+    sitemap_skipped: bool,
+    crawl_successful: bool,
+    total_failed: int,
+) -> bool:
+    return (
+        has_new_state
+        and not crawl_is_partial
+        and not sitemap_skipped
+        and crawl_successful
+        and total_failed == 0
+    )
 
 
 async def _get_primary_active_job_id(
@@ -1075,15 +1145,17 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
             new_sitemap_state: dict[str, Any] | None = None
             sitemap_skipped = False
             page_buffer: list[CrawlPageData] = []
+            page_buffer_bytes = 0
             processing_page_seconds = 0.0
             processing_file_seconds = 0.0
 
             async def _flush_pages() -> None:
-                nonlocal num_failed_pages, processing_page_seconds
+                nonlocal num_failed_pages, page_buffer_bytes, processing_page_seconds
                 if not page_buffer:
                     return
                 batch = list(page_buffer)
                 page_buffer.clear()
+                page_buffer_bytes = 0
                 flush_started = time.time()
                 (
                     success_count,
@@ -1173,8 +1245,9 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                 finally:
                     processing_file_seconds += time.time() - file_started
 
-            queue: asyncio.Queue[tuple[object, asyncio.Event | None]] = asyncio.Queue(
-                maxsize=max(crawl_context.batch_size * 2, 2)
+            queue = _ByteBoundedQueue[tuple[object, asyncio.Event | None]](
+                max_items=max(crawl_context.batch_size * 2, 2),
+                max_bytes=crawl_context.max_batch_content_bytes,
             )
             stream_complete = object()
 
@@ -1238,7 +1311,7 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                                     pages_unchanged=num_not_modified_pages,
                                 ),
                                 None,
-                            )
+                            ),
                         )
                         return
                     async for event in crawler.crawl(crawl_request):
@@ -1247,7 +1320,12 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                             if isinstance(event, FileDownloaded)
                             else None
                         )
-                        await queue.put((event, acknowledgement))
+                        event_weight = (
+                            len(event.content.encode("utf-8"))
+                            if isinstance(event, PageCrawled)
+                            else 0
+                        )
+                        await queue.put((event, acknowledgement), weight=event_weight)
                         if acknowledgement is not None:
                             await acknowledgement.wait()
                 finally:
@@ -1286,6 +1364,7 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                     try:
                         if isinstance(event, PageCrawled):
                             num_pages += 1
+                            page_content_bytes = len(event.content.encode("utf-8"))
                             page_buffer.append(
                                 {
                                     "url": event.url,
@@ -1294,7 +1373,12 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                                     "last_modified": event.last_modified,
                                 }
                             )
-                            if len(page_buffer) >= crawl_context.batch_size:
+                            page_buffer_bytes += page_content_bytes
+                            if (
+                                len(page_buffer) >= crawl_context.batch_size
+                                or page_buffer_bytes
+                                >= crawl_context.max_batch_content_bytes
+                            ):
                                 await _flush_pages()
                         elif isinstance(event, PageUnchanged):
                             num_not_modified_pages += 1
@@ -1363,36 +1447,12 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                 0.0,
             )
 
-            if (
-                new_sitemap_state is not None
-                and not crawl_is_partial
-                and not sitemap_skipped
-            ):
-
-                async def _store_sitemap_state(sess: AsyncSession) -> None:
-                    await sess.execute(
-                        sa.update(WebsitesTable)
-                        .where(
-                            WebsitesTable.id == params.website_id,
-                            WebsitesTable.tenant_id == crawl_context.tenant_id,
-                        )
-                        .values(sitemap_state=new_sitemap_state)
-                    )
-
-                await execute_with_recovery(
-                    container=container,
-                    session_holder=session_holder,
-                    created_sessions=created_sessions,
-                    operation_name="sitemap_state_update",
-                    operation=_store_sitemap_state,
-                )
-
             # Cleanup phase: delete stale blobs (batch for performance)
             cleanup_start = time.time()
             # Exclude failed_titles - their original data was preserved by transaction rollback
             stale_titles = (
                 []
-                if crawl_is_partial
+                if crawl_is_partial or num_failed_pages or num_failed_files
                 else [
                     title
                     for title in existing_titles
@@ -1623,9 +1683,42 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
 
             # Determine if crawl was successful
             # Success = at least one item (page or file) AND not everything failed
-            total_items = num_pages + num_not_modified_pages + num_files
             total_failed = num_failed_pages + num_failed_files
-            crawl_successful = total_items > 0 and total_failed < total_items
+            crawl_successful = _crawl_was_successful(
+                pages=num_pages,
+                unchanged_pages=num_not_modified_pages,
+                files=num_files,
+                failed_pages=num_failed_pages,
+                failed_files=num_failed_files,
+                sitemap_skipped=sitemap_skipped,
+            )
+
+            if _should_store_sitemap_state(
+                has_new_state=new_sitemap_state is not None,
+                crawl_is_partial=crawl_is_partial,
+                sitemap_skipped=sitemap_skipped,
+                crawl_successful=crawl_successful,
+                total_failed=total_failed,
+            ):
+                assert new_sitemap_state is not None
+
+                async def _store_sitemap_state(sess: AsyncSession) -> None:
+                    await sess.execute(
+                        sa.update(WebsitesTable)
+                        .where(
+                            WebsitesTable.id == params.website_id,
+                            WebsitesTable.tenant_id == crawl_context.tenant_id,
+                        )
+                        .values(sitemap_state=new_sitemap_state)
+                    )
+
+                await execute_with_recovery(
+                    container=container,
+                    session_holder=session_holder,
+                    created_sessions=created_sessions,
+                    operation_name="sitemap_state_update",
+                    operation=_store_sitemap_state,
+                )
 
             async def _do_circuit_breaker_update(sess: AsyncSession) -> None:
                 """Update circuit breaker state with appropriate backoff/reset."""

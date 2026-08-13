@@ -9,12 +9,12 @@ export function initCrawler(client) {
     },
 
     /**
-     * Run a bounded, read-only probe against one configured website.
+     * Run a bounded, audited probe against one configured website.
      * @param {string} websiteId
      */
     probe: async (websiteId) => {
       return client.fetch("/api/v1/crawler/diagnostics/{website_id}/probe/", {
-        method: "get",
+        method: "post",
         params: { path: { website_id: websiteId } }
       });
     }

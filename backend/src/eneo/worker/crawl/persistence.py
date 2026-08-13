@@ -287,7 +287,11 @@ async def persist_batch(
                 ):
                     success_count += 1
                     successful_urls.append(url)
-                    validator_refreshes.append(page_data)
+                    if (
+                        page_data.get("etag") is not None
+                        or page_data.get("last_modified") is not None
+                    ):
+                        validator_refreshes.append(page_data)
                     continue
 
                 # 2. Chunk the text (local operation)

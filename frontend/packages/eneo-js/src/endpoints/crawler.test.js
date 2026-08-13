@@ -11,7 +11,7 @@ test("createEneo exposes native crawler diagnostics", () => {
   assert.equal(typeof eneo.crawler.probe, "function");
 });
 
-test("crawler diagnostics use read-only tenant-scoped contracts", async () => {
+test("crawler diagnostics and audited probe use tenant-scoped contracts", async () => {
   const calls = [];
   const crawler = initCrawler({
     fetch: async (endpoint, request) => {
@@ -31,7 +31,7 @@ test("crawler diagnostics use read-only tenant-scoped contracts", async () => {
     {
       endpoint: "/api/v1/crawler/diagnostics/{website_id}/probe/",
       request: {
-        method: "get",
+        method: "post",
         params: { path: { website_id: "website-id" } }
       }
     }

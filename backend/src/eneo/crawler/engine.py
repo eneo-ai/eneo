@@ -7,7 +7,7 @@ requiring every engine to build a complete spool before ingestion starts.
 """
 
 from collections.abc import AsyncIterator
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal, Protocol
 
@@ -53,7 +53,7 @@ class CrawlRequest:
     obey_robots: bool
     limits: CrawlLimits
     http_user: str | None = None
-    http_pass: str | None = None
+    http_pass: str | None = field(default=None, repr=False)
     conditional_gets: tuple["ConditionalGet", ...] = ()
 
 

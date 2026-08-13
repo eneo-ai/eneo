@@ -48,13 +48,13 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
+    get?: never;
+    put?: never;
     /**
      * Probe Crawler Website
-     * @description Run a bounded, read-only native crawler probe against one configured website owned by the current tenant.
+     * @description Run a bounded, audited native crawler connectivity probe against one configured website owned by the current tenant.
      */
-    get: operations["probe_crawler_website_api_v1_crawler_diagnostics__website_id__probe__get"];
-    put?: never;
-    post?: never;
+    post: operations["probe_crawler_website_api_v1_crawler_diagnostics__website_id__probe__post"];
     delete?: never;
     options?: never;
     head?: never;
@@ -8221,6 +8221,7 @@ export interface components {
       | "website_updated"
       | "website_deleted"
       | "website_crawled"
+      | "website_crawl_probed"
       | "website_transferred"
       | "group_chat_created"
       | "collection_created"
@@ -11253,7 +11254,7 @@ export interface components {
       obey_robots?: boolean | null;
       /**
        * Autothrottle Enabled
-       * @description Enable automatic request throttling based on server response times
+       * @description Enable conservative pacing between bounded request batches
        * @example true
        */
       autothrottle_enabled?: boolean | null;
@@ -21139,7 +21140,7 @@ export interface operations {
       };
     };
   };
-  probe_crawler_website_api_v1_crawler_diagnostics__website_id__probe__get: {
+  probe_crawler_website_api_v1_crawler_diagnostics__website_id__probe__post: {
     parameters: {
       query?: never;
       header?: never;
