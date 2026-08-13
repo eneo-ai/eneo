@@ -12,6 +12,7 @@ from eneo.governance_policy.presentation.governance_policy_models import (
     GovernancePolicyUpdate,
     McpRestrictionInput,
     ModelsRestrictionInput,
+    ReasoningPolicyInput,
     SkillsPolicyInput,
 )
 from eneo.governance_policy.presentation.governance_policy_router import (
@@ -106,3 +107,35 @@ async def test_mcp_only_update_revalidates_personal_skill_activation():
     )
 
     assistant_service.assert_personal_default_governance_context_fit.assert_awaited_once()
+
+
+async def test_reasoning_only_update_skips_unrelated_context_fit_validation():
+    policy = GovernancePolicy(
+        id=uuid4(),
+        tenant_id=uuid4(),
+        scope=PolicyScope.PERSONAL_DEFAULT_ASSISTANT,
+    )
+    service = MagicMock()
+    service.get_policy_for_update = AsyncMock(return_value=policy)
+    service.get_skill_bindings = AsyncMock(return_value=[])
+    service.get_skill_binding_projections = AsyncMock(return_value=[])
+    service.update_policy = AsyncMock(return_value=policy)
+    assistant_service = MagicMock()
+    assistant_service.assert_personal_default_governance_context_fit = AsyncMock()
+    container = MagicMock()
+    container.governance_policy_service.return_value = service
+    container.governance_policy_assembler.return_value = MagicMock()
+    container.assistant_service.return_value = assistant_service
+
+    await update_governance_policy(
+        payload=GovernancePolicyUpdate(
+            reasoning_policy=ReasoningPolicyInput(
+                default_effort=None,
+                allow_user_override=True,
+            )
+        ),
+        request=_session_request(),
+        container=container,
+    )
+
+    assistant_service.assert_personal_default_governance_context_fit.assert_not_awaited()

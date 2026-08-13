@@ -989,9 +989,30 @@ class TenantModelAdapter(CompletionModelAdapter):
                 supported_params = (
                     _get_supported_openai_params(self.litellm_model) or []
                 )
-                if "reasoning_effort" not in supported_params or model_kwargs_dict[
-                    "reasoning_effort"
-                ] in (None, "none", ""):
+                reasoning_effort = model_kwargs_dict["reasoning_effort"]
+                remove_reasoning_effort = (
+                    "reasoning_effort" not in supported_params
+                    or reasoning_effort in (None, "")
+                )
+                if reasoning_effort == "none" and not remove_reasoning_effort:
+                    try:
+                        remove_reasoning_effort = (
+                            litellm_transport.get_model_info(self.litellm_model).get(
+                                "supports_none_reasoning_effort"
+                            )
+                            is not True
+                        )
+                    except Exception:
+                        # Old snapshots advertised `none` for every reasoning
+                        # route. Treat unavailable metadata conservatively so
+                        # those values retain their provider-default behavior.
+                        remove_reasoning_effort = True
+                        logger.debug(
+                            "Could not confirm literal none reasoning support",
+                            extra={"model_route": self.litellm_model},
+                            exc_info=True,
+                        )
+                if remove_reasoning_effort:
                     del model_kwargs_dict["reasoning_effort"]
 
             # Ensure max_tokens is set - some APIs (e.g., vLLM, OpenAI-compatible)

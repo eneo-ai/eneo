@@ -71,6 +71,9 @@ class GovernancePolicyRepoImpl:
             ],
             disabled_mcp_tool_ids=disabled_tool_ids,
             default_prompt_library_id=row.default_prompt_library_id,
+            reasoning_policy_configured=row.reasoning_policy_configured,
+            default_reasoning_effort=row.default_reasoning_effort,
+            allow_user_reasoning_effort=row.allow_user_reasoning_effort,
             updated_at=row.updated_at,
             updated_by_user_id=row.updated_by_user_id,
         )
@@ -135,6 +138,9 @@ class GovernancePolicyRepoImpl:
                 mcp_restriction_enabled=policy.mcp_restriction_enabled,
                 prompt_enforcement_enabled=policy.prompt_enforcement_enabled,
                 default_prompt_library_id=policy.default_prompt_library_id,
+                reasoning_policy_configured=policy.reasoning_policy_configured,
+                default_reasoning_effort=policy.default_reasoning_effort,
+                allow_user_reasoning_effort=policy.allow_user_reasoning_effort,
                 updated_by_user_id=updated_by_user_id,
             )
         )

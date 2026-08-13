@@ -21,6 +21,7 @@ from eneo.completion_models.domain.completion_model import (
     CompletionModel as CompletionModelDomain,
 )
 from eneo.completion_models.domain.model_kwargs_capabilities import (
+    reasoning_effort_options_from_model_info,
     snapshot_supported_model_kwargs,
 )
 from eneo.completion_models.presentation.completion_model_assembler import (
@@ -95,9 +96,48 @@ def test_snapshot_fallback_honors_reasoning_flag():
 
 
 def test_snapshot_keeps_discovered_reasoning_options_over_fallback():
-    snapshot = snapshot_supported_model_kwargs(["reasoning_effort"], reasoning=True)
+    snapshot = snapshot_supported_model_kwargs(
+        ["reasoning_effort"],
+        reasoning=True,
+        reasoning_effort_options=["low", "medium", "high", "xhigh"],
+    )
 
-    assert snapshot.reasoning_effort.options == ["none", "low", "medium", "high"]
+    assert snapshot.reasoning_effort.options == ["low", "medium", "high", "xhigh"]
+
+
+def test_litellm_reasoning_flags_map_to_exact_supported_options():
+    options = reasoning_effort_options_from_model_info(
+        {
+            "supports_reasoning": True,
+            "supports_none_reasoning_effort": True,
+            "supports_minimal_reasoning_effort": True,
+            "supports_low_reasoning_effort": True,
+            "supports_xhigh_reasoning_effort": True,
+            "supports_max_reasoning_effort": True,
+        }
+    )
+
+    assert options == ["none", "minimal", "low", "medium", "high", "xhigh", "max"]
+
+
+def test_snapshot_does_not_invent_reasoning_options_after_explicit_discovery():
+    snapshot = snapshot_supported_model_kwargs(
+        ["reasoning_effort"],
+        reasoning=False,
+        reasoning_effort_options=[],
+    )
+
+    assert snapshot.reasoning_effort.supported is False
+
+
+def test_admin_reasoning_flag_restores_conservative_options_after_empty_discovery():
+    snapshot = snapshot_supported_model_kwargs(
+        ["reasoning_effort"],
+        reasoning=True,
+        reasoning_effort_options=[],
+    )
+
+    assert snapshot.reasoning_effort.options == ["low", "medium", "high"]
 
 
 def test_capability_override_wins_over_model_name_and_reasoning_flag():
@@ -160,6 +200,44 @@ def test_filter_unsupported_returns_self_when_all_supported():
     filtered = kwargs.filter_unsupported(model.supported_model_kwargs)
 
     assert filtered is kwargs
+
+
+def test_filter_unsupported_strips_unadvertised_select_values():
+    model = _completion_model_sparse(
+        reasoning=True,
+        model_kwargs_capabilities={
+            "reasoning_effort": {
+                "supported": True,
+                "control": "select",
+                "options": ["low", "medium", "high"],
+            }
+        },
+    )
+
+    filtered = ModelKwargs(reasoning_effort="ultra").filter_unsupported(
+        model.supported_model_kwargs
+    )
+
+    assert filtered.reasoning_effort is None
+
+
+def test_filter_unsupported_rejects_select_values_without_an_option_set():
+    model = _completion_model_sparse(
+        reasoning=True,
+        model_kwargs_capabilities={
+            "reasoning_effort": {
+                "supported": True,
+                "control": "select",
+                "options": None,
+            }
+        },
+    )
+
+    filtered = ModelKwargs(reasoning_effort="high").filter_unsupported(
+        model.supported_model_kwargs
+    )
+
+    assert filtered.reasoning_effort is None
 
 
 def test_filter_unsupported_preserves_response_format():

@@ -48,6 +48,11 @@ class PromptEnforcementInput(BaseModel):
     prompt_library_id: UUID | None = None
 
 
+class ReasoningPolicyInput(BaseModel):
+    default_effort: str | None = Field(default=None, max_length=32)
+    allow_user_override: bool = False
+
+
 class SkillsPolicyInput(BaseModel):
     bindings: list[AssistantSkillBindingInput] = Field(
         default_factory=lambda: list[AssistantSkillBindingInput]()
@@ -58,6 +63,7 @@ class GovernancePolicyUpdate(BaseModel):
     models_restriction: ModelsRestrictionInput | None = None
     mcp_restriction: McpRestrictionInput | None = None
     prompt_enforcement: PromptEnforcementInput | None = None
+    reasoning_policy: ReasoningPolicyInput | None = None
     skills: SkillsPolicyInput | None = None
 
 
@@ -93,6 +99,12 @@ class PromptEnforcementPublic(BaseModel):
     prompt_library_id: UUID | None
 
 
+class ReasoningPolicyPublic(BaseModel):
+    configured: bool
+    default_effort: str | None
+    allow_user_override: bool
+
+
 class SkillsPolicyPublic(BaseModel):
     bindings: list[AssistantSkillBindingSummary]
 
@@ -101,6 +113,7 @@ class GovernancePolicyPublic(BaseModel):
     models_restriction: ModelsRestrictionPublic
     mcp_restriction: McpRestrictionPublic
     prompt_enforcement: PromptEnforcementPublic
+    reasoning_policy: ReasoningPolicyPublic
     skills: SkillsPolicyPublic
     updated_at: datetime | None
     updated_by_user_id: UUID | None

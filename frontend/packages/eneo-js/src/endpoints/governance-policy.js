@@ -17,21 +17,29 @@ export function initGovernancePolicy(client) {
 
     /**
      * Update the tenant's personal assistant governance policy. Only the provided
-     * dimensions (models_restriction / mcp_restriction / prompt_enforcement / skills)
-     * are touched.
+     * dimensions (models_restriction / mcp_restriction / prompt_enforcement /
+     * reasoning_policy / skills) are touched.
      * @param {Object} params
      * @param {{enabled: boolean, models: {completion_model_id: string, is_default: boolean}[], provider_ids: string[]} | null} [params.models_restriction]
      * @param {{enabled: boolean, servers: {mcp_server_id: string, is_default_enabled: boolean}[], disabled_tool_ids: string[]} | null} [params.mcp_restriction]
      * @param {{enabled: boolean, prompt_library_id: string | null} | null} [params.prompt_enforcement]
+     * @param {{default_effort: string | null, allow_user_override: boolean} | null} [params.reasoning_policy]
      * @param {{bindings: import('../types/resources').SkillBindingReferenceInput[]} | null} [params.skills]
      * @throws {EneoError}
      */
-    update: async ({ models_restriction, mcp_restriction, prompt_enforcement, skills }) => {
+    update: async ({
+      models_restriction,
+      mcp_restriction,
+      prompt_enforcement,
+      reasoning_policy,
+      skills
+    }) => {
       /** @type {Record<string, unknown>} */
       const body = {};
       if (models_restriction !== undefined) body.models_restriction = models_restriction;
       if (mcp_restriction !== undefined) body.mcp_restriction = mcp_restriction;
       if (prompt_enforcement !== undefined) body.prompt_enforcement = prompt_enforcement;
+      if (reasoning_policy !== undefined) body.reasoning_policy = reasoning_policy;
       if (skills !== undefined) body.skills = skills;
       const res = await client.fetch("/api/v1/admin/governance-policy/", {
         method: "put",

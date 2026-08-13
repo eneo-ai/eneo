@@ -16,6 +16,7 @@
   import PolicyConfirmDialog from "./PolicyConfirmDialog.svelte";
   import PolicySaveBar from "./PolicySaveBar.svelte";
   import PromptEnforcementSection from "./PromptEnforcementSection.svelte";
+  import ReasoningPolicySection from "./ReasoningPolicySection.svelte";
   import SkillsPolicySection from "./SkillsPolicySection.svelte";
   import { PolicyDraft } from "./policyDraft.svelte";
 
@@ -52,6 +53,16 @@
         setSingleDefault={draft.setSingleDefault}
         toggleModelSelected={draft.toggleModelSelected}
         toggleProvider={draft.toggleProvider}
+      />
+      <ReasoningPolicySection
+        configured={draft.reasoningPolicyConfigured}
+        bind:defaultEffort={draft.defaultReasoningEffort}
+        bind:allowUserOverride={draft.allowUserReasoningEffort}
+        options={draft.reasoningOptions}
+        summary={draft.reasoningSummary}
+        valid={draft.reasoningValid}
+        optionLabel={draft.reasoningOptionLabel}
+        onActivate={draft.activateReasoningPolicy}
       />
       <McpRestrictionSection
         bind:mcpEnabled={draft.mcpEnabled}

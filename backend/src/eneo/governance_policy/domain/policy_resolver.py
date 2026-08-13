@@ -38,6 +38,9 @@ class EffectiveConfig:
 
     prompt_enforced: bool
     enforced_prompt_text: str | None
+    reasoning_policy_configured: bool = False
+    default_reasoning_effort: str | None = None
+    reasoning_effort_user_configurable: bool = False
 
     # Allowed servers that start switched OFF in the user's chat (UX seed
     # only — the user can still enable them per conversation).
@@ -58,6 +61,9 @@ _EMPTY = EffectiveConfig(
     available_mcp_servers=[],
     prompt_enforced=False,
     enforced_prompt_text=None,
+    reasoning_policy_configured=False,
+    default_reasoning_effort=None,
+    reasoning_effort_user_configurable=False,
 )
 
 
@@ -184,6 +190,9 @@ def resolve_personal_default(
         default_disabled_mcp_server_ids=default_disabled_mcp_server_ids,
         prompt_enforced=policy.prompt_enforcement_enabled,
         enforced_prompt_text=enforced_prompt_text,
+        reasoning_policy_configured=policy.reasoning_policy_configured,
+        default_reasoning_effort=policy.default_reasoning_effort,
+        reasoning_effort_user_configurable=policy.allow_user_reasoning_effort,
         governance_skill_resolution=(
             governance_skill_resolution
             if governance_skill_resolution is not None
@@ -223,3 +232,29 @@ def select_effective_completion_model(
         if effective_config.available_models
         else None
     )
+
+
+def select_effective_reasoning_effort(
+    *,
+    selected_model: "CompletionModel",
+    stored_effort: str | None,
+    effective_config: EffectiveConfig,
+) -> str | None:
+    """Resolve a personal chat effort against policy and model capabilities."""
+    capability = selected_model.get_supported_model_kwargs().reasoning_effort
+    if (
+        not capability.supported
+        or capability.control != "select"
+        or capability.options is None
+    ):
+        return None
+
+    if (
+        effective_config.reasoning_effort_user_configurable
+        and stored_effort is not None
+        and capability.accepts(stored_effort)
+    ):
+        return stored_effort
+    if capability.accepts(effective_config.default_reasoning_effort):
+        return effective_config.default_reasoning_effort
+    return None

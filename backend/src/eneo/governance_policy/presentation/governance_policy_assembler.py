@@ -13,6 +13,7 @@ from eneo.governance_policy.presentation.governance_policy_models import (
     PolicyCompletionModelPublic,
     PolicyMcpServerPublic,
     PromptEnforcementPublic,
+    ReasoningPolicyPublic,
     SkillsPolicyPublic,
 )
 from eneo.skills.domain.skill import SkillBindingProjection
@@ -51,6 +52,11 @@ class GovernancePolicyAssembler:
             prompt_enforcement=PromptEnforcementPublic(
                 enabled=policy.prompt_enforcement_enabled,
                 prompt_library_id=policy.default_prompt_library_id,
+            ),
+            reasoning_policy=ReasoningPolicyPublic(
+                configured=policy.reasoning_policy_configured,
+                default_effort=policy.default_reasoning_effort,
+                allow_user_override=policy.allow_user_reasoning_effort,
             ),
             skills=SkillsPolicyPublic(
                 bindings=[

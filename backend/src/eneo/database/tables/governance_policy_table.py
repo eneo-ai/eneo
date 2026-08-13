@@ -42,6 +42,10 @@ class GovernancePolicies(BasePublic):
         ForeignKey(PromptLibrary.id, ondelete="RESTRICT"), nullable=True
     )
 
+    reasoning_policy_configured: Mapped[bool] = mapped_column(server_default="False")
+    default_reasoning_effort: Mapped[Optional[str]] = mapped_column(nullable=True)
+    allow_user_reasoning_effort: Mapped[bool] = mapped_column(server_default="False")
+
     updated_by_user_id: Mapped[Optional[UUID]] = mapped_column(
         ForeignKey(Users.id, ondelete="SET NULL"), nullable=True
     )
