@@ -65,6 +65,9 @@ class GovernancePolicy:
     # so tools synced onto a server later are allowed automatically.
     disabled_mcp_tool_ids: list[UUID] = field(default_factory=lambda: [])  # noqa: C408
     default_prompt_library_id: UUID | None = None
+    reasoning_policy_configured: bool = False
+    default_reasoning_effort: str | None = None
+    allow_user_reasoning_effort: bool = False
 
     updated_at: datetime | None = None
     updated_by_user_id: UUID | None = None
@@ -127,3 +130,14 @@ class GovernancePolicy:
             )
         self.prompt_enforcement_enabled = enabled
         self.default_prompt_library_id = prompt_library_id if enabled else None
+
+    def set_reasoning_policy(
+        self, *, default_effort: str | None, allow_user_override: bool
+    ) -> None:
+        if default_effort is not None and (
+            not default_effort.strip() or len(default_effort) > 32
+        ):
+            raise BadRequestException("Invalid default reasoning effort")
+        self.reasoning_policy_configured = True
+        self.default_reasoning_effort = default_effort
+        self.allow_user_reasoning_effort = allow_user_override

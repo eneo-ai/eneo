@@ -11862,6 +11862,10 @@ export interface components {
       default_disabled_mcp_server_ids?: string[];
       /** Prompt Locked */
       prompt_locked: boolean;
+      /** Default Reasoning Effort */
+      default_reasoning_effort: string | null;
+      /** Reasoning Effort User Configurable */
+      reasoning_effort_user_configurable: boolean;
     };
     /** EmbeddingModelCreate */
     EmbeddingModelCreate: {
@@ -12655,6 +12659,7 @@ export interface components {
       models_restriction: components["schemas"]["ModelsRestrictionPublic"];
       mcp_restriction: components["schemas"]["McpRestrictionPublic"];
       prompt_enforcement: components["schemas"]["PromptEnforcementPublic"];
+      reasoning_policy: components["schemas"]["ReasoningPolicyPublic"];
       skills: components["schemas"]["SkillsPolicyPublic"];
       /** Updated At */
       updated_at: string | null;
@@ -12666,6 +12671,7 @@ export interface components {
       models_restriction?: components["schemas"]["ModelsRestrictionInput"] | null;
       mcp_restriction?: components["schemas"]["McpRestrictionInput"] | null;
       prompt_enforcement?: components["schemas"]["PromptEnforcementInput"] | null;
+      reasoning_policy?: components["schemas"]["ReasoningPolicyInput"] | null;
       skills?: components["schemas"]["SkillsPolicyInput"] | null;
     };
     /** GroupChatAssistantPublic */
@@ -16416,6 +16422,25 @@ export interface components {
        * Format: uuid
        */
       session_id: string;
+    };
+    /** ReasoningPolicyInput */
+    ReasoningPolicyInput: {
+      /** Default Effort */
+      default_effort?: string | null;
+      /**
+       * Allow User Override
+       * @default false
+       */
+      allow_user_override?: boolean;
+    };
+    /** ReasoningPolicyPublic */
+    ReasoningPolicyPublic: {
+      /** Configured */
+      configured: boolean;
+      /** Default Effort */
+      default_effort: string | null;
+      /** Allow User Override */
+      allow_user_override: boolean;
     };
     /**
      * ResourcePermission
