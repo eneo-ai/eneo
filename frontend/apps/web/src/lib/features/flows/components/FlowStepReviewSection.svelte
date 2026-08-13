@@ -40,7 +40,12 @@
 </script>
 
 <FlowStepSection title={m.flow_step_review_section()}>
-  <Settings.Row title={m.flow_step_review_policy()} description={m.flow_step_review_policy_desc()}>
+  <Settings.Row
+    title={m.flow_step_review_policy()}
+    description={m.flow_step_review_policy_desc()}
+    fullWidth
+    density="compact"
+  >
     <div class="flex flex-col gap-2">
       <Select.Root
         type="single"

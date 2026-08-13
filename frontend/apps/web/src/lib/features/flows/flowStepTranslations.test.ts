@@ -33,6 +33,12 @@ describe("flow step translation copy", () => {
       "Styr vilken text AI:n faktiskt får in. Lämna tomt om steget ska använda sitt vanliga underlag. Samma variabler som i Instruktioner fungerar här, men här bygger du texten AI:n ska bearbeta, t.ex. med titel eller step_1.output.text."
     );
     expect(messages.flow_step_input_template_tooltip).toContain("step_1.output.text");
+    expect(messages.flow_runtime_input_title).toBe("Filer vid körning");
+    expect(messages.flow_runtime_input_description).toBe(
+      "Filer som laddas upp när flödet körs blir tillgängliga i det här steget."
+    );
+    expect(messages.flow_runtime_input_required).toBe("Kräv filuppladdning");
+    expect(messages.flow_step_security_inherit).toBe("Ärvs från ytan");
   });
 
   it("keeps the matching material terminology in English for the same keys", () => {
@@ -58,5 +64,11 @@ describe("flow step translation copy", () => {
       "Controls which text the AI actually receives. Leave this empty if the step should use its normal material. The same variables work here as in Instructions, but here you build the text the AI will process, e.g. with title or step_1.output.text."
     );
     expect(messages.flow_step_input_template_tooltip).toContain("step_1.output.text");
+    expect(messages.flow_runtime_input_title).toBe("Files at run time");
+    expect(messages.flow_runtime_input_description).toBe(
+      "Files uploaded when the flow runs become available to this step."
+    );
+    expect(messages.flow_runtime_input_required).toBe("Require a file upload");
+    expect(messages.flow_step_security_inherit).toBe("Inherited from the space");
   });
 });

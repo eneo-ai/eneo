@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import type { FlowStep } from "@eneo/eneo-js";
+import type { FlowStep, SecurityClassification } from "@eneo/eneo-js";
 import {
   hasAdvancedSettingsActive,
   getTemplateAssetStatusClass,
@@ -9,7 +9,11 @@ import {
   getMimePresetsForFormat,
   MIME_PRESETS_DOCUMENT,
   MIME_PRESETS_AUDIO,
-  getTemplateAssetStatusLabel
+  getTemplateAssetStatusLabel,
+  getSecurityClassificationLabel,
+  getSecurityInheritanceLabel,
+  getSelectableSecurityClassifications,
+  getSummarySourceText
 } from "./flowStepEditHelpers";
 
 function makeStep(overrides: Partial<FlowStep> = {}): FlowStep {
@@ -76,6 +80,43 @@ describe("hasAdvancedSettingsActive", () => {
 
   test("returns true when hasInputTemplateOverride is true", () => {
     expect(hasAdvancedSettingsActive(makeStep(), true)).toBe(true);
+  });
+});
+
+describe("step editor summaries", () => {
+  test("describes transcribe-only flow input instead of calling it a material template", () => {
+    expect(
+      getSummarySourceText(
+        makeStep({ output_mode: "transcribe_only", input_source: "flow_input" }),
+        { usesInputTemplate: true },
+        null
+      )
+    ).toBe("Flödets indata");
+  });
+
+  test("shows the inherited space classification when it is available", () => {
+    expect(getSecurityInheritanceLabel({ security_level: 2, name: "Intern" })).toBe(
+      "Ärvs från ytan — Intern"
+    );
+    expect(getSecurityInheritanceLabel(null)).toBe("Ärvs från ytan");
+  });
+
+  test("uses configured organization classifications at or above the space level", () => {
+    const classifications = [
+      { id: "public", name: "Publik", security_level: 1 },
+      { id: "restricted", name: "Begränsad", security_level: 3 },
+      { id: "internal", name: "Intern", security_level: 2 }
+    ] as SecurityClassification[];
+
+    const selectable = getSelectableSecurityClassifications(classifications, {
+      security_level: 2
+    });
+
+    expect(selectable.map((classification) => classification.id)).toEqual([
+      "internal",
+      "restricted"
+    ]);
+    expect(getSecurityClassificationLabel(selectable[0])).toBe("Intern");
   });
 });
 

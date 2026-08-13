@@ -42,16 +42,16 @@ function getDefaultHint(locale: FlowLocale, inputSource: string | null | undefin
 
 const FLOW_STEP_COPY = {
   sv: {
-    instructionsTitle: "Instruktioner till AI:n",
+    instructionsTitle: "Instruktion till AI:n",
     instructionsHelperTitle: "Beskriv hur AI:n ska arbeta i det här steget.",
     instructionsHelperBody: "Exempel: Svara kort och tydligt. Använd punktlista.",
     instructionsPlaceholder: "t.ex. Svara kort och tydligt. Använd punktlista.",
-    inputTemplateTitle: "Underlag till steget",
+    inputTemplateTitle: "Anpassad text till AI:n",
     inputTemplateDescription:
       "Här bygger du den text AI:n ska arbeta med. Lämna tomt om steget ska använda sitt vanliga underlag.",
     inputTemplatePlaceholder: "t.ex. Rubrik: {{flow_input.titel}}\nText: {{step_1.output.text}}",
-    inputTemplateCtaTitle: "Anpassa underlaget (frivilligt)",
-    inputTemplateCtaAction: "Anpassa underlaget",
+    inputTemplateCtaTitle: "Anpassa underlaget",
+    inputTemplateCtaAction: "Anpassa texten",
     inputTemplateDefaultPreviousStep:
       "Om du lämnar detta tomt används resultatet från föregående steg.",
     inputTemplateDefaultAllPreviousSteps:
@@ -61,16 +61,16 @@ const FLOW_STEP_COPY = {
     inputTemplateDefaultFallback: "Om du lämnar detta tomt används stegets vanliga underlag."
   },
   en: {
-    instructionsTitle: "Instructions for the AI",
+    instructionsTitle: "Instruction for the AI",
     instructionsHelperTitle: "Describe how the AI should work in this step.",
     instructionsHelperBody: "Example: Answer briefly and clearly. Use bullet points.",
     instructionsPlaceholder: "e.g. Answer briefly and clearly. Use bullet points.",
-    inputTemplateTitle: "Material for the step",
+    inputTemplateTitle: "Custom text for the AI",
     inputTemplateDescription:
       "Here you build the text the AI should work with. Leave it empty if the step should use its normal material.",
     inputTemplatePlaceholder: "e.g. Title: {{flow_input.title}}\nText: {{step_1.output.text}}",
-    inputTemplateCtaTitle: "Adjust the material (optional)",
-    inputTemplateCtaAction: "Adjust the material",
+    inputTemplateCtaTitle: "Customize material",
+    inputTemplateCtaAction: "Customize text",
     inputTemplateDefaultPreviousStep:
       "If you leave this empty, the result from the previous step will be used.",
     inputTemplateDefaultAllPreviousSteps:

@@ -1,5 +1,5 @@
 import { m } from "$lib/paraglide/messages";
-import type { FlowStep } from "@eneo/eneo-js";
+import type { FlowStep, SecurityClassification } from "@eneo/eneo-js";
 import { OUTPUT_TYPES, type FlowStepValidationIssue } from "$lib/features/flows/flowStepTypes";
 import type {
   FlowSourceHintKind,
@@ -77,6 +77,33 @@ export function getInputSourceLabel(value: string): string {
 
 export function getOutputTypeLabel(value: string): string {
   return OUTPUT_TYPES.find((type) => type.value === value)?.label ?? value;
+}
+
+export function getSecurityInheritanceLabel(
+  classification: Pick<SecurityClassification, "name" | "security_level"> | null | undefined
+): string {
+  if (!classification) return m.flow_step_security_inherit();
+  return `${m.flow_step_security_inherit()} — ${classification.name}`;
+}
+
+export function getSecurityClassificationLabel(
+  classification: Pick<SecurityClassification, "name" | "security_level">
+): string {
+  return classification.name;
+}
+
+export function getSelectableSecurityClassifications(
+  classifications: SecurityClassification[],
+  inheritedClassification: Pick<SecurityClassification, "security_level"> | null | undefined
+): SecurityClassification[] {
+  const inheritedLevel = inheritedClassification?.security_level;
+
+  return [...classifications]
+    .filter(
+      (classification) =>
+        inheritedLevel === undefined || classification.security_level >= inheritedLevel
+    )
+    .sort((left, right) => left.security_level - right.security_level);
 }
 
 export function getInputSourceOptionLabel(value: string, legacyInvalid: boolean): string {
@@ -297,13 +324,21 @@ export function getSummarySourceText(
   previousStep: FlowStep | undefined | null
 ): string {
   if (!activeStep) return "";
+  if (activeStep.output_mode === "transcribe_only" && activeStep.input_source === "flow_input") {
+    return m.flow_step_summary_source_flow_input();
+  }
   if (summaryModel?.usesInputTemplate) return m.flow_step_summary_source_input_template();
   switch (activeStep.input_source) {
     case "flow_input":
       return m.flow_step_summary_source_flow_input();
     case "previous_step":
       return previousStep
-        ? m.flow_step_summary_source_previous_step({ order: String(previousStep.step_order) })
+        ? m.flow_step_summary_source_previous_step_named({
+            order: String(previousStep.step_order),
+            name:
+              previousStep.user_description ||
+              m.flow_step_fallback_label({ order: String(previousStep.step_order) })
+          })
         : m.flow_step_summary_source_previous_step_unknown();
     case "all_previous_steps":
       return m.flow_step_summary_source_all_previous_steps();

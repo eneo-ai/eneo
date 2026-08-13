@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import type { FlowStep } from "@eneo/eneo-js";
-import { getStepAiWorkKind } from "./flowStepEditorPresentation";
+import { getDefaultOpenStepChapter, getStepAiWorkKind } from "./flowStepEditorPresentation";
 
 function step(partial: Partial<FlowStep>): FlowStep {
   return {
@@ -65,5 +65,33 @@ describe("getStepAiWorkKind", () => {
 
   it("never reports missing while the instruction is still unknown (loading)", () => {
     expect(getStepAiWorkKind(step({}), { instructionPresent: null })).toBe("process");
+  });
+});
+
+describe("getDefaultOpenStepChapter", () => {
+  it("opens the task for a normal AI step", () => {
+    expect(getDefaultOpenStepChapter({ step: step({}) })).toBe("task");
+  });
+
+  it("opens material for transcription steps", () => {
+    expect(
+      getDefaultOpenStepChapter({
+        step: step({ input_type: "audio", output_mode: "transcribe_only" })
+      })
+    ).toBe("input");
+  });
+
+  it("opens result for deterministic document and template steps", () => {
+    expect(getDefaultOpenStepChapter({ step: step({ output_mode: "render_verbatim" }) })).toBe(
+      "result"
+    );
+    expect(getDefaultOpenStepChapter({ step: step({ output_mode: "template_fill" }) })).toBe(
+      "result"
+    );
+  });
+
+  it("opens the first section that needs repair", () => {
+    expect(getDefaultOpenStepChapter({ step: step({}), hasInputError: true })).toBe("input");
+    expect(getDefaultOpenStepChapter({ step: step({}), hasOutputError: true })).toBe("result");
   });
 });

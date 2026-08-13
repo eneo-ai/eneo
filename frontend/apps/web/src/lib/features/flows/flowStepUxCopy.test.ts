@@ -9,8 +9,9 @@ describe("flowStepUxCopy", () => {
       inputSource: "previous_step"
     });
 
-    expect(copy.inputTemplateTitle).toBe("Underlag till steget");
-    expect(copy.inputTemplateEditorLabel).toBe("Underlag till steget");
+    expect(copy.inputTemplateTitle).toBe("Anpassad text till AI:n");
+    expect(copy.inputTemplateEditorLabel).toBe("Anpassad text till AI:n");
+    expect(copy.inputTemplateCtaAction).toBe("Anpassa texten");
     expect(copy.inputTemplateDescription).toBe(
       "Här bygger du den text AI:n ska arbeta med. Lämna tomt om steget ska använda sitt vanliga underlag."
     );
@@ -38,8 +39,10 @@ describe("flowStepUxCopy", () => {
       inputSource: "flow_input"
     });
 
-    expect(copy.instructionsTitle).toBe("Instructions for the AI");
-    expect(copy.inputTemplateTitle).toBe("Material for the step");
+    expect(copy.instructionsTitle).toBe("Instruction for the AI");
+    expect(copy.inputTemplateTitle).toBe("Custom text for the AI");
+    expect(copy.inputTemplateEditorLabel).toBe("Custom text for the AI");
+    expect(copy.inputTemplateCtaAction).toBe("Customize text");
     expect(copy.inputTemplateDescription).toBe(
       "Here you build the text the AI should work with. Leave it empty if the step should use its normal material."
     );

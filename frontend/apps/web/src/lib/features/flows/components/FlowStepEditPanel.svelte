@@ -1,7 +1,12 @@
 <script lang="ts">
   import FlowStepSection from "$lib/features/flows/components/FlowStepSection.svelte";
   import FlowStepChapter from "$lib/features/flows/components/FlowStepChapter.svelte";
-  import { EneoError, type FlowStep, type UploadedFile } from "@eneo/eneo-js";
+  import {
+    EneoError,
+    type FlowStep,
+    type SecurityClassification,
+    type UploadedFile
+  } from "@eneo/eneo-js";
   import { Settings } from "$lib/components/layout";
   import { getFlowUserMode } from "$lib/features/flows/FlowUserMode";
   import { getFlowEditor } from "$lib/features/flows/FlowEditor";
@@ -9,6 +14,7 @@
   import { getEneo } from "$lib/core/Eneo";
   import { initAttachmentManager } from "$lib/features/attachments/AttachmentManager";
   import { writable } from "svelte/store";
+  import { tick } from "svelte";
   import { IconWorkflow } from "@eneo/icons/workflow";
   import MousePointerClick from "lucide-svelte/icons/mouse-pointer-click";
   import { Button } from "$lib/components/ui/button/index.js";
@@ -20,6 +26,7 @@
   import {
     getAvailableOutputModes,
     getAvailableOutputTypes,
+    getOutputModeCompatibilityIssue,
     getFlowStepValidationIssues,
     getSelectableInputSourceOptions,
     getSelectableInputTypeOptions
@@ -80,12 +87,17 @@
 
   // Extracted helpers
   import { getInputTypeLabel, getInputSourceLabel, getIssueMessage } from "./flowStepEditHelpers";
-  import { getStepAiWork } from "$lib/features/flows/flowStepEditorPresentation";
   import {
-    getChapterWhatStatus,
+    getDefaultOpenStepChapter,
+    getStepAiWork
+  } from "$lib/features/flows/flowStepEditorPresentation";
+  import {
+    getChapterInputStatus,
+    getChapterTaskStatus,
     getChapterOutputStatus,
     getChapterControlStatus,
-    getChapterAdvancedStatus
+    getChapterAdvancedStatus,
+    getTechnicalSettingsCount
   } from "./flowStepChapterStatus";
   import {
     type AdvancedJsonField,
@@ -121,17 +133,20 @@
     steps,
     activeStepId,
     isPublished,
+    securityClassifications = [],
     transcriptionEnabled = true,
     transcriptionModelConfigured = false,
     transcriptionModelLabel = null,
     formSchema,
     onStepChanged,
     onJsonValidationChanged,
-    onOpenTranscriptionSettings
+    onOpenTranscriptionSettings,
+    onEditWithAI
   }: {
     steps: FlowStep[];
     activeStepId: string | null;
     isPublished: boolean;
+    securityClassifications?: SecurityClassification[];
     transcriptionEnabled?: boolean;
     transcriptionModelConfigured?: boolean;
     transcriptionModelLabel?: string | null;
@@ -149,6 +164,7 @@
     onStepChanged?: (detail: { index: number; step: FlowStep }) => void;
     onJsonValidationChanged?: (detail: { hasErrors: boolean; fields: string[] }) => void;
     onOpenTranscriptionSettings?: () => void;
+    onEditWithAI?: () => void;
   } = $props();
 
   // ---------------------------------------------------------------------------
@@ -192,6 +208,9 @@
 
   const activeIndex = $derived(steps.findIndex((s) => s.id === activeStepId));
   const activeStep = $derived(activeIndex >= 0 ? steps[activeIndex] : null);
+  const activeStepStateKey = $derived(
+    activeStep?.id ?? (activeStep ? `draft:${activeStep.step_order}` : "no-step")
+  );
   const isAdvancedMode = $derived($mode === "power_user");
   const locale = (getLocale() === "en" ? "en" : "sv") as "sv" | "en";
   const hasAudioInputSteps = $derived(steps.some((step) => step.input_type === "audio"));
@@ -620,31 +639,60 @@
   const stepAiWork = $derived(
     activeStep ? getStepAiWork(activeStep, { instructionPresent: aiInstructionPresent }) : null
   );
-  // A freshly-created step opens its work section (AI for templates, "what" for
-  // blank); an existing step opens nothing — a calm collapsed overview. Keyed by
-  // step_order so it survives the temp→real id reconciliation.
+  const outputCompatibilityIssue = $derived(
+    activeStep ? getOutputModeCompatibilityIssue(activeStep) : null
+  );
+  // The first open section follows the step's task. Per-step interaction state
+  // is retained by FlowStepChapter for the current page session.
   const newStepOpenIntent = flowEditor.state.newStepOpenIntent;
   const defaultOpenChapter = $derived.by(() => {
     if (!activeStep) return null;
     const intent = $newStepOpenIntent;
-    return intent && intent.order === activeStep.step_order ? intent.chapter : null;
+    if (intent && intent.order === activeStep.step_order) return "task";
+    return getDefaultOpenStepChapter({
+      step: activeStep,
+      hasInputError: currentStepIssues.length > 0,
+      hasOutputError: outputCompatibilityIssue !== null
+    });
   });
-  // Bumped when the user clicks the capsule's "instruction missing" warning, to
-  // force the AI chapter open (the explicit fix action).
-  let aiRequestOpen = $state(0);
-  // Set when the capsule's "add instruction" action fires so the instruction
-  // editor focuses once it mounts (the AI section is unmounted while collapsed).
+  let taskRequestOpen = $state(0);
+  let technicalRequestOpen = $state(0);
   let focusInstructionPending = $state(false);
-  const chapterWhatStatus = $derived(
-    activeStep ? getChapterWhatStatus(activeStep, isAdvancedMode) : ""
+  const chapterTaskStatus = $derived(
+    activeStep
+      ? getChapterTaskStatus(
+          activeStep,
+          instructionText,
+          stepAiWork?.text ?? activeStep.user_description ?? ""
+        )
+      : ""
+  );
+  const chapterInputStatus = $derived(
+    activeStep
+      ? getChapterInputStatus({
+          step: activeStep,
+          previousStep,
+          hasKnowledge: hasKnowledgeSelections,
+          hasAttachments: hasAttachmentSelections
+        })
+      : ""
   );
   const chapterOutputStatus = $derived(
     activeStep ? getChapterOutputStatus(activeStep, isAdvancedMode) : ""
   );
-  const chapterControlStatus = $derived(activeStep ? getChapterControlStatus(activeStep) : "");
+  const chapterControlStatus = $derived(
+    activeStep
+      ? getChapterControlStatus(
+          activeStep,
+          $currentSpace.security_classification,
+          securityClassifications
+        )
+      : ""
+  );
   const chapterAdvancedStatus = $derived(
     activeStep ? getChapterAdvancedStatus(activeStep) : m.flow_chapter_advanced_default()
   );
+  const technicalSettingsCount = $derived(activeStep ? getTechnicalSettingsCount(activeStep) : 0);
   const inputTemplateText = $derived(
     activeStep ? getInputBindingQuestion(activeStep.input_bindings) : ""
   );
@@ -671,11 +719,19 @@
     !isTranscribeOnly && activeStep !== null && !isAdvancedMode
   );
   const showInputTemplate = $derived(
-    isAdvancedMode || (canRevealInputTemplate && revealInputTemplateInUserMode)
+    isAdvancedMode ||
+      hasInputTemplateOverride ||
+      (canRevealInputTemplate && revealInputTemplateInUserMode)
   );
   const stepUxCopy = $derived(getFlowStepUxCopy({ locale, inputSource: activeStep?.input_source }));
   const inputTemplateSectionTitle = $derived(stepUxCopy.inputTemplateTitle);
   const inputTemplateSectionDescription = $derived(stepUxCopy.inputTemplateDescription);
+
+  async function showTechnicalSettings() {
+    mode.set("power_user");
+    await tick();
+    technicalRequestOpen += 1;
+  }
 
   const templateStepRefs = $derived.by(() => {
     return collectTemplateStepReferenceOrders(inputTemplateText);
@@ -794,19 +850,18 @@
     class:opacity-60={isPublished}
   >
     <div class="flow-step-editor">
-      <Settings.Page>
-        <div class="mb-3 flex min-w-0 items-baseline gap-1.5">
-          <span class="text-secondary shrink-0 text-xs font-medium">
+      <div class="mx-auto w-full max-w-[1000px]">
+        <div class="mb-4 min-w-0">
+          <span class="text-secondary block text-xs font-medium tracking-[0.02em]">
             {m.flow_step_position({
               index: String(activeStep.step_order),
               total: String(steps.length)
             })}
           </span>
           {#if activeStep.user_description}
-            <span class="text-muted shrink-0 text-xs" aria-hidden="true">·</span>
-            <span class="text-primary truncate text-sm font-semibold">
+            <h2 class="text-primary mt-1 truncate text-lg font-semibold tracking-[-0.02em]">
               {activeStep.user_description}
-            </span>
+            </h2>
           {/if}
         </div>
         {#if stepSummaryModel}
@@ -815,10 +870,9 @@
             summaryModel={stepSummaryModel}
             {previousStep}
             {isAdvancedMode}
-            {hasInputTemplateOverride}
             {aiInstructionPresent}
             onFixInstruction={() => {
-              aiRequestOpen++;
+              taskRequestOpen++;
               focusInstructionPending = true;
             }}
           />
@@ -827,12 +881,13 @@
 
         <FlowStepChapter
           title={m.flow_chapter_what()}
-          status={chapterWhatStatus}
-          initialOpen={defaultOpenChapter === "what"}
-          resetKey={activeStep?.step_order}
+          status={chapterTaskStatus}
+          initialOpen={defaultOpenChapter === "task"}
+          resetKey={activeStepStateKey}
+          requestOpen={taskRequestOpen}
         >
-          <FlowStepSection title={m.flow_step_section_details()}>
-            <Settings.Row title={m.flow_step_name()} description="" let:aria>
+          <FlowStepSection>
+            <Settings.Row title={m.flow_step_name()} description="" density="compact" let:aria>
               <div class="flex flex-col gap-2">
                 <Input
                   {...aria}
@@ -856,145 +911,140 @@
             </Settings.Row>
           </FlowStepSection>
 
-          {#if !isTemplateFill}
-            <FlowStepInputSection
+          {#if !isTemplateFill && !isTranscribeOnly}
+            <FlowStepBehaviorSection
               step={activeStep}
               {isPublished}
-              {selectableInputSourceOptions}
-              {displayedInputTypeOptions}
-              {runtimeInputConfig}
-              {sourceHintKind}
-              {sourceValidationMessage}
-              {inputSourceFeedback}
-              {inputTypeValidationMessage}
-              {inputTypeFeedback}
+              {isAdvancedMode}
+              {isTranscribeOnly}
+              instructionMissing={stepAiWork?.missing ?? false}
+              focusInstruction={focusInstructionPending}
+              onInstructionFocused={() => (focusInstructionPending = false)}
+              assistant={assistantState.assistant}
+              assistantLoading={assistantState.loading}
+              availableModels={$currentSpace.completion_models}
+              {steps}
+              {formSchema}
               {transcriptionEnabled}
-              {transcriptionModelConfigured}
-              {transcriptionModelLabel}
-              flowId={currentFlowId}
-              onInputSourceChange={(detail) =>
-                handleInputSourceChange(detail.value as FlowStep["input_source"])}
-              onInputTypeChange={(detail) =>
-                handleInputTypeChange(detail.value as FlowStep["input_type"])}
-              onRuntimeInputChange={(detail) => updateRuntimeInputSettings(detail.patch)}
-              onHttpConfigChange={(detail) => updateStep("input_config", detail.config)}
-              onOpenTranscriptionSettings={() => onOpenTranscriptionSettings?.()}
+              {hasAudioInputSteps}
+              {stepUxCopy}
+              {instructionText}
+              loadPromptVersions={(id) => flowEditor.listAssistantPrompts(id)}
+              onAssistantFieldChange={(detail) => updateAssistantField(detail.field, detail.value)}
+              onInstructionDraft={(detail) => queueInstructionDraft(detail.value)}
+              onInstructionCommit={(detail) => void updateInstruction(detail.value)}
+              {onEditWithAI}
             />
           {/if}
         </FlowStepChapter>
 
-        {#if !isTemplateFill}
-          <FlowStepChapter
-            title={m.flow_chapter_ai()}
-            status={stepAiWork?.text}
-            initialOpen={defaultOpenChapter === "ai"}
-            resetKey={activeStep?.step_order}
-            requestOpen={aiRequestOpen}
-          >
-            {#if !isTemplateFill}
-              <FlowStepBehaviorSection
-                step={activeStep}
-                {isPublished}
-                {isAdvancedMode}
-                {isTranscribeOnly}
-                instructionMissing={stepAiWork?.missing ?? false}
-                focusInstruction={focusInstructionPending}
-                onInstructionFocused={() => (focusInstructionPending = false)}
-                assistant={assistantState.assistant}
-                assistantLoading={assistantState.loading}
-                availableModels={$currentSpace.completion_models}
-                {steps}
-                {formSchema}
-                {transcriptionEnabled}
-                {hasAudioInputSteps}
-                {stepUxCopy}
-                {instructionText}
-                {canRevealInputTemplate}
-                {showInputTemplate}
-                loadPromptVersions={(id) => flowEditor.listAssistantPrompts(id)}
-                onAssistantFieldChange={(detail) =>
-                  updateAssistantField(detail.field, detail.value)}
-                onInstructionDraft={(detail) => queueInstructionDraft(detail.value)}
-                onInstructionCommit={(detail) => void updateInstruction(detail.value)}
-                onRevealInputTemplate={() => (revealInputTemplateInUserMode = true)}
-              />
-            {/if}
-
-            {#if isAdvancedMode && !isTranscribeOnly && !isTemplateFill}
-              <FlowStepContextSection
-                collapsible
-                resetKey={activeStep?.step_order}
-                assistant={assistantState.assistant}
-                assistantLoading={assistantState.loading}
-                runningUploads={assistantState.runningUploads}
-                onKnowledgeChange={(detail) => {
-                  updateAssistantField("websites", detail.websites);
-                  updateAssistantField("groups", detail.groups);
-                  updateAssistantField(
-                    "integration_knowledge_list",
-                    detail.integrationKnowledgeList
-                  );
-                }}
-                onRemoveAttachment={(detail) => void assistantState.removeAttachment(detail.file)}
-              />
-            {/if}
-
-            {#if !isTranscribeOnly && !isTemplateFill}
-              <FlowStepInputTemplateSection
-                collapsible
-                resetKey={activeStep?.step_order}
-                step={activeStep}
-                {isPublished}
-                {isAdvancedMode}
-                isPowerUser={$mode === "power_user"}
-                {hasInputTemplateOverride}
-                {hasTypedInputSources}
-                {showInputTemplate}
-                {inputTemplateText}
-                {effectiveInputSources}
-                {templateSourceConflict}
-                {templateStepRefs}
-                {steps}
-                {formSchema}
-                {transcriptionEnabled}
-                {hasAudioInputSteps}
-                {stepUxCopy}
-                {inputTemplateSectionTitle}
-                {inputTemplateSectionDescription}
-                onRevealInputTemplate={() => (revealInputTemplateInUserMode = true)}
-                onClearInputTemplate={() => updateInputTemplate("")}
-                onInputTemplateChange={(detail) => updateInputTemplate(detail.value)}
-                onInputSourceChange={(detail) =>
-                  handleInputSourceChange(detail.value as FlowStep["input_source"])}
-              />
-            {/if}
-          </FlowStepChapter>
-        {/if}
-
         <FlowStepChapter
-          title={m.flow_chapter_control()}
-          status={chapterControlStatus}
-          badge={m.flow_chapter_always_visible()}
-          resetKey={activeStep?.step_order}
+          title={m.flow_chapter_input()}
+          status={chapterInputStatus}
+          initialOpen={defaultOpenChapter === "input"}
+          resetKey={activeStepStateKey}
         >
-          <FlowStepReviewSection
+          <FlowStepInputSection
             step={activeStep}
             {isPublished}
-            onReviewModeChange={(detail) => handleReviewModeChange(detail.value)}
+            {isAdvancedMode}
+            {selectableInputSourceOptions}
+            {displayedInputTypeOptions}
+            {runtimeInputConfig}
+            {sourceHintKind}
+            {sourceValidationMessage}
+            {inputSourceFeedback}
+            {inputTypeValidationMessage}
+            {inputTypeFeedback}
+            {transcriptionEnabled}
+            {transcriptionModelConfigured}
+            {transcriptionModelLabel}
+            flowId={currentFlowId}
+            onInputSourceChange={(detail) =>
+              handleInputSourceChange(detail.value as FlowStep["input_source"])}
+            onInputTypeChange={(detail) =>
+              handleInputTypeChange(detail.value as FlowStep["input_type"])}
+            onRuntimeInputChange={(detail) => updateRuntimeInputSettings(detail.patch)}
+            onHttpConfigChange={(detail) => updateStep("input_config", detail.config)}
+            onOpenTranscriptionSettings={() => onOpenTranscriptionSettings?.()}
           />
 
-          <FlowStepSecuritySection
-            step={activeStep}
-            {isPublished}
-            onClassificationChange={(detail) =>
-              updateStep("output_classification_override", detail.value)}
-          />
+          {#if isTranscribeOnly}
+            <FlowStepBehaviorSection
+              step={activeStep}
+              {isPublished}
+              {isAdvancedMode}
+              {isTranscribeOnly}
+              instructionMissing={stepAiWork?.missing ?? false}
+              focusInstruction={focusInstructionPending}
+              onInstructionFocused={() => (focusInstructionPending = false)}
+              assistant={assistantState.assistant}
+              assistantLoading={assistantState.loading}
+              availableModels={$currentSpace.completion_models}
+              {steps}
+              {formSchema}
+              {transcriptionEnabled}
+              {hasAudioInputSteps}
+              {stepUxCopy}
+              {instructionText}
+              loadPromptVersions={(id) => flowEditor.listAssistantPrompts(id)}
+              onAssistantFieldChange={(detail) => updateAssistantField(detail.field, detail.value)}
+              onInstructionDraft={(detail) => queueInstructionDraft(detail.value)}
+              onInstructionCommit={(detail) => void updateInstruction(detail.value)}
+              {onEditWithAI}
+            />
+          {/if}
+
+          {#if !isTranscribeOnly && !isTemplateFill}
+            <FlowStepContextSection
+              resetKey={activeStepStateKey}
+              assistant={assistantState.assistant}
+              assistantLoading={assistantState.loading}
+              runningUploads={assistantState.runningUploads}
+              onKnowledgeChange={(detail) => {
+                updateAssistantField("websites", detail.websites);
+                updateAssistantField("groups", detail.groups);
+                updateAssistantField("integration_knowledge_list", detail.integrationKnowledgeList);
+              }}
+              onRemoveAttachment={(detail) => void assistantState.removeAttachment(detail.file)}
+            />
+          {/if}
+
+          {#if !isTranscribeOnly && !isTemplateFill}
+            <FlowStepInputTemplateSection
+              resetKey={activeStepStateKey}
+              step={activeStep}
+              {isPublished}
+              {isAdvancedMode}
+              isPowerUser={$mode === "power_user"}
+              {hasInputTemplateOverride}
+              {hasTypedInputSources}
+              {showInputTemplate}
+              {inputTemplateText}
+              {effectiveInputSources}
+              {templateSourceConflict}
+              {templateStepRefs}
+              {steps}
+              {formSchema}
+              {transcriptionEnabled}
+              {hasAudioInputSteps}
+              {stepUxCopy}
+              {inputTemplateSectionTitle}
+              {inputTemplateSectionDescription}
+              onRevealInputTemplate={() => (revealInputTemplateInUserMode = true)}
+              onClearInputTemplate={() => updateInputTemplate("")}
+              onInputTemplateChange={(detail) => updateInputTemplate(detail.value)}
+              onInputSourceChange={(detail) =>
+                handleInputSourceChange(detail.value as FlowStep["input_source"])}
+            />
+          {/if}
         </FlowStepChapter>
 
         <FlowStepChapter
           title={m.flow_chapter_output()}
           status={chapterOutputStatus}
-          resetKey={activeStep?.step_order}
+          initialOpen={defaultOpenChapter === "result"}
+          resetKey={activeStepStateKey}
         >
           {#if isTemplateFill}
             <FlowStepTemplateFillSection
@@ -1069,15 +1119,39 @@
           {/if}
         </FlowStepChapter>
 
-        <!-- Typed I/O info banners -->
-        <FlowStepTypedIoBanners step={activeStep} />
+        <FlowStepChapter
+          title={m.flow_chapter_control()}
+          status={chapterControlStatus}
+          initialOpen={defaultOpenChapter === "control"}
+          resetKey={activeStepStateKey}
+        >
+          <div class="grid gap-6 lg:grid-cols-2 lg:gap-8">
+            <FlowStepReviewSection
+              step={activeStep}
+              {isPublished}
+              onReviewModeChange={(detail) => handleReviewModeChange(detail.value)}
+            />
+
+            <FlowStepSecuritySection
+              step={activeStep}
+              {isPublished}
+              classifications={securityClassifications}
+              inheritedClassification={$currentSpace.security_classification}
+              onClassificationChange={(detail) =>
+                updateStep("output_classification_override", detail.value)}
+            />
+          </div>
+        </FlowStepChapter>
 
         {#if isAdvancedMode && !isTemplateFill}
           <FlowStepChapter
-            title={m.flow_step_advanced()}
+            title={m.flow_chapter_technical()}
             status={chapterAdvancedStatus}
-            resetKey={activeStep?.step_order}
+            initialOpen={defaultOpenChapter === "technical"}
+            resetKey={activeStepStateKey}
+            requestOpen={technicalRequestOpen}
           >
+            <FlowStepTypedIoBanners step={activeStep} />
             <FlowStepAdvancedSection
               embedded
               step={activeStep}
@@ -1089,8 +1163,19 @@
               onJsonFieldFormat={(detail) => handleAdvancedJsonFieldFormat(detail.field)}
             />
           </FlowStepChapter>
+        {:else if !isAdvancedMode && technicalSettingsCount > 0}
+          <div class="flex flex-wrap items-center gap-x-5 gap-y-2 px-2 py-4">
+            <p class="text-secondary text-[0.8125rem]">
+              {technicalSettingsCount === 1
+                ? m.flow_technical_settings_count_one()
+                : m.flow_technical_settings_count_many({ count: technicalSettingsCount })}
+            </p>
+            <Button variant="link" size="sm" class="h-auto px-0" onclick={showTechnicalSettings}>
+              {m.flow_show_in_advanced()}
+            </Button>
+          </div>
         {/if}
-      </Settings.Page>
+      </div>
     </div>
   </div>
 {/if}

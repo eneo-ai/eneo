@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 import type { FlowStep } from "@eneo/eneo-js";
 import {
+  OUTPUT_MODES,
   getAvailableOutputModes,
   getAvailableOutputTypes,
   getFlowStepValidationIssues,
+  getOutputModeCompatibilityIssue,
   getSelectableInputTypeOptions,
   getValidInputSources,
   getValidInputTypes,
@@ -15,9 +17,23 @@ function outputStep(overrides: Partial<FlowStep> = {}): FlowStep {
   return {
     input_type: "text",
     output_mode: "pass_through",
+    output_type: "text",
     ...overrides
   } as FlowStep;
 }
+
+describe("output mode catalog", () => {
+  it("stays exhaustive with the generated backend output-mode union", () => {
+    expect(OUTPUT_MODES.map((mode) => mode.value)).toEqual([
+      "pass_through",
+      "compose_text",
+      "transcribe_only",
+      "template_fill",
+      "render_verbatim",
+      "http_post"
+    ]);
+  });
+});
 
 describe("mapOutputToInputType", () => {
   it("maps rendered document outputs back to text for chaining", () => {
@@ -128,11 +144,27 @@ describe("getAvailableOutputTypes", () => {
     expect(values).toEqual(["text"]);
   });
 
-  it("restricts template_fill steps to docx output", () => {
-    const values = getAvailableOutputTypes(outputStep({ output_mode: "template_fill" })).map(
-      (type) => type.value
+  it("restricts template_fill steps while preserving an invalid saved output type", () => {
+    const options = getAvailableOutputTypes(outputStep({ output_mode: "template_fill" }));
+    expect(options.map((type) => type.value)).toEqual(["text", "docx"]);
+    expect(options[0]).toMatchObject({ value: "text", legacyInvalid: true });
+  });
+
+  it("offers only document formats for render_verbatim while preserving an invalid saved value", () => {
+    const options = getAvailableOutputTypes(
+      outputStep({ output_mode: "render_verbatim", output_type: "text" })
     );
-    expect(values).toEqual(["docx"]);
+
+    expect(options.map((type) => type.value)).toEqual(["text", "pdf", "docx"]);
+    expect(options[0]).toMatchObject({ value: "text", legacyInvalid: true });
+  });
+
+  it("restricts compose_text steps to text output", () => {
+    const values = getAvailableOutputTypes(
+      outputStep({ output_mode: "compose_text", output_type: "text" })
+    ).map((type) => type.value);
+
+    expect(values).toEqual(["text"]);
   });
 
   it("offers every output type for a plain pass_through step", () => {
@@ -185,6 +217,99 @@ describe("getAvailableOutputModes", () => {
       isAdvancedMode: true
     }).map((mode) => mode.value);
     expect(values).toContain("template_fill");
+  });
+
+  it("offers deterministic text and document creation for text input", () => {
+    const values = getAvailableOutputModes({
+      step: outputStep({ input_type: "text", output_type: "text" }),
+      isAdvancedMode: false
+    }).map((mode) => mode.value);
+
+    expect(values).toContain("compose_text");
+    expect(values).toContain("render_verbatim");
+  });
+
+  it("does not offer deterministic text or document creation for JSON input", () => {
+    const values = getAvailableOutputModes({
+      step: outputStep({ input_type: "json", output_type: "json" }),
+      isAdvancedMode: true
+    }).map((mode) => mode.value);
+
+    expect(values).not.toContain("compose_text");
+    expect(values).not.toContain("render_verbatim");
+  });
+
+  it("offers deterministic document rendering for text-to-document steps", () => {
+    const options = getAvailableOutputModes({
+      step: outputStep({
+        input_type: "text",
+        output_type: "pdf",
+        output_mode: "pass_through"
+      }),
+      isAdvancedMode: false
+    });
+
+    expect(options.map((mode) => mode.value)).toContain("render_verbatim");
+    expect(options.find((mode) => mode.value === "pass_through")).toMatchObject({
+      legacyInvalid: true
+    });
+  });
+
+  it("keeps an incompatible saved mode visible so the user can repair it", () => {
+    const options = getAvailableOutputModes({
+      step: outputStep({
+        input_type: "json",
+        output_type: "pdf",
+        output_mode: "render_verbatim"
+      }),
+      isAdvancedMode: false
+    });
+
+    expect(options.find((mode) => mode.value === "render_verbatim")).toMatchObject({
+      legacyInvalid: true
+    });
+  });
+
+  it("keeps HTTP delivery out of Simple unless the step already uses it", () => {
+    expect(
+      getAvailableOutputModes({ step: outputStep(), isAdvancedMode: false }).map(
+        (mode) => mode.value
+      )
+    ).not.toContain("http_post");
+    expect(
+      getAvailableOutputModes({
+        step: outputStep({ output_mode: "http_post" }),
+        isAdvancedMode: false
+      }).map((mode) => mode.value)
+    ).toContain("http_post");
+  });
+});
+
+describe("getOutputModeCompatibilityIssue", () => {
+  it("matches the backend constraints for deterministic modes", () => {
+    expect(
+      getOutputModeCompatibilityIssue(
+        outputStep({ input_type: "text", output_type: "pdf", output_mode: "render_verbatim" })
+      )
+    ).toBeNull();
+    expect(
+      getOutputModeCompatibilityIssue(
+        outputStep({ input_type: "json", output_type: "pdf", output_mode: "render_verbatim" })
+      )
+    ).toBe("render_verbatim_requires_text_document");
+    expect(
+      getOutputModeCompatibilityIssue(
+        outputStep({ input_type: "text", output_type: "json", output_mode: "compose_text" })
+      )
+    ).toBe("compose_text_requires_text");
+  });
+
+  it("rejects text-to-document pass-through so the repair path is explicit", () => {
+    expect(
+      getOutputModeCompatibilityIssue(
+        outputStep({ input_type: "text", output_type: "docx", output_mode: "pass_through" })
+      )
+    ).toBe("text_document_requires_render_verbatim");
   });
 });
 

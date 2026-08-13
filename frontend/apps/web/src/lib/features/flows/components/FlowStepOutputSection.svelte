@@ -14,6 +14,12 @@
   import * as Alert from "$lib/components/ui/alert/index.js";
   import * as Select from "$lib/components/ui/select/index.js";
   import { Input } from "$lib/components/ui/input/index.js";
+  import CircleAlert from "lucide-svelte/icons/circle-alert";
+  import {
+    getOutputModeCompatibilityIssue,
+    type OutputModeCompatibilityIssue,
+    type SelectableOutputOption
+  } from "$lib/features/flows/flowStepTypes";
   import { getOutputHintText } from "./flowStepEditHelpers";
   import HttpConfigPanel from "./http/HttpConfigPanel.svelte";
   import { parseHttpAuthoredConfig, type HttpAuthoredConfig } from "./http/httpConfigTypes";
@@ -39,8 +45,8 @@
     step: FlowStep;
     isPublished: boolean;
     isAdvancedMode: boolean;
-    availableOutputTypes: Array<{ value: string; label: string }>;
-    availableOutputModes: Array<{ value: string; label: string }>;
+    availableOutputTypes: SelectableOutputOption<FlowStep["output_type"]>[];
+    availableOutputModes: SelectableOutputOption<FlowStep["output_mode"]>[];
     flowId?: string;
     outputHintKind: FlowOutputHintKind | null;
     embedded?: boolean;
@@ -60,6 +66,7 @@
   );
   const citationMode = $derived(resolveFlowCitationMode(step.output_config));
   const supportsCitationMode = $derived(supportsFlowCitationMode(step));
+  const compatibilityIssue = $derived(getOutputModeCompatibilityIssue(step));
 
   const selectedOutputTypeLabel = $derived(
     availableOutputTypes.find((t) => t.value === step.output_type)?.label ?? step.output_type
@@ -73,45 +80,105 @@
       : m.flow_step_citation_mode_off()
   );
 
-  // Plain-language reassurance for document outputs — the "vidarebefordra" mode
-  // label doesn't make clear that a file is produced.
-  const documentHelperText = $derived(
-    step.output_mode === "pass_through" &&
-      (step.output_type === "pdf" || step.output_type === "docx")
-      ? step.output_type === "pdf"
-        ? m.flow_output_document_helper_pdf()
-        : m.flow_output_document_helper_word()
-      : ""
-  );
+  function getCompatibilityIssueText(issue: OutputModeCompatibilityIssue): string {
+    switch (issue) {
+      case "compose_text_requires_text":
+        return m.flow_output_mode_invalid_compose_text();
+      case "render_verbatim_requires_text_document":
+        return m.flow_output_mode_invalid_render_verbatim();
+      case "template_fill_requires_docx":
+        return m.flow_output_mode_invalid_template_fill();
+      case "transcribe_only_requires_audio_text":
+        return m.flow_output_mode_invalid_transcribe_only();
+      case "text_document_requires_render_verbatim":
+        return m.flow_output_mode_invalid_text_document();
+    }
+  }
 </script>
 
 <FlowStepSection title={embedded ? undefined : m.flow_step_output_section()}>
-  <Settings.Row title={m.flow_step_output_type()} description={m.flow_step_output_format_desc()}>
+  <div class="grid gap-5 lg:grid-cols-2 lg:gap-8">
     <div class="flex flex-col gap-2">
+      <label class="text-primary text-sm font-medium" for="flow-step-output-type">
+        {m.flow_step_output_type()}
+      </label>
       <Select.Root
         type="single"
         value={step.output_type}
         disabled={isPublished}
         onValueChange={(value) => onOutputTypeChange?.({ value })}
       >
-        <Select.Trigger class="w-full" aria-label={m.flow_step_output_type()}>
+        <Select.Trigger
+          id="flow-step-output-type"
+          class="w-full"
+          aria-label={m.flow_step_output_type()}
+          aria-invalid={compatibilityIssue !== null}
+        >
           {selectedOutputTypeLabel}
         </Select.Trigger>
         <Select.Content>
           <Select.Group>
             {#each availableOutputTypes as t (t.value)}
-              <Select.Item value={t.value} label={t.label}>{t.label}</Select.Item>
+              <Select.Item value={t.value} label={t.label}>
+                {t.label}{t.legacyInvalid ? ` — ${m.flow_output_mode_needs_attention()}` : ""}
+              </Select.Item>
             {/each}
           </Select.Group>
         </Select.Content>
       </Select.Root>
       {#if getOutputHintText(step.output_mode, outputHintKind)}
-        <p class="text-muted text-xs leading-relaxed" aria-live="polite">
+        <p class="text-secondary text-[0.8125rem] leading-relaxed" aria-live="polite">
           {getOutputHintText(step.output_mode, outputHintKind)}
+        </p>
+      {:else}
+        <p class="text-secondary text-[0.8125rem] leading-relaxed">
+          {m.flow_step_output_format_desc()}
         </p>
       {/if}
     </div>
-  </Settings.Row>
+
+    <div class="flex flex-col gap-2">
+      <label class="text-primary text-sm font-medium" for="flow-step-output-mode">
+        {m.flow_step_output_mode()}
+      </label>
+      <Select.Root
+        type="single"
+        value={step.output_mode}
+        disabled={isPublished}
+        onValueChange={(value) => onOutputModeChange?.({ value })}
+      >
+        <Select.Trigger
+          id="flow-step-output-mode"
+          class="w-full"
+          aria-label={m.flow_step_output_mode()}
+          aria-invalid={compatibilityIssue !== null}
+        >
+          {selectedOutputModeLabel}
+        </Select.Trigger>
+        <Select.Content>
+          <Select.Group>
+            {#each availableOutputModes as mode (mode.value)}
+              <Select.Item value={mode.value} label={mode.label}>
+                {mode.label}{mode.legacyInvalid ? ` — ${m.flow_output_mode_needs_attention()}` : ""}
+              </Select.Item>
+            {/each}
+          </Select.Group>
+        </Select.Content>
+      </Select.Root>
+    </div>
+  </div>
+
+  {#if compatibilityIssue}
+    <Alert.Root class="border-warning-default/35 bg-warning-dimmer/25 rounded-xl px-4 py-3">
+      <CircleAlert class="text-warning-stronger mt-0.5 size-4 shrink-0" aria-hidden="true" />
+      <Alert.Title class="text-warning-stronger text-sm font-medium">
+        {m.flow_output_mode_needs_attention()}
+      </Alert.Title>
+      <Alert.Description class="text-warning-stronger text-[0.8125rem] leading-relaxed">
+        {getCompatibilityIssueText(compatibilityIssue)}
+      </Alert.Description>
+    </Alert.Root>
+  {/if}
 
   {#if isAdvancedMode && step.output_type === "docx"}
     <Alert.Root
@@ -139,35 +206,11 @@
     </Alert.Root>
   {/if}
 
-  <Settings.Row title={m.flow_step_output_mode()} description="">
-    <div class="flex flex-col gap-2">
-      <Select.Root
-        type="single"
-        value={step.output_mode}
-        disabled={isPublished}
-        onValueChange={(value) => onOutputModeChange?.({ value })}
-      >
-        <Select.Trigger class="w-full" aria-label={m.flow_step_output_mode()}>
-          {selectedOutputModeLabel}
-        </Select.Trigger>
-        <Select.Content>
-          <Select.Group>
-            {#each availableOutputModes as mode (mode.value)}
-              <Select.Item value={mode.value} label={mode.label}>{mode.label}</Select.Item>
-            {/each}
-          </Select.Group>
-        </Select.Content>
-      </Select.Root>
-      {#if documentHelperText}
-        <p class="text-muted text-xs leading-relaxed">{documentHelperText}</p>
-      {/if}
-    </div>
-  </Settings.Row>
-
-  {#if supportsCitationMode}
+  {#if isAdvancedMode && supportsCitationMode}
     <Settings.Row
       title={m.flow_step_citation_mode()}
       description={m.flow_step_citation_mode_desc()}
+      density="compact"
     >
       <div class="flex flex-col gap-2">
         <Select.Root
@@ -206,10 +249,10 @@
     </Settings.Row>
   {/if}
 
-  {#if step.output_mode === "http_post"}
+  {#if isAdvancedMode && step.output_mode === "http_post"}
     <!-- Legacy URL-only fallback for configs without authored format -->
     {#if step.output_config && !step.output_config.auth}
-      <Settings.Row title={m.flow_step_webhook_url()} description="">
+      <Settings.Row title={m.flow_step_webhook_url()} description="" density="compact">
         <Input
           value={step.output_config?.url ?? ""}
           disabled={isPublished}
@@ -221,7 +264,7 @@
   {/if}
 </FlowStepSection>
 
-{#if step.output_mode === "http_post" && (step.output_config?.auth || !step.output_config?.url)}
+{#if isAdvancedMode && step.output_mode === "http_post" && (step.output_config?.auth || !step.output_config?.url)}
   <HttpConfigPanel
     config={httpConfig}
     direction="output"

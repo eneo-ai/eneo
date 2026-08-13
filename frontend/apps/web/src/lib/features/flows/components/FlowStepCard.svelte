@@ -255,7 +255,7 @@
             >{railOutputLabel}</Badge
           >
           <span class="text-muted text-xs" aria-hidden="true">&middot;</span>
-          <span class="text-accent-stronger text-xs font-medium tabular-nums">
+          <span class="text-secondary text-xs font-medium tabular-nums">
             {m.flow_step_card_chain_short()}: {nextChannelLabel}
           </span>
         </div>

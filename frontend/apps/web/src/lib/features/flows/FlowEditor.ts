@@ -132,7 +132,7 @@ function createFlowEditor(data: FlowEditorInitData) {
   // Which editor chapter a freshly-created step should open by default. Keyed by
   // step_order so it survives the temp→real id reconciliation. Template steps
   // land on the AI work section; blank steps land on "what".
-  const newStepOpenIntent = writable<{ order: number; chapter: "ai" | "what" } | null>(null);
+  const newStepOpenIntent = writable<{ order: number } | null>(null);
 
   // Derived: is the flow published?
   const isPublished = derived(editor.state.resource, ($resource) => {
@@ -537,7 +537,7 @@ function createFlowEditor(data: FlowEditorInitData) {
       ...u,
       steps: [...(u.steps ?? []), newStep as FlowStep]
     }));
-    newStepOpenIntent.set({ order: stepCount + 1, chapter: seed ? "ai" : "what" });
+    newStepOpenIntent.set({ order: stepCount + 1 });
     activeStepId.set(tempId);
 
     // Background: create hidden assistant

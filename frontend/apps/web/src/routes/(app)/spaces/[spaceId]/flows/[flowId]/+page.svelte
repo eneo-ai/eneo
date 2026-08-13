@@ -19,6 +19,7 @@
   import FlowRunDialog from "$lib/features/flows/components/FlowRunDialog.svelte";
   import FlowPackageExportDialog from "$lib/features/flows/components/FlowPackageExportDialog.svelte";
   import { Button } from "$lib/components/ui/button/index.js";
+  import * as Sheet from "$lib/components/ui/sheet/index.js";
   import { Switch } from "$lib/components/ui/switch/index.js";
   import * as AlertDialog from "$lib/components/ui/alert-dialog/index.js";
   import * as Card from "$lib/components/ui/card/index.js";
@@ -31,6 +32,7 @@
   import { IconLoadingSpinner } from "@eneo/icons/loading-spinner";
   import CheckCircle2 from "lucide-svelte/icons/check-circle-2";
   import CircleAlert from "lucide-svelte/icons/circle-alert";
+  import ListTree from "lucide-svelte/icons/list-tree";
   import {
     EneoError,
     type FlowRun,
@@ -40,6 +42,7 @@
   import { toast } from "$lib/components/toast";
   import { m } from "$lib/paraglide/messages";
   import { untrack } from "svelte";
+  import { MediaQuery } from "svelte/reactivity";
   import { slide } from "svelte/transition";
   import FlowDryRun from "$lib/features/flows/components/FlowDryRun.svelte";
   import FlowPageHeader from "$lib/features/flows/components/FlowPageHeader.svelte";
@@ -68,6 +71,8 @@
   let latestHistoryPayload = $state<Record<string, unknown> | null>(null);
   let hasStepJsonValidationErrors = $state(false);
   let stepJsonValidationFields = $state<string[]>([]);
+  let mobileStepsOpen = $state(false);
+  const isDesktopStepLayout = new MediaQuery("(min-width: 80rem)");
   type BuilderStageId = 1 | 2 | 3 | 4 | 5;
   let builderStage = $state<BuilderStageId>(1);
 
@@ -107,6 +112,47 @@
   } = flowEditor;
   const careDataPolicy = $derived(resolveFlowCareDataPolicy($resource.metadata_json));
   const runHistoryRetention = $derived($resource.run_history_retention);
+  const activeProcessingStep = $derived(
+    $update.steps.find((step) => step.id === $activeStepId) ?? null
+  );
+
+  async function selectProcessingStep(stepId: string | null) {
+    try {
+      await flowEditor.flushSaves();
+    } catch (error) {
+      const message =
+        error instanceof EneoError
+          ? error.getReadableMessage()
+          : "Kunde inte spara stegets ändringar.";
+      toast.error(message);
+    }
+    if (stepId) {
+      flowEditor.selectStep(stepId);
+      mobileStepsOpen = false;
+    }
+  }
+
+  async function moveProcessingStep(index: number, direction: -1 | 1) {
+    try {
+      await flowEditor.moveStepAtIndex(index, direction);
+    } catch (error) {
+      const message =
+        error instanceof EneoError
+          ? error.getReadableMessage()
+          : "Kunde inte uppdatera stegordning.";
+      toast.error(message);
+    }
+  }
+
+  async function removeProcessingStep(index: number) {
+    try {
+      await flowEditor.removeStepAtIndex(index);
+    } catch (error) {
+      const message =
+        error instanceof EneoError ? error.getReadableMessage() : "Kunde inte ta bort steget.";
+      toast.error(message);
+    }
+  }
 
   function retentionActivationSourceLabel(
     source: NonNullable<FlowRunRetention>["activation_sources"][number]
@@ -330,6 +376,24 @@
     >Eneo.ai – {$currentSpace.personal ? m.personal() : $currentSpace.name} – {$resource.name}</title
   >
 </svelte:head>
+
+{#snippet processingStepList()}
+  <FlowStepList
+    steps={$update.steps}
+    activeStepId={$activeStepId}
+    isPublished={$isPublished}
+    validationErrors={$validationErrors}
+    onBuildWithAI={canUseAIBuilder
+      ? () => {
+          ensureAIBuilder();
+          setActiveTab("ai-builder");
+        }
+      : undefined}
+    onSelectStep={(stepId) => void selectProcessingStep(stepId)}
+    onMoveStep={(index, direction) => void moveProcessingStep(index, direction)}
+    onRemoveStep={(index) => void removeProcessingStep(index)}
+  />
+{/snippet}
 
 <Page.Root>
   <FlowPageHeader
@@ -1080,77 +1144,78 @@
             </div>
           </div>
         {:else if builderStage === 4}
-          <!-- Side-by-side list-detail layout -->
-          <div
-            class="mx-auto flex w-full max-w-[1600px] flex-1 flex-col gap-3 overflow-hidden lg:flex-row"
-          >
-            <div
-              class="border-default bg-primary max-h-[42vh] w-full overflow-hidden rounded-xl border shadow-sm sm:max-h-[48vh] lg:max-h-none lg:w-80 lg:shrink-0 xl:w-[340px]"
+          {#if !isDesktopStepLayout.current}
+            <Button
+              variant="outline"
+              class="mx-auto flex h-auto w-full max-w-[1000px] items-center justify-between gap-3 px-4 py-3 text-left"
+              aria-label={m.flow_steps_open({ count: String($update.steps.length) })}
+              onclick={() => (mobileStepsOpen = true)}
             >
-              <FlowStepList
-                steps={$update.steps}
-                activeStepId={$activeStepId}
-                isPublished={$isPublished}
-                validationErrors={$validationErrors}
-                onBuildWithAI={canUseAIBuilder
-                  ? () => {
-                      ensureAIBuilder();
-                      setActiveTab("ai-builder");
-                    }
-                  : undefined}
-                onSelectStep={async (stepId) => {
-                  try {
-                    await flowEditor.flushSaves();
-                  } catch (error) {
-                    const message =
-                      error instanceof EneoError
-                        ? error.getReadableMessage()
-                        : "Kunde inte spara stegets ändringar.";
-                    toast.error(message);
-                  }
-                  if (stepId) {
-                    flowEditor.selectStep(stepId);
-                  }
-                }}
-                onMoveStep={async (index, direction) => {
-                  try {
-                    await flowEditor.moveStepAtIndex(index, direction);
-                  } catch (error) {
-                    const message =
-                      error instanceof EneoError
-                        ? error.getReadableMessage()
-                        : "Kunde inte uppdatera stegordning.";
-                    toast.error(message);
-                  }
-                }}
-                onRemoveStep={async (index) => {
-                  try {
-                    await flowEditor.removeStepAtIndex(index);
-                  } catch (error) {
-                    const message =
-                      error instanceof EneoError
-                        ? error.getReadableMessage()
-                        : "Kunde inte ta bort steget.";
-                    toast.error(message);
-                  }
-                }}
-              />
-            </div>
+              <span class="min-w-0">
+                <span class="text-secondary block text-xs font-medium">
+                  {activeProcessingStep
+                    ? m.flow_step_position({
+                        index: String(activeProcessingStep.step_order),
+                        total: String($update.steps.length)
+                      })
+                    : m.flow_steps()}
+                </span>
+                <span class="text-primary block truncate text-sm font-semibold">
+                  {activeProcessingStep?.user_description ?? m.flow_step_select_prompt()}
+                </span>
+              </span>
+              <ListTree class="text-secondary size-5 shrink-0" aria-hidden="true" />
+            </Button>
+
+            <Sheet.Root bind:open={mobileStepsOpen}>
+              <Sheet.Content
+                side="right"
+                class="w-[min(26rem,calc(100vw-1rem))] gap-0 p-0 motion-reduce:animate-none motion-reduce:transition-none sm:max-w-md"
+              >
+                <Sheet.Title class="sr-only">
+                  {m.flow_steps_open({ count: String($update.steps.length) })}
+                </Sheet.Title>
+                <Sheet.Description class="sr-only">
+                  {m.flow_steps_sheet_description()}
+                </Sheet.Description>
+                <div class="min-h-0 flex-1 overflow-hidden pt-12">
+                  {@render processingStepList()}
+                </div>
+              </Sheet.Content>
+            </Sheet.Root>
+          {/if}
+
+          <div
+            class="mx-auto flex w-full max-w-[1600px] flex-1 flex-col gap-3 overflow-hidden xl:flex-row xl:justify-center"
+          >
+            {#if isDesktopStepLayout.current}
+              <div
+                class="border-default bg-primary w-80 shrink-0 overflow-hidden rounded-xl border shadow-sm xl:w-[340px]"
+              >
+                {@render processingStepList()}
+              </div>
+            {/if}
 
             <div
-              class="border-default bg-primary flex-1 overflow-hidden rounded-xl border shadow-sm lg:max-w-[900px] 2xl:max-w-[1000px]"
+              class="border-default bg-primary flex-1 overflow-hidden rounded-xl border shadow-sm xl:max-w-[900px] 2xl:max-w-[1000px]"
             >
               <div class="h-full overflow-y-auto">
                 <FlowStepEditPanel
                   steps={$update.steps}
                   activeStepId={$activeStepId}
                   isPublished={$isPublished}
+                  securityClassifications={data.securityClassifications}
                   {transcriptionEnabled}
                   transcriptionModelConfigured={transcriptionModel !== null}
                   transcriptionModelLabel={transcriptionModel?.nickname ??
                     transcriptionModel?.name ??
                     null}
                   formSchema={formSchemaMetadata}
+                  onEditWithAI={canUseAIBuilder
+                    ? () => {
+                        setActiveTab("ai-builder");
+                      }
+                    : undefined}
                   onOpenTranscriptionSettings={() => void navigateToStage(2)}
                   onJsonValidationChanged={(detail) => {
                     hasStepJsonValidationErrors = detail.hasErrors;

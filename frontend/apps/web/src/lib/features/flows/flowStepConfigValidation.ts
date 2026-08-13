@@ -3,6 +3,7 @@ import { hasDeletedInputBindingSourceRefs, getInputBindingQuestion } from "./flo
 import { getTemplateFillOutputConfig } from "./templateFillConfig";
 import { createDefaultHttpConfig } from "./components/http/httpConfigDefaults";
 import { parseHttpAuthoredConfig } from "./components/http/httpConfigTypes";
+import { getOutputModeCompatibilityIssue } from "./flowStepTypes";
 
 /** Matches the synthetic token for a reference to a since-deleted step. */
 export const DELETED_STEP_TOKEN = /\{\{step_\d+_deleted/;
@@ -18,6 +19,11 @@ export function computeStepConfigValidationIssues(
 ): Map<string, string[]> {
   const entries = new Map<string, string[]>();
   for (const step of steps) {
+    if (getOutputModeCompatibilityIssue(step) !== null) {
+      entries.set(`${prefix}output_mode_incompatible:${step.step_order}`, [
+        "output_mode_incompatible"
+      ]);
+    }
     if (step.output_mode === "template_fill") {
       const config = getTemplateFillOutputConfig(step);
       if (!config.template_asset_id) {

@@ -204,6 +204,42 @@ describe("flow step transition policy", () => {
     expect(result.output_config).toBeNull();
   });
 
+  it("clears an output contract when switching to deterministic document rendering", () => {
+    const result = applyOutputModeChange({
+      step: makeStep({
+        input_type: "text",
+        output_type: "pdf",
+        output_contract: { type: "object" },
+        output_config: { citation_mode: "inline_inref_sidecar" }
+      }),
+      nextMode: "render_verbatim",
+      runtimeInputConfig: makeRuntimeInputConfig(),
+      templateFillConfig: getTemplateFillOutputConfig(makeStep())
+    });
+
+    expect(result.output_mode).toBe("render_verbatim");
+    expect(result.output_contract).toBeNull();
+    expect(result.output_config).toBeNull();
+  });
+
+  it("selects a valid response format when a deterministic mode is chosen", () => {
+    const rendered = applyOutputModeChange({
+      step: makeStep({ input_type: "text", output_type: "text" }),
+      nextMode: "render_verbatim",
+      runtimeInputConfig: makeRuntimeInputConfig(),
+      templateFillConfig: getTemplateFillOutputConfig(makeStep())
+    });
+    const composed = applyOutputModeChange({
+      step: makeStep({ input_type: "text", output_type: "json" }),
+      nextMode: "compose_text",
+      runtimeInputConfig: makeRuntimeInputConfig(),
+      templateFillConfig: getTemplateFillOutputConfig(makeStep())
+    });
+
+    expect(rendered.output_type).toBe("pdf");
+    expect(composed.output_type).toBe("text");
+  });
+
   it("clears review policy when switching to outbound output delivery", () => {
     const result = applyOutputModeChange({
       step: makeStep({

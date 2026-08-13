@@ -77,7 +77,7 @@ describe("FlowStepInputTemplateSection", () => {
     expect(container.textContent).toContain("Original analys");
   });
 
-  it("renders implicit previous-step underlag with the resolved source step", () => {
+  it("does not repeat the implicit previous-step source already shown by the source selector", () => {
     const { container } = renderSection({
       effectiveInputSources: [
         {
@@ -88,11 +88,10 @@ describe("FlowStepInputTemplateSection", () => {
       ]
     });
 
-    expect(container.textContent).toContain(
+    expect(container.textContent).not.toContain(
       String(m.flow_input_template_effective_sources_title())
     );
-    expect(container.textContent).toContain("Steg 1: Läs dokument");
-    expect(container.textContent).toContain(
+    expect(container.textContent).not.toContain(
       String(m.flow_input_template_effective_previous_step())
     );
   });

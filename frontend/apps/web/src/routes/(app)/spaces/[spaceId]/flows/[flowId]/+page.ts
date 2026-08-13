@@ -11,10 +11,16 @@ export const load = async (event) => {
     throw error(403);
   }
 
-  const flow = await eneo.flows.get({ id: flowId });
+  const [flow, security] = await Promise.all([
+    eneo.flows.get({ id: flowId }),
+    eneo.securityClassifications.list()
+  ]);
   if (flow.space_id !== currentSpace.id) {
     throw error(404);
   }
 
-  return { flow };
+  return {
+    flow,
+    securityClassifications: security.security_enabled ? security.security_classifications : []
+  };
 };

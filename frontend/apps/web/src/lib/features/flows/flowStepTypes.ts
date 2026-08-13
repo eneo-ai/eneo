@@ -1,7 +1,21 @@
 import type { FlowStep } from "@eneo/eneo-js";
 import { m } from "$lib/paraglide/messages";
 
-export const OUTPUT_TYPES = [
+type InputType = FlowStep["input_type"];
+type InputSource = FlowStep["input_source"];
+type OutputMode = FlowStep["output_mode"];
+type OutputType = FlowStep["output_type"];
+
+type OutputOption<TValue extends string> = {
+  value: TValue;
+  readonly label: string;
+};
+
+export type SelectableOutputOption<TValue extends string> = OutputOption<TValue> & {
+  legacyInvalid: boolean;
+};
+
+export const OUTPUT_TYPES: OutputOption<OutputType>[] = [
   {
     value: "text",
     get label() {
@@ -28,37 +42,39 @@ export const OUTPUT_TYPES = [
   }
 ];
 
-export const OUTPUT_MODES = [
-  {
-    value: "pass_through",
-    get label() {
-      return m.flow_output_mode_pass_through();
-    }
-  },
-  {
-    value: "transcribe_only",
-    get label() {
-      return m.flow_output_mode_transcribe_only();
-    }
-  },
-  {
-    value: "http_post",
-    get label() {
-      return m.flow_output_mode_http_post();
-    }
-  },
-  {
-    value: "template_fill",
-    get label() {
-      return m.flow_output_mode_template_fill();
-    }
-  }
+const OUTPUT_MODE_LABELS: Record<OutputMode, () => string> = {
+  pass_through: () => m.flow_output_mode_pass_through(),
+  compose_text: () => m.flow_output_mode_compose_text(),
+  transcribe_only: () => m.flow_output_mode_transcribe_only(),
+  template_fill: () => m.flow_output_mode_template_fill(),
+  render_verbatim: () => m.flow_output_mode_render_verbatim(),
+  http_post: () => m.flow_output_mode_http_post()
+};
+
+const OUTPUT_MODE_ORDER: OutputMode[] = [
+  "pass_through",
+  "compose_text",
+  "transcribe_only",
+  "template_fill",
+  "render_verbatim",
+  "http_post"
 ];
 
-type InputType = FlowStep["input_type"];
-type InputSource = FlowStep["input_source"];
-type OutputMode = FlowStep["output_mode"];
-type OutputType = FlowStep["output_type"];
+// Exhaustive over the generated backend union: a new runtime mode must gain a
+// deliberate authoring label here instead of silently disappearing from the UI.
+export const OUTPUT_MODES: OutputOption<OutputMode>[] = OUTPUT_MODE_ORDER.map((value) => ({
+  value,
+  get label() {
+    return OUTPUT_MODE_LABELS[value]();
+  }
+}));
+
+export type OutputModeCompatibilityIssue =
+  | "compose_text_requires_text"
+  | "render_verbatim_requires_text_document"
+  | "template_fill_requires_docx"
+  | "transcribe_only_requires_audio_text"
+  | "text_document_requires_render_verbatim";
 
 export type FlowStepLike = Pick<
   FlowStep,
@@ -365,27 +381,77 @@ export function getFlowStepValidationIssues(steps: FlowStepLike[]): FlowStepVali
 }
 
 export function getAvailableOutputTypes(
-  step: Pick<FlowStep, "output_mode"> | null | undefined
-): typeof OUTPUT_TYPES {
-  if (step?.output_mode === "transcribe_only") {
-    return OUTPUT_TYPES.filter((type) => type.value === "text");
-  }
-  if (step?.output_mode === "template_fill") {
-    return OUTPUT_TYPES.filter((type) => type.value === "docx");
-  }
-  return OUTPUT_TYPES;
+  step: Pick<FlowStep, "output_mode" | "output_type"> | null | undefined
+): SelectableOutputOption<OutputType>[] {
+  if (!step) return OUTPUT_TYPES.map((type) => ({ ...type, legacyInvalid: false }));
+
+  const allowedTypes: OutputType[] =
+    step.output_mode === "transcribe_only" || step.output_mode === "compose_text"
+      ? ["text"]
+      : step.output_mode === "template_fill"
+        ? ["docx"]
+        : step.output_mode === "render_verbatim"
+          ? ["pdf", "docx"]
+          : OUTPUT_TYPES.map((type) => type.value);
+
+  return OUTPUT_TYPES.filter(
+    (type) => allowedTypes.includes(type.value) || type.value === step.output_type
+  ).map((type) => ({
+    ...type,
+    legacyInvalid: type.value === step.output_type && !allowedTypes.includes(type.value)
+  }));
 }
 
 export function getAvailableOutputModes(params: {
-  step: Pick<FlowStep, "input_type" | "output_mode"> | null | undefined;
+  step: Pick<FlowStep, "input_type" | "output_type" | "output_mode"> | null | undefined;
   isAdvancedMode: boolean;
-}): typeof OUTPUT_MODES {
+}): SelectableOutputOption<OutputMode>[] {
   const { step, isAdvancedMode } = params;
-  const base =
-    step?.input_type === "audio"
-      ? OUTPUT_MODES
-      : OUTPUT_MODES.filter((mode) => mode.value !== "transcribe_only");
-  return isAdvancedMode || step?.output_mode === "template_fill"
-    ? base
-    : base.filter((mode) => mode.value !== "template_fill");
+  if (!step) return OUTPUT_MODES.map((mode) => ({ ...mode, legacyInvalid: false }));
+
+  return OUTPUT_MODES.filter((mode) => {
+    const isCurrent = mode.value === step.output_mode;
+    if (!isAdvancedMode && mode.value === "template_fill" && !isCurrent) return false;
+    if (!isAdvancedMode && mode.value === "http_post" && !isCurrent) return false;
+    if (isCurrent) return true;
+    if (mode.value === "compose_text" || mode.value === "render_verbatim") {
+      return step.input_type === "text";
+    }
+    if (mode.value === "transcribe_only") return step.input_type === "audio";
+    return true;
+  }).map((mode) => ({
+    ...mode,
+    legacyInvalid: mode.value === step.output_mode && getOutputModeCompatibilityIssue(step) !== null
+  }));
+}
+
+export function getOutputModeCompatibilityIssue(
+  step: Pick<FlowStep, "input_type" | "output_type" | "output_mode">
+): OutputModeCompatibilityIssue | null {
+  if (step.output_mode === "compose_text") {
+    return step.input_type === "text" && step.output_type === "text"
+      ? null
+      : "compose_text_requires_text";
+  }
+  if (step.output_mode === "render_verbatim") {
+    return step.input_type === "text" && (step.output_type === "pdf" || step.output_type === "docx")
+      ? null
+      : "render_verbatim_requires_text_document";
+  }
+  if (step.output_mode === "template_fill") {
+    return step.output_type === "docx" ? null : "template_fill_requires_docx";
+  }
+  if (step.output_mode === "transcribe_only") {
+    return step.input_type === "audio" && step.output_type === "text"
+      ? null
+      : "transcribe_only_requires_audio_text";
+  }
+  if (
+    step.output_mode === "pass_through" &&
+    step.input_type === "text" &&
+    (step.output_type === "pdf" || step.output_type === "docx")
+  ) {
+    return "text_document_requires_render_verbatim";
+  }
+  return null;
 }

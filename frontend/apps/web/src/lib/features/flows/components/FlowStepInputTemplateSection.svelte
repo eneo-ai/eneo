@@ -1,13 +1,9 @@
 <script lang="ts">
   import FlowStepSection from "$lib/features/flows/components/FlowStepSection.svelte";
-  import { Settings } from "$lib/components/layout";
   import { m } from "$lib/paraglide/messages";
   import type { FlowStep } from "@eneo/eneo-js";
   import { Button } from "$lib/components/ui/button/index.js";
-  import * as Tooltip from "$lib/components/ui/tooltip/index.js";
   import * as Alert from "$lib/components/ui/alert/index.js";
-  import { IconQuestionMark } from "@eneo/icons/question-mark";
-  import { slide } from "svelte/transition";
   import FlowPromptEditor from "./FlowPromptEditor.svelte";
   import { INPUT_SOURCE_LABELS } from "./flowStepEditHelpers";
   import type { FlowFormSchemaMetadata } from "$lib/features/flows/flowFormSchema";
@@ -75,8 +71,7 @@
   );
 
   const shouldShowEffectiveInputSources = $derived(
-    effectiveInputSources.length > 0 &&
-      (showInputTemplate || isAdvancedMode || hasTypedInputSources)
+    effectiveInputSources.length > 0 && hasTypedInputSources
   );
 
   function stepLabel(stepOrder: number, stepName: string | null): string {
@@ -176,10 +171,11 @@
 {/if}
 
 {#if shouldShowEffectiveInputSources}
-  <Alert.Root class="border-default bg-secondary/15 mb-3 rounded-lg" role="status">
-    <Alert.Description class="text-secondary flex flex-col gap-2 text-xs leading-relaxed">
-      <span class="text-primary font-medium">{m.flow_input_template_effective_sources_title()}</span
-      >
+  <section class="mb-4 px-2" aria-labelledby="flow-step-effective-sources-title">
+    <div class="text-secondary flex flex-col gap-2 text-[0.8125rem] leading-relaxed">
+      <h3 id="flow-step-effective-sources-title" class="text-primary text-sm font-medium">
+        {m.flow_input_template_effective_sources_title()}
+      </h3>
       <ul class="flex flex-col gap-1.5">
         {#each effectiveInputSources as source, index (`${source.kind}-${index}`)}
           <li class="flex flex-wrap items-center gap-x-2 gap-y-1">
@@ -188,50 +184,44 @@
           </li>
         {/each}
       </ul>
-    </Alert.Description>
-  </Alert.Root>
+    </div>
+  </section>
 {/if}
 
-{#if showInputTemplate}
-  <div transition:slide={{ duration: 200 }}>
-    <FlowStepSection
-      title={inputTemplateSectionTitle}
-      {collapsible}
-      {resetKey}
-      status={templateStatus}
-    >
-      <Settings.Row title={inputTemplateSectionTitle} description={inputTemplateSectionDescription}>
-        <svelte:fragment slot="title">
-          <Tooltip.Provider delayDuration={150}>
-            <Tooltip.Root>
-              <Tooltip.Trigger aria-label={m.flow_step_input_template_tooltip()}>
-                <IconQuestionMark class="text-muted hover:text-primary ml-1.5" aria-hidden="true" />
-              </Tooltip.Trigger>
-              <Tooltip.Content>{m.flow_step_input_template_tooltip()}</Tooltip.Content>
-            </Tooltip.Root>
-          </Tooltip.Provider>
-        </svelte:fragment>
-        <div class="flex flex-col gap-2">
-          <Alert.Root class="bg-secondary/20 rounded-lg" role="status">
-            <Alert.Description class="text-secondary text-xs leading-relaxed">
-              {stepUxCopy.inputTemplateDefaultHint}
-            </Alert.Description>
-          </Alert.Root>
-          <FlowPromptEditor
-            value={inputTemplateText}
-            disabled={isPublished}
-            label={stepUxCopy.inputTemplateEditorLabel}
-            placeholder={stepUxCopy.inputTemplatePlaceholder}
-            minHeight={isAdvancedMode ? 160 : 132}
-            {steps}
-            currentStepOrder={step.step_order}
-            {formSchema}
-            transcriptionEnabled={transcriptionEnabled && hasAudioInputSteps}
-            {isAdvancedMode}
-            onChange={(value) => onInputTemplateChange?.({ value })}
-          />
-        </div>
-      </Settings.Row>
-    </FlowStepSection>
+<FlowStepSection title={inputTemplateSectionTitle} {collapsible} {resetKey} status={templateStatus}>
+  <div class="flex flex-col gap-3 px-2">
+    <p class="text-secondary max-w-3xl text-[0.8125rem] leading-relaxed">
+      {inputTemplateSectionDescription}
+    </p>
+    {#if showInputTemplate}
+      <div class="flex flex-col gap-2">
+        <p class="text-secondary text-[0.8125rem] leading-relaxed">
+          {stepUxCopy.inputTemplateDefaultHint}
+        </p>
+        <FlowPromptEditor
+          value={inputTemplateText}
+          disabled={isPublished}
+          label={stepUxCopy.inputTemplateEditorLabel}
+          placeholder={stepUxCopy.inputTemplatePlaceholder}
+          minHeight={isAdvancedMode ? 160 : 132}
+          {steps}
+          currentStepOrder={step.step_order}
+          {formSchema}
+          transcriptionEnabled={transcriptionEnabled && hasAudioInputSteps}
+          {isAdvancedMode}
+          onChange={(value) => onInputTemplateChange?.({ value })}
+        />
+      </div>
+    {:else}
+      <Button
+        variant="outline"
+        size="sm"
+        class="self-start"
+        disabled={isPublished}
+        onclick={() => onRevealInputTemplate?.()}
+      >
+        {stepUxCopy.inputTemplateCtaAction}
+      </Button>
+    {/if}
   </div>
-{/if}
+</FlowStepSection>

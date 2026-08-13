@@ -26,6 +26,7 @@
     placeholder = "",
     label = m.flow_step_prompt(),
     minHeight = 160,
+    maxHeight,
     steps,
     currentStepOrder,
     formSchema,
@@ -47,6 +48,7 @@
     ariaDescribedby?: string;
     focusOnMount?: boolean;
     minHeight?: number;
+    maxHeight?: number;
     steps: FlowStep[];
     currentStepOrder: number;
     formSchema:
@@ -103,6 +105,27 @@
   let activeTrigger: "braces" | "at" | null = $state(null);
   let autocompleteAnchorIndex = $state(-1);
   let markerEl: HTMLSpanElement | null = $state(null);
+
+  // Recalculate the constrained editor height when the component mounts or
+  // when mode-dependent sizing changes. Reading these values here keeps the
+  // DOM resize in sync when Enkel/Avancerad reuses the same editor instance.
+  $effect(() => {
+    const editor = textareaEl;
+    const valueToMeasure = currentEditorValue;
+    const nextMinHeight = minHeight;
+    const nextMaxHeight = maxHeight;
+    if (!editor) return;
+    tick().then(() => {
+      if (
+        textareaEl === editor &&
+        currentEditorValue === valueToMeasure &&
+        minHeight === nextMinHeight &&
+        maxHeight === nextMaxHeight
+      ) {
+        autoResize();
+      }
+    });
+  });
 
   // Focus the textarea when the parent requests it (e.g. the step capsule's
   // "add instruction" action, which opens this section and moves focus here).
@@ -191,7 +214,9 @@
   function autoResize() {
     if (!textareaEl) return;
     textareaEl.style.height = "auto";
-    textareaEl.style.height = textareaEl.scrollHeight + "px";
+    const nextHeight = Math.min(textareaEl.scrollHeight, maxHeight ?? Number.POSITIVE_INFINITY);
+    textareaEl.style.height = `${nextHeight}px`;
+    textareaEl.style.overflowY = textareaEl.scrollHeight > nextHeight ? "auto" : "hidden";
   }
 
   let lastInputType = "";
@@ -415,7 +440,7 @@
     <!-- Textarea layer (on top, transparent text, visible caret) -->
     <textarea
       bind:this={textareaEl}
-      class="selection:bg-accent-dimmer selection:text-primary relative z-10 w-full overflow-hidden bg-transparent px-4 py-3 font-mono text-base leading-relaxed text-transparent caret-foreground focus:outline-none sm:text-sm"
+      class="selection:bg-accent-dimmer selection:text-primary caret-foreground relative z-10 w-full overflow-hidden bg-transparent px-4 py-3 font-mono text-base leading-relaxed text-transparent focus:outline-none sm:text-sm"
       style={`min-height: ${minHeight}px`}
       oninput={handleInput}
       onkeydown={handleKeydown}

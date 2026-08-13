@@ -32,6 +32,26 @@ export interface StepAiWork {
   missing: boolean;
 }
 
+export type FlowStepChapterId = "task" | "input" | "result" | "control" | "technical";
+
+export function getDefaultOpenStepChapter({
+  step,
+  hasInputError = false,
+  hasOutputError = false
+}: {
+  step: Pick<FlowStep, "output_mode">;
+  hasInputError?: boolean;
+  hasOutputError?: boolean;
+}): FlowStepChapterId {
+  if (hasInputError) return "input";
+  if (hasOutputError) return "result";
+  if (step.output_mode === "transcribe_only") return "input";
+  if (step.output_mode === "template_fill" || step.output_mode === "render_verbatim") {
+    return "result";
+  }
+  return "task";
+}
+
 export function getStepAiWork(
   step: FlowStep,
   opts: { instructionPresent: boolean | null }

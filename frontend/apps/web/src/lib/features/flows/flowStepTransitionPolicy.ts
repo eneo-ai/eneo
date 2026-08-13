@@ -220,6 +220,39 @@ export function applyOutputModeChange({
     );
   }
 
+  if (nextMode === "render_verbatim") {
+    return sanitizeFlowStepReviewPolicy(
+      sanitizeStepCitationMode({
+        ...step,
+        output_mode: "render_verbatim",
+        output_type:
+          step.output_type === "pdf" || step.output_type === "docx" ? step.output_type : "pdf",
+        output_contract: null
+      })
+    );
+  }
+
+  if (nextMode === "compose_text") {
+    return sanitizeFlowStepReviewPolicy(
+      sanitizeStepCitationMode({
+        ...step,
+        output_mode: "compose_text",
+        output_type: "text",
+        output_contract: null
+      })
+    );
+  }
+
+  if (
+    nextMode === "pass_through" &&
+    step.input_type === "text" &&
+    (step.output_type === "pdf" || step.output_type === "docx")
+  ) {
+    return sanitizeFlowStepReviewPolicy(
+      sanitizeStepCitationMode({ ...step, output_mode: "pass_through", output_type: "text" })
+    );
+  }
+
   return sanitizeFlowStepReviewPolicy(sanitizeStepCitationMode({ ...step, output_mode: nextMode }));
 }
 

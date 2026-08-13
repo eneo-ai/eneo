@@ -9,7 +9,6 @@
     WebsiteSparse
   } from "@eneo/eneo-js";
   import { Button } from "$lib/components/ui/button/index.js";
-  import * as Alert from "$lib/components/ui/alert/index.js";
   import { IconLoadingSpinner } from "@eneo/icons/loading-spinner";
   import { IconTrash } from "@eneo/icons/trash";
   import { IconCancel } from "@eneo/icons/cancel";
@@ -137,15 +136,11 @@
       {m.flow_step_assistant_loading()}
     </div>
   {:else if assistant}
-    <Alert.Root class="border-accent-default/15 bg-accent-dimmer/50 mb-4 rounded-xl" role="status">
-      <Alert.Title class="text-accent-stronger text-sm font-medium">
-        {m.flow_step_context_runtime_files_title()}
-      </Alert.Title>
-      <Alert.Description class="text-accent-stronger mt-1 text-xs leading-relaxed">
-        {m.flow_step_context_runtime_files_body()}
-      </Alert.Description>
-    </Alert.Root>
-    <Settings.Row title={m.knowledge()} description={m.flow_step_knowledge_desc()}>
+    <Settings.Row
+      title={m.knowledge()}
+      description={m.flow_step_knowledge_desc()}
+      density="compact"
+    >
       <SelectKnowledge
         originMode="personal"
         bind:selectedWebsites
@@ -159,8 +154,15 @@
         bind:selectedIntegrationKnowledge
       />
     </Settings.Row>
-    <Settings.Row title={m.attachments()} description={m.flow_step_attachments_desc()}>
+    <Settings.Row
+      title={m.attachments()}
+      description={m.flow_step_attachments_desc()}
+      density="compact"
+    >
       <div class="w-full">
+        <p class="text-secondary mb-3 text-[0.8125rem] leading-relaxed">
+          {m.flow_step_runtime_files_help()}
+        </p>
         {#each Array.isArray(assistant.attachments) ? assistant.attachments : [] as file (file.id)}
           <div
             class="border-default bg-primary hover:bg-hover-dimmer flex h-16 items-center gap-3 border-b px-4"

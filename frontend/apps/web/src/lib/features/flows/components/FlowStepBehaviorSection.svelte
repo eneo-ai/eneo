@@ -6,7 +6,6 @@
   import { Button } from "$lib/components/ui/button/index.js";
   import * as Tooltip from "$lib/components/ui/tooltip/index.js";
   import * as Alert from "$lib/components/ui/alert/index.js";
-  import * as Card from "$lib/components/ui/card/index.js";
   import CircleAlert from "lucide-svelte/icons/circle-alert";
   import { IconLoadingSpinner } from "@eneo/icons/loading-spinner";
   import { IconLockClosed } from "@eneo/icons/lock-closed";
@@ -38,13 +37,11 @@
     instructionText,
     instructionMissing = false,
     focusInstruction = false,
-    canRevealInputTemplate,
-    showInputTemplate,
     loadPromptVersions,
     onAssistantFieldChange,
     onInstructionDraft,
     onInstructionCommit,
-    onRevealInputTemplate,
+    onEditWithAI,
     onInstructionFocused
   }: {
     step: FlowStep;
@@ -62,19 +59,13 @@
     instructionText: string;
     instructionMissing?: boolean;
     focusInstruction?: boolean;
-    canRevealInputTemplate: boolean;
-    showInputTemplate: boolean;
     loadPromptVersions: (assistantId: string) => Promise<PromptSparse[]>;
     onAssistantFieldChange?: (detail: { field: string; value: unknown }) => void;
     onInstructionDraft?: (detail: { value: string }) => void;
     onInstructionCommit?: (detail: { value: string }) => void;
-    onRevealInputTemplate?: () => void;
+    onEditWithAI?: () => void;
     onInstructionFocused?: () => void;
   } = $props();
-
-  // Onboarding comparison cards clutter the section once a step is configured.
-  // Show them only while the instruction is empty, or on explicit "Visa tips".
-  let showTips = $state(false);
 
   // Collapsed label for the advanced model group — the chosen model's name.
   const modelStatus = $derived(
@@ -117,8 +108,9 @@
          behaviour settings are secondary and live in a collapsed group below. -->
     <Settings.Row
       title={stepUxCopy.instructionsTitle}
-      description={isAdvancedMode ? stepUxCopy.instructionsHelperTitle : ""}
+      description={stepUxCopy.instructionsHelperTitle}
       fullWidth
+      density="compact"
     >
       <svelte:fragment slot="title">
         <Tooltip.Provider delayDuration={150}>
@@ -130,85 +122,18 @@
           </Tooltip.Root>
         </Tooltip.Provider>
       </svelte:fragment>
-      <!-- Enkel treats the raw prompt as a technical control: it stays in
-           Avancerad. The one exception is a missing instruction, which the
-           user must be able to fix without switching modes. The stored
-           prompt text can contain backend-compiled contract scaffolding, so
-           a read-only preview of it is deliberately NOT shown here. -->
-      {#if isAdvancedMode || instructionMissing}
-        {@render instructionEditor()}
-      {:else}
-        <div class="border-default bg-secondary/15 rounded-xl border px-3.5 py-3">
-          <p class="text-primary text-sm font-medium">
-            {m.flow_step_instructions_user_mode_ready()}
-          </p>
-          <p class="text-secondary mt-1 text-xs leading-relaxed">
-            {m.flow_step_instructions_user_mode_hint()}
-          </p>
-        </div>
-      {/if}
+      <svelte:fragment slot="toolbar">
+        {#if onEditWithAI && !isPublished}
+          <Button variant="outline" size="sm" onclick={onEditWithAI}>
+            {m.flow_step_edit_with_ai()}
+          </Button>
+        {/if}
+      </svelte:fragment>
+      {@render instructionEditor()}
     </Settings.Row>
 
     {#snippet instructionEditor()}
       <div class="flex flex-col gap-2">
-        {#if instructionMissing || showTips}
-          <div class="grid gap-3 md:grid-cols-2">
-            <Card.Root class="bg-hover-dimmer">
-              <Card.Content class="px-3.5 py-3">
-                <p class="text-accent-stronger text-sm font-semibold">
-                  {m.flow_step_instructions_compare_title()}
-                </p>
-                <p class="text-secondary mt-1 text-xs leading-relaxed">
-                  {m.flow_step_instructions_compare_body()}
-                </p>
-              </Card.Content>
-            </Card.Root>
-            <Card.Root class="bg-hover-dimmer">
-              <Card.Content class="px-3.5 py-3">
-                <p class="text-accent-stronger text-sm font-semibold">
-                  {m.flow_step_input_template_compare_title()}
-                </p>
-                <p class="text-secondary mt-1 text-xs leading-relaxed">
-                  {m.flow_step_input_template_compare_body()}
-                </p>
-              </Card.Content>
-            </Card.Root>
-          </div>
-        {:else}
-          <button
-            type="button"
-            class="text-accent-default hover:text-accent-stronger focus-visible:ring-accent-default/40 self-start rounded text-xs font-medium focus-visible:ring-2 focus-visible:outline-none"
-            onclick={() => (showTips = true)}
-          >
-            {m.flow_step_instructions_show_tips()}
-          </button>
-        {/if}
-        {#if !isAdvancedMode}
-          <div class="flex flex-col gap-3 px-0.5 pt-0.5 pb-1.5">
-            <div class="max-w-2xl min-w-0">
-              <p class="text-primary text-sm font-medium">
-                {stepUxCopy.instructionsHelperTitle}
-              </p>
-            </div>
-            {#if canRevealInputTemplate && !showInputTemplate}
-              <div
-                class="border-default bg-secondary/15 flex flex-wrap items-start justify-between gap-3 rounded-xl border px-3 py-3"
-              >
-                <div class="max-w-2xl min-w-0">
-                  <p class="text-primary text-sm font-medium">
-                    {stepUxCopy.inputTemplateCtaTitle}
-                  </p>
-                  <p class="text-muted mt-1 text-xs leading-relaxed">
-                    {stepUxCopy.inputTemplateDefaultHint}
-                  </p>
-                </div>
-                <Button variant="outline" size="sm" onclick={() => onRevealInputTemplate?.()}>
-                  {stepUxCopy.inputTemplateCtaAction}
-                </Button>
-              </div>
-            {/if}
-          </div>
-        {/if}
         <FlowPromptEditor
           value={instructionText}
           disabled={isPublished || assistantLoading || !assistant}
@@ -217,7 +142,8 @@
           invalid={instructionMissing}
           ariaDescribedby={instructionMissing ? "flow-step-instruction-missing" : undefined}
           placeholder={stepUxCopy.instructionsPlaceholder}
-          minHeight={isAdvancedMode ? 160 : 132}
+          minHeight={isAdvancedMode ? 160 : 144}
+          maxHeight={360}
           {steps}
           currentStepOrder={step.step_order}
           {formSchema}
@@ -272,7 +198,7 @@
               updateAssistantField("completion_model", currentAssistant.completion_model)}
           />
         </div>
-        <Settings.Row title={m.model_behaviour()} description="">
+        <Settings.Row title={m.model_behaviour()} description="" density="compact">
           <SelectBehaviourV2
             bind:kwArgs={currentAssistant.completion_model_kwargs}
             selectedModel={currentAssistant.completion_model}

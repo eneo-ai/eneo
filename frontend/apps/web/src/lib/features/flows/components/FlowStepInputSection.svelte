@@ -3,10 +3,11 @@
   import { Settings } from "$lib/components/layout";
   import { m } from "$lib/paraglide/messages";
   import type { FlowStep } from "@eneo/eneo-js";
-  import { slide } from "svelte/transition";
   import * as Alert from "$lib/components/ui/alert/index.js";
   import * as Collapsible from "$lib/components/ui/collapsible/index.js";
+  import { Button } from "$lib/components/ui/button/index.js";
   import * as Select from "$lib/components/ui/select/index.js";
+  import { Switch } from "$lib/components/ui/switch/index.js";
   import { Input } from "$lib/components/ui/input/index.js";
   import { Textarea } from "$lib/components/ui/textarea/index.js";
   import { IconChevronRight } from "@eneo/icons/chevron-right";
@@ -31,6 +32,7 @@
   let {
     step,
     isPublished,
+    isAdvancedMode,
     selectableInputSourceOptions,
     displayedInputTypeOptions,
     runtimeInputConfig,
@@ -51,6 +53,7 @@
   }: {
     step: FlowStep;
     isPublished: boolean;
+    isAdvancedMode: boolean;
     selectableInputSourceOptions: Array<{
       value: string;
       legacyInvalid: boolean;
@@ -113,10 +116,11 @@
   }
 </script>
 
-<FlowStepSection title={m.flow_step_section_input()}>
+<FlowStepSection>
   <Settings.Row
-    title={m.flow_step_input_source_label()}
+    title={m.flow_step_section_input()}
     description={m.flow_step_standard_input_desc()}
+    density="compact"
   >
     <div class="flex flex-col gap-2">
       <Select.Root
@@ -125,7 +129,7 @@
         disabled={isPublished}
         onValueChange={(value) => onInputSourceChange?.({ value })}
       >
-        <Select.Trigger class="w-full" aria-label={m.flow_step_input_source_label()}>
+        <Select.Trigger class="w-full" aria-label={m.flow_step_section_input()}>
           {selectedInputSourceLabel}
         </Select.Trigger>
         <Select.Content>
@@ -152,92 +156,92 @@
     </div>
   </Settings.Row>
 
-  <Settings.Row title={m.flow_step_input_type()} description={m.flow_step_input_format_desc()}>
-    <div class="flex flex-col gap-2">
-      <Select.Root
-        type="single"
-        value={step.input_type}
-        disabled={isPublished}
-        onValueChange={(value) => onInputTypeChange?.({ value })}
-      >
-        <Select.Trigger class="w-full" aria-label={m.flow_step_input_type()}>
-          {selectedInputTypeLabel}
-        </Select.Trigger>
-        <Select.Content>
-          <Select.Group>
-            {#each displayedInputTypeOptions as option (option.value)}
-              <Select.Item
-                value={option.value}
-                disabled={option.disabled}
-                label={getInputTypeOptionLabel(option.value, option.legacyInvalid)}
-              >
-                {getInputTypeOptionLabel(option.value, option.legacyInvalid)}
-              </Select.Item>
-            {/each}
-          </Select.Group>
-        </Select.Content>
-      </Select.Root>
-      {#if getInputFormatHintText(sourceHintKind, step.input_type)}
-        <p class="text-muted text-xs leading-relaxed" aria-live="polite">
-          {getInputFormatHintText(sourceHintKind, step.input_type)}
-        </p>
-      {/if}
-      {#if inputTypeValidationMessage || inputTypeFeedback}
-        <p class="text-warning-stronger text-xs leading-relaxed" aria-live="polite">
-          {inputTypeValidationMessage ?? inputTypeFeedback}
-        </p>
-      {/if}
-    </div>
-  </Settings.Row>
+  {#if isAdvancedMode || inputTypeValidationMessage || inputTypeFeedback}
+    <Settings.Row
+      title={m.flow_step_input_type()}
+      description={m.flow_step_input_format_desc()}
+      density="compact"
+    >
+      <div class="flex flex-col gap-2">
+        <Select.Root
+          type="single"
+          value={step.input_type}
+          disabled={isPublished}
+          onValueChange={(value) => onInputTypeChange?.({ value })}
+        >
+          <Select.Trigger class="w-full" aria-label={m.flow_step_input_type()}>
+            {selectedInputTypeLabel}
+          </Select.Trigger>
+          <Select.Content>
+            <Select.Group>
+              {#each displayedInputTypeOptions as option (option.value)}
+                <Select.Item
+                  value={option.value}
+                  disabled={option.disabled}
+                  label={getInputTypeOptionLabel(option.value, option.legacyInvalid)}
+                >
+                  {getInputTypeOptionLabel(option.value, option.legacyInvalid)}
+                </Select.Item>
+              {/each}
+            </Select.Group>
+          </Select.Content>
+        </Select.Root>
+        {#if getInputFormatHintText(sourceHintKind, step.input_type)}
+          <p class="text-muted text-xs leading-relaxed" aria-live="polite">
+            {getInputFormatHintText(sourceHintKind, step.input_type)}
+          </p>
+        {/if}
+        {#if inputTypeValidationMessage || inputTypeFeedback}
+          <p class="text-warning-stronger text-xs leading-relaxed" aria-live="polite">
+            {inputTypeValidationMessage ?? inputTypeFeedback}
+          </p>
+        {/if}
+      </div>
+    </Settings.Row>
+  {/if}
 
   <Settings.Row
     title={m.flow_runtime_input_title()}
     description={m.flow_runtime_input_description()}
     fullWidth={true}
+    density="compact"
   >
     <div class="flex flex-col gap-3">
-      <label
-        class="bg-primary flex items-start gap-3 rounded-lg border px-3 py-3 transition-colors {runtimeInputConfig.enabled
+      <div
+        class="bg-primary flex items-start justify-between gap-4 rounded-lg border px-3 py-3 transition-colors {runtimeInputConfig.enabled
           ? 'border-accent-default/40'
           : 'border-default'}"
       >
-        <input
-          type="checkbox"
-          class="accent-accent-default mt-0.5 size-4"
-          checked={runtimeInputConfig.enabled}
-          disabled={isPublished}
-          aria-label={m.flow_runtime_input_accept_files()}
-          onchange={(event) => updateRuntimeInputSettings({ enabled: event.currentTarget.checked })}
-        />
         <div class="min-w-0">
           <p class="text-sm font-medium">{m.flow_runtime_input_accept_files()}</p>
           <p class="text-muted mt-1 text-xs leading-relaxed">
             {m.flow_runtime_input_accept_files_desc()}
           </p>
         </div>
-      </label>
+        <Switch
+          checked={runtimeInputConfig.enabled}
+          disabled={isPublished}
+          aria-label={m.flow_runtime_input_accept_files()}
+          onCheckedChange={(checked) => updateRuntimeInputSettings({ enabled: checked })}
+        />
+      </div>
 
       {#if runtimeInputConfig.enabled}
-        <div
-          class="border-default/40 ml-1 flex flex-col gap-4 border-l pl-3 sm:ml-2 sm:pl-4"
-          transition:slide={{ duration: 200 }}
-        >
-          <label class="flex items-start gap-3">
-            <input
-              type="checkbox"
-              class="accent-accent-default mt-0.5 size-4"
-              checked={runtimeInputConfig.required}
-              disabled={isPublished}
-              onchange={(event) =>
-                updateRuntimeInputSettings({ required: event.currentTarget.checked })}
-            />
+        <div class="border-default/40 ml-1 flex flex-col gap-4 border-l pl-3 sm:ml-2 sm:pl-4">
+          <div class="flex items-start justify-between gap-4">
             <div class="min-w-0">
               <p class="text-sm font-medium">{m.flow_runtime_input_required()}</p>
               <p class="text-muted mt-1 text-xs leading-relaxed">
                 {m.flow_runtime_input_required_desc()}
               </p>
             </div>
-          </label>
+            <Switch
+              checked={runtimeInputConfig.required}
+              disabled={isPublished}
+              aria-label={m.flow_runtime_input_required()}
+              onCheckedChange={(checked) => updateRuntimeInputSettings({ required: checked })}
+            />
+          </div>
 
           <div class="flex flex-col gap-1">
             <label class="text-sm font-medium" for="runtime-input-format"
@@ -351,18 +355,22 @@
                     </span>
                     <div class="flex flex-wrap gap-1.5">
                       {#each getMimePresetsForFormat(runtimeInputConfig.input_format) as preset (preset.mime)}
-                        <button
-                          type="button"
+                        <Button
+                          variant="outline"
+                          size="sm"
                           class="rounded-md border px-2.5 py-1 text-xs font-medium transition-colors {runtimeInputConfig.accepted_mimetypes_override.includes(
                             preset.mime
                           )
                             ? 'border-accent-default/60 bg-accent-dimmer/50 text-accent-stronger'
                             : 'border-default bg-primary text-secondary hover:bg-secondary/10'}"
                           disabled={isPublished}
+                          aria-pressed={runtimeInputConfig.accepted_mimetypes_override.includes(
+                            preset.mime
+                          )}
                           onclick={() => toggleMimePreset(preset.mime)}
                         >
                           {preset.label}
-                        </button>
+                        </Button>
                       {/each}
                     </div>
                     {#if runtimeInputConfig.accepted_mimetypes_override.some((mt) => !getMimePresetsForFormat(runtimeInputConfig.input_format).some((p) => p.mime === mt))}

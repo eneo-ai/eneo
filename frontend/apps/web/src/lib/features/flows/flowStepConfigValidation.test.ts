@@ -46,6 +46,37 @@ describe("computeStepConfigValidationIssues", () => {
     );
     expect([...issues.keys()]).toContain(`${PREFIX}http_missing_url:4`);
   });
+
+  it("blocks publishing an incompatible output mode without rewriting the step", () => {
+    const issues = computeStepConfigValidationIssues(
+      [
+        makeStep({
+          input_type: "text",
+          output_type: "pdf",
+          output_mode: "pass_through",
+          step_order: 5
+        })
+      ],
+      PREFIX
+    );
+
+    expect([...issues.keys()]).toContain(`${PREFIX}output_mode_incompatible:5`);
+  });
+
+  it("accepts a compatible render_verbatim document step", () => {
+    const issues = computeStepConfigValidationIssues(
+      [
+        makeStep({
+          input_type: "text",
+          output_type: "pdf",
+          output_mode: "render_verbatim"
+        })
+      ],
+      PREFIX
+    );
+
+    expect([...issues.keys()]).not.toContain(`${PREFIX}output_mode_incompatible:1`);
+  });
 });
 
 describe("hasDeletedStepReferences", () => {

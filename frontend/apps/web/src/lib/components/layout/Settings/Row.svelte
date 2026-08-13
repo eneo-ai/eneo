@@ -7,6 +7,7 @@
   export let title: string;
   export let description: string = "";
   export let fullWidth = false;
+  export let density: "default" | "compact" = "default";
 
   export let hasChanges = false;
   export let revertFn: (() => void) | undefined = undefined;
@@ -18,7 +19,7 @@
     variants: { fullWidth: { true: ["w-full"], false: ["lg:w-[56%]"] } }
   });
 
-  const descriptionSection = cva(["flex", "w-full", "justify-between"], {
+  const descriptionSection = cva(["flex", "w-full", "flex-col", "justify-between", "sm:flex-row"], {
     variants: { fullWidth: { true: ["w-full"], false: ["lg:w-[40%]"] } }
   });
 
@@ -39,9 +40,17 @@
   data-row-has-changes={hasChanges}
 >
   <div class={descriptionSection({ fullWidth })}>
-    <div class="flex flex-col gap-1.5 pr-12 pl-2">
+    <div
+      class="flex flex-col pr-12 pl-2"
+      class:gap-1.5={density === "default"}
+      class:gap-1={density === "compact"}
+    >
       <h3
-        class="text-primary flex items-center text-base font-semibold tracking-tight"
+        class="text-primary flex items-center tracking-tight"
+        class:text-base={density === "default"}
+        class:font-semibold={density === "default"}
+        class:text-sm={density === "compact"}
+        class:font-medium={density === "compact"}
         id={labelId}
       >
         <span class={changeIndicator({ hasChanges })}></span>{title}<slot name="title"></slot>
@@ -58,7 +67,12 @@
         {/if}
       </h3>
       {#if description}
-        <p class="text-secondary text-[0.875rem] leading-relaxed" id={descriptionId}>
+        <p
+          class="text-secondary leading-relaxed"
+          class:text-[0.875rem]={density === "default"}
+          class:text-[0.8125rem]={density === "compact"}
+          id={descriptionId}
+        >
           {description}
         </p>
       {/if}

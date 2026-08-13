@@ -1,13 +1,11 @@
 <script lang="ts">
   import { m } from "$lib/paraglide/messages";
   import type { FlowStep } from "@eneo/eneo-js";
-  import { Badge } from "$lib/components/ui/badge/index.js";
   import CircleAlert from "lucide-svelte/icons/circle-alert";
   import {
     getInputTypeLabel,
     getOutputTypeLabel,
-    getSummarySourceText,
-    hasAdvancedSettingsActive
+    getSummarySourceText
   } from "./flowStepEditHelpers";
   import { getStepAiWork } from "$lib/features/flows/flowStepEditorPresentation";
   import { createDefaultHttpConfig } from "./http/httpConfigDefaults";
@@ -19,7 +17,6 @@
     summaryModel,
     previousStep,
     isAdvancedMode,
-    hasInputTemplateOverride,
     aiInstructionPresent,
     onFixInstruction
   }: {
@@ -30,7 +27,6 @@
     } | null;
     previousStep: FlowStep | undefined | null;
     isAdvancedMode: boolean;
-    hasInputTemplateOverride: boolean;
     // Whether the step's AI instruction is filled. `null` means the assistant
     // is still loading, so the capsule stays neutral instead of claiming the
     // instruction is missing.
@@ -106,15 +102,6 @@
       <span class="text-primary font-medium">{outputLabel}</span>
       · {m.flow_capsule_next()}: {nextChannel}
     </span>
-
-    {#if !isAdvancedMode && hasAdvancedSettingsActive(step, hasInputTemplateOverride)}
-      <Badge
-        variant="outline"
-        class="border-warning-default/25 bg-warning-dimmer/50 text-warning-stronger ml-auto text-xs"
-      >
-        {m.flow_step_summary_badge_advanced()}
-      </Badge>
-    {/if}
   </div>
 
   {#if httpSummary}
