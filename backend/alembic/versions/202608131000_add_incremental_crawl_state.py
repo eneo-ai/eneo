@@ -1,7 +1,7 @@
 """add incremental crawler state
 
 Revision ID: 202608131000
-Revises: 202608101300
+Revises: 202608121500
 Create Date: 2026-08-13 10:00:00.000000
 """
 
@@ -13,7 +13,7 @@ from sqlalchemy.dialects.postgresql import JSONB
 from alembic import op
 
 revision: str = "202608131000"
-down_revision: str | None = "202608101300"
+down_revision: str | None = "202608121500"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
