@@ -63,6 +63,27 @@ class ErrorCodes(int, Enum):
     SYSTEM_USER_PROTECTED = 9040
     # AI provider deterministically rejected the request (4xx upstream)
     PROVIDER_REJECTED_REQUEST = 9041
+    # Deployment configuration errors
+    ENCRYPTION_NOT_CONFIGURED = 9042
+    SKILL_REVISION_CONFLICT = 9043
+    FILE_IN_USE = 9044
+    FILE_ORIGINAL_NOT_FOUND = 9045
+    DEPLOYMENT_POLICY_CONFLICT = 9046
+    OBJECT_STORE_NOT_SELECTABLE = 9047
+    # Skill lifecycle conflicts. Each one needs different client handling, so
+    # they cannot share a code: the client picks its instruction from the code,
+    # and not every blocker can be cleared. They are registered in
+    # eneo.server.exception_handlers, which may depend on the Skills domain
+    # without reversing the dependency.
+    SKILL_SLUG_TAKEN = 9048
+    SKILL_PUBLISHED_NOT_DELETABLE = 9049
+    SKILL_IN_USE_BY_APP_RUN = 9050
+    SKILL_STILL_ATTACHED = 9051
+    SKILL_EXECUTION_BLOCK_CONFLICT = 9052
+    SKILL_NOT_PUBLISHED_FOR_BINDING = 9053
+    SKILL_BLOCKED_FOR_BINDING = 9054
+    SKILL_RUNTIME_POLICY_CHANGED = 9055
+    INVALID_FILENAME = 9056
 
 
 class NotFoundException(Exception):
@@ -204,8 +225,8 @@ class FileNotSupportedException(Exception):
 
 class FileTooLargeException(Exception):
     DEFAULT_DOCS_HINT = (
-        "See backend/README.md (Environment variables) and backend/.env.template "
-        "to update upload limits."
+        "Ask an administrator with the Storage permission to review the "
+        "object-content deployment policy."
     )
 
     def __init__(
@@ -214,12 +235,12 @@ class FileTooLargeException(Exception):
         *,
         file_size: int | None = None,
         max_size: int | None = None,
-        setting_name: str | None = None,
+        limit_name: str | None = None,
         docs_hint: str | None = None,
     ):
         self.file_size = file_size
         self.max_size = max_size
-        self.setting_name = setting_name
+        self.limit_name = limit_name
         self.docs_hint = docs_hint or self.DEFAULT_DOCS_HINT
 
         if message is None:
@@ -257,11 +278,8 @@ class FileTooLargeException(Exception):
         else:
             message = "File size limit exceeded."
 
-        if self.setting_name:
-            message += (
-                f" Adjust {self.setting_name} in your backend environment "
-                "if you need a higher limit."
-            )
+        if self.limit_name:
+            message += f" The active limit is {self.limit_name}."
 
         if self.docs_hint:
             message += f" {self.docs_hint}"
@@ -280,7 +298,18 @@ class FileTooLargeException(Exception):
             details["max_size_bytes"] = self.max_size
             details["max_size_human"] = self._format_bytes(self.max_size)
 
+        if self.limit_name is not None:
+            details["limit_name"] = self.limit_name
+
         return details
+
+
+class InvalidFilenameException(Exception):
+    pass
+
+
+class InfoBlobPublicationConflictError(RuntimeError):
+    """The locked publication identities resolve to different active sources."""
 
 
 class ChunkEmbeddingMisMatchException(Exception):
@@ -324,6 +353,10 @@ class NameCollisionException(Exception):
     pass
 
 
+class SkillRevisionConflictException(Exception):
+    pass
+
+
 class UserNotCreatedInEneoError(Exception):
     pass
 
@@ -361,6 +394,10 @@ class TenantSuspendedException(Exception):
 
 
 class APIKeyNotConfiguredException(Exception):
+    pass
+
+
+class EncryptionNotConfiguredException(Exception):
     pass
 
 
@@ -454,12 +491,18 @@ EXCEPTION_MAP = {
     PydanticParseError: (500, None, ErrorCodes.PYDANTIC_PARSE_ERROR),
     FileNotSupportedException: (415, None, ErrorCodes.FILE_NOT_SUPPORTED),
     FileTooLargeException: (413, None, ErrorCodes.FILE_TOO_LARGE),
+    InvalidFilenameException: (400, None, ErrorCodes.INVALID_FILENAME),
     ChunkEmbeddingMisMatchException: (
         500,
         "Something went wrong.",
         ErrorCodes.CHUNK_EMBEDDING_MISMATCH,
     ),
     NameCollisionException: (409, None, ErrorCodes.NAME_COLLISION),
+    SkillRevisionConflictException: (
+        409,
+        None,
+        ErrorCodes.SKILL_REVISION_CONFLICT,
+    ),
     ProvisioningNotAllowed: (403, None, ErrorCodes.PROVISIONING_NOT_ENABLED),
     UserInactiveException: (403, None, ErrorCodes.USER_INACTIVE),
     NoModelSelectedException: (400, None, ErrorCodes.NO_MODEL_SELECTED),
@@ -477,6 +520,11 @@ EXCEPTION_MAP = {
     ),
     TenantSuspendedException: (403, "Tenant is suspended", ErrorCodes.TENANT_SUSPENDED),
     APIKeyNotConfiguredException: (503, None, ErrorCodes.API_KEY_NOT_CONFIGURED),
+    EncryptionNotConfiguredException: (
+        503,
+        None,
+        ErrorCodes.ENCRYPTION_NOT_CONFIGURED,
+    ),
     # File extraction errors - use None to pass through the exception's own message
     ExtractionError: (400, None, ErrorCodes.FILE_EXTRACTION_ERROR),
     EncryptedFileError: (400, None, ErrorCodes.FILE_ENCRYPTED),

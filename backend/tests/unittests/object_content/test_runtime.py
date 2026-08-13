@@ -1,0 +1,489 @@
+from __future__ import annotations
+
+import asyncio
+import os
+from collections.abc import AsyncGenerator
+from contextlib import asynccontextmanager
+from datetime import UTC, datetime
+from typing import TYPE_CHECKING, cast
+from unittest.mock import AsyncMock, MagicMock
+from uuid import UUID
+
+import pytest
+from sqlalchemy.ext.asyncio import AsyncConnection, AsyncSession
+
+from eneo.database.database import DatabaseSessionManager
+from eneo.database.tables.object_store_binding_table import (
+    ObjectStoreBindings,
+)
+from eneo.object_content.configuration import (
+    ObjectContentCoreSettings,
+    ObjectContentSettings,
+)
+from eneo.object_content.content import (
+    ObjectContentUnavailableError,
+)
+from eneo.object_content.object_store_connection import (
+    ObjectStoreConnectionDatabaseUnavailable,
+    ObjectStoreConnectionInput,
+    ObjectStoreConnectionService,
+    ObjectStoreConnectionSource,
+    ObjectStoreCredentialRotation,
+    StoredObjectStoreConnection,
+)
+from eneo.object_content.object_store_provider import ObjectStoreProvider
+from eneo.object_content.runtime import (
+    ObjectContentReadinessCode,
+    ObjectContentRuntime,
+    ObjectContentRuntimeState,
+)
+from eneo.object_content.s3_object_store import (
+    ObjectStoreUnavailableError,
+    S3ObjectStore,
+    StoreBindingCreation,
+)
+
+if TYPE_CHECKING:
+    from mypy_boto3_s3 import S3Client
+
+
+class _ReadinessDatabase(DatabaseSessionManager):
+    def __init__(
+        self,
+        *,
+        available: bool = True,
+        active_object_content: bool = False,
+    ) -> None:
+        super().__init__()
+        self.available = available
+        self.active_object_content = active_object_content
+        self.binding_state: ObjectStoreBindings | None = None
+        self.connect_count = 0
+        self.connect_in_flight = 0
+        self.peak_connect_in_flight = 0
+
+    @asynccontextmanager
+    async def connect(self) -> AsyncGenerator[AsyncConnection]:
+        self.connect_count += 1
+        self.connect_in_flight += 1
+        self.peak_connect_in_flight = max(
+            self.peak_connect_in_flight,
+            self.connect_in_flight,
+        )
+        try:
+            # Force overlap so this test proves the runtime lock is load-bearing.
+            await asyncio.sleep(0)
+            if not self.available:
+                raise OSError("test PostgreSQL outage")
+            connection = MagicMock(spec=AsyncConnection)
+            result = MagicMock()
+            result.scalar_one.return_value = self.active_object_content
+            connection.execute = AsyncMock(return_value=result)
+            yield cast(AsyncConnection, connection)
+        finally:
+            self.connect_in_flight -= 1
+
+    @asynccontextmanager
+    async def session(self) -> AsyncGenerator[AsyncSession]:
+        session = MagicMock(spec=AsyncSession)
+
+        def rows() -> MagicMock:
+            result = MagicMock()
+            result.one_or_none.return_value = self.binding_state
+            return result
+
+        session.scalars = AsyncMock(side_effect=lambda *_a, **_k: rows())
+
+        async def execute(statement: object, *_args: object) -> MagicMock:
+            # Model the binding-row lifecycle: an INSERT creates the row from
+            # its bound values; a column SELECT snapshots the current row.
+            if getattr(statement, "is_insert", False):
+                if self.binding_state is None:
+                    params = statement.compile().params  # type: ignore[attr-defined]
+                    row = ObjectStoreBindings()
+                    row.slot = params.get("slot", 1)
+                    row.deployment_id = params["deployment_id"]
+                    row.binding_id = params["binding_id"]
+                    self.binding_state = row
+                return MagicMock()
+            snapshot = MagicMock()
+            snapshot.one_or_none.side_effect = lambda: (
+                None
+                if self.binding_state is None
+                else (
+                    self.binding_state.deployment_id,
+                    self.binding_state.binding_id,
+                    self.binding_state.confirmed_at,
+                    self.binding_state.create_started_at,
+                )
+            )
+            return snapshot
+
+        session.execute = AsyncMock(side_effect=execute)
+
+        async def scalar(statement: object) -> object:
+            if "now()" in str(statement).lower():
+                return datetime.now(UTC)
+            return None
+
+        session.scalar = AsyncMock(side_effect=scalar)
+        session.flush = AsyncMock()
+        transaction = AsyncMock()
+        transaction.__aenter__.return_value = None
+        transaction.__aexit__.return_value = None
+        session.begin = MagicMock(return_value=transaction)
+        yield cast(AsyncSession, session)
+
+
+class _ReadinessStore:
+    def __init__(self, ready: list[bool] | None = None) -> None:
+        self._ready = list(ready or [True])
+        self.closed = False
+        self.check_ready_count = 0
+        self.binding_created = False
+
+    async def check_ready(self) -> None:
+        self.check_ready_count += 1
+        ready = self._ready.pop(0) if len(self._ready) > 1 else self._ready[0]
+        if not ready:
+            raise ObjectStoreUnavailableError("test object-store outage")
+
+    async def verify_binding(self, _binding_id: UUID) -> bool:
+        return self.binding_created
+
+    async def prepare_binding_creation(
+        self,
+        binding_id: UUID,
+    ) -> StoreBindingCreation | None:
+        if self.binding_created:
+            return None
+        return StoreBindingCreation(
+            binding_id=binding_id,
+            body=b"test binding",
+        )
+
+    async def create_binding(self, _creation: StoreBindingCreation) -> None:
+        self.binding_created = True
+
+    async def close(self) -> None:
+        self.closed = True
+
+
+def _settings() -> ObjectContentSettings:
+    return ObjectContentSettings(
+        _env_file=None,
+        endpoint_url="http://object-content:8333",
+        region="local",
+        bucket="eneo-content",
+        access_key_id="test-access",
+        secret_access_key="test-secret",
+        deployment_id=UUID("a2d539af-fef0-42aa-a7f8-14376947be2c"),
+        allow_insecure_http=True,
+    )
+
+
+def test_runtime_fails_closed_before_start() -> None:
+    runtime = ObjectContentRuntime()
+
+    with pytest.raises(ObjectContentUnavailableError, match="not initialized"):
+        runtime.service
+
+
+def test_runtime_inline_capacity_has_no_process_owned_business_limit() -> None:
+    runtime = ObjectContentRuntime()
+
+    runtime.start(
+        core_settings=ObjectContentCoreSettings(
+            _env_file=None,
+            inline_maximum_bytes=10,
+            inline_io_chunk_bytes=10,
+        ),
+    )
+
+    assert runtime.state is ObjectContentRuntimeState.ENABLED
+
+
+def test_runtime_exposes_the_configured_portable_object_store_ceiling() -> None:
+    settings = _settings()
+    runtime = ObjectContentRuntime()
+
+    runtime.start(settings=settings, store=cast(S3ObjectStore, _ReadinessStore()))
+
+    assert runtime.object_store_maximum_bytes == settings.maximum_multipart_bytes
+
+
+@pytest.mark.asyncio
+async def test_committed_connection_mutations_survive_local_publication_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runtime = ObjectContentRuntime()
+    stored = MagicMock(spec=StoredObjectStoreConnection)
+    stored.revision = 2
+    connection_service = MagicMock(spec=ObjectStoreConnectionService)
+    connection_service.create = AsyncMock(return_value=stored)
+    connection_service.rotate_credentials = AsyncMock(return_value=stored)
+    provider = MagicMock(spec=ObjectStoreProvider)
+    provider.publish = AsyncMock(side_effect=RuntimeError("test publication failure"))
+    monkeypatch.setattr(runtime, "_connection_service", connection_service)
+    monkeypatch.setattr(runtime, "_object_store_provider", provider)
+
+    created = await runtime.create_object_store_connection(
+        ObjectStoreConnectionInput(
+            endpoint_url="https://objects.example.test",
+            region="se-1",
+            bucket="eneo-content",
+            access_key_id="access-key",
+            secret_access_key="secret-key",
+        ),
+        actor_user_id=UUID("aac28240-56fa-431f-9c15-1d187de6515a"),
+    )
+    rotated = await runtime.rotate_object_store_credentials(
+        ObjectStoreCredentialRotation(
+            expected_revision=1,
+            access_key_id="replacement-access-key",
+            secret_access_key="replacement-secret-key",
+        ),
+        actor_user_id=UUID("aac28240-56fa-431f-9c15-1d187de6515a"),
+    )
+
+    assert created is stored
+    assert rotated is stored
+    assert runtime._readiness_cache is None
+    assert provider.publish.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_absent_object_store_is_a_healthy_inline_capability(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    for name in tuple(os.environ):
+        if name.upper().startswith("OBJECT_CONTENT_"):
+            monkeypatch.delenv(name, raising=False)
+    runtime = ObjectContentRuntime(database=_ReadinessDatabase())
+
+    runtime.start()
+    await runtime.validate_configuration()
+    readiness = await runtime.readiness()
+    capabilities = await runtime.storage_capabilities()
+    reconciliation = await runtime.reconcile_once()
+
+    assert runtime.state is ObjectContentRuntimeState.ENABLED
+    assert runtime.enabled is True
+    assert runtime.object_store_configured is False
+    assert readiness.ready is True
+    assert readiness.code is ObjectContentReadinessCode.OBJECT_STORE_NOT_CONFIGURED
+    assert runtime.inline_maximum_bytes == 200 * 1024**2
+    assert runtime.object_store_maximum_bytes is None
+    assert capabilities[0].configured is True
+    assert capabilities[0].selectable is True
+    assert capabilities[1].configured is False
+    assert capabilities[1].selectable is False
+    assert (
+        capabilities[1].readiness_code
+        is ObjectContentReadinessCode.OBJECT_STORE_NOT_CONFIGURED
+    )
+    assert reconciliation.content_processed == 0
+    assert reconciliation.object_cycle_completed is False
+    assert runtime.service.object_store_configured is False
+    assert runtime.reconciler is not None
+
+    await runtime.stop()
+    assert runtime.state is ObjectContentRuntimeState.NOT_STARTED
+
+
+@pytest.mark.asyncio
+async def test_absent_object_store_fails_closed_when_remote_content_exists(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    for name in tuple(os.environ):
+        if name.upper().startswith("OBJECT_CONTENT_"):
+            monkeypatch.delenv(name, raising=False)
+    runtime = ObjectContentRuntime(
+        database=_ReadinessDatabase(active_object_content=True)
+    )
+    runtime.start()
+
+    with pytest.raises(
+        ObjectContentUnavailableError, match="required by active content"
+    ):
+        await runtime.validate_configuration()
+    readiness = await runtime.readiness()
+
+    assert readiness.ready is False
+    assert readiness.code is ObjectContentReadinessCode.CONFIGURATION_REQUIRED
+    with pytest.raises(
+        ObjectContentUnavailableError,
+        match="required by active content",
+    ):
+        await runtime.reconcile_once()
+
+
+@pytest.mark.asyncio
+async def test_reconciliation_before_start_remains_a_loud_initialization_error() -> (
+    None
+):
+    runtime = ObjectContentRuntime(database=_ReadinessDatabase())
+
+    with pytest.raises(ObjectContentUnavailableError, match="not initialized"):
+        await runtime.reconcile_once()
+
+
+@pytest.mark.asyncio
+async def test_readiness_recovers_after_cache_expiry_without_process_restart(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    now = 0.0
+    monkeypatch.setattr("eneo.object_content.runtime.monotonic", lambda: now)
+    store = _ReadinessStore([False, True])
+    runtime = ObjectContentRuntime(database=_ReadinessDatabase())
+    runtime.start(settings=_settings(), store=cast("S3ObjectStore", store))
+
+    unavailable = await runtime.readiness()
+    cached_unavailable = await runtime.readiness()
+    now = 1.1
+    recovered = await runtime.readiness()
+
+    assert unavailable.ready is True
+    assert unavailable.code is ObjectContentReadinessCode.STORE_DEGRADED
+    assert cached_unavailable == unavailable
+    assert store.check_ready_count == 2
+    assert recovered.ready is True
+    assert recovered.code is ObjectContentReadinessCode.READY
+
+    await runtime.stop()
+    assert store.closed
+
+
+@pytest.mark.asyncio
+async def test_readiness_recovery_adopts_validated_legacy_connection(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    settings = _settings()
+    legacy_store = _ReadinessStore([False, True])
+    admin_store = _ReadinessStore()
+    stores = iter((legacy_store, admin_store))
+    stored = MagicMock(spec=StoredObjectStoreConnection)
+    stored.revision = 1
+    connection_service = MagicMock(spec=ObjectStoreConnectionService)
+    connection_service.get = AsyncMock(return_value=None)
+    connection_service.adopt_legacy = AsyncMock(return_value=stored)
+    connection_service.settings_for = MagicMock(return_value=settings)
+    monkeypatch.setattr(
+        "eneo.object_content.runtime.load_object_content_settings",
+        lambda: settings,
+    )
+    monkeypatch.setattr(
+        "eneo.object_content.runtime.ObjectStoreConnectionService",
+        lambda **_kwargs: connection_service,
+    )
+    runtime = ObjectContentRuntime(database=_ReadinessDatabase())
+    runtime.start(
+        core_settings=ObjectContentCoreSettings(_env_file=None),
+        store_factory=lambda _settings: cast(S3ObjectStore, next(stores)),
+    )
+
+    with pytest.raises(ObjectContentUnavailableError):
+        await runtime.validate_configuration()
+    recovered = await runtime.readiness()
+
+    assert recovered.code is ObjectContentReadinessCode.READY
+    assert runtime.object_store_connection_source is ObjectStoreConnectionSource.ADMIN
+    connection_service.adopt_legacy.assert_awaited_once_with(settings)
+
+    await runtime.stop()
+
+
+@pytest.mark.asyncio
+async def test_readiness_reports_database_outage_and_recovers_after_cache_expiry(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    now = 0.0
+    monkeypatch.setattr("eneo.object_content.runtime.monotonic", lambda: now)
+    store = _ReadinessStore()
+    database = _ReadinessDatabase(available=False)
+    runtime = ObjectContentRuntime(database=database)
+    runtime.start(settings=_settings(), store=cast("S3ObjectStore", store))
+
+    unavailable = await runtime.readiness()
+    database.available = True
+    cached_unavailable = await runtime.readiness()
+    now = 1.1
+    recovered = await runtime.readiness()
+
+    assert unavailable.ready is False
+    assert unavailable.code is ObjectContentReadinessCode.DATABASE_UNAVAILABLE
+    assert cached_unavailable == unavailable
+    assert database.connect_count == 2
+    assert recovered.ready is True
+    assert recovered.code is ObjectContentReadinessCode.READY
+
+    await runtime.stop()
+
+
+@pytest.mark.asyncio
+async def test_connection_table_outage_is_database_unavailable_readiness(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runtime = ObjectContentRuntime(database=_ReadinessDatabase())
+    runtime.start(settings=_settings(), store=cast("S3ObjectStore", _ReadinessStore()))
+    monkeypatch.setattr(
+        runtime,
+        "refresh_object_store_configuration",
+        AsyncMock(
+            side_effect=ObjectStoreConnectionDatabaseUnavailable(
+                "test connection-table outage"
+            )
+        ),
+    )
+
+    readiness = await runtime.readiness()
+
+    assert readiness.ready is False
+    assert readiness.code is ObjectContentReadinessCode.DATABASE_UNAVAILABLE
+
+    await runtime.stop()
+
+
+@pytest.mark.asyncio
+async def test_concurrent_enabled_readiness_coalesces_dependency_probes_and_expires(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    now = 0.0
+    monkeypatch.setattr(
+        "eneo.object_content.runtime.monotonic",
+        lambda: now,
+    )
+    store = _ReadinessStore()
+    database = _ReadinessDatabase()
+    runtime = ObjectContentRuntime(database=database)
+    runtime.start(settings=_settings(), store=cast("S3ObjectStore", store))
+
+    readiness = await asyncio.gather(*(runtime.readiness() for _ in range(16)))
+
+    assert all(result.ready for result in readiness)
+    assert {result.code for result in readiness} == {ObjectContentReadinessCode.READY}
+    assert database.connect_count == 1
+    assert database.peak_connect_in_flight == 1
+    assert store.check_ready_count == 1
+
+    now = 1.1
+    refreshed = await runtime.readiness()
+
+    assert refreshed.ready is True
+    assert database.connect_count == 2
+    assert store.check_ready_count == 2
+
+    await runtime.stop()
+
+
+@pytest.mark.asyncio
+async def test_runtime_stop_is_idempotent() -> None:
+    client = MagicMock()
+    store = S3ObjectStore(_settings(), client=cast("S3Client", client))
+    runtime = ObjectContentRuntime(database=_ReadinessDatabase())
+    runtime.start(settings=_settings(), store=store)
+
+    await runtime.stop()
+    await runtime.stop()
+
+    client.close.assert_called_once_with()

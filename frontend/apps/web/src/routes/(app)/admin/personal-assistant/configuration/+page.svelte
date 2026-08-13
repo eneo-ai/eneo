@@ -6,12 +6,18 @@
 
 <script lang="ts">
   import { Settings } from "$lib/components/layout";
+  import {
+    loadSkillBindingCatalogPage,
+    loadSkillBindingPreview
+  } from "$lib/features/skills/skillBindingCatalog";
   import { m } from "$lib/paraglide/messages";
   import McpRestrictionSection from "./McpRestrictionSection.svelte";
   import ModelRestrictionSection from "./ModelRestrictionSection.svelte";
   import PolicyConfirmDialog from "./PolicyConfirmDialog.svelte";
   import PolicySaveBar from "./PolicySaveBar.svelte";
   import PromptEnforcementSection from "./PromptEnforcementSection.svelte";
+  import ReasoningPolicySection from "./ReasoningPolicySection.svelte";
+  import SkillsPolicySection from "./SkillsPolicySection.svelte";
   import { PolicyDraft } from "./policyDraft.svelte";
 
   let { data } = $props();
@@ -48,6 +54,16 @@
         toggleModelSelected={draft.toggleModelSelected}
         toggleProvider={draft.toggleProvider}
       />
+      <ReasoningPolicySection
+        configured={draft.reasoningPolicyConfigured}
+        bind:defaultEffort={draft.defaultReasoningEffort}
+        bind:allowUserOverride={draft.allowUserReasoningEffort}
+        options={draft.reasoningOptions}
+        summary={draft.reasoningSummary}
+        valid={draft.reasoningValid}
+        optionLabel={draft.reasoningOptionLabel}
+        onActivate={draft.activateReasoningPolicy}
+      />
       <McpRestrictionSection
         bind:mcpEnabled={draft.mcpEnabled}
         allMcpServers={draft.allMcpServers}
@@ -66,6 +82,28 @@
         promptOptions={draft.promptOptions}
         promptSummary={draft.promptSummary}
         badgeVariant={draft.badgeVariant}
+      />
+      <SkillsPolicySection
+        bind:skillBindings={draft.skillBindings}
+        initialCatalogPage={draft.skillCatalogPage}
+        bindingSummaries={draft.skillBindingSummaries}
+        summary={draft.skillsSummary}
+        skillsValid={draft.skillsValid}
+        selectiveActivationEnabled={draft.selectiveActivationEnabled}
+        badgeVariant={draft.badgeVariant}
+        onListCatalog={(params) =>
+          loadSkillBindingCatalogPage({
+            eneo: data.eneo,
+            spaceId: data.organizationSpace.id,
+            organizationSpace: true,
+            ...params
+          })}
+        onGetSkillPreview={(target) =>
+          loadSkillBindingPreview({
+            eneo: data.eneo,
+            spaceId: data.organizationSpace.id,
+            target
+          })}
       />
     </div>
   </Settings.Page>

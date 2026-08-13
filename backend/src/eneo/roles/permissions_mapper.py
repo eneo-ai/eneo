@@ -1,10 +1,10 @@
-# MIT License
-
 # flake8: noqa
 from eneo.roles.permissions import Permission
 
 PERMISSIONS_WITH_DESCRIPTION = {
     Permission.ASSISTANTS: "Management of Assistants. Create, Update, and Delete Assistants.",
+    Permission.SKILLS: "Use Skills. Browse and attach existing Skills to Assistants and Apps you can edit.",
+    Permission.SKILLS_MANAGEMENT: "Manage Skills. Together with Use Skills, create, revise, change availability, and delete Skills in Spaces where you have access.",
     Permission.PERSONAL_CHAT: "Use the personal chat. Without this permission the personal chat is unavailable; all other access is unaffected.",
     Permission.GROUP_CHATS: "Management of Group Chats. Create, Update, and Delete Assistants.",
     Permission.APPS: "Management of Apps. Create, Update, and Delete Apps",
@@ -17,4 +17,6 @@ PERMISSIONS_WITH_DESCRIPTION = {
     Permission.ADMIN: "Organization owner. Management of Users, Roles, and Groups.",
     Permission.SHARED_SPACES: "Create shared Spaces. Viewing, editing, and deleting shared Spaces are governed by space membership.",
     Permission.API_KEYS: "Create API keys. Required for minting tenant, space, assistant, and app-scoped keys via the dashboard.",
+    Permission.STORAGE: "Administer file storage. Required for connecting an S3-compatible destination, changing it, rotating its keys, and setting upload limits.",
+    Permission.ASSISTANT_DEBUG: "Inspect body-free chat diagnostics, including Skill activation decisions, for conversations you can access.",
 }

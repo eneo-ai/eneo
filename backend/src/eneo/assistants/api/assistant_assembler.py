@@ -135,6 +135,10 @@ class AssistantAssembler:
                 effective_config.default_disabled_mcp_server_ids
             ),
             prompt_locked=effective_config.prompt_enforced,
+            default_reasoning_effort=effective_config.default_reasoning_effort,
+            reasoning_effort_user_configurable=(
+                effective_config.reasoning_effort_user_configurable
+            ),
         )
 
     def from_assistant_to_model(
@@ -229,6 +233,8 @@ class AssistantAssembler:
             permissions=permissions,
             description=assistant.description,
             insight_enabled=assistant.insight_enabled,
+            inline_file_text=assistant.inline_file_text,
+            knowledge_mode=assistant.knowledge_mode,
             type=assistant.type,
             data_retention_days=assistant.data_retention_days,
             metadata_json=assistant.metadata_json,

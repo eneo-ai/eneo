@@ -19,9 +19,12 @@
  */
 
 import { invalidate } from "$app/navigation";
+import { getErrorMessage } from "$lib/core/errors";
+import { getModelKwargOptionLabel } from "$lib/features/ai-models/ModelKwargCapabilities";
 import { m } from "$lib/paraglide/messages";
 import { SvelteMap, SvelteSet } from "svelte/reactivity";
-import type { Eneo } from "@eneo/eneo-js";
+import type { AssistantSkillBindingInput, AssistantSkillBindingSummary, Eneo } from "@eneo/eneo-js";
+import type { SkillBindingCatalogPage } from "$lib/features/skills/skillBindingCatalog";
 import { disabledToolIdsForSelectedServers } from "./mcpPolicy";
 
 type ModelSelection = { selected: boolean; isDefault: boolean };
@@ -30,10 +33,18 @@ type CompletionModel = {
   provider_id?: string | null;
   nickname?: string | null;
   name: string;
+  supports_tool_calling?: boolean;
   // Mirrors the backend's accept set: the policy PUT rejects any model whose
   // `can_access` is false (effectively-deprecated, locked, not org-enabled, …),
   // so the picker must only offer accessible models.
   can_access?: boolean;
+  supported_model_kwargs?: {
+    reasoning_effort?: {
+      supported?: boolean;
+      control?: string | null;
+      options?: string[] | null;
+    };
+  } | null;
 };
 type ModelProvider = { id: string; name: string; is_active?: boolean };
 type McpTool = {
@@ -62,6 +73,12 @@ type Policy = {
     disabled_tool_ids?: string[] | null;
   };
   prompt_enforcement: { enabled: boolean; prompt_library_id?: string | null };
+  reasoning_policy?: {
+    configured?: boolean;
+    default_effort?: string | null;
+    allow_user_override?: boolean;
+  } | null;
+  skills: { bindings: AssistantSkillBindingSummary[] };
 };
 
 type PolicyUpdate = {
@@ -79,6 +96,13 @@ type PolicyUpdate = {
     enabled: boolean;
     prompt_library_id: string | null;
   };
+  reasoning_policy?: {
+    default_effort: string | null;
+    allow_user_override: boolean;
+  };
+  skills?: {
+    bindings: AssistantSkillBindingInput[];
+  };
 };
 
 export type PolicyPageData = {
@@ -88,6 +112,8 @@ export type PolicyPageData = {
   modelProviders?: ModelProvider[] | null;
   mcpSettings?: { items?: McpServer[] | null } | null;
   promptLibrary: { items: PromptOption[] };
+  skills: SkillBindingCatalogPage;
+  skillRuntimePolicy: { selective_activation_enabled: boolean };
 };
 
 export type BadgeVariant = "default" | "outline" | "destructive";
@@ -95,7 +121,9 @@ export type BadgeVariant = "default" | "outline" | "destructive";
 const EMPTY_POLICY: Policy = {
   models_restriction: { enabled: false, models: [], provider_ids: [] },
   mcp_restriction: { enabled: false, servers: [], disabled_tool_ids: [] },
-  prompt_enforcement: { enabled: false, prompt_library_id: null }
+  prompt_enforcement: { enabled: false, prompt_library_id: null },
+  reasoning_policy: { default_effort: null, allow_user_override: false },
+  skills: { bindings: [] }
 };
 
 export class PolicyDraft {
@@ -110,6 +138,16 @@ export class PolicyDraft {
   #allProviders = $state<ModelProvider[]>([]);
   #allMcpServers = $state<McpServer[]>([]);
   promptOptions = $state<PromptOption[]>([]);
+  skillCatalogPage = $state<SkillBindingCatalogPage>({
+    items: [],
+    count: 0,
+    limit: 25,
+    next_cursor: null
+  });
+  skillBindingSummaries = $state<AssistantSkillBindingSummary[]>([]);
+  // Tenant runtime prerequisite for On demand: with selective activation off the
+  // backend rejects every on-demand candidate, so the picker must too.
+  selectiveActivationEnabled = $state(false);
 
   // ---- Editable state ------------------------------------------------------
   modelsEnabled = $state(false);
@@ -122,6 +160,10 @@ export class PolicyDraft {
   disabledMcpToolIds = new SvelteSet<string>();
   promptEnabled = $state(false);
   selectedPromptId = $state<string | null>(null);
+  reasoningPolicyConfigured = $state(false);
+  defaultReasoningEffort = $state<string | null>(null);
+  allowUserReasoningEffort = $state(false);
+  skillBindings = $state<AssistantSkillBindingInput[]>([]);
 
   // ---- Save lifecycle ------------------------------------------------------
   saving = $state(false);
@@ -141,6 +183,8 @@ export class PolicyDraft {
     this.#allProviders = (data.modelProviders ?? []).filter((p) => p.is_active);
     this.#allMcpServers = (data.mcpSettings?.items ?? []).filter((s) => s.is_available);
     this.promptOptions = data.promptLibrary.items;
+    this.skillCatalogPage = data.skills;
+    this.selectiveActivationEnabled = data.skillRuntimePolicy.selective_activation_enabled;
     this.#seed(data.policy, selectableModels);
   }
 
@@ -178,6 +222,15 @@ export class PolicyDraft {
     }
     this.promptEnabled = policy.prompt_enforcement.enabled;
     this.selectedPromptId = policy.prompt_enforcement.prompt_library_id ?? null;
+    this.reasoningPolicyConfigured = policy.reasoning_policy?.configured ?? false;
+    this.defaultReasoningEffort = policy.reasoning_policy?.default_effort ?? null;
+    this.allowUserReasoningEffort = policy.reasoning_policy?.allow_user_override ?? false;
+    this.skillBindingSummaries = policy.skills.bindings;
+    this.skillBindings = policy.skills.bindings.map((binding) => ({
+      skill_id: binding.skill_id,
+      skill_revision_id: binding.skill_revision_id,
+      activation_mode: binding.activation_mode
+    }));
     this.saveError = null;
   }
 
@@ -233,7 +286,17 @@ export class PolicyDraft {
   defaultModelId = $derived(
     this.selectedModels.find((entry) => entry.is_default)?.completion_model_id ?? null
   );
-
+  reasoningOptions = $derived.by(() => {
+    const options = new SvelteSet<string>();
+    for (const model of this.#allModels) {
+      if (model.can_access === false) continue;
+      if (this.modelsEnabled && !this.effectiveModelIds.has(model.id)) continue;
+      const capability = model.supported_model_kwargs?.reasoning_effort;
+      if (!capability?.supported || capability.control !== "select") continue;
+      for (const option of capability.options ?? []) options.add(option);
+    }
+    return Array.from(options);
+  });
   // ---- Dirty tracking (against the last-saved baseline) --------------------
   #initialModelIds = $derived(
     new SvelteSet(this.#policy.models_restriction.models.map((entry) => entry.completion_model_id))
@@ -284,7 +347,37 @@ export class PolicyDraft {
         ? this.selectedPromptId !== (this.#policy.prompt_enforcement.prompt_library_id ?? null)
         : false)
   );
-  dirty = $derived(this.#modelsDirty || this.#mcpDirty || this.#promptDirty);
+  #reasoningDirty = $derived(
+    this.reasoningPolicyConfigured !== (this.#policy.reasoning_policy?.configured ?? false) ||
+      this.defaultReasoningEffort !== (this.#policy.reasoning_policy?.default_effort ?? null) ||
+      this.allowUserReasoningEffort !==
+        (this.#policy.reasoning_policy?.allow_user_override ?? false)
+  );
+  #initialSkillBindings = $derived(
+    this.#policy.skills.bindings.map((binding) => ({
+      skill_id: binding.skill_id,
+      skill_revision_id: binding.skill_revision_id,
+      activation_mode: binding.activation_mode
+    }))
+  );
+  #skillsDirty = $derived(
+    this.skillBindings.length !== this.#initialSkillBindings.length ||
+      this.skillBindings.some((binding, index) => {
+        const initial = this.#initialSkillBindings[index];
+        return (
+          initial?.skill_id !== binding.skill_id ||
+          initial.skill_revision_id !== binding.skill_revision_id ||
+          initial.activation_mode !== binding.activation_mode
+        );
+      })
+  );
+  dirty = $derived(
+    this.#modelsDirty ||
+      this.#reasoningDirty ||
+      this.#mcpDirty ||
+      this.#promptDirty ||
+      this.#skillsDirty
+  );
 
   // ---- Validation ----------------------------------------------------------
   defaultValid = $derived(
@@ -293,12 +386,22 @@ export class PolicyDraft {
       this.effectiveModelIds.has(this.defaultModelId)
   );
   mcpValid = $derived(!this.mcpEnabled || this.mcpSelections.size > 0);
+  reasoningValid = $derived(
+    this.defaultReasoningEffort === null ||
+      this.reasoningOptions.includes(this.defaultReasoningEffort)
+  );
+  skillsValid = $derived(
+    this.skillBindings.every((binding) => binding.activation_mode !== "on_demand") ||
+      this.selectiveActivationEnabled
+  );
   canSave = $derived(
     this.dirty &&
       (!this.modelsEnabled || this.effectiveModelIds.size > 0) &&
       this.defaultValid &&
+      this.reasoningValid &&
       this.mcpValid &&
-      (!this.promptEnabled || this.selectedPromptId !== null)
+      (!this.promptEnabled || this.selectedPromptId !== null) &&
+      this.skillsValid
   );
 
   // ---- Summaries -----------------------------------------------------------
@@ -326,6 +429,15 @@ export class PolicyDraft {
             total: this.#allMcpServers.length
           })
   );
+  reasoningSummary = $derived.by(() => {
+    if (!this.reasoningPolicyConfigured) return m.governance_reasoning_summary_inactive();
+    const defaultLabel = this.defaultReasoningEffort
+      ? this.reasoningOptionLabel(this.defaultReasoningEffort)
+      : m.default_behavior();
+    return this.allowUserReasoningEffort
+      ? m.governance_reasoning_summary_user_choice({ effort: defaultLabel })
+      : m.governance_reasoning_summary_fixed({ effort: defaultLabel });
+  });
   promptSummary = $derived(
     !this.promptEnabled
       ? m.governance_prompt_summary_inactive()
@@ -337,6 +449,11 @@ export class PolicyDraft {
               m.governance_prompt_unknown()
           })
   );
+  skillsSummary = $derived(
+    this.skillBindings.length === 0
+      ? m.governance_skills_summary_none()
+      : m.governance_skills_summary_count({ count: this.skillBindings.length })
+  );
 
   // ---- Helpers (arrow fields → safe to pass as props) ----------------------
   badgeVariant = (enabled: boolean, valid: boolean): BadgeVariant =>
@@ -347,7 +464,13 @@ export class PolicyDraft {
       ? m.governance_provider_other_models()
       : (this.#allProviders.find((p) => p.id === pid)?.name ?? m.governance_provider_unknown());
 
+  reasoningOptionLabel = getModelKwargOptionLabel;
+
   // ---- Mutations -----------------------------------------------------------
+  activateReasoningPolicy = () => {
+    this.reasoningPolicyConfigured = true;
+  };
+
   setSingleDefault = (id: string) => {
     // The default flag must travel on a row in `governance_policy_completion_models`,
     // so if the target is allowed only via a whitelisted provider, also flip its
@@ -430,6 +553,9 @@ export class PolicyDraft {
     if (this.promptEnabled && !initial.prompt_enforcement.enabled) {
       out.push(m.governance_confirm_prompt_forced());
     }
+    if (this.#skillsDirty) {
+      out.push(m.governance_confirm_skills_changed());
+    }
     return out;
   };
 
@@ -466,13 +592,23 @@ export class PolicyDraft {
           prompt_library_id: this.promptEnabled ? this.selectedPromptId : null
         };
       }
+      if (this.#reasoningDirty) {
+        update.reasoning_policy = {
+          default_effort: this.defaultReasoningEffort,
+          allow_user_override: this.allowUserReasoningEffort
+        };
+      }
+      if (this.#skillsDirty) {
+        update.skills = {
+          bindings: this.skillBindings
+        };
+      }
       await this.#eneo.governancePolicy.update(update);
       await invalidate("admin:governance-policy");
       this.pendingConfirm = null;
       this.saveAnnouncement = m.governance_save_success();
-    } catch (e) {
-      const err = e as { message?: string };
-      this.saveError = err.message ?? m.governance_save_error();
+    } catch (error) {
+      this.saveError = getErrorMessage(error, m.governance_save_error());
       this.saveAnnouncement = m.governance_save_failure();
     } finally {
       this.saving = false;

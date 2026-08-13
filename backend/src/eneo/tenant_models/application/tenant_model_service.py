@@ -32,6 +32,7 @@ from eneo.completion_models.domain.completion_model_repo import (
     CompletionModelRepository,
 )
 from eneo.completion_models.domain.model_kwargs_capabilities import (
+    reasoning_effort_options_from_model_info,
     snapshot_supported_model_kwargs,
 )
 from eneo.database.tables.ai_models_table import (
@@ -46,10 +47,9 @@ from eneo.main.exceptions import (
     NotFoundException,
     UnauthorizedException,
 )
-from eneo.model_providers.infrastructure.litellm_provider import (
-    build_litellm_model_name,
-)
+from eneo.model_providers.domain.model_route import resolve_model_route
 from eneo.model_providers.infrastructure.litellm_transport import (
+    get_model_info,
     get_supported_openai_params,
 )
 from eneo.model_providers.infrastructure.model_provider_repository import (
@@ -128,7 +128,10 @@ def _snapshot_completion_capabilities(
     *,
     reasoning: bool,
 ) -> dict[str, object]:
-    model_route = build_litellm_model_name(provider_type, model_name)
+    model_route = resolve_model_route(
+        provider_type=provider_type,
+        model_name=model_name,
+    )
     try:
         supported_params = get_supported_openai_params(model_route)
     except Exception:
@@ -138,8 +141,22 @@ def _snapshot_completion_capabilities(
             exc_info=True,
         )
         supported_params = None
+    reasoning_effort_options: list[str] | None = None
+    if supported_params is not None and "reasoning_effort" in supported_params:
+        try:
+            reasoning_effort_options = reasoning_effort_options_from_model_info(
+                get_model_info(model_route)
+            )
+        except Exception:
+            logger.warning(
+                "Could not discover model reasoning levels; using conservative defaults",
+                extra={"model_route": model_route},
+                exc_info=True,
+            )
     return snapshot_supported_model_kwargs(
-        supported_params, reasoning=reasoning
+        supported_params,
+        reasoning=reasoning,
+        reasoning_effort_options=reasoning_effort_options,
     ).model_dump()
 
 

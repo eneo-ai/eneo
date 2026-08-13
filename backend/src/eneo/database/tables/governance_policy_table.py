@@ -42,11 +42,21 @@ class GovernancePolicies(BasePublic):
         ForeignKey(PromptLibrary.id, ondelete="RESTRICT"), nullable=True
     )
 
+    reasoning_policy_configured: Mapped[bool] = mapped_column(server_default="False")
+    default_reasoning_effort: Mapped[Optional[str]] = mapped_column(nullable=True)
+    allow_user_reasoning_effort: Mapped[bool] = mapped_column(server_default="False")
+
     updated_by_user_id: Mapped[Optional[UUID]] = mapped_column(
         ForeignKey(Users.id, ondelete="SET NULL"), nullable=True
     )
 
     __table_args__ = (
+        Index(
+            "uq_governance_policies_tenant_id_id",
+            "tenant_id",
+            "id",
+            unique=True,
+        ),
         UniqueConstraint(
             "tenant_id", "scope", name="uq_governance_policies_tenant_id_scope"
         ),

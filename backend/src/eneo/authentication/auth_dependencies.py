@@ -17,7 +17,8 @@ from eneo.main.logging import get_logger
 from eneo.roles.permissions import Permission, validate_permission
 from eneo.server.dependencies.auth_definitions import OAUTH2_SCHEME
 from eneo.server.dependencies.container import get_container
-from eneo.users.user import UserInDB
+from eneo.tenants.tenant import TenantState
+from eneo.users.user import UserInDB, UserState
 
 logger = get_logger(__name__)
 
@@ -148,7 +149,10 @@ async def require_session_auth(
     if getattr(request.state, "api_key", None) is not None:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="This endpoint requires a session token.",
+            detail={
+                "code": "session_auth_required",
+                "message": "This endpoint requires a session token.",
+            },
         )
 
 
@@ -178,6 +182,26 @@ async def require_user_identity(
                     "specific user."
                 ),
             },
+        )
+
+
+async def require_storage_administration(
+    user: Annotated[UserInDB, Depends(get_current_active_user)],
+) -> None:
+    """Require an eligible administrator holding the storage permission.
+
+    Storage administration is a normal permission, granted to the Owner role
+    by default, rather than a separate deployment-wide flag.
+    """
+    if (
+        user.state is not UserState.ACTIVE
+        or user.deleted_at is not None
+        or user.tenant.state is not TenantState.ACTIVE
+        or Permission.STORAGE not in user.permissions
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Active storage administration permission is required.",
         )
 
 
@@ -240,6 +264,7 @@ APPS_READ_OVERRIDES: frozenset[str] = frozenset(
 FILES_READ_OVERRIDES: frozenset[str] = frozenset(
     {
         "generate_signed_url",
+        "generate_original_signed_url",
     }
 )
 

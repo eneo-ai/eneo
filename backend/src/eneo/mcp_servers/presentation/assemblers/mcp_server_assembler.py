@@ -103,6 +103,10 @@ class MCPServerAssembler:
             credential_preview=_compute_credential_preview(
                 mcp_server.http_auth_config_schema, self.encryption_service
             ),
+            forward_identity=mcp_server.forward_identity,
+            tool_catalog_max_count=mcp_server.tool_catalog_max_count,
+            tool_catalog_max_bytes=mcp_server.tool_catalog_max_bytes,
+            tool_definition_max_bytes=mcp_server.tool_definition_max_bytes,
             tags=mcp_server.tags,
             icon_url=mcp_server.icon_url,
             documentation_url=mcp_server.documentation_url,
@@ -159,6 +163,10 @@ class MCPServerSettingsAssembler:
             credential_preview=_compute_credential_preview(
                 mcp_server.http_auth_config_schema, self.encryption_service
             ),
+            forward_identity=mcp_server.forward_identity,
+            tool_catalog_max_count=mcp_server.tool_catalog_max_count,
+            tool_catalog_max_bytes=mcp_server.tool_catalog_max_bytes,
+            tool_definition_max_bytes=mcp_server.tool_definition_max_bytes,
             tags=mcp_server.tags,
             icon_url=mcp_server.icon_url,
             documentation_url=mcp_server.documentation_url,

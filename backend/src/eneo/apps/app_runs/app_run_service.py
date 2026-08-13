@@ -4,10 +4,9 @@ from eneo.apps.app_runs.api.app_run_models import AppRunParams
 from eneo.main.logging import get_logger
 
 logger = get_logger(__name__)
-from eneo.ai_models.completion_models.completion_model import CompletionModelResponse
 from eneo.apps.app_runs.app_run_factory import AppRunFactory
 from eneo.apps.app_runs.app_run_repo import AppRunRepository
-from eneo.apps.apps.app_service import AppService
+from eneo.apps.apps.app_service import AppExecutionResult, AppService
 from eneo.completion_models.infrastructure.context_builder import count_tokens
 from eneo.files.file_service import FileService
 from eneo.jobs.job_models import Task
@@ -39,7 +38,8 @@ class AppRunService:
         self.file_service = file_service
 
     async def queue_app_run(self, app_id: UUID, file_ids: list[UUID], text: str | None):
-        app, _ = await self.app_service.get_app(app_id)
+        execution_plan = await self.app_service.prepare_app_run(app_id)
+        app = execution_plan.app
 
         files = await self.file_service.get_file_infos(file_ids)
 
@@ -52,6 +52,7 @@ class AppRunService:
             text=text,
             user_id=self.user.id,
             tenant_id=self.user.tenant_id,
+            skill_provenance=execution_plan.skill_provenance,
         )
 
         app_run_in_db = await self.repo.add(app_run)
@@ -115,9 +116,13 @@ class AppRunService:
     ):
         app_run = await self.get_app_run(app_run_id)
 
-        response: CompletionModelResponse = await self.app_service.run_app(
-            app_id, file_ids=file_ids, text=text
+        execution: AppExecutionResult = await self.app_service.run_app(
+            app_id,
+            file_ids=file_ids,
+            text=text,
+            skill_provenance=app_run.skill_provenance,
         )
+        response = execution.response
 
         # Prefer actual provider token counts, fall back to litellm estimates
         if response.usage and response.usage.prompt_tokens is not None:
@@ -144,6 +149,7 @@ class AppRunService:
             output=response.completion.text,  # type: ignore[union-attr]
             num_tokens_input=num_tokens_input,
             num_tokens_output=num_tokens_output,
+            skill_provenance=execution.skill_provenance,
         )
 
         await self.repo.update(app_run)

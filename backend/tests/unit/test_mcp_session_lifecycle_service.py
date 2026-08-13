@@ -36,8 +36,44 @@ async def test_terminate_for_chat_session_terminates_every_persisted_session():
 
     state_repo.list_for_chat_session.assert_awaited_once_with(chat_session_id)
     assert proxy_factory.terminate.await_count == 2
-    proxy_factory.terminate.assert_any_await(servers[first_server_id], "mcp-session-1")
-    proxy_factory.terminate.assert_any_await(servers[second_server_id], "mcp-session-2")
+    proxy_factory.terminate.assert_any_await(
+        servers[first_server_id], "mcp-session-1", identity_headers={}
+    )
+    proxy_factory.terminate.assert_any_await(
+        servers[second_server_id], "mcp-session-2", identity_headers={}
+    )
+
+
+@pytest.mark.asyncio
+async def test_terminate_carries_the_acting_users_identity_headers():
+    chat_session_id = uuid4()
+    server_id = uuid4()
+    state_repo = AsyncMock()
+    state_repo.list_for_chat_session.return_value = [(server_id, "mcp-session-1")]
+    server = SimpleNamespace(id=server_id, http_url="https://one")
+    server_repo = AsyncMock()
+    server_repo.one_or_none.return_value = server
+    proxy_factory = AsyncMock()
+    user = SimpleNamespace(
+        id=uuid4(),
+        username="anna",
+        email="anna@kommun.se",
+        tenant_id=uuid4(),
+        roles=[],
+        tenant=None,
+    )
+    service = McpSessionLifecycleService(
+        state_repo=state_repo,
+        mcp_server_repo=server_repo,
+        proxy_factory=proxy_factory,
+        user=user,
+    )
+
+    await service.terminate_for_chat_session(chat_session_id)
+
+    kwargs = proxy_factory.terminate.await_args.kwargs
+    assert kwargs["identity_headers"]["X-Eneo-User-Id"] == str(user.id)
+    assert kwargs["identity_headers"]["X-Eneo-User-Name"] == "anna"
 
 
 @pytest.mark.asyncio

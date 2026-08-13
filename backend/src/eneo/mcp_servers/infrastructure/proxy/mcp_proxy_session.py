@@ -16,12 +16,15 @@ from types import TracebackType
 from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
+from eneo.authentication.signed_urls import looks_like_reference_url
+from eneo.internal_mcp.constants import FILES_SERVER_NAME
 from eneo.main.config import get_settings
 from eneo.main.logging import get_logger
-from eneo.mcp_servers.domain.entities.mcp_server import MCPServer
+from eneo.mcp_servers.domain.entities.mcp_server import MCPServer, MCPServerTool
 from eneo.mcp_servers.infrastructure.client.mcp_client import (
     MCPClient,
     MCPClientError,
+    validate_tool_catalog,
 )
 from eneo.mcp_servers.infrastructure.repo_impl.chat_session_mcp_state_repo_impl import (
     ChatSessionMcpStateRepo,
@@ -30,9 +33,17 @@ from eneo.mcp_servers.infrastructure.repo_impl.chat_session_mcp_state_repo_impl 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
 
+    from eneo.mcp_servers.domain.repositories.mcp_server_tool_repo import (
+        MCPServerToolRepository,
+    )
+
 logger = get_logger(__name__)
 
 _settings = get_settings()
+MCP_IDENTITY_CATALOG_PREPARATION_TIMEOUT_SECONDS = float(
+    _settings.mcp_client_connect_timeout_seconds
+    + _settings.mcp_client_list_tools_timeout_seconds
+)
 _CIRCUIT_BREAKER_STATE: dict[UUID, dict[str, float | int]] = {}
 _CIRCUIT_BREAKER_LOCK = asyncio.Lock()
 
@@ -55,6 +66,8 @@ class MCPProxySession:
         auth_credentials_map: dict[UUID, dict[str, str]] | None = None,
         chat_session_id: UUID | None = None,
         db_session: "AsyncSession | None" = None,
+        identity_headers: dict[str, str] | None = None,
+        mcp_server_tool_repo: "MCPServerToolRepository | None" = None,
     ):
         """
         Initialize proxy session.
@@ -63,6 +76,9 @@ class MCPProxySession:
             mcp_servers: List of MCP servers the assistant has access to
                         (already filtered by tenant/space/assistant hierarchy)
             auth_credentials_map: Map of server_id -> auth credentials
+            identity_headers: Acting user/tenant X-Eneo-* headers, handed to
+                every client. Each client forwards them only when its own server
+                has ``forward_identity=True`` (per-server PII opt-in).
             chat_session_id: When set with ``db_session``, the proxy resumes
                 each MCP server's persisted protocol session id on connect and
                 upserts the post-initialize value. Generic — applies to every
@@ -74,7 +90,10 @@ class MCPProxySession:
         super().__init__()
         self.mcp_servers = mcp_servers
         self.auth_credentials_map = auth_credentials_map or {}
+        self.identity_headers = identity_headers or {}
         self.chat_session_id = chat_session_id
+        self._durable_session_requested = chat_session_id is not None
+        self._mcp_server_tool_repo = mcp_server_tool_repo
         self._mcp_state_repo: ChatSessionMcpStateRepo | None = (
             ChatSessionMcpStateRepo(db_session)
             if chat_session_id is not None and db_session is not None
@@ -84,6 +103,7 @@ class MCPProxySession:
         # Lazy connection cache: server_id -> MCPClient (connected)
         self._clients: dict[UUID, MCPClient] = {}
         self._connection_locks: dict[UUID, asyncio.Lock] = {}
+        self._mcp_state_lock = asyncio.Lock()
 
         # Servers that pushed a tools/list_changed notification this session.
         # refresh_tools() re-lists them and rebuilds their slice of the
@@ -125,6 +145,28 @@ class MCPProxySession:
             sanitized = "t_" + sanitized
         return sanitized
 
+    @staticmethod
+    def _describe_for_llm(
+        *,
+        server_name: str,
+        name: str,
+        title: str | None,
+        description: str | None,
+    ) -> str:
+        """Model-facing description, opening with the tool's display name.
+
+        The wire name is a sanitized ``server__tool`` identifier the model must
+        emit verbatim, so it cannot double as a label; left to itself the model
+        recites that identifier when a user asks what the assistant can do. MCP's
+        optional ``title`` is the human-readable name the chat UI already prefers
+        for tool-call chips, and the description is the only channel that carries
+        it to the model: the OpenAI function schema has no title field.
+        """
+        base = description or f"Tool from {server_name}"
+        if not title or title == name:
+            return base
+        return f'Display name: "{title}".\n{base}'
+
     def _register_tool(
         self,
         server: MCPServer,
@@ -162,7 +204,12 @@ class MCPProxySession:
                 "type": "function",
                 "function": {
                     "name": prefixed_name,
-                    "description": description or f"Tool from {server.name}",
+                    "description": self._describe_for_llm(
+                        server_name=server.name,
+                        name=name,
+                        title=title,
+                        description=description,
+                    ),
                     "parameters": input_schema or {"type": "object", "properties": {}},
                 },
             }
@@ -179,6 +226,8 @@ class MCPProxySession:
         server's tool list is re-listed.
         """
         if not tool.is_enabled_by_default:
+            return False
+        if getattr(tool, "removed_from_remote", False) is True:
             return False
         if (
             tool.requires_approval
@@ -273,6 +322,267 @@ class MCPProxySession:
                 after.add(prefixed)
 
         return before != after
+
+    async def _load_protocol_session_id(
+        self, server: MCPServer, *, fail_closed: bool = False
+    ) -> str | None:
+        if self._mcp_state_repo is None or self.chat_session_id is None:
+            return None
+
+        try:
+            async with self._mcp_state_lock:
+                return await self._mcp_state_repo.get(
+                    chat_session_id=self.chat_session_id,
+                    mcp_server_id=server.id,
+                    identity_policy_generation=server.identity_policy_generation,
+                )
+        except Exception as exc:
+            logger.warning(
+                "[MCPProxy] Failed to read persisted mcp_session_id for server '%s': %s",
+                server.name,
+                exc,
+            )
+            if fail_closed:
+                raise
+            return None
+
+    async def _claim_protocol_session_id(
+        self,
+        server: MCPServer,
+        assigned_id: str | None,
+        resume_id: str | None,
+    ) -> str | None:
+        if assigned_id is None:
+            return assigned_id
+        if not self._durable_session_requested:
+            return assigned_id
+        if self._mcp_state_repo is None or self.chat_session_id is None:
+            return None
+
+        try:
+            async with self._mcp_state_lock:
+                winner = await self._mcp_state_repo.claim(
+                    chat_session_id=self.chat_session_id,
+                    mcp_server_id=server.id,
+                    candidate_mcp_session_id=assigned_id,
+                    expected_mcp_session_id=resume_id,
+                    identity_policy_generation=server.identity_policy_generation,
+                )
+        except Exception as exc:
+            logger.warning(
+                "[MCPProxy] Failed to persist mcp_session_id for server '%s': %s",
+                server.name,
+                exc,
+            )
+            return None
+        return winner
+
+    async def _discover_identity_scoped_tools(
+        self, server: MCPServer, resume_id: str | None
+    ) -> list[dict[str, Any]]:
+        auth_credentials = self.auth_credentials_map.get(server.id, {})
+        next_resume_id = resume_id
+
+        # A concurrent first turn can win the durable-session claim after this
+        # probe connected. Retry once against that winner; never keep or expose
+        # work from a session that lost the compare-and-set.
+        for attempt in range(2):
+            client = MCPClient(
+                server,
+                auth_credentials,
+                resume_mcp_session_id=next_resume_id,
+                identity_headers=self.identity_headers,
+            )
+            session_is_durable = False
+            candidate_terminated = False
+            try:
+                async with client:
+                    assigned_id = client.assigned_mcp_session_id
+                    session_is_durable = (
+                        assigned_id is None or assigned_id == next_resume_id
+                    )
+                    live_tools = await client.list_tools()
+                    if assigned_id is None:
+                        return live_tools
+
+                    session_is_durable = False
+                    winner = await self._claim_protocol_session_id(
+                        server, assigned_id, next_resume_id
+                    )
+                    if winner is None:
+                        return []
+                    if winner == assigned_id:
+                        session_is_durable = self._durable_session_requested
+                        return live_tools
+
+                    await client.terminate_protocol_session(assigned_id)
+                    candidate_terminated = True
+                    if attempt == 0:
+                        next_resume_id = winner
+                        continue
+                    return []
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                logger.warning(
+                    "[MCPProxy] Failed identity-scoped tool discovery for '%s': %s",
+                    server.name,
+                    exc,
+                )
+                return []
+            finally:
+                assigned_id = client.assigned_mcp_session_id
+                if assigned_id and not session_is_durable and not candidate_terminated:
+                    try:
+                        await client.terminate_protocol_session(assigned_id)
+                    except Exception as exc:
+                        logger.warning(
+                            "[MCPProxy] Failed to terminate unpersisted protocol "
+                            "session for '%s': %s",
+                            server.name,
+                            exc,
+                        )
+        return []
+
+    async def _stage_live_tool_catalog(
+        self, server: MCPServer, live_tools: list[dict[str, Any]]
+    ) -> bool:
+        """Validate and atomically queue new or changed live definitions.
+
+        Runtime discovery remains fail-closed: staging does not add the new
+        entity to ``server.tools``, so this request still intersects against
+        the pre-approved in-memory catalog.
+        """
+        try:
+            validate_tool_catalog(
+                live_tools,
+                max_count=server.tool_catalog_max_count,
+                max_catalog_bytes=server.tool_catalog_max_bytes,
+                max_definition_bytes=server.tool_definition_max_bytes,
+            )
+        except MCPClientError as exc:
+            logger.warning(
+                "[MCPProxy] Rejected unsafe live catalog from '%s': %s",
+                server.name,
+                exc,
+            )
+            return False
+
+        if self._mcp_server_tool_repo is None or not live_tools:
+            return True
+
+        approved_by_name = {tool.name: tool for tool in server.tools}
+        staging_candidates: list[dict[str, Any]] = []
+        for live_tool in live_tools:
+            approved = approved_by_name.get(live_tool["name"])
+            if approved is None or (
+                not approved.requires_approval
+                and approved.has_definition_drift(
+                    description=live_tool.get("description"),
+                    input_schema=live_tool.get("input_schema"),
+                )
+            ):
+                staging_candidates.append(live_tool)
+        if not staging_candidates:
+            return True
+
+        observations = [
+            MCPServerTool.pending_discovery(
+                mcp_server_id=server.id,
+                name=live_tool["name"],
+                title=live_tool.get("title"),
+                description=live_tool.get("description"),
+                input_schema=live_tool.get("input_schema"),
+            )
+            for live_tool in staging_candidates
+        ]
+        try:
+            staged = await self._mcp_server_tool_repo.stage_observed(observations)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            logger.warning(
+                "[MCPProxy] Failed to stage live catalog from '%s': %s",
+                server.name,
+                exc,
+            )
+            return False
+        if staged:
+            logger.info(
+                "[MCPProxy] Staged %d user-observed definition(s) from '%s' "
+                "for admin approval",
+                len(staged),
+                server.name,
+            )
+        return True
+
+    async def prepare_tools_for_context(self) -> None:
+        """Resolve identity-scoped tool catalogs before model exposure.
+
+        The database catalog remains the administrator-approved allowlist. A
+        server that receives the acting user's identity may return a narrower
+        ``tools/list`` response for that user, so its LLM-facing catalog must
+        be the intersection of the two. Global catalogs keep the existing lazy
+        connection path.
+
+        Discovery failures fail closed for the affected server: none of its
+        administrator-discovered definitions are exposed in this request.
+        """
+        identity_servers = [
+            server for server in self.mcp_servers if server.forward_identity
+        ]
+        if not identity_servers:
+            return
+
+        # One AsyncSession cannot serve concurrent operations. Resolve the
+        # persisted ids serially, then parallelize only the independent remote
+        # probes. Any newly assigned ids are serialized again by
+        # _mcp_state_lock before each probe transport closes.
+        probe_servers: list[MCPServer] = []
+        resume_ids: list[str | None] = []
+        for server in identity_servers:
+            try:
+                resume_id = await self._load_protocol_session_id(
+                    server, fail_closed=True
+                )
+            except Exception:
+                self._rebuild_server_tools(server, [])
+                continue
+            probe_servers.append(server)
+            resume_ids.append(resume_id)
+
+        if not probe_servers:
+            return
+
+        probe_tasks = [
+            asyncio.create_task(self._discover_identity_scoped_tools(server, resume_id))
+            for server, resume_id in zip(probe_servers, resume_ids, strict=True)
+        ]
+        pending = set(probe_tasks)
+        try:
+            _, pending = await asyncio.wait(
+                probe_tasks,
+                timeout=MCP_IDENTITY_CATALOG_PREPARATION_TIMEOUT_SECONDS,
+            )
+        finally:
+            for task in pending:
+                task.cancel()
+            if pending:
+                await asyncio.gather(*pending, return_exceptions=True)
+
+        # Apply results only after every probe has closed, and in configured
+        # server order rather than network completion order.
+        for server, task in zip(probe_servers, probe_tasks, strict=True):
+            if task in pending:
+                logger.warning(
+                    "[MCPProxy] Identity-scoped tool discovery timed out for '%s'",
+                    server.name,
+                )
+                live_tools: list[dict[str, Any]] = []
+            else:
+                live_tools = task.result()
+            catalog_is_safe = await self._stage_live_tool_catalog(server, live_tools)
+            self._rebuild_server_tools(server, live_tools if catalog_is_safe else [])
 
     async def refresh_tools(self, touched_tool_names: list[str] | None = None) -> bool:
         """Re-list tools for servers whose advertised set may have changed.
@@ -386,27 +696,51 @@ class MCPProxySession:
         self._failed_server_ids.add(server_id)
 
     def _truncate_tool_result(self, result: dict[str, Any]) -> dict[str, Any]:
+        """Trim an oversized tool result to the budget instead of failing it.
+
+        Leading content blocks are kept whole until the budget runs out; the
+        text block that crosses it is cut mid-text and everything after it is
+        dropped. A trailing notice tells the model the output was truncated,
+        so e.g. a large page extraction still yields its head as usable,
+        citable content rather than an error.
+        """
         max_chars = _settings.mcp_tool_output_max_chars
         serialized = json.dumps(result, ensure_ascii=False, default=str)
         if len(serialized) <= max_chars:
             return result
 
-        preview = serialized[: max_chars // 2]
-        return {
-            "content": [
-                {
-                    "type": "text",
-                    "text": json.dumps(
-                        {
-                            "error": f"Tool output exceeded maximum size of {max_chars} characters",
-                            "partial_data_preview": preview,
-                        },
-                        ensure_ascii=False,
-                    ),
-                }
-            ],
-            "is_error": True,
-        }
+        remaining = max_chars
+        kept: list[dict[str, Any]] = []
+        dropped = 0
+        blocks: list[dict[str, Any]] = result.get("content") or []
+        for block in blocks:
+            if remaining <= 0:
+                dropped += 1
+                continue
+            size = len(json.dumps(block, ensure_ascii=False, default=str))
+            if size <= remaining:
+                kept.append(block)
+                remaining -= size
+            elif block.get("type") == "text":
+                text = block.get("text") or ""
+                # Serialization overhead (escaping, keys) counts toward the
+                # budget, so cut the text to what remains after it.
+                overhead = size - len(text)
+                kept.append({**block, "text": text[: max(0, remaining - overhead)]})
+                remaining = 0
+            else:
+                # Non-text blocks (images, resources) cannot be kept partially.
+                dropped += 1
+                remaining = 0
+        notice = f"[Tool output truncated at {max_chars} characters"
+        if dropped:
+            notice += f"; {dropped} content block(s) dropped"
+        notice += (
+            ". Narrow the request (e.g. fewer URLs or a more specific query) "
+            "to fit the limit.]"
+        )
+        kept.append({"type": "text", "text": notice})
+        return {**result, "content": kept}
 
     def get_tools_for_llm(self) -> list[dict[str, Any]]:
         """
@@ -504,69 +838,121 @@ class MCPProxySession:
             # this (chat_session, server) pair so the server sees a continuous
             # logical session across user turns. None on first turn or for
             # callers without a chat context (testing).
-            resume_id: str | None = None
-            if self._mcp_state_repo is not None and self.chat_session_id is not None:
-                try:
-                    resume_id = await self._mcp_state_repo.get(
-                        chat_session_id=self.chat_session_id,
-                        mcp_server_id=server_id,
-                    )
-                except Exception as exc:
-                    logger.warning(
-                        "[MCPProxy] Failed to read persisted mcp_session_id for "
-                        "server '%s' (continuing without resume): %s",
-                        server.name,
-                        exc,
-                    )
+            resume_id = await self._load_protocol_session_id(server)
 
-            # Create new connection with timing
             auth_creds = self.auth_credentials_map.get(server_id, {})
-            client = MCPClient(
-                server,
-                auth_creds,
-                resume_mcp_session_id=resume_id,
-                on_tools_list_changed=lambda sid=server_id: self._dirty_server_ids.add(
-                    sid
-                ),
+            for attempt in range(2):
+                client = MCPClient(
+                    server,
+                    auth_creds,
+                    resume_mcp_session_id=resume_id,
+                    on_tools_list_changed=lambda sid=server_id: self._dirty_server_ids.add(
+                        sid
+                    ),
+                    identity_headers=self.identity_headers,
+                )
+
+                logger.debug(f"[MCPProxy] Connecting to '{server.name}'...")
+                start_time = time.perf_counter()
+                await client.connect()
+                elapsed_ms = (time.perf_counter() - start_time) * 1000
+
+                assigned_id = client.assigned_mcp_session_id
+                if assigned_id is None:
+                    self._clients[server_id] = client
+                    logger.debug(
+                        f"[MCPProxy] Connected to '{server.name}' in {elapsed_ms:.0f}ms"
+                    )
+                    return client
+
+                winner = await self._claim_protocol_session_id(
+                    server, assigned_id, resume_id
+                )
+                if winner != assigned_id:
+                    try:
+                        await client.terminate_protocol_session(assigned_id)
+                    except Exception as exc:
+                        logger.warning(
+                            "[MCPProxy] Failed to terminate unclaimed protocol "
+                            "session for '%s': %s",
+                            server.name,
+                            exc,
+                        )
+                    finally:
+                        await client.disconnect()
+                    if winner is not None and attempt == 0:
+                        resume_id = winner
+                        continue
+                    raise MCPClientError(
+                        f"Could not persist a stable MCP session for '{server.name}'"
+                    )
+
+                self._clients[server_id] = client
+                logger.debug(
+                    f"[MCPProxy] Connected to '{server.name}' in {elapsed_ms:.0f}ms"
+                )
+                return client
+
+            raise MCPClientError(
+                f"Could not establish an MCP session for '{server.name}'"
             )
 
-            logger.debug(f"[MCPProxy] Connecting to '{server.name}'...")
-            start_time = time.perf_counter()
-            await client.connect()
-            elapsed_ms = (time.perf_counter() - start_time) * 1000
+    def _files_read_file_entry(self) -> tuple[str, str | None] | None:
+        """Prefixed name + title of the loopback read_file, when registered.
 
-            self._clients[server_id] = client
-            logger.debug(
-                f"[MCPProxy] Connected to '{server.name}' in {elapsed_ms:.0f}ms"
-            )
+        Scanned on demand rather than cached: the registry is small and is
+        cleared and rebuilt by the live-refresh path, so stored state could go
+        stale.
+        """
+        for prefixed_name, (server, name, title) in self._tool_registry.items():
+            if server.name == FILES_SERVER_NAME and name == "read_file":
+                return prefixed_name, title
+        return None
 
-            # Persist the post-initialize session id so the next user turn
-            # resumes the same logical session. Failure here is non-fatal:
-            # the client is still usable for this turn, we just lose
-            # continuity. Skip the upsert when the value matches what we
-            # already had stored (no schema work for the steady state).
-            assigned_id = client.assigned_mcp_session_id
-            if (
-                self._mcp_state_repo is not None
-                and self.chat_session_id is not None
-                and assigned_id
-                and assigned_id != resume_id
-            ):
-                try:
-                    await self._mcp_state_repo.upsert(
-                        chat_session_id=self.chat_session_id,
-                        mcp_server_id=server_id,
-                        mcp_session_id=assigned_id,
-                    )
-                except Exception as exc:
-                    logger.warning(
-                        "[MCPProxy] Failed to persist mcp_session_id for "
-                        "server '%s': %s",
-                        server.name,
-                        exc,
-                    )
+    def _reference_fallback_hint(
+        self, failing_tool_name: str, arguments: dict[str, Any]
+    ) -> str:
+        """Pointer to the built-in reader for a failed reference-URL call.
 
-            return client
+        Keys on the argument shape (a signed attachment reference URL), not on
+        which server failed: any tool call that carried a reference url can be
+        retried against the loopback read_file, which registers exactly when
+        reference entries render in the prompt. Empty when no argument is a
+        reference, read_file is not registered, or read_file itself failed.
+        """
+        if not any(
+            isinstance(value, str) and looks_like_reference_url(value)
+            for value in arguments.values()
+        ):
+            return ""
+        entry = self._files_read_file_entry()
+        if entry is None:
+            return ""
+        prefixed_name, title = entry
+        if prefixed_name == failing_tool_name:
+            return ""
+        display = f' ("{title}")' if title else ""
+        return (
+            "The attached file itself is still readable: pass the same url "
+            f"to the {prefixed_name}{display} tool."
+        )
+
+    def _unavailable_result(
+        self, tool_name: str, arguments: dict[str, Any]
+    ) -> dict[str, Any]:
+        """Error result for a tool whose server cannot be called right now."""
+        text = (
+            "External tool service temporarily unavailable. If another "
+            "available tool can do the job, use it instead of retrying this "
+            "one."
+        )
+        hint = self._reference_fallback_hint(tool_name, arguments)
+        if hint:
+            text = f"{text} {hint}"
+        return {
+            "content": [{"type": "text", "text": text}],
+            "is_error": True,
+        }
 
     async def call_tool(
         self,
@@ -601,26 +987,10 @@ class MCPProxySession:
         logger.debug(f"[MCPProxy] Calling {original_tool_name} on '{server.name}'")
 
         if await self._is_circuit_open(server.id):
-            return {
-                "content": [
-                    {
-                        "type": "text",
-                        "text": "External tool service temporarily unavailable. Please retry later.",
-                    }
-                ],
-                "is_error": True,
-            }
+            return self._unavailable_result(tool_name, arguments)
 
         if server.id in self._failed_server_ids:
-            return {
-                "content": [
-                    {
-                        "type": "text",
-                        "text": "External tool service temporarily unavailable. Please retry later.",
-                    }
-                ],
-                "is_error": True,
-            }
+            return self._unavailable_result(tool_name, arguments)
 
         # Use cached client only. Connecting here is unsafe: this method runs
         # under asyncio.gather (see call_tools_parallel), which dispatches each
@@ -635,15 +1005,7 @@ class MCPProxySession:
                 server.name,
             )
             self._mark_server_failed(server.id)
-            return {
-                "content": [
-                    {
-                        "type": "text",
-                        "text": "External tool service temporarily unavailable. Please retry later.",
-                    }
-                ],
-                "is_error": True,
-            }
+            return self._unavailable_result(tool_name, arguments)
 
         try:
             # Execute tool with timing
@@ -660,7 +1022,17 @@ class MCPProxySession:
                 await self._record_failure(server.id)
             else:
                 await self._record_success(server.id)
-            return self._truncate_tool_result(result)
+            result = self._truncate_tool_result(result)
+            if is_error:
+                # A tool that failed on a reference URL should not be retried
+                # into a loop; appended after truncation so the pointer to the
+                # built-in reader survives it.
+                hint = self._reference_fallback_hint(tool_name, arguments)
+                if hint:
+                    blocks: list[Any] = list(result.get("content") or [])
+                    blocks.append({"type": "text", "text": hint})
+                    result = {**result, "content": blocks}
+            return result
         except MCPClientError:
             self._mark_server_failed(server.id)
             await self._record_failure(server.id)
@@ -775,6 +1147,17 @@ class MCPProxySession:
         # task's current cancel scope" and silently leaks the underlying
         # HTTP read/write TaskGroup children.
         for server_id, client in reversed(self._clients.items()):
+            assigned_id = client.assigned_mcp_session_id
+            if not self._durable_session_requested and assigned_id is not None:
+                try:
+                    await client.terminate_protocol_session(assigned_id)
+                except Exception as exc:
+                    logger.warning(
+                        "[MCPProxy] Failed to terminate ephemeral protocol "
+                        "session for '%s': %s",
+                        server_id,
+                        exc,
+                    )
             try:
                 await client.disconnect()
             except Exception as e:

@@ -1,0 +1,57 @@
+# Optional bundled S3-compatible byte plane.
+#
+# Compose this file with docker-compose.yml and enable the object-content
+# profile only after setting an immutable ENEO_SEAWEEDFS_IMAGE digest plus the
+# complete OBJECT_CONTENT_* endpoint block in .env.
+
+services:
+  backend:
+    networks:
+      - object_content_net
+
+  worker:
+    networks:
+      - object_content_net
+
+  object-content:
+    profiles:
+      - object-content
+    image: ${ENEO_SEAWEEDFS_IMAGE:?Set the verified ghcr.io/eneo-ai/eneo-seaweedfs digest in .env}
+    restart: unless-stopped
+    command:
+      - mini
+      - -dir=/data
+      - -webdav=false
+      - -admin.ui=false
+      - -master.telemetry=false
+      - -s3.iam=false
+      - -master.volumeSizeLimitMB=${SEAWEEDFS_VOLUME_SIZE_LIMIT_MB:-30000}
+      - -master.garbageThreshold=${SEAWEEDFS_GARBAGE_THRESHOLD:-0.3}
+    environment:
+      # SeaweedFS uses these conventional S3 gateway variable names. No AWS
+      # service is selected or contacted.
+      AWS_ACCESS_KEY_ID: ${OBJECT_CONTENT_ACCESS_KEY_ID:?Set the object-content access key in .env}
+      AWS_SECRET_ACCESS_KEY: ${OBJECT_CONTENT_SECRET_ACCESS_KEY:?Set the object-content secret key in .env}
+      S3_BUCKET: ${OBJECT_CONTENT_BUCKET:-eneo-object-content}
+    volumes:
+      - eneo_object_content_data:/data
+    networks:
+      - object_content_net
+    expose:
+      - "8333"
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=64m
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    stop_grace_period: 1m
+
+networks:
+  object_content_net:
+    driver: bridge
+    internal: true
+
+volumes:
+  eneo_object_content_data:

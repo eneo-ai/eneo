@@ -28,6 +28,7 @@ import pytest
 from eneo.ai_models.completion_models.completion_model import (
     Completion,
     CompletionModelResponse,
+    ResponseType,
 )
 from eneo.help_assistants.application.helper_run_service import HelperRunService
 from eneo.help_assistants.domain.factory import HelperAssistantsFactory
@@ -294,6 +295,44 @@ async def test_continue_turn_reuses_session_and_persists_question():
     # Status was NOT mutated — continue_turn keeps the run IN_PROGRESS.
     mocks["helper_run_repo"].update_status.assert_not_awaited()
     assert result.answer == "Follow-up answer."
+
+
+@pytest.mark.asyncio
+async def test_streaming_persists_adapter_cumulative_input_estimate():
+    user = _make_user()
+    helper_assistant = _mock_helper_assistant(assistant_id=uuid4())
+    session = _build_session(session_id=uuid4())
+    question_repo = AsyncMock()
+    question_repo.session = MagicMock()
+    question_repo.session.in_transaction.return_value = True
+    service, _ = _build_service(user=user, question_repo=question_repo)
+
+    async def completion_stream():
+        yield Completion(response_type=ResponseType.TEXT, text="Helper answer.")
+        yield Completion(stop=True, input_token_estimate=57)
+
+    response = CompletionModelResponse.model_construct(
+        completion=completion_stream(),
+        model=helper_assistant.completion_model,
+        extended_logging=None,
+        total_token_count=10,
+        usage=None,
+    )
+
+    chunks = [
+        chunk
+        async for chunk in service._stream_and_persist(
+            response=response,
+            session=session,
+            question="Help me",
+            datastore_chunks=[],
+            helper_assistant=helper_assistant,
+        )
+    ]
+
+    assert any(chunk.text == "Helper answer." for chunk in chunks)
+    persisted = question_repo.add.await_args.args[0]
+    assert persisted.num_tokens_question == 57
 
 
 @pytest.mark.asyncio

@@ -16,6 +16,16 @@ export function getPermissionCopy(name: string, fallbackDescription: string): En
         label: m.permission_assistants(),
         description: m.permission_assistants_description()
       };
+    case "skills":
+      return {
+        label: m.permission_skills(),
+        description: m.permission_skills_description()
+      };
+    case "skills_management":
+      return {
+        label: m.permission_skills_management(),
+        description: m.permission_skills_management_description()
+      };
     case "personal_chat":
       return {
         label: m.permission_personal_chat(),

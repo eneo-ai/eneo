@@ -1,6 +1,6 @@
 # MCP Servers
 
-Model Context Protocol (MCP) servers extend your assistants with external tools and data sources. This guide covers how to add MCP servers, manage tools, understand the sync and approval flow, and make tools available in spaces.
+Model Context Protocol (MCP) servers give assistants access to external tools and live data. This guide covers setup, tool approval, user-specific catalogs, session state, and day-to-day operation.
 
 import { Callout } from 'nextra/components'
 
@@ -15,8 +15,20 @@ MCP is an open protocol that lets AI assistants call external tools — such as 
 | **MCP Server** | A remote service that exposes tools via the MCP protocol |
 | **Tool** | A single function the server provides (e.g. `search_tickets`, `create_issue`) |
 | **Tool Sync** | Discovering tools from the remote server and detecting changes |
-| **Approval** | Admin review step before new or changed tools become active |
+| **Approved catalog** | The tool names, descriptions, and schemas an admin has accepted in Eneo |
+| **Live catalog** | The tools the remote server returns for the signed-in user during this request |
+| **Approval** | Admin review before a new or changed definition becomes active |
 | **Space** | Where you enable MCP servers so assistants can use their tools |
+
+For a server that receives user identity, Eneo exposes only the intersection of
+the two catalogs:
+
+```text
+approved and enabled in Eneo ∩ visible to this user now = tools sent to the model
+```
+
+The remote server decides what the user can see. Eneo decides what the model is
+allowed to call. A tool must pass both checks.
 
 ---
 
@@ -33,6 +45,8 @@ MCP servers are managed in **Admin → MCP Servers**. Only admins can add, edit,
 3. Configure optional settings:
    - **Description** — What the server does
    - **Authentication** — Choose between `Public` (no auth) or `Bearer Token`
+   - **Forward user identity** — Send the acting user's Eneo identity to this server
+   - **Tool catalog limits** — Set the largest catalog and tool definition Eneo will accept
    - **Documentation URL** — Link to the server's documentation
    - **Security Classification** — Restrict which spaces can use this server
 4. Click **Add MCP Server**
@@ -40,7 +54,7 @@ MCP servers are managed in **Admin → MCP Servers**. Only admins can add, edit,
 Eneo will **test the connection** before saving. If the URL is unreachable or returns an error, the server is not created and you get an error message.
 
 <Callout type="info">
-  On successful creation, Eneo automatically connects to the server and discovers all available tools. These initial tools are added as **enabled by default** without requiring approval, since the admin is explicitly adding a trusted server.
+  On successful creation, Eneo connects to the server and stores the tools visible to the creating admin. These initial tools are enabled by default because the admin is explicitly adding the server. When identity forwarding is enabled, other users may have a different catalog; their additional tools enter the approval flow described below.
 </Callout>
 
 ### Authentication
@@ -48,6 +62,52 @@ Eneo will **test the connection** before saving. If the URL is unreachable or re
 If the MCP server requires authentication, select **Bearer Token** and enter the token. The token is encrypted at rest using Fernet encryption (AES-128-CBC + HMAC-SHA256) and is never shown in the UI after saving.
 
 When editing a server, leave the token field empty to keep the existing token.
+
+### Forwarding user identity
+
+Identity forwarding is off by default. Enable it only when the MCP server is
+trusted to receive personal data and uses that identity to authorize each
+request.
+
+Eneo sends the available values in these headers:
+
+- `X-Eneo-User-Id`, `X-Eneo-User-Email`, and `X-Eneo-User-Name`
+- `X-Eneo-Tenant-Id` and `X-Eneo-Tenant-Name`
+- `X-Eneo-Role`
+
+Empty values are omitted. Text values are stripped of control characters and
+percent-encoded as UTF-8; the receiving server must decode them before display
+or matching. Headers are sent during connection checks, tool discovery, tool
+calls, and protocol-session termination.
+
+<Callout type="warning">
+  Forwarded headers are identity claims from Eneo, not a replacement for a
+  protected network path. The MCP server must accept them only from the trusted
+  Eneo backend and must authorize every request.
+</Callout>
+
+### Tool catalog limits
+
+Open **Tool catalog limits** in the server form to set two safeguards for that
+server:
+
+| Setting | Default | Allowed range |
+|---|---:|---:|
+| Maximum tools | 256 | 1–4,096 |
+| Maximum catalog size | 16 MiB | 1–64 MiB |
+| Maximum size per tool | 64 KiB | 1–1,024 KiB |
+
+The sizes include tool names, descriptions, and input schemas as serialized
+JSON. The total-size limit prevents a large collection of individually valid
+tools from becoming one oversized database write. Choose values that cover the
+server's expected catalog without accepting unbounded data. These limits
+protect chat latency and database growth; they do not decide how many approved
+tools an assistant should receive.
+
+Eneo validates the complete live catalog before saving or exposing anything.
+If either limit is exceeded, that server contributes no tools to the current
+request and Eneo writes no partial catalog. Increase a limit only after checking
+that the larger catalog is intentional.
 
 ---
 
@@ -87,8 +147,18 @@ Eneo connects to the remote server, fetches the current tool list, and compares 
 |----------|-------------|
 | **New tool** | Created with `pending` status — requires approval before it becomes active |
 | **Changed tool** (description or schema updated) | Change is stored as pending — the tool continues using its **previous version** until the change is approved |
-| **Removed tool** (no longer on remote server) | Marked as `removed from server` — requires approval to delete |
+| **Removed tool** (global catalog) | Marked as `removed from server` — requires approval to delete |
 | **Unchanged tool** | No action needed |
+
+For an identity-forwarding server, an admin sync is only the acting admin's
+view. Eneo therefore does not mark a tool as removed merely because that admin
+cannot see it.
+
+Before every tool-capable model turn, Eneo also lists tools as the signed-in
+user. A user-only tool that is not in the approved catalog is stored as a
+pending definition and omitted from that model request. After an admin approves
+it, a later request may expose it to users for whom the remote server still
+returns it.
 
 <Callout type="info">
   **Why approval?** The approval step is a security measure. It prevents a compromised or misbehaving MCP server from silently injecting or modifying tool definitions. An admin must review and explicitly approve every change before it takes effect.
@@ -140,28 +210,77 @@ For example, if a space is classified as "Confidential" (level 3), only MCP serv
 
 ---
 
-## How It Works (Architecture)
+## How Eneo builds a tool-enabled request
 
-When an assistant uses a tool during a conversation, the following happens:
+The approved catalog remains the control point even when each user sees a
+different remote catalog.
 
+```mermaid
+flowchart LR
+  A[Admin approves tool definitions] --> C[(Approved catalog)]
+  U[User sends a message] --> L[Live tools for this user]
+  C --> I{Approved, enabled, and live?}
+  L --> I
+  I -->|Yes| M[Send tool definition to the model]
+  I -->|Unknown| P[Queue pending admin review]
+  I -->|Not live| O[Omit from this request]
 ```
-User message → Assistant (LLM) → Tool call decision
-                                       ↓
-                                  Eneo Proxy
-                                       ↓
-                              MCP Server (remote)
-                                       ↓
-                                 Tool result
-                                       ↓
-                              Assistant (LLM) → Response to user
+
+1. Eneo loads the approved and enabled definitions from PostgreSQL.
+2. For identity-forwarding servers, it lists tools as the signed-in user. Independent server probes run concurrently under one bounded preparation deadline.
+3. Unknown definitions are queued for admin review and remain hidden. Discovery failure or timeout hides that server's tools for this request.
+4. The model receives only the approved/live intersection. Descriptions and schemas always come from the approved catalog, not the live response.
+5. If the model selects a tool, Eneo calls the same remote server and returns the result to the model.
+
+### Stateful MCP sessions
+
+An Eneo conversation and an MCP protocol session are related but not identical.
+Before the first MCP connection, Eneo commits the new conversation and the
+user's message. When a server assigns an `Mcp-Session-Id`, Eneo stores it per
+conversation and server, then resumes it on later turns even though each turn
+opens a fresh HTTP transport. The catalog probe and the later tool call use that
+same logical session, so tools activated by earlier calls remain available.
+
+The session ID is committed in a short database transaction before Eneo treats
+the remote session as durable. If that commit fails, Eneo attempts to terminate
+the new remote session rather than leaving an unreachable session behind.
+
+```mermaid
+sequenceDiagram
+  participant E as Eneo
+  participant D as PostgreSQL
+  participant M as MCP server
+  E->>D: Commit a new conversation and user message
+  E->>D: Load session ID for this conversation and server
+  E->>M: Connect or resume
+  M-->>E: Session ID and live tools
+  E->>D: Commit a newly assigned session ID
+  E->>M: Call tools in the same logical session
 ```
 
-1. The LLM decides to call a tool based on the conversation context
-2. Eneo proxies the tool call to the remote MCP server over Streamable HTTP
-3. The MCP server executes the tool and returns a result
-4. The result is fed back to the LLM, which formulates a response
+Deleting a conversation attempts to terminate its remote sessions. Local
+deletion still completes if a remote server is unavailable, so stateful MCP
+servers should also enforce a reasonable idle timeout.
 
-The proxy handles authentication, connection management, and error handling transparently.
+### Security and failure boundaries
+
+| Event | Eneo behavior |
+|---|---|
+| Live tool is not approved | Store as pending; do not expose it |
+| Live schema differs from approved schema | Continue using the approved schema until review |
+| User cannot see an approved tool | Omit it from this request |
+| Identity-scoped discovery fails or times out | Omit that server's tools from this request |
+| Catalog exceeds an admin limit | Reject the entire catalog for this request; save nothing |
+| New protocol session cannot be persisted | Terminate it and omit that discovery result |
+| Admin cannot see a user-only tool during sync | Keep the existing tool; absence is not deletion evidence |
+
+### Checklist for MCP server operators
+
+- Support Streamable HTTP and return a user-scoped `tools/list` when identity forwarding is enabled.
+- Authorize every list and call request; do not rely on the model or Eneo's catalog as your only access check.
+- Keep tool names stable and treat description/schema changes as reviewed contract changes.
+- If state continuity matters, support `Mcp-Session-Id`, session termination, and idle expiration.
+- Ensure Eneo can reach the endpoint within the configured connect and list-tools timeouts.
 
 ---
 
@@ -195,6 +314,33 @@ The proxy handles authentication, connection management, and error handling tran
 - Check that individual tools are toggled on in the space
 - If using security classifications, verify the server meets the space's classification level
 - Check that pending tool changes have been approved — new tools are inactive until approved
+
+### Different Users See Different Tools
+
+This is expected when identity forwarding is enabled and the MCP server returns
+an identity-scoped catalog. Confirm that the remote authorization rules are
+correct. Eneo will not expose an approved tool to a user when it is absent from
+that user's live catalog.
+
+### A User-Specific Tool Is Missing
+
+Ask the user to retry once, then check the server's pending tool changes in
+admin. The first observation stores an unknown tool for review but deliberately
+does not expose it. Approve the definition and retry as a user who is authorized
+by the remote server.
+
+### Identity Headers Are Missing or Encoded
+
+- Confirm **Forward user identity** is enabled on this server.
+- One-shot operations without an acting user cannot supply user identity.
+- Decode percent-encoded UTF-8 header values on the server before using names or roles.
+
+### Stateful Tools Lose Their State
+
+- Check whether the server returned and accepts `Mcp-Session-Id`.
+- Verify the server did not restart or evict the logical session.
+- Configure an idle timeout long enough for normal conversation gaps.
+- Check backend logs for session resume or termination failures.
 
 ### Pending Changes Won't Clear
 

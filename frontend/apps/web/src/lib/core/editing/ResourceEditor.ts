@@ -22,7 +22,7 @@ export function createResourceEditor<T extends Resource, Defs extends Defaults<T
   editableFields: CompareOptions<AppliedDefaults<T, Defs>>;
   /** Specify a function to run when the updates are saved, this is usually the specific PATCH endpoint for the resource */
   updateResource: (
-    resource: { id: string },
+    resource: AppliedDefaults<T, Defs>,
     changes:
       | Diff<AppliedDefaults<T, Defs>, CompareOptions<AppliedDefaults<T, Defs>>>
       | { [key in keyof T]: T[key] }
@@ -50,12 +50,12 @@ export function createResourceEditor<T extends Resource, Defs extends Defaults<T
   const isSaving = writable(false);
 
   /** Will save the current changes to this resource and delete removed files */
-  async function saveChanges(field: keyof T | undefined = undefined) {
+  async function saveChanges(field: keyof T | undefined = undefined): Promise<boolean> {
+    isSaving.set(true);
     try {
       // Get changes to this resource
       const $resource = get(resource);
       const $update = get(update);
-      isSaving.set(true);
       const changes = field
         ? ({ [field]: $update[field] } as unknown as { [key in keyof T]: T[key] })
         : get(currentChanges).diff;
@@ -86,10 +86,13 @@ export function createResourceEditor<T extends Resource, Defs extends Defaults<T
           }
         });
       }
+      return true;
     } catch (e) {
       toastError(e);
+      return false;
+    } finally {
+      isSaving.set(false);
     }
-    isSaving.set(false);
   }
 
   function discardChanges(field: keyof T | undefined = undefined) {

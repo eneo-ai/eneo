@@ -119,7 +119,7 @@ ServiceDep = Annotated[ModelProviderService, Depends(get_model_provider_service)
     "/",
     response_model=list[ModelProviderPublic],
     description="List all model providers for the tenant.",
-    responses=responses.get_responses([403]),
+    responses=responses.get_responses([403, 503]),
 )
 async def list_providers(
     user: CurrentUser,
@@ -374,7 +374,7 @@ async def get_model_defaults(
 @router.get(
     "/{provider_id}/",
     response_model=ModelProviderPublic,
-    responses=responses.get_responses([403, 404]),
+    responses=responses.get_responses([403, 404, 503]),
 )
 async def get_provider(
     provider_id: UUID,
@@ -391,7 +391,7 @@ async def get_provider(
     "/",
     response_model=ModelProviderPublic,
     description="Create a new model provider.",
-    responses=responses.get_responses([400, 403, 409]),
+    responses=responses.get_responses([400, 403, 409, 503]),
 )
 async def create_provider(
     data: ModelProviderCreate,
@@ -415,7 +415,7 @@ async def create_provider(
     "/{provider_id}/",
     response_model=ModelProviderPublic,
     description="Update an existing model provider.",
-    responses=responses.get_responses([403, 404, 409]),
+    responses=responses.get_responses([403, 404, 409, 503]),
 )
 async def update_provider(
     provider_id: UUID,
@@ -441,7 +441,7 @@ async def update_provider(
     description=(
         "List available models from the provider's API using its credentials."
     ),
-    responses=responses.get_responses([404]),
+    responses=responses.get_responses([404, 503]),
 )
 async def list_provider_models(
     provider_id: UUID,
@@ -466,7 +466,7 @@ async def list_provider_models(
     "/{provider_id}/test/",
     response_model=dict[str, Any],
     description="Test connectivity to a model provider.",
-    responses=responses.get_responses([404]),
+    responses=responses.get_responses([404, 503]),
 )
 async def test_provider(
     provider_id: UUID,
@@ -482,7 +482,7 @@ async def test_provider(
     description=(
         "Validate that a model works with this provider by making a minimal API call."
     ),
-    responses=responses.get_responses([404]),
+    responses=responses.get_responses([404, 503]),
 )
 async def validate_model(
     provider_id: UUID,
@@ -497,7 +497,7 @@ async def validate_model(
     "/{provider_id}/",
     response_model=dict[str, str],
     description="Delete a model provider.",
-    responses=responses.get_responses([400, 403, 404]),
+    responses=responses.get_responses([400, 403, 404, 503]),
 )
 async def delete_provider(
     provider_id: UUID,

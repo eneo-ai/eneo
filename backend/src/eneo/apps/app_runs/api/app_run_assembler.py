@@ -41,6 +41,7 @@ class AppRunAssembler:
             finished_at=finished_at,
             status=status,
             user=app_run.user,
+            skill_provenance=list(app_run.skill_provenance or ()),
         )
 
     def from_app_run_to_sparse_model(self, app_run: AppRun):
@@ -64,4 +65,5 @@ class AppRunAssembler:
             finished_at=finished_at,
             status=status,
             user=app_run.user,
+            skill_provenance=list(app_run.skill_provenance or ()),
         )

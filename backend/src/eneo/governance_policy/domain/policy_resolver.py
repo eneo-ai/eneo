@@ -15,6 +15,8 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 from uuid import UUID
 
+from eneo.skills.domain.skill import SkillRuntimeResolution
+
 if TYPE_CHECKING:
     from eneo.assistants.assistant import Assistant
     from eneo.completion_models.domain.completion_model import CompletionModel
@@ -36,11 +38,17 @@ class EffectiveConfig:
 
     prompt_enforced: bool
     enforced_prompt_text: str | None
+    reasoning_policy_configured: bool = False
+    default_reasoning_effort: str | None = None
+    reasoning_effort_user_configurable: bool = False
 
     # Allowed servers that start switched OFF in the user's chat (UX seed
     # only — the user can still enable them per conversation).
     default_disabled_mcp_server_ids: list[UUID] = field(
         default_factory=lambda: []  # noqa: C408
+    )
+    governance_skill_resolution: SkillRuntimeResolution = field(
+        default_factory=lambda: SkillRuntimeResolution(eligible=(), blocked=())
     )
 
 
@@ -53,6 +61,9 @@ _EMPTY = EffectiveConfig(
     available_mcp_servers=[],
     prompt_enforced=False,
     enforced_prompt_text=None,
+    reasoning_policy_configured=False,
+    default_reasoning_effort=None,
+    reasoning_effort_user_configurable=False,
 )
 
 
@@ -64,6 +75,7 @@ def resolve(
     tenant_completion_models: list["CompletionModel"],
     tenant_mcp_servers: list["MCPServer"],
     library_prompt_text: str | None,
+    governance_skill_resolution: SkillRuntimeResolution | None = None,
 ) -> EffectiveConfig:
     """Compute the effective config for a personal assistant.
 
@@ -72,6 +84,32 @@ def resolve(
     means "behave as before."
     """
     if not assistant.is_default or not space_is_personal or policy is None:
+        return _EMPTY
+
+    return resolve_personal_default(
+        policy=policy,
+        tenant_completion_models=tenant_completion_models,
+        tenant_mcp_servers=tenant_mcp_servers,
+        library_prompt_text=library_prompt_text,
+        governance_skill_resolution=governance_skill_resolution,
+    )
+
+
+def resolve_personal_default(
+    *,
+    policy: "GovernancePolicy | None",
+    tenant_completion_models: list["CompletionModel"],
+    tenant_mcp_servers: list["MCPServer"],
+    library_prompt_text: str | None,
+    governance_skill_resolution: SkillRuntimeResolution | None = None,
+) -> EffectiveConfig:
+    """Resolve the personal-default policy without requiring an Assistant.
+
+    Policy writes use this form so an invalid on-demand configuration is
+    rejected even before the tenant has created a personal default Assistant.
+    Runtime callers continue to use :func:`resolve`, which owns applicability.
+    """
+    if policy is None:
         return _EMPTY
 
     # ---- MODELS -----------------------------------------------------------
@@ -152,6 +190,14 @@ def resolve(
         default_disabled_mcp_server_ids=default_disabled_mcp_server_ids,
         prompt_enforced=policy.prompt_enforcement_enabled,
         enforced_prompt_text=enforced_prompt_text,
+        reasoning_policy_configured=policy.reasoning_policy_configured,
+        default_reasoning_effort=policy.default_reasoning_effort,
+        reasoning_effort_user_configurable=policy.allow_user_reasoning_effort,
+        governance_skill_resolution=(
+            governance_skill_resolution
+            if governance_skill_resolution is not None
+            else SkillRuntimeResolution(eligible=(), blocked=())
+        ),
     )
 
 
@@ -186,3 +232,29 @@ def select_effective_completion_model(
         if effective_config.available_models
         else None
     )
+
+
+def select_effective_reasoning_effort(
+    *,
+    selected_model: "CompletionModel",
+    stored_effort: str | None,
+    effective_config: EffectiveConfig,
+) -> str | None:
+    """Resolve a personal chat effort against policy and model capabilities."""
+    capability = selected_model.get_supported_model_kwargs().reasoning_effort
+    if (
+        not capability.supported
+        or capability.control != "select"
+        or capability.options is None
+    ):
+        return None
+
+    if (
+        effective_config.reasoning_effort_user_configurable
+        and stored_effort is not None
+        and capability.accepts(stored_effort)
+    ):
+        return stored_effort
+    if capability.accepts(effective_config.default_reasoning_effort):
+        return effective_config.default_reasoning_effort
+    return None

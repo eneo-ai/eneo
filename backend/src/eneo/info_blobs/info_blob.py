@@ -1,11 +1,48 @@
-from typing import Optional
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Optional
 from uuid import UUID
 
 from pydantic import BaseModel, computed_field, model_validator
 
 from eneo.groups_legacy.api.group_models import GroupInDBBase
 from eneo.main.models import InDB
+from eneo.object_content.content import CapturedContent, StorageKind
 from eneo.websites.presentation.website_models import WebsiteInDBBase
+
+if TYPE_CHECKING:
+    from eneo.object_content.content_service import VerifiedObjectPublication
+
+
+@dataclass(frozen=True, slots=True)
+class CapturedKnowledgeOriginal:
+    job_id: UUID
+    original_filename: str
+    policy_revision: int
+    storage_kind: StorageKind
+    captured: CapturedContent
+
+    def __post_init__(self) -> None:
+        if not 1 <= len(self.original_filename) <= 255:
+            raise ValueError("original_filename must contain 1 to 255 characters")
+        if self.policy_revision < 1:
+            raise ValueError("policy_revision must be positive")
+
+
+@dataclass(frozen=True, slots=True)
+class PreparedKnowledgeOriginal(CapturedKnowledgeOriginal):
+    publication: VerifiedObjectPublication | None = None
+
+    def __post_init__(self) -> None:
+        CapturedKnowledgeOriginal.__post_init__(self)
+        if self.storage_kind is StorageKind.OBJECT_STORE and self.publication is None:
+            raise ValueError("object-store originals require verified publication")
+        if (
+            self.storage_kind is StorageKind.POSTGRES_INLINE
+            and self.publication is not None
+        ):
+            raise ValueError("inline originals cannot carry object publication")
 
 
 class InfoBlobBase(BaseModel):
@@ -48,6 +85,14 @@ class InfoBlobAdd(InfoBlobBase, InfoBlobMetadataUpsertPublic):
 
 class InfoBlobAddToDB(InfoBlobAdd):
     embedding_model_id: UUID
+    source_id: UUID
+    version_state: str
+
+    @model_validator(mode="after")
+    def require_content_hash(self) -> "InfoBlobAddToDB":
+        if self.content_hash is None:
+            raise ValueError("Published InfoBlob content requires a SHA-256 digest")
+        return self
 
 
 class InfoBlobUpdatePublic(BaseModel):
@@ -72,6 +117,8 @@ class InfoBlobInDBNoText(InDB):
     integration_knowledge_id: Optional[UUID] = None
     sharepoint_item_id: Optional[str] = None
     content_hash: Optional[bytes] = None
+    source_id: UUID
+    version_state: str
 
     group: Optional[GroupInDBBase] = None
     website: Optional[WebsiteInDBBase] = None

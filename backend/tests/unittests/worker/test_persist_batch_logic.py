@@ -11,20 +11,20 @@ Core Invariants Tested:
 4. Embedding bytes cap triggers early Phase 1 exit
 5. Each page gets its own savepoint in Phase 2
 6. Delete and insert happen within the same savepoint (atomic)
-7. successful_urls contains ONLY URLs that committed successfully
+7. successful_urls contains only published or confirmed-unchanged URLs
 
 Run with: pytest tests/unittests/worker/test_persist_batch_logic.py -v
 """
 
 import asyncio
 from contextlib import asynccontextmanager
+from hashlib import sha256
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
 import pytest
 
 from eneo.worker.crawl_context import CrawlContext, EmbeddingModelSpec
-
 
 # =============================================================================
 # HELPER: Mock Session Manager
@@ -62,9 +62,18 @@ def create_mock_session():
 
     # These methods ARE coroutines, so use AsyncMock
     mock_session.execute = AsyncMock()
+    mock_session.scalar = AsyncMock(return_value=0)
     mock_session.begin_nested = AsyncMock(return_value=AsyncMock())
 
     return mock_session
+
+
+def create_mock_result():
+    return MagicMock(
+        one=lambda: (1_000_000, None),
+        one_or_none=lambda: None,
+        scalar_one=lambda: uuid4(),
+    )
 
 
 def create_mock_sessionmanager(mock_session):
@@ -297,9 +306,7 @@ class TestEmbeddingSemaphoreBehavior:
 
         # CRITICAL: Use create_mock_session() NOT AsyncMock() - see helper docstring
         mock_session = create_mock_session()
-        mock_session.execute = AsyncMock(
-            return_value=MagicMock(scalar_one=lambda: uuid4())
-        )
+        mock_session.execute = AsyncMock(return_value=create_mock_result())
         mock_sm = create_mock_sessionmanager(mock_session)
 
         with (
@@ -377,9 +384,7 @@ class TestEmbeddingSemaphoreBehavior:
 
         # CRITICAL: Use create_mock_session() NOT AsyncMock() - see helper docstring
         mock_session = create_mock_session()
-        mock_session.execute = AsyncMock(
-            return_value=MagicMock(scalar_one=lambda: uuid4())
-        )
+        mock_session.execute = AsyncMock(return_value=create_mock_result())
 
         mock_sm = create_mock_sessionmanager(mock_session)
 
@@ -474,9 +479,7 @@ class TestMemoryCapsEnforcement:
 
         # CRITICAL: Use create_mock_session() NOT AsyncMock() - see helper docstring
         mock_session = create_mock_session()
-        mock_session.execute = AsyncMock(
-            return_value=MagicMock(scalar_one=lambda: uuid4())
-        )
+        mock_session.execute = AsyncMock(return_value=create_mock_result())
 
         mock_sm = create_mock_sessionmanager(mock_session)
 
@@ -532,9 +535,7 @@ class TestPhase2SavepointBehavior:
         # CRITICAL: Use create_mock_session() NOT AsyncMock() - see helper docstring
         mock_session = create_mock_session()
         mock_session.begin_nested = AsyncMock(return_value=savepoint_mock)
-        mock_session.execute = AsyncMock(
-            return_value=MagicMock(scalar_one=lambda: uuid4())
-        )
+        mock_session.execute = AsyncMock(return_value=create_mock_result())
 
         mock_sm = create_mock_sessionmanager(mock_session)
 
@@ -560,16 +561,16 @@ class TestPhase2SavepointBehavior:
         )
 
     @pytest.mark.asyncio
-    async def test_delete_and_insert_within_same_savepoint(
+    async def test_supersede_and_insert_within_same_savepoint(
         self, crawl_context, embedding_model_spec, mock_embeddings_service
     ):
         """
-        INVARIANT: Delete (deduplication) and insert must happen within same savepoint.
+        INVARIANT: Version lookup, demotion and insert happen within one savepoint.
 
         This ensures atomic operation: either both succeed or both rollback.
 
         Scenario: 1 page
-        Expected: DELETE and INSERT execute between begin_nested() and commit()
+        Expected: SELECT and INSERT execute between begin_nested() and commit()
         """
         page_buffer = [{"url": "https://example.com/page1", "content": "Test content"}]
 
@@ -582,13 +583,14 @@ class TestPhase2SavepointBehavior:
 
         savepoint_mock.commit = AsyncMock(side_effect=track_commit)
 
-        async def track_execute(stmt):
+        async def track_execute(stmt, params=None):
             stmt_str = str(stmt)
-            if "DELETE" in stmt_str:
-                operation_order.append("DELETE")
+            if "SELECT" in stmt_str and "info_blobs" in stmt_str:
+                operation_order.append("SELECT")
+                return MagicMock(one_or_none=lambda: None)
             elif "INSERT" in stmt_str:
                 operation_order.append("INSERT")
-            return MagicMock(scalar_one=lambda: uuid4())
+            return create_mock_result()
 
         # CRITICAL: Use create_mock_session() NOT AsyncMock() - see helper docstring
         mock_session = create_mock_session()
@@ -618,19 +620,71 @@ class TestPhase2SavepointBehavior:
                 container=create_mock_container(mock_embeddings_service),
             )
 
-        # Verify order: BEGIN_NESTED -> DELETE -> INSERT (blob) -> INSERT (chunks) -> COMMIT
+        # Verify order: BEGIN_NESTED -> SELECT -> INSERTs -> COMMIT
         assert operation_order[0] == "BEGIN_NESTED", "Savepoint must start first"
-        assert "DELETE" in operation_order, "DELETE must occur"
+        assert "SELECT" in operation_order, "Active-version lookup must occur"
         assert "INSERT" in operation_order, "INSERT must occur"
-        delete_idx = operation_order.index("DELETE")
+        select_idx = operation_order.index("SELECT")
         first_insert_idx = next(
             i for i, op in enumerate(operation_order) if op == "INSERT"
         )
         commit_idx = operation_order.index("COMMIT")
 
-        assert delete_idx > 0, "DELETE must be after BEGIN_NESTED"
-        assert first_insert_idx > delete_idx, "INSERT must be after DELETE"
+        assert select_idx > 0, "SELECT must be after BEGIN_NESTED"
+        assert first_insert_idx > select_idx, "INSERT must be after SELECT"
         assert commit_idx > first_insert_idx, "COMMIT must be after INSERTs"
+
+    @pytest.mark.asyncio
+    async def test_retained_quota_rejects_page_before_publication(
+        self, crawl_context, embedding_model_spec, mock_embeddings_service
+    ):
+        page_buffer = [
+            {
+                "url": "https://example.com/over-quota",
+                "content": "Content that cannot fit",
+            }
+        ]
+        statements: list[str] = []
+        savepoint = AsyncMock()
+        savepoint.commit = AsyncMock()
+        savepoint.rollback = AsyncMock()
+        mock_session = create_mock_session()
+        mock_session.begin_nested = AsyncMock(return_value=savepoint)
+        mock_session.scalar = AsyncMock(side_effect=[9, 0])
+
+        async def execute(stmt, params=None):
+            statement = str(stmt)
+            statements.append(statement)
+            if "tenants" in statement and "users" in statement:
+                return MagicMock(one=lambda: (10, None))
+            if "FROM info_blobs" in statement:
+                return MagicMock(one_or_none=lambda: None)
+            return create_mock_result()
+
+        mock_session.execute = AsyncMock(side_effect=execute)
+        mock_sm = create_mock_sessionmanager(mock_session)
+
+        with (
+            patch(
+                "eneo.worker.crawl.persistence._get_embedding_semaphore",
+                return_value=asyncio.Semaphore(10),
+            ),
+            patch("eneo.database.database.sessionmanager", mock_sm),
+        ):
+            from eneo.worker.crawl_tasks import persist_batch
+
+            success, failed, urls, _ = await persist_batch(
+                page_buffer=page_buffer,
+                ctx=crawl_context,
+                embedding_model=embedding_model_spec,
+                container=create_mock_container(mock_embeddings_service),
+            )
+
+        assert (success, failed, urls) == (0, 1, [])
+        assert not any(
+            "INSERT INTO info_blobs" in statement for statement in statements
+        )
+        savepoint.rollback.assert_awaited_once()
 
 
 # =============================================================================
@@ -681,9 +735,7 @@ class TestSuccessfulUrlsTracking:
         # CRITICAL: Use create_mock_session() NOT AsyncMock() - see helper docstring
         mock_session = create_mock_session()
         mock_session.begin_nested = AsyncMock(side_effect=create_savepoint)
-        mock_session.execute = AsyncMock(
-            return_value=MagicMock(scalar_one=lambda: uuid4())
-        )
+        mock_session.execute = AsyncMock(return_value=create_mock_result())
 
         mock_sm = create_mock_sessionmanager(mock_session)
 
@@ -738,8 +790,8 @@ class TestSuccessfulUrlsTracking:
         """
         INVARIANT: When embedding_model is None, all pages fail with NO_EMBEDDING_MODEL reason.
         """
-        from eneo.worker.crawl_tasks import persist_batch
         from eneo.worker.crawl_context import FailureReason
+        from eneo.worker.crawl_tasks import persist_batch
 
         page_buffer = [
             {"url": "https://example.com/page1", "content": "Content 1"},
@@ -787,9 +839,7 @@ class TestSuccessfulUrlsTracking:
         # CRITICAL: Use create_mock_session() NOT AsyncMock() - see helper docstring
         mock_session = create_mock_session()
         mock_session.begin_nested = AsyncMock(return_value=savepoint)
-        mock_session.execute = AsyncMock(
-            return_value=MagicMock(scalar_one=lambda: uuid4())
-        )
+        mock_session.execute = AsyncMock(return_value=create_mock_result())
 
         mock_sm = create_mock_sessionmanager(mock_session)
 
@@ -827,6 +877,70 @@ class TestSuccessfulUrlsTracking:
 
 class TestPhaseIsolation:
     """Tests that verify Phase 1 has ZERO database operations."""
+
+    @pytest.mark.asyncio
+    async def test_unchanged_page_skips_embedding_and_database_write(
+        self, crawl_context, embedding_model_spec, mock_embeddings_service
+    ):
+        url = "https://example.com/unchanged"
+        content = "Already published content"
+        mock_session = create_mock_session()
+        mock_sm = create_mock_sessionmanager(mock_session)
+
+        with patch("eneo.database.database.sessionmanager", mock_sm):
+            from eneo.worker.crawl_tasks import persist_batch
+
+            success, failed, persisted_urls, failures = await persist_batch(
+                page_buffer=[{"url": url, "content": content}],
+                ctx=crawl_context,
+                embedding_model=embedding_model_spec,
+                container=create_mock_container(mock_embeddings_service),
+                existing_publications={
+                    url: (
+                        sha256(content.encode("utf-8")).digest(),
+                        embedding_model_spec.id,
+                    )
+                },
+            )
+
+        assert (success, failed, persisted_urls, failures) == (1, 0, [url], {})
+        mock_embeddings_service.get_embeddings.assert_not_awaited()
+        mock_sm.session.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_matching_content_with_a_new_model_is_reembedded(
+        self, crawl_context, embedding_model_spec, mock_embeddings_service
+    ):
+        url = "https://example.com/model-change"
+        content = "Content published with an older embedding model"
+        mock_session = create_mock_session()
+        mock_session.execute = AsyncMock(return_value=create_mock_result())
+        mock_sm = create_mock_sessionmanager(mock_session)
+
+        with (
+            patch(
+                "eneo.worker.crawl.persistence._get_embedding_semaphore",
+                return_value=asyncio.Semaphore(10),
+            ),
+            patch("eneo.database.database.sessionmanager", mock_sm),
+        ):
+            from eneo.worker.crawl_tasks import persist_batch
+
+            success, failed, persisted_urls, failures = await persist_batch(
+                page_buffer=[{"url": url, "content": content}],
+                ctx=crawl_context,
+                embedding_model=embedding_model_spec,
+                container=create_mock_container(mock_embeddings_service),
+                existing_publications={
+                    url: (
+                        sha256(content.encode("utf-8")).digest(),
+                        uuid4(),
+                    )
+                },
+            )
+
+        assert (success, failed, persisted_urls, failures) == (1, 0, [url], {})
+        mock_embeddings_service.get_embeddings.assert_awaited_once()
 
     @pytest.mark.asyncio
     async def test_no_session_opened_during_phase_1(
@@ -885,9 +999,7 @@ class TestPhaseIsolation:
             # CRITICAL: Use MagicMock for session (not AsyncMock) - see create_mock_session() docstring
             mock_session = MagicMock()
             mock_session.begin_nested = AsyncMock(return_value=AsyncMock())
-            mock_session.execute = AsyncMock(
-                return_value=MagicMock(scalar_one=lambda: uuid4())
-            )
+            mock_session.execute = AsyncMock(return_value=create_mock_result())
 
             # session.begin() returns an async context manager
             @asynccontextmanager
@@ -969,7 +1081,7 @@ class TestTransactionWallTimeGuard:
             persist_count += 1
             if persist_count >= 2:
                 await asyncio.sleep(2)  # Will trigger timeout
-            return MagicMock(scalar_one=lambda: uuid4())
+            return create_mock_result()
 
         # CRITICAL: Use create_mock_session() NOT AsyncMock() - see helper docstring
         mock_session = create_mock_session()

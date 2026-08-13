@@ -15,6 +15,39 @@ MCP_TOOL_REFERENCES_INSTRUCTION = (
     "source_id."
 )
 
+# Appended to the system prompt on every request that advertises tools. Tool
+# identifiers are sanitized `server__tool` strings (see MCPProxySession) that the
+# model must emit verbatim when calling, so they leak into prose unless the model
+# is told otherwise: asked "what tools do you have?", it answers with a list of
+# wire identifiers. Pairs with the `Display name:` line each tool description
+# opens with when its server supplies an MCP title.
+TOOL_NAMING_INSTRUCTION = (
+    "The tool identifiers you call with (for example knowledge__search_knowledge) "
+    "are internal wiring, not names for users. When you mention a tool, use the "
+    "Display name from its description when it has one, otherwise plain language "
+    "for what the tool does, in the language of the conversation. If the user "
+    "asks what you can do or which tools you have, answer with a short summary "
+    "of capabilities grouped by what the user can accomplish, not an inventory "
+    "of identifiers. Show a raw identifier only when the user asks for it."
+)
+
+# Appended to the system prompt when attached-file reference entries render in
+# the conversation and tools are advertised. States the arbitration rule once
+# per request; the per-message reference preamble
+# (build_file_references_string) carries only mechanics, so multi-turn
+# histories do not repeat this text.
+ATTACHED_FILE_REFERENCES_INSTRUCTION = (
+    'Some messages list attached files as JSON entries whose "url" is a '
+    "signed attachment reference, not a web link. Pass the url, exactly as "
+    "written, to a tool that accepts a URL input. The url's host carries no "
+    "meaning: never judge from the url whether a file is readable, and never "
+    "ask the user to re-upload a file listed in a reference entry. Prefer a "
+    "tool suited to the file and the task; when no more specific tool fits or "
+    'a chosen tool fails, the read_file ("Read attached file") tool, when '
+    "available, accepts every reference url. Use it rather than telling the "
+    "user a file cannot be read."
+)
+
 SHOW_REFERENCES_PROMPT = """Use the provided sources delimited by triple quotes to answer questions.
 Only use the sources to answer questions. You MUST reference every source you use by adding an inline XML self-closing tag immediately after the information: <inref id="<source_id>"/>
 

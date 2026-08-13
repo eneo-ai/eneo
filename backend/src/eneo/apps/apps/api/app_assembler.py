@@ -18,7 +18,7 @@ from eneo.files.file_models import (
 )
 from eneo.files.image import ImageMimeTypes
 from eneo.files.text import TextMimeTypes
-from eneo.main.config import get_settings
+from eneo.object_content.deployment_policy import UploadAdmissionSnapshot
 from eneo.prompts.api.prompt_assembler import PromptAssembler
 from eneo.transcription_models.presentation import TranscriptionModelPublic
 
@@ -37,15 +37,16 @@ class AppAssembler:
         self,
         user: "UserInDB",
         prompt_assembler: PromptAssembler,
+        upload_admission: UploadAdmissionSnapshot,
     ):
         super().__init__()
         self.user = user
         self.prompt_assembler = prompt_assembler
+        self.upload_admission = upload_admission
 
     def _get_accepted_file_types(
         self, input_type: InputFieldType
     ) -> list[AcceptedFileType]:
-        settings = get_settings()
         match input_type:
             case InputFieldType.TEXT_FIELD:
                 return []
@@ -53,7 +54,7 @@ class AppAssembler:
                 return [
                     AcceptedFileType(
                         mimetype=mimetype,
-                        size_limit=settings.upload_file_to_session_max_size,
+                        size_limit=self.upload_admission.session_file_maximum_bytes,
                     )
                     for mimetype in TextMimeTypes.values()
                 ]
@@ -61,7 +62,7 @@ class AppAssembler:
                 return [
                     AcceptedFileType(
                         mimetype=mimetype,
-                        size_limit=settings.transcription_max_file_size,
+                        size_limit=self.upload_admission.session_audio_maximum_bytes,
                     )
                     for mimetype in AudioMimeTypes.values()
                 ]
@@ -69,7 +70,7 @@ class AppAssembler:
                 return [
                     AcceptedFileType(
                         mimetype=mimetype,
-                        size_limit=settings.transcription_max_file_size,
+                        size_limit=self.upload_admission.session_audio_maximum_bytes,
                     )
                     for mimetype in AudioMimeTypes.values()
                 ]
@@ -77,36 +78,38 @@ class AppAssembler:
                 return [
                     AcceptedFileType(
                         mimetype=mimetype,
-                        size_limit=settings.upload_image_to_session_max_size,
+                        size_limit=self.upload_admission.session_image_maximum_bytes,
                     )
                     for mimetype in ImageMimeTypes.values()
                 ]
 
     def _get_limit(self, input_type: InputFieldType) -> Limit:
-        settings = get_settings()
         match input_type:
             case InputFieldType.TEXT_FIELD:
                 return Limit(max_files=0, max_size=0)
             case InputFieldType.TEXT_UPLOAD:
                 return Limit(
                     max_files=_TEXT_MAX_FILES,
-                    max_size=_TEXT_MAX_FILES * settings.upload_file_to_session_max_size,
+                    max_size=_TEXT_MAX_FILES
+                    * self.upload_admission.session_file_maximum_bytes,
                 )
             case InputFieldType.AUDIO_UPLOAD:
                 return Limit(
                     max_files=_AUDIO_MAX_FILES,
-                    max_size=_AUDIO_MAX_FILES * settings.transcription_max_file_size,
+                    max_size=_AUDIO_MAX_FILES
+                    * self.upload_admission.session_audio_maximum_bytes,
                 )
             case InputFieldType.AUDIO_RECORDER:
                 return Limit(
                     max_files=_AUDIO_MAX_FILES,
-                    max_size=_AUDIO_MAX_FILES * settings.transcription_max_file_size,
+                    max_size=_AUDIO_MAX_FILES
+                    * self.upload_admission.session_audio_maximum_bytes,
                 )
             case InputFieldType.IMAGE_UPLOAD:
                 return Limit(
                     max_files=_IMAGE_MAX_FILES,
                     max_size=_IMAGE_MAX_FILES
-                    * settings.upload_image_to_session_max_size,
+                    * self.upload_admission.session_image_maximum_bytes,
                 )
 
     def _get_input_fields(
@@ -152,18 +155,18 @@ class AppAssembler:
         # falling back to `ModelKwargs()` here would silently hide an
         # upstream regression instead of letting it surface.
         model_kwargs = app.completion_model_kwargs
-        settings = get_settings()
         allowed_attachments = FileRestrictions(
             accepted_file_types=[
                 AcceptedFileType(
                     mimetype=mimetype,
-                    size_limit=settings.upload_file_to_session_max_size,
+                    size_limit=self.upload_admission.session_file_maximum_bytes,
                 )
                 for mimetype in TextMimeTypes.values()
             ],
             limit=Limit(
                 max_files=_TEXT_MAX_FILES,
-                max_size=_TEXT_MAX_FILES * settings.upload_file_to_session_max_size,
+                max_size=_TEXT_MAX_FILES
+                * self.upload_admission.session_file_maximum_bytes,
             ),
         )
 

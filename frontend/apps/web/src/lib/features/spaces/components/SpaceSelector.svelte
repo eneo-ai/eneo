@@ -19,6 +19,15 @@
   import { getAppContext } from "$lib/core/AppContext";
 
   export let showSelectPrompt = false;
+  export let space:
+    | {
+        id: string;
+        name: string;
+        personal: boolean;
+        organization?: boolean;
+        icon_id?: string | null;
+      }
+    | undefined = undefined;
 
   const spaces = getSpacesManager();
   const {
@@ -43,15 +52,17 @@
   });
 
   let showCreateDialog: Dialog.OpenState;
+
+  $: displayedSpace = space ?? $currentSpace;
 </script>
 
-{#if ($currentSpace.personal || $currentSpace.organization) && !showSelectPrompt}
+{#if (displayedSpace.personal || displayedSpace.organization) && !showSelectPrompt}
   <div
     class="group border-default relative flex h-[4.25rem] w-full items-center justify-start gap-3 border-b-[0.5px] pt-0.5 pr-5 pl-[1.4rem] font-medium"
   >
-    <SpaceChip space={$currentSpace} />
+    <SpaceChip space={displayedSpace} />
     <span class="text-primary flex-grow truncate pl-0.5 text-left">
-      {$currentSpace.personal ? m.personal_space() : m.organization_space()}
+      {displayedSpace.personal ? m.personal_space() : m.organization_space()}
     </span>
   </div>
 {:else}
@@ -69,19 +80,19 @@
       </div>
       <span class="text-primary flex-grow truncate pl-0.5 text-left">{m.select_a_space()}</span>
     {:else}
-      <SpaceChip space={$currentSpace}></SpaceChip>
+      <SpaceChip space={displayedSpace}></SpaceChip>
       <span class="text-primary flex-grow truncate pl-0.5 text-left">
-        {$currentSpace.name}
+        {displayedSpace.name}
       </span>
     {/if}
-    {#if !$currentSpace.organization}
+    {#if !displayedSpace.organization}
       <IconChevronUpDown class="text-muted group-hover:text-accent-stronger min-w-6" />
     {/if}
   </Button>
 {/if}
 
 <!-- Selector drop down -->
-{#if $open && !$currentSpace.organization}
+{#if $open && !displayedSpace.organization}
   <div
     {...$overlay}
     use:overlay
@@ -114,7 +125,7 @@
           <SpaceChip {space} />
           <span class="flex-grow truncate text-left">{space.name}</span>
           <div class="text-accent-stronger ml-2 min-w-5">
-            {#if space.id === $currentSpace.id && !showSelectPrompt}
+            {#if space.id === displayedSpace.id && !showSelectPrompt}
               <IconSelectedItem />
             {/if}
           </div>
@@ -136,7 +147,7 @@
   </div>
 {/if}
 
-{#if canCreateSharedSpace}
+{#if canCreateSharedSpace && !displayedSpace.organization}
   <CreateSpaceDialog includeTrigger={false} forwardToNewSpace={true} bind:isOpen={showCreateDialog}
   ></CreateSpaceDialog>
 {/if}

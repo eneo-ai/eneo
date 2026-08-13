@@ -53,6 +53,7 @@ class ConditionalGetHint(TypedDict):
 
 # Wire-contract cap on conditional_gets entries per crawl request
 _MAX_CONDITIONAL_GETS = 50_000
+_DONE_STATUSES = frozenset({"completed", "cancelled", "failed"})
 
 # Margin on top of the service-side max_seconds before the client gives up
 # on the stream; the service is expected to terminate the crawl itself.
@@ -315,6 +316,7 @@ class RemoteCrawler:
         outcome: dict[str, Any] | None = None
         done_status: str | None = None
         done_error: str | None = None
+        done_seen = False
         event_counts: dict[str, int] = {}
 
         async with session.post(
@@ -336,6 +338,11 @@ class RemoteCrawler:
                     line = raw_line.strip()
                     if not line:
                         continue
+                    if done_seen:
+                        raise CrawlerException(
+                            "Crawler service sent an event after the terminal done event "
+                            f"for {url}"
+                        )
                     try:
                         event = json.loads(line)
                     except json.JSONDecodeError:
@@ -396,11 +403,23 @@ class RemoteCrawler:
                     elif event_type == "failed":
                         failed_count += 1
                     elif event_type == "done":
+                        status = event.get("status")
+                        if status not in _DONE_STATUSES:
+                            raise CrawlerException(
+                                "Crawler service returned an unrecognized terminal "
+                                f"status for {url}: {status!r}"
+                            )
+                        done_seen = True
                         outcome = event.get("outcome") or {}
-                        done_status = event.get("status")
+                        done_status = status
                         done_error = event.get("error")
                     # Other event types (robots, skipped_*, ...) are tolerated
                     # and ignored: the worker has no use for them today.
+
+        if not done_seen:
+            raise CrawlerException(
+                f"Crawler service stream ended without a terminal done event for {url}"
+            )
 
         logger.info(
             "Crawler service stream consumed: url=%s events=%s status=%s outcome=%s",
@@ -651,13 +670,6 @@ class RemoteCrawler:
                         elif done_status == "failed":
                             is_partial = True
                             termination_reason = "error"
-                        elif done_status is None:
-                            # The stream ended without a terminal done event
-                            # (service died between events, or a middlebox
-                            # terminated the framing cleanly). The pages
-                            # received are a prefix, not the full crawl.
-                            is_partial = True
-                            termination_reason = "stream_interrupted"
                         logger.info(
                             "Remote crawl stream finished",
                             extra={

@@ -7,10 +7,12 @@
 -->
 
 <script lang="ts">
+  import { EneoError } from "@eneo/eneo-js";
   import { Loader2, CircleCheck, CircleX, Zap, Trash2 } from "lucide-svelte";
   import { Button } from "$lib/components/ui/button/index.js";
   import { m } from "$lib/paraglide/messages";
   import { getEneo } from "$lib/core/Eneo";
+  import { getErrorMessage } from "$lib/core/errors";
   import type { WizardModelDraft } from "../wizardState";
   import type { ModelType } from "./draft";
 
@@ -52,10 +54,14 @@
           ? { status: "success", message: m.model_test_success() }
           : { status: "error", message: result.error || m.model_test_failed() }
       };
-    } catch {
+    } catch (error: unknown) {
       validationStates = {
         ...validationStates,
-        [index]: { status: "error", message: m.model_test_connection_error() }
+        [index]: {
+          status: "error",
+          message:
+            error instanceof EneoError ? getErrorMessage(error) : m.model_test_connection_error()
+        }
       };
     }
   }

@@ -48,6 +48,40 @@ SCHEDULER_LOCK_KEY = "crawl_scheduler:leader"
 SCHEDULER_LOCK_TTL_SECONDS = 1800
 
 
+def _stale_titles_for_crawl(
+    existing_titles: list[str],
+    crawled_titles: set[str],
+    failed_titles: set[str],
+    *,
+    is_partial: bool,
+) -> list[str]:
+    """Return deletable titles only after a complete crawl."""
+    if is_partial:
+        return []
+    return [
+        title
+        for title in existing_titles
+        if title not in crawled_titles and title not in failed_titles
+    ]
+
+
+def _validator_refresh(
+    *,
+    title: str,
+    stored: tuple[str | None, str | None],
+    etag: str | None,
+    last_modified: str | None,
+) -> dict[str, str | None] | None:
+    """Build a validator update when either value changed, including removal."""
+    if stored == (etag, last_modified):
+        return None
+    return {
+        "b_title": title,
+        "b_etag": etag,
+        "b_last_modified": last_modified,
+    }
+
+
 async def _get_primary_active_job_id(
     session: AsyncSession,
     *,
@@ -644,7 +678,7 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                         "metric_value": 1,
                     },
                 )
-                setattr(task_manager, "_job_already_handled", True)
+                task_manager.mark_job_handled()
                 return {
                     "status": "duplicate_skipped",
                     "job_id": str(job_id),
@@ -725,17 +759,20 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
             # session returns to pool immediately. This prevents holding a connection
             # for 5-30 minutes during the actual crawl operation.
             from eneo.database.database import sessionmanager
-            from eneo.database.tables.info_blobs_table import InfoBlobs
+            from eneo.database.tables.info_blobs_table import (
+                InfoBlobs,
+                active_info_blob_version,
+            )
             from eneo.database.tables.websites_table import Websites as WebsitesTable
 
             # These will be populated by bootstrap
             crawl_context: CrawlContext
             existing_titles: list[str] = []
-            existing_file_hashes: dict[str, bytes] = {}
             existing_page_hashes: dict[str, bytes] = {}
             existing_validators: dict[str, tuple[str | None, str | None]] = {}
             conditional_gets: list[ConditionalGetHint] = []
             stored_sitemap_state: dict[str, Any] | None = None
+            existing_publications: dict[str, tuple[bytes, UUID]] = {}
             website_url: str = ""  # For logging after session closes
 
             start = time.time()
@@ -931,7 +968,10 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                     InfoBlobs.embedding_model_id,
                     InfoBlobs.http_etag,
                     InfoBlobs.http_last_modified,
-                ).where(InfoBlobs.website_id == params.website_id)
+                ).where(
+                    InfoBlobs.website_id == params.website_id,
+                    active_info_blob_version(),
+                )
                 blob_result = await bootstrap_session.execute(stmt)
 
                 current_embedding_model_id = (
@@ -939,7 +979,8 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                 )
 
                 # Build lookups for O(1) operations. Page blobs use the URL as
-                # title; file blobs use the filename.
+                # title; file blobs use the filename. Only active publications
+                # participate in recrawl decisions.
                 for (
                     title,
                     hash_bytes,
@@ -948,29 +989,31 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                     blob_last_modified,
                 ) in blob_result:
                     existing_titles.append(title)
-                    if title.startswith("http"):
-                        # Hash-skip and 304-skip both mean "reuse the stored
-                        # embeddings", which is only valid when the blob was
-                        # embedded with the current model: after a model switch
-                        # the page must re-embed even if its content is unchanged
-                        if (
-                            current_embedding_model_id is None
-                            or blob_embedding_model_id != current_embedding_model_id
-                        ):
-                            continue
-                        if hash_bytes is not None:
-                            existing_page_hashes[title] = hash_bytes
-                        existing_validators[title] = (blob_etag, blob_last_modified)
-                        if blob_etag or blob_last_modified:
-                            conditional_gets.append(
-                                {
-                                    "url": title,
-                                    "etag": blob_etag,
-                                    "last_modified": blob_last_modified,
-                                }
-                            )
-                    elif hash_bytes is not None:
-                        existing_file_hashes[title] = hash_bytes
+                    if hash_bytes is not None and blob_embedding_model_id is not None:
+                        existing_publications[title] = (
+                            hash_bytes,
+                            blob_embedding_model_id,
+                        )
+                    if not title.startswith("http"):
+                        continue
+                    # Hash-skip and 304-skip both reuse the stored embeddings,
+                    # which is valid only for the website's current model.
+                    if (
+                        current_embedding_model_id is None
+                        or blob_embedding_model_id != current_embedding_model_id
+                    ):
+                        continue
+                    if hash_bytes is not None:
+                        existing_page_hashes[title] = hash_bytes
+                    existing_validators[title] = (blob_etag, blob_last_modified)
+                    if blob_etag or blob_last_modified:
+                        conditional_gets.append(
+                            {
+                                "url": title,
+                                "etag": blob_etag,
+                                "last_modified": blob_last_modified,
+                            }
+                        )
 
             finally:
                 # Always close the bootstrap session to return connection to pool
@@ -1255,19 +1298,14 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                         # extracted text stays identical; keep the stored
                         # validators current or every later crawl re-sends the
                         # old ones and never reaches the 304 path again.
-                        if (
-                            page.etag or page.last_modified
-                        ) and existing_validators.get(page.url) != (
-                            page.etag,
-                            page.last_modified,
-                        ):
-                            validator_refreshes.append(
-                                {
-                                    "b_title": page.url,
-                                    "b_etag": page.etag,
-                                    "b_last_modified": page.last_modified,
-                                }
-                            )
+                        refresh = _validator_refresh(
+                            title=page.url,
+                            stored=existing_validators[page.url],
+                            etag=page.etag,
+                            last_modified=page.last_modified,
+                        )
+                        if refresh is not None:
+                            validator_refreshes.append(refresh)
                         continue
 
                     # Buffer page as dict (primitives only!)
@@ -1292,6 +1330,7 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                             ctx=crawl_context,
                             embedding_model=embedding_model_spec,
                             container=container,
+                            existing_publications=existing_publications,
                         )
                         crawled_titles.update(successful_urls)
                         # Aggregate failure reasons and track failed URLs
@@ -1323,6 +1362,7 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                         ctx=crawl_context,
                         embedding_model=embedding_model_spec,
                         container=container,
+                        existing_publications=existing_publications,
                     )
                     crawled_titles.update(successful_urls)
                     # Aggregate failure reasons and track failed URLs
@@ -1356,11 +1396,11 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                         file_bytes = file.read_bytes()
                         new_file_hash = hashlib.sha256(file_bytes).digest()
 
-                        existing_file_hash = existing_file_hashes.get(filename)
+                        existing_file = existing_publications.get(filename)
 
-                        if (
-                            existing_file_hash is not None
-                            and new_file_hash == existing_file_hash
+                        if embedding_model_spec is not None and existing_file == (
+                            new_file_hash,
+                            embedding_model_spec.id,
                         ):
                             # File unchanged - skip processing
                             num_skipped_files += 1
@@ -1405,6 +1445,7 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                         crawled_titles.add(filename)
 
                     except Exception:
+                        failed_titles.add(filename)
                         logger.exception(
                             "Exception while uploading file",
                             extra={
@@ -1420,11 +1461,12 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
             # Cleanup phase: delete stale blobs (batch for performance)
             cleanup_start = time.time()
             # Exclude failed_titles - their original data was preserved by transaction rollback
-            stale_titles = [
-                title
-                for title in existing_titles
-                if title not in crawled_titles and title not in failed_titles
-            ]
+            stale_titles = _stale_titles_for_crawl(
+                existing_titles,
+                crawled_titles,
+                failed_titles,
+                is_partial=crawl_is_partial,
+            )
 
             # Batch delete using session-per-operation pattern
             if stale_titles:
@@ -1465,6 +1507,7 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                         .where(
                             InfoBlobs.website_id == params.website_id,
                             InfoBlobs.title == sa.bindparam("b_title"),
+                            active_info_blob_version(),
                         )
                         .values(
                             http_etag=sa.bindparam("b_etag"),
@@ -1498,10 +1541,16 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                 from eneo.database.tables.info_blobs_table import (
                     InfoBlobs as InfoBlobsTable,
                 )
+                from eneo.database.tables.info_blobs_table import (
+                    active_info_blob_version,
+                )
 
                 update_size_stmt = (
                     sa.select(sa.func.coalesce(sa.func.sum(InfoBlobsTable.size), 0))
-                    .where(InfoBlobsTable.website_id == crawl_context.website_id)
+                    .where(
+                        InfoBlobsTable.website_id == crawl_context.website_id,
+                        active_info_blob_version(),
+                    )
                     .scalar_subquery()
                 )
                 stmt = (
@@ -1884,7 +1933,7 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
             # Signal task_manager to skip its complete_job() call
             # Why: We've already completed the job with a fresh session above,
             # task_manager's job_service has stale session references
-            setattr(task_manager, "_job_already_handled", True)
+            task_manager.mark_job_handled()
 
         return task_manager.successful()
     finally:

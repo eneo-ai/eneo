@@ -19,11 +19,16 @@ from eneo.roles.permissions import (
     validate_permission,
     validate_permissions,
 )
+from eneo.roles.permissions_mapper import PERMISSIONS_WITH_DESCRIPTION
 from eneo.roles.role import RoleInDB
 from eneo.tenants.tenant import TenantInDB
 from eneo.users.user import UserInDB
 
 _TEST_TENANT = TenantInDB(id=uuid4(), name="test", quota_limit=1024**3)
+
+
+def test_assistant_debug_permission_is_listed_for_role_configuration():
+    assert Permission.ASSISTANT_DEBUG in PERMISSIONS_WITH_DESCRIPTION
 
 
 def _make_user(*permissions: Permission) -> UserInDB:
@@ -190,6 +195,8 @@ class TestPermissionSemantics:
         """Ensure all expected permissions are defined in the enum."""
         expected = {
             "assistants",
+            "skills",
+            "skills_management",
             "personal_chat",
             "group_chats",
             "apps",
@@ -203,6 +210,8 @@ class TestPermissionSemantics:
             "integrations",
             "shared_spaces",
             "api_keys",
+            "storage",
+            "assistant_debug",
         }
         actual = {p.value for p in Permission}
         assert actual == expected
@@ -256,17 +265,23 @@ class TestRoleTemplates:
         user = templates["User"]
         assert "personal_chat" in user
         assert "assistants" in user
+        assert "skills" not in user
+        assert "skills_management" not in user
         assert "shared_spaces" in user
         assert "collections" in user
         assert "admin" not in user
         assert "insights" not in user
+        assert "assistant_debug" not in user
 
     def test_ai_configurator_has_ai_permissions(self, templates):
         ai = templates["AI Configurator"]
         assert "AI" in ai
         assert "assistants" in ai
+        assert "skills" not in ai
+        assert "skills_management" not in ai
         assert "shared_spaces" in ai
         assert "admin" not in ai
+        assert "assistant_debug" in ai
 
     def test_all_templates_have_spaces(self, templates):
         """All templates should have spaces permission (current expected behavior)."""

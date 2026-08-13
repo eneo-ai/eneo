@@ -508,7 +508,7 @@ async def test_tenant_key_matrix_for_governance_and_diagnostics(
 
 @pytest.mark.integration
 @pytest.mark.asyncio
-async def test_tenant_read_key_logging_missing_message_returns_404_not_scope_error(
+async def test_tenant_read_key_logging_requires_bearer_session(
     client,
     default_user_token,
 ):
@@ -527,10 +527,10 @@ async def test_tenant_read_key_logging_missing_message_returns_404_not_scope_err
             "X-Correlation-ID": request_id,
         },
     )
-    assert response.status_code == 404, response.text
+    assert response.status_code == 403, response.text
     detail = _error_detail(response)
     assert detail.get("request_id") == request_id, response.text
-    assert detail.get("code") != "insufficient_scope", response.text
+    assert detail.get("code") == "session_auth_required", response.text
 
 
 @pytest.mark.integration

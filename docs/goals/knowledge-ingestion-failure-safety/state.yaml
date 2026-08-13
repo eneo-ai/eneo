@@ -1,0 +1,261 @@
+version: 2
+
+goal:
+  title: "Preserve Knowledge On Ingestion Failure"
+  slug: "knowledge-ingestion-failure-safety"
+  kind: specific
+  tranche: "Prove, fix, validate, publish, review, and merge the bounded ingestion failure-safety slice."
+  status: active
+
+rules:
+  pm_owns_state: true
+  one_active_task: true
+  max_write_workers: 1
+  no_implementation_without_worker_or_pm_task: true
+  no_completion_without_judge_or_pm_audit: true
+  planning_is_not_completion: true
+  queued_required_worker_blocks_completion: true
+
+agents:
+  scout: installed
+  worker: installed
+  judge: installed
+
+continuity:
+  rotate_threads: false
+  rotation_authorized_by: null
+  rotate_after_completed_write_tasks: 2
+  rotate_after_hours: 6
+  rotate_when_slow: true
+  current_thread_id: "019fa011-95d2-79d1-96b4-f42d6bb6024c"
+  previous_thread_id: "019f64db-c1fa-7250-97d3-e4c12a889f71"
+  rotation_count: 0
+  completed_write_tasks_in_thread: 1
+  handoff_note: notes/handoff.md
+  last_handoff_at: null
+  last_verified_revision: "0c8741c2da1ad3eec210fed55160131f7842d78c"
+
+active_task: T004
+
+tasks:
+  - id: T001
+    type: scout
+    assignee: Scout
+    status: done
+    reasoning_hint: medium
+    objective: "Freeze source evidence for current ingestion ownership, failure mutations, failure types, tests, PostgreSQL setup, validation commands, docs impact, and epic #549 task traceability."
+    inputs:
+      - backend/src/eneo/worker/upload_tasks.py
+      - backend/src/eneo/embedding_models/infrastructure/datastore.py
+      - backend/src/eneo
+      - backend/tests
+      - docs/CONTRIBUTING.md
+      - docs/CODE_QUALITY.md
+      - docs/ARCHITECTURE.md
+      - backend/README.md
+      - GitHub epic #549 and related tasks
+    constraints:
+      - "Read-only outside Goal Maker control files."
+      - "Do not edit implementation or test files."
+      - "Treat the requested canonical direction as a hypothesis to verify."
+      - "Do not inspect or edit object-content migration/move owners."
+      - "Prefer exact file, symbol, transaction, and test evidence."
+    expected_output:
+      - "Canonical owner and caller map"
+      - "Mutation and transaction timeline"
+      - "Existing typed failure inventory"
+      - "Focused RED tests and validation ladder"
+      - "Allowed files and stop conditions"
+      - "Equivalent development task search result under epic #549"
+      - "Docs impact decision"
+    receipt:
+      result: done
+      note: notes/T001-source-evidence.md
+      summary: "Verified the caught-exception commit defect, zero-text success bug, savepoint seam, test bootstrap, docs decision, and the absence of an equivalent bounded task before creating #607 under epic #549."
+      evidence:
+        - backend/src/eneo/worker/worker.py:331-348
+        - backend/src/eneo/worker/task_manager.py:90-128
+        - backend/src/eneo/info_blobs/text_processor.py:29-81
+        - backend/src/eneo/info_blobs/info_blob_service.py:120-165
+        - backend/src/eneo/embedding_models/infrastructure/datastore.py:87-145
+        - https://github.com/eneo-ai/eneo/issues/607
+        - https://github.com/eneo-ai/eneo/issues/571
+
+  - id: T002
+    type: judge
+    assignee: Judge
+    status: done
+    reasoning_hint: high
+    objective: "Challenge the frozen evidence and Claude plan pass, then select the smallest safe owner-level implementation."
+    inputs:
+      - "T001 receipt"
+      - "Claude plan pass from session knowledge-ingestion-failure-safety"
+    constraints:
+      - "Read-only outside Goal Maker control files."
+      - "Reject scope expansion into migrations, lifecycle redesign, object-content move owners, or slice 2 product work."
+      - "Keep remote/model I/O outside long PostgreSQL transactions."
+    expected_output:
+      - "Decision"
+      - "Exact Worker objective"
+      - "allowed_files"
+      - "verify"
+      - "stop_if"
+      - "Finding disposition ledger"
+    receipt:
+      result: done
+      decision: "Use narrowed Hypothesis B: task-level pre-mutation blank-text guards and nested savepoints around process_text only; keep Datastore and global transaction owners unchanged."
+      next_allowed_task: T003
+      allowed_files:
+        - backend/src/eneo/files/text.py
+        - backend/src/eneo/worker/upload_tasks.py
+        - backend/tests/integration/test_ingestion_failure_safety.py
+      prior_claude_disposition:
+        - "Accepted P0: keep zero-text failure out of Datastore and use the upload/transcription task seam."
+        - "Accepted P0: select Hypothesis B."
+        - "Accepted P1: require committed readback from a fresh PostgreSQL session."
+        - "Resolved P2: charter now defers transaction separation to #571."
+        - "Accepted P2 rationale comment; rejected a helper abstraction."
+        - "Rejected optional P3 TextProcessor annotations as scope expansion."
+      summary: "Claude plan pass changes_required/6 and verified source led to a three-file Worker slice with no unrelated caller or public-contract changes."
+
+  - id: T003
+    type: worker
+    assignee: Worker
+    status: done
+    reasoning_hint: default
+    objective: "Prove committed ingestion failure behavior red, then add the typed blank-text guard and task-level savepoints without changing other ingestion callers."
+    allowed_files:
+      - backend/src/eneo/files/text.py
+      - backend/src/eneo/worker/upload_tasks.py
+      - backend/tests/integration/test_ingestion_failure_safety.py
+    verify:
+      - "cd backend && bash -lc 'set -a; source .env.template; set +a; uv run pytest -q -m integration tests/integration/test_ingestion_failure_safety.py'"
+      - "cd backend && bash -lc 'set -a; source .env.template; set +a; uv run pytest -q tests/unittests/files/test_text_extractor.py tests/unittests/ai_models/embedding_models/test_datastore.py tests/unittests/info_blobs/test_info_blobs_service.py'"
+      - "cd backend && bash -lc 'set -a; source .env.template; set +a; uv run ruff check src/eneo tests/integration/test_ingestion_failure_safety.py'"
+      - "cd backend && bash -lc 'set -a; source .env.template; set +a; uv run ruff format --check src/eneo tests/integration/test_ingestion_failure_safety.py'"
+      - "cd backend && bash -lc 'set -a; source .env.template; set +a; uv run pyright'"
+      - "git diff --check"
+      - "git status --short"
+    stop_if:
+      - "The targeted base run does not fail for the intended committed-state invariant."
+      - "Fresh-session readback cannot observe FAILED after the ambient transaction closes."
+      - "A non-whitespace worker input can still produce zero chunks, making the task guard insufficient."
+      - "Any provider credential or real model/network call is required."
+      - "Any file outside allowed_files is needed."
+      - "A migration, generation/lifecycle/status-publication split, retry/public interface change, TaskManager/Worker change, crawler change, or object-content change is required."
+      - "The same verification failure repeats twice."
+    receipt:
+      result: done
+      changed_files:
+        - backend/src/eneo/files/text.py
+        - backend/src/eneo/worker/upload_tasks.py
+        - backend/tests/integration/test_ingestion_failure_safety.py
+      red: "8 failed on the frozen base: chunking and embedding committed destructive replacements, and blank upload/transcription completed with empty replacements."
+      green: "Real PostgreSQL integration 8 passed; focused unit tests 64 passed; Ruff, format, Pyright, and git diff --check passed."
+      commands:
+        - "cd backend && bash -lc 'set -a; source .env.template; set +a; uv run pytest -q -m integration tests/integration/test_ingestion_failure_safety.py'"
+        - "cd backend && bash -lc 'set -a; source .env.template; set +a; uv run pytest -q tests/unittests/files/test_text_extractor.py tests/unittests/ai_models/embedding_models/test_datastore.py tests/unittests/info_blobs/test_info_blobs_service.py'"
+        - "cd backend && bash -lc 'set -a; source .env.template; set +a; uv run ruff check src/eneo tests/integration/test_ingestion_failure_safety.py'"
+        - "cd backend && bash -lc 'set -a; source .env.template; set +a; uv run ruff format --check src/eneo tests/integration/test_ingestion_failure_safety.py'"
+        - "cd backend && bash -lc 'set -a; source .env.template; set +a; uv run pyright'"
+        - "git diff --check"
+      summary: "Added the typed blank-content failure and isolated only process_text in nested savepoints; fresh sessions prove FAILED commits while prior rows survive and failed first attempts publish nothing."
+
+  - id: T004
+    type: pm
+    assignee: PM
+    status: active
+    reasoning_hint: high
+    objective: "Run the final validation ladder and exact-diff Claude commit gate, publish the reviewable PR, resolve current review/CI evidence, and merge the exact accepted head."
+    inputs:
+      - "T003 receipt"
+      - "Current full diff including untracked files"
+      - "One resumable Claude session"
+      - "Bounded development task #607 under epic #549; #571 is downstream only"
+    constraints:
+      - "Control files, validation, git, and GitHub metadata only unless a verified review finding requires returning to a bounded Worker task."
+      - "Require GREEN_LIGHT yes and MIN_SCORE >= 8 before every commit."
+      - "Require a fresh top-level /review on every changed PR head."
+      - "Merge only the immutable accepted head with all required CI green."
+    expected_output:
+      - "Validation evidence"
+      - "Claude session and verdict"
+      - "Commit and PR"
+      - "Review and CI disposition"
+      - "Merge evidence"
+    review_cycles: 1
+    receipt: null
+
+  - id: T005
+    type: worker
+    assignee: Worker
+    status: done
+    reasoning_hint: default
+    objective: "Close the first Claude commit-gate proof gap without expanding the failure-safety slice."
+    inputs:
+      - "Claude commit-gate iteration 2: changes_required, GREEN_LIGHT no, MIN_SCORE 7"
+      - ".codex/artifacts/claude-peer-loop-knowledge-ingestion-failure-safety-20260726T205133Z.md"
+    allowed_files:
+      - backend/src/eneo/worker/upload_tasks.py
+      - backend/tests/integration/test_ingestion_failure_safety.py
+    constraints:
+      - "Add one real-PostgreSQL successful upload proof using the existing test helpers and a fake embedding seam; assert COMPLETE and committed replacement blob/chunks."
+      - "For blank cases, assert the persisted job error comes from NoExtractableTextError and that embeddings were not awaited."
+      - "Delete unreachable embedding mock setup and move a stable invariant-only savepoint rationale to the first occurrence; remove issue-number/history leakage from product comments."
+      - "Do not add a helper abstraction, NamedTuple, unit-test file, product owner, migration, public contract, or retry behavior."
+    verify:
+      - "cd backend && bash -lc 'set -a; source .env.template; set +a; uv run pytest -q -m integration tests/integration/test_ingestion_failure_safety.py'"
+      - "cd backend && bash -lc 'set -a; source .env.template; set +a; uv run ruff check src/eneo tests/integration/test_ingestion_failure_safety.py'"
+      - "cd backend && bash -lc 'set -a; source .env.template; set +a; uv run ruff format --check src/eneo tests/integration/test_ingestion_failure_safety.py'"
+      - "cd backend && bash -lc 'set -a; source .env.template; set +a; uv run pyright'"
+      - "rg -n '(slice[[:space:]]*[0-9]+|M[0-9]+\\.[0-9]+|WI-[A-Za-z0-9-]+|T[0-9]{3,}|PR[[:space:]]*#?[0-9]+|#[0-9]+)' backend/src/eneo/files/text.py backend/src/eneo/worker/upload_tasks.py backend/tests/integration/test_ingestion_failure_safety.py"
+      - "git diff --check"
+    stop_if:
+      - "A file outside allowed_files is required."
+      - "A real provider credential or model/network call is required."
+      - "The successful publication proof cannot use the existing datastore contract and integration fixtures."
+      - "The same verification failure repeats twice."
+    receipt:
+      result: done
+      changed_files:
+        - backend/src/eneo/worker/upload_tasks.py
+        - backend/tests/integration/test_ingestion_failure_safety.py
+      commands:
+        - "Tracked-template real PostgreSQL integration: 9 passed in 21.53s"
+        - "Ruff check and whole-backend format check: passed"
+        - "Whole-backend Pyright: 0 errors, 0 warnings"
+        - "Product naming scan: no matches"
+        - "git diff --check: passed"
+      summary: "Proved successful committed replacement, made the blank-content typed failure observable, removed dead mocks, and removed coordination/history leakage from the product comment."
+
+  - id: T999
+    type: judge
+    assignee: Judge
+    status: queued
+    reasoning_hint: high
+    objective: "Audit whether the merged slice satisfies the original ingestion failure-safety outcome."
+    inputs:
+      - "All done task receipts"
+      - "Merged immutable PR head"
+      - "Current validation and review evidence"
+    constraints:
+      - "Do not implement."
+      - "Reject completion if required Worker work is queued or active."
+    expected_output:
+      - "complete | not_complete"
+      - "Acceptance mapping"
+      - "Missing evidence"
+      - "Next task if not complete"
+    receipt: null
+
+checks:
+  dirty_fingerprint: unknown
+  last_verification:
+    result: passed
+    task: T003
+    commands:
+      - "Tracked-template real PostgreSQL integration: 8 passed"
+      - "Focused unit tests: 64 passed"
+      - "Ruff check and format check: passed"
+      - "Whole-backend Pyright: 0 errors, 0 warnings"
+      - "git diff --check: passed"

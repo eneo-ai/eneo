@@ -1,5 +1,13 @@
+from unittest.mock import MagicMock
+
+from eneo.object_content.runtime import ObjectContentRuntime
 from eneo.settings.setting_service import SettingService
-from eneo.settings.settings import SettingsInDB, SettingsPublic, SettingsUpsert
+from eneo.settings.settings import (
+    SettingsBase,
+    SettingsInDB,
+    SettingsPublic,
+    SettingsUpsert,
+)
 from tests.fixtures import TEST_USER, TEST_UUID
 
 TEST_SETTINGS = SettingsPublic()
@@ -79,6 +87,7 @@ async def test_get_settings_if_settings():
         feature_flag_service=MockFeatureFlagService(),
         tenant_repo=MockTenantRepo(),
         audit_service=MockAuditService(),
+        skill_repo=MagicMock(),
     )
 
     settings = await service.get_settings()
@@ -96,10 +105,11 @@ async def test_update_settings():
         feature_flag_service=MockFeatureFlagService(),
         tenant_repo=MockTenantRepo(),
         audit_service=MockAuditService(),
+        skill_repo=MagicMock(),
     )
 
     repo.settings[TEST_USER.id] = TEST_SETTINGS_EXPECTED
-    new_settings = SettingsPublic(chatbot_widget={"colour": "blue"})
+    new_settings = SettingsBase(chatbot_widget={"colour": "blue"})
     settings_expected = SettingsInDB(
         **new_settings.model_dump(), id=TEST_UUID, user_id=TEST_USER.id
     )
@@ -120,9 +130,10 @@ async def test_update_settings_creates_row_when_missing():
         feature_flag_service=MockFeatureFlagService(),
         tenant_repo=MockTenantRepo(),
         audit_service=MockAuditService(),
+        skill_repo=MagicMock(),
     )
 
-    new_settings = SettingsPublic(chatbot_widget={"preferred_text_format": "richtext"})
+    new_settings = SettingsBase(chatbot_widget={"preferred_text_format": "richtext"})
 
     settings = await service.update_settings(new_settings)
 
@@ -130,3 +141,35 @@ async def test_update_settings_creates_row_when_missing():
     assert repo.settings[TEST_USER.id].chatbot_widget == {
         "preferred_text_format": "richtext"
     }
+
+
+async def test_settings_project_object_content_as_a_read_only_capability():
+    repo = MockRepo()
+    runtime = MagicMock(spec=ObjectContentRuntime)
+    runtime.enabled = True
+    service = SettingService(
+        repo=repo,
+        user=TEST_USER,
+        ai_models_service=MockRepo(),
+        feature_flag_service=MockFeatureFlagService(),
+        tenant_repo=MockTenantRepo(),
+        audit_service=MockAuditService(),
+        skill_repo=MagicMock(),
+        object_content=runtime,
+    )
+
+    settings = await service.get_settings()
+
+    assert settings.object_content_enabled is True
+
+
+def test_settings_write_model_accepts_an_echoed_public_response() -> None:
+    echoed_response = SettingsPublic(
+        chatbot_widget={"colour": "blue"},
+        object_content_enabled=True,
+    )
+
+    writable = SettingsBase.model_validate(echoed_response.model_dump())
+
+    assert writable == SettingsBase(chatbot_widget={"colour": "blue"})
+    assert "object_content_enabled" not in writable.model_dump()

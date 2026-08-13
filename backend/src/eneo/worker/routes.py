@@ -1,3 +1,4 @@
+from datetime import datetime, timezone
 from typing import cast
 from uuid import UUID
 
@@ -10,6 +11,11 @@ from eneo.audit.application.audit_task_params import (
 from eneo.audit.application.audit_worker_task import log_audit_event_task
 from eneo.audit.application.export_worker_task import export_audit_logs_task
 from eneo.database.database import AsyncSession
+from eneo.jobs.durable_dispatch import redispatch_stale_jobs
+from eneo.jobs.job_manager import job_manager
+from eneo.jobs.job_models import JobFailureCode
+from eneo.jobs.job_repo import KNOWLEDGE_JOB_STALE_AFTER, JobRepository
+from eneo.jobs.job_staging import reconcile_job_staging
 from eneo.jobs.task_models import (
     AnalyzeConversationInsightsTask,
     Transcription,
@@ -17,9 +23,14 @@ from eneo.jobs.task_models import (
     UploadInfoBlob,
 )
 from eneo.main.container.container import Container
+from eneo.main.logging import get_logger
 from eneo.websites.crawl_dependencies.crawl_models import CrawlTask
 from eneo.worker.analysis_tasks import analyze_conversation_insights_task
 from eneo.worker.crawl_tasks import crawl_task, queue_website_crawls
+from eneo.worker.object_content_tasks import (
+    ObjectContentReconciliationSummary,
+    reconcile_object_content_task,
+)
 from eneo.worker.upload_tasks import transcription_task, upload_info_blob_task
 from eneo.worker.usage_stats_tasks import (
     recalculate_all_tenants_usage_stats,
@@ -29,6 +40,16 @@ from eneo.worker.usage_stats_tasks import (
 from eneo.worker.worker import Worker
 
 worker = Worker()
+logger = get_logger(__name__)
+
+
+@worker.cron_job(manages_own_session=True, run_at_startup=True)
+async def reconcile_object_content(
+    container: Container,
+) -> ObjectContentReconciliationSummary:
+    """Converge one bounded object-content batch every minute."""
+    del container
+    return await reconcile_object_content_task()
 
 
 class ExportCleanupJobError(TypedDict, total=False):
@@ -65,16 +86,50 @@ class AuditPurgeResult(TypedDict):
     success: bool
 
 
-@worker.function()
+@worker.long_running_function(keep_result=0)
 async def upload_info_blob(job_id: UUID, params: UploadInfoBlob, container: Container):
     return await upload_info_blob_task(
         job_id=job_id, params=params, container=container
     )
 
 
-@worker.function()
+@worker.long_running_function(keep_result=0)
 async def transcription(job_id: UUID, params: Transcription, container: Container):
     return await transcription_task(job_id=job_id, params=params, container=container)
+
+
+@worker.cron_job(manages_own_session=True)
+async def redispatch_durable_knowledge_jobs(container: Container) -> None:
+    session = cast(AsyncSession, container.session())
+    async with session.begin():
+        await redispatch_stale_jobs(session, enqueue=job_manager.enqueue)
+
+
+@worker.cron_job(manages_own_session=True)
+async def reap_stale_knowledge_jobs(container: Container) -> None:
+    session = cast(AsyncSession, container.session())
+    async with session.begin():
+        failed_jobs = await JobRepository(session).mark_stale_in_progress_jobs_failed(
+            datetime.now(timezone.utc) - KNOWLEDGE_JOB_STALE_AFTER
+        )
+    for job_id, task in failed_jobs:
+        logger.warning(
+            "Stale knowledge job failed",
+            extra={
+                "job_id": str(job_id),
+                "task": task,
+                "failure_code": JobFailureCode.PROCESSING_INTERRUPTED.value,
+            },
+        )
+
+
+@worker.cron_job(manages_own_session=True)
+async def reconcile_knowledge_job_staging(
+    container: Container,
+) -> None:
+    session = cast(AsyncSession, container.session())
+    async with session.begin():
+        await reconcile_job_staging(session)
 
 
 @worker.long_running_function()

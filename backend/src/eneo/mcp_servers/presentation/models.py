@@ -1,9 +1,17 @@
 from typing import Any, Generic, Literal, Optional, TypeVar, Union
 from uuid import UUID
 
-from pydantic import AnyHttpUrl, BaseModel, computed_field
+from pydantic import AnyHttpUrl, BaseModel, Field, computed_field
 
 from eneo.main.models import NOT_PROVIDED, ModelId, NotProvided
+from eneo.mcp_servers.domain.entities.mcp_server import (
+    MCP_TOOL_CATALOG_DEFAULT_MAX_BYTES,
+    MCP_TOOL_CATALOG_DEFAULT_MAX_COUNT,
+    MCP_TOOL_CATALOG_HARD_MAX_BYTES,
+    MCP_TOOL_CATALOG_HARD_MAX_COUNT,
+    MCP_TOOL_DEFINITION_DEFAULT_MAX_BYTES,
+    MCP_TOOL_DEFINITION_HARD_MAX_BYTES,
+)
 from eneo.security_classifications.presentation.security_classification_models import (
     SecurityClassificationPublic,
 )
@@ -29,6 +37,10 @@ class MCPServerPublic(BaseModel):
     http_auth_type: str  # "none", "bearer"
     has_credentials: bool
     credential_preview: Optional[str] = None  # masked token, e.g. "••••••••sk12"
+    forward_identity: bool = False
+    tool_catalog_max_count: int = MCP_TOOL_CATALOG_DEFAULT_MAX_COUNT
+    tool_catalog_max_bytes: int = MCP_TOOL_CATALOG_DEFAULT_MAX_BYTES
+    tool_definition_max_bytes: int = MCP_TOOL_DEFINITION_DEFAULT_MAX_BYTES
     tags: Optional[list[str]]
     icon_url: Optional[str]
     documentation_url: Optional[str]
@@ -47,6 +59,24 @@ class MCPServerCreate(BaseModel):
     http_auth_type: Literal["none", "bearer"] = "none"
     description: Optional[str] = None
     http_auth_config_schema: Optional[dict[str, Any]] = None
+    forward_identity: bool = False
+    tool_catalog_max_count: int = Field(
+        default=MCP_TOOL_CATALOG_DEFAULT_MAX_COUNT,
+        ge=1,
+        le=MCP_TOOL_CATALOG_HARD_MAX_COUNT,
+    )
+    tool_catalog_max_bytes: int = Field(
+        default=MCP_TOOL_CATALOG_DEFAULT_MAX_BYTES,
+        ge=1024 * 1024,
+        le=MCP_TOOL_CATALOG_HARD_MAX_BYTES,
+        multiple_of=1024 * 1024,
+    )
+    tool_definition_max_bytes: int = Field(
+        default=MCP_TOOL_DEFINITION_DEFAULT_MAX_BYTES,
+        ge=1024,
+        le=MCP_TOOL_DEFINITION_HARD_MAX_BYTES,
+        multiple_of=1024,
+    )
     tags: Optional[list[str]] = None
     icon_url: Optional[AnyHttpUrl] = None
     documentation_url: Optional[AnyHttpUrl] = None
@@ -61,6 +91,24 @@ class MCPServerUpdate(BaseModel):
     http_auth_type: Optional[Literal["none", "bearer"]] = None
     description: Optional[str] = None
     http_auth_config_schema: Optional[dict[str, Any]] = None
+    forward_identity: Optional[bool] = None
+    tool_catalog_max_count: Optional[int] = Field(
+        default=None,
+        ge=1,
+        le=MCP_TOOL_CATALOG_HARD_MAX_COUNT,
+    )
+    tool_catalog_max_bytes: Optional[int] = Field(
+        default=None,
+        ge=1024 * 1024,
+        le=MCP_TOOL_CATALOG_HARD_MAX_BYTES,
+        multiple_of=1024 * 1024,
+    )
+    tool_definition_max_bytes: Optional[int] = Field(
+        default=None,
+        ge=1024,
+        le=MCP_TOOL_DEFINITION_HARD_MAX_BYTES,
+        multiple_of=1024,
+    )
     tags: Optional[list[str]] = None
     icon_url: Optional[AnyHttpUrl] = None
     documentation_url: Optional[AnyHttpUrl] = None

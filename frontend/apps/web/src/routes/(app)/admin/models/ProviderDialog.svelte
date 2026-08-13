@@ -20,7 +20,7 @@
   import { getEneo } from "$lib/core/Eneo";
   import { m } from "$lib/paraglide/messages";
   import { toast } from "$lib/components/toast";
-  import { toastError } from "$lib/core/errors";
+  import { getErrorMessage, toastError } from "$lib/core/errors";
 
   import * as Dialog from "$lib/components/ui/dialog/index.js";
   import * as Field from "$lib/components/ui/field/index.js";
@@ -172,7 +172,7 @@
       toast.success(m.provider_updated_success());
       dialogOpen = false;
     } catch (e: unknown) {
-      error = e instanceof Error ? e.message : m.failed_to_update_provider();
+      error = getErrorMessage(e);
       toastError(e, m.failed_to_update_provider());
     } finally {
       isSubmitting = false;

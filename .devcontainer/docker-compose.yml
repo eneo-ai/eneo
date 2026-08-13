@@ -15,6 +15,22 @@ services:
       # Overrides any value in backend/.env (env vars beat dotenv in
       # pydantic-settings); the kravla service below runs with auth disabled
       - CRAWLER_SERVICE_URL=http://kravla:8080
+      # Optional operator-managed object storage. Leave these unset and
+      # instead connect through Admin > Storage against the object-content
+      # profile below: endpoint http://object-content:8333, signing region
+      # local, bucket eneo-object-content-dev, and the profile's dev
+      # credentials. post-start.sh prints these values when the profile is
+      # running.
+      - OBJECT_CONTENT_ENDPOINT_URL
+      - OBJECT_CONTENT_REGION
+      - OBJECT_CONTENT_BUCKET
+      - OBJECT_CONTENT_ACCESS_KEY_ID
+      - OBJECT_CONTENT_SECRET_ACCESS_KEY
+      - OBJECT_CONTENT_DEPLOYMENT_ID
+      # Plain HTTP is fine for local development; production keeps the
+      # HTTPS-only default. Container env wins over backend/.env, so override
+      # this from the host environment if you need to test the refusal.
+      - OBJECT_CONTENT_ALLOW_INSECURE_HTTP=${OBJECT_CONTENT_ALLOW_INSECURE_HTTP:-true}
     volumes:
       - ../:/workspace
       # Isolate .venv from host to prevent host-side uv/python from corrupting it
@@ -23,6 +39,38 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
     # Docker group is created dynamically in post-create.sh with the correct GID
     # This ensures it works on any system regardless of the host's docker GID
+  object-content:
+    profiles:
+      - object-content
+    build:
+      context: ../docker/seaweedfs
+      dockerfile: Dockerfile
+    command:
+      - mini
+      - -dir=/data
+      - -webdav=false
+      - -admin.ui=false
+      - -master.telemetry=false
+      - -s3.iam=false
+    networks:
+      - eneo
+    environment:
+      # SeaweedFS uses these conventional S3 gateway variable names. No AWS
+      # service is selected or contacted.
+      AWS_ACCESS_KEY_ID: ${OBJECT_CONTENT_ACCESS_KEY_ID:-eneo-dev-object-content}
+      AWS_SECRET_ACCESS_KEY: ${OBJECT_CONTENT_SECRET_ACCESS_KEY:-local-development-only-secret}
+      S3_BUCKET: ${OBJECT_CONTENT_BUCKET:-eneo-object-content-dev}
+    volumes:
+      - object_content_data:/data
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=64m
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    expose:
+      - "8333"
 
   db:
     image: pgvector/pgvector:pg13
@@ -63,6 +111,7 @@ volumes:
   postgres_data:
   redis_data:
   backend_venv:
+  object_content_data:
 
 networks:
   eneo:

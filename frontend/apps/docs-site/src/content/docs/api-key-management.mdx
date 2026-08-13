@@ -64,6 +64,9 @@ Two related guardrails come from the same principle:
 
 - **Cannot use user-identity endpoints** (`/me`, info-blob updates): `403` with `code: "user_identity_required"`.
 - **Cannot manage other API keys**: API-key mutations require a session login; any API key, including a tenant-admin service key, is rejected.
+- **Cannot read Admin Insights message details**: These endpoints require an
+  interactive session. Every API key receives `403` with
+  `code: "session_auth_required"`.
 
 **Why service keys exist**: In production environments, integrations should not break when an employee leaves the organization. With user keys, deactivating a departing employee's account would silently break every integration that used their key. Service keys solve this by decoupling key validity from any individual user's lifecycle.
 

@@ -12,13 +12,11 @@ Core invariants:
 from datetime import datetime
 from uuid import uuid4
 
-
 from eneo.completion_models.constants import (
     ENTITY_TABLE_MAP,
     MIGRATABLE_ENTITY_TYPES,
 )
 from eneo.completion_models.domain.completion_model import CompletionModel
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -104,6 +102,12 @@ class TestMigratedModelCanAccess:
     def test_active_model_can_access(self):
         model = _make_model()
         assert model.can_access is True
+
+    def test_model_route_uses_the_provider_qualified_name(self):
+        model = _make_model()
+        model.provider_type = "azure"
+
+        assert model.get_model_route() == "azure/test-model"
 
     def test_migrated_model_cannot_access(self):
         model = _make_model(migrated_to_model_id=uuid4())
@@ -206,6 +210,7 @@ class TestAIModelsServiceCanAccess:
 
     def test_can_access_excludes_migrated(self):
         from unittest.mock import MagicMock
+
         from eneo.ai_models.ai_models_service import AIModelsService
 
         service = AIModelsService.__new__(AIModelsService)
@@ -219,6 +224,7 @@ class TestAIModelsServiceCanAccess:
 
     def test_can_access_allows_normal_model(self):
         from unittest.mock import MagicMock
+
         from eneo.ai_models.ai_models_service import AIModelsService
 
         service = AIModelsService.__new__(AIModelsService)

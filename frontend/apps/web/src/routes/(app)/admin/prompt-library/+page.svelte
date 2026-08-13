@@ -13,6 +13,8 @@
   import * as Table from "$lib/components/ui/table/index.js";
   import * as Dialog from "$lib/components/ui/dialog/index.js";
   import { Input } from "$lib/components/ui/input/index.js";
+  import { EneoError } from "@eneo/eneo-js";
+  import { getErrorMessage } from "$lib/core/errors";
   import { m } from "$lib/paraglide/messages";
   import { Plus, Trash2, Search } from "lucide-svelte";
 
@@ -45,13 +47,13 @@
       await data.eneo.promptLibrary.delete({ id: confirmDelete.id });
       confirmDelete = null;
       await invalidate("admin:prompt-library");
-    } catch (e) {
-      const err = e as { status?: number; message?: string };
-      if (err.status === 409) {
-        deleteError = m.governance_prompts_delete_conflict();
-      } else {
-        deleteError = err.message ?? m.governance_prompts_delete_error();
-      }
+    } catch (error) {
+      // A prompt in use has no reason code of its own yet, so the status is
+      // still the only discriminator here.
+      const conflict = error instanceof EneoError && error.status === 409;
+      deleteError = conflict
+        ? m.governance_prompts_delete_conflict()
+        : getErrorMessage(error, m.governance_prompts_delete_error());
     } finally {
       isDeleting = false;
     }

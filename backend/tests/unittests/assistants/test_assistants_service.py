@@ -11,10 +11,16 @@ from eneo.assistants.api.assistant_models import (
     AssistantBase,
     AssistantCreatePublic,
     AssistantUpdatePublic,
+    KnowledgeMode,
 )
 from eneo.assistants.assistant import Assistant
 from eneo.assistants.assistant_service import AssistantService
+from eneo.completion_models.domain.model_kwargs_capabilities import (
+    ModelKwargCapability,
+    SupportedModelKwargs,
+)
 from eneo.files.file_models import FileType
+from eneo.governance_policy.domain.policy_resolver import EffectiveConfig
 from eneo.main.exceptions import (
     BadRequestException,
     ModelNotAvailableException,
@@ -22,6 +28,11 @@ from eneo.main.exceptions import (
 )
 from eneo.main.models import ModelId
 from eneo.prompts.api.prompt_models import PromptCreate
+from eneo.skills.domain.skill import (
+    AssistantSkillBindingReplacement,
+    SkillBindingIntent,
+    SkillBindingReference,
+)
 from tests.fixtures import (
     TEST_ASSISTANT,
     TEST_COLLECTION,
@@ -47,6 +58,7 @@ def setup_fixture():
     mock_db_result.fetchall.return_value = []
     repo.session.execute = AsyncMock(return_value=mock_db_result)
     user = TEST_USER
+    auth_service = MagicMock()
     assistant = AssistantCreatePublic(
         name="test_name",
         prompt=PromptCreate(text="test_prompt"),
@@ -64,6 +76,8 @@ def setup_fixture():
     mock_assistant.has_knowledge.return_value = False
     mock_assistant.has_mcp.return_value = False
     mock_space = MagicMock()
+    mock_space.id = TEST_UUID
+    mock_space.mcp_servers = []
     mock_space.get_assistant.return_value = mock_assistant
     space_repo.get_space_by_assistant.return_value = mock_space
 
@@ -79,6 +93,7 @@ def setup_fixture():
         repo=repo,
         space_repo=space_repo,
         user=user,
+        auth_service=auth_service,
         service_repo=AsyncMock(),
         step_repo=AsyncMock(),
         completion_model_crud_service=AsyncMock(),
@@ -95,6 +110,7 @@ def setup_fixture():
         icon_repo=AsyncMock(),
         org_space_assistant_role_repo=role_repo_mock,
         help_assistant_assignment_history_repo=history_repo_mock,
+        skill_service=AsyncMock(),
     )
 
     # Attachment fit validation needs a real model + token counts; it is
@@ -102,6 +118,12 @@ def setup_fixture():
     # orchestration tests (update flow, model selection, permissions) aren't
     # coupled to the token-counting subsystem.
     service._validate_attachments_fit = AsyncMock()
+    service.skill_service.replace_assistant_bindings.return_value = (
+        AssistantSkillBindingReplacement(
+            bindings=(),
+            on_demand_skill_ids_requiring_validation=frozenset(),
+        )
+    )
 
     setup = Setup(assistant=assistant, service=service, group_service=AsyncMock())
 
@@ -113,6 +135,7 @@ async def assistant_service():
     return AssistantService(
         repo=AsyncMock(),
         user=MagicMock(id=uuid4()),
+        auth_service=MagicMock(),
         service_repo=AsyncMock(),
         step_repo=AsyncMock(),
         completion_model_crud_service=AsyncMock(),
@@ -262,6 +285,34 @@ async def test_update_runs_fit_check_for_prompt_only_change(setup: Setup):
     )
 
     setup.service._validate_attachments_fit.assert_awaited_once()
+    assert (
+        setup.service._validate_attachments_fit.await_args.kwargs[
+            "validate_all_on_demand_candidates"
+        ]
+        is True
+    )
+
+
+async def test_update_runs_full_candidate_fit_for_model_change(setup: Setup):
+    model_id = uuid4()
+    model = MagicMock(id=model_id)
+    space = setup.service.space_repo.get_space_by_assistant.return_value
+    space.is_completion_model_available.return_value = True
+    space.is_completion_model_in_space.return_value = True
+    space.get_completion_model.return_value = model
+
+    await setup.service.update_assistant(
+        assistant_id=TEST_UUID,
+        completion_model_id=model_id,
+    )
+
+    setup.service._validate_attachments_fit.assert_awaited_once()
+    assert (
+        setup.service._validate_attachments_fit.await_args.kwargs[
+            "validate_all_on_demand_candidates"
+        ]
+        is True
+    )
 
 
 async def test_update_skips_fit_check_for_unrelated_change(setup: Setup):
@@ -271,6 +322,111 @@ async def test_update_skips_fit_check_for_unrelated_change(setup: Setup):
     await setup.service.update_assistant(assistant_id=TEST_UUID, name="renamed")
 
     setup.service._validate_attachments_fit.assert_not_awaited()
+    setup.service.skill_service.replace_assistant_bindings.assert_not_awaited()
+
+
+async def test_update_runs_full_candidate_fit_for_mcp_tool_change(setup: Setup):
+    projected_servers = [MagicMock()]
+    setup.service.space_repo.project_assistant_mcp_servers.return_value = (
+        projected_servers
+    )
+
+    await setup.service.update_assistant(
+        assistant_id=TEST_UUID,
+        mcp_tools=[],
+    )
+
+    setup.service.space_repo.project_assistant_mcp_servers.assert_awaited_once_with(
+        space_id=TEST_UUID,
+        assistant_id=TEST_UUID,
+        mcp_servers=[],
+        tool_settings=[],
+    )
+    setup.service._validate_attachments_fit.assert_awaited_once()
+    fit_kwargs = setup.service._validate_attachments_fit.await_args.kwargs
+    assert fit_kwargs["validate_all_on_demand_candidates"] is True
+    assert fit_kwargs["mcp_servers_override"] == projected_servers
+
+
+async def test_update_replaces_assistant_skills_before_fit_and_parent_persist(
+    setup: Setup,
+):
+    assistant = setup.service.space_repo.get_space_by_assistant.return_value.get_assistant.return_value
+    assistant.space_id = TEST_UUID
+    space = setup.service.space_repo.get_space_by_assistant.return_value
+    setup.service.space_repo.update.return_value = space
+    intents = [
+        SkillBindingIntent(
+            reference=SkillBindingReference(skill_id=uuid4(), skill_revision_id=uuid4())
+        ),
+        SkillBindingIntent(
+            reference=SkillBindingReference(skill_id=uuid4(), skill_revision_id=uuid4())
+        ),
+    ]
+    events: list[str] = []
+
+    assistant.update.side_effect = lambda **_: events.append("parent_update")
+
+    async def replace_bindings(**_):
+        events.append("binding_replace")
+        return AssistantSkillBindingReplacement(
+            bindings=(),
+            on_demand_skill_ids_requiring_validation=frozenset(),
+        )
+
+    async def validate_fit(*_, **__):
+        events.append("fit")
+
+    async def persist_parent(*_, **__):
+        events.append("persist")
+        return space
+
+    setup.service.skill_service.replace_assistant_bindings.side_effect = (
+        replace_bindings
+    )
+    setup.service._validate_attachments_fit.side_effect = validate_fit
+    setup.service.space_repo.update.side_effect = persist_parent
+
+    await setup.service.update_assistant(
+        assistant_id=TEST_UUID,
+        skill_binding_intents=intents,
+    )
+
+    setup.service.skill_service.replace_assistant_bindings.assert_awaited_once_with(
+        space_id=TEST_UUID,
+        assistant_id=TEST_UUID,
+        intents=intents,
+    )
+    assert events == ["parent_update", "binding_replace", "fit", "persist"]
+    assert (
+        setup.service._validate_attachments_fit.await_args.kwargs[
+            "validate_all_on_demand_candidates"
+        ]
+        is True
+    )
+
+
+async def test_update_assistant_binding_fit_failure_skips_parent_persist(
+    setup: Setup,
+):
+    assistant = setup.service.space_repo.get_space_by_assistant.return_value.get_assistant.return_value
+    assistant.space_id = TEST_UUID
+    setup.service._validate_attachments_fit.side_effect = BadRequestException(
+        "Composed context is too large"
+    )
+
+    with pytest.raises(BadRequestException, match="too large"):
+        await setup.service.update_assistant(
+            assistant_id=TEST_UUID,
+            skill_binding_intents=[],
+        )
+
+    setup.service.skill_service.replace_assistant_bindings.assert_awaited_once_with(
+        space_id=TEST_UUID,
+        assistant_id=TEST_UUID,
+        intents=[],
+    )
+    setup.service.space_repo.update.assert_not_awaited()
 
 
 def configure_personal_default_assistant(
@@ -300,6 +456,37 @@ def configure_personal_default_assistant(
     return assistant, space
 
 
+def reasoning_model(*options: str) -> MagicMock:
+    model = MagicMock(id=uuid4())
+    model.get_supported_model_kwargs.return_value = SupportedModelKwargs(
+        reasoning_effort=ModelKwargCapability(
+            supported=True,
+            control="select",
+            options=list(options),
+        )
+    )
+    return model
+
+
+def governed_reasoning_config(
+    *models: MagicMock,
+    default_model: MagicMock | None = None,
+    user_configurable: bool = True,
+) -> EffectiveConfig:
+    return EffectiveConfig(
+        models_enforced=True,
+        available_models=list(models),
+        locked_model=None,
+        policy_default_model=default_model or (models[0] if models else None),
+        mcp_enforced=False,
+        available_mcp_servers=[],
+        prompt_enforced=False,
+        enforced_prompt_text=None,
+        reasoning_policy_configured=True,
+        reasoning_effort_user_configurable=user_configurable,
+    )
+
+
 async def test_personal_chat_can_change_personal_default_completion_model(setup: Setup):
     assistant, space = configure_personal_default_assistant(setup)
     completion_model_id = uuid4()
@@ -313,6 +500,288 @@ async def test_personal_chat_can_change_personal_default_completion_model(setup:
 
     assistant.update.assert_called_once()
     assert assistant.update.call_args.kwargs["completion_model"] == completion_model
+
+
+async def test_personal_chat_can_change_reasoning_effort_when_policy_allows(
+    setup: Setup,
+):
+    assistant, _ = configure_personal_default_assistant(setup)
+    assistant.completion_model_kwargs = ModelKwargs(
+        temperature=0.7,
+        top_p=0.8,
+        reasoning_effort="low",
+        response_format={"type": "json_object"},
+    )
+    assistant.completion_model = MagicMock()
+    assistant.completion_model.get_supported_model_kwargs.return_value = (
+        SupportedModelKwargs(
+            reasoning_effort=ModelKwargCapability(
+                supported=True,
+                control="select",
+                options=["low", "medium", "high"],
+            )
+        )
+    )
+    setup.service.effective_config_service = AsyncMock()
+    setup.service.effective_config_service.resolve_for.return_value = EffectiveConfig(
+        models_enforced=False,
+        available_models=[],
+        locked_model=None,
+        policy_default_model=None,
+        mcp_enforced=False,
+        available_mcp_servers=[],
+        prompt_enforced=False,
+        enforced_prompt_text=None,
+        reasoning_policy_configured=True,
+        reasoning_effort_user_configurable=True,
+    )
+    kwargs = ModelKwargs(reasoning_effort="high")
+
+    await setup.service.update_assistant(
+        assistant_id=TEST_UUID,
+        completion_model_kwargs=kwargs,
+    )
+
+    assert assistant.update.call_args.kwargs["completion_model_kwargs"] == ModelKwargs(
+        temperature=0.7,
+        top_p=0.8,
+        reasoning_effort="high",
+        response_format={"type": "json_object"},
+    )
+
+
+@pytest.mark.parametrize("can_manage_assistants", [False, True])
+async def test_personal_chat_validates_reasoning_against_governed_model(
+    setup: Setup,
+    can_manage_assistants: bool,
+):
+    assistant, _ = configure_personal_default_assistant(
+        setup, can_manage_assistants=can_manage_assistants
+    )
+    stored_model = reasoning_model("low")
+    governed_model = reasoning_model("high")
+    assistant.completion_model = stored_model
+    assistant.completion_model_kwargs = ModelKwargs(
+        temperature=0.7,
+        reasoning_effort="low",
+    )
+    setup.service.effective_config_service = AsyncMock()
+    setup.service.effective_config_service.resolve_for.return_value = (
+        governed_reasoning_config(governed_model)
+    )
+
+    await setup.service.update_assistant(
+        assistant_id=TEST_UUID,
+        completion_model_kwargs=ModelKwargs(reasoning_effort="high"),
+    )
+
+    assert assistant.update.call_args.kwargs["completion_model_kwargs"] == ModelKwargs(
+        temperature=0.7,
+        reasoning_effort="high",
+    )
+
+
+@pytest.mark.parametrize("can_manage_assistants", [False, True])
+async def test_personal_chat_rejects_effort_only_supported_by_replaced_model(
+    setup: Setup,
+    can_manage_assistants: bool,
+):
+    assistant, _ = configure_personal_default_assistant(
+        setup, can_manage_assistants=can_manage_assistants
+    )
+    stored_model = reasoning_model("low")
+    governed_model = reasoning_model("high")
+    assistant.completion_model = stored_model
+    assistant.completion_model_kwargs = ModelKwargs(reasoning_effort="low")
+    setup.service.effective_config_service = AsyncMock()
+    setup.service.effective_config_service.resolve_for.return_value = (
+        governed_reasoning_config(governed_model)
+    )
+
+    with pytest.raises(
+        BadRequestException,
+        match="value unsupported by the selected model",
+    ):
+        await setup.service.update_assistant(
+            assistant_id=TEST_UUID,
+            completion_model_kwargs=ModelKwargs(reasoning_effort="low"),
+        )
+
+    assistant.update.assert_not_called()
+
+
+async def test_personal_chat_rejects_reasoning_update_without_governed_model(
+    setup: Setup,
+):
+    assistant, _ = configure_personal_default_assistant(setup)
+    assistant.completion_model = MagicMock(id=uuid4())
+    setup.service.effective_config_service = AsyncMock()
+    setup.service.effective_config_service.resolve_for.return_value = (
+        governed_reasoning_config()
+    )
+
+    with pytest.raises(
+        BadRequestException,
+        match="governance policy has no allowed models",
+    ):
+        await setup.service.update_assistant(
+            assistant_id=TEST_UUID,
+            completion_model_kwargs=ModelKwargs(reasoning_effort="high"),
+        )
+
+    assistant.update.assert_not_called()
+
+
+async def test_personal_chat_explicit_model_precedes_governed_model_for_update(
+    setup: Setup,
+):
+    assistant, space = configure_personal_default_assistant(
+        setup, can_manage_assistants=True
+    )
+    governed_model = reasoning_model("high")
+    explicit_model = reasoning_model("max")
+    assistant.completion_model = MagicMock(id=uuid4())
+    assistant.completion_model_kwargs = ModelKwargs(reasoning_effort="high")
+    space.get_completion_model.return_value = explicit_model
+    setup.service.effective_config_service = AsyncMock()
+    setup.service.effective_config_service.resolve_for.return_value = (
+        governed_reasoning_config(
+            governed_model,
+            explicit_model,
+            default_model=governed_model,
+            user_configurable=False,
+        )
+    )
+
+    await setup.service.update_assistant(
+        assistant_id=TEST_UUID,
+        completion_model_id=explicit_model.id,
+        completion_model_kwargs=ModelKwargs(reasoning_effort="max"),
+    )
+
+    assert assistant.update.call_args.kwargs["completion_model"] is explicit_model
+    assert assistant.update.call_args.kwargs["completion_model_kwargs"] == ModelKwargs(
+        reasoning_effort="max"
+    )
+
+
+@pytest.mark.parametrize(
+    ("reasoning_effort", "accepted"),
+    [("high", True), ("low", False)],
+)
+async def test_personal_chat_repeated_excluded_model_uses_governed_capabilities(
+    setup: Setup,
+    reasoning_effort: str,
+    accepted: bool,
+):
+    assistant, space = configure_personal_default_assistant(setup)
+    stored_model = reasoning_model("low")
+    governed_model = reasoning_model("high")
+    assistant.completion_model = stored_model
+    assistant.completion_model_kwargs = ModelKwargs(reasoning_effort="low")
+    space.get_completion_model.return_value = stored_model
+    setup.service.effective_config_service = AsyncMock()
+    setup.service.effective_config_service.resolve_for.return_value = (
+        governed_reasoning_config(governed_model)
+    )
+
+    update = setup.service.update_assistant(
+        assistant_id=TEST_UUID,
+        completion_model_id=stored_model.id,
+        completion_model_kwargs=ModelKwargs(reasoning_effort=reasoning_effort),
+    )
+    if accepted:
+        await update
+        assert assistant.update.call_args.kwargs[
+            "completion_model_kwargs"
+        ] == ModelKwargs(reasoning_effort="high")
+    else:
+        with pytest.raises(
+            BadRequestException,
+            match="value unsupported by the selected model",
+        ):
+            await update
+        assistant.update.assert_not_called()
+
+
+async def test_personal_chat_cannot_combine_reasoning_effort_with_protected_changes(
+    setup: Setup,
+):
+    assistant, _ = configure_personal_default_assistant(setup)
+
+    with pytest.raises(
+        UnauthorizedException,
+        match="only allows changing the personal assistant's completion model or "
+        "policy-permitted reasoning effort",
+    ):
+        await setup.service.update_assistant(
+            assistant_id=TEST_UUID,
+            name="Renamed",
+            completion_model_kwargs=ModelKwargs(reasoning_effort="high"),
+        )
+
+    assistant.update.assert_not_called()
+
+
+async def test_personal_chat_cannot_change_reasoning_effort_when_policy_forbids_it(
+    setup: Setup,
+):
+    assistant, _ = configure_personal_default_assistant(setup)
+    setup.service.effective_config_service = AsyncMock()
+    setup.service.effective_config_service.resolve_for.return_value = MagicMock(
+        reasoning_effort_user_configurable=False
+    )
+
+    with pytest.raises(
+        BadRequestException,
+        match="managed by the personal assistant policy",
+    ):
+        await setup.service.update_assistant(
+            assistant_id=TEST_UUID,
+            completion_model_kwargs=ModelKwargs(reasoning_effort="high"),
+        )
+
+    assistant.update.assert_not_called()
+
+
+async def test_personal_chat_cannot_store_unsupported_reasoning_effort(
+    setup: Setup,
+):
+    assistant, _ = configure_personal_default_assistant(setup)
+    assistant.completion_model = MagicMock()
+    assistant.completion_model.get_supported_model_kwargs.return_value = (
+        SupportedModelKwargs(
+            reasoning_effort=ModelKwargCapability(
+                supported=True,
+                control="select",
+                options=["low", "medium", "high"],
+            )
+        )
+    )
+    setup.service.effective_config_service = AsyncMock()
+    setup.service.effective_config_service.resolve_for.return_value = EffectiveConfig(
+        models_enforced=False,
+        available_models=[],
+        locked_model=None,
+        policy_default_model=None,
+        mcp_enforced=False,
+        available_mcp_servers=[],
+        prompt_enforced=False,
+        enforced_prompt_text=None,
+        reasoning_policy_configured=True,
+        reasoning_effort_user_configurable=True,
+    )
+
+    with pytest.raises(
+        BadRequestException,
+        match="value unsupported by the selected model",
+    ):
+        await setup.service.update_assistant(
+            assistant_id=TEST_UUID,
+            completion_model_kwargs=ModelKwargs(reasoning_effort="max"),
+        )
+
+    assistant.update.assert_not_called()
 
 
 @pytest.mark.parametrize(
@@ -330,9 +799,12 @@ async def test_personal_chat_can_change_personal_default_completion_model(setup:
         {"attachment_ids": []},
         {"description": None},
         {"insight_enabled": False},
+        {"inline_file_text": False},
+        {"knowledge_mode": KnowledgeMode.INJECT},
         {"data_retention_days": None},
         {"metadata_json": {}},
         {"icon_id": uuid4()},
+        {"skill_binding_intents": []},
     ],
 )
 async def test_personal_chat_cannot_change_extended_default_assistant_fields(
@@ -454,8 +926,8 @@ async def test_create_from_template_keeps_fallback_when_template_has_no_model(
     )
 
 
-async def test_update_rejects_adding_mcp_when_knowledge_exists(setup: Setup):
-    """Cannot add MCP servers when assistant already has knowledge."""
+async def test_update_allows_mcp_alongside_knowledge(setup: Setup):
+    """Knowledge and MCP servers coexist on an assistant."""
     assistant = MagicMock()
     assistant.has_knowledge.return_value = True
     assistant.has_mcp.return_value = False
@@ -471,63 +943,12 @@ async def test_update_rejects_adding_mcp_when_knowledge_exists(setup: Setup):
     mock_result.fetchall.return_value = [(mcp_id,)]
     setup.service.repo.session.execute = AsyncMock(return_value=mock_result)
 
-    with pytest.raises(
-        BadRequestException, match="Knowledge and MCP servers cannot both be active"
-    ):
-        await setup.service.update_assistant(
-            assistant_id=TEST_UUID,
-            mcp_server_ids=[mcp_id],
-        )
-
-
-async def test_update_rejects_adding_knowledge_when_mcp_exists(setup: Setup):
-    """Cannot add knowledge when assistant already has MCP servers."""
-    assistant = MagicMock()
-    assistant.has_knowledge.return_value = False
-    assistant.has_mcp.return_value = True
-    assistant.mcp_servers = [MagicMock()]
-
-    # After update() is called with groups, has_knowledge should return True
-    assistant.update.side_effect = lambda **kwargs: setattr(
-        assistant, "has_knowledge", MagicMock(return_value=True)
+    await setup.service.update_assistant(
+        assistant_id=TEST_UUID,
+        mcp_server_ids=[mcp_id],
     )
 
-    space = MagicMock()
-    space.get_assistant.return_value = assistant
-    setup.service.space_repo.get_space_by_assistant.return_value = space
-
-    with pytest.raises(
-        BadRequestException, match="Knowledge and MCP servers cannot both be active"
-    ):
-        await setup.service.update_assistant(
-            assistant_id=TEST_UUID,
-            groups=[uuid4()],
-        )
-
-
-async def test_update_rejects_keeping_both_when_legacy_assistant(setup: Setup):
-    """Legacy edge case: assistant has both, updating MCP with non-empty list is still rejected."""
-    assistant = MagicMock()
-    assistant.has_knowledge.return_value = True
-    assistant.has_mcp.return_value = True
-    assistant.mcp_servers = [MagicMock()]
-
-    space = MagicMock()
-    space.get_assistant.return_value = assistant
-    setup.service.space_repo.get_space_by_assistant.return_value = space
-
-    mcp_id = uuid4()
-    mock_result = MagicMock()
-    mock_result.fetchall.return_value = [(mcp_id,)]
-    setup.service.repo.session.execute = AsyncMock(return_value=mock_result)
-
-    with pytest.raises(
-        BadRequestException, match="Knowledge and MCP servers cannot both be active"
-    ):
-        await setup.service.update_assistant(
-            assistant_id=TEST_UUID,
-            mcp_server_ids=[mcp_id],
-        )
+    assistant.update.assert_called_once()
 
 
 async def test_update_allows_removing_mcp_when_both_exist(setup: Setup):

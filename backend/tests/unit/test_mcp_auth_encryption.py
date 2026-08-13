@@ -50,6 +50,7 @@ def _make_service(encryption_service=None):
         mcp_server_repo=mock_repo,
         mcp_server_tool_repo=mock_tool_repo,
         user=mock_user,
+        mcp_state_repo=AsyncMock(),
         encryption_service=encryption_service,
     )
     return service, mock_repo, mock_tool_repo
@@ -280,10 +281,30 @@ class TestAssemblerHasCredentials:
         server.security_classification = None
         server.is_enabled = True
         server.tools = []
+        server.forward_identity = True
+        server.tool_catalog_max_count = 73
+        server.tool_catalog_max_bytes = 7 * 1024 * 1024
+        server.tool_definition_max_bytes = 96 * 1024
 
         assembler = MCPServerSettingsAssembler()
         dto = assembler.from_domain_to_model(server)
         assert dto.has_credentials is True
+        assert dto.tool_catalog_max_count == 73
+        assert dto.tool_catalog_max_bytes == 7 * 1024 * 1024
+        assert dto.tool_definition_max_bytes == 96 * 1024
+
+        unrelated_edit = MCPServerUpdate(
+            description="Updated description",
+            tool_catalog_max_count=dto.tool_catalog_max_count,
+            tool_catalog_max_bytes=dto.tool_catalog_max_bytes,
+            tool_definition_max_bytes=dto.tool_definition_max_bytes,
+        )
+        assert unrelated_edit.model_dump(exclude_unset=True) == {
+            "description": "Updated description",
+            "tool_catalog_max_count": 73,
+            "tool_catalog_max_bytes": 7 * 1024 * 1024,
+            "tool_definition_max_bytes": 96 * 1024,
+        }
 
     def test_settings_assembler_without_credentials(self):
         from eneo.mcp_servers.presentation.assemblers.mcp_server_assembler import (
@@ -303,6 +324,10 @@ class TestAssemblerHasCredentials:
         server.security_classification = None
         server.is_enabled = False
         server.tools = []
+        server.forward_identity = False
+        server.tool_catalog_max_count = 256
+        server.tool_catalog_max_bytes = 16 * 1024 * 1024
+        server.tool_definition_max_bytes = 64 * 1024
 
         assembler = MCPServerSettingsAssembler()
         dto = assembler.from_domain_to_model(server)
@@ -444,7 +469,7 @@ class TestProxyFactoryDecryption:
 
 class TestUpdateConnectionValidation:
     """Test that update_mcp_server validates connection before saving when
-    connection-affecting fields (http_url, http_auth_type, credentials) change."""
+    connection-affecting fields (URL, auth, credentials, identity mode) change."""
 
     @pytest.fixture
     def _setup(self):
@@ -559,6 +584,133 @@ class TestUpdateConnectionValidation:
         assert result.connection is None
         mock_repo.update.assert_called_once()
         service._test_connection_and_discover_tools.assert_not_called()
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("existing_mode", "requested_mode"), [(False, True), (True, False)]
+    )
+    async def test_rejects_identity_mode_change_when_connection_fails(
+        self, _setup, existing_mode, requested_mode
+    ):
+        """Both identity-mode transitions are validated before persistence."""
+        from eneo.mcp_servers.application.mcp_server_service import ConnectionResult
+
+        service, mock_repo, existing, _ = _setup
+        existing.forward_identity = existing_mode
+        service._test_connection_and_discover_tools = AsyncMock(
+            return_value=(
+                [],
+                ConnectionResult(success=False, error_message="Identity mode rejected"),
+            )
+        )
+
+        result = await service.update_mcp_server(
+            mcp_server_id=existing.id,
+            forward_identity=requested_mode,
+        )
+
+        assert result.connection is not None
+        assert result.connection.success is False
+        validated_server = service._test_connection_and_discover_tools.call_args.args[0]
+        assert validated_server.forward_identity is requested_mode
+        mock_repo.update.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_same_identity_mode_does_not_trigger_validation(self, _setup):
+        from eneo.mcp_servers.application.mcp_server_service import ConnectionResult
+
+        service, mock_repo, existing, _ = _setup
+        existing.forward_identity = True
+        service._test_connection_and_discover_tools = AsyncMock(
+            return_value=(
+                [],
+                ConnectionResult(success=False, error_message="should not be called"),
+            )
+        )
+
+        await service.update_mcp_server(
+            mcp_server_id=existing.id,
+            forward_identity=True,
+        )
+
+        mock_repo.update.assert_called_once()
+        service._test_connection_and_discover_tools.assert_not_called()
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("existing_mode", "requested_mode"), [(False, True), (True, False)]
+    )
+    async def test_identity_mode_change_invalidates_persisted_protocol_sessions(
+        self, _setup, existing_mode, requested_mode
+    ):
+        from eneo.mcp_servers.application.mcp_server_service import ConnectionResult
+
+        service, mock_repo, existing, _ = _setup
+        state_repo = service.mcp_state_repo
+        existing.forward_identity = existing_mode
+        service._test_connection_and_discover_tools = AsyncMock(
+            return_value=([], ConnectionResult(success=True))
+        )
+
+        await service.update_mcp_server(
+            mcp_server_id=existing.id,
+            forward_identity=requested_mode,
+        )
+
+        mock_repo.update.assert_awaited_once()
+        state_repo.delete_for_server.assert_awaited_once_with(existing.id)
+        assert existing.identity_policy_generation == 1
+
+    @pytest.mark.asyncio
+    async def test_disabling_identity_uses_anonymous_catalog_as_availability_snapshot(
+        self, _setup
+    ):
+        from eneo.mcp_servers.application.mcp_server_service import ConnectionResult
+        from eneo.mcp_servers.domain.entities.mcp_server import MCPServerTool
+        from eneo.mcp_servers.infrastructure.proxy.mcp_proxy_session import (
+            MCPProxySession,
+        )
+
+        service, mock_repo, existing, _ = _setup
+        tool_repo = service.tool_repo
+        existing.forward_identity = True
+        shared = MCPServerTool(
+            mcp_server_id=existing.id,
+            name="shared",
+            description="Approved shared tool",
+            input_schema={"type": "object"},
+        )
+        user_only = MCPServerTool(
+            mcp_server_id=existing.id,
+            name="user_only",
+            description="Approved user-scoped tool",
+            input_schema={"type": "object"},
+        )
+        existing.tools = [shared, user_only]
+        tool_repo.by_server.return_value = existing.tools
+        tool_repo.stage_observed.return_value = []
+        service._test_connection_and_discover_tools = AsyncMock(
+            return_value=(
+                [
+                    {
+                        "name": "shared",
+                        "description": "Approved shared tool",
+                        "input_schema": {"type": "object"},
+                    }
+                ],
+                ConnectionResult(success=True, tools_discovered=1),
+            )
+        )
+
+        await service.update_mcp_server(
+            mcp_server_id=existing.id,
+            forward_identity=False,
+        )
+
+        assert mock_repo.update.await_count == 1
+        assert user_only.removed_from_remote is True
+        proxy = MCPProxySession([existing])
+        assert proxy.get_allowed_tool_names() == {"test__shared"}
 
     @pytest.mark.asyncio
     async def test_rejects_credential_update_when_connection_fails(self, _setup):

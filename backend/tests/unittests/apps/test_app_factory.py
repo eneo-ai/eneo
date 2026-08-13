@@ -180,7 +180,7 @@ def test_create_app_from_db_preserves_completion_model_provider_type(
     app_record.attachments = []
     app_record.template = None
 
-    app = factory.create_app_from_db(app_record)
+    app = factory.create_app_from_db(app_record, attachments=[])
 
     assert app.completion_model is not None
     assert app.completion_model.provider_type == "vllm"

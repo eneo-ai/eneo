@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "sync": "svelte-kit sync",
-    "dev": "NODE_ENV=development svelte-kit sync && svelte-package --watch",
+    "dev": "NODE_ENV=development svelte-kit sync && svelte-package --watch --preserve-output",
     "dev:app": "vite dev",
     "build:dev": "NODE_ENV=development svelte-kit sync && svelte-package",
     "build": "NODE_ENV=production svelte-kit sync && svelte-package && publint",

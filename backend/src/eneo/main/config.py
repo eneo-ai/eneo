@@ -362,12 +362,6 @@ class Settings(BaseSettings):
     mobilityguard_client_secret: Optional[str] = None
     mobilityguard_tenant_id: Optional[str] = None
 
-    # Max sizes
-    upload_file_to_session_max_size: int
-    upload_image_to_session_max_size: int
-    upload_max_file_size: int
-    transcription_max_file_size: int
-
     # Visual content in document attachments (PDF pages with images/graphics,
     # DOCX/PPTX embedded images) is extracted as derived image files so vision
     # models can read it (capped per document to bound token cost)
@@ -385,6 +379,11 @@ class Settings(BaseSettings):
     # Tokens kept free in the input window for the live question (and a little
     # history) when checking whether the prompt + attachments fit.
     attachment_context_reserve_tokens: int = 2000
+
+    # The Skill attachment guardrail lives in the stored tenant runtime
+    # policy (skill_runtime_policies). The historical SKILL_MAX_BINDINGS
+    # environment value is read once by migration 202607240310 as a seed and
+    # has no runtime effect.
 
     # Temporary directory for file uploads
     upload_tmp_dir: Path = Path("/tmp")
@@ -428,6 +427,30 @@ class Settings(BaseSettings):
     jwt_secret: str
     jwt_token_prefix: str
     url_signing_key: str
+
+    # Signed file references (original-download URLs surfaced to the LLM so it
+    # can hand them to URL-accepting MCP tools).
+    # Expiry of the minted URL; clamped to the original-download token maximum
+    # (1 hour) at mint time.
+    file_reference_url_expiry_seconds: int = 3600
+    # Base URL used to build the signed download links handed to MCP tools.
+    # Defaults to public_origin, but a remote tool (server-to-server) often needs
+    # a different, internally-reachable host than the browser-facing origin (e.g.
+    # http://host.docker.internal:8123 in dev, or an internal service URL in prod).
+    # Unlike public_origin this is NOT restricted to https/localhost. Must point
+    # at the Eneo backend's /api/v1 and be reachable from the tool's network.
+    file_reference_base_url: Optional[str] = None
+
+    # Base URL Eneo uses to reach its OWN loopback MCP servers (mounted under
+    # /internal-mcp) during a completion. Must be reachable from within the
+    # backend process/container. Dev default is the local server.
+    internal_mcp_base_url: str = "http://localhost:8123"
+
+    # Relevance floor (cosine similarity, -1..1) for inject-mode knowledge
+    # retrieval: chunks scoring below it are dropped instead of injected.
+    # Off by default because useful values depend on the embedding model in
+    # use; set per deployment where that model is known.
+    inject_knowledge_min_score: Optional[float] = Field(default=None, ge=-1.0, le=1.0)
 
     # Dev
     testing: bool = False

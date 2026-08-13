@@ -4,6 +4,39 @@ export type Assistant =
   components["schemas"]["AssistantPublic"] | components["schemas"]["DefaultAssistant"];
 
 export type AssistantSparse = Omit<components["schemas"]["AssistantSparse"], "user_id">;
+export type SkillSparse = components["schemas"]["SkillSparse"];
+export type SkillCatalogPage = components["schemas"]["CursorPaginatedResponse_SkillSparse_"];
+export type SkillPublic = components["schemas"]["SkillPublic"];
+export type SkillRevisionPublic = components["schemas"]["SkillRevisionPublic"];
+export type SkillRevisionSummaryPublic = components["schemas"]["SkillRevisionSummaryPublic"];
+export type SkillRevisionRestorePublic = components["schemas"]["SkillRevisionRestorePublic"];
+export type SkillRevisionSummaryPage =
+  components["schemas"]["CursorPaginatedResponse_SkillRevisionSummaryPublic_"];
+export type SkillBindingSummary = components["schemas"]["SkillBindingSummary"];
+export type SkillBindingReferenceInput = components["schemas"]["SkillBindingReferenceInput"];
+export type SkillActivationMode = components["schemas"]["SkillActivationMode"];
+export type AssistantSkillBindingInput = components["schemas"]["AssistantSkillBindingInput"];
+export type AssistantSkillBindingSummary = components["schemas"]["AssistantSkillBindingSummary"];
+export type AssistantSkillConfiguration =
+  components["schemas"]["AssistantSkillConfigurationPublic"];
+export type AssistantSkillRuntimeSummary = components["schemas"]["AssistantSkillRuntimeSummary"];
+export type SkillRuntimePolicy = components["schemas"]["SkillRuntimePolicyPublic"];
+export type SkillRuntimePolicyUpdate = components["schemas"]["SkillRuntimePolicyUpdate"];
+export type SkillRuntimeModelProjections = components["schemas"]["SkillRuntimeModelProjections"];
+export type OrganizationSkillPublic = components["schemas"]["OrganizationSkillPublic"];
+export type OrganizationSkillSummaryPublic =
+  components["schemas"]["OrganizationSkillSummaryPublic"];
+export type OrganizationSkillSummaryPagePublic =
+  components["schemas"]["OrganizationSkillSummaryPagePublic"];
+export type SkillAdoptionProjectionPagePublic =
+  components["schemas"]["SkillAdoptionProjectionPagePublic"];
+export type PersonalChatPinAdvancePublic = components["schemas"]["PersonalChatPinAdvancePublic"];
+export type AssistantFleetAdvancePublic = components["schemas"]["AssistantFleetAdvancePublic"];
+export type AppFleetAdvancePublic = components["schemas"]["AppFleetAdvancePublic"];
+export type PublishedSkillPublic = components["schemas"]["PublishedSkillPublic"];
+export type PublishedSkillSummaryPublic = components["schemas"]["PublishedSkillSummaryPublic"];
+export type PublishedSkillSummaryPagePublic =
+  components["schemas"]["PublishedSkillSummaryPagePublic"];
 export type AssistantResponse = Omit<
   components["schemas"]["AskResponse"],
   "session_id" | "references" | "tools"
@@ -33,6 +66,7 @@ export type EmbeddingModel = components["schemas"]["EmbeddingModelPublic"];
 export type TranscriptionModel = components["schemas"]["TranscriptionModelPublic"];
 export type SecurityClassification = components["schemas"]["SecurityClassificationPublic"];
 export type Job = components["schemas"]["JobPublic"];
+export type JobFailureCode = components["schemas"]["JobFailureCode"];
 export type JobStatus = components["schemas"]["Status"];
 // Backend's TenantPublic schema omits `id`, but the actual API response includes it.
 // Until the schema is fixed upstream we extend the type so consumers can use `tenant.id`.
@@ -52,6 +86,24 @@ export type UserGroup = components["schemas"]["UserGroupPublic"];
 export type User = components["schemas"]["UserAdminView"];
 export type UserSparse = components["schemas"]["UserSparse"];
 export type CurrentUser = components["schemas"]["UserPublic"];
+export type StorageKind = components["schemas"]["StorageKind"];
+export type ObjectContentReadinessCode = components["schemas"]["ObjectContentReadinessCode"];
+export type UploadLimitUseCase = components["schemas"]["UploadLimitUseCase"];
+export type ContentState = components["schemas"]["ContentState"];
+export type ContentOwner = components["schemas"]["ContentOwner"];
+export type ContentMoveState = components["schemas"]["ContentMoveState"];
+export type ContentMoveFailureCode = components["schemas"]["ContentMoveFailureCode"];
+export type DeploymentPolicy = components["schemas"]["DeploymentPolicyPublic"];
+export type DeploymentPolicyUpdate = components["schemas"]["DeploymentPolicyUpdate"];
+export type ObjectContentInventory = components["schemas"]["ObjectContentInventoryPublic"];
+export type ObjectContentMoves = components["schemas"]["ObjectContentMovesPublic"];
+export type MoveQueueRequest = components["schemas"]["MoveQueueRequest"];
+export type MoveQueueResult = components["schemas"]["MoveQueuePublic"];
+export type MovePauseUpdate = components["schemas"]["DeploymentPolicyPauseUpdate"];
+export type MovePauseResult = components["schemas"]["MovePausePublic"];
+export type ObjectStoreConnection = components["schemas"]["ObjectStoreConnectionPublic"];
+export type ObjectStoreConnectionCreate = components["schemas"]["ObjectStoreConnectionInput"];
+export type ObjectStoreCredentialRotation = components["schemas"]["ObjectStoreCredentialRotation"];
 export type Role = components["schemas"]["RolePublic"];
 export type Permission = components["schemas"]["Permission"];
 export type ResourcePermission = components["schemas"]["ResourcePermission"];
@@ -60,6 +112,8 @@ export type Limits = components["schemas"]["Limits"];
 export type UploadedFile = components["schemas"]["FilePublic"];
 export type Website = components["schemas"]["WebsitePublic"];
 export type Settings = components["schemas"]["SettingsPublic"];
+export type SkillExecutionBlockPublic = components["schemas"]["SkillExecutionBlockPublic"];
+export type SkillExecutionBlockState = components["schemas"]["SkillExecutionBlockState"];
 export type WebsiteSparse = components["schemas"]["WebsiteSparse"];
 export type Space = components["schemas"]["SpacePublic"];
 export type SpaceSparse = components["schemas"]["SpaceSparse"];
@@ -116,14 +170,9 @@ export type Conversation = components["schemas"]["SessionPublic"] & {
 };
 export type ConversationSparse = components["schemas"]["SessionMetadataPublic"];
 export type McpToolReference = components["schemas"]["McpToolReferencePublic"];
-// num_tokens_* are populated by the backend on every persisted message and
-// streamed live via the SSE token_usage event, but are not part of the generated
-// Message schema.
-export type ConversationMessage = components["schemas"]["Message"] & {
-  num_tokens_question?: number;
-  num_tokens_answer?: number;
-};
+export type ConversationMessage = components["schemas"]["Message"];
 export type ConversationTools = components["schemas"]["UseTools"];
+export type ChatTurnDiagnostics = components["schemas"]["ChatTurnDiagnostics"];
 export type PreflightResponse = components["schemas"]["PreflightResponse"];
 export type GroupChat = components["schemas"]["GroupChatPublic"];
 export type GroupChatSparse = Omit<components["schemas"]["GroupChatSparse"], "user_id">;

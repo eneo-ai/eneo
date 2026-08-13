@@ -12,9 +12,9 @@ from eneo.main.exceptions import (
     APIKeyNotConfiguredException,
     ProviderRejectedRequestException,
 )
+from eneo.model_providers.domain.model_route import resolve_model_route
 from eneo.model_providers.infrastructure import litellm_transport
 from eneo.model_providers.infrastructure.litellm_provider import (
-    build_litellm_model_name,
     build_litellm_provider_kwargs,
 )
 from eneo.model_providers.infrastructure.litellm_transport import (
@@ -26,9 +26,12 @@ from eneo.model_providers.infrastructure.litellm_transport import (
 from eneo.tenants.provider_field_config import get_required_fields
 
 
-def test_build_litellm_model_name_is_canonical():
+def test_resolve_model_route_is_canonical():
     assert (
-        build_litellm_model_name("anthropic", "claude-sonnet-4")
+        resolve_model_route(
+            provider_type="anthropic",
+            model_name="claude-sonnet-4",
+        )
         == "anthropic/claude-sonnet-4"
     )
 

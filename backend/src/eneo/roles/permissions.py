@@ -1,5 +1,3 @@
-# MIT License
-
 from __future__ import annotations
 
 from enum import Enum
@@ -15,6 +13,8 @@ _F = TypeVar("_F", bound=Callable[..., Coroutine[Any, Any, Any]])
 
 class Permission(str, Enum):
     ASSISTANTS = "assistants"
+    SKILLS = "skills"
+    SKILLS_MANAGEMENT = "skills_management"
     PERSONAL_CHAT = "personal_chat"
     GROUP_CHATS = "group_chats"
     APPS = "apps"
@@ -28,6 +28,8 @@ class Permission(str, Enum):
     INTEGRATIONS = "integrations"
     SHARED_SPACES = "shared_spaces"
     API_KEYS = "api_keys"
+    STORAGE = "storage"
+    ASSISTANT_DEBUG = "assistant_debug"
 
 
 def validate_permissions(permission: Permission) -> Callable[[_F], _F]:

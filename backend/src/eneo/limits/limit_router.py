@@ -8,7 +8,10 @@ from eneo.server.dependencies.container import get_container
 from eneo.server.protocol import responses
 
 router = APIRouter()
-with_user_container = get_container(with_user=True)
+with_user_container = get_container(
+    with_user=True,
+    with_upload_admission=True,
+)
 
 
 @router.get(

@@ -9,6 +9,8 @@ from uuid import UUID
 
 import sqlalchemy as sa
 from arq.cron import cron
+from arq.worker import Function
+from arq.worker import func as arq_func
 from dependency_injector import providers
 from opentelemetry import trace
 
@@ -175,7 +177,7 @@ class Worker:
     def __init__(self):
         super().__init__()
         settings = get_settings()
-        self.functions: list[Callable[..., Any]] = []
+        self.functions: list[Callable[..., Any] | Function] = []
         self.cron_jobs: list[Any] = []
         self.redis_settings = build_arq_redis_settings(settings)
         self.on_startup = self.startup
@@ -325,7 +327,7 @@ class Worker:
 
         await lifespan.shutdown()
 
-    def function(self, with_user: bool = True):
+    def function(self, with_user: bool = True, *, keep_result: int | None = None):
         def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
             @wraps(func)
             async def wrapper(ctx: ARQContext, params: object) -> Any:
@@ -344,12 +346,19 @@ class Worker:
                     assert job_id is not None
                     return await func(job_id, params, container=container)
 
-            self.functions.append(_traced_job("job", wrapper))
+            traced = _traced_job("job", wrapper)
+            self.functions.append(
+                arq_func(traced, keep_result=keep_result)
+                if keep_result is not None
+                else traced
+            )
             return wrapper
 
         return decorator
 
-    def long_running_function(self, with_user: bool = True):
+    def long_running_function(
+        self, with_user: bool = True, *, keep_result: int | None = None
+    ):
         """Decorator for long-running tasks (crawls, batch jobs).
 
         Unlike function(), this does NOT hold a database session for the entire
@@ -443,7 +452,12 @@ class Worker:
                 assert job_id is not None
                 return await func(job_id, params, container=container)
 
-            self.functions.append(_traced_job("job", wrapper))
+            traced = _traced_job("job", wrapper)
+            self.functions.append(
+                arq_func(traced, keep_result=keep_result)
+                if keep_result is not None
+                else traced
+            )
             return wrapper
 
         return decorator
@@ -527,7 +541,12 @@ class Worker:
 
         logger.debug(
             "Including functions from subworker: %s",
-            [func.__name__ for func in sub_worker.functions],
+            [
+                registered.name
+                if isinstance(registered, Function)
+                else registered.__name__
+                for registered in sub_worker.functions
+            ],
         )
         logger.debug(
             "Including cron jobs from subworker: %s",

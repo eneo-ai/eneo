@@ -1,10 +1,11 @@
 <script lang="ts">
   import { Page, Settings } from "$lib/components/layout";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager.js";
+  import { hasPermission } from "$lib/core/hasPermission.js";
 
   import { Button, Input, Tooltip } from "@eneo/ui";
   import { IconSparkles } from "@eneo/icons/sparkles";
-  import { afterNavigate, beforeNavigate } from "$app/navigation";
+  import { afterNavigate, beforeNavigate, invalidate } from "$app/navigation";
 
   import { initAssistantEditor } from "$lib/features/assistants/AssistantEditor.js";
   import { fade } from "svelte/transition";
@@ -29,6 +30,14 @@
   import RetentionPolicyInput from "$lib/components/settings/RetentionPolicyInput.svelte";
   import IconUpload from "$lib/features/icons/IconUpload.svelte";
   import ApiKeysSettingsSection from "$lib/features/api-keys/ApiKeysSettingsSection.svelte";
+  import SkillBindingsEditor from "$lib/features/skills/SkillBindingsEditor.svelte";
+  import { Badge } from "$lib/components/ui/badge/index.js";
+  import { resolve } from "$app/paths";
+  import {
+    loadSkillBindingCatalogPage,
+    loadSkillBindingPreview
+  } from "$lib/features/skills/skillBindingCatalog";
+  import type { SkillFormValue } from "$lib/features/skills/skillBindings";
   import { untrack } from "svelte";
 
   let { data } = $props();
@@ -40,6 +49,14 @@
   const isHelpAssistant = $derived(
     (data.assistant as { is_help_assistant?: boolean }).is_help_assistant ?? false
   );
+
+  // URL-only file handling is backed by originals in object storage. Without a
+  // connected store file text is always inlined, so the toggle is locked and
+  // says why, with a link on to the setup page for those who can act on it.
+  const objectStorageMissing = $derived(!data.settings.object_store_configured);
+  // The storage controls require the storage permission and live inside the
+  // admin area, so only users who can reach and use that page are pointed at it.
+  const canConfigureStorage = $derived(hasPermission(data.user)({ allOf: ["admin", "storage"] }));
 
   const {
     state: { currentSpace },
@@ -53,14 +70,28 @@
   } = untrack(() =>
     initAssistantEditor({
       assistant: data.assistant,
+      skillBindings: data.skillBindings.map((binding) => ({
+        skill_id: binding.skill_id,
+        skill_revision_id: binding.skill_revision_id,
+        activation_mode: binding.activation_mode
+      })),
       eneo: data.eneo,
-      onUpdateDone() {
-        refreshCurrentSpace("applications");
+      onUpdateDone(_assistant, changes) {
+        void refreshCurrentSpace("applications");
+        if (changes.skill_bindings !== undefined || changes.completion_model !== undefined) {
+          void invalidate("space:skills").catch((error) => {
+            console.error("Failed to refresh Assistant Skill runtime", error);
+          });
+        }
       }
     })
   );
 
   let cancelUploadsAndClearQueue = $state<() => void>(() => {});
+
+  async function createSkill(value: SkillFormValue) {
+    return data.eneo.skills.create({ spaceId: $currentSpace.id, ...value });
+  }
 
   const effectiveConfig = $derived($resource.effective_config);
   const promptLocked = $derived(effectiveConfig?.prompt_locked === true);
@@ -239,7 +270,7 @@
               $update.completion_model
             );
 
-            await saveChanges();
+            if (!(await saveChanges())) return;
             showSavesChangedNotice = true;
             setTimeout(() => {
               showSavesChangedNotice = false;
@@ -392,6 +423,42 @@
           ></textarea>
         </Settings.Row>
 
+        {#if data.supportsDirectSkills && $currentSpace.hasPermission("read", "skill")}
+          <div id="skills" class="scroll-mt-20">
+            <Settings.Row
+              title={m.skills()}
+              description={m.skills_editor_description()}
+              hasChanges={$currentChanges.diff.skill_bindings !== undefined}
+              revertFn={() => discardChanges("skill_bindings")}
+            >
+              <SkillBindingsEditor
+                bind:bindings={$update.skill_bindings}
+                initialCatalogPage={data.skills}
+                bindingSummaries={data.skillBindings}
+                activationSurface="assistant"
+                skillRuntime={data.skillRuntime}
+                canEditBindings={data.assistant.permissions?.includes("edit") ?? false}
+                canCreateSkills={$currentSpace.organization !== true &&
+                  $currentSpace.hasPermission("create", "skill")}
+                onListCatalog={(params) =>
+                  loadSkillBindingCatalogPage({
+                    eneo: data.eneo,
+                    spaceId: data.currentSpace.id,
+                    organizationSpace: data.currentSpace.organization === true,
+                    ...params
+                  })}
+                onGetSkillPreview={(target) =>
+                  loadSkillBindingPreview({
+                    eneo: data.eneo,
+                    spaceId: data.currentSpace.id,
+                    target
+                  })}
+                onCreateSkill={createSkill}
+              />
+            </Settings.Row>
+          </div>
+        {/if}
+
         <Settings.Row
           title={m.attachments()}
           description={m.attach_further_instructions()}
@@ -405,15 +472,6 @@
           ></AssistantSettingsAttachments>
         </Settings.Row>
 
-        <!-- Knowledge and MCP are mutually exclusive. Only disable knowledge when MCP is active
-             AND no knowledge exists. If both somehow exist (legacy data), allow editing both
-             so the user can remove one to resolve the conflict. -->
-        {@const hasAnyKnowledge =
-          ($update.groups?.length ?? 0) > 0 ||
-          ($update.websites?.length ?? 0) > 0 ||
-          ($update.integration_knowledge_list?.length ?? 0) > 0}
-        {@const hasAnyMCP = ($update.mcp_servers?.length ?? 0) > 0}
-        {@const knowledgeDisabledByMCP = hasAnyMCP && !hasAnyKnowledge}
         <Settings.Row
           title={m.knowledge()}
           description={m.select_additional_knowledge()}
@@ -426,15 +484,7 @@
             discardChanges("integration_knowledge_list");
           }}
         >
-          {#if knowledgeDisabledByMCP}
-            <p
-              class="label-warning border-label-default bg-label-dimmer text-label-stronger mb-2 rounded-md border px-2 py-1 text-sm"
-            >
-              <span class="font-bold">{m.warning()}:&nbsp;</span
-              >{m.knowledge_disabled_when_mcp_active()}
-            </p>
-          {/if}
-          <div class={knowledgeDisabledByMCP ? "pointer-events-none opacity-50" : ""}>
+          <div>
             <SelectKnowledge
               originMode="personal"
               bind:selectedWebsites={$update.websites}
@@ -456,15 +506,7 @@
             discardChanges("integration_knowledge_list");
           }}
         >
-          {#if knowledgeDisabledByMCP}
-            <p
-              class="label-warning border-label-default bg-label-dimmer text-label-stronger mb-2 rounded-md border px-2 py-1 text-sm"
-            >
-              <span class="font-bold">{m.warning()}:&nbsp;</span
-              >{m.knowledge_disabled_when_mcp_active()}
-            </p>
-          {/if}
-          <div class={knowledgeDisabledByMCP ? "pointer-events-none opacity-50" : ""}>
+          <div>
             <SelectKnowledge
               originMode="organization"
               bind:selectedWebsites={$update.websites}
@@ -535,15 +577,68 @@
             ></SelectModelSpecificSettings>
           </Settings.Row>
         {/if}
+
+        {#if data.settings.file_references_enabled}
+          <Settings.Row
+            title={m.inline_file_text()}
+            description={m.inline_file_text_description()}
+            hasChanges={$currentChanges.diff.inline_file_text !== undefined}
+            revertFn={() => {
+              discardChanges("inline_file_text");
+            }}
+          >
+            <svelte:fragment slot="title">
+              {#if objectStorageMissing}
+                <Badge variant="secondary" class="ml-2">{m.inline_file_text_locked()}</Badge>
+              {/if}
+            </svelte:fragment>
+            <svelte:fragment slot="description">
+              {#if objectStorageMissing}
+                <p
+                  class="label-warning border-label-default bg-label-dimmer text-label-stronger mt-2.5 rounded-md border px-2 py-1 text-sm"
+                >
+                  <span class="font-bold">{m.hint()}:&nbsp;</span
+                  >{m.inline_file_text_object_storage_hint()}
+                  {#if canConfigureStorage}
+                    <a href={resolve("/admin/storage")} class="underline"
+                      >{m.configure_object_storage()}</a
+                    >
+                  {/if}
+                </p>
+              {/if}
+            </svelte:fragment>
+            <div class="border-default flex h-14 border-b py-2">
+              <Input.RadioSwitch
+                bind:value={$update.inline_file_text}
+                disabled={objectStorageMissing}
+                labelTrue={m.enable()}
+                labelFalse={m.disable()}
+              ></Input.RadioSwitch>
+            </div>
+          </Settings.Row>
+        {/if}
+
+        <Settings.Row
+          title={m.knowledge_mode()}
+          description={m.knowledge_mode_description()}
+          hasChanges={$currentChanges.diff.knowledge_mode !== undefined}
+          revertFn={() => {
+            discardChanges("knowledge_mode");
+          }}
+        >
+          <div class="border-default flex h-14 border-b py-2">
+            <Input.RadioSwitch
+              bind:value={
+                () => $update.knowledge_mode !== "inject",
+                (v) => ($update.knowledge_mode = v ? "tool" : "inject")
+              }
+              labelTrue={m.knowledge_mode_tool()}
+              labelFalse={m.knowledge_mode_inject()}
+            ></Input.RadioSwitch>
+          </div>
+        </Settings.Row>
       </Settings.Group>
 
-      <!-- Same mutual exclusivity logic as above: only disable MCP when knowledge
-           is active AND no MCP exists. If both exist (legacy data), keep both editable. -->
-      {@const mcpDisabledByKnowledge =
-        (($update.groups?.length ?? 0) > 0 ||
-          ($update.websites?.length ?? 0) > 0 ||
-          ($update.integration_knowledge_list?.length ?? 0) > 0) &&
-        ($update.mcp_servers?.length ?? 0) === 0}
       <Settings.Group title={m.mcp_servers()}>
         <Settings.Row
           title={m.mcp_servers()}
@@ -555,14 +650,6 @@
             discardChanges("mcp_tools");
           }}
         >
-          {#if mcpDisabledByKnowledge}
-            <p
-              class="label-warning border-label-default bg-label-dimmer text-label-stronger mb-2 rounded-md border px-2 py-1 text-sm"
-            >
-              <span class="font-bold">{m.warning()}:&nbsp;</span
-              >{m.mcp_disabled_when_knowledge_active()}
-            </p>
-          {/if}
           {#if mcpEnforced}
             <!-- Policy GRANTs these servers to the personal assistant; they are
                  applied automatically at ask-time, so the picker is read-only. -->
@@ -579,7 +666,7 @@
               {m.governance_assistant_mcp_provided_by_policy()}
             </p>
           {:else}
-            <div class={mcpDisabledByKnowledge ? "pointer-events-none opacity-50" : ""}>
+            <div>
               <SelectMCPServers
                 bind:selectedMCPServers={$update.mcp_servers}
                 bind:selectedMCPTools={$update.mcp_tools}

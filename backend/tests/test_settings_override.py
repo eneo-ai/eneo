@@ -37,10 +37,6 @@ def test_settings_can_be_overridden():
         postgres_db="test_db",
         redis_host="test_redis",
         redis_port=6379,
-        upload_file_to_session_max_size=1000,
-        upload_image_to_session_max_size=500,
-        upload_max_file_size=2000,
-        transcription_max_file_size=1500,
         api_prefix="/api",
         api_key_length=32,
         api_key_header_name="X-API-Key",
@@ -80,10 +76,6 @@ def test_settings_reset():
         postgres_db="test",
         redis_host="test",
         redis_port=6379,
-        upload_file_to_session_max_size=1000,
-        upload_image_to_session_max_size=500,
-        upload_max_file_size=2000,
-        transcription_max_file_size=1500,
         api_prefix="/api",
         api_key_length=32,
         api_key_header_name="X-API-Key",
@@ -120,10 +112,6 @@ def test_settings_database_url_construction():
         postgres_db="mydb",
         redis_host="redis",
         redis_port=6379,
-        upload_file_to_session_max_size=1000,
-        upload_image_to_session_max_size=500,
-        upload_max_file_size=2000,
-        transcription_max_file_size=1500,
         api_prefix="/api",
         api_key_length=32,
         api_key_header_name="X-API-Key",
@@ -160,10 +148,6 @@ def _set_minimal_settings_env(monkeypatch: pytest.MonkeyPatch) -> None:
         "POSTGRES_DB": "test",
         "REDIS_HOST": "localhost",
         "REDIS_PORT": "6379",
-        "UPLOAD_FILE_TO_SESSION_MAX_SIZE": "1000",
-        "UPLOAD_IMAGE_TO_SESSION_MAX_SIZE": "500",
-        "UPLOAD_MAX_FILE_SIZE": "2000",
-        "TRANSCRIPTION_MAX_FILE_SIZE": "1500",
         "MAX_IN_QUESTION": "100",
         "API_PREFIX": "/api",
         "API_KEY_LENGTH": "32",
@@ -179,6 +163,15 @@ def _set_minimal_settings_env(monkeypatch: pytest.MonkeyPatch) -> None:
     }
     for key, value in values.items():
         monkeypatch.setenv(key, value)
+
+
+def test_business_upload_limits_are_not_runtime_settings() -> None:
+    assert {
+        "upload_file_to_session_max_size",
+        "upload_image_to_session_max_size",
+        "upload_max_file_size",
+        "transcription_max_file_size",
+    }.isdisjoint(Settings.model_fields)
 
 
 def test_federation_enabled_env_takes_precedence(

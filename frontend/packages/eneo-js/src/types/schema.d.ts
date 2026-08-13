@@ -850,6 +850,114 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/settings/skills/{skill_id}/execution-block": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get an organisation Skill execution block
+     * @description Return the active tenant-scoped execution block for one organisation Skill.
+     */
+    get: operations["get_skill_execution_block_api_v1_settings_skills__skill_id__execution_block_get"];
+    put?: never;
+    /**
+     * Block an organisation Skill from execution
+     * @description Block every retained version of an organisation Skill from subsequent runtime composition without changing its bindings or history.
+     */
+    post: operations["block_skill_execution_api_v1_settings_skills__skill_id__execution_block_post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/settings/skills/{skill_id}/execution-block/unblock": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Unblock an organisation Skill
+     * @description Release the exact active execution block reviewed by the tenant administrator.
+     */
+    post: operations["unblock_skill_execution_api_v1_settings_skills__skill_id__execution_block_unblock_post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/settings/skills/runtime-policy": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get the tenant Skill runtime policy
+     * @description Return the stored organisation Skill runtime policy: selective-activation enablement, attachment limit, context share, and the per-turn activation ceiling.
+     */
+    get: operations["get_skill_runtime_policy_api_v1_settings_skills_runtime_policy_get"];
+    /**
+     * Replace the tenant Skill runtime policy
+     * @description Replace all stored Skill runtime policy values. The per-turn activation ceiling can be lowered but never raised past the platform bound.
+     */
+    put: operations["update_skill_runtime_policy_api_v1_settings_skills_runtime_policy_put"];
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/settings/skills/runtime-policy/reset": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Restore the seeded Skill runtime policy defaults
+     * @description Restore the product-standard seeded values, which may differ from a deployment's migrated environment seed.
+     */
+    post: operations["reset_skill_runtime_policy_api_v1_settings_skills_runtime_policy_reset_post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/settings/skills/runtime-policy/model-projections": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get per-model Skill context allowances
+     * @description Return the read-only policy allowance for each accessible completion model: input window, native tool-calling support, and the token allowance produced by the configured context share.
+     */
+    get: operations["get_skill_runtime_model_projections_api_v1_settings_skills_runtime_policy_model_projections_get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/settings/templates": {
     parameters: {
       query?: never;
@@ -1279,6 +1387,26 @@ export interface paths {
      * @description Chat with an assistant or group chat; starts or continues a conversation and streams the response as Server-Sent Events when stream is true.
      */
     post: operations["chat_api_v1_conversations__post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/conversations/{session_id}/messages/{message_id}/diagnostics/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get Chat Turn Diagnostics
+     * @description Get body-free Skill activation diagnostics for one chat turn.
+     */
+    get: operations["get_chat_turn_diagnostics_api_v1_conversations__session_id__messages__message_id__diagnostics__get"];
+    put?: never;
+    post?: never;
     delete?: never;
     options?: never;
     head?: never;
@@ -3728,6 +3856,26 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/files/{id}/deletion-preview/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get File Deletion Preview
+     * @description Preview whether deleting this File would remove active chat, Assistant, App, or App-run attachments.
+     */
+    get: operations["get_file_deletion_preview_api_v1_files__id__deletion_preview__get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/files/{id}/signed-url/": {
     parameters: {
       query?: never;
@@ -3751,6 +3899,26 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/files/{id}/original/signed-url/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Generate a signed URL for the exact original file
+     * @description Checks ownership and exact-original availability, then returns a short-lived URL that cannot be used for a processing download.
+     */
+    post: operations["generate_original_signed_url_api_v1_files__id__original_signed_url__post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/files/{id}/download/": {
     parameters: {
       query?: never;
@@ -3764,6 +3932,23 @@ export interface paths {
      *         No authentication is required, but the token must be valid and not expired.
      */
     get: operations["download_file_signed_api_v1_files__id__download__get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/files/{id}/original/download/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Download the exact original file using a signed URL */
+    get: operations["download_original_file_signed_api_v1_files__id__original_download__get"];
     put?: never;
     post?: never;
     delete?: never;
@@ -3807,7 +3992,7 @@ export interface paths {
     put?: never;
     /**
      * Upload icon
-     * @description Upload icon image (PNG, JPEG, WebP). Max 256 KB. Returns icon ID.
+     * @description Upload an icon image (PNG, JPEG, WebP) within the active deployment image limit. Returns the icon ID.
      */
     post: operations["create_icon_api_v1_icons__post"];
     delete?: never;
@@ -5694,6 +5879,664 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/admin/object-content-policy": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get Deployment Policy
+     * @description Get the deployment-wide new-write storage target, upload limits, and sanitized capability facts.
+     */
+    get: operations["get_deployment_policy_api_v1_admin_object_content_policy_get"];
+    /**
+     * Replace Deployment Policy
+     * @description Replace the deployment-wide new-write storage target and upload limits using the expected revision. The target affects eligible new writes only and never moves existing content.
+     */
+    put: operations["replace_deployment_policy_api_v1_admin_object_content_policy_put"];
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/admin/object-content-inventory": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get Object Content Inventory
+     * @description Get bounded deployment-wide object-content inventory facts. Requires the storage administration permission (held by the Owner role by default).
+     */
+    get: operations["get_object_content_inventory_api_v1_admin_object_content_inventory_get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/admin/object-content-moves": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get Object Content Moves
+     * @description Get bounded aggregate progress and typed failure reasons for explicit object-content moves. Requires the storage administration permission (held by the Owner role by default).
+     */
+    get: operations["get_object_content_moves_api_v1_admin_object_content_moves_get"];
+    put?: never;
+    /**
+     * Queue Object Content Moves
+     * @description Queue one bounded page of eligible content for an explicit storage move. This never starts an automatic fleet migration.
+     */
+    post: operations["queue_object_content_moves_api_v1_admin_object_content_moves_post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/admin/object-content-moves/pause": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    /**
+     * Set Object Content Moves Paused
+     * @description Pause or resume new object-content move claims using the expected deployment-policy revision.
+     */
+    put: operations["set_object_content_moves_paused_api_v1_admin_object_content_moves_pause_put"];
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/admin/object-store-connection": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get Object Store Connection
+     * @description Get the deployment-wide S3-compatible destination without returning credentials or internal object identifiers. Requires the storage administration permission (held by the Owner role by default).
+     */
+    get: operations["get_object_store_connection_api_v1_admin_object_store_connection_get"];
+    put?: never;
+    /**
+     * Create Object Store Connection
+     * @description Test and save the first deployment-wide S3-compatible destination. This does not select it for new writes or move existing content.
+     */
+    post: operations["create_object_store_connection_api_v1_admin_object_store_connection_post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/admin/object-store-connection/credentials": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    /**
+     * Rotate Object Store Credentials
+     * @description Test and replace credentials for the configured destination without changing its endpoint, bucket, signing region, or addressing style.
+     */
+    put: operations["rotate_object_store_credentials_api_v1_admin_object_store_connection_credentials_put"];
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/admin/object-store-connection/destination": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Replace Object Store Destination
+     * @description Switch the deployment to an S3-compatible destination the operator has already filled with a byte-for-byte copy of the content namespace. Refused while any write could still reach a destination. The previous destination is archived for switch-back; no bucket is ever deleted.
+     */
+    post: operations["replace_object_store_destination_api_v1_admin_object_store_connection_destination_post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/admin/object-store-connection/destination/switch-back": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Switch Back Object Store Destination
+     * @description Return to the archived previous destination using its stored credentials. Subject to the same write-quiescence preconditions as a forward switch.
+     */
+    post: operations["switch_back_object_store_destination_api_v1_admin_object_store_connection_destination_switch_back_post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/admin/object-store-connection/previous": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post?: never;
+    /**
+     * Forget Previous Object Store Destination
+     * @description Forget the archived previous destination. The bucket itself is operator-owned and is never touched; decommission it at the provider when it is no longer needed.
+     */
+    delete: operations["forget_previous_object_store_destination_api_v1_admin_object_store_connection_previous_delete"];
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/admin/object-store-connection/pending": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post?: never;
+    /**
+     * Abandon Pending Object Store Destination
+     * @description Abandon the pending destination attempt an interrupted or ambiguous change left behind. Releases its remote marker and clears the temporary records; the bucket itself is operator-owned and its content is never touched.
+     */
+    delete: operations["abandon_pending_object_store_destination_api_v1_admin_object_store_connection_pending_delete"];
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/spaces/{space_id}/skills/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** List Skills */
+    get: operations["list_skills_api_v1_spaces__space_id__skills__get"];
+    put?: never;
+    /**
+     * Create Skill
+     * @description Create a Space-owned Skill with its first immutable revision.
+     */
+    post: operations["create_skill_api_v1_spaces__space_id__skills__post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/spaces/{space_id}/skills/{skill_id}/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Get Skill */
+    get: operations["get_skill_api_v1_spaces__space_id__skills__skill_id___get"];
+    put?: never;
+    post?: never;
+    /**
+     * Delete Skill
+     * @description Delete an unbound Skill and all of its revisions.
+     */
+    delete: operations["delete_skill_api_v1_spaces__space_id__skills__skill_id___delete"];
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/spaces/{space_id}/skills/{skill_id}/revisions/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * List Skill Revisions
+     * @description List immutable Skill revision summaries using a stable cursor.
+     */
+    get: operations["list_skill_revisions_api_v1_spaces__space_id__skills__skill_id__revisions__get"];
+    put?: never;
+    /**
+     * Create Skill Revision
+     * @description Create the next immutable Skill revision; identical current content is a no-op.
+     */
+    post: operations["create_skill_revision_api_v1_spaces__space_id__skills__skill_id__revisions__post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/spaces/{space_id}/skills/{skill_id}/revisions/{revision_id}/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get Skill Revision
+     * @description Get one immutable Skill revision for review.
+     */
+    get: operations["get_skill_revision_api_v1_spaces__space_id__skills__skill_id__revisions__revision_id___get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/spaces/{space_id}/skills/{skill_id}/revisions/{source_revision_id}/restore/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Restore Skill Revision
+     * @description Copy an immutable historical revision into the next revision. Existing revision-pinned bindings are unchanged.
+     */
+    post: operations["restore_skill_revision_api_v1_spaces__space_id__skills__skill_id__revisions__source_revision_id__restore__post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/spaces/{space_id}/skills/{skill_id}/active/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    /**
+     * Set Skill Active
+     * @description Activate or deactivate a Skill. Existing exact-revision bindings remain valid.
+     */
+    patch: operations["set_skill_active_api_v1_spaces__space_id__skills__skill_id__active__patch"];
+    trace?: never;
+  };
+  "/api/v1/spaces/{space_id}/assistants/{assistant_id}/skills/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** List Assistant Skill Bindings */
+    get: operations["list_assistant_skill_bindings_api_v1_spaces__space_id__assistants__assistant_id__skills__get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/spaces/{space_id}/assistants/{assistant_id}/skills/configuration/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Get Assistant Skill Configuration */
+    get: operations["get_assistant_skill_configuration_api_v1_spaces__space_id__assistants__assistant_id__skills_configuration__get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/spaces/{space_id}/apps/{app_id}/skills/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** List App Skill Bindings */
+    get: operations["list_app_skill_bindings_api_v1_spaces__space_id__apps__app_id__skills__get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/skills/catalogue/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * List Catalogue
+     * @description List approved Skills in the current tenant's catalogue.
+     */
+    get: operations["list_catalogue_api_v1_skills_catalogue__get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/skills/catalogue/{skill_id}/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get Catalogue Skill
+     * @description Open the exact approved revision of a catalogue Skill.
+     */
+    get: operations["get_catalogue_skill_api_v1_skills_catalogue__skill_id___get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/skills/organization/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * List Organization Skills
+     * @description List organisation Skill drafts and publication status.
+     */
+    get: operations["list_organization_skills_api_v1_skills_organization__get"];
+    put?: never;
+    /**
+     * Create Organization Skill
+     * @description Create an organisation Skill draft.
+     */
+    post: operations["create_organization_skill_api_v1_skills_organization__post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/skills/organization/{skill_id}/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Get Organization Skill */
+    get: operations["get_organization_skill_api_v1_skills_organization__skill_id___get"];
+    put?: never;
+    post?: never;
+    /**
+     * Delete Organization Skill
+     * @description Delete an eligible organisation Skill draft.
+     */
+    delete: operations["delete_organization_skill_api_v1_skills_organization__skill_id___delete"];
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/skills/organization/{skill_id}/adoption/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get Organization Skill Adoption
+     * @description List structural Assistant and App adoption of an organisation Skill, with full-result revision totals.
+     */
+    get: operations["get_organization_skill_adoption_api_v1_skills_organization__skill_id__adoption__get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/skills/organization/{skill_id}/revisions/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * List Organization Skill Revisions
+     * @description List immutable revisions of an organisation Skill.
+     */
+    get: operations["list_organization_skill_revisions_api_v1_skills_organization__skill_id__revisions__get"];
+    put?: never;
+    /**
+     * Create Organization Skill Revision
+     * @description Create the next immutable organisation Skill revision; identical current content is a no-op.
+     */
+    post: operations["create_organization_skill_revision_api_v1_skills_organization__skill_id__revisions__post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/skills/organization/{skill_id}/revisions/{revision_id}/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get Organization Skill Revision
+     * @description Open one immutable organisation Skill revision.
+     */
+    get: operations["get_organization_skill_revision_api_v1_skills_organization__skill_id__revisions__revision_id___get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/skills/organization/{skill_id}/revisions/{source_revision_id}/restore/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Restore Organization Skill Revision
+     * @description Restore historical content as the next immutable revision.
+     */
+    post: operations["restore_organization_skill_revision_api_v1_skills_organization__skill_id__revisions__source_revision_id__restore__post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/skills/organization/{skill_id}/publish/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Publish Organization Skill
+     * @description Publish the exact organisation Skill revision just reviewed.
+     */
+    post: operations["publish_organization_skill_api_v1_skills_organization__skill_id__publish__post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/skills/organization/{skill_id}/personal-chat/advance/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Advance Personal Chat Binding
+     * @description Move the Personal Chat binding of this Skill to its currently published revision. Guarded by the pinned revision the administrator reviewed, so a concurrent binding change is refused instead of overwritten.
+     */
+    post: operations["advance_personal_chat_binding_api_v1_skills_organization__skill_id__personal_chat_advance__post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/skills/organization/{skill_id}/assistants/advance/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Advance Assistant Bindings
+     * @description Move one bounded chunk of Assistant bindings to the reviewed published Skill revision.
+     */
+    post: operations["advance_assistant_bindings_api_v1_skills_organization__skill_id__assistants_advance__post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/skills/organization/{skill_id}/apps/advance/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Advance App Bindings
+     * @description Move one bounded chunk of App bindings to the reviewed published Skill revision. Existing queued App runs keep their retained revision.
+     */
+    post: operations["advance_app_bindings_api_v1_skills_organization__skill_id__apps_advance__post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/skills/organization/{skill_id}/unpublish/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Unpublish Organization Skill
+     * @description Remove an organisation Skill from new catalogue use.
+     */
+    post: operations["unpublish_organization_skill_api_v1_skills_organization__skill_id__unpublish__post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/integrations/sharepoint/webhook/": {
     parameters: {
       query?: never;
@@ -7319,11 +8162,21 @@ export interface components {
       | "app_executed"
       | "app_published"
       | "app_run_deleted"
+      | "skill_created"
+      | "skill_revision_created"
+      | "skill_revision_restored"
+      | "skill_status_changed"
+      | "skill_published"
+      | "skill_unpublished"
+      | "skill_bindings_advanced"
+      | "skill_deleted"
       | "session_started"
       | "session_ended"
       | "tool_approval_submitted"
       | "file_uploaded"
       | "file_deleted"
+      | "file_original_download_link_created"
+      | "file_signed_url_minted"
       | "website_created"
       | "website_updated"
       | "website_deleted"
@@ -8034,6 +8887,38 @@ export interface components {
       /** Hash Version */
       hash_version: string;
     };
+    /** AppFleetAdvanceCountsPublic */
+    AppFleetAdvanceCountsPublic: {
+      /** Advanced */
+      advanced: number;
+      /** Concurrent Change */
+      concurrent_change: number;
+      /** Incompatible */
+      incompatible: number;
+    };
+    /** AppFleetAdvancePublic */
+    AppFleetAdvancePublic: {
+      /**
+       * Run Id
+       * Format: uuid
+       */
+      run_id: string;
+      /** Next Cursor */
+      next_cursor: string | null;
+      counts: components["schemas"]["AppFleetAdvanceCountsPublic"];
+      /** Outcomes */
+      outcomes: components["schemas"]["AppPinAdvanceOutcomePublic"][];
+    };
+    /** AppFleetAdvanceRequest */
+    AppFleetAdvanceRequest: {
+      /**
+       * Expected Published Revision Id
+       * Format: uuid
+       */
+      expected_published_revision_id: string;
+      /** Cursor */
+      cursor?: string | null;
+    };
     /** AppInTemplatePublic */
     AppInTemplatePublic: {
       /** Name */
@@ -8048,6 +8933,26 @@ export interface components {
       input_description: string | null;
       /** Input Type */
       input_type: string;
+    };
+    /**
+     * AppPinAdvanceIncompatibleReason
+     * @enum {string}
+     */
+    AppPinAdvanceIncompatibleReason: "context_window";
+    /**
+     * AppPinAdvanceOutcome
+     * @enum {string}
+     */
+    AppPinAdvanceOutcome: "advanced" | "concurrent_change" | "incompatible";
+    /** AppPinAdvanceOutcomePublic */
+    AppPinAdvanceOutcomePublic: {
+      /**
+       * App Id
+       * Format: uuid
+       */
+      app_id: string;
+      outcome: components["schemas"]["AppPinAdvanceOutcome"];
+      reason?: components["schemas"]["AppPinAdvanceIncompatibleReason"] | null;
     };
     /** AppPublic */
     AppPublic: {
@@ -8111,6 +9016,8 @@ export interface components {
       /** Finished At */
       finished_at: string | null;
       user: components["schemas"]["UserSparse"];
+      /** Skill Provenance */
+      skill_provenance: components["schemas"]["SkillExecutionReference"][];
       /** Output */
       output: string | null;
     };
@@ -8130,6 +9037,8 @@ export interface components {
       /** Finished At */
       finished_at: string | null;
       user: components["schemas"]["UserSparse"];
+      /** Skill Provenance */
+      skill_provenance: components["schemas"]["SkillExecutionReference"][];
     };
     /** AppSparse */
     AppSparse: {
@@ -8389,6 +9298,8 @@ export interface components {
        * @description Icon ID referencing an uploaded icon. Set to null to remove.
        */
       icon_id?: string | null;
+      /** Skill Bindings */
+      skill_bindings?: components["schemas"]["SkillBindingReferenceInput"][] | null;
     };
     /** Applications */
     Applications: {
@@ -8426,6 +9337,13 @@ export interface components {
     };
     /** AskResponse */
     AskResponse: {
+      /** Id */
+      id?: string | null;
+      /** Created At */
+      created_at?: string | null;
+      /** Updated At */
+      updated_at?: string | null;
+      completion_model?: components["schemas"]["CompletionModelPublic"] | null;
       /**
        * Session Id
        * Format: uuid
@@ -8525,6 +9443,38 @@ export interface components {
        */
       completion_model?: components["schemas"]["ModelId"] | null;
     };
+    /** AssistantFleetAdvanceCountsPublic */
+    AssistantFleetAdvanceCountsPublic: {
+      /** Advanced */
+      advanced: number;
+      /** Concurrent Change */
+      concurrent_change: number;
+      /** Incompatible */
+      incompatible: number;
+    };
+    /** AssistantFleetAdvancePublic */
+    AssistantFleetAdvancePublic: {
+      /**
+       * Run Id
+       * Format: uuid
+       */
+      run_id: string;
+      /** Next Cursor */
+      next_cursor: string | null;
+      counts: components["schemas"]["AssistantFleetAdvanceCountsPublic"];
+      /** Outcomes */
+      outcomes: components["schemas"]["AssistantPinAdvanceOutcomePublic"][];
+    };
+    /** AssistantFleetAdvanceRequest */
+    AssistantFleetAdvanceRequest: {
+      /**
+       * Expected Published Revision Id
+       * Format: uuid
+       */
+      expected_published_revision_id: string;
+      /** Cursor */
+      cursor?: string | null;
+    };
     /** AssistantGuard */
     AssistantGuard: {
       /**
@@ -8586,6 +9536,26 @@ export interface components {
        * Format: date-time
        */
       created_at: string;
+    };
+    /**
+     * AssistantPinAdvanceIncompatibleReason
+     * @enum {string}
+     */
+    AssistantPinAdvanceIncompatibleReason: "activation_unavailable" | "context_window";
+    /**
+     * AssistantPinAdvanceOutcome
+     * @enum {string}
+     */
+    AssistantPinAdvanceOutcome: "advanced" | "concurrent_change" | "incompatible";
+    /** AssistantPinAdvanceOutcomePublic */
+    AssistantPinAdvanceOutcomePublic: {
+      /**
+       * Assistant Id
+       * Format: uuid
+       */
+      assistant_id: string;
+      outcome: components["schemas"]["AssistantPinAdvanceOutcome"];
+      reason?: components["schemas"]["AssistantPinAdvanceIncompatibleReason"] | null;
     };
     /** AssistantPublic */
     AssistantPublic: {
@@ -8654,6 +9624,13 @@ export interface components {
        */
       insight_enabled: boolean;
       /**
+       * Inline File Text
+       * @description Whether attached file text is inlined into the prompt (True) or the file is surfaced to the model as a signed URL only (False).
+       */
+      inline_file_text: boolean;
+      /** @description How attached knowledge reaches the model: 'tool' (searchable MCP tool, called on demand) or 'inject' (retrieved and packed into the prompt on every turn). */
+      knowledge_mode: components["schemas"]["KnowledgeMode"];
+      /**
        * Data Retention Days
        * @description Number of days to retain data for this assistant
        */
@@ -8673,6 +9650,77 @@ export interface components {
        * @default false
        */
       is_help_assistant?: boolean;
+    };
+    /** AssistantSkillBindingInput */
+    AssistantSkillBindingInput: {
+      /**
+       * Skill Id
+       * Format: uuid
+       */
+      skill_id: string;
+      /**
+       * Skill Revision Id
+       * Format: uuid
+       */
+      skill_revision_id: string;
+      /** Activation Mode */
+      activation_mode?: components["schemas"]["SkillActivationMode"];
+    };
+    /** AssistantSkillBindingSummary */
+    AssistantSkillBindingSummary: {
+      /**
+       * Skill Id
+       * Format: uuid
+       */
+      skill_id: string;
+      /**
+       * Skill Revision Id
+       * Format: uuid
+       */
+      skill_revision_id: string;
+      /** Attachable Revision Id */
+      attachable_revision_id: string | null;
+      /** Slug */
+      slug: string;
+      /** Revision Number */
+      revision_number: number;
+      /** Attachable Revision Number */
+      attachable_revision_number: number | null;
+      /** Display Name */
+      display_name: string;
+      /** Description */
+      description: string;
+      /** Content Digest */
+      content_digest: string;
+      /** Position */
+      position: number;
+      /** Is Active */
+      is_active: boolean;
+      source: components["schemas"]["SkillBindingSource"];
+      /** Execution Blocked */
+      execution_blocked: boolean;
+      activation_mode: components["schemas"]["SkillActivationMode"];
+    };
+    /** AssistantSkillConfigurationPublic */
+    AssistantSkillConfigurationPublic: {
+      /** Bindings */
+      bindings: components["schemas"]["AssistantSkillBindingSummary"][];
+      runtime: components["schemas"]["AssistantSkillRuntimeSummary"] | null;
+    };
+    /** AssistantSkillRuntimeSummary */
+    AssistantSkillRuntimeSummary: {
+      /**
+       * Effective Model Id
+       * Format: uuid
+       */
+      effective_model_id: string;
+      effective_mode: components["schemas"]["SkillTurnEffectiveMode"];
+      fallback_reason: components["schemas"]["SkillActivationFallbackReason"] | null;
+      /** Skill Context Tokens */
+      skill_context_tokens: number;
+      /** Skill Context Token Limit */
+      skill_context_token_limit: number;
+      token_count_source: components["schemas"]["TokenCountSource"];
     };
     /** AssistantSparse */
     AssistantSparse: {
@@ -9193,6 +10241,15 @@ export interface components {
       /** Code Verifier */
       code_verifier?: string | null;
     };
+    /** CapabilityPublic */
+    CapabilityPublic: {
+      target: components["schemas"]["StorageKind"];
+      /** Configured */
+      configured: boolean;
+      /** Selectable */
+      selectable: boolean;
+      readiness_code: components["schemas"]["ObjectContentReadinessCode"];
+    };
     /**
      * CategoryConfig
      * @description Category configuration for API responses.
@@ -9266,6 +10323,23 @@ export interface components {
        * @description New enabled state
        */
       enabled: boolean;
+    };
+    /**
+     * ChatTurnDiagnostics
+     * @description Body-free Skill activation diagnostics for one persisted chat turn.
+     */
+    ChatTurnDiagnostics: {
+      /**
+       * Session Id
+       * Format: uuid
+       */
+      session_id: string;
+      /**
+       * Message Id
+       * Format: uuid
+       */
+      message_id: string;
+      skill_activation: components["schemas"]["SkillActivationEvidenceV1"] | null;
     };
     /** CollectionMetadata */
     CollectionMetadata: {
@@ -9732,10 +10806,41 @@ export interface components {
       security_classification?: components["schemas"]["ModelId"] | null;
     };
     /**
+     * ConstrainingSource
+     * @enum {string}
+     */
+    ConstrainingSource: "admin_policy" | "operator_ceiling";
+    /**
      * ContentDisposition
      * @enum {string}
      */
     ContentDisposition: "attachment" | "inline";
+    /**
+     * ContentMoveFailureCode
+     * @enum {string}
+     */
+    ContentMoveFailureCode:
+      | "store_unavailable"
+      | "target_too_large"
+      | "source_missing"
+      | "source_corrupt"
+      | "target_corrupt"
+      | "content_ineligible";
+    /**
+     * ContentMoveState
+     * @enum {string}
+     */
+    ContentMoveState: "pending" | "target_verified" | "failed";
+    /**
+     * ContentOwner
+     * @enum {string}
+     */
+    ContentOwner: "file_content" | "icon" | "knowledge_file" | "other";
+    /**
+     * ContentState
+     * @enum {string}
+     */
+    ContentState: "pending" | "available" | "retained" | "failed" | "delete_pending" | "tombstoned";
     /**
      * ContinueTurnRequest
      * @description Body for ``POST /runs/{run_id}/turns/`` — follow-up turn.
@@ -10249,6 +11354,48 @@ export interface components {
        */
       readonly count: number;
     };
+    /** CursorPaginatedResponse[SkillRevisionSummaryPublic] */
+    CursorPaginatedResponse_SkillRevisionSummaryPublic_: {
+      /**
+       * Items
+       * @description List of items returned in the response
+       */
+      items: components["schemas"]["SkillRevisionSummaryPublic"][];
+      /** Limit */
+      limit?: number | null;
+      /** Next Cursor */
+      next_cursor?: string | null;
+      /** Previous Cursor */
+      previous_cursor?: string | null;
+      /** Total Count */
+      total_count: number;
+      /**
+       * Count
+       * @description Number of items returned in the response
+       */
+      readonly count: number;
+    };
+    /** CursorPaginatedResponse[SkillSparse] */
+    CursorPaginatedResponse_SkillSparse_: {
+      /**
+       * Items
+       * @description List of items returned in the response
+       */
+      items: components["schemas"]["SkillSparse"][];
+      /** Limit */
+      limit?: number | null;
+      /** Next Cursor */
+      next_cursor?: string | null;
+      /** Previous Cursor */
+      previous_cursor?: string | null;
+      /** Total Count */
+      total_count: number;
+      /**
+       * Count
+       * @description Number of items returned in the response
+       */
+      readonly count: number;
+    };
     /** CursorPaginatedResponse[UserSparse] */
     CursorPaginatedResponse_UserSparse_: {
       /**
@@ -10363,6 +11510,13 @@ export interface components {
        */
       insight_enabled?: boolean;
       /**
+       * Inline File Text
+       * @default true
+       */
+      inline_file_text?: boolean;
+      /** @default inject */
+      knowledge_mode?: components["schemas"]["KnowledgeMode"];
+      /**
        * Data Retention Days
        * @description Number of days to retain data for this assistant
        */
@@ -10452,6 +11606,62 @@ export interface components {
        */
       deleted_keys: string[];
     };
+    /** DeploymentPolicyPauseUpdate */
+    DeploymentPolicyPauseUpdate: {
+      /** Expected Revision */
+      expected_revision: number;
+      /** Moves Paused */
+      moves_paused: boolean;
+    };
+    /** DeploymentPolicyPublic */
+    DeploymentPolicyPublic: {
+      policy: components["schemas"]["DeploymentPolicyPublicValues"];
+      /** Limits */
+      limits: components["schemas"]["UploadLimitProjection"][];
+      /** Capabilities */
+      capabilities: components["schemas"]["CapabilityPublic"][];
+    };
+    /** DeploymentPolicyPublicValues */
+    DeploymentPolicyPublicValues: {
+      /** Revision */
+      revision: number;
+      new_write_storage_target: components["schemas"]["StorageKind"];
+      /** Session File Limit Bytes */
+      session_file_limit_bytes: number;
+      /** Session Image Limit Bytes */
+      session_image_limit_bytes: number;
+      /** Knowledge File Limit Bytes */
+      knowledge_file_limit_bytes: number;
+      /** Transcription Audio Limit Bytes */
+      transcription_audio_limit_bytes: number;
+      /** Moves Paused */
+      moves_paused: boolean;
+      updated_by_actor: components["schemas"]["PolicyActor"];
+      /**
+       * Created At
+       * Format: date-time
+       */
+      created_at: string;
+      /**
+       * Updated At
+       * Format: date-time
+       */
+      updated_at: string;
+    };
+    /** DeploymentPolicyUpdate */
+    DeploymentPolicyUpdate: {
+      /** Expected Revision */
+      expected_revision: number;
+      new_write_storage_target: components["schemas"]["StorageKind"];
+      /** Session File Limit Bytes */
+      session_file_limit_bytes: number;
+      /** Session Image Limit Bytes */
+      session_image_limit_bytes: number;
+      /** Knowledge File Limit Bytes */
+      knowledge_file_limit_bytes: number;
+      /** Transcription Audio Limit Bytes */
+      transcription_audio_limit_bytes: number;
+    };
     /**
      * EffectiveConfigPublic
      * @description Frontend hint surface for personal-assistant governance.
@@ -10475,6 +11685,10 @@ export interface components {
       default_disabled_mcp_server_ids?: string[];
       /** Prompt Locked */
       prompt_locked: boolean;
+      /** Default Reasoning Effort */
+      default_reasoning_effort: string | null;
+      /** Reasoning Effort User Configurable */
+      reasoning_effort_user_configurable: boolean;
     };
     /** EmbeddingModelCreate */
     EmbeddingModelCreate: {
@@ -10828,6 +12042,7 @@ export interface components {
       | "assistant"
       | "space"
       | "app"
+      | "skill"
       | "file"
       | "website"
       | "tenant_settings"
@@ -10899,7 +12114,22 @@ export interface components {
       | 9038
       | 9039
       | 9040
-      | 9041;
+      | 9041
+      | 9042
+      | 9043
+      | 9044
+      | 9045
+      | 9046
+      | 9047
+      | 9048
+      | 9049
+      | 9050
+      | 9051
+      | 9052
+      | 9053
+      | 9054
+      | 9055
+      | 9056;
     /**
      * ExpiringKeySummaryItem
      * @description Lightweight summary of a single expiring API key.
@@ -11153,6 +12383,20 @@ export interface components {
        */
       status?: string;
     };
+    /** FileDeletionPreview */
+    FileDeletionPreview: {
+      /**
+       * File Id
+       * Format: uuid
+       */
+      file_id: string;
+      /** Can Delete */
+      can_delete: boolean;
+      /** Affected File Count */
+      affected_file_count: number;
+      /** Blockers */
+      blockers: components["schemas"]["FileUsageSummary"][];
+    };
     /** FilePublic */
     FilePublic: {
       /** Created At */
@@ -11174,12 +12418,28 @@ export interface components {
       transcription?: string | null;
       /** Token Count */
       token_count?: number | null;
+      /**
+       * Has Download Reference
+       * @default false
+       */
+      has_download_reference?: boolean;
     };
     /** FileRestrictions */
     FileRestrictions: {
       /** Accepted File Types */
       accepted_file_types: components["schemas"]["AcceptedFileType"][];
       limit: components["schemas"]["Limit"];
+    };
+    /**
+     * FileUsageKind
+     * @enum {string}
+     */
+    FileUsageKind: "chat_attachment" | "assistant_attachment" | "app_attachment" | "app_run_input";
+    /** FileUsageSummary */
+    FileUsageSummary: {
+      kind: components["schemas"]["FileUsageKind"];
+      /** Count */
+      count: number;
     };
     /** FormatLimit */
     FormatLimit: {
@@ -11222,6 +12482,8 @@ export interface components {
       models_restriction: components["schemas"]["ModelsRestrictionPublic"];
       mcp_restriction: components["schemas"]["McpRestrictionPublic"];
       prompt_enforcement: components["schemas"]["PromptEnforcementPublic"];
+      reasoning_policy: components["schemas"]["ReasoningPolicyPublic"];
+      skills: components["schemas"]["SkillsPolicyPublic"];
       /** Updated At */
       updated_at: string | null;
       /** Updated By User Id */
@@ -11232,6 +12494,8 @@ export interface components {
       models_restriction?: components["schemas"]["ModelsRestrictionInput"] | null;
       mcp_restriction?: components["schemas"]["McpRestrictionInput"] | null;
       prompt_enforcement?: components["schemas"]["PromptEnforcementInput"] | null;
+      reasoning_policy?: components["schemas"]["ReasoningPolicyInput"] | null;
+      skills?: components["schemas"]["SkillsPolicyInput"] | null;
     };
     /** GroupChatAssistantPublic */
     GroupChatAssistantPublic: {
@@ -11875,6 +13139,37 @@ export interface components {
      * @enum {string}
      */
     IntegrationType: "confluence" | "sharepoint";
+    /** InventoryPublic */
+    InventoryPublic: {
+      owner: components["schemas"]["ContentOwner"];
+      target: components["schemas"]["StorageKind"];
+      state: components["schemas"]["ContentState"];
+      /** Count */
+      count: number;
+      /** Bytes */
+      bytes: number;
+      /** Oldest Created At */
+      oldest_created_at: string | null;
+    };
+    /**
+     * JobFailureCode
+     * @enum {string}
+     */
+    JobFailureCode:
+      | "extraction_failed"
+      | "no_extractable_text"
+      | "encrypted"
+      | "corrupt"
+      | "unsupported_format"
+      | "processing_failed"
+      | "cancelled"
+      | "processing_interrupted"
+      | "invalid_job_payload"
+      | "quota_exceeded"
+      | "storage_limit_exceeded"
+      | "storage_unavailable"
+      | "storage_verification_failed"
+      | "knowledge_source_conflict";
     /** JobPublic */
     JobPublic: {
       /** Created At */
@@ -11894,6 +13189,7 @@ export interface components {
       result_location?: string | null;
       /** Finished At */
       finished_at?: string | null;
+      failure_code?: components["schemas"]["JobFailureCode"] | null;
     };
     /** Knowledge */
     Knowledge: {
@@ -11901,6 +13197,16 @@ export interface components {
       websites: components["schemas"]["PaginatedPermissions_WebsitePublic_"];
       integration_knowledge_list: components["schemas"]["PaginatedPermissions_IntegrationKnowledgePublic_"];
     };
+    /**
+     * KnowledgeMode
+     * @description How attached knowledge reaches the model.
+     *
+     *     TOOL exposes knowledge as a searchable MCP tool the model calls on demand;
+     *     INJECT retrieves on every turn and packs chunks into the prompt (legacy
+     *     behavior, also the runtime fallback for models without tool calling).
+     * @enum {string}
+     */
+    KnowledgeMode: "tool" | "inject";
     /** Limit */
     Limit: {
       /** Max Files */
@@ -11963,6 +13269,26 @@ export interface components {
       http_auth_config_schema?: {
         [key: string]: unknown;
       } | null;
+      /**
+       * Forward Identity
+       * @default false
+       */
+      forward_identity?: boolean;
+      /**
+       * Tool Catalog Max Count
+       * @default 256
+       */
+      tool_catalog_max_count?: number;
+      /**
+       * Tool Catalog Max Bytes
+       * @default 16777216
+       */
+      tool_catalog_max_bytes?: number;
+      /**
+       * Tool Definition Max Bytes
+       * @default 65536
+       */
+      tool_definition_max_bytes?: number;
       /** Tags */
       tags?: string[] | null;
       /** Icon Url */
@@ -12001,6 +13327,26 @@ export interface components {
       has_credentials: boolean;
       /** Credential Preview */
       credential_preview?: string | null;
+      /**
+       * Forward Identity
+       * @default false
+       */
+      forward_identity?: boolean;
+      /**
+       * Tool Catalog Max Count
+       * @default 256
+       */
+      tool_catalog_max_count?: number;
+      /**
+       * Tool Catalog Max Bytes
+       * @default 16777216
+       */
+      tool_catalog_max_bytes?: number;
+      /**
+       * Tool Definition Max Bytes
+       * @default 65536
+       */
+      tool_definition_max_bytes?: number;
       /** Tags */
       tags: string[] | null;
       /** Icon Url */
@@ -12066,6 +13412,26 @@ export interface components {
       has_credentials: boolean;
       /** Credential Preview */
       credential_preview?: string | null;
+      /**
+       * Forward Identity
+       * @default false
+       */
+      forward_identity?: boolean;
+      /**
+       * Tool Catalog Max Count
+       * @default 256
+       */
+      tool_catalog_max_count?: number;
+      /**
+       * Tool Catalog Max Bytes
+       * @default 16777216
+       */
+      tool_catalog_max_bytes?: number;
+      /**
+       * Tool Definition Max Bytes
+       * @default 65536
+       */
+      tool_definition_max_bytes?: number;
       /** Tags */
       tags: string[] | null;
       /** Icon Url */
@@ -12213,6 +13579,14 @@ export interface components {
       http_auth_config_schema?: {
         [key: string]: unknown;
       } | null;
+      /** Forward Identity */
+      forward_identity?: boolean | null;
+      /** Tool Catalog Max Count */
+      tool_catalog_max_count?: number | null;
+      /** Tool Catalog Max Bytes */
+      tool_catalog_max_bytes?: number | null;
+      /** Tool Definition Max Bytes */
+      tool_definition_max_bytes?: number | null;
       /** Tags */
       tags?: string[] | null;
       /** Icon Url */
@@ -12328,18 +13702,37 @@ export interface components {
        * @default []
        */
       tool_calls?: components["schemas"]["ToolCallInfo"][];
+      /** Skill Provenance */
+      skill_provenance?: components["schemas"]["SkillExecutionReference"][] | null;
       /** Reasoning */
       reasoning?: string | null;
       /**
        * Num Tokens Question
+       * @description Cumulative prompt tokens across all provider requests in the turn. Use context_prompt_tokens for context-window headroom.
        * @default 0
        */
       num_tokens_question?: number;
       /**
        * Num Tokens Answer
+       * @description Cumulative completion tokens across all provider responses in the turn. Use context_completion_tokens for context-window headroom.
        * @default 0
        */
       num_tokens_answer?: number;
+      /**
+       * Context Prompt Tokens
+       * @description Prompt tokens for the final provider request only. Null for rows saved before final-request usage was recorded.
+       */
+      context_prompt_tokens?: number | null;
+      /**
+       * Context Completion Tokens
+       * @description Completion tokens for the final provider response only. Null for rows saved before final-request usage was recorded.
+       */
+      context_completion_tokens?: number | null;
+      /**
+       * Skill Context Tokens
+       * @description Model-aware Skill-owned subset of context_prompt_tokens. Already included; do not add it to context usage again. Null for legacy rows.
+       */
+      skill_context_tokens?: number | null;
     };
     /** MessageLogging */
     MessageLogging: {
@@ -12373,18 +13766,37 @@ export interface components {
        * @default []
        */
       tool_calls?: components["schemas"]["ToolCallInfo"][];
+      /** Skill Provenance */
+      skill_provenance?: components["schemas"]["SkillExecutionReference"][] | null;
       /** Reasoning */
       reasoning?: string | null;
       /**
        * Num Tokens Question
+       * @description Cumulative prompt tokens across all provider requests in the turn. Use context_prompt_tokens for context-window headroom.
        * @default 0
        */
       num_tokens_question?: number;
       /**
        * Num Tokens Answer
+       * @description Cumulative completion tokens across all provider responses in the turn. Use context_completion_tokens for context-window headroom.
        * @default 0
        */
       num_tokens_answer?: number;
+      /**
+       * Context Prompt Tokens
+       * @description Prompt tokens for the final provider request only. Null for rows saved before final-request usage was recorded.
+       */
+      context_prompt_tokens?: number | null;
+      /**
+       * Context Completion Tokens
+       * @description Completion tokens for the final provider response only. Null for rows saved before final-request usage was recorded.
+       */
+      context_completion_tokens?: number | null;
+      /**
+       * Skill Context Tokens
+       * @description Model-aware Skill-owned subset of context_prompt_tokens. Already included; do not add it to context usage again. Null for legacy rows.
+       */
+      skill_context_tokens?: number | null;
       logging_details: components["schemas"]["LoggingDetailsPublic"];
     };
     /** MetadataCount */
@@ -12892,6 +14304,38 @@ export interface components {
      * @enum {string}
      */
     Modules: "eneo-applications";
+    /** MovePausePublic */
+    MovePausePublic: {
+      /** Policy Revision */
+      policy_revision: number;
+      /** Paused */
+      paused: boolean;
+    };
+    /** MoveQueuePublic */
+    MoveQueuePublic: {
+      /** Queued Count */
+      queued_count: number;
+      /** Target Too Large Count */
+      target_too_large_count: number;
+    };
+    /** MoveQueueRequest */
+    MoveQueueRequest: {
+      target: components["schemas"]["StorageKind"];
+      /** Limit */
+      limit: number;
+    };
+    /** MoveStatePublic */
+    MoveStatePublic: {
+      target: components["schemas"]["StorageKind"];
+      state: components["schemas"]["ContentMoveState"];
+      failure_code: components["schemas"]["ContentMoveFailureCode"] | null;
+      /** Count */
+      count: number;
+      /** Bytes */
+      bytes: number;
+      /** Oldest Updated At */
+      oldest_updated_at: string | null;
+    };
     /** OIDCDebugToggleRequest */
     OIDCDebugToggleRequest: {
       /**
@@ -12926,6 +14370,107 @@ export interface components {
       /** Backend */
       backend: string;
     };
+    /** ObjectContentInventoryPublic */
+    ObjectContentInventoryPublic: {
+      /** Inventory */
+      inventory: components["schemas"]["InventoryPublic"][];
+      postgresql_allocation: components["schemas"]["PostgresqlAllocationPublic"] | null;
+    };
+    /** ObjectContentMovesPublic */
+    ObjectContentMovesPublic: {
+      /** Policy Revision */
+      policy_revision: number;
+      /** Paused */
+      paused: boolean;
+      /** Moves */
+      moves: components["schemas"]["MoveStatePublic"][];
+    };
+    /**
+     * ObjectContentReadinessCode
+     * @enum {string}
+     */
+    ObjectContentReadinessCode:
+      | "ready"
+      | "object_store_not_configured"
+      | "not_initialized"
+      | "configuration_required"
+      | "database_unavailable"
+      | "store_degraded";
+    /** ObjectStoreConnectionInput */
+    ObjectStoreConnectionInput: {
+      /** Endpoint Url */
+      endpoint_url: string;
+      /** Region */
+      region: string;
+      /** Bucket */
+      bucket: string;
+      /**
+       * Access Key Id
+       * Format: password
+       */
+      access_key_id: string;
+      /**
+       * Secret Access Key
+       * Format: password
+       */
+      secret_access_key: string;
+      /**
+       * Addressing Style
+       * @default path
+       * @enum {string}
+       */
+      addressing_style?: "path" | "virtual";
+    };
+    /** ObjectStoreConnectionPublic */
+    ObjectStoreConnectionPublic: {
+      source: components["schemas"]["ObjectStoreConnectionSource"];
+      /** Configured */
+      configured: boolean;
+      /** Credentials Can Be Managed */
+      credentials_can_be_managed: boolean;
+      /** Revision */
+      revision?: number | null;
+      /** Endpoint Url */
+      endpoint_url?: string | null;
+      /** Region */
+      region?: string | null;
+      /** Bucket */
+      bucket?: string | null;
+      /** Addressing Style */
+      addressing_style?: ("path" | "virtual") | null;
+      /** Updated At */
+      updated_at?: string | null;
+      previous_destination?: components["schemas"]["PreviousObjectStoreDestination"] | null;
+      pending_destination?: components["schemas"]["PendingObjectStoreDestination"] | null;
+    };
+    /**
+     * ObjectStoreConnectionSource
+     * @enum {string}
+     */
+    ObjectStoreConnectionSource: "unconfigured" | "environment" | "admin";
+    /** ObjectStoreCredentialRotation */
+    ObjectStoreCredentialRotation: {
+      /** Expected Revision */
+      expected_revision: number;
+      /**
+       * Access Key Id
+       * Format: password
+       */
+      access_key_id: string;
+      /**
+       * Secret Access Key
+       * Format: password
+       */
+      secret_access_key: string;
+    };
+    /**
+     * ObjectStoreSwitchBackInput
+     * @description Names the archived destination the administrator intends to restore.
+     */
+    ObjectStoreSwitchBackInput: {
+      /** Expected Previous Revision */
+      expected_previous_revision: number;
+    };
     /** OpenIdConnectLogin */
     OpenIdConnectLogin: {
       /** Code */
@@ -12948,6 +14493,138 @@ export interface components {
       scope?: string;
       /** Nonce */
       nonce?: string | null;
+    };
+    /** OrganizationSkillPublic */
+    OrganizationSkillPublic: {
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /**
+       * Space Id
+       * Format: uuid
+       */
+      space_id: string;
+      /** Slug */
+      slug: string;
+      /** Is Active */
+      is_active: boolean;
+      /**
+       * Current Revision Id
+       * Format: uuid
+       */
+      current_revision_id: string;
+      /** Current Revision Number */
+      current_revision_number: number;
+      /** Display Name */
+      display_name: string;
+      /** Description */
+      description: string;
+      /** Content Digest */
+      content_digest: string;
+      /**
+       * Created By User Id
+       * Format: uuid
+       */
+      created_by_user_id: string;
+      /**
+       * Created At
+       * Format: date-time
+       */
+      created_at: string;
+      /**
+       * Updated At
+       * Format: date-time
+       */
+      updated_at: string;
+      /** Published Revision Number */
+      published_revision_number: number | null;
+      /** First Published At */
+      first_published_at: string | null;
+      publication_state: components["schemas"]["SkillPublicationState"];
+      /** Execution Blocked */
+      execution_blocked: boolean;
+      current_revision: components["schemas"]["SkillRevisionPublic"];
+    };
+    /** OrganizationSkillSummaryPagePublic */
+    OrganizationSkillSummaryPagePublic: {
+      /**
+       * Items
+       * @description List of items returned in the response
+       */
+      items: components["schemas"]["OrganizationSkillSummaryPublic"][];
+      /** Limit */
+      limit: number;
+      /** Next Cursor */
+      next_cursor?: string | null;
+      /**
+       * Count
+       * @description Number of items returned in the response
+       */
+      readonly count: number;
+    };
+    /** OrganizationSkillSummaryPublic */
+    OrganizationSkillSummaryPublic: {
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /**
+       * Space Id
+       * Format: uuid
+       */
+      space_id: string;
+      /** Slug */
+      slug: string;
+      /** Is Active */
+      is_active: boolean;
+      /**
+       * Current Revision Id
+       * Format: uuid
+       */
+      current_revision_id: string;
+      /** Current Revision Number */
+      current_revision_number: number;
+      /** Display Name */
+      display_name: string;
+      /** Description */
+      description: string;
+      /** Content Digest */
+      content_digest: string;
+      /**
+       * Created By User Id
+       * Format: uuid
+       */
+      created_by_user_id: string;
+      /**
+       * Created At
+       * Format: date-time
+       */
+      created_at: string;
+      /**
+       * Updated At
+       * Format: date-time
+       */
+      updated_at: string;
+      /** Published Revision Number */
+      published_revision_number: number | null;
+      /** First Published At */
+      first_published_at: string | null;
+      publication_state: components["schemas"]["SkillPublicationState"];
+      /** Execution Blocked */
+      execution_blocked: boolean;
+    };
+    /** OriginalSignedURLRequest */
+    OriginalSignedURLRequest: {
+      /**
+       * Expires In
+       * @default 3600
+       */
+      expires_in?: number;
+      /** @default attachment */
+      content_disposition?: components["schemas"]["ContentDisposition"];
     };
     /**
      * Outcome
@@ -13742,6 +15419,13 @@ export interface components {
        * @description Whether insights are enabled for this assistant. If enabled, users with appropriate permissions can see all sessions for this assistant.
        */
       insight_enabled?: boolean | null;
+      /**
+       * Inline File Text
+       * @description Whether to inline attached file text into the prompt. When False, a file whose original is available via signed URL is surfaced as that URL only (e.g. to avoid large files blowing the context window).
+       */
+      inline_file_text?: boolean | null;
+      /** @description How attached knowledge reaches the model: 'tool' exposes it as a searchable MCP tool the model calls on demand; 'inject' retrieves on every turn and packs results into the prompt. */
+      knowledge_mode?: components["schemas"]["KnowledgeMode"] | null;
       /** Data Retention Days */
       data_retention_days?: number | null;
       /**
@@ -13756,6 +15440,8 @@ export interface components {
        * @description Icon ID referencing an uploaded icon. Set to null to remove.
        */
       icon_id?: string | null;
+      /** Skill Bindings */
+      skill_bindings?: components["schemas"]["AssistantSkillBindingInput"][] | null;
     };
     /** PartialCompletionModelUpdate */
     PartialCompletionModelUpdate: {
@@ -13951,6 +15637,30 @@ export interface components {
       additional_redirect_uris?: string[] | null;
     };
     /**
+     * PendingObjectStoreDestination
+     * @description A destination attempt recorded by an interrupted or ambiguous switch.
+     */
+    PendingObjectStoreDestination: {
+      /** Revision */
+      revision: number;
+      /** Endpoint Url */
+      endpoint_url: string;
+      /** Region */
+      region: string;
+      /** Bucket */
+      bucket: string;
+      /**
+       * Addressing Style
+       * @enum {string}
+       */
+      addressing_style: "path" | "virtual";
+      /**
+       * Updated At
+       * Format: date-time
+       */
+      updated_at: string;
+    };
+    /**
      * PendingQueueSummary
      * @description Pending crawl queue summary.
      */
@@ -13976,6 +15686,8 @@ export interface components {
      */
     Permission:
       | "assistants"
+      | "skills"
+      | "skills_management"
       | "personal_chat"
       | "group_chats"
       | "apps"
@@ -13988,13 +15700,47 @@ export interface components {
       | "websites"
       | "integrations"
       | "shared_spaces"
-      | "api_keys";
+      | "api_keys"
+      | "storage"
+      | "assistant_debug";
     /** PermissionPublic */
     PermissionPublic: {
       name: components["schemas"]["Permission"];
       /** Description */
       description: string;
     };
+    /** PersonalChatPinAdvancePublic */
+    PersonalChatPinAdvancePublic: {
+      /**
+       * Outcome
+       * @enum {string}
+       */
+      outcome: "advanced" | "already_current";
+      /** From Revision Number */
+      from_revision_number: number;
+      /** To Revision Number */
+      to_revision_number: number;
+    };
+    /** PersonalChatPinAdvanceRequest */
+    PersonalChatPinAdvanceRequest: {
+      /**
+       * Expected Pinned Revision Id
+       * Format: uuid
+       * @description The revision the Personal Chat binding was pinned to when the administrator reviewed the move.
+       */
+      expected_pinned_revision_id: string;
+      /**
+       * Expected Published Revision Id
+       * Format: uuid
+       * @description The published revision the administrator reviewed as the target. A publish that lands after the review is refused as a conflict instead of silently applied.
+       */
+      expected_published_revision_id: string;
+    };
+    /**
+     * PolicyActor
+     * @enum {string}
+     */
+    PolicyActor: "migration" | "storage_admin";
     /** PolicyCompletionModelInput */
     PolicyCompletionModelInput: {
       /**
@@ -14040,6 +15786,17 @@ export interface components {
       mcp_server_id: string;
       /** Is Default Enabled */
       is_default_enabled: boolean;
+    };
+    /** PostgresqlAllocationPublic */
+    PostgresqlAllocationPublic: {
+      /** Total Bytes */
+      total_bytes: number;
+      /** Inline Content Bytes */
+      inline_content_bytes: number;
+      /** Searchable Knowledge Bytes */
+      searchable_knowledge_bytes: number;
+      /** Other Bytes */
+      other_bytes: number;
     };
     /**
      * PreflightRequest
@@ -14117,9 +15874,37 @@ export interface components {
       assistant_attachment_tokens?: number;
       /**
        * Prompt Tokens
+       * @description Model-aware estimate of the initial system message and Skill tool definitions. Includes skill_context_tokens.
        * @default 0
        */
       prompt_tokens?: number;
+      /**
+       * Skill Context Tokens
+       * @description Model-aware Skill-owned subset of prompt_tokens. Already included; do not add it to the preflight total again.
+       * @default 0
+       */
+      skill_context_tokens?: number;
+    };
+    /** PreviousObjectStoreDestination */
+    PreviousObjectStoreDestination: {
+      /** Revision */
+      revision: number;
+      /** Endpoint Url */
+      endpoint_url: string;
+      /** Region */
+      region: string;
+      /** Bucket */
+      bucket: string;
+      /**
+       * Addressing Style
+       * @enum {string}
+       */
+      addressing_style: "path" | "virtual";
+      /**
+       * Updated At
+       * Format: date-time
+       */
+      updated_at: string;
     };
     /** PrivacyPolicy */
     PrivacyPolicy: {
@@ -14335,6 +16120,112 @@ export interface components {
        */
       email: string;
     };
+    /** PublishedSkillPublic */
+    PublishedSkillPublic: {
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /** Slug */
+      slug: string;
+      /**
+       * Revision Id
+       * Format: uuid
+       */
+      revision_id: string;
+      /** Revision Number */
+      revision_number: number;
+      /** Display Name */
+      display_name: string;
+      /** Description */
+      description: string;
+      /** Content Digest */
+      content_digest: string;
+      /**
+       * First Published At
+       * Format: date-time
+       */
+      first_published_at: string;
+      /** Execution Blocked */
+      execution_blocked: boolean;
+      revision: components["schemas"]["PublishedSkillRevisionPublic"];
+    };
+    /** PublishedSkillRevisionPublic */
+    PublishedSkillRevisionPublic: {
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /**
+       * Skill Id
+       * Format: uuid
+       */
+      skill_id: string;
+      /** Revision Number */
+      revision_number: number;
+      /** Display Name */
+      display_name: string;
+      /** Description */
+      description: string;
+      /** Instructions */
+      instructions: string;
+      /** Content Digest */
+      content_digest: string;
+      /**
+       * Created At
+       * Format: date-time
+       */
+      created_at: string;
+    };
+    /** PublishedSkillSummaryPagePublic */
+    PublishedSkillSummaryPagePublic: {
+      /**
+       * Items
+       * @description List of items returned in the response
+       */
+      items: components["schemas"]["PublishedSkillSummaryPublic"][];
+      /** Limit */
+      limit: number;
+      /** Next Cursor */
+      next_cursor?: string | null;
+      /**
+       * Count
+       * @description Number of items returned in the response
+       */
+      readonly count: number;
+    };
+    /** PublishedSkillSummaryPublic */
+    PublishedSkillSummaryPublic: {
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /** Slug */
+      slug: string;
+      /**
+       * Revision Id
+       * Format: uuid
+       */
+      revision_id: string;
+      /** Revision Number */
+      revision_number: number;
+      /** Display Name */
+      display_name: string;
+      /** Description */
+      description: string;
+      /** Content Digest */
+      content_digest: string;
+      /**
+       * First Published At
+       * Format: date-time
+       */
+      first_published_at: string;
+      /** Execution Blocked */
+      execution_blocked: boolean;
+    };
     /** QuestionMetadata */
     QuestionMetadata: {
       /**
@@ -14354,6 +16245,25 @@ export interface components {
        * Format: uuid
        */
       session_id: string;
+    };
+    /** ReasoningPolicyInput */
+    ReasoningPolicyInput: {
+      /** Default Effort */
+      default_effort?: string | null;
+      /**
+       * Allow User Override
+       * @default false
+       */
+      allow_user_override?: boolean;
+    };
+    /** ReasoningPolicyPublic */
+    ReasoningPolicyPublic: {
+      /** Configured */
+      configured: boolean;
+      /** Default Effort */
+      default_effort: string | null;
+      /** Allow User Override */
+      allow_user_override: boolean;
     };
     /**
      * ResourcePermission
@@ -15045,12 +16955,24 @@ export interface components {
       /** Message */
       message: string;
     };
+    /** SettingsBase */
+    SettingsBase: {
+      /** Chatbot Widget */
+      chatbot_widget?: {
+        [key: string]: unknown;
+      };
+    };
     /** SettingsPublic */
     SettingsPublic: {
       /** Chatbot Widget */
       chatbot_widget?: {
         [key: string]: unknown;
       };
+      /**
+       * Object Content Enabled
+       * @default false
+       */
+      object_content_enabled?: boolean;
       /**
        * Using Templates
        * @default false
@@ -15076,6 +16998,16 @@ export interface components {
        * @default true
        */
       api_key_expiry_notifications?: boolean;
+      /**
+       * File References Enabled
+       * @default false
+       */
+      file_references_enabled?: boolean;
+      /**
+       * Object Store Configured
+       * @default false
+       */
+      object_store_configured?: boolean;
     };
     /**
      * SharePointSubscriptionPublic
@@ -15197,6 +17129,627 @@ export interface components {
       url: string;
       /** Expires At */
       expires_at: number;
+    };
+    /**
+     * SkillActivationEvidenceV1
+     * @description Strict, versioned, body-free facts retained with one Question.
+     */
+    SkillActivationEvidenceV1: {
+      /**
+       * Version
+       * @default 1
+       * @constant
+       */
+      version?: 1;
+      effective_mode: components["schemas"]["SkillTurnEffectiveMode"];
+      fallback_reason?: components["schemas"]["SkillActivationFallbackReason"] | null;
+      /** Available */
+      available: components["schemas"]["SkillActivationReference"][];
+      /** Blocked */
+      blocked: components["schemas"]["SkillActivationReference"][];
+      /** Initially Active */
+      initially_active: string[];
+      /**
+       * Accepted
+       * @default []
+       */
+      accepted?: string[];
+      /**
+       * Repeated
+       * @default []
+       */
+      repeated?: string[];
+      /**
+       * Rejected
+       * @default []
+       */
+      rejected?: components["schemas"]["SkillActivationRejection"][];
+      /**
+       * Selected Model Id
+       * Format: uuid
+       */
+      selected_model_id: string;
+      /** Selected Model Route */
+      selected_model_route: string;
+      /** Skill Context Tokens */
+      skill_context_tokens: number;
+      /** Skill Context Token Limit */
+      skill_context_token_limit: number;
+      /**
+       * Token Count Source
+       * @enum {string}
+       */
+      token_count_source: "litellm" | "fallback_estimate";
+      /**
+       * Activation Rounds
+       * @default 0
+       */
+      activation_rounds?: number;
+      /**
+       * Selection Latency Ms
+       * @default 0
+       */
+      selection_latency_ms?: number;
+    };
+    /**
+     * SkillActivationFallbackReason
+     * @enum {string}
+     */
+    SkillActivationFallbackReason:
+      | "model_lacks_tool_calling"
+      | "catalog_budget_exceeded"
+      | "token_measurement_unavailable"
+      | "selective_activation_disabled";
+    /**
+     * SkillActivationMode
+     * @description Closed Assistant/Governance Policy binding mode; Apps compose eagerly
+     *     and carry the fixed ALWAYS value without a persisted column.
+     * @enum {string}
+     */
+    SkillActivationMode: "always" | "on_demand";
+    /**
+     * SkillActivationReference
+     * @description Body-free exact revision identity safe for retained turn evidence.
+     */
+    SkillActivationReference: {
+      /** Activation Key */
+      activation_key?: string | null;
+      /**
+       * Skill Id
+       * Format: uuid
+       */
+      skill_id: string;
+      /**
+       * Skill Revision Id
+       * Format: uuid
+       */
+      skill_revision_id: string;
+      /** Revision Number */
+      revision_number: number;
+      /** Content Digest */
+      content_digest: string;
+      /** Position */
+      position: number;
+      source: components["schemas"]["SkillBindingSource"];
+      /** Display Name */
+      display_name?: string | null;
+      /** Slug */
+      slug?: string | null;
+    };
+    /** SkillActivationRejection */
+    SkillActivationRejection: {
+      /** Activation Key */
+      activation_key: string;
+      reason: components["schemas"]["SkillActivationRejectionReason"];
+    };
+    /**
+     * SkillActivationRejectionReason
+     * @enum {string}
+     */
+    SkillActivationRejectionReason:
+      | "unknown_key"
+      | "blocked"
+      | "activation_unavailable"
+      | "activation_limit_exceeded"
+      | "context_limit_exceeded"
+      | "model_context_limit_exceeded"
+      | "token_measurement_unavailable"
+      | "reserved_tool_collision";
+    /** SkillActiveUpdateRequest */
+    SkillActiveUpdateRequest: {
+      /** Is Active */
+      is_active: boolean;
+    };
+    /**
+     * SkillAdoptionDrift
+     * @enum {string}
+     */
+    SkillAdoptionDrift: "current" | "behind" | "unpublished";
+    /** SkillAdoptionPersonalChatPublic */
+    SkillAdoptionPersonalChatPublic: {
+      /**
+       * Revision Id
+       * Format: uuid
+       */
+      revision_id: string;
+      /** Revision Number */
+      revision_number: number;
+      drift: components["schemas"]["SkillAdoptionDrift"];
+    };
+    /** SkillAdoptionProjectionPagePublic */
+    SkillAdoptionProjectionPagePublic: {
+      summary: components["schemas"]["SkillAdoptionSummaryPublic"] | null;
+      /** Items */
+      items: components["schemas"]["SkillAdoptionResourcePublic"][];
+      /** Limit */
+      limit: number;
+      /** Next Cursor */
+      next_cursor?: string | null;
+    };
+    /**
+     * SkillAdoptionResourceKind
+     * @enum {string}
+     */
+    SkillAdoptionResourceKind: "assistant" | "app";
+    /** SkillAdoptionResourcePublic */
+    SkillAdoptionResourcePublic: {
+      kind: components["schemas"]["SkillAdoptionResourceKind"];
+      /**
+       * Resource Id
+       * Format: uuid
+       */
+      resource_id: string;
+      /** Name */
+      name: string;
+      /**
+       * Space Id
+       * Format: uuid
+       */
+      space_id: string;
+      /** Space Name */
+      space_name: string;
+      /**
+       * Revision Id
+       * Format: uuid
+       */
+      revision_id: string;
+      /** Revision Number */
+      revision_number: number;
+      drift: components["schemas"]["SkillAdoptionDrift"];
+    };
+    /** SkillAdoptionRevisionCountPublic */
+    SkillAdoptionRevisionCountPublic: {
+      /**
+       * Revision Id
+       * Format: uuid
+       */
+      revision_id: string;
+      /** Revision Number */
+      revision_number: number;
+      /** Assistant Count */
+      assistant_count: number;
+      /** App Count */
+      app_count: number;
+      /** Personal Chat Pinned */
+      personal_chat_pinned: boolean;
+    };
+    /** SkillAdoptionSummaryPublic */
+    SkillAdoptionSummaryPublic: {
+      /** Assistant Count */
+      assistant_count: number;
+      /** App Count */
+      app_count: number;
+      /** Distinct Space Count */
+      distinct_space_count: number;
+      /** Behind Published Count */
+      behind_published_count: number;
+      personal_chat: components["schemas"]["SkillAdoptionPersonalChatPublic"] | null;
+      /** Revision Counts */
+      revision_counts: components["schemas"]["SkillAdoptionRevisionCountPublic"][];
+    };
+    /** SkillBindingReferenceInput */
+    SkillBindingReferenceInput: {
+      /**
+       * Skill Id
+       * Format: uuid
+       */
+      skill_id: string;
+      /**
+       * Skill Revision Id
+       * Format: uuid
+       */
+      skill_revision_id: string;
+    };
+    /**
+     * SkillBindingSource
+     * @enum {string}
+     */
+    SkillBindingSource: "space" | "organization";
+    /** SkillBindingSummary */
+    SkillBindingSummary: {
+      /**
+       * Skill Id
+       * Format: uuid
+       */
+      skill_id: string;
+      /**
+       * Skill Revision Id
+       * Format: uuid
+       */
+      skill_revision_id: string;
+      /** Attachable Revision Id */
+      attachable_revision_id: string | null;
+      /** Slug */
+      slug: string;
+      /** Revision Number */
+      revision_number: number;
+      /** Attachable Revision Number */
+      attachable_revision_number: number | null;
+      /** Display Name */
+      display_name: string;
+      /** Description */
+      description: string;
+      /** Content Digest */
+      content_digest: string;
+      /** Position */
+      position: number;
+      /** Is Active */
+      is_active: boolean;
+      source: components["schemas"]["SkillBindingSource"];
+      /** Execution Blocked */
+      execution_blocked: boolean;
+    };
+    /** SkillCreateRequest */
+    SkillCreateRequest: {
+      /** Display Name */
+      display_name: string;
+      /** Description */
+      description: string;
+      /** Instructions */
+      instructions: string;
+      /** Slug */
+      slug: string;
+    };
+    /** SkillExecutionBlockPublic */
+    SkillExecutionBlockPublic: {
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /**
+       * Skill Id
+       * Format: uuid
+       */
+      skill_id: string;
+      /**
+       * Blocked By User Id
+       * Format: uuid
+       */
+      blocked_by_user_id: string;
+      /** Reason */
+      reason: string;
+      /**
+       * Blocked At
+       * Format: date-time
+       */
+      blocked_at: string;
+    };
+    /** SkillExecutionBlockState */
+    SkillExecutionBlockState: {
+      /**
+       * Skill Id
+       * Format: uuid
+       */
+      skill_id: string;
+      block: components["schemas"]["SkillExecutionBlockPublic"] | null;
+    };
+    /** SkillExecutionBlockUpdate */
+    SkillExecutionBlockUpdate: {
+      /** Reason */
+      reason: string;
+    };
+    /** SkillExecutionReference */
+    SkillExecutionReference: {
+      /**
+       * Skill Id
+       * Format: uuid
+       */
+      skill_id: string;
+      /**
+       * Skill Revision Id
+       * Format: uuid
+       */
+      skill_revision_id: string;
+      /** Revision Number */
+      revision_number: number;
+      /** Content Digest */
+      content_digest: string;
+      /** Position */
+      position: number;
+    };
+    /** SkillExecutionUnblockUpdate */
+    SkillExecutionUnblockUpdate: {
+      /** Reason */
+      reason: string;
+      /**
+       * Expected Block Id
+       * Format: uuid
+       */
+      expected_block_id: string;
+    };
+    /** SkillPublic */
+    SkillPublic: {
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /**
+       * Space Id
+       * Format: uuid
+       */
+      space_id: string;
+      /** Slug */
+      slug: string;
+      /** Is Active */
+      is_active: boolean;
+      /**
+       * Current Revision Id
+       * Format: uuid
+       */
+      current_revision_id: string;
+      /** Current Revision Number */
+      current_revision_number: number;
+      /** Display Name */
+      display_name: string;
+      /** Description */
+      description: string;
+      /** Content Digest */
+      content_digest: string;
+      /**
+       * Created By User Id
+       * Format: uuid
+       */
+      created_by_user_id: string;
+      /**
+       * Created At
+       * Format: date-time
+       */
+      created_at: string;
+      /**
+       * Updated At
+       * Format: date-time
+       */
+      updated_at: string;
+      current_revision: components["schemas"]["SkillRevisionPublic"];
+    };
+    /**
+     * SkillPublicationState
+     * @enum {string}
+     */
+    SkillPublicationState: "draft" | "published" | "update_pending" | "unpublished";
+    /** SkillPublishRequest */
+    SkillPublishRequest: {
+      /**
+       * Expected Revision Id
+       * Format: uuid
+       */
+      expected_revision_id: string;
+    };
+    /** SkillRevisionCreateRequest */
+    SkillRevisionCreateRequest: {
+      /** Display Name */
+      display_name: string;
+      /** Description */
+      description: string;
+      /** Instructions */
+      instructions: string;
+    };
+    /** SkillRevisionPublic */
+    SkillRevisionPublic: {
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /**
+       * Skill Id
+       * Format: uuid
+       */
+      skill_id: string;
+      /** Revision Number */
+      revision_number: number;
+      /** Display Name */
+      display_name: string;
+      /** Description */
+      description: string;
+      /** Instructions */
+      instructions: string;
+      /** Content Digest */
+      content_digest: string;
+      /**
+       * Created By User Id
+       * Format: uuid
+       */
+      created_by_user_id: string;
+      /**
+       * Created At
+       * Format: date-time
+       */
+      created_at: string;
+    };
+    /** SkillRevisionRestorePublic */
+    SkillRevisionRestorePublic: {
+      revision: components["schemas"]["SkillRevisionPublic"];
+      /** Created */
+      created: boolean;
+      /**
+       * Restored From Revision Id
+       * Format: uuid
+       */
+      restored_from_revision_id: string;
+      /** Restored From Revision Number */
+      restored_from_revision_number: number;
+    };
+    /** SkillRevisionRestoreRequest */
+    SkillRevisionRestoreRequest: {
+      /**
+       * Reviewed Current Revision Id
+       * Format: uuid
+       */
+      reviewed_current_revision_id: string;
+    };
+    /** SkillRevisionSummaryPublic */
+    SkillRevisionSummaryPublic: {
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /**
+       * Skill Id
+       * Format: uuid
+       */
+      skill_id: string;
+      /** Revision Number */
+      revision_number: number;
+      /** Display Name */
+      display_name: string;
+      /**
+       * Created At
+       * Format: date-time
+       */
+      created_at: string;
+    };
+    /**
+     * SkillRuntimeModelProjection
+     * @description Read-only policy allowance for one accessible completion model. The
+     *     exact LiteLLM-measured configuration fit belongs to save-time validation,
+     *     not this projection.
+     */
+    SkillRuntimeModelProjection: {
+      /**
+       * Completion Model Id
+       * Format: uuid
+       */
+      completion_model_id: string;
+      /** Name */
+      name: string;
+      /** Nickname */
+      nickname: string | null;
+      /** Max Input Tokens */
+      max_input_tokens: number;
+      /** Supports Tool Calling */
+      supports_tool_calling: boolean;
+      /** Skill Context Token Allowance */
+      skill_context_token_allowance: number;
+    };
+    /** SkillRuntimeModelProjections */
+    SkillRuntimeModelProjections: {
+      /** Context Share Percent */
+      context_share_percent: number;
+      /** Models */
+      models: components["schemas"]["SkillRuntimeModelProjection"][];
+    };
+    /** SkillRuntimePolicyEditableBounds */
+    SkillRuntimePolicyEditableBounds: {
+      max_attached_skills: components["schemas"]["SkillRuntimePolicyFieldBounds"];
+      context_share_percent: components["schemas"]["SkillRuntimePolicyFieldBounds"];
+      max_activations_per_turn: components["schemas"]["SkillRuntimePolicyFieldBounds"];
+    };
+    /** SkillRuntimePolicyFieldBounds */
+    SkillRuntimePolicyFieldBounds: {
+      /** Minimum */
+      minimum: number;
+      /** Maximum */
+      maximum: number;
+    };
+    /** SkillRuntimePolicyPublic */
+    SkillRuntimePolicyPublic: {
+      /** Selective Activation Enabled */
+      selective_activation_enabled: boolean;
+      /** Max Attached Skills */
+      max_attached_skills: number;
+      /** Context Share Percent */
+      context_share_percent: number;
+      /** Max Activations Per Turn */
+      max_activations_per_turn: number;
+      editable_bounds: components["schemas"]["SkillRuntimePolicyEditableBounds"];
+    };
+    /**
+     * SkillRuntimePolicyUpdate
+     * @description Full replacement of the one four-field tenant policy.
+     */
+    SkillRuntimePolicyUpdate: {
+      /** Selective Activation Enabled */
+      selective_activation_enabled: boolean;
+      /** Max Attached Skills */
+      max_attached_skills: number;
+      /** Context Share Percent */
+      context_share_percent: number;
+      /** Max Activations Per Turn */
+      max_activations_per_turn: number;
+    };
+    /** SkillSparse */
+    SkillSparse: {
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /**
+       * Space Id
+       * Format: uuid
+       */
+      space_id: string;
+      /** Slug */
+      slug: string;
+      /** Is Active */
+      is_active: boolean;
+      /**
+       * Current Revision Id
+       * Format: uuid
+       */
+      current_revision_id: string;
+      /** Current Revision Number */
+      current_revision_number: number;
+      /** Display Name */
+      display_name: string;
+      /** Description */
+      description: string;
+      /** Content Digest */
+      content_digest: string;
+      /**
+       * Created By User Id
+       * Format: uuid
+       */
+      created_by_user_id: string;
+      /**
+       * Created At
+       * Format: date-time
+       */
+      created_at: string;
+      /**
+       * Updated At
+       * Format: date-time
+       */
+      updated_at: string;
+    };
+    /**
+     * SkillTurnEffectiveMode
+     * @enum {string}
+     */
+    SkillTurnEffectiveMode: "eager" | "always_only" | "selective";
+    /** SkillsPolicyInput */
+    SkillsPolicyInput: {
+      /** Bindings */
+      bindings?: components["schemas"]["AssistantSkillBindingInput"][];
+    };
+    /** SkillsPolicyPublic */
+    SkillsPolicyPublic: {
+      /** Bindings */
+      bindings: components["schemas"]["AssistantSkillBindingSummary"][];
     };
     /** SkippedDetail */
     SkippedDetail: {
@@ -15335,6 +17888,8 @@ export interface components {
       knowledge: components["schemas"]["Knowledge"];
       members: components["schemas"]["PaginatedPermissions_SpaceMember_"];
       group_members: components["schemas"]["PaginatedPermissions_SpaceGroupMember_"];
+      /** Skill Permissions */
+      skill_permissions: components["schemas"]["ResourcePermission"][];
       /** Available Roles */
       available_roles: components["schemas"]["SpaceRole"][];
       security_classification: components["schemas"]["SecurityClassificationPublic"] | null;
@@ -15428,6 +17983,11 @@ export interface components {
       /** Items */
       items: components["schemas"]["StorageSpaceInfoModel"][];
     };
+    /**
+     * StorageKind
+     * @enum {string}
+     */
+    StorageKind: "postgres_inline" | "object_store";
     /** StorageModel */
     StorageModel: {
       /** Total Used */
@@ -16416,6 +18976,11 @@ export interface components {
       /** Enabled */
       enabled: boolean;
     };
+    /**
+     * TokenCountSource
+     * @enum {string}
+     */
+    TokenCountSource: "litellm" | "fallback_estimate";
     /** TokenUsageSummary */
     TokenUsageSummary: {
       /**
@@ -16862,6 +19427,24 @@ export interface components {
     UpdateStatusRequest: {
       status: components["schemas"]["HelperRunStatus"];
     };
+    /** UploadLimitProjection */
+    UploadLimitProjection: {
+      use_case: components["schemas"]["UploadLimitUseCase"];
+      /** Configured Bytes */
+      configured_bytes: number;
+      /** Effective Bytes */
+      effective_bytes: number;
+      storage_target: components["schemas"]["StorageKind"];
+      /** Operator Ceiling Bytes */
+      operator_ceiling_bytes: number | null;
+      constraining_source: components["schemas"]["ConstrainingSource"];
+    };
+    /**
+     * UploadLimitUseCase
+     * @enum {string}
+     */
+    UploadLimitUseCase:
+      "session_file" | "session_image" | "session_audio" | "knowledge_file" | "knowledge_audio";
     /** UseTools */
     UseTools: {
       /** Assistants */
@@ -18222,12 +20805,36 @@ export interface components {
     };
     /** TokenUsageEvent */
     TokenUsageEvent: {
-      /** Prompt Tokens */
+      /**
+       * Prompt Tokens
+       * @description Cumulative prompt tokens across every provider request in this logical turn. Use context_prompt_tokens for context-window headroom.
+       */
       prompt_tokens: number;
-      /** Completion Tokens */
+      /**
+       * Completion Tokens
+       * @description Cumulative completion tokens across every provider response in this logical turn. Use context_completion_tokens for context-window headroom.
+       */
       completion_tokens: number;
-      /** Turn Tokens */
+      /**
+       * Turn Tokens
+       * @description Cumulative prompt_tokens plus completion_tokens for this turn.
+       */
       turn_tokens: number;
+      /**
+       * Context Prompt Tokens
+       * @description Prompt tokens for the final provider request only.
+       */
+      context_prompt_tokens: number;
+      /**
+       * Context Completion Tokens
+       * @description Completion tokens for the final provider response only.
+       */
+      context_completion_tokens: number;
+      /**
+       * Skill Context Tokens
+       * @description Model-aware Skill-owned subset of context_prompt_tokens. Already included; do not add it to context usage again.
+       */
+      skill_context_tokens: number;
     };
     /** SSETokenUsage */
     SSETokenUsage: {
@@ -18252,6 +20859,23 @@ export interface components {
     };
     /** SSEFirstChunk */
     SSEFirstChunk: {
+      /**
+       * Id
+       * @default null
+       */
+      id?: string | null;
+      /**
+       * Created At
+       * @default null
+       */
+      created_at?: string | null;
+      /**
+       * Updated At
+       * @default null
+       */
+      updated_at?: string | null;
+      /** @default null */
+      completion_model?: components["schemas"]["CompletionModelPublic"] | null;
       /**
        * Session Id
        * Format: uuid
@@ -21286,6 +23910,15 @@ export interface operations {
           "application/json": components["schemas"]["JobPublic"];
         };
       };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Forbidden */
       403: {
         headers: {
@@ -21320,6 +23953,15 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
     };
@@ -21457,7 +24099,7 @@ export interface operations {
     };
     requestBody: {
       content: {
-        "application/json": components["schemas"]["SettingsPublic"];
+        "application/json": components["schemas"]["SettingsBase"];
       };
     };
     responses: {
@@ -21526,6 +24168,326 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["PaginatedResponse_str_"];
+        };
+      };
+    };
+  };
+  get_skill_execution_block_api_v1_settings_skills__skill_id__execution_block_get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        skill_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["SkillExecutionBlockState"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  block_skill_execution_api_v1_settings_skills__skill_id__execution_block_post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        skill_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["SkillExecutionBlockUpdate"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["SkillExecutionBlockState"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  unblock_skill_execution_api_v1_settings_skills__skill_id__execution_block_unblock_post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        skill_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["SkillExecutionUnblockUpdate"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["SkillExecutionBlockState"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  get_skill_runtime_policy_api_v1_settings_skills_runtime_policy_get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["SkillRuntimePolicyPublic"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  update_skill_runtime_policy_api_v1_settings_skills_runtime_policy_put: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["SkillRuntimePolicyUpdate"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["SkillRuntimePolicyPublic"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  reset_skill_runtime_policy_api_v1_settings_skills_runtime_policy_reset_post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["SkillRuntimePolicyPublic"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  get_skill_runtime_model_projections_api_v1_settings_skills_runtime_policy_model_projections_get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["SkillRuntimeModelProjections"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
     };
@@ -22044,6 +25006,13 @@ export interface operations {
         content: {
           "application/json": components["schemas"]["AskResponse"];
           "text/event-stream": {
+            /** Id */
+            id?: string | null;
+            /** Created At */
+            created_at?: string | null;
+            /** Updated At */
+            updated_at?: string | null;
+            completion_model?: components["schemas"]["CompletionModelPublic"] | null;
             /**
              * Session Id
              * Format: uuid
@@ -22186,6 +25155,11 @@ export interface operations {
                 transcription?: string | null;
                 /** Token Count */
                 token_count?: number | null;
+                /**
+                 * Has Download Reference
+                 * @default false
+                 */
+                has_download_reference?: boolean;
               };
               /** InfoBlobAskAssistantPublic */
               InfoBlobAskAssistantPublic: {
@@ -22460,6 +25434,13 @@ export interface operations {
         content: {
           "application/json": components["schemas"]["AskResponse"];
           "text/event-stream": {
+            /** Id */
+            id?: string | null;
+            /** Created At */
+            created_at?: string | null;
+            /** Updated At */
+            updated_at?: string | null;
+            completion_model?: components["schemas"]["CompletionModelPublic"] | null;
             /**
              * Session Id
              * Format: uuid
@@ -22602,6 +25583,11 @@ export interface operations {
                 transcription?: string | null;
                 /** Token Count */
                 token_count?: number | null;
+                /**
+                 * Has Download Reference
+                 * @default false
+                 */
+                has_download_reference?: boolean;
               };
               /** InfoBlobAskAssistantPublic */
               InfoBlobAskAssistantPublic: {
@@ -23756,10 +26742,22 @@ export interface operations {
                     transcription?: string | null;
                     /** Token Count */
                     token_count?: number | null;
+                    /**
+                     * Has Download Reference
+                     * @default false
+                     */
+                    has_download_reference?: boolean;
                   };
                 };
               }
             | {
+                /** Id */
+                id?: string | null;
+                /** Created At */
+                created_at?: string | null;
+                /** Updated At */
+                updated_at?: string | null;
+                completion_model?: components["schemas"]["CompletionModelPublic"] | null;
                 /**
                  * Session Id
                  * Format: uuid
@@ -23784,6 +26782,103 @@ export interface operations {
                  */
                 mcp_tool_references?: components["schemas"]["McpToolReferencePublic"][];
                 $defs: {
+                  /** CompletionModelPublic */
+                  CompletionModelPublic: {
+                    /** Created At */
+                    created_at?: string | null;
+                    /** Updated At */
+                    updated_at?: string | null;
+                    /**
+                     * Id
+                     * Format: uuid
+                     */
+                    id: string;
+                    /** Name */
+                    name: string;
+                    /** Nickname */
+                    nickname?: string | null;
+                    /** Family */
+                    family?: string | null;
+                    /** Max Input Tokens */
+                    max_input_tokens: number;
+                    /** Max Output Tokens */
+                    max_output_tokens: number;
+                    /** Is Deprecated */
+                    is_deprecated: boolean;
+                    /** Nr Billion Parameters */
+                    nr_billion_parameters?: number | null;
+                    /** Hf Link */
+                    hf_link?: string | null;
+                    /** Stability */
+                    stability?: string | null;
+                    /** Hosting */
+                    hosting?: string | null;
+                    /** Open Source */
+                    open_source?: boolean | null;
+                    /** Description */
+                    description?: string | null;
+                    /** Deployment Name */
+                    deployment_name?: string | null;
+                    /** Org */
+                    org?: string | null;
+                    /** Vision */
+                    vision: boolean;
+                    /** Reasoning */
+                    reasoning: boolean;
+                    /**
+                     * Supports Tool Calling
+                     * @default false
+                     */
+                    supports_tool_calling?: boolean;
+                    /** Base Url */
+                    base_url?: string | null;
+                    /** Litellm Model Name */
+                    litellm_model_name?: string | null;
+                    model_kwargs_capabilities?:
+                      components["schemas"]["SupportedModelKwargs"] | null;
+                    /** Input Cost Per Token */
+                    input_cost_per_token?: number | string | null;
+                    /** Output Cost Per Token */
+                    output_cost_per_token?: number | string | null;
+                    /**
+                     * Is Org Enabled
+                     * @default false
+                     */
+                    is_org_enabled?: boolean;
+                    /**
+                     * Is Org Default
+                     * @default false
+                     */
+                    is_org_default?: boolean;
+                    /** Tenant Id */
+                    tenant_id?: string | null;
+                    /** Provider Id */
+                    provider_id?: string | null;
+                    /** Provider Type */
+                    provider_type?: string | null;
+                    /** Migrated To Model Id */
+                    migrated_to_model_id?: string | null;
+                    /**
+                     * Can Access
+                     * @default false
+                     */
+                    can_access?: boolean;
+                    /**
+                     * Is Locked
+                     * @default true
+                     */
+                    is_locked?: boolean;
+                    /** Lock Reason */
+                    lock_reason?: string | null;
+                    /** Credential Provider */
+                    credential_provider?: string | null;
+                    security_classification?:
+                      components["schemas"]["SecurityClassificationPublic"] | null;
+                    /** Provider Name */
+                    provider_name?: string | null;
+                    /** Deprecation Date */
+                    deprecation_date?: string | null;
+                  };
                   /** FilePublic */
                   FilePublic: {
                     /** Created At */
@@ -23805,6 +26900,11 @@ export interface operations {
                     transcription?: string | null;
                     /** Token Count */
                     token_count?: number | null;
+                    /**
+                     * Has Download Reference
+                     * @default false
+                     */
+                    has_download_reference?: boolean;
                   };
                   /** InfoBlobAskAssistantPublic */
                   InfoBlobAskAssistantPublic: {
@@ -23876,6 +26976,55 @@ export interface operations {
                     /** Mcp Tool Name */
                     mcp_tool_name?: string | null;
                   };
+                  /** ModelKwargCapability */
+                  ModelKwargCapability: {
+                    /**
+                     * Supported
+                     * @default false
+                     */
+                    supported?: boolean;
+                    /** Control */
+                    control?: ("slider" | "select") | null;
+                    /** Minimum */
+                    minimum?: number | null;
+                    /** Maximum */
+                    maximum?: number | null;
+                    /** Step */
+                    step?: number | null;
+                    /** Options */
+                    options?: string[] | null;
+                  };
+                  /**
+                   * SecurityClassificationPublic
+                   * @description Basic security classification information.
+                   */
+                  SecurityClassificationPublic: {
+                    /** Created At */
+                    created_at?: string | null;
+                    /** Updated At */
+                    updated_at?: string | null;
+                    /**
+                     * Id
+                     * Format: uuid
+                     */
+                    id: string;
+                    /** Name */
+                    name: string;
+                    /** Description */
+                    description: string | null;
+                    /** Security Level */
+                    security_level: number;
+                  };
+                  /** SupportedModelKwargs */
+                  SupportedModelKwargs: {
+                    temperature?: components["schemas"]["ModelKwargCapability"];
+                    top_p?: components["schemas"]["ModelKwargCapability"];
+                    reasoning_effort?: components["schemas"]["ModelKwargCapability"];
+                    verbosity?: components["schemas"]["ModelKwargCapability"];
+                    presence_penalty?: components["schemas"]["ModelKwargCapability"];
+                    frequency_penalty?: components["schemas"]["ModelKwargCapability"];
+                    top_k?: components["schemas"]["ModelKwargCapability"];
+                  };
                   /** ToolAssistant */
                   ToolAssistant: {
                     /**
@@ -23925,6 +27074,56 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  get_chat_turn_diagnostics_api_v1_conversations__session_id__messages__message_id__diagnostics__get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        session_id: string;
+        message_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ChatTurnDiagnostics"];
         };
       };
       /** @description Forbidden */
@@ -24909,6 +28108,15 @@ export interface operations {
       };
       /** @description Bad Request */
       400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
         headers: {
           [name: string]: unknown;
         };
@@ -30406,6 +33614,15 @@ export interface operations {
           "application/json": components["schemas"]["GeneralError"];
         };
       };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
     };
   };
   create_provider_api_v1_admin_model_providers__post: {
@@ -30464,6 +33681,15 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
     };
@@ -30629,6 +33855,15 @@ export interface operations {
           "application/json": components["schemas"]["HTTPValidationError"];
         };
       };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
     };
   };
   update_provider_api_v1_admin_model_providers__provider_id___put: {
@@ -30691,6 +33926,15 @@ export interface operations {
           "application/json": components["schemas"]["HTTPValidationError"];
         };
       };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
     };
   };
   delete_provider_api_v1_admin_model_providers__provider_id___delete: {
@@ -30751,6 +33995,15 @@ export interface operations {
           "application/json": components["schemas"]["HTTPValidationError"];
         };
       };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
     };
   };
   list_provider_models_api_v1_admin_model_providers__provider_id__models__get: {
@@ -30796,6 +34049,15 @@ export interface operations {
           "application/json": components["schemas"]["HTTPValidationError"];
         };
       };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
     };
   };
   test_provider_api_v1_admin_model_providers__provider_id__test__post: {
@@ -30836,6 +34098,15 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
     };
@@ -30882,6 +34153,15 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
     };
@@ -31531,6 +34811,15 @@ export interface operations {
           "application/json": components["schemas"]["HTTPValidationError"];
         };
       };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
     };
   };
   get_file_api_v1_files__id___get: {
@@ -31618,6 +34907,64 @@ export interface operations {
           "application/json": components["schemas"]["GeneralError"];
         };
       };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  get_file_deletion_preview_api_v1_files__id__deletion_preview__get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["FileDeletionPreview"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Validation Error */
       422: {
         headers: {
@@ -31641,6 +34988,59 @@ export interface operations {
     requestBody: {
       content: {
         "application/json": components["schemas"]["SignedURLRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["SignedURLResponse"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  generate_original_signed_url_api_v1_files__id__original_signed_url__post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["OriginalSignedURLRequest"];
       };
     };
     responses: {
@@ -31756,6 +35156,119 @@ export interface operations {
           "application/json": components["schemas"]["HTTPValidationError"];
         };
       };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  download_original_file_signed_api_v1_files__id__original_download__get: {
+    parameters: {
+      query: {
+        /** @description The signed original-download token */
+        token: string;
+      };
+      header?: {
+        range?: string | null;
+      };
+      path: {
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successfully downloaded the entire original file */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Successfully downloaded part of the original audio */
+      206: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Requested Range Not Satisfiable */
+      416: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
     };
   };
   get_icon_api_v1_icons__id___get: {
@@ -31794,6 +35307,15 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
     };
@@ -31890,6 +35412,15 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
     };
@@ -37310,6 +40841,2304 @@ export interface operations {
       };
       /** @description Forbidden */
       403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  get_deployment_policy_api_v1_admin_object_content_policy_get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["DeploymentPolicyPublic"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  replace_deployment_policy_api_v1_admin_object_content_policy_put: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["DeploymentPolicyUpdate"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["DeploymentPolicyPublic"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  get_object_content_inventory_api_v1_admin_object_content_inventory_get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ObjectContentInventoryPublic"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  get_object_content_moves_api_v1_admin_object_content_moves_get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ObjectContentMovesPublic"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  queue_object_content_moves_api_v1_admin_object_content_moves_post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["MoveQueueRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["MoveQueuePublic"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  set_object_content_moves_paused_api_v1_admin_object_content_moves_pause_put: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["DeploymentPolicyPauseUpdate"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["MovePausePublic"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  get_object_store_connection_api_v1_admin_object_store_connection_get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ObjectStoreConnectionPublic"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  create_object_store_connection_api_v1_admin_object_store_connection_post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["ObjectStoreConnectionInput"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ObjectStoreConnectionPublic"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  rotate_object_store_credentials_api_v1_admin_object_store_connection_credentials_put: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["ObjectStoreCredentialRotation"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ObjectStoreConnectionPublic"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  replace_object_store_destination_api_v1_admin_object_store_connection_destination_post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["ObjectStoreConnectionInput"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ObjectStoreConnectionPublic"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  switch_back_object_store_destination_api_v1_admin_object_store_connection_destination_switch_back_post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["ObjectStoreSwitchBackInput"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ObjectStoreConnectionPublic"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  forget_previous_object_store_destination_api_v1_admin_object_store_connection_previous_delete: {
+    parameters: {
+      query: {
+        /** @description Revision of the archived destination being forgotten */
+        expected_revision: number;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  abandon_pending_object_store_destination_api_v1_admin_object_store_connection_pending_delete: {
+    parameters: {
+      query: {
+        /** @description Revision of the pending destination attempt being abandoned */
+        expected_revision: number;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  list_skills_api_v1_spaces__space_id__skills__get: {
+    parameters: {
+      query?: {
+        limit?: number;
+        cursor?: string | null;
+        q?: string | null;
+      };
+      header?: never;
+      path: {
+        space_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["CursorPaginatedResponse_SkillSparse_"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  create_skill_api_v1_spaces__space_id__skills__post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        space_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["SkillCreateRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["SkillPublic"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  get_skill_api_v1_spaces__space_id__skills__skill_id___get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        space_id: string;
+        skill_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["SkillPublic"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  delete_skill_api_v1_spaces__space_id__skills__skill_id___delete: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        space_id: string;
+        skill_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  list_skill_revisions_api_v1_spaces__space_id__skills__skill_id__revisions__get: {
+    parameters: {
+      query?: {
+        limit?: number;
+        cursor?: string | null;
+      };
+      header?: never;
+      path: {
+        space_id: string;
+        skill_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["CursorPaginatedResponse_SkillRevisionSummaryPublic_"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  create_skill_revision_api_v1_spaces__space_id__skills__skill_id__revisions__post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        space_id: string;
+        skill_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["SkillRevisionCreateRequest"];
+      };
+    };
+    responses: {
+      /** @description The submitted content already matches the current revision. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["SkillRevisionPublic"];
+        };
+      };
+      /** @description Successful Response */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["SkillRevisionPublic"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  get_skill_revision_api_v1_spaces__space_id__skills__skill_id__revisions__revision_id___get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        space_id: string;
+        skill_id: string;
+        revision_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["SkillRevisionPublic"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  restore_skill_revision_api_v1_spaces__space_id__skills__skill_id__revisions__source_revision_id__restore__post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        space_id: string;
+        skill_id: string;
+        source_revision_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["SkillRevisionRestoreRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["SkillRevisionRestorePublic"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  set_skill_active_api_v1_spaces__space_id__skills__skill_id__active__patch: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        space_id: string;
+        skill_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["SkillActiveUpdateRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["SkillPublic"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  list_assistant_skill_bindings_api_v1_spaces__space_id__assistants__assistant_id__skills__get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        space_id: string;
+        assistant_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["SkillBindingSummary"][];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  get_assistant_skill_configuration_api_v1_spaces__space_id__assistants__assistant_id__skills_configuration__get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        space_id: string;
+        assistant_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AssistantSkillConfigurationPublic"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  list_app_skill_bindings_api_v1_spaces__space_id__apps__app_id__skills__get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        space_id: string;
+        app_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["SkillBindingSummary"][];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  list_catalogue_api_v1_skills_catalogue__get: {
+    parameters: {
+      query?: {
+        limit?: number;
+        cursor?: string | null;
+        search?: string | null;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["PublishedSkillSummaryPagePublic"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  get_catalogue_skill_api_v1_skills_catalogue__skill_id___get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        skill_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["PublishedSkillPublic"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  list_organization_skills_api_v1_skills_organization__get: {
+    parameters: {
+      query?: {
+        limit?: number;
+        cursor?: string | null;
+        search?: string | null;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["OrganizationSkillSummaryPagePublic"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  create_organization_skill_api_v1_skills_organization__post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["SkillCreateRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["OrganizationSkillPublic"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  get_organization_skill_api_v1_skills_organization__skill_id___get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        skill_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["OrganizationSkillPublic"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  delete_organization_skill_api_v1_skills_organization__skill_id___delete: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        skill_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  get_organization_skill_adoption_api_v1_skills_organization__skill_id__adoption__get: {
+    parameters: {
+      query?: {
+        limit?: number;
+        cursor?: string | null;
+      };
+      header?: never;
+      path: {
+        skill_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["SkillAdoptionProjectionPagePublic"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  list_organization_skill_revisions_api_v1_skills_organization__skill_id__revisions__get: {
+    parameters: {
+      query?: {
+        limit?: number;
+        cursor?: string | null;
+      };
+      header?: never;
+      path: {
+        skill_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["CursorPaginatedResponse_SkillRevisionSummaryPublic_"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  create_organization_skill_revision_api_v1_skills_organization__skill_id__revisions__post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        skill_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["SkillRevisionCreateRequest"];
+      };
+    };
+    responses: {
+      /** @description The submitted content already matches the current revision. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["SkillRevisionPublic"];
+        };
+      };
+      /** @description Successful Response */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["SkillRevisionPublic"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  get_organization_skill_revision_api_v1_skills_organization__skill_id__revisions__revision_id___get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        skill_id: string;
+        revision_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["SkillRevisionPublic"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  restore_organization_skill_revision_api_v1_skills_organization__skill_id__revisions__source_revision_id__restore__post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        skill_id: string;
+        source_revision_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["SkillRevisionRestoreRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["SkillRevisionRestorePublic"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  publish_organization_skill_api_v1_skills_organization__skill_id__publish__post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        skill_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["SkillPublishRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["OrganizationSkillPublic"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  advance_personal_chat_binding_api_v1_skills_organization__skill_id__personal_chat_advance__post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        skill_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["PersonalChatPinAdvanceRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["PersonalChatPinAdvancePublic"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  advance_assistant_bindings_api_v1_skills_organization__skill_id__assistants_advance__post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        skill_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["AssistantFleetAdvanceRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AssistantFleetAdvancePublic"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  advance_app_bindings_api_v1_skills_organization__skill_id__apps_advance__post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        skill_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["AppFleetAdvanceRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AppFleetAdvancePublic"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  unpublish_organization_skill_api_v1_skills_organization__skill_id__unpublish__post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        skill_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["OrganizationSkillPublic"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
         headers: {
           [name: string]: unknown;
         };

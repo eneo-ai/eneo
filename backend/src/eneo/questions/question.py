@@ -13,7 +13,7 @@ from pydantic import (
 
 from eneo.ai_models.completion_models.completion_model import CompletionModel
 from eneo.completion_models.infrastructure.web_search import WebSearchResult
-from eneo.files.file_models import File, FilePublic
+from eneo.files.file_models import File, FileMetadata, FilePublic
 from eneo.info_blobs.info_blob import InfoBlobInDB, InfoBlobPublicNoText
 from eneo.logging.logging import (
     LoggingDetails,
@@ -21,6 +21,10 @@ from eneo.logging.logging import (
     LoggingDetailsPublic,
 )
 from eneo.main.models import InDB
+from eneo.skills.domain.skill import (
+    SkillActivationEvidenceV1,
+    SkillExecutionReference,
+)
 
 
 # SubModels
@@ -42,7 +46,7 @@ class UseTools(BaseModel):
 
 class QuestionsFiles(BaseModel):
     type: str
-    file: File
+    file: FileMetadata
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -103,6 +107,9 @@ class ToolCallInfo(BaseModel):
 class QuestionAdd(QuestionBase):
     num_tokens_question: int
     num_tokens_answer: int
+    context_prompt_tokens: Optional[int] = None
+    context_completion_tokens: Optional[int] = None
+    skill_context_tokens: Optional[int] = None
     tenant_id: UUID
     completion_model_id: Optional[UUID] = None
     session_id: Optional[UUID] = None
@@ -110,6 +117,8 @@ class QuestionAdd(QuestionBase):
     logging_details: Optional[LoggingDetails] = None
     assistant_id: Optional[UUID] = None
     tool_calls: Optional[list[ToolCallInfo]] = None
+    skill_provenance: Optional[list[SkillExecutionReference]] = None
+    skill_activation: Optional[SkillActivationEvidenceV1] = None
     # Model reasoning/thinking text captured during streaming. Persisted so the
     # trace can be re-shown when a conversation is reloaded. None for turns
     # produced before this field existed or by models without reasoning.
@@ -138,19 +147,18 @@ class Question(QuestionAdd, InDB):
     mcp_tool_references: list[McpToolReferencePublic] = []
     tool_calls: Optional[list[ToolCallInfo]] = None
 
-    @model_validator(mode="after")
-    def process_files_from_db(self) -> "Question":
-        """
-        Process files from the database record.
-        User files have type="user", assistant files have type="assistant"
-        """
-        if self.questions_files:
-            self.files = [qf.file for qf in self.questions_files if qf.type == "user"]
-            self.generated_files = [
-                qf.file for qf in self.questions_files if qf.type == "assistant"
-            ]
-
-        return self
+    def attach_hydrated_files(self, files_by_id: dict[UUID, File]) -> None:
+        """Attach byte-complete Files after the persistent row is authorized."""
+        self.files = [
+            files_by_id[question_file.file.id]
+            for question_file in self.questions_files
+            if question_file.type == "user"
+        ]
+        self.generated_files = [
+            files_by_id[question_file.file.id]
+            for question_file in self.questions_files
+            if question_file.type == "assistant"
+        ]
 
 
 class Message(QuestionBase, InDB):
@@ -163,15 +171,48 @@ class Message(QuestionBase, InDB):
     web_search_references: list[WebSearchResultPublic]
     mcp_tool_references: list[McpToolReferencePublic] = []
     tool_calls: list[ToolCallInfo] = []
+    skill_provenance: Optional[list[SkillExecutionReference]] = None
     reasoning: Optional[str] = None
-    # Default 0 keeps deserialization safe for rows persisted before token
-    # measurement was introduced. The DB columns are NOT NULL int, so every
-    # persisted row reads back as an integer. Clients that sum these values
-    # across history should treat 0 as "zero OR unmeasured" — historical
-    # conversations from before measurement was added will underreport actual
-    # context usage. Fix requires a backfill migration, out of scope here.
-    num_tokens_question: int = 0
-    num_tokens_answer: int = 0
+    # Cumulative turn usage across provider requests. Historical rows from
+    # before measurement was introduced use 0 for unmeasured usage.
+    num_tokens_question: int = Field(
+        default=0,
+        description=(
+            "Cumulative prompt tokens across all provider requests in the turn. "
+            "Use context_prompt_tokens for context-window headroom."
+        ),
+    )
+    num_tokens_answer: int = Field(
+        default=0,
+        description=(
+            "Cumulative completion tokens across all provider responses in the "
+            "turn. Use context_completion_tokens for context-window headroom."
+        ),
+    )
+    # Final provider request/response only. Unlike num_tokens_*, these values
+    # are not accumulated across Skill activation or tool rounds.
+    context_prompt_tokens: Optional[int] = Field(
+        default=None,
+        description=(
+            "Prompt tokens for the final provider request only. Null for rows "
+            "saved before final-request usage was recorded."
+        ),
+    )
+    context_completion_tokens: Optional[int] = Field(
+        default=None,
+        description=(
+            "Completion tokens for the final provider response only. Null for rows "
+            "saved before final-request usage was recorded."
+        ),
+    )
+    # LiteLLM-measured subset of context_prompt_tokens owned by Skills.
+    skill_context_tokens: Optional[int] = Field(
+        default=None,
+        description=(
+            "Model-aware Skill-owned subset of context_prompt_tokens. Already "
+            "included; do not add it to context usage again. Null for legacy rows."
+        ),
+    )
 
     @field_validator("tool_calls", mode="before")
     @classmethod

@@ -6,11 +6,8 @@ from typing import TYPE_CHECKING, Optional, cast
 from urllib.parse import unquote
 from uuid import UUID
 
-import sqlalchemy as sa
 from sqlalchemy import event
 
-from eneo.database.tables.info_blob_chunk_table import InfoBlobChunks
-from eneo.embedding_models.infrastructure.datastore import Datastore
 from eneo.info_blobs.info_blob import InfoBlobAdd, InfoBlobUpdate
 from eneo.integration.domain.entities.oauth_token import OauthToken
 from eneo.integration.domain.entities.sync_log import SyncLog
@@ -154,7 +151,6 @@ class SharePointContentService:
         oauth_token_repo: "OauthTokenRepository",
         user_integration_repo: "UserIntegrationRepository",
         user: "UserInDB",
-        datastore: "Datastore",
         info_blob_service: "InfoBlobService",
         integration_knowledge_repo: "IntegrationKnowledgeRepository",
         oauth_token_service: "OauthTokenService",
@@ -170,7 +166,6 @@ class SharePointContentService:
         self.oauth_token_repo = oauth_token_repo
         self.user_integration_repo = user_integration_repo
         self.user = user
-        self.datastore = datastore
         self.info_blob_service = info_blob_service
         self.integration_knowledge_repo = integration_knowledge_repo
         self.oauth_token_service = oauth_token_service
@@ -1220,42 +1215,13 @@ class SharePointContentService:
             tenant_id=self.user.tenant_id,
             integration_knowledge_id=integration_knowledge.id,
             sharepoint_item_id=sharepoint_item_id,
-            content_hash=None,
+            content_hash=content_hash,
         )
 
-        if sharepoint_item_id:
-            info_blob = await self.info_blob_service.upsert_info_blob_by_sharepoint_item_and_integration(
-                info_blob_add
-            )
-        else:
-            info_blob = (
-                await self.info_blob_service.upsert_info_blob_by_title_and_integration(
-                    info_blob_add
-                )
-            )
-
-        try:
-            await self.info_blob_service.repo.session.execute(
-                sa.delete(InfoBlobChunks).where(
-                    InfoBlobChunks.info_blob_id == info_blob.id
-                )
-            )
-            logger.debug(f"Cleared old chunks for {title}")
-        except Exception as e:
-            logger.warning(f"Could not delete old chunks for {title}: {e}")
-
-        try:
-            await self.datastore.add(
-                info_blob=info_blob,
-                embedding_model=integration_knowledge.embedding_model,
-            )
-        except Exception as e:
-            logger.debug(f"Could not add embedding for {title}: {e}")
-        else:
-            await self.info_blob_service.repo.update_content_hash(
-                info_blob_id=info_blob.id,
-                content_hash=content_hash,
-            )
+        info_blob = await self.info_blob_service.publish_info_blob_without_validation(
+            info_blob_add,
+            embedding_model=integration_knowledge.embedding_model,
+        )
 
         current_size = safe_int(getattr(integration_knowledge, "size", 0))
         new_blob_size = safe_int(getattr(info_blob, "size", 0))

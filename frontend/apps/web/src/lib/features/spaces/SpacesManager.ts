@@ -7,7 +7,7 @@
 import { goto } from "$app/navigation";
 import { resolve } from "$app/paths";
 import { createContext } from "$lib/core/context";
-import type { Eneo, ResourcePermission, Space, SpaceSparse } from "@eneo/eneo-js";
+import type { Eneo, ModelKwargs, ResourcePermission, Space, SpaceSparse } from "@eneo/eneo-js";
 import { derived, get, writable, type Readable } from "svelte/store";
 import { toastError } from "$lib/core/errors";
 
@@ -146,14 +146,23 @@ function SpacesManager(data: SpacesManagerParams) {
     }
   }
 
-  async function updateDefaultAssistant({ completionModel }: { completionModel: { id: string } }) {
+  async function updateDefaultAssistant({
+    completionModel,
+    modelKwargs
+  }: {
+    completionModel?: { id: string };
+    modelKwargs?: ModelKwargs;
+  }) {
     const defaultAssistant = get(currentSpace).default_assistant;
     if (!defaultAssistant) return;
     const id = defaultAssistant.id;
     try {
       const updatedAssistant = await eneo.assistants.update({
         assistant: { id },
-        update: { completion_model: completionModel }
+        update: {
+          ...(completionModel ? { completion_model: completionModel } : {}),
+          ...(modelKwargs ? { completion_model_kwargs: modelKwargs } : {})
+        }
       });
       currentSpace.update(($currentSpace) => {
         $currentSpace.default_assistant = updatedAssistant;
@@ -244,6 +253,8 @@ function derivedCurrentSpace(space: Readable<Space>) {
             return (
               $space.knowledge.integration_knowledge_list.permissions?.includes(action) ?? false
             );
+          case "skill":
+            return $space.skill_permissions?.includes(action) ?? false;
           case "member":
             return $space.members.permissions?.includes(action) ?? false;
           case "group_member":
@@ -264,6 +275,7 @@ type Resource =
   | "service"
   | "website"
   | "integrationKnowledge"
+  | "skill"
   | "collection"
   | "member"
   | "group_member"

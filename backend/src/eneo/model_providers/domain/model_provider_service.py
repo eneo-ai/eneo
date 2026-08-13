@@ -3,6 +3,7 @@ from typing import TYPE_CHECKING, Any, Optional
 from uuid import UUID, uuid4
 
 from eneo.main.exceptions import BadRequestException, NameCollisionException
+from eneo.model_providers.domain.model_defaults_lookup import resolve_model_defaults
 from eneo.model_providers.domain.model_provider import ModelProvider
 from eneo.model_providers.infrastructure.model_provider_repository import (
     ModelProviderRepository,
@@ -158,8 +159,15 @@ def _infer_mode_from_name(name: str) -> str | None:
 def _enrich_with_litellm_metadata(
     name: str, provider_type: str, mode_hint: str | None = None
 ) -> dict[str, Any] | None:
-    """Look up `name` in litellm.model_cost (with prefix variants) and return
-    an enriched capability dict, or None if the model should be hidden.
+    """Look up `name` in litellm.model_cost and return an enriched capability
+    dict, or None if the model should be hidden.
+
+    This function owns presentation policy only: which models are surfaced
+    (filter substrings, mode mapping) and which fields are extracted per mode.
+    Which ``model_cost`` row a ``(name, provider_type)`` pair maps to is
+    delegated to ``resolve_model_defaults`` so the runtime enrichment and
+    ``/model-defaults/`` paths agree structurally. The one-shot cost backfill
+    keeps an intentionally frozen copy of the same documented semantics.
 
     Returns None when the name matches a non-text filter substring or maps to
     a litellm mode we don't surface (image, tts, moderation, etc.).
@@ -178,13 +186,7 @@ def _enrich_with_litellm_metadata(
         return None
 
     model_cost = getattr(litellm, "model_cost", {})
-
-    candidates = [name, f"{provider_type}/{name}"]
-    info: dict[str, Any] | None = None
-    for key in candidates:
-        if key in model_cost:
-            info = model_cost[key]
-            break
+    info = resolve_model_defaults(model_cost, name, provider_type)
 
     if info is None:
         chosen = mode_hint or _infer_mode_from_name(name)

@@ -20,12 +20,16 @@ roles:
       - websites
       - integrations
       - shared_spaces
+      - assistant_debug
 
   - name: 'Owner'
     permissions:
       - admin
+      - storage
       - personal_chat
       - assistants
+      - skills
+      - skills_management
       - group_chats
       - apps
       - services
@@ -36,3 +40,4 @@ roles:
       - integrations
       - shared_spaces
       - api_keys
+      - assistant_debug
