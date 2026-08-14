@@ -3,10 +3,13 @@
   import type { FlowRetentionImpactPreview, FlowRetentionPolicy } from "@eneo/eneo-js";
   import { beforeNavigate } from "$app/navigation";
   import { resolve } from "$app/paths";
+  import ChevronDown from "lucide-svelte/icons/chevron-down";
   import TriangleAlert from "lucide-svelte/icons/triangle-alert";
   import * as Alert from "$lib/components/ui/alert/index.js";
   import { Badge } from "$lib/components/ui/badge/index.js";
   import { Button } from "$lib/components/ui/button/index.js";
+  import * as Card from "$lib/components/ui/card/index.js";
+  import * as Collapsible from "$lib/components/ui/collapsible/index.js";
   import { Page, Settings } from "$lib/components/layout";
   import {
     NumberField,
@@ -18,6 +21,7 @@
   import { getEneo } from "$lib/core/Eneo";
   import { toastError } from "$lib/core/errors";
   import FlowRetentionImpactDialog from "$lib/features/flows/components/FlowRetentionImpactDialog.svelte";
+  import FlowClassificationRetentionSettings from "$lib/features/flows/components/FlowClassificationRetentionSettings.svelte";
   import {
     confirmationFromFlowRetentionPreview,
     FLOW_RETENTION_MAX_DAYS,
@@ -41,6 +45,8 @@
   const EVIDENCE_MAX_STEP_BYTES = 4194304;
 
   let policy = $state<FlowRetentionPolicy>(initial.flowRetentionPolicy);
+  let classificationDirtyCount = $state(0);
+  let runtimeLimitsOpen = $state(false);
   let saving = $state(false);
   let preview = $state<FlowRetentionImpactPreview | null>(null);
   let previewOpen = $state(false);
@@ -166,6 +172,8 @@
     evidenceStepSize
   ]);
 
+  const totalDirtyCount = $derived(form.dirtyCount + classificationDirtyCount);
+
   const retentionDirty = $derived(
     runHistory.dirty || uploadCleanup.dirty || minimumRetention.dirty || noPurge.dirty
   );
@@ -202,6 +210,17 @@
     return { active: true, label: m.flow_retention_status_cleanup_days({ days }) };
   });
 
+  const protectionStatus = $derived.by(() => {
+    const paused = policy.effective_state.barrier_sources.some(
+      (source) => source === "organization_no_purge" || source === "classification_no_purge"
+    );
+    if (paused) return m.flow_retention_status_protection_paused();
+    if (policy.effective_state.barrier_sources.length > 0) {
+      return m.flow_retention_status_protection_minimum();
+    }
+    return m.flow_retention_status_protection_none();
+  });
+
   function formatSeconds(value: number): string {
     if (value < 60) return `${value} s`;
     const minutes = value / 60;
@@ -218,6 +237,33 @@
     }
     return m.flow_runtime_policy_seconds_preview({ value: formatSeconds(field.value) });
   }
+
+  const runtimeLimitsSummary = $derived(
+    m.flow_runtime_policy_advanced_summary({
+      normal: formatSeconds(
+        defaultStepTimeout.value ?? initial.flowRuntimePolicy.hard_ceiling_seconds
+      ),
+      maximum: formatSeconds(maxStepTimeout.value ?? initial.flowRuntimePolicy.hard_ceiling_seconds)
+    })
+  );
+
+  function formatStorage(value: number | null | undefined): string {
+    if (value == null) return m.flow_knowledge_evidence_default_hint();
+    if (value >= MB) return `${Number((value / MB).toFixed(1))} MB`;
+    return `${Number((value / KB).toFixed(1))} KB`;
+  }
+
+  const evidenceSummary = $derived(
+    m.flow_knowledge_evidence_summary({
+      sources: evidenceSources.value ?? 0,
+      passages: evidencePassages.value ?? 0,
+      total: formatStorage(evidenceStepSize.value)
+    })
+  );
+
+  const builderMessagePages = $derived(
+    Math.max(1, Math.round((builderMaxMessageChars.value ?? 0) / 2500))
+  );
 
   function activationSourceLabel(
     source: FlowRetentionPolicy["effective_state"]["activation_sources"][number]
@@ -413,8 +459,27 @@
     }
   }
 
+  async function refreshEffectiveRetentionPolicy() {
+    policy = await eneo.settings.getFlowRetentionPolicy();
+  }
+
+  function setClassificationDirtyCount(count: number) {
+    classificationDirtyCount = count;
+  }
+
+  function setRuntimeLimitsOpen(open: boolean) {
+    if (!open && (defaultStepTimeout.dirty || maxStepTimeout.dirty || timeoutOrderError)) return;
+    runtimeLimitsOpen = open;
+  }
+
+  $effect(() => {
+    if (defaultStepTimeout.dirty || maxStepTimeout.dirty || timeoutOrderError) {
+      runtimeLimitsOpen = true;
+    }
+  });
+
   beforeNavigate((navigation) => {
-    if (form.dirtyCount === 0) return;
+    if (totalDirtyCount === 0) return;
     if (!confirm(m.flow_settings_leave_confirm())) navigation.cancel();
   });
 </script>
@@ -425,7 +490,7 @@
 
 <Page.Root>
   <Page.Header>
-    <Page.Title title={m.flow_settings_title()} />
+    <Page.Title title={m.flow_settings_title()} description={m.flow_settings_page_description()} />
     <Page.Tabbar>
       <Page.TabTrigger tab="retention">{m.flow_settings_tab_retention()}</Page.TabTrigger>
       <Page.TabTrigger tab="uploads">{m.flow_settings_tab_uploads()}</Page.TabTrigger>
@@ -435,8 +500,86 @@
   </Page.Header>
   <Page.Main>
     <Page.Tab id="retention">
-      <Settings.Page>
-        <Settings.Group title={m.flow_retention_group_automatic()}>
+      <Settings.Page density="compact">
+        <Settings.Group
+          title={m.flow_retention_current_group()}
+          description={m.flow_retention_current_description()}
+          density="compact"
+        >
+          {#if retentionDirty}
+            <Alert.Root class="mx-4 max-w-3xl lg:mx-0.5">
+              <TriangleAlert aria-hidden="true" />
+              <Alert.Description>{m.flow_retention_status_unsaved_note()}</Alert.Description>
+            </Alert.Root>
+          {/if}
+          <Card.Root size="sm" class="mx-4 gap-0 py-0 lg:mx-0.5">
+            <Card.Content class="grid p-0 sm:grid-cols-3">
+              <div class="border-default flex min-w-0 flex-col gap-2 p-4 sm:border-r">
+                <span class="text-secondary text-xs font-medium">
+                  {m.flow_retention_status_run_history()}
+                </span>
+                <Badge variant={runHistoryStatus.active ? "default" : "secondary"}>
+                  {runHistoryStatus.label}
+                </Badge>
+              </div>
+              <div
+                class="border-default flex min-w-0 flex-col gap-2 border-t p-4 sm:border-t-0 sm:border-r"
+              >
+                <span class="text-secondary text-xs font-medium">
+                  {m.flow_retention_status_uploads()}
+                </span>
+                <Badge variant={uploadStatus.active ? "default" : "secondary"}>
+                  {uploadStatus.label}
+                </Badge>
+              </div>
+              <div class="border-default flex min-w-0 flex-col gap-2 border-t p-4 sm:border-t-0">
+                <span class="text-secondary text-xs font-medium">
+                  {m.flow_retention_status_protection()}
+                </span>
+                <Badge variant="outline">{protectionStatus}</Badge>
+              </div>
+            </Card.Content>
+            {#if policy.effective_state.activation_sources.length > 0 || policy.effective_state.barrier_sources.length > 0 || policy.effective_state.classification_policy_count > 0}
+              <Card.Content
+                class="text-secondary border-default flex flex-wrap gap-x-6 gap-y-1 border-t py-3 text-xs"
+              >
+                {#if policy.effective_state.activation_sources.length > 0}
+                  <p>
+                    <span class="text-primary font-medium"
+                      >{m.flow_retention_activation_sources()}:</span
+                    >
+                    {policy.effective_state.activation_sources
+                      .map(activationSourceLabel)
+                      .join(", ")}
+                  </p>
+                {/if}
+                {#if policy.effective_state.barrier_sources.length > 0}
+                  <p>
+                    <span class="text-primary font-medium"
+                      >{m.flow_retention_barrier_sources()}:</span
+                    >
+                    {policy.effective_state.barrier_sources.map(barrierSourceLabel).join(", ")}
+                  </p>
+                {/if}
+                {#if policy.effective_state.classification_policy_count > 0}
+                  <p>
+                    {policy.effective_state.classification_policy_count === 1
+                      ? m.flow_retention_classification_policy_count_one()
+                      : m.flow_retention_classification_policy_count({
+                          count: policy.effective_state.classification_policy_count
+                        })}
+                  </p>
+                {/if}
+              </Card.Content>
+            {/if}
+          </Card.Root>
+        </Settings.Group>
+
+        <Settings.Group
+          title={m.flow_retention_group_automatic()}
+          description={m.flow_retention_group_automatic_description()}
+          density="compact"
+        >
           <Settings.ToggleNumberRow
             title={m.flow_retention_run_history_title()}
             description={m.flow_retention_run_history_description()}
@@ -459,7 +602,11 @@
           />
         </Settings.Group>
 
-        <Settings.Group title={m.flow_retention_group_preservation()}>
+        <Settings.Group
+          title={m.flow_retention_group_preservation()}
+          description={m.flow_retention_group_preservation_description()}
+          density="compact"
+        >
           <Settings.NumberRow
             title={m.flow_retention_minimum_title()}
             description={m.flow_retention_minimum_description()}
@@ -474,111 +621,71 @@
             label={m.flow_retention_no_purge_checkbox()}
             field={noPurge}
           />
+          {#if noPurge.value}
+            <Alert.Root class="mx-4 max-w-3xl lg:mx-0.5">
+              <TriangleAlert aria-hidden="true" />
+              <Alert.Description>{m.flow_retention_no_purge_warning()}</Alert.Description>
+            </Alert.Root>
+          {/if}
         </Settings.Group>
 
-        <Settings.Group title={m.flow_retention_effective_group()}>
-          <Settings.Row
-            fullWidth
-            title={m.flow_retention_status_title()}
-            description={m.flow_retention_effective_description()}
-          >
-            <div class="flex flex-col gap-3 pt-2 pl-2 text-sm">
-              {#if retentionDirty}
-                <p class="text-warning-default text-xs">
-                  {m.flow_retention_status_unsaved_note()}
-                </p>
-              {/if}
-              <div class="flex flex-wrap items-center gap-x-6 gap-y-2">
-                <div class="flex items-center gap-2">
-                  <span class="text-primary font-medium">
-                    {m.flow_retention_status_run_history()}
-                  </span>
-                  <Badge variant={runHistoryStatus.active ? "default" : "secondary"}>
-                    {runHistoryStatus.label}
-                  </Badge>
-                </div>
-                <div class="flex items-center gap-2">
-                  <span class="text-primary font-medium">
-                    {m.flow_retention_status_uploads()}
-                  </span>
-                  <Badge variant={uploadStatus.active ? "default" : "secondary"}>
-                    {uploadStatus.label}
-                  </Badge>
-                </div>
-              </div>
-              {#if policy.effective_state.activation_sources.length > 0 || policy.effective_state.barrier_sources.length > 0 || policy.effective_state.classification_policy_count > 0}
-                <div class="text-secondary flex flex-col gap-1.5">
-                  {#if policy.effective_state.activation_sources.length > 0}
-                    <p>
-                      <span class="text-primary font-medium"
-                        >{m.flow_retention_activation_sources()}:</span
-                      >
-                      {policy.effective_state.activation_sources
-                        .map(activationSourceLabel)
-                        .join(", ")}
-                    </p>
-                  {/if}
-                  {#if policy.effective_state.barrier_sources.length > 0}
-                    <p>
-                      <span class="text-primary font-medium"
-                        >{m.flow_retention_barrier_sources()}:</span
-                      >
-                      {policy.effective_state.barrier_sources.map(barrierSourceLabel).join(", ")}
-                    </p>
-                  {/if}
-                  {#if policy.effective_state.classification_policy_count > 0}
-                    <p>
-                      {policy.effective_state.classification_policy_count === 1
-                        ? m.flow_retention_classification_policy_count_one()
-                        : m.flow_retention_classification_policy_count({
-                            count: policy.effective_state.classification_policy_count
-                          })}
-                    </p>
-                  {/if}
-                </div>
-              {/if}
-            </div>
-          </Settings.Row>
+        <Settings.Group
+          title={m.flow_retention_group_classifications()}
+          description={m.flow_retention_group_classifications_description()}
+          density="compact"
+        >
+          <FlowClassificationRetentionSettings
+            initialPolicies={initial.flowClassificationRetentionPolicies}
+            classifications={initial.securityClassifications.security_classifications}
+            securityEnabled={initial.securityClassifications.security_enabled}
+            onDirtyCountChange={setClassificationDirtyCount}
+            onPoliciesChanged={refreshEffectiveRetentionPolicy}
+          />
+        </Settings.Group>
 
-          <Settings.Row
-            fullWidth
-            title={m.flow_retention_audit_title()}
-            description={m.flow_retention_audit_description()}
-          >
-            <div class="pt-1 pl-2">
-              <a
-                class="text-accent-default text-sm font-medium hover:underline"
-                href={resolve("/(app)/admin/audit-logs")}
-              >
-                {m.flow_retention_audit_link()}
-              </a>
-            </div>
-          </Settings.Row>
-
-          <Settings.Row
-            fullWidth
-            title={m.flow_retention_preservation_title()}
-            description={m.flow_retention_preservation_hold_caveat()}
-          >
-            <div class="flex flex-col gap-2 pt-2 pl-2">
-              <p class="text-secondary max-w-2xl text-sm leading-relaxed">
-                {m.flow_retention_classification_hint()}
-              </p>
-              <a
-                class="text-accent-default w-fit text-sm font-medium hover:underline"
-                href={resolve("/(app)/admin/security-classifications")}
-              >
-                {m.flow_retention_manage_classifications()}
-              </a>
-            </div>
-          </Settings.Row>
+        <Settings.Group
+          title={m.flow_retention_effective_group()}
+          description={m.flow_retention_effective_group_description()}
+          density="compact"
+        >
+          <div class="grid gap-3 px-4 lg:grid-cols-2 lg:px-0.5">
+            <Card.Root size="sm">
+              <Card.Header>
+                <Card.Title>{m.flow_retention_audit_title()}</Card.Title>
+                <Card.Description class="leading-relaxed">
+                  {m.flow_retention_audit_description()}
+                </Card.Description>
+              </Card.Header>
+              <Card.Content>
+                <Button
+                  variant="link"
+                  class="h-auto px-0"
+                  href={resolve("/(app)/admin/audit-logs")}
+                >
+                  {m.flow_retention_audit_link()}
+                </Button>
+              </Card.Content>
+            </Card.Root>
+            <Card.Root size="sm">
+              <Card.Header>
+                <Card.Title>{m.flow_retention_preservation_title()}</Card.Title>
+                <Card.Description class="leading-relaxed">
+                  {m.flow_retention_preservation_hold_caveat()}
+                </Card.Description>
+              </Card.Header>
+            </Card.Root>
+          </div>
         </Settings.Group>
       </Settings.Page>
     </Page.Tab>
 
     <Page.Tab id="uploads">
-      <Settings.Page>
-        <Settings.Group title={m.flow_input_limits_file_group()}>
+      <Settings.Page density="compact">
+        <Settings.Group
+          title={m.flow_input_limits_file_group()}
+          description={m.flow_input_limits_file_group_description()}
+          density="compact"
+        >
           <Settings.NumberRow
             title={m.flow_input_limits_file_title()}
             description={m.flow_input_limits_file_description()}
@@ -587,19 +694,21 @@
             hint={m.flow_knowledge_evidence_ceiling_bytes_hint({
               ceiling: `${Math.floor(initial.flowInputLimits.file_max_size_ceiling_bytes / MB)} MB`
             })}
-            restorable
             field={fileMaxSize}
           />
           <Settings.NumberRow
             title={m.flow_input_limits_max_files_title()}
             description={m.flow_input_limits_max_files_description()}
             placeholder={m.flow_input_limits_unlimited_hint()}
-            restorable
             field={maxFilesPerRun}
           />
         </Settings.Group>
 
-        <Settings.Group title={m.flow_input_limits_audio_group()}>
+        <Settings.Group
+          title={m.flow_input_limits_audio_group()}
+          description={m.flow_input_limits_audio_group_description()}
+          density="compact"
+        >
           <Settings.NumberRow
             title={m.flow_input_limits_audio_title()}
             description={m.flow_input_limits_audio_description()}
@@ -608,45 +717,77 @@
             hint={m.flow_knowledge_evidence_ceiling_bytes_hint({
               ceiling: `${Math.floor(initial.flowInputLimits.audio_max_size_ceiling_bytes / MB)} MB`
             })}
-            restorable
             field={audioMaxSize}
           />
           <Settings.NumberRow
             title={m.flow_input_limits_audio_max_files_title()}
             description={m.flow_input_limits_audio_max_files_description()}
             placeholder={m.flow_input_limits_deployment_default_hint()}
-            restorable
             field={audioMaxFiles}
           />
         </Settings.Group>
 
-        <Settings.Group title={m.flow_runtime_policy_group()}>
-          <Settings.NumberRow
-            title={m.flow_runtime_policy_default_timeout_title()}
-            description={m.flow_runtime_policy_default_timeout_description()}
-            placeholder={m.flow_input_limits_deployment_default_hint()}
-            unit={m.flow_settings_unit_seconds()}
-            hint={timeoutHint(defaultStepTimeout)}
-            restorable
-            field={defaultStepTimeout}
-          />
-          <Settings.NumberRow
-            title={m.flow_runtime_policy_max_timeout_title()}
-            description={m.flow_runtime_policy_max_timeout_description()}
-            placeholder={m.flow_input_limits_deployment_default_hint()}
-            unit={m.flow_settings_unit_seconds()}
-            hint={timeoutHint(maxStepTimeout)}
-            externalError={timeoutOrderError}
-            restorable
-            field={maxStepTimeout}
-          />
+        <Settings.Group
+          title={m.flow_runtime_policy_group()}
+          description={m.flow_runtime_policy_group_description()}
+          density="compact"
+        >
+          <Collapsible.Root
+            open={runtimeLimitsOpen}
+            onOpenChange={setRuntimeLimitsOpen}
+            class="px-4 lg:px-0.5"
+          >
+            <Collapsible.Trigger
+              class="border-default hover:bg-hover-dimmer focus-visible:ring-ring flex w-full items-center justify-between gap-4 rounded-lg border px-4 py-3 text-left focus-visible:ring-2 focus-visible:outline-none"
+            >
+              <span class="min-w-0">
+                <span class="text-primary block text-sm font-semibold">
+                  {m.flow_runtime_policy_advanced_title()}
+                </span>
+                <span class="text-secondary mt-0.5 block text-xs leading-relaxed">
+                  {runtimeLimitsSummary}
+                </span>
+              </span>
+              <ChevronDown
+                class={runtimeLimitsOpen
+                  ? "size-4 shrink-0 rotate-180 transition-transform duration-150 motion-reduce:transition-none"
+                  : "size-4 shrink-0 transition-transform duration-150 motion-reduce:transition-none"}
+                aria-hidden="true"
+              />
+            </Collapsible.Trigger>
+            <Collapsible.Content class="collapsible-animate">
+              <div class="flex flex-col gap-4 pt-4">
+                <Settings.NumberRow
+                  title={m.flow_runtime_policy_default_timeout_title()}
+                  description={m.flow_runtime_policy_default_timeout_description()}
+                  placeholder={m.flow_input_limits_deployment_default_hint()}
+                  unit={m.flow_settings_unit_seconds()}
+                  hint={timeoutHint(defaultStepTimeout)}
+                  field={defaultStepTimeout}
+                />
+                <Settings.NumberRow
+                  title={m.flow_runtime_policy_max_timeout_title()}
+                  description={m.flow_runtime_policy_max_timeout_description()}
+                  placeholder={m.flow_input_limits_deployment_default_hint()}
+                  unit={m.flow_settings_unit_seconds()}
+                  hint={timeoutHint(maxStepTimeout)}
+                  externalError={timeoutOrderError}
+                  field={maxStepTimeout}
+                />
+              </div>
+            </Collapsible.Content>
+          </Collapsible.Root>
         </Settings.Group>
       </Settings.Page>
     </Page.Tab>
 
     <Page.Tab id="builder">
-      <Settings.Page>
-        <Settings.Group title={m.ai_builder_limits_group()}>
+      <Settings.Page density="compact">
+        <Settings.Group
+          title={m.ai_builder_limits_group()}
+          description={m.ai_builder_limits_group_description()}
+          density="compact"
+        >
           <Settings.NumberRow
             title={m.ai_builder_limits_max_attachments_title()}
             description={m.ai_builder_limits_max_attachments_description()}
@@ -660,14 +801,19 @@
             title={m.ai_builder_limits_max_message_chars_title()}
             description={m.ai_builder_limits_max_message_chars_description()}
             unit={m.flow_settings_unit_chars()}
-            hint={m.ai_builder_limits_ceiling_hint({
-              value: String(data.aiBuilderBudgetSettings.max_message_chars_hard_limit)
+            hint={m.ai_builder_limits_message_hint({
+              ceiling: String(data.aiBuilderBudgetSettings.max_message_chars_hard_limit),
+              pages: builderMessagePages
             })}
             field={builderMaxMessageChars}
           />
         </Settings.Group>
 
-        <Settings.Group title={m.flow_mapped_execution_group()}>
+        <Settings.Group
+          title={m.flow_mapped_execution_group()}
+          description={m.flow_mapped_execution_group_description()}
+          density="compact"
+        >
           <Settings.ToggleNumberRow
             title={m.flow_mapped_execution_enable_title()}
             description={m.flow_mapped_execution_enable_description()}
@@ -679,7 +825,7 @@
             hint={m.flow_mapped_execution_calls_description()}
             field={mappedCalls}
           />
-          <div class="flex flex-col gap-2 px-4 lg:ml-[40%] lg:px-1">
+          <div class="flex flex-col gap-2 px-4 xl:ml-[40%] xl:px-1">
             {#if mappedCallsSource === "invalid"}
               <Alert.Root variant="destructive" class="max-w-xl">
                 <TriangleAlert aria-hidden="true" />
@@ -714,11 +860,12 @@
     </Page.Tab>
 
     <Page.Tab id="evidence">
-      <Settings.Page>
-        <Settings.Group title={m.flow_knowledge_evidence_scope_group()}>
-          <p class="text-secondary max-w-2xl px-6 text-sm leading-relaxed">
-            {m.flow_knowledge_evidence_intro()}
-          </p>
+      <Settings.Page density="compact">
+        <Settings.Group
+          title={m.flow_knowledge_evidence_group()}
+          description={m.flow_knowledge_evidence_intro()}
+          density="compact"
+        >
           <Settings.NumberRow
             title={m.flow_knowledge_evidence_sources_title()}
             description={m.flow_knowledge_evidence_sources_description()}
@@ -726,7 +873,6 @@
             hint={m.flow_knowledge_evidence_ceiling_hint({
               ceiling: String(EVIDENCE_MAX_SOURCES)
             })}
-            restorable
             field={evidenceSources}
           />
           <Settings.NumberRow
@@ -736,12 +882,8 @@
             hint={m.flow_knowledge_evidence_ceiling_hint({
               ceiling: String(EVIDENCE_MAX_PASSAGES)
             })}
-            restorable
             field={evidencePassages}
           />
-        </Settings.Group>
-
-        <Settings.Group title={m.flow_knowledge_evidence_size_group()}>
           <Settings.NumberRow
             title={m.flow_knowledge_evidence_passage_bytes_title()}
             description={m.flow_knowledge_evidence_passage_bytes_description()}
@@ -750,7 +892,6 @@
             hint={m.flow_knowledge_evidence_ceiling_bytes_hint({
               ceiling: `${EVIDENCE_MAX_PASSAGE_BYTES / KB} KB`
             })}
-            restorable
             field={evidencePassageSize}
           />
           <Settings.NumberRow
@@ -761,9 +902,14 @@
             hint={m.flow_knowledge_evidence_ceiling_bytes_hint({
               ceiling: `${EVIDENCE_MAX_STEP_BYTES / MB} MB`
             })}
-            restorable
             field={evidenceStepSize}
           />
+          <Card.Root size="sm" class="mx-4 lg:mx-0.5">
+            <Card.Header>
+              <Card.Title>{m.flow_knowledge_evidence_summary_title()}</Card.Title>
+              <Card.Description class="leading-relaxed">{evidenceSummary}</Card.Description>
+            </Card.Header>
+          </Card.Root>
         </Settings.Group>
       </Settings.Page>
     </Page.Tab>
@@ -771,18 +917,23 @@
 
   {#if form.dirtyCount > 0}
     <div class="bg-frosted-glass-primary border-default z-10 border-t backdrop-blur-md">
-      <div class="mx-auto flex w-full max-w-[1100px] items-center justify-between gap-4 px-4 py-3">
-        <p class="text-secondary text-sm" aria-live="polite">
-          {form.dirtyCount === 1
-            ? m.flow_settings_unsaved_one()
-            : m.flow_settings_unsaved_many({ count: form.dirtyCount })}
-        </p>
+      <div class="mx-auto flex w-full max-w-[1180px] items-center justify-between gap-4 px-4 py-3">
+        <div class="min-w-0" aria-live="polite">
+          <p class="text-secondary text-sm">
+            {form.dirtyCount === 1
+              ? m.flow_settings_unsaved_one()
+              : m.flow_settings_unsaved_many({ count: form.dirtyCount })}
+          </p>
+          {#if timeoutOrderError}
+            <p class="text-negative-default mt-0.5 text-xs">{timeoutOrderError}</p>
+          {/if}
+        </div>
         <div class="flex items-center gap-2">
           <Button variant="ghost" onclick={() => form.resetAll()} disabled={saving}>
             {m.discard_changes()}
           </Button>
           <Button onclick={save} disabled={blocked || saving}>
-            {saving ? m.saving() : m.save()}
+            {saving ? m.saving() : m.flow_settings_save_changes()}
           </Button>
         </div>
       </div>

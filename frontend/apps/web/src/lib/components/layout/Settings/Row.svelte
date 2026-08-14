@@ -1,13 +1,16 @@
 <script lang="ts">
   import { cva } from "class-variance-authority";
   import RotateCcw from "lucide-svelte/icons/rotate-ccw";
+  import { getContext } from "svelte";
   import { uid } from "uid";
   import { m } from "$lib/paraglide/messages";
+  import { settingsDensityContext, type SettingsDensity } from "./density";
 
   export let title: string;
   export let description: string = "";
   export let fullWidth = false;
-  export let density: "default" | "compact" = "default";
+  export let density: SettingsDensity =
+    getContext<SettingsDensity>(settingsDensityContext) ?? "default";
 
   export let hasChanges = false;
   export let revertFn: (() => void) | undefined = undefined;
@@ -15,12 +18,29 @@
   const labelId = uid(8);
   const descriptionId = uid(8);
 
-  const inputSection = cva(["flex", "w-full", "flex-col", "pt-3"], {
-    variants: { fullWidth: { true: ["w-full"], false: ["lg:w-[56%]"] } }
+  const inputSection = cva(["flex", "w-full", "flex-col"], {
+    variants: {
+      fullWidth: { true: ["w-full"], false: [] },
+      density: {
+        default: ["pt-3"],
+        compact: ["pt-1", "xl:pt-3"]
+      }
+    },
+    compoundVariants: [
+      { fullWidth: false, density: "default", class: "lg:w-[56%]" },
+      { fullWidth: false, density: "compact", class: "xl:w-[56%]" }
+    ]
   });
 
   const descriptionSection = cva(["flex", "w-full", "flex-col", "justify-between", "sm:flex-row"], {
-    variants: { fullWidth: { true: ["w-full"], false: ["lg:w-[40%]"] } }
+    variants: {
+      fullWidth: { true: ["w-full"], false: [] },
+      density: { default: [], compact: [] }
+    },
+    compoundVariants: [
+      { fullWidth: false, density: "default", class: "lg:w-[40%]" },
+      { fullWidth: false, density: "compact", class: "xl:w-[40%]" }
+    ]
   });
 
   const changeIndicator = cva(["transition-all", "duration-300"], {
@@ -36,12 +56,20 @@
 <div
   class:!flex-col={fullWidth}
   class:gap-y-2={fullWidth}
-  class="flex flex-col justify-between gap-y-4 px-4 lg:flex-row lg:pr-6 lg:pl-0.5"
+  class="flex flex-col justify-between gap-y-3 px-4"
+  class:lg:flex-row={density === "default"}
+  class:lg:pr-6={density === "default"}
+  class:lg:pl-0.5={density === "default"}
+  class:xl:flex-row={density === "compact"}
+  class:xl:pr-6={density === "compact"}
+  class:xl:pl-0.5={density === "compact"}
   data-row-has-changes={hasChanges}
 >
-  <div class={descriptionSection({ fullWidth })}>
+  <div class={descriptionSection({ fullWidth, density })}>
     <div
-      class="flex flex-col pr-12 pl-2"
+      class="flex flex-col pl-2"
+      class:pr-12={density === "default"}
+      class:xl:pr-12={density === "compact"}
       class:gap-1.5={density === "default"}
       class:gap-1={density === "compact"}
     >
@@ -83,7 +111,7 @@
     </div>
   </div>
 
-  <div class={inputSection({ fullWidth })}>
+  <div class={inputSection({ fullWidth, density })}>
     <slot
       {labelId}
       {descriptionId}

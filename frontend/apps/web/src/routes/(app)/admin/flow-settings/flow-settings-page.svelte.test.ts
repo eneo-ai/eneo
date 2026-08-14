@@ -3,13 +3,15 @@ import { render } from "vitest-browser-svelte";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 
 const updateMappedExecutionPolicy = vi.hoisted(() => vi.fn());
+const getFlowRetentionPolicy = vi.hoisted(() => vi.fn());
 const toastSuccess = vi.hoisted(() => vi.fn());
 const toastErrorMock = vi.hoisted(() => vi.fn());
 
 vi.mock("$lib/core/Eneo", () => ({
   getEneo: () => ({
     settings: {
-      updateMappedExecutionPolicy
+      updateMappedExecutionPolicy,
+      getFlowRetentionPolicy
     }
   })
 }));
@@ -46,6 +48,22 @@ vi.mock("$app/paths", () => ({
   resolveRoute: (path: string) => path
 }));
 
+vi.mock("$app/state", () => ({
+  page: {
+    url: new URL("http://localhost/admin/flow-settings"),
+    state: {}
+  }
+}));
+
+vi.mock("$app/stores", () => ({
+  page: {
+    subscribe: (run: (value: { url: URL; state: Record<string, unknown> }) => void) => {
+      run({ url: new URL("http://localhost/admin/flow-settings"), state: {} });
+      return () => undefined;
+    }
+  }
+}));
+
 vi.mock("$lib/paraglide/messages", async () => {
   const { default: swedishMessages } = await import("../../../../../messages/sv.json");
 
@@ -79,7 +97,7 @@ import FlowSettingsPage from "./+page.svelte";
 type PageProps = { data: never };
 
 // The page's data prop type includes the whole layout payload (user, tenant,
-// eneo client, ...); the page itself only reads the six policy objects below.
+// eneo client, ...); the page itself only reads the settings payload below.
 function pageProps(mappedOverrides: Record<string, unknown> = {}): PageProps {
   return { data: pageData(mappedOverrides) as never };
 }
@@ -131,7 +149,21 @@ function pageData(mappedOverrides: Record<string, unknown> = {}) {
       max_recorded_passages_per_source: 5,
       max_recorded_passage_bytes: 4096,
       max_recorded_passage_bytes_per_step: 131_072
-    }
+    },
+    securityClassifications: {
+      security_enabled: true,
+      security_classifications: [
+        {
+          id: "class-1",
+          name: "Klass 1",
+          description: "Intern information",
+          security_level: 0,
+          created_at: null,
+          updated_at: null
+        }
+      ]
+    },
+    flowClassificationRetentionPolicies: { policies: [] }
   };
 }
 
@@ -176,19 +208,39 @@ describe("flow settings page — mapped restore lifecycle", () => {
     expect(toastSuccess).toHaveBeenCalled();
   });
 
-  test("repeated undo and restore controls carry row-specific accessible names", async () => {
+  test("shows the saved retention status before editable retention controls", async () => {
     render(FlowSettingsPage, pageProps());
-    await page.getByRole("tab", { name: "Körningar" }).click();
 
-    // uploads tab renders two populated size fields with restore links
-    const fileRestore = page.getByRole("button", {
-      name: "Återställ till standard: Största filstorlek"
-    });
-    const audioRestore = page.getByRole("button", {
-      name: "Återställ till standard: Största ljudfil"
-    });
-    await expect.element(fileRestore).toBeVisible();
-    await expect.element(audioRestore).toBeVisible();
+    const sectionHeadings = Array.from(document.querySelectorAll("h2"), (heading) =>
+      heading.textContent?.trim()
+    );
+
+    expect(sectionHeadings[0]).toBe("Vad gäller just nu");
+    expect(sectionHeadings).toContain("Automatisk gallring");
+
+    await page.getByRole("switch", { name: "Gallra körningshistorik automatiskt" }).click();
+    await expect
+      .element(page.getByText("Visar sparat läge – du har osparade ändringar."))
+      .toBeVisible();
+    await expect.element(page.getByText("Gallras inte automatiskt")).toBeVisible();
+  });
+
+  test("uses task-oriented names for every settings tab", async () => {
+    render(FlowSettingsPage, pageProps());
+
+    await expect.element(page.getByRole("tab", { name: "Gallring och bevarande" })).toBeVisible();
+    await expect
+      .element(page.getByRole("tab", { name: "Uppladdningar och körtider" }))
+      .toBeVisible();
+    await expect.element(page.getByRole("tab", { name: "AI-byggaren" })).toBeVisible();
+    await expect.element(page.getByRole("tab", { name: "Sparat källunderlag" })).toBeVisible();
+  });
+
+  test("dirty upload rows expose row-specific undo actions without repeated default links", async () => {
+    render(FlowSettingsPage, pageProps());
+    await page.getByRole("tab", { name: "Uppladdningar och körtider" }).click();
+
+    expect(page.getByRole("button", { name: /Återställ till standard:/ }).query()).toBeNull();
 
     // dirty two rows and expect two distinct undo names
     await page.getByRole("textbox", { name: "Största filstorlek" }).fill("5");
@@ -199,6 +251,45 @@ describe("flow settings page — mapped restore lifecycle", () => {
     await expect
       .element(page.getByRole("button", { name: "Ignorera ändringar: Största ljudfil" }))
       .toBeVisible();
+  });
+
+  test("edits one classification rule in a focused dialog", async () => {
+    render(FlowSettingsPage, pageProps());
+
+    await expect.element(page.getByText("Regler per säkerhetsklassificering")).toBeVisible();
+    expect(
+      page.getByRole("spinbutton", { name: "Gallra efter dagar för Klass 1" }).query()
+    ).toBeNull();
+
+    await page.getByRole("button", { name: "Ändra regel för Klass 1" }).click();
+
+    await expect
+      .element(page.getByRole("spinbutton", { name: "Gallra efter dagar för Klass 1" }))
+      .toBeVisible();
+    await expect
+      .element(page.getByRole("dialog", { name: "Gallringsregel för Klass 1" }))
+      .toBeVisible();
+
+    await page.getByRole("spinbutton", { name: "Gallra efter dagar för Klass 1" }).fill("30");
+    await page.getByRole("button", { name: "Stäng", exact: true }).click();
+
+    await expect.element(page.getByText("Ingen egen regel").first()).toBeVisible();
+    await expect.element(page.getByText("Osparad ändring")).toBeVisible();
+  });
+
+  test("reveals low-frequency runtime limits and keeps invalid edits visible", async () => {
+    render(FlowSettingsPage, pageProps());
+    await page.getByRole("tab", { name: "Uppladdningar och körtider" }).click();
+
+    const trigger = page.getByRole("button", { name: /Avancerad driftstyrning/ });
+    expect(page.getByRole("textbox", { name: "Normal tidsgräns per steg" }).query()).toBeNull();
+    await trigger.click();
+    const normalLimit = page.getByRole("textbox", { name: "Normal tidsgräns per steg" });
+    await normalLimit.fill("4000");
+    await trigger.click();
+
+    await expect.element(normalLimit).toBeVisible();
+    await expect.element(page.getByText(/Ange ett värde mellan/)).toBeVisible();
   });
 
   test("inherited state shows the hint and offers no restore action", async () => {
@@ -230,6 +321,20 @@ describe("flow settings page — mapped restore lifecycle", () => {
       .toBeVisible();
     await expect
       .element(page.getByRole("button", { name: /Återställ till driftmiljöns standard/ }))
+      .toBeVisible();
+  });
+
+  test("summarizes the effective source-text budget in human units", async () => {
+    render(FlowSettingsPage, pageProps());
+    await page.getByRole("tab", { name: "Sparat källunderlag" }).click();
+
+    await expect.element(page.getByText("Med de här värdena")).toBeVisible();
+    await expect
+      .element(
+        page.getByText(
+          "Högst 25 källor och 5 textavsnitt per källa sparas, sammanlagt högst 128 KB per steg."
+        )
+      )
       .toBeVisible();
   });
 });

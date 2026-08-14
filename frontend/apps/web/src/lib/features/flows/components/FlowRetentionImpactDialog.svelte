@@ -1,7 +1,7 @@
 <script lang="ts">
   import type { FlowRetentionImpactPreview } from "@eneo/eneo-js";
-  import AlertTriangle from "lucide-svelte/icons/alert-triangle";
   import CircleCheck from "lucide-svelte/icons/circle-check";
+  import ShieldCheck from "lucide-svelte/icons/shield-check";
   import { m } from "$lib/paraglide/messages";
   import { getLocale } from "$lib/paraglide/runtime";
   import * as Alert from "$lib/components/ui/alert/index.js";
@@ -58,7 +58,7 @@
 </script>
 
 <Dialog.Root bind:open>
-  <Dialog.Content class="max-h-[90vh] overflow-y-auto sm:max-w-2xl">
+  <Dialog.Content class="max-h-[90vh] overflow-y-auto sm:max-w-2xl" closeLabel={m.aria_close()}>
     <Dialog.Header>
       <Dialog.Title>{m.flow_retention_preview_title()}</Dialog.Title>
       <Dialog.Description>{m.flow_retention_preview_description()}</Dialog.Description>
@@ -239,17 +239,11 @@
       </p>
     </section>
 
-    <div class="border-warning-default bg-warning-dimmer flex gap-3 rounded-lg border p-4">
-      <AlertTriangle class="text-warning-default mt-0.5 size-5 shrink-0" />
-      <div>
-        <p class="text-primary text-sm font-semibold">
-          {m.flow_retention_preservation_title()}
-        </p>
-        <p class="text-primary mt-1 text-sm leading-relaxed">
-          {m.flow_retention_preservation_hold_caveat()}
-        </p>
-      </div>
-    </div>
+    <Alert.Root>
+      <ShieldCheck aria-hidden="true" />
+      <Alert.Title>{m.flow_retention_preservation_title()}</Alert.Title>
+      <Alert.Description>{m.flow_retention_preservation_hold_caveat()}</Alert.Description>
+    </Alert.Root>
 
     <div class="flex items-start gap-3">
       <Checkbox id="flow-retention-acknowledge" bind:checked={acknowledged} class="mt-0.5" />
@@ -261,10 +255,10 @@
     <Dialog.Footer>
       <Dialog.Close>
         {#snippet child({ props })}
-          <Button variant="outline" {...props}>{m.cancel()}</Button>
+          <Button variant="outline" class="px-4" {...props}>{m.cancel()}</Button>
         {/snippet}
       </Dialog.Close>
-      <Button onclick={onConfirm} disabled={!acknowledged || confirming}>
+      <Button class="min-w-28 px-4" onclick={onConfirm} disabled={!acknowledged || confirming}>
         {confirming ? m.saving() : m.flow_retention_preview_confirm()}
       </Button>
     </Dialog.Footer>

@@ -17,6 +17,7 @@ import {
 import { sanitizeFlowStepReviewPolicy } from "./flowStepReviewPolicy";
 import { createDefaultHttpConfig } from "./components/http/httpConfigDefaults";
 import { parseHttpAuthoredConfig, type HttpMethod } from "./components/http/httpConfigTypes";
+import { canClearInputBindingSourceRefs, setInputBindingSourceRefs } from "./flowInputBindings";
 
 type StepInputSource = FlowStep["input_source"];
 type StepInputType = FlowStep["input_type"];
@@ -64,7 +65,11 @@ export function applyInputSourceChange({
   });
 
   let finalInputConfig = nextInputConfig;
-  let finalBindings = step.input_bindings;
+  const resetSourceRefs = canClearInputBindingSourceRefs(step)
+    ? setInputBindingSourceRefs(step.input_bindings, [])
+    : { status: "blocked" as const };
+  let finalBindings =
+    resetSourceRefs.status === "updated" ? resetSourceRefs.inputBindings : step.input_bindings;
 
   if (nextInputType !== step.input_type) {
     const wasFileBased = FILE_BASED_INPUT_TYPES.has(step.input_type);

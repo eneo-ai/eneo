@@ -27,7 +27,7 @@ test("tenant admin confirms organization and classification retention through th
   await page.goto("/admin/flow-data-retention");
   await expect(page).toHaveURL(/\/admin\/flow-settings\?tab=retention/);
   await expect(page.getByRole("heading", { name: "Flödesinställningar" })).toBeVisible();
-  await expect(page.getByText("Aktuell gallringsstatus")).toBeVisible();
+  await expect(page.getByText("Vad gäller just nu")).toBeVisible();
   await expect(page.getByText("Gallras inte automatiskt").first()).toBeVisible();
   await expect(
     page.getByText("Automatisk gallring är avstängd – körningshistorik raderas aldrig automatiskt.")
@@ -39,7 +39,7 @@ test("tenant admin confirms organization and classification retention through th
   const runHistorySwitch = page.getByRole("switch", {
     name: "Gallra körningshistorik automatiskt"
   });
-  const noPurge = page.getByRole("switch", { name: "Spärra automatisk gallring" });
+  const noPurge = page.getByRole("switch", { name: "Pausa automatisk gallring" });
   const minimumRetention = page.getByRole("textbox", { name: "Kortaste bevarandetid" });
   await expect(minimumRetention).toHaveAttribute("placeholder", "Ingen nedre gräns");
 
@@ -49,7 +49,7 @@ test("tenant admin confirms organization and classification retention through th
   await minimumRetention.fill("90");
   await noPurge.click();
   await expect(page.getByText("3 osparade ändringar")).toBeVisible();
-  await page.getByRole("button", { name: "Spara" }).click();
+  await page.getByRole("button", { name: "Spara ändringar" }).click();
 
   const dialog = page.getByRole("dialog");
   await expect(
@@ -72,50 +72,57 @@ test("tenant admin confirms organization and classification retention through th
 
   // Lengthening the window is non-destructive: no confirmation gate.
   await runHistoryDays.fill("60");
-  await page.getByRole("button", { name: "Spara" }).click();
+  await page.getByRole("button", { name: "Spara ändringar" }).click();
   await expect(runHistoryDays).toHaveValue("60");
   await expect(dialog).not.toBeVisible();
 
   await page.goto("/admin/security-classifications");
-  const classificationRow = page
-    .getByRole("row")
-    .filter({ hasText: classificationName })
-    .filter({ has: page.getByRole("spinbutton") });
-  await classificationRow
-    .getByRole("spinbutton", { name: `Kvarhållningsdagar för ${classificationName}` })
-    .fill("20");
-  await classificationRow
-    .getByRole("spinbutton", {
-      name: `Minsta kvarhållning i dagar för ${classificationName}`
-    })
-    .fill("120");
-  await classificationRow.getByRole("checkbox", { name: "Spärra automatisk gallring" }).check();
-  await classificationRow.getByRole("button", { name: "Spara" }).click();
+  await expect(page.getByRole("heading", { name: "Säkerhet" })).toBeVisible();
+  await expect(page.getByText("Gallring av flödesdata")).not.toBeVisible();
+
+  await page.goto("/admin/flow-settings?tab=retention");
+  await page.getByRole("button", { name: `Ändra regel för ${classificationName}` }).click();
+  const classificationSheet = page.getByRole("dialog", { name: classificationName });
+  const deleteAfterInput = classificationSheet.getByRole("spinbutton", {
+    name: `Gallra efter dagar för ${classificationName}`
+  });
+  const minimumInput = classificationSheet.getByRole("spinbutton", {
+    name: `Minsta bevarandetid i dagar för ${classificationName}`
+  });
+  await deleteAfterInput.fill("20");
+  await minimumInput.fill("120");
+  await classificationSheet
+    .getByRole("switch", { name: `Pausa automatisk gallring: ${classificationName}` })
+    .click();
+  await classificationSheet.getByRole("button", { name: "Granska och spara" }).click();
   await expect(
     dialog.getByRole("heading", { name: "Bekräfta ändring av gallringspolicy" })
   ).toBeVisible();
   await dialog.getByRole("checkbox").check();
   await dialog.getByRole("button", { name: "Bekräfta policyändring" }).click();
   await expect(dialog).not.toBeVisible();
-  await expect(classificationRow).toContainText("Gallra efter: 20 dagar");
-  await expect(classificationRow).toContainText("Minimum: 120 dagar");
-  await expect(classificationRow).toContainText("Gallringsspärr: på");
+  await expect(page.getByRole("cell", { name: "20 dagar" })).toBeVisible();
+  await expect(page.getByRole("cell", { name: "120 dagar" })).toBeVisible();
+  await expect(page.getByText("Pausad").first()).toBeVisible();
+  await expect(page.getByText("1 klassificering har egna gallringsregler.")).toBeVisible();
 
-  await classificationRow
-    .getByRole("spinbutton", { name: `Kvarhållningsdagar för ${classificationName}` })
-    .fill("");
-  await classificationRow.getByRole("button", { name: "Spara" }).click();
+  await page.getByRole("button", { name: `Ändra regel för ${classificationName}` }).click();
+  const reopenedSheet = page.getByRole("dialog", { name: classificationName });
+  const reopenedDeleteAfter = reopenedSheet.getByRole("spinbutton", {
+    name: `Gallra efter dagar för ${classificationName}`
+  });
+  await reopenedDeleteAfter.fill("");
+  await reopenedSheet.getByRole("button", { name: "Granska och spara" }).click();
   await expect(dialog).not.toBeVisible();
-  await expect(classificationRow).not.toContainText("Gallra efter:");
-  await expect(classificationRow).toContainText("Minimum: 120 dagar");
-  await expect(classificationRow).toContainText("Gallringsspärr: på");
+  await expect(page.getByRole("cell", { name: "Organisationens regel" }).first()).toBeVisible();
+  await expect(page.getByRole("cell", { name: "120 dagar" })).toBeVisible();
 
   await page.goto("/admin/flow-settings?tab=retention");
   await page.getByRole("switch", { name: "Gallra körningshistorik automatiskt" }).click();
   await expect(
     page.getByText("Automatisk gallring är avstängd – körningshistorik raderas aldrig automatiskt.")
   ).toBeVisible();
-  await page.getByRole("button", { name: "Spara" }).click();
+  await page.getByRole("button", { name: "Spara ändringar" }).click();
   await expect(dialog).not.toBeVisible();
   await expect(page.getByText("Gallras inte automatiskt").first()).toBeVisible();
   await expect(page.getByText("Bevarandespärrar från:", { exact: false })).toBeVisible();
@@ -128,10 +135,10 @@ test("tenant admin confirms organization and classification retention through th
 
   await page.goto("/en/admin/flow-settings?tab=retention");
   await expect(page.getByRole("heading", { name: "Flow settings" })).toBeVisible();
-  await expect(page.getByText("Current retention status")).toBeVisible();
+  await expect(page.getByText("Current settings")).toBeVisible();
   await expect(page.getByText("Not deleted automatically").first()).toBeVisible();
   await expect(page.getByRole("textbox", { name: "Minimum retention period" })).toHaveValue("90");
-  await expect(page.getByRole("switch", { name: "Block automatic deletion" })).toHaveAttribute(
+  await expect(page.getByRole("switch", { name: "Pause automatic deletion" })).toHaveAttribute(
     "data-state",
     "checked"
   );

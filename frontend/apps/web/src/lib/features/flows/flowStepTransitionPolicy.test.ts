@@ -137,6 +137,82 @@ describe("flow step transition policy", () => {
     });
   });
 
+  it("clears explicit source refs when the user returns to a standard input source", () => {
+    const result = applyInputSourceChange({
+      step: makeStep({
+        step_order: 3,
+        input_source: "previous_step",
+        input_bindings: {
+          question: "Fokusera på beslut och åtgärder.",
+          source_refs: [{ step_ref: "step_1", output: "structured", field_path: "decisions" }]
+        } as never
+      }),
+      nextSource: "all_previous_steps",
+      previousOutputType: undefined,
+      runtimeInputConfig: makeRuntimeInputConfig(),
+      isAdvancedMode: true
+    });
+
+    expect(result.step.input_source).toBe("all_previous_steps");
+    expect(result.step.input_bindings).toEqual({
+      question: "Fokusera på beslut och åtgärder."
+    });
+  });
+
+  it("preserves contract-bound JSON material when the standard input source changes", () => {
+    const inputBindings = {
+      source_refs: [{ step_ref: "step_1", output: "structured", field_path: "summary" }]
+    };
+    const result = applyInputSourceChange({
+      step: makeStep({
+        step_order: 3,
+        input_source: "previous_step",
+        input_type: "json",
+        input_contract: {
+          type: "object",
+          properties: { summary: { type: "string" } },
+          required: ["summary"]
+        } as never,
+        input_bindings: inputBindings as never
+      }),
+      nextSource: "all_previous_steps",
+      previousOutputType: "json",
+      runtimeInputConfig: makeRuntimeInputConfig(),
+      isAdvancedMode: true
+    });
+
+    expect(result.step.input_source).toBe("all_previous_steps");
+    expect(result.step.input_bindings).toEqual(inputBindings);
+  });
+
+  it("preserves advanced item formatting when the standard input source changes", () => {
+    const inputBindings = {
+      source_refs: [
+        {
+          step_ref: "step_1",
+          output: "structured",
+          field_path: "participants",
+          item_template: "- {name}"
+        }
+      ]
+    };
+    const result = applyInputSourceChange({
+      step: makeStep({
+        step_order: 3,
+        input_source: "previous_step",
+        output_mode: "compose_text",
+        input_bindings: inputBindings as never
+      }),
+      nextSource: "all_previous_steps",
+      previousOutputType: "json",
+      runtimeInputConfig: makeRuntimeInputConfig(),
+      isAdvancedMode: true
+    });
+
+    expect(result.step.input_source).toBe("all_previous_steps");
+    expect(result.step.input_bindings).toEqual(inputBindings);
+  });
+
   it("forces audio steps onto flow_input and transcribe_only output", () => {
     const result = applyInputTypeChange({
       step: makeStep({

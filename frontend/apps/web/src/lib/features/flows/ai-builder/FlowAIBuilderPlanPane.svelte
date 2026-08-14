@@ -180,11 +180,15 @@
     return service.availableModels.find((model) => model.id === ref)?.name ?? ref;
   }
 
-  function executionStepLabel(planStepRef: string): string {
+  function resolveExecutionStepLabel(planStepRef: string): string | null {
     const steps = service.currentPlan?.proposal.spec.steps ?? [];
     const stepIndex = steps.findIndex((step) => step.plan_step_ref === planStepRef);
-    if (stepIndex === -1) return planStepRef;
+    if (stepIndex === -1) return null;
     return `${stepIndex + 1}. ${steps[stepIndex].name}`;
+  }
+
+  function executionStepLabel(planStepRef: string): string {
+    return resolveExecutionStepLabel(planStepRef) ?? planStepRef;
   }
 
   let isApproving = $state(false);
@@ -900,6 +904,7 @@
                         planId={plan.plan_id}
                         changeKind={getStepChangeKind(step, plan.proposal.edit?.diff ?? null)}
                         {resolveModelName}
+                        resolveInputStepLabel={resolveExecutionStepLabel}
                         isFirst={i === 0}
                         isLast={i === spec.steps.length - 1}
                         planStatus={plan.status}

@@ -1,9 +1,7 @@
 <script lang="ts">
   import { uid } from "uid";
-  import CircleOff from "lucide-svelte/icons/circle-off";
   import * as InputGroup from "$lib/components/ui/input-group/index.js";
   import * as Field from "$lib/components/ui/field/index.js";
-  import * as Alert from "$lib/components/ui/alert/index.js";
   import { Switch } from "$lib/components/ui/switch/index.js";
   import { Label } from "$lib/components/ui/label/index.js";
   import Row from "./Row.svelte";
@@ -98,10 +96,7 @@
         {/if}
       </div>
     {:else}
-      <Alert.Root class="max-w-xl">
-        <CircleOff aria-hidden="true" />
-        <Alert.Description>{offStatus}</Alert.Description>
-      </Alert.Root>
+      <p class="text-secondary max-w-xl text-xs leading-relaxed">{offStatus}</p>
     {/if}
   </div>
 </Row>

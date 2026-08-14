@@ -1,6 +1,7 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/svelte";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { m } from "$lib/paraglide/messages";
 import FlowAIBuilderStepCard from "./FlowAIBuilderStepCard.svelte";
 import { AIBuilderIssueKind, buildAIBuilderDiagnosticReport } from "./aiBuilderDiagnosticReport";
 import type { StepSpec } from "./protocol";
@@ -59,6 +60,76 @@ describe("FlowAIBuilderStepCard", () => {
 
     expect(disclosure.getAttribute("aria-expanded")).toBe("true");
     expect(screen.getByText("gpt-5.4 nano")).toBeTruthy();
+  });
+
+  it("shows input bindings as human-readable material instead of raw JSON", async () => {
+    const { container } = render(FlowAIBuilderStepCard, {
+      step: makeStep({
+        input_bindings: {
+          question: "Skriv en kort rapport.",
+          source_refs: [{ step_ref: "step_a", output: "structured", field_path: "summary" }]
+        }
+      }),
+      stepNumber: 2,
+      resolveInputStepLabel: (ref) => (ref === "step_a" ? "1. Strukturera samtalet" : null)
+    });
+
+    await fireEvent.click(
+      screen.getByRole("button", { name: /^(Step|Steg) 2: Fetch time \((NEW|NY)\)$/ })
+    );
+
+    expect(container.textContent).toMatch(/Material used|Underlag som används/);
+    expect(container.textContent).toContain("1. Strukturera samtalet");
+    expect(container.textContent).toContain("summary");
+    expect(container.textContent).toContain("Skriv en kort rapport.");
+    expect(container.textContent).not.toContain('"step_ref"');
+    expect(container.textContent).not.toContain("step_a");
+  });
+
+  it("fails closed when Builder material cannot be interpreted safely", async () => {
+    const { container } = render(FlowAIBuilderStepCard, {
+      step: makeStep({ input_bindings: { hidden_mode: true } }),
+      stepNumber: 2
+    });
+
+    await fireEvent.click(
+      screen.getByRole("button", { name: /^(Step|Steg) 2: Fetch time \((NEW|NY)\)$/ })
+    );
+
+    expect(container.textContent).toContain(String(m.flow_input_material_invalid_notice()));
+    expect(container.textContent).not.toContain("hidden_mode");
+  });
+
+  it("renders separately formatted references to the same field as distinct material rows", async () => {
+    render(FlowAIBuilderStepCard, {
+      step: makeStep({
+        output_mode: "compose_text",
+        input_bindings: {
+          source_refs: [
+            {
+              step_ref: "step_a",
+              output: "structured",
+              field_path: "participants",
+              item_template: "- {name}"
+            },
+            {
+              step_ref: "step_a",
+              output: "structured",
+              field_path: "participants",
+              item_template: "{role}: {name}"
+            }
+          ]
+        }
+      }),
+      stepNumber: 2,
+      resolveInputStepLabel: () => "1. Strukturera samtalet"
+    });
+
+    await fireEvent.click(
+      screen.getByRole("button", { name: /^(Step|Steg) 2: Fetch time \((NEW|NY)\)$/ })
+    );
+
+    expect(screen.getAllByText(String(m.flow_input_material_advanced_notice()))).toHaveLength(2);
   });
 
   it("emits structured step edit context instead of relying on button text", async () => {

@@ -5,6 +5,10 @@
   import FlowAIBuilderDiagnosticCopyButton from "./FlowAIBuilderDiagnosticCopyButton.svelte";
   import type { AIBuilderDiagnosticReport } from "./aiBuilderDiagnosticReport";
   import type { AIBuilderSuggestChangeIntent, StepChangeKind, StepSpec } from "./protocol";
+  import {
+    parseFlowInputBindings,
+    type FlowInputBindingSourceRef
+  } from "$lib/features/flows/flowInputBindings";
 
   // Mirrors backend requires_completion_model: transcription uses flow config, not GPT.
   const TRANSCRIBE_ONLY_OUTPUT_MODE = "transcribe_only";
@@ -20,6 +24,7 @@
     planStatus?: string;
     onsuggestchange?: (intent: AIBuilderSuggestChangeIntent) => void;
     resolveModelName?: (ref: string | null) => string | null;
+    resolveInputStepLabel?: (ref: string) => string | null;
   }
 
   let {
@@ -31,7 +36,8 @@
     isFirst = false,
     planStatus = "",
     onsuggestchange,
-    resolveModelName
+    resolveModelName,
+    resolveInputStepLabel
   }: Props = $props();
 
   let showDetails = $state(false);
@@ -86,6 +92,7 @@
   const hasBindings = $derived(
     !!step.input_bindings && Object.keys(step.input_bindings).length > 0
   );
+  const inputBindingsState = $derived(parseFlowInputBindings(step.input_bindings));
   const hasInputContract = $derived(Object.keys(inputContractProperties).length > 0);
   const hasOutputContract = $derived(Object.keys(outputContractProperties).length > 0);
   const hasInstructions = $derived(!!step.assistant_spec.instructions?.trim());
@@ -118,6 +125,23 @@
   }
   const inputTypeDisplay = $derived(simpleTypeLabel(inputType));
   const outputTypeDisplay = $derived(simpleTypeLabel(outputType));
+
+  function inputMaterialSourceTitle(source: FlowInputBindingSourceRef): string {
+    return resolveInputStepLabel?.(source.stepRef) ?? m.flow_input_material_unknown_source();
+  }
+
+  function inputMaterialSourceMeta(source: FlowInputBindingSourceRef): string {
+    const parts: string[] = [
+      source.output === "structured"
+        ? m.flow_input_template_source_output_structured()
+        : m.flow_input_template_source_output_text(),
+      source.fieldPath
+        ? m.flow_input_material_selected_field({ field: source.fieldPath })
+        : m.flow_input_material_whole_result()
+    ];
+    if (source.label) parts.push(source.label);
+    return parts.join(" · ");
+  }
 
   function requestStepChange() {
     if (!planId) return;
@@ -296,12 +320,47 @@
                   <h4 class="text-muted text-xs font-semibold tracking-[0.06em] uppercase">
                     {m.ai_builder_step_bindings()}
                   </h4>
-                  <pre
-                    class="border-default bg-primary text-secondary max-h-64 overflow-auto rounded-md border px-3 py-2 font-mono text-xs leading-relaxed break-words whitespace-pre-wrap">{JSON.stringify(
-                      step.input_bindings,
-                      null,
-                      2
-                    )}</pre>
+                  {#if inputBindingsState.status === "invalid"}
+                    <p
+                      class="border-warning-default/40 bg-warning-dimmer text-warning-stronger rounded-md border px-3 py-2 text-xs leading-relaxed"
+                    >
+                      {m.flow_input_material_invalid_notice()}
+                    </p>
+                  {:else}
+                    <ul
+                      class="border-default divide-default flex flex-col divide-y overflow-hidden rounded-md border"
+                    >
+                      {#if inputBindingsState.question}
+                        <li class="bg-primary px-3 py-2">
+                          <p class="text-primary text-xs font-semibold">
+                            {m.flow_input_material_custom_text()}
+                          </p>
+                          <p
+                            class="text-secondary mt-1 text-xs leading-relaxed whitespace-pre-wrap"
+                          >
+                            {inputBindingsState.question}
+                          </p>
+                        </li>
+                      {/if}
+                      {#each inputBindingsState.sourceRefs as source, index (index)}
+                        <li class="bg-primary px-3 py-2">
+                          <p class="text-primary text-xs font-semibold">
+                            {inputMaterialSourceTitle(source)}
+                          </p>
+                          <p class="text-muted mt-1 text-xs leading-relaxed">
+                            {inputMaterialSourceMeta(source)}
+                          </p>
+                          {#if source.itemTemplate}
+                            <p class="text-muted mt-1 text-xs leading-relaxed">
+                              {outputMode === "compose_text"
+                                ? m.flow_input_material_advanced_notice()
+                                : m.flow_input_material_item_template_unsupported_notice()}
+                            </p>
+                          {/if}
+                        </li>
+                      {/each}
+                    </ul>
+                  {/if}
                 </section>
               {/if}
 

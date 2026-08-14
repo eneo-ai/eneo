@@ -6,6 +6,7 @@
 
   export let parent: { title?: string; href: string } | null = null;
   export let title: string | undefined = undefined;
+  export let description: string | undefined = undefined;
   export let truncate = false;
 
   let titleContainer: HTMLDivElement;
@@ -66,13 +67,20 @@
       {/if}
 
       {#if title}
-        <h1
+        <div
           in:fly|global={{ x: -5, duration: parent ? 300 : 0, easing: quadInOut, opacity: 0.3 }}
           class:pl-2={isOverflowing}
-          class="text-primary inline-block w-full items-center gap-2 truncate pr-4 text-[1.45rem] leading-normal font-extrabold"
+          class="min-w-0 pr-4"
         >
-          {title}
-        </h1>
+          <h1 class="text-primary truncate text-[1.35rem] leading-tight font-extrabold">
+            {title}
+          </h1>
+          {#if description}
+            <p class="text-secondary mt-0.5 hidden truncate text-xs leading-tight @4xl:block">
+              {description}
+            </p>
+          {/if}
+        </div>
       {:else}
         <slot></slot>
       {/if}

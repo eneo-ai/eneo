@@ -61,9 +61,11 @@
     getInputTemplateSourceConflictStepOrders
   } from "$lib/features/flows/flowVariableTokens";
   import {
-    getFlowStepEffectiveInputSources,
     getInputBindingQuestion,
-    hasInputBindingSourceRefs
+    hasInputBindingSourceRefs,
+    setInputBindingQuestion,
+    setInputBindingSourceRefs,
+    type FlowInputBindingSourceRef
   } from "$lib/features/flows/flowInputBindings";
   import {
     applyInputSourceChange,
@@ -361,15 +363,16 @@
 
   function updateInputTemplate(value: string) {
     if (activeStep === null) return;
-    const nextBindings: Record<string, unknown> = {
-      ...((activeStep.input_bindings as Record<string, unknown> | null) ?? {})
-    };
-    if (value.trim().length === 0) {
-      delete nextBindings.question;
-    } else {
-      nextBindings.question = value;
-    }
-    updateStep("input_bindings", Object.keys(nextBindings).length > 0 ? nextBindings : null);
+    const result = setInputBindingQuestion(activeStep.input_bindings, value);
+    if (result.status === "blocked") return;
+    updateStep("input_bindings", result.inputBindings);
+  }
+
+  function updateInputSources(sourceRefs: FlowInputBindingSourceRef[]) {
+    if (activeStep === null) return;
+    const result = setInputBindingSourceRefs(activeStep.input_bindings, sourceRefs);
+    if (result.status === "blocked") return;
+    updateStep("input_bindings", result.inputBindings);
   }
 
   async function handleCommittedStepRename() {
@@ -700,9 +703,6 @@
   const hasTypedInputSources = $derived(
     activeStep ? hasInputBindingSourceRefs(activeStep.input_bindings) : false
   );
-  const effectiveInputSources = $derived(
-    activeStep ? getFlowStepEffectiveInputSources(activeStep, steps) : []
-  );
   const stepSummaryModel = $derived(
     activeStep
       ? getStepSummaryModel({
@@ -1018,22 +1018,22 @@
               {isAdvancedMode}
               isPowerUser={$mode === "power_user"}
               {hasInputTemplateOverride}
-              {hasTypedInputSources}
               {showInputTemplate}
               {inputTemplateText}
-              {effectiveInputSources}
               {templateSourceConflict}
               {templateStepRefs}
               {steps}
               {formSchema}
               {transcriptionEnabled}
               {hasAudioInputSteps}
+              runtimeInputEnabled={runtimeInputConfig.enabled}
               {stepUxCopy}
               {inputTemplateSectionTitle}
               {inputTemplateSectionDescription}
               onRevealInputTemplate={() => (revealInputTemplateInUserMode = true)}
               onClearInputTemplate={() => updateInputTemplate("")}
               onInputTemplateChange={(detail) => updateInputTemplate(detail.value)}
+              onInputSourcesChange={(detail) => updateInputSources(detail.sourceRefs)}
               onInputSourceChange={(detail) =>
                 handleInputSourceChange(detail.value as FlowStep["input_source"])}
             />
