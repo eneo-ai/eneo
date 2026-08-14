@@ -383,12 +383,6 @@
     activeStepId={$activeStepId}
     isPublished={$isPublished}
     validationErrors={$validationErrors}
-    onBuildWithAI={canUseAIBuilder
-      ? () => {
-          ensureAIBuilder();
-          setActiveTab("ai-builder");
-        }
-      : undefined}
     onSelectStep={(stepId) => void selectProcessingStep(stepId)}
     onMoveStep={(index, direction) => void moveProcessingStep(index, direction)}
     onRemoveStep={(index) => void removeProcessingStep(index)}
@@ -623,11 +617,11 @@
                   {/if}
 
                   <!-- The current stage keeps its label at every width; other
-                       stages show labels only when the full row fits (xl+). -->
+                       stages show labels only when the full row fits (2xl+). -->
                   <span
                     class="{isActive
                       ? 'inline'
-                      : 'hidden xl:inline'} truncate text-sm whitespace-nowrap
+                      : 'hidden 2xl:inline'} truncate text-sm whitespace-nowrap
                       {isActive
                       ? 'text-primary font-semibold'
                       : isSkipped
@@ -1186,18 +1180,18 @@
           {/if}
 
           <div
-            class="mx-auto flex w-full max-w-[1600px] flex-1 flex-col gap-3 overflow-hidden xl:flex-row xl:justify-center"
+            class="flow-processing-workspace mx-auto flex w-full max-w-[1600px] flex-1 flex-col gap-3 overflow-hidden xl:flex-row xl:justify-center"
           >
             {#if isDesktopStepLayout.current}
               <div
-                class="border-default bg-primary w-80 shrink-0 overflow-hidden rounded-xl border shadow-sm xl:w-[340px]"
+                class="flow-processing-step-list border-default bg-primary w-80 shrink-0 overflow-hidden rounded-xl border shadow-sm xl:w-[340px]"
               >
                 {@render processingStepList()}
               </div>
             {/if}
 
             <div
-              class="border-default bg-primary flex-1 overflow-hidden rounded-xl border shadow-sm xl:max-w-[900px] 2xl:max-w-[1000px]"
+              class="flow-processing-step-editor border-default bg-primary flex-1 overflow-hidden rounded-xl border shadow-sm xl:max-w-[900px] 2xl:max-w-[1000px]"
             >
               <div class="h-full overflow-y-auto">
                 <FlowStepEditPanel
@@ -1501,6 +1495,20 @@
 </AlertDialog.Root>
 
 <style>
+  @media (min-width: 2400px) {
+    .flow-processing-workspace {
+      max-width: 2000px;
+    }
+
+    .flow-processing-step-list {
+      width: 380px;
+    }
+
+    .flow-processing-step-editor {
+      max-width: 1440px;
+    }
+  }
+
   @media (prefers-reduced-motion: reduce) {
     :global(*),
     :global(*::before),

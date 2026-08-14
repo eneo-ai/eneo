@@ -820,6 +820,23 @@ describe("FlowStepList ownership guard", () => {
     expect(source).not.toMatch(/\bstep\.step_order\s*=/);
     expect(source).not.toMatch(/\bstep_order\s*:\s*(?:i|index|stepIndex)\s*\+\s*1/);
   });
+
+  it("keeps empty-state creation choices in the editor instead of duplicating them", () => {
+    const stepListSource = readFileSync(
+      new URL("./components/FlowStepList.svelte", import.meta.url),
+      "utf8"
+    );
+    const stepEditorSource = readFileSync(
+      new URL("./components/FlowStepEditPanel.svelte", import.meta.url),
+      "utf8"
+    );
+
+    expect(stepListSource).not.toContain("onBuildWithAI");
+    expect(stepListSource).not.toContain("flow_starter_drafting_action");
+    expect(stepEditorSource).toContain("flow_empty_add_step");
+    expect(stepEditorSource).toContain("flow_starter_drafting_action");
+    expect(stepEditorSource).toContain("ai_builder_empty_state_cta");
+  });
 });
 
 describe("Flow retention projection surface", () => {
@@ -836,6 +853,37 @@ describe("Flow retention projection surface", () => {
     expect(source).toContain("runHistoryRetention.barrier_sources");
     expect(source).toContain("m.flow_retention_activation_sources()");
     expect(source).toContain("m.flow_retention_barrier_sources()");
+  });
+});
+
+describe("Flow processing workspace layout", () => {
+  it("opts only the flow editor into the wider large-screen application shell", () => {
+    const appLayoutSource = readFileSync(
+      new URL("../../../routes/(app)/+layout.svelte", import.meta.url),
+      "utf8"
+    );
+    const flowRouteSource = readFileSync(
+      new URL(
+        "../../../routes/(app)/spaces/[spaceId]/flows/[flowId]/+page.svelte",
+        import.meta.url
+      ),
+      "utf8"
+    );
+    const stepEditorSource = readFileSync(
+      new URL("./components/FlowStepEditPanel.svelte", import.meta.url),
+      "utf8"
+    );
+
+    expect(appLayoutSource).toContain(
+      'const flowWorkspaceRoute = "/(app)/spaces/[spaceId]/flows/[flowId]"'
+    );
+    expect(appLayoutSource).toContain("class:flow-workspace-shell={usesWideFlowWorkspace}");
+    expect(appLayoutSource).toContain("max-w-[2000px]");
+    expect(flowRouteSource).toContain("flow-processing-workspace");
+    expect(flowRouteSource).toContain("flow-processing-step-list");
+    expect(flowRouteSource).toContain("flow-processing-step-editor");
+    expect(flowRouteSource).toContain("hidden 2xl:inline");
+    expect(stepEditorSource).toContain("flow-step-editor-content");
   });
 });
 

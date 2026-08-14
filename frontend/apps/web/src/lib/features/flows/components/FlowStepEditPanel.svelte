@@ -829,9 +829,28 @@
         </p>
       </div>
       {#if !isPublished}
-        <Button onclick={() => flowEditor.addStep()}>
-          {m.flow_empty_add_step()}
-        </Button>
+        <div class="flex max-w-xl flex-col items-center gap-3">
+          <div class="flex flex-wrap items-center justify-center gap-2">
+            <Button onclick={() => flowEditor.addStep()}>
+              {m.flow_empty_add_step()}
+            </Button>
+            {#if isAdvancedMode}
+              <Button variant="outline" onclick={() => flowEditor.createDraftingChainStarter()}>
+                {m.flow_starter_drafting_action()}
+              </Button>
+            {/if}
+            {#if onEditWithAI}
+              <Button variant="outline" onclick={onEditWithAI}>
+                {m.ai_builder_empty_state_cta()}
+              </Button>
+            {/if}
+          </div>
+          {#if isAdvancedMode}
+            <p class="text-muted max-w-lg text-xs leading-relaxed">
+              {m.flow_starter_drafting_body()}
+            </p>
+          {/if}
+        </div>
       {/if}
     </div>
   {:else}
@@ -850,7 +869,7 @@
     class:opacity-60={isPublished}
   >
     <div class="flow-step-editor">
-      <div class="mx-auto w-full max-w-[1000px]">
+      <div class="flow-step-editor-content mx-auto w-full max-w-[1000px]">
         <div class="mb-4 min-w-0">
           <span class="text-secondary block text-xs font-medium tracking-[0.02em]">
             {m.flow_step_position({
@@ -1179,3 +1198,11 @@
     </div>
   </div>
 {/if}
+
+<style>
+  @media (min-width: 2400px) {
+    .flow-step-editor-content {
+      max-width: 1280px;
+    }
+  }
+</style>

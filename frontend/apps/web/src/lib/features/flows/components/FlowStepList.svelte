@@ -4,7 +4,6 @@
   import { getFlowUserMode } from "$lib/features/flows/FlowUserMode";
   import { getFlowEditor, type FlowStepCreationSeed } from "$lib/features/flows/FlowEditor";
   import { IconPlus } from "@eneo/icons/plus";
-  import { Button } from "$lib/components/ui/button/index.js";
   import * as AlertDialog from "$lib/components/ui/alert-dialog/index.js";
   import { Separator } from "$lib/components/ui/separator/index.js";
   import { m } from "$lib/paraglide/messages";
@@ -17,7 +16,6 @@
     activeStepId,
     isPublished,
     validationErrors = new Map(),
-    onBuildWithAI,
     onSelectStep,
     onMoveStep,
     onRemoveStep
@@ -26,7 +24,6 @@
     activeStepId: string | null;
     isPublished: boolean;
     validationErrors?: Map<string, string[]>;
-    onBuildWithAI?: () => void;
     onSelectStep?: (stepId: string | null) => void;
     onMoveStep?: (index: number, direction: -1 | 1) => void | Promise<void>;
     onRemoveStep?: (index: number) => void | Promise<void>;
@@ -98,39 +95,8 @@
 
   <div class="flex-1 overflow-y-auto" role="list" aria-label={m.flow_steps()}>
     {#if steps.length === 0}
-      <div class="flex flex-col items-center gap-3 px-4 py-8 text-center">
+      <div class="flex flex-col items-center px-4 py-8 text-center">
         <p class="text-secondary text-sm">{m.flow_steps_empty()}</p>
-        <p class="text-muted max-w-[220px] text-xs leading-relaxed">
-          {m.flow_step_list_empty_hint()}
-        </p>
-        {#if !isPublished && onBuildWithAI}
-          <div class="mt-2 w-full">
-            <Button variant="outline" size="sm" onclick={onBuildWithAI}>
-              {m.ai_builder_empty_state_cta()}
-            </Button>
-          </div>
-        {/if}
-        {#if !isPublished && $mode === "power_user"}
-          <div
-            class="bg-secondary/15 border-default/60 mt-3 w-full rounded-xl border px-4 py-4 text-left"
-          >
-            <p class="text-primary text-sm font-semibold tracking-[-0.005em]">
-              {m.flow_starter_drafting_title()}
-            </p>
-            <p class="text-secondary mt-1 text-xs leading-relaxed">
-              {m.flow_starter_drafting_body()}
-            </p>
-            <div class="mt-3">
-              <Button
-                variant="outline"
-                size="sm"
-                onclick={() => flowEditor.createDraftingChainStarter()}
-              >
-                {m.flow_starter_drafting_action()}
-              </Button>
-            </div>
-          </div>
-        {/if}
       </div>
     {:else}
       {#each steps as step, index (step.id ?? index)}
@@ -152,7 +118,7 @@
     {/if}
   </div>
 
-  {#if !isPublished}
+  {#if !isPublished && steps.length > 0}
     <div class="px-3 pt-2 pb-3">
       <Separator class="mb-3" />
       <button

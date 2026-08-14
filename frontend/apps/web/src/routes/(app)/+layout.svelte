@@ -46,6 +46,9 @@
   $: contentLink = $page.url.pathname + "#content";
   $: currentRoute = $page.url.pathname;
 
+  const flowWorkspaceRoute = "/(app)/spaces/[spaceId]/flows/[flowId]";
+  $: usesWideFlowWorkspace = $page.route.id === flowWorkspaceRoute;
+
   $: isPersonal = currentRoute.startsWith("/spaces/personal");
   $: isOrganization = currentRoute.startsWith("/spaces/organization");
   $: isSpacesGeneric = currentRoute.startsWith("/spaces") && !isPersonal && !isOrganization;
@@ -73,15 +76,18 @@
   }}
 ></div>
 
-<div class="bg-tertiary fixed inset-x-0 h-[8.275rem] transition-all duration-700 ease-in-out"></div>
+<div
+  class="bg-tertiary fixed inset-x-0 h-[8.275rem] transition-all duration-700 ease-in-out motion-reduce:transition-none"
+></div>
 
 <div
+  class:flow-workspace-shell={usesWideFlowWorkspace}
   class="bg-secondary mx-auto flex min-h-[100svh] w-full max-w-[2000px] flex-col p-0 md:px-4 md:pt-3"
 >
   <header
     class:max-h-0={!$showHeader}
     class:max-h-14={$showHeader}
-    class="border-stronger bg-secondary z-10 box-border flex items-start overflow-clip rounded-t-sm transition-all duration-500 ease-in-out"
+    class="border-stronger bg-secondary z-10 box-border flex items-start overflow-clip rounded-t-sm transition-all duration-500 ease-in-out motion-reduce:transition-none"
   >
     <div
       class="border-default hover:bg-accent-dimmer group flex h-[3.25rem] min-w-[3.85rem] items-center justify-between border-r-[0.5px] pr-3 pl-6 md:w-[17rem] md:min-w-[17rem]"
@@ -142,7 +148,9 @@
     </nav>
   </header>
 
-  <main class="border-box bg-primary relative z-10 flex-grow overflow-clip transition-all">
+  <main
+    class="border-box bg-primary relative z-10 flex-grow overflow-clip transition-all motion-reduce:transition-none"
+  >
     <slot />
   </main>
 </div>
@@ -170,5 +178,11 @@
     box-shadow: 0px 14px 12px 2px rgba(0, 0, 0, 0.1);
     border: 0.5px solid var(--border-stronger);
     border-bottom: 0px;
+  }
+
+  @media (min-width: 2400px) {
+    .flow-workspace-shell {
+      max-width: 2560px;
+    }
   }
 </style>
