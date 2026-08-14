@@ -22,6 +22,7 @@
     isFirst?: boolean;
     isLast?: boolean;
     planStatus?: string;
+    openByDefault?: boolean;
     onsuggestchange?: (intent: AIBuilderSuggestChangeIntent) => void;
     resolveModelName?: (ref: string | null) => string | null;
     resolveInputStepLabel?: (ref: string) => string | null;
@@ -35,12 +36,17 @@
     buildDiagnosticReport,
     isFirst = false,
     planStatus = "",
+    openByDefault = false,
     onsuggestchange,
     resolveModelName,
     resolveInputStepLabel
   }: Props = $props();
 
-  let showDetails = $state(false);
+  function initialDetailsState(): boolean {
+    return openByDefault;
+  }
+
+  let showDetails = $state(initialDetailsState());
   let instructionsExpanded = $state(false);
 
   type SchemaProperty = {

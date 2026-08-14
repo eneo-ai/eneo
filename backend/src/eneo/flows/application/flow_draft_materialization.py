@@ -143,6 +143,7 @@ def compile_flow_draft_changeset(
     current_flow: Flow | None,
     *,
     removed_existing_step_refs: frozenset[str] = frozenset(),
+    updated_existing_step_refs: frozenset[str] | None = None,
     default_transcription_model_id: UUID | None = None,
 ) -> FlowDraftChangeSet:
     existing_by_ref: dict[str, FlowStep] = {}
@@ -154,7 +155,11 @@ def compile_flow_draft_changeset(
         existing_by_ref=existing_by_ref,
         removed_existing_step_refs=removed_existing_step_refs,
     )
-
+    _validate_updated_existing_step_refs(
+        existing_by_ref=existing_by_ref,
+        removed_existing_step_refs=removed_existing_step_refs,
+        updated_existing_step_refs=updated_existing_step_refs,
+    )
     ref_to_order = build_ref_to_order(spec.steps)
     assistants_to_create: list[FlowDraftAssistantToCreate] = []
     assistants_to_update: list[FlowDraftAssistantToUpdate] = []
@@ -166,18 +171,30 @@ def compile_flow_draft_changeset(
         rewritten_spec = rewrite_step_spec_variables(step_spec, ref_to_order)
 
         if existing_step is not None:
-            assistants_to_update.append(
-                FlowDraftAssistantToUpdate(
-                    existing_step_id=existing_step.id,
-                    existing_assistant_id=existing_step.assistant_id,
-                    assistant_spec=rewritten_spec.assistant_spec,
-                )
+            existing_ref = rewritten_spec.existing_step_ref
+            updates_step = (
+                updated_existing_step_refs is None
+                or existing_ref in updated_existing_step_refs
             )
+            if updates_step:
+                assistants_to_update.append(
+                    FlowDraftAssistantToUpdate(
+                        existing_step_ref=existing_ref,
+                        existing_step_id=existing_step.id,
+                        existing_assistant_id=existing_step.assistant_id,
+                        assistant_spec=rewritten_spec.assistant_spec,
+                    )
+                )
             compiled_steps.append(
-                _compile_modified_step(
+                _compile_existing_step(
                     step_spec=rewritten_spec,
                     existing_step=existing_step,
                     step_order=step_order,
+                    change_kind=(
+                        FlowDraftStepChangeKind.MODIFIED
+                        if updates_step
+                        else FlowDraftStepChangeKind.UNCHANGED
+                    ),
                 )
             )
             continue
@@ -236,6 +253,27 @@ def _validate_existing_step_ref_coverage(
         current_refs=set(existing_by_ref),
         preserved_refs=preserved_refs,
         removed_existing_step_refs=removed_existing_step_refs,
+    )
+
+
+def _validate_updated_existing_step_refs(
+    *,
+    existing_by_ref: dict[str, FlowStep],
+    removed_existing_step_refs: frozenset[str],
+    updated_existing_step_refs: frozenset[str] | None,
+) -> None:
+    if updated_existing_step_refs is None:
+        return
+    invalid_refs = sorted(
+        (updated_existing_step_refs - set(existing_by_ref))
+        | (updated_existing_step_refs & removed_existing_step_refs)
+    )
+    if not invalid_refs:
+        return
+    raise _invalid_existing_step_ref(
+        "Updated step references must identify preserved existing steps.",
+        reason="invalid_updated_existing_step_refs",
+        invalid_refs=invalid_refs,
     )
 
 
@@ -406,11 +444,12 @@ def _compile_new_step(
     )
 
 
-def _compile_modified_step(
+def _compile_existing_step(
     *,
     step_spec: StepSpec,
     existing_step: FlowStep,
     step_order: int,
+    change_kind: FlowDraftStepChangeKind,
 ) -> FlowDraftCompiledStep:
     effective_spec = preserve_modified_step_output_config(
         step_spec=step_spec,
@@ -418,7 +457,7 @@ def _compile_modified_step(
     )
     return FlowDraftCompiledStep(
         plan_step_ref=effective_spec.plan_step_ref,
-        change_kind=FlowDraftStepChangeKind.MODIFIED,
+        change_kind=change_kind,
         step_order=step_order,
         user_description=effective_spec.name,
         assistant_id=existing_step.assistant_id,

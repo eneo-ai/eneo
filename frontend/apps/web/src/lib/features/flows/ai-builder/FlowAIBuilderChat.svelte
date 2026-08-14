@@ -104,7 +104,7 @@
   }
 
   async function handleUnsupportedArchitectureStartFresh() {
-    clearPendingEditContext();
+    resetComposerContext();
     try {
       await service.startFreshSession(targetKind);
     } catch {
@@ -145,11 +145,9 @@
 
   let inputRef = $state<FlowAIBuilderInput | undefined>();
   let pendingEditContext = $state<AIBuilderPlanEditContext | null>(null);
-  const activeEditContext = $derived(
-    pendingEditContext ?? service.savedFlowStepScope?.editContext ?? null
-  );
+  const activeEditContext = $derived(pendingEditContext ?? service.activeStepTransportContext);
   const savedFlowStepScopeLabel = $derived.by(() => {
-    const scope = service.savedFlowStepScope;
+    const scope = service.activeStepScope;
     if (!scope || pendingEditContext) return null;
     return m.ai_builder_edit_context_step({ step: scope.stepNumber, name: scope.stepName });
   });
@@ -211,7 +209,14 @@
 
   function clearPendingEditContext() {
     pendingEditContext = null;
-    service.clearSavedFlowStepScope();
+  }
+
+  function clearActiveEditContext() {
+    if (pendingEditContext) {
+      clearPendingEditContext();
+    } else {
+      service.clearActiveStepScope();
+    }
     inputRef?.clearActivePlaceholder();
   }
 
@@ -235,6 +240,8 @@
   // placeholder cannot leak into the new conversation.
   export function resetComposerContext() {
     clearPendingEditContext();
+    service.resetStepScope();
+    inputRef?.clearActivePlaceholder();
   }
 
   let scrollContainer = $state<HTMLDivElement | undefined>();
@@ -417,6 +424,7 @@
             taskText={firstTaskText ?? ""}
             requirements={latestRequirements}
             messages={service.messages}
+            savedFlowStepScope={service.activeStepScope}
             disabled={service.isCreating}
             onedittask={handleRequirementsChange}
           />
@@ -441,6 +449,7 @@
               requirementsUserRequest={message.requirementsSummary
                 ? latestUserRequestBefore(i)
                 : null}
+              savedFlowStepScope={service.activeStepScope}
               requirementsConfirmed={message.requirementsSummary
                 ? service.isRequirementsSummaryConfirmed(message.requirementsSummary)
                 : false}
@@ -485,7 +494,7 @@
       bind:this={inputRef}
       editContext={activeEditContext}
       editContextLabel={savedFlowStepScopeLabel}
-      oncleareditcontext={clearPendingEditContext}
+      oncleareditcontext={clearActiveEditContext}
       refinement={showTaskSummary}
       {generationWait}
     />

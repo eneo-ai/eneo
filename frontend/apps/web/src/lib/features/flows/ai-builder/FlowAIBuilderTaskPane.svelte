@@ -12,17 +12,29 @@
   import { Button } from "$lib/components/ui/button/index.js";
   import * as Collapsible from "$lib/components/ui/collapsible/index.js";
   import FlowAIBuilderBoundedLog from "./FlowAIBuilderBoundedLog.svelte";
-  import type { ChatMessage, RequirementsSummary } from "./protocol";
+  import type {
+    AIBuilderStepScopePresentation,
+    ChatMessage,
+    RequirementsSummary
+  } from "./protocol";
 
   interface Props {
     taskText: string;
     requirements: RequirementsSummary | null;
     messages: ChatMessage[];
+    savedFlowStepScope?: AIBuilderStepScopePresentation | null;
     disabled?: boolean;
     onedittask?: () => void;
   }
 
-  let { taskText, requirements, messages, disabled = false, onedittask }: Props = $props();
+  let {
+    taskText,
+    requirements,
+    messages,
+    savedFlowStepScope = null,
+    disabled = false,
+    onedittask
+  }: Props = $props();
 
   // ~3 clamped lines at the pane's measure. Static threshold instead of a
   // scrollHeight probe: deterministic in jsdom and stable under font zoom —
@@ -72,7 +84,9 @@
   <section class="flex flex-col gap-2.5" aria-labelledby="ai-builder-task-heading">
     <div class="flex items-center justify-between gap-2">
       <h2 id="ai-builder-task-heading" class="text-primary text-sm font-semibold">
-        {m.ai_builder_task_heading()}
+        {savedFlowStepScope
+          ? m.ai_builder_saved_step_review_heading({ step: savedFlowStepScope.stepNumber })
+          : m.ai_builder_task_heading()}
       </h2>
       {#if onedittask}
         <Button variant="ghost" size="xs" onclick={onedittask} {disabled}>
@@ -80,6 +94,15 @@
         </Button>
       {/if}
     </div>
+
+    {#if savedFlowStepScope}
+      <div class="border-accent-default/25 bg-accent-default/6 rounded-lg border px-3 py-2.5">
+        <p class="text-primary text-sm font-medium">{savedFlowStepScope.stepName}</p>
+        <p class="text-secondary mt-0.5 text-xs leading-relaxed">
+          {m.ai_builder_saved_step_review_scope()}
+        </p>
+      </div>
+    {/if}
 
     <p
       class="text-secondary text-sm leading-relaxed break-words whitespace-pre-wrap"
@@ -101,7 +124,7 @@
       </button>
     {/if}
 
-    {#if requirements}
+    {#if requirements && !savedFlowStepScope}
       <dl class="definition-grid mt-1">
         <dt>{m.ai_builder_task_purpose()}</dt>
         <dd>{requirements.summary}</dd>
@@ -113,7 +136,7 @@
     {/if}
   </section>
 
-  {#if decisions.length > 0}
+  {#if decisions.length > 0 && !savedFlowStepScope}
     <section class="flex flex-col gap-2" aria-labelledby="ai-builder-decisions-heading">
       <h2 id="ai-builder-decisions-heading" class="text-primary text-sm font-semibold">
         {m.ai_builder_decisions_from_answers()}
@@ -127,7 +150,7 @@
     </section>
   {/if}
 
-  {#if assumptions.length > 0}
+  {#if assumptions.length > 0 && !savedFlowStepScope}
     <Collapsible.Root bind:open={assumptionsOpen}>
       <h2 class="text-sm">
         <Collapsible.Trigger class="section-trigger">

@@ -73,6 +73,11 @@ export interface AIBuilderSavedFlowStepScope {
   stepNumber: number;
 }
 
+export interface AIBuilderStepScopePresentation {
+  stepName: string;
+  stepNumber: number;
+}
+
 export type AIBuilderConversationMessage = GeneratedAIBuilderConversationMessage;
 
 export type AIBuilderAttachmentFile = GeneratedAIBuilderAttachmentFile;
@@ -355,6 +360,8 @@ const flowEditDiffSchema = z.object({
 const flowBuilderEditApprovalSchema = z.strictObject({
   base_flow_revision: z.int(),
   removed_existing_step_refs: stringArraySchema.optional(),
+  scoped_target_existing_step_ref: nullableStringSchema,
+  scoped_target_plan_step_ref: nullableStringSchema,
   diff: flowEditDiffSchema,
   warnings: stringArraySchema.optional(),
   advisories: z.array(editAdvisorySchema).optional(),

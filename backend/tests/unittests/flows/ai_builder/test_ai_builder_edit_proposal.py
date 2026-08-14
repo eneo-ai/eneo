@@ -14,6 +14,11 @@ from eneo.flows.ai_builder.ai_builder_create_compile_context import (
 )
 from eneo.flows.ai_builder.ai_builder_domain_models import ConversationMessage
 from eneo.flows.ai_builder.ai_builder_edit_proposal import process_edit_arguments
+from eneo.flows.ai_builder.ai_builder_plan_edit_context import (
+    AIBuilderPlanEditContext,
+    AIBuilderSavedFlowStepEditContext,
+    ResolvedAIBuilderEditContext,
+)
 from eneo.flows.ai_builder.ai_builder_proposal_capture import (
     REJECTED_PROPOSAL_CAPTURE_DIR_ENV,
 )
@@ -77,6 +82,297 @@ async def test_process_edit_arguments_accepts_ordered_submission() -> None:
     assert result.compiled_proposal.content.spec.steps[0].name == "Analyze case text"
     assert result.compiled_proposal.content.edit is not None
     assert result.compiled_proposal.content.edit.base_flow_revision == 7
+
+
+@pytest.mark.asyncio
+async def test_process_edit_arguments_persists_resolved_saved_step_scope() -> None:
+    flow_step_id = uuid4()
+    flow = _flow(
+        _flow_step(
+            step_order=1,
+            user_description="Analyze text",
+        )
+    )
+    context = ResolvedAIBuilderEditContext(
+        request=AIBuilderSavedFlowStepEditContext(flow_step_id=flow_step_id),
+        scope="step",
+        target_existing_step_ref="existing_step_1",
+        target_step_name="Analyze text",
+        target_step_number=1,
+    )
+
+    result = await _process(
+        flow=flow,
+        plan_edit_context=context,
+        arguments={
+            "plan_rationale": "Clarify the analysis instructions.",
+            "steps": [
+                {
+                    "kind": "modify",
+                    "existing_step_ref": "existing_step_1",
+                    "assistant_spec": {
+                        "instructions": "Analyze the text and explain the result clearly."
+                    },
+                }
+            ],
+        },
+    )
+
+    assert result.compiled_proposal is not None
+    assert result.compiled_proposal.content.edit is not None
+    assert (
+        result.compiled_proposal.content.edit.scoped_target_existing_step_ref
+        == "existing_step_1"
+    )
+
+
+@pytest.mark.asyncio
+async def test_process_edit_arguments_classifies_whole_flow_input_change_as_modified() -> (
+    None
+):
+    flow = _flow(
+        _flow_step(step_order=1, user_description="Collect source"),
+        _flow_step(
+            step_order=2,
+            user_description="Write result",
+            input_source="all_previous_steps",
+        ),
+    )
+
+    result = await _process(
+        flow=flow,
+        arguments={
+            "plan_rationale": "Use the direct predecessor as the input.",
+            "steps": [
+                {"kind": "modify", "existing_step_ref": "existing_step_1"},
+                {
+                    "kind": "modify",
+                    "existing_step_ref": "existing_step_2",
+                    "input_source": "previous_step",
+                },
+            ],
+        },
+    )
+
+    assert result.compiled_proposal is not None
+    assert result.compiled_proposal.content.edit is not None
+    changes = result.compiled_proposal.content.edit.diff.step_changes
+    assert [(change.step_ref, change.kind) for change in changes] == [
+        ("existing_step_1", "unchanged"),
+        ("existing_step_2", "modified"),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_process_edit_arguments_keeps_identity_entries_unchanged() -> None:
+    flow = _flow(
+        _flow_step(step_order=1, user_description="Collect source"),
+        _flow_step(
+            step_order=2,
+            user_description="Write result",
+            input_source="all_previous_steps",
+        ),
+    )
+    context = ResolvedAIBuilderEditContext(
+        request=AIBuilderSavedFlowStepEditContext(flow_step_id=flow.steps[0].id),
+        scope="step",
+        target_existing_step_ref="existing_step_1",
+        target_step_name="Collect source",
+        target_step_number=1,
+    )
+
+    result = await _process(
+        flow=flow,
+        plan_edit_context=context,
+        arguments={
+            "plan_rationale": "Clarify the source and repair its consumer.",
+            "steps": [
+                {
+                    "kind": "modify",
+                    "existing_step_ref": "existing_step_1",
+                    "assistant_spec": {
+                        "instructions": "Collect the source and label it clearly."
+                    },
+                },
+                {
+                    "kind": "modify",
+                    "existing_step_ref": "existing_step_2",
+                },
+            ],
+        },
+    )
+
+    assert result.compiled_proposal is not None
+    assert result.compiled_proposal.content.edit is not None
+    changes = result.compiled_proposal.content.edit.diff.step_changes
+    assert [(change.step_ref, change.kind) for change in changes] == [
+        ("existing_step_1", "modified"),
+        ("existing_step_2", "unchanged"),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_process_edit_arguments_refines_selected_added_plan_step() -> None:
+    flow = _flow(_flow_step(step_order=1, user_description="Collect source"))
+    initial = await _process(
+        flow=flow,
+        arguments={
+            "plan_rationale": "Add a report step.",
+            "steps": [
+                {"kind": "modify", "existing_step_ref": "existing_step_1"},
+                {
+                    "kind": "add",
+                    "step": {
+                        "name": "Write report",
+                        "instructions": "Write a concise report.",
+                    },
+                },
+            ],
+        },
+    )
+    assert initial.compiled_proposal is not None
+    prior_spec = initial.compiled_proposal.content.spec
+    target = prior_spec.steps[1]
+    context_request = AIBuilderPlanEditContext(
+        scope="step",
+        plan_id=uuid4(),
+        target_plan_step_ref=target.plan_step_ref,
+        target_step_name=target.name,
+        target_step_number=2,
+    )
+
+    result = await _process(
+        flow=flow,
+        prior_spec_for_revision=prior_spec,
+        plan_edit_context=ResolvedAIBuilderEditContext(
+            request=context_request,
+            scope="step",
+            target_plan_step_ref=target.plan_step_ref,
+            target_step_name=target.name,
+            target_step_number=2,
+            plan_id=context_request.plan_id,
+        ),
+        arguments={
+            "plan_rationale": "Make the selected report more explicit.",
+            "steps": [
+                {"kind": "modify", "existing_step_ref": "existing_step_1"},
+                {
+                    "kind": "add",
+                    "step": {
+                        "name": "Write report",
+                        "instructions": "Write a concise report with clear conclusions.",
+                    },
+                },
+            ],
+        },
+    )
+
+    assert result.failure_kind is None
+    assert result.compiled_proposal is not None
+    assert result.compiled_proposal.content.edit is not None
+    assert (
+        result.compiled_proposal.content.edit.scoped_target_plan_step_ref
+        == target.plan_step_ref
+    )
+    assert (
+        result.compiled_proposal.content.spec.steps[1].assistant_spec.instructions
+        == "Write a concise report with clear conclusions."
+    )
+
+    replacement_spec = result.compiled_proposal.content.spec
+    replacement_target = replacement_spec.steps[1]
+    replacement_context_request = AIBuilderPlanEditContext(
+        scope="step",
+        plan_id=uuid4(),
+        target_plan_step_ref=replacement_target.plan_step_ref,
+        target_step_name=replacement_target.name,
+        target_step_number=2,
+    )
+    second_result = await _process(
+        flow=flow,
+        prior_spec_for_revision=replacement_spec,
+        plan_edit_context=ResolvedAIBuilderEditContext(
+            request=replacement_context_request,
+            scope="step",
+            target_plan_step_ref=replacement_target.plan_step_ref,
+            target_step_name=replacement_target.name,
+            target_step_number=2,
+            plan_id=replacement_context_request.plan_id,
+        ),
+        arguments={
+            "plan_rationale": "Add a limitations section to the selected report.",
+            "steps": [
+                {"kind": "modify", "existing_step_ref": "existing_step_1"},
+                {
+                    "kind": "add",
+                    "step": {
+                        "name": "Write report",
+                        "instructions": (
+                            "Write a concise report with clear conclusions and limitations."
+                        ),
+                    },
+                },
+            ],
+        },
+    )
+
+    assert second_result.failure_kind is None
+    assert second_result.compiled_proposal is not None
+    assert (
+        second_result.compiled_proposal.content.spec.steps[
+            1
+        ].assistant_spec.instructions
+        == "Write a concise report with clear conclusions and limitations."
+    )
+
+
+@pytest.mark.asyncio
+async def test_process_edit_arguments_rejects_model_authored_downstream_wiring() -> (
+    None
+):
+    flow = _flow(
+        _flow_step(step_order=1, user_description="Collect source"),
+        _flow_step(
+            step_order=2,
+            user_description="Write result",
+            input_source="previous_step",
+        ),
+    )
+    context = ResolvedAIBuilderEditContext(
+        request=AIBuilderSavedFlowStepEditContext(flow_step_id=flow.steps[0].id),
+        scope="step",
+        target_existing_step_ref="existing_step_1",
+        target_step_name="Collect source",
+        target_step_number=1,
+    )
+
+    result = await _process(
+        flow=flow,
+        plan_edit_context=context,
+        arguments={
+            "plan_rationale": "Clarify the selected step.",
+            "steps": [
+                {
+                    "kind": "modify",
+                    "existing_step_ref": "existing_step_1",
+                    "assistant_spec": {
+                        "instructions": "Collect the source and label it clearly."
+                    },
+                },
+                {
+                    "kind": "modify",
+                    "existing_step_ref": "existing_step_2",
+                    "input_source": "flow_input",
+                },
+            ],
+        },
+    )
+
+    assert result.compiled_proposal is None
+    assert result.failure_kind == "quality"
+    assert result.feedback is not None
+    assert "existing_step_2" in result.feedback
+    assert "selected step" in result.feedback
 
 
 @pytest.mark.asyncio
@@ -1577,6 +1873,8 @@ async def _process(
     assistant_snapshots=None,
     resource_catalog=None,
     planning_state: PlanningState | None = None,
+    plan_edit_context: ResolvedAIBuilderEditContext | None = None,
+    prior_spec_for_revision=None,
 ):
     return await process_edit_arguments(
         turn=_make_turn(),
@@ -1588,6 +1886,8 @@ async def _process(
         assistant_snapshots=assistant_snapshots,
         resource_catalog=resource_catalog,
         planning_state=planning_state,
+        plan_edit_context=plan_edit_context,
+        prior_spec_for_revision=prior_spec_for_revision,
         compile_context=create_compile_context_from_planning_state(
             planning_state,
             ui_language=resolve_ui_language(conversation or []),

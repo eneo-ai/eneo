@@ -210,6 +210,40 @@ def test_shared_compile_preserves_every_existing_step_without_removals() -> None
     ]
 
 
+def test_shared_compile_only_updates_explicitly_modified_existing_steps() -> None:
+    first = _flow_step(step_order=1)
+    second = _flow_step(step_order=2)
+    third = _flow_step(step_order=3)
+    current_flow = _flow(first, second, third)
+    spec = FlowDraftSpecCore(
+        flow_name="Updated flow",
+        steps=[
+            _step_spec(plan_step_ref="step_a", existing_step_ref="existing_step_1"),
+            _step_spec(plan_step_ref="step_b", existing_step_ref="existing_step_2"),
+            _step_spec(
+                plan_step_ref="step_c",
+                existing_step_ref="existing_step_3",
+                instructions="Updated conclusion instructions.",
+            ),
+        ],
+    )
+
+    changeset = compile_flow_draft_changeset(
+        spec,
+        current_flow=current_flow,
+        updated_existing_step_refs=frozenset({"existing_step_3"}),
+    )
+
+    assert [
+        update.existing_assistant_id for update in changeset.assistants_to_update
+    ] == [third.assistant_id]
+    assert [step.change_kind for step in changeset.compiled_steps] == [
+        FlowDraftStepChangeKind.UNCHANGED,
+        FlowDraftStepChangeKind.UNCHANGED,
+        FlowDraftStepChangeKind.MODIFIED,
+    ]
+
+
 def test_shared_compile_deletes_only_explicit_removed_existing_step() -> None:
     removed_assistant_id = uuid4()
     current_flow = _flow(

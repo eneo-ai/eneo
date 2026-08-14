@@ -83,6 +83,7 @@ class EditFlowAuthoringCommand(BaseModel):
     expected_revision: int
     spec: FlowDraftSpecCore
     removed_existing_step_refs: frozenset[str]
+    updated_existing_step_refs: frozenset[str]
     origin: FlowAuthoringOrigin
     resource_bindings: tuple[LocalResourceBinding, ...] = ()
     default_transcription_model_id: UUID | None = None
@@ -161,6 +162,7 @@ class FlowAuthoringCommandService:
             spec,
             current_flow,
             removed_existing_step_refs=_removed_existing_step_refs(command),
+            updated_existing_step_refs=_updated_existing_step_refs(command),
             default_transcription_model_id=command.default_transcription_model_id,
         )
         changeset = policy.stamp_metadata(
@@ -334,6 +336,14 @@ def _removed_existing_step_refs(command: FlowAuthoringCommand) -> frozenset[str]
     if command.kind == "create":
         return frozenset()
     return command.removed_existing_step_refs
+
+
+def _updated_existing_step_refs(
+    command: FlowAuthoringCommand,
+) -> frozenset[str] | None:
+    if command.kind == "create":
+        return None
+    return command.updated_existing_step_refs
 
 
 def _target_flow_id(command: FlowAuthoringCommand) -> UUID | None:

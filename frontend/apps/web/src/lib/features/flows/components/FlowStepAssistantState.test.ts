@@ -82,4 +82,16 @@ describe("FlowStepAssistantState", () => {
       disabled_reason: "no_assignment"
     });
   });
+
+  it("reloads the same assistant when its external revision changes", async () => {
+    const activeStep = { current: makeStep("assistant-1") };
+    const { state, flowEditor } = makeState(activeStep);
+
+    state.syncWithActiveStep(activeStep.current, 0);
+    await vi.waitFor(() => expect(flowEditor.loadAssistant).toHaveBeenCalledTimes(1));
+
+    state.syncWithActiveStep(activeStep.current, 1);
+
+    await vi.waitFor(() => expect(flowEditor.loadAssistant).toHaveBeenCalledTimes(2));
+  });
 });

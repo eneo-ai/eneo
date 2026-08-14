@@ -16,6 +16,7 @@ import type {
   AIBuilderEditContext,
   AIBuilderPhase,
   AIBuilderSavedFlowStepScope,
+  AIBuilderStepScopePresentation,
   AIBuilderSendOutcome,
   AIBuilderSession,
   AIBuilderStatus,
@@ -37,6 +38,7 @@ export class FlowAIBuilderService {
   #stateVersion = $state(0);
   #hasSeenPlanInSession = $state(false);
   #savedFlowStepScope = $state<AIBuilderSavedFlowStepScope | null>(null);
+  #suppressedPlanStepScope = $state<{ sessionId: string; planId: string } | null>(null);
 
   hasSession = $derived(this.#state.session !== null);
   hasSeenPlanInSession = $derived(this.#hasSeenPlanInSession);
@@ -102,7 +104,6 @@ export class FlowAIBuilderService {
     }
     if (state.currentPlan !== null) {
       this.#hasSeenPlanInSession = true;
-      this.clearSavedFlowStepScope();
     }
   }
 
@@ -122,12 +123,79 @@ export class FlowAIBuilderService {
     return this.#savedFlowStepScope;
   }
 
+  get activeStepScope(): AIBuilderStepScopePresentation | null {
+    const context = this.activeStepTransportContext;
+    if (
+      context?.kind === "proposed_plan" &&
+      context.target_step_name &&
+      context.target_step_number
+    ) {
+      return {
+        stepName: context.target_step_name,
+        stepNumber: context.target_step_number
+      };
+    }
+    return this.#savedFlowStepScope;
+  }
+
+  get activeStepTransportContext(): AIBuilderEditContext | null {
+    const scope = this.#savedFlowStepScope;
+    const plan = this.#state.currentPlan;
+    if (plan === null) return scope?.editContext ?? null;
+    const suppressedScope = this.#suppressedPlanStepScope;
+    if (
+      suppressedScope !== null &&
+      suppressedScope.sessionId === this.#state.session?.session_id &&
+      suppressedScope.planId === plan.plan_id
+    ) {
+      return null;
+    }
+
+    const targetExistingStepRef = plan.proposal.edit?.scoped_target_existing_step_ref;
+    const targetPlanStepRef = plan.proposal.edit?.scoped_target_plan_step_ref;
+    if (!targetExistingStepRef && !targetPlanStepRef) return scope?.editContext ?? null;
+    const targetPlanIndex = plan.proposal.spec.steps.findIndex(
+      (step) =>
+        (!targetPlanStepRef || step.plan_step_ref === targetPlanStepRef) &&
+        (!targetExistingStepRef || step.existing_step_ref === targetExistingStepRef)
+    );
+    const targetStep = plan.proposal.spec.steps[targetPlanIndex];
+    if (!targetStep?.plan_step_ref) {
+      // Keep any launch scope rather than silently widening the edit. The
+      // backend rejects stale saved-step identity against the current plan.
+      return scope?.editContext ?? null;
+    }
+
+    return {
+      kind: "proposed_plan",
+      plan_id: plan.plan_id,
+      scope: "step",
+      target_existing_step_ref: targetExistingStepRef ?? null,
+      target_plan_step_ref: targetPlanStepRef ?? null,
+      target_step_name: targetStep.name,
+      target_step_number: targetPlanIndex + 1
+    };
+  }
+
   setSavedFlowStepScope(scope: AIBuilderSavedFlowStepScope): void {
+    this.#suppressedPlanStepScope = null;
     this.#savedFlowStepScope = scope;
   }
 
   clearSavedFlowStepScope(): void {
     this.#savedFlowStepScope = null;
+  }
+
+  clearActiveStepScope(): void {
+    this.#savedFlowStepScope = null;
+    const sessionId = this.#state.session?.session_id;
+    const planId = this.#state.currentPlan?.plan_id;
+    this.#suppressedPlanStepScope = sessionId && planId ? { sessionId, planId } : null;
+  }
+
+  resetStepScope(): void {
+    this.#savedFlowStepScope = null;
+    this.#suppressedPlanStepScope = null;
   }
 
   get isStreaming(): boolean {
@@ -300,9 +368,7 @@ export class FlowAIBuilderService {
   }
 
   async applyPlan(): Promise<ApplyResult> {
-    const result = await this.#driver.applyPlan();
-    this.clearSavedFlowStepScope();
-    return result;
+    return await this.#driver.applyPlan();
   }
 
   async createFlowFromPlan(): Promise<ApplyResult> {

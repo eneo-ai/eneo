@@ -8,6 +8,14 @@ type AssistantRecord = {
   completion_model?: { id: string };
 };
 
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((complete) => {
+    resolve = complete;
+  });
+  return { promise, resolve };
+}
+
 function createManager(
   overrides: {
     loadRemote?: (assistantId: string) => Promise<AssistantRecord | null>;
@@ -101,6 +109,48 @@ describe("AssistantSaveManager", () => {
     await expect(manager.load("assistant-1")).resolves.toEqual({
       id: "assistant-1",
       prompt: { text: "Pending" }
+    });
+  });
+
+  it("reloads an externally changed assistant after invalidation", async () => {
+    const loadRemote = vi
+      .fn<(assistantId: string) => Promise<AssistantRecord | null>>()
+      .mockResolvedValueOnce({ id: "assistant-1", prompt: { text: "Before AI apply" } })
+      .mockResolvedValueOnce({ id: "assistant-1", prompt: { text: "After AI apply" } });
+    const { manager } = createManager({ loadRemote });
+
+    await expect(manager.load("assistant-1")).resolves.toMatchObject({
+      prompt: { text: "Before AI apply" }
+    });
+
+    manager.invalidate(["assistant-1"]);
+
+    await expect(manager.load("assistant-1")).resolves.toMatchObject({
+      prompt: { text: "After AI apply" }
+    });
+    expect(loadRemote).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not cache an old load that finishes after invalidation", async () => {
+    const oldLoad = deferred<AssistantRecord | null>();
+    const freshLoad = deferred<AssistantRecord | null>();
+    const loadRemote = vi
+      .fn<(assistantId: string) => Promise<AssistantRecord | null>>()
+      .mockReturnValueOnce(oldLoad.promise)
+      .mockReturnValueOnce(freshLoad.promise);
+    const { manager } = createManager({ loadRemote });
+
+    const first = manager.load("assistant-1");
+    manager.invalidate(["assistant-1"]);
+    const second = manager.load("assistant-1");
+
+    freshLoad.resolve({ id: "assistant-1", prompt: { text: "After AI apply" } });
+    await expect(second).resolves.toMatchObject({ prompt: { text: "After AI apply" } });
+    oldLoad.resolve({ id: "assistant-1", prompt: { text: "Before AI apply" } });
+
+    await expect(first).resolves.toMatchObject({ prompt: { text: "After AI apply" } });
+    expect(manager.getCached("assistant-1")).toMatchObject({
+      prompt: { text: "After AI apply" }
     });
   });
 

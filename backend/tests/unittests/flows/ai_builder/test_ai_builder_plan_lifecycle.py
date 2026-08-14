@@ -28,7 +28,13 @@ from eneo.flows.ai_builder.ai_builder_edit_preview_models import (
     FlowEditDiff,
     StepChange,
 )
-from eneo.flows.ai_builder.ai_builder_plan_lifecycle import AIBuilderPlanLifecycle
+from eneo.flows.ai_builder.ai_builder_error_contract import (
+    AIBuilderBadRequestException,
+)
+from eneo.flows.ai_builder.ai_builder_plan_lifecycle import (
+    AIBuilderPlanLifecycle,
+    _updated_existing_step_refs_for_apply,
+)
 from eneo.flows.ai_builder.ai_builder_proposal_telemetry import (
     MaterializerProgressSnapshot,
 )
@@ -304,8 +310,14 @@ def _make_plan_edit_approval(
     spec: FlowDraftSpecCore,
     *,
     removed_existing_step_refs: frozenset[str] = frozenset(),
+    updated_existing_step_refs: frozenset[str] = frozenset(),
+    scoped_target_existing_step_ref: str | None = None,
 ) -> FlowBuilderEditApproval:
     step_changes = [StepChange(kind="unchanged", step_name="Step A")]
+    step_changes.extend(
+        StepChange(kind="modified", step_name=ref, step_ref=ref)
+        for ref in sorted(updated_existing_step_refs)
+    )
     step_changes.extend(
         StepChange(kind="removed", step_name=ref, step_ref=ref)
         for ref in sorted(removed_existing_step_refs)
@@ -313,11 +325,111 @@ def _make_plan_edit_approval(
     return FlowBuilderEditApproval(
         base_flow_revision=1,
         removed_existing_step_refs=removed_existing_step_refs,
+        scoped_target_existing_step_ref=scoped_target_existing_step_ref,
         diff=FlowEditDiff(
             step_changes=step_changes,
             net_steps_removed=len(removed_existing_step_refs),
         ),
     )
+
+
+def test_modified_step_without_existing_reference_fails_before_authoring() -> None:
+    user = _make_user()
+    session = _make_session(
+        tenant_id=user.tenant_id,
+        actor_user_id=user.id,
+        flow_id=uuid4(),
+        target_kind=TargetKind.EDIT,
+    )
+    spec = _make_spec()
+    approval = FlowBuilderEditApproval(
+        base_flow_revision=1,
+        diff=FlowEditDiff(
+            step_changes=[StepChange(kind="modified", step_name="Changed step")]
+        ),
+    )
+    plan = _make_plan(
+        session_id=session.id,
+        tenant_id=session.tenant_id,
+        spec=spec,
+        edit=approval,
+    )
+
+    with pytest.raises(
+        AIBuilderBadRequestException,
+        match="modified step without an existing step reference",
+    ):
+        _updated_existing_step_refs_for_apply(session=session, plan=plan)
+
+
+def test_scoped_apply_updates_only_the_selected_step() -> None:
+    user = _make_user()
+    session = _make_session(
+        tenant_id=user.tenant_id,
+        actor_user_id=user.id,
+        flow_id=uuid4(),
+        target_kind=TargetKind.EDIT,
+    )
+    spec = _make_spec()
+    approval = FlowBuilderEditApproval(
+        base_flow_revision=1,
+        scoped_target_existing_step_ref="existing_step_2",
+        diff=FlowEditDiff(
+            step_changes=[
+                StepChange(
+                    kind="modified",
+                    step_name="Selected step",
+                    step_ref="existing_step_2",
+                ),
+            ]
+        ),
+    )
+    plan = _make_plan(
+        session_id=session.id,
+        tenant_id=session.tenant_id,
+        spec=spec,
+        edit=approval,
+    )
+
+    assert _updated_existing_step_refs_for_apply(
+        session=session, plan=plan
+    ) == frozenset({"existing_step_2"})
+
+
+def test_scoped_apply_rejects_modified_assistant_outside_selected_step() -> None:
+    user = _make_user()
+    session = _make_session(
+        tenant_id=user.tenant_id,
+        actor_user_id=user.id,
+        flow_id=uuid4(),
+        target_kind=TargetKind.EDIT,
+    )
+    spec = _make_spec()
+    approval = FlowBuilderEditApproval(
+        base_flow_revision=1,
+        scoped_target_existing_step_ref="existing_step_2",
+        diff=FlowEditDiff(
+            step_changes=[
+                StepChange(
+                    kind="modified",
+                    step_name="Wrong step",
+                    step_ref="existing_step_1",
+                )
+            ]
+        ),
+    )
+    plan = _make_plan(
+        session_id=session.id,
+        tenant_id=session.tenant_id,
+        spec=spec,
+        edit=approval,
+    )
+
+    with pytest.raises(
+        AIBuilderBadRequestException,
+        match="outside the selected step",
+    ):
+        _updated_existing_step_refs_for_apply(session=session, plan=plan)
 
 
 def _make_binding(
@@ -1140,6 +1252,7 @@ class TestAIBuilderPlanLifecycle:
             edit=_make_plan_edit_approval(
                 spec,
                 removed_existing_step_refs=frozenset({"existing_step_2"}),
+                updated_existing_step_refs=frozenset({"existing_step_1"}),
             ),
         )
         repo.get_plan.return_value = plan
@@ -1161,6 +1274,7 @@ class TestAIBuilderPlanLifecycle:
         command = authoring_service.prepare.await_args.kwargs["command"]
         assert isinstance(command, EditFlowAuthoringCommand)
         assert command.removed_existing_step_refs == frozenset({"existing_step_2"})
+        assert command.updated_existing_step_refs == frozenset({"existing_step_1"})
 
     @pytest.mark.anyio
     async def test_apply_plan_rejects_create_plan_with_existing_step_ref_at_authoring_boundary(

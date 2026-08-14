@@ -213,6 +213,8 @@ class FlowBuilderEditApproval(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     base_flow_revision: int
+    scoped_target_existing_step_ref: str | None = None
+    scoped_target_plan_step_ref: str | None = None
     removed_existing_step_refs: frozenset[str] = Field(default_factory=frozenset)
     diff: FlowEditDiff
     warnings: list[str] = Field(default_factory=list)

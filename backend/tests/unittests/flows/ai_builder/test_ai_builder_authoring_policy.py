@@ -5,6 +5,7 @@ from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
+from pydantic import ValidationError
 
 from eneo.flows.ai_builder.ai_builder_authoring_policy import AIBuilderAuthoringPolicy
 from eneo.flows.application.flow_authoring_command import (
@@ -23,6 +24,25 @@ from eneo.flows.flow_authoring_spec import (
     OutputType,
     StepSpec,
 )
+
+
+def test_edit_command_requires_explicit_step_and_assistant_update_boundaries() -> None:
+    spec = _spec(existing_step_ref="existing_step_1")
+
+    with pytest.raises(ValidationError) as exc_info:
+        EditFlowAuthoringCommand.model_validate(
+            {
+                "space_id": uuid4(),
+                "flow_id": uuid4(),
+                "expected_revision": 1,
+                "spec": spec,
+                "removed_existing_step_refs": [],
+                "origin": _origin(spec_hash=spec.spec_hash()),
+            }
+        )
+
+    missing_fields = {tuple(error["loc"]) for error in exc_info.value.errors()}
+    assert missing_fields >= {("updated_existing_step_refs",)}
 
 
 @pytest.mark.anyio
@@ -83,6 +103,7 @@ async def test_prepare_removes_stale_ai_builder_description_metadata() -> None:
             expected_revision=1,
             spec=spec,
             removed_existing_step_refs=frozenset(),
+            updated_existing_step_refs=frozenset({"existing_step_1"}),
             origin=origin,
         ),
         flow_service=SimpleNamespace(get_flow=_async_return(current_flow)),
@@ -119,6 +140,7 @@ async def test_prepare_rewrites_builder_managed_stale_terminal_output_descriptio
             expected_revision=1,
             spec=spec,
             removed_existing_step_refs=frozenset(),
+            updated_existing_step_refs=frozenset({"existing_step_1"}),
             origin=origin,
         ),
         flow_service=SimpleNamespace(get_flow=_async_return(current_flow)),
@@ -153,6 +175,7 @@ async def test_manual_description_override_keeps_current_description() -> None:
             expected_revision=1,
             spec=spec,
             removed_existing_step_refs=frozenset(),
+            updated_existing_step_refs=frozenset({"existing_step_1"}),
             origin=origin,
         ),
         flow_service=SimpleNamespace(get_flow=_async_return(current_flow)),
@@ -189,6 +212,7 @@ async def test_unsupported_current_flow_signature_leaves_description_unchanged()
             expected_revision=1,
             spec=spec,
             removed_existing_step_refs=frozenset(),
+            updated_existing_step_refs=frozenset({"existing_step_1"}),
             origin=origin,
         ),
         flow_service=SimpleNamespace(get_flow=_async_return(current_flow)),
@@ -235,6 +259,9 @@ async def test_unsupported_middle_step_signature_leaves_description_unchanged() 
             expected_revision=1,
             spec=spec,
             removed_existing_step_refs=frozenset(),
+            updated_existing_step_refs=frozenset(
+                {"existing_step_1", "existing_step_2", "existing_step_3"}
+            ),
             origin=origin,
         ),
         flow_service=SimpleNamespace(get_flow=_async_return(current_flow)),

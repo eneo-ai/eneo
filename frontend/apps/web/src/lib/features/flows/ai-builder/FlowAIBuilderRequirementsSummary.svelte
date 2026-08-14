@@ -4,13 +4,14 @@
   import { cubicOut } from "svelte/easing";
   import { prefersReducedMotion } from "$lib/core/prefersReducedMotion";
   import { Button } from "$lib/components/ui/button/index.js";
-  import type { RequirementsSummary } from "./protocol";
+  import type { AIBuilderStepScopePresentation, RequirementsSummary } from "./protocol";
 
   const reducedMotion = prefersReducedMotion();
 
   interface Props {
     summary: RequirementsSummary;
     userRequest?: string | null;
+    savedFlowStepScope?: AIBuilderStepScopePresentation | null;
     confirmed?: boolean;
     active?: boolean;
     onconfirm?: () => void;
@@ -22,6 +23,7 @@
   let {
     summary,
     userRequest = null,
+    savedFlowStepScope = null,
     confirmed = false,
     active = true,
     onconfirm,
@@ -49,7 +51,9 @@
 <section
   class="border-default bg-primary ring-foreground/10 group mt-3 overflow-hidden rounded-xl border ring-1 transition-[opacity,box-shadow] duration-200 ease-out
     {confirmed && !expanded ? 'opacity-70' : 'shadow-sm'}"
-  aria-label={m.ai_builder_requirements_title()}
+  aria-label={savedFlowStepScope
+    ? m.ai_builder_saved_step_review_heading({ step: savedFlowStepScope.stepNumber })
+    : m.ai_builder_requirements_title()}
 >
   <header class="flex items-center gap-2.5 px-4 pt-3.5 pb-2">
     <span
@@ -71,13 +75,15 @@
     </span>
 
     <h2 class="text-primary text-sm font-semibold tracking-[-0.01em]">
-      {m.ai_builder_requirements_title()}
+      {savedFlowStepScope
+        ? m.ai_builder_saved_step_review_heading({ step: savedFlowStepScope.stepNumber })
+        : m.ai_builder_requirements_title()}
     </h2>
 
     {#if confirmed || !active}
       <button
         type="button"
-        class="text-accent-default hover:text-accent-stronger focus-visible:ring-accent-default/30 pointer-coarse:min-h-[44px] ml-auto cursor-pointer rounded-md px-2 py-0.5 text-xs font-medium transition-colors focus-visible:ring-2 focus-visible:outline-none"
+        class="text-accent-default hover:text-accent-stronger focus-visible:ring-accent-default/30 ml-auto cursor-pointer rounded-md px-2 py-0.5 text-xs font-medium transition-colors focus-visible:ring-2 focus-visible:outline-none pointer-coarse:min-h-[44px]"
         onclick={toggleExpanded}
       >
         {expanded ? m.ai_builder_requirements_collapse() : m.ai_builder_requirements_expand()}
@@ -87,9 +93,18 @@
 
   {#if expanded}
     <div class="flex flex-col gap-4 px-4 pt-2 pb-4">
-      <div class="border-default border-b pb-3">
-        <p class="text-primary text-[0.9375rem] leading-[1.55]">{summary.summary}</p>
-      </div>
+      {#if savedFlowStepScope}
+        <div class="border-accent-default/25 bg-accent-default/6 rounded-lg border px-3 py-2.5">
+          <p class="text-primary text-sm font-medium">{savedFlowStepScope.stepName}</p>
+          <p class="text-secondary mt-0.5 text-xs leading-relaxed">
+            {m.ai_builder_saved_step_review_scope()}
+          </p>
+        </div>
+      {:else}
+        <div class="border-default border-b pb-3">
+          <p class="text-primary text-[0.9375rem] leading-[1.55]">{summary.summary}</p>
+        </div>
+      {/if}
 
       {#if userRequest}
         <!-- The quoted task is a quote, not a box: a plain left rule. -->
@@ -106,41 +121,43 @@
       <!-- One definition pattern for ALL metadata: decisions and input/output
            share the same label–value grid — nothing is stated twice in two
            different shapes. -->
-      <section class="flex flex-col gap-2">
-        {#if hasDecisions}
-          <h3 class="text-primary text-sm font-semibold">
-            {m.ai_builder_requirements_decisions()}
-          </h3>
-        {/if}
-        <dl class="divide-dimmer flex flex-col divide-y">
-          {#each summary.key_decisions as decision (decision.topic)}
+      {#if !savedFlowStepScope}
+        <section class="flex flex-col gap-2">
+          {#if hasDecisions}
+            <h3 class="text-primary text-sm font-semibold">
+              {m.ai_builder_requirements_decisions()}
+            </h3>
+          {/if}
+          <dl class="divide-dimmer flex flex-col divide-y">
+            {#each summary.key_decisions as decision (decision.topic)}
+              <div class="grid gap-x-4 gap-y-1 py-2 first:pt-0 sm:grid-cols-[12rem_1fr]">
+                <dt class="text-secondary text-[0.8125rem]">{decision.topic}</dt>
+                <dd class="text-primary text-[0.8125rem] leading-normal">
+                  {decision.decision}
+                </dd>
+              </div>
+            {/each}
             <div class="grid gap-x-4 gap-y-1 py-2 first:pt-0 sm:grid-cols-[12rem_1fr]">
-              <dt class="text-secondary text-[0.8125rem]">{decision.topic}</dt>
+              <dt class="text-secondary text-[0.8125rem]">{m.ai_builder_requirements_input()}</dt>
               <dd class="text-primary text-[0.8125rem] leading-normal">
-                {decision.decision}
+                {summary.input_description}
               </dd>
             </div>
-          {/each}
-          <div class="grid gap-x-4 gap-y-1 py-2 first:pt-0 sm:grid-cols-[12rem_1fr]">
-            <dt class="text-secondary text-[0.8125rem]">{m.ai_builder_requirements_input()}</dt>
-            <dd class="text-primary text-[0.8125rem] leading-normal">
-              {summary.input_description}
-            </dd>
-          </div>
-          <div class="grid gap-x-4 gap-y-1 py-2 last:pb-0 sm:grid-cols-[12rem_1fr]">
-            <dt class="text-secondary text-[0.8125rem]">{m.ai_builder_requirements_output()}</dt>
-            <dd class="text-primary text-[0.8125rem] leading-normal">
-              {summary.output_description}
-            </dd>
-          </div>
-        </dl>
-      </section>
+            <div class="grid gap-x-4 gap-y-1 py-2 last:pb-0 sm:grid-cols-[12rem_1fr]">
+              <dt class="text-secondary text-[0.8125rem]">{m.ai_builder_requirements_output()}</dt>
+              <dd class="text-primary text-[0.8125rem] leading-normal">
+                {summary.output_description}
+              </dd>
+            </div>
+          </dl>
+        </section>
+      {/if}
 
-      {#if hasAssumptions}
+      {#if hasAssumptions && !savedFlowStepScope}
         <section class="flex flex-col gap-1.5">
           <button
             type="button"
-            class="text-primary focus-visible:ring-accent-default/30 pointer-coarse:min-h-[44px] flex w-fit items-center gap-1.5 rounded text-sm font-semibold transition-colors focus-visible:ring-2 focus-visible:outline-none"
+            class="text-primary focus-visible:ring-accent-default/30 flex w-fit items-center gap-1.5 rounded text-sm font-semibold transition-colors focus-visible:ring-2 focus-visible:outline-none pointer-coarse:min-h-[44px]"
             aria-expanded={assumptionsExpanded}
             onclick={() => (assumptionsExpanded = !assumptionsExpanded)}
           >

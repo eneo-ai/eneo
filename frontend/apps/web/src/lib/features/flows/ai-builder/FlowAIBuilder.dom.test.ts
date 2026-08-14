@@ -23,7 +23,7 @@ vi.mock("$lib/core/Eneo", () => ({
 import FlowAIBuilderHarness from "./test-harnesses/FlowAIBuilderHarness.svelte";
 import type { AIBuilderClientTransport } from "./FlowAIBuilderDriver";
 import type { FlowAIBuilderService } from "./FlowAIBuilderService.svelte.ts";
-import type { AIBuilderSavedFlowStepScope } from "./protocol";
+import type { AIBuilderSavedFlowStepScope, ProposedPlan } from "./protocol";
 
 const DEFAULT_MODEL_ID = "11111111-1111-4111-8111-111111111199";
 const DEFAULT_MODEL_RESPONSE = {
@@ -366,9 +366,9 @@ describe("FlowAIBuilder shell layout", () => {
       if (path === "/api/v1/flows/ai-builder/sessions/{session_id}") return session;
       return {};
     }) as unknown as AIBuilderClientTransport["fetch"];
-    let submittedBody: unknown;
+    const submittedBodies: unknown[] = [];
     const stream = vi.fn(async (_path, init, handlers) => {
-      submittedBody = init.requestBody["application/json"];
+      submittedBodies.push(init.requestBody["application/json"]);
       handlers.onMessage({ event: "done", data: "" });
       handlers.onClose();
     }) as AIBuilderClientTransport["stream"];
@@ -405,13 +405,103 @@ describe("FlowAIBuilder shell layout", () => {
     await fireEvent.keyDown(textbox, { key: "Enter" });
 
     await waitFor(() => expect(stream).toHaveBeenCalledOnce());
-    expect(submittedBody).toMatchObject({
+    expect(submittedBodies[0]).toMatchObject({
       message: "Ändra bara det här steget",
       edit_context: {
         kind: "saved_flow_step",
         flow_step_id: "22222222-2222-4222-8222-222222222222"
       }
     });
+
+    const step = (number: number, name: string) => ({
+      plan_step_ref: `step_${number}`,
+      existing_step_ref: `existing_step_${number}`,
+      name,
+      assistant_spec: { instructions: name, model_ref: null, knowledge_refs: [] },
+      input_source: number === 1 ? ("flow_input" as const) : ("previous_step" as const),
+      input_type: "text" as const,
+      output_mode: "compose_text" as const,
+      output_type: "text" as const,
+      input_bindings: null,
+      input_contract: null,
+      output_contract: null,
+      input_config: null,
+      output_config: null,
+      review_policy: null
+    });
+    service!.seedState({
+      currentPlan: {
+        plan_id: "plan-1",
+        status: "proposed",
+        proposal: {
+          spec: {
+            flow_name: "Flow",
+            flow_description: "",
+            steps: [
+              step(1, "Identifiera underlag"),
+              step(2, "Jämför likheter och skillnader"),
+              step(3, "Sammanställ slutsats")
+            ],
+            form_fields: null
+          },
+          assumptions: [],
+          lint_warnings: [],
+          edit: {
+            base_flow_revision: 1,
+            scoped_target_existing_step_ref: "existing_step_2",
+            scoped_target_plan_step_ref: "step_2",
+            removed_existing_step_refs: [],
+            diff: {
+              step_changes: [],
+              net_steps_added: 0,
+              net_steps_removed: 0,
+              flow_property_changes: {}
+            }
+          },
+          execution_shape: {
+            completion_model_step_count: 3,
+            transcription_model_step_count: 0,
+            deterministic_step_count: 0,
+            schema_constrained_step_count: 0,
+            mapped_step_upper_bounds: []
+          }
+        }
+      } satisfies ProposedPlan
+    });
+
+    const refinementTextbox = await screen.findByRole("textbox");
+    await fireEvent.input(refinementTextbox, {
+      target: { value: "Förtydliga jämförelsen" }
+    });
+    await fireEvent.keyDown(refinementTextbox, { key: "Enter", ctrlKey: true });
+
+    await waitFor(() => expect(stream).toHaveBeenCalledTimes(2));
+    expect(submittedBodies[1]).toMatchObject({
+      message: "Förtydliga jämförelsen",
+      edit_context: {
+        kind: "proposed_plan",
+        plan_id: "plan-1",
+        scope: "step",
+        target_existing_step_ref: "existing_step_2",
+        target_plan_step_ref: "step_2",
+        target_step_name: "Jämför likheter och skillnader",
+        target_step_number: 2
+      }
+    });
+
+    await fireEvent.click(screen.getByRole("button", { name: m.ai_builder_edit_context_clear() }));
+    expect(screen.queryByText(/Redigerar steg 2/)).toBeNull();
+
+    await fireEvent.input(refinementTextbox, {
+      target: { value: "Gör i stället en ändring i hela flödet" }
+    });
+    await fireEvent.keyDown(refinementTextbox, { key: "Enter", ctrlKey: true });
+
+    await waitFor(() => expect(stream).toHaveBeenCalledTimes(3));
+    expect(submittedBodies[2]).toMatchObject({
+      message: "Gör i stället en ändring i hela flödet"
+    });
+    expect(submittedBodies[2]).not.toHaveProperty("edit_context");
   });
 
   it("asks before replacing an unapproved AI edit with a saved-step edit", async () => {

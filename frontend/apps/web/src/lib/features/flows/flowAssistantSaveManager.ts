@@ -20,6 +20,7 @@ export class AssistantSaveManager<TAssistant extends object> {
   readonly status: Writable<AssistantSaveStatus> = writable("idle");
 
   private readonly cache = new Map<string, TAssistant>();
+  private readonly cacheGenerations = new Map<string, number>();
   private readonly pendingChanges = new Map<string, Record<string, unknown>>();
   private readonly saveTimers = new Map<string, TimerHandle>();
   private readonly inFlight = new Set<string>();
@@ -39,6 +40,17 @@ export class AssistantSaveManager<TAssistant extends object> {
     return this.cache.get(assistantId) ?? null;
   }
 
+  /**
+   * Discard remote snapshots after another owner has updated assistants.
+   * Pending local edits stay authoritative and are merged after the reload.
+   */
+  invalidate(assistantIds: Iterable<string>): void {
+    for (const assistantId of assistantIds) {
+      this.cacheGenerations.set(assistantId, this.cacheGeneration(assistantId) + 1);
+      this.cache.delete(assistantId);
+    }
+  }
+
   async load(assistantId: string): Promise<TAssistant | null> {
     if (!assistantId) return null;
 
@@ -46,20 +58,22 @@ export class AssistantSaveManager<TAssistant extends object> {
       await this.savePromises.get(assistantId)?.catch(() => {});
     }
 
-    let base = this.cache.get(assistantId) ?? null;
-    if (!base) {
+    while (true) {
+      const cached = this.cache.get(assistantId);
+      if (cached) return this.mergeWithPending(assistantId, cached);
+
+      const generation = this.cacheGeneration(assistantId);
+      let loaded: TAssistant | null;
       try {
-        base = await this.options.loadRemote(assistantId);
+        loaded = await this.options.loadRemote(assistantId);
       } catch {
         return null;
       }
-      if (base) {
-        this.cache.set(assistantId, base);
-      }
+      if (generation !== this.cacheGeneration(assistantId)) continue;
+      if (!loaded) return null;
+      this.cache.set(assistantId, loaded);
+      return this.mergeWithPending(assistantId, loaded);
     }
-
-    if (!base) return null;
-    return this.mergeWithPending(assistantId, base);
   }
 
   async save(assistantId: string, changes: Record<string, unknown>): Promise<void> {
@@ -137,6 +151,10 @@ export class AssistantSaveManager<TAssistant extends object> {
       ...base,
       ...pending
     } as TAssistant;
+  }
+
+  private cacheGeneration(assistantId: string): number {
+    return this.cacheGenerations.get(assistantId) ?? 0;
   }
 
   private clearTimer(assistantId: string): void {

@@ -15437,6 +15437,10 @@ export interface components {
       removed_existing_step_refs?: string[];
       /** Risk Flags */
       risk_flags?: string[];
+      /** Scoped Target Existing Step Ref */
+      scoped_target_existing_step_ref?: string | null;
+      /** Scoped Target Plan Step Ref */
+      scoped_target_plan_step_ref?: string | null;
       /** Warnings */
       warnings?: string[];
     };

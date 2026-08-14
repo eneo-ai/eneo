@@ -20,7 +20,7 @@ export function getRemovedStepChanges(editDiff: FlowEditDiff | null | undefined)
   return (editDiff?.step_changes ?? []).filter((change) => change.kind === "removed");
 }
 
-export function getFirstChangedStepIndex(
+export function getReviewFocusStepIndex(
   steps: StepSpec[],
   editDiff: FlowEditDiff | null | undefined
 ): number | null {

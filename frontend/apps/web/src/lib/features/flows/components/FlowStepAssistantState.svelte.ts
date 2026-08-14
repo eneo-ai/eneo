@@ -28,6 +28,7 @@ export class FlowStepAssistantState {
   promptGuideAvailability = $state<PromptGuideAvailability | null>(null);
 
   #lastLoadedId: string | null = null;
+  #lastLoadedRevision = -1;
   #loadRequestToken = 0;
   #autoClearedLegacyTemplateByStepId = new SvelteSet<string>();
   #promptGuideAvailabilityByAssistantId = new SvelteMap<string, PromptGuideAvailability | null>();
@@ -174,16 +175,21 @@ export class FlowStepAssistantState {
   }
 
   /** React to active step changes — load, unload, or switch assistant */
-  syncWithActiveStep(activeStep: FlowStep | null) {
+  syncWithActiveStep(activeStep: FlowStep | null, revision = 0) {
     if (activeStep?.output_mode === "template_fill") {
       this.assistant = null;
       this.#lastLoadedId = null;
+      this.#lastLoadedRevision = revision;
       this.loading = false;
       this.promptGuideAvailability = null;
       this.cancelUploadsAndClearQueue();
-    } else if (activeStep?.assistant_id && activeStep.assistant_id !== this.#lastLoadedId) {
+    } else if (
+      activeStep?.assistant_id &&
+      (activeStep.assistant_id !== this.#lastLoadedId || revision !== this.#lastLoadedRevision)
+    ) {
       const targetId = activeStep.assistant_id;
       this.#lastLoadedId = targetId;
+      this.#lastLoadedRevision = revision;
       this.assistant = null;
       this.promptGuideAvailability = null;
       this.loading = true;
@@ -197,6 +203,7 @@ export class FlowStepAssistantState {
       this.assistant = null;
       this.promptGuideAvailability = null;
       this.#lastLoadedId = null;
+      this.#lastLoadedRevision = revision;
       this.loading = false;
       this.cancelUploadsAndClearQueue();
     }

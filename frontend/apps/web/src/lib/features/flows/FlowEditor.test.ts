@@ -994,6 +994,52 @@ describe("FlowEditor active step selection commands", () => {
       editor.destroy();
     }
   });
+
+  it("reloads assistants after an externally applied flow replaces the resource", async () => {
+    const assistantGet = vi
+      .fn()
+      .mockResolvedValueOnce({ id: "assistant-1", prompt: { text: "Before AI apply" } })
+      .mockResolvedValueOnce({ id: "assistant-1", prompt: { text: "After AI apply" } });
+    const editor = createFlowEditor({
+      flow: makeFlow(null, { steps: [makeStep(1)] }),
+      eneo: makeEneo({ assistantGet })
+    });
+    try {
+      await expect(editor.loadAssistant("assistant-1")).resolves.toMatchObject({
+        prompt: { text: "Before AI apply" }
+      });
+
+      editor.setResource(makeFlow(null, { steps: [makeStep(1)] }));
+
+      await expect(editor.loadAssistant("assistant-1")).resolves.toMatchObject({
+        prompt: { text: "After AI apply" }
+      });
+      expect(assistantGet).toHaveBeenCalledTimes(2);
+    } finally {
+      editor.destroy();
+    }
+  });
+
+  it("does not request an assistant reload after a normal local save", async () => {
+    const assistantUpdate = vi.fn(async () => ({
+      id: "assistant-1",
+      prompt: { text: "Locally saved" }
+    }));
+    const editor = createFlowEditor({
+      flow: makeFlow(null, { steps: [makeStep(1)] }),
+      eneo: makeEneo({ assistantUpdate })
+    });
+    try {
+      await editor.updateAssistantImmediately("assistant-1", {
+        prompt: { text: "Locally saved" }
+      });
+
+      expect(get(editor.assistantRevision)).toBe(1);
+      expect(get(editor.assistantReloadRevision)).toBe(0);
+    } finally {
+      editor.destroy();
+    }
+  });
 });
 
 describe("FlowEditor HTTP step config validation", () => {

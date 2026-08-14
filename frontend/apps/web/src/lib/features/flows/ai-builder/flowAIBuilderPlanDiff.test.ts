@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  getFirstChangedStepIndex,
+  getReviewFocusStepIndex,
   getRemovedStepChanges,
   getStepChangeKind
 } from "./flowAIBuilderPlanDiff";
@@ -62,7 +62,7 @@ describe("flowAIBuilderPlanDiff", () => {
 
     expect(getStepChangeKind(unchanged, editDiff)).toBe("unchanged");
     expect(getStepChangeKind(modified, editDiff)).toBe("modified");
-    expect(getFirstChangedStepIndex([unchanged, modified], editDiff)).toBe(1);
+    expect(getReviewFocusStepIndex([unchanged, modified], editDiff)).toBe(1);
   });
 
   it("keeps added steps actionable and returns removed steps separately", () => {
@@ -75,6 +75,6 @@ describe("flowAIBuilderPlanDiff", () => {
     expect(getRemovedStepChanges(editDiff)).toEqual([
       { kind: "removed", step_name: "Old", step_ref: "existing_step_1", details: null }
     ]);
-    expect(getFirstChangedStepIndex([added], editDiff)).toBe(0);
+    expect(getReviewFocusStepIndex([added], editDiff)).toBe(0);
   });
 });

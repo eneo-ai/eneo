@@ -66,6 +66,7 @@ export interface FlowStepCreationSeed {
 function createFlowEditor(data: FlowEditorInitData) {
   type LoadedAssistant = Awaited<ReturnType<typeof data.eneo.flows.assistants.get>>;
   const assistantRevision = writable(0);
+  const assistantReloadRevision = writable(0);
   const editor = createResourceEditor({
     eneo: data.eneo,
     resource: data.flow,
@@ -854,6 +855,12 @@ function createFlowEditor(data: FlowEditorInitData) {
     unsubscribeValidation();
   }
 
+  function setResource(value: Flow): void {
+    assistantSaveManager.invalidate((value.steps ?? []).map((step) => step.assistant_id));
+    editor.setResource(value);
+    assistantReloadRevision.update((revision) => revision + 1);
+  }
+
   const flowEditor = Object.freeze({
     ...editor,
     state: {
@@ -865,11 +872,12 @@ function createFlowEditor(data: FlowEditorInitData) {
       isPublished,
       canEditDataRetentionDays
     },
-    setResource: editor.setResource,
+    setResource,
     addStep,
     insertStepAfter,
     createDraftingChainStarter,
     assistantRevision,
+    assistantReloadRevision,
     loadAssistant,
     saveAssistant,
     updateAssistantImmediately,

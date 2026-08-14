@@ -125,6 +125,44 @@ def _removed_existing_step_refs_for_apply(
     ).removed_existing_step_refs
 
 
+def _updated_existing_step_refs_for_apply(
+    *,
+    session: BuilderSession,
+    plan: BuilderPlan,
+) -> frozenset[str]:
+    if session.target_kind != TargetKind.EDIT:
+        return frozenset()
+    modified_changes = [
+        change
+        for change in _edit_approval_for_apply(
+            session=session, plan=plan
+        ).diff.step_changes
+        if change.kind == "modified"
+    ]
+    if any(change.step_ref is None for change in modified_changes):
+        raise AIBuilderBadRequestException(
+            "Approved edit plan contains a modified step without an existing step reference.",
+            code=AIBuilderErrorCode.BAD_REQUEST,
+            context={"plan_id": str(plan.id), "session_id": str(session.id)},
+        )
+    modified_refs = frozenset(
+        change.step_ref for change in modified_changes if change.step_ref is not None
+    )
+    approval = _edit_approval_for_apply(session=session, plan=plan)
+    scoped_target_ref = approval.scoped_target_existing_step_ref
+    if scoped_target_ref is not None and modified_refs - {scoped_target_ref}:
+        raise AIBuilderBadRequestException(
+            "Approved scoped edit plan modifies a step outside the selected step.",
+            code=AIBuilderErrorCode.BAD_REQUEST,
+            context={
+                "plan_id": str(plan.id),
+                "session_id": str(session.id),
+                "scoped_target_existing_step_ref": scoped_target_ref,
+            },
+        )
+    return modified_refs
+
+
 def _edit_approval_for_apply(
     *,
     session: BuilderSession,
@@ -645,6 +683,10 @@ class AIBuilderPlanLifecycle:
             expected_revision=expected_revision,
             spec=spec,
             removed_existing_step_refs=removed_existing_step_refs,
+            updated_existing_step_refs=_updated_existing_step_refs_for_apply(
+                session=session,
+                plan=plan,
+            ),
             origin=origin,
             resource_bindings=resource_bindings,
             default_transcription_model_id=default_transcription_model_id,

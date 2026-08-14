@@ -5,7 +5,7 @@
   import { Markdown } from "@eneo/ui";
   import FlowAIBuilderQuestion from "./FlowAIBuilderQuestion.svelte";
   import FlowAIBuilderRequirementsSummary from "./FlowAIBuilderRequirementsSummary.svelte";
-  import type { RequirementsSummary } from "./protocol";
+  import type { AIBuilderStepScopePresentation, RequirementsSummary } from "./protocol";
   import type {
     StructuredQuestion,
     StructuredQuestionAnswerPayload
@@ -21,6 +21,7 @@
     questionAnswerLabel?: string | null;
     requirementsSummary?: RequirementsSummary;
     requirementsUserRequest?: string | null;
+    savedFlowStepScope?: AIBuilderStepScopePresentation | null;
     requirementsConfirmed?: boolean;
     requirementsActive?: boolean;
     onQuestionAnswer?: (answer: StructuredQuestionAnswerPayload) => void;
@@ -40,6 +41,7 @@
     questionAnswerLabel = null,
     requirementsSummary = undefined,
     requirementsUserRequest = null,
+    savedFlowStepScope = null,
     requirementsConfirmed = false,
     requirementsActive = true,
     onQuestionAnswer = undefined,
@@ -89,6 +91,7 @@
         <FlowAIBuilderRequirementsSummary
           summary={requirementsSummary}
           userRequest={requirementsUserRequest}
+          {savedFlowStepScope}
           confirmed={requirementsConfirmed}
           active={requirementsActive}
           disabled={interactionDisabled}

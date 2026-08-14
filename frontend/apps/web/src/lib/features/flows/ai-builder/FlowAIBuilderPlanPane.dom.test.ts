@@ -18,6 +18,247 @@ afterEach(() => {
 });
 
 describe("FlowAIBuilderPlanPane", () => {
+  it("does not claim a one-step edit until the server scopes the proposal", () => {
+    render(FlowAIBuilderPlanPaneHarness, {
+      currentSpace: makeSpace({ transcriptionModels: [] }),
+      state: {
+        session: makeSession({ status: "awaiting_approval" }),
+        currentPlan: makePlan({
+          proposal: makeProposal({
+            spec: {
+              flow_name: "Comparison flow",
+              flow_description: "",
+              form_fields: [],
+              steps: [
+                makeStep({
+                  existing_step_ref: "existing_step_2",
+                  name: "Compare similarities and differences"
+                })
+              ]
+            }
+          })
+        })
+      },
+      onservice: (service) =>
+        service.setSavedFlowStepScope({
+          stepNumber: 2,
+          stepName: "Compare similarities and differences",
+          editContext: { kind: "saved_flow_step", flow_step_id: "step-2" }
+        })
+    });
+
+    expect(screen.getByRole("heading", { name: "Comparison flow" })).toBeTruthy();
+    expect(screen.queryByText(m.ai_builder_saved_step_review_scope())).toBeNull();
+  });
+
+  it("prioritizes and opens the changed step when reviewing a saved-step edit", () => {
+    const target = makeStep({
+      plan_step_ref: "step_b",
+      existing_step_ref: "existing_step_2",
+      name: "Compare similarities and differences",
+      assistant_spec: {
+        instructions: "Compare similarities, differences, conclusions, and limitations.",
+        knowledge_refs: [],
+        model_ref: null
+      }
+    });
+    render(FlowAIBuilderPlanPaneHarness, {
+      currentSpace: makeSpace({ transcriptionModels: [] }),
+      state: {
+        session: makeSession({ status: "awaiting_approval" }),
+        currentPlan: makePlan({
+          proposal: makeProposal({
+            plan_rationale: "The selected step needs clearer comparison instructions.",
+            assumptions: ["Existing steps and runtime fields remain unchanged."],
+            spec: {
+              flow_name: "Comparison flow",
+              flow_description: "",
+              form_fields: [],
+              steps: [
+                makeStep({
+                  plan_step_ref: "step_a",
+                  existing_step_ref: "existing_step_1",
+                  name: "Identify source material"
+                }),
+                target,
+                makeStep({
+                  plan_step_ref: "step_c",
+                  existing_step_ref: "existing_step_3",
+                  name: "Summarize conclusions"
+                })
+              ]
+            },
+            edit: {
+              base_flow_revision: 1,
+              scoped_target_existing_step_ref: "existing_step_2",
+              removed_existing_step_refs: [],
+              diff: {
+                step_changes: [
+                  {
+                    kind: "unchanged",
+                    step_name: "Identify source material",
+                    step_ref: "existing_step_1",
+                    details: null
+                  },
+                  {
+                    kind: "modified",
+                    step_name: target.name,
+                    step_ref: "existing_step_2",
+                    details: "instructions"
+                  },
+                  {
+                    kind: "unchanged",
+                    step_name: "Summarize conclusions",
+                    step_ref: "existing_step_3",
+                    details: null
+                  }
+                ],
+                net_steps_added: 0,
+                net_steps_removed: 0,
+                flow_property_changes: {}
+              }
+            }
+          })
+        })
+      },
+      onservice: (service) =>
+        service.setSavedFlowStepScope({
+          stepNumber: 2,
+          stepName: target.name,
+          editContext: { kind: "saved_flow_step", flow_step_id: "step-2" }
+        })
+    });
+
+    expect(
+      screen.getByRole("heading", { name: m.ai_builder_step_change_review_title(), level: 3 })
+    ).toBeTruthy();
+    expect(
+      screen.getByRole("heading", {
+        name: m.ai_builder_saved_step_plan_title({ step: 2, name: target.name })
+      })
+    ).toBeTruthy();
+    expect(screen.getByText(m.ai_builder_saved_step_review_scope())).toBeTruthy();
+    expect(
+      screen
+        .getByRole("tab", { name: m.ai_builder_canvas_tab_details() })
+        .getAttribute("data-state")
+    ).toBe("active");
+    expect(
+      screen
+        .getByRole("button", { name: /Compare similarities and differences/ })
+        .getAttribute("aria-expanded")
+    ).toBe("true");
+    expect(
+      screen.getByRole("button", { name: /Identify source material/ }).getAttribute("aria-expanded")
+    ).toBe("false");
+    const changedStep = screen.getByRole("button", {
+      name: /Compare similarities and differences/
+    });
+    const unchangedContextStep = screen.getByRole("button", { name: /Identify source material/ });
+    expect(
+      changedStep.compareDocumentPosition(unchangedContextStep) & Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy();
+
+    const changeHeading = screen.getByRole("heading", {
+      name: m.ai_builder_step_change_review_title(),
+      level: 3
+    });
+    const rationaleTrigger = screen.getByRole("button", {
+      name: m.ai_builder_why_this_change()
+    });
+    const rationaleHeading = rationaleTrigger.closest("h3");
+    expect(rationaleHeading).toBeTruthy();
+    expect(
+      changeHeading.compareDocumentPosition(rationaleHeading!) & Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy();
+    expect(rationaleTrigger.getAttribute("aria-expanded")).toBe("false");
+    expect(screen.getByRole("button", { name: m.ai_builder_execution_profile() })).toBeTruthy();
+    expect(
+      screen.getByRole("button", {
+        name: new RegExp(m.ai_builder_technical_assumptions())
+      })
+    ).toBeTruthy();
+  });
+
+  it("restores scoped review for a proposal-only step after reload", () => {
+    const addedTarget = makeStep({
+      plan_step_ref: "step_new",
+      existing_step_ref: null,
+      name: "Write new report",
+      assistant_spec: {
+        instructions: "Write a concise report with conclusions and limitations.",
+        knowledge_refs: [],
+        model_ref: null
+      }
+    });
+    render(FlowAIBuilderPlanPaneHarness, {
+      currentSpace: makeSpace({ transcriptionModels: [] }),
+      state: {
+        session: makeSession({ status: "awaiting_approval" }),
+        currentPlan: makePlan({
+          plan_id: "replacement-plan",
+          proposal: makeProposal({
+            spec: {
+              flow_name: "Report flow",
+              flow_description: "",
+              form_fields: [],
+              steps: [
+                makeStep({
+                  plan_step_ref: "step_existing",
+                  existing_step_ref: "existing_step_1",
+                  name: "Collect source"
+                }),
+                addedTarget
+              ]
+            },
+            edit: {
+              base_flow_revision: 1,
+              scoped_target_existing_step_ref: null,
+              scoped_target_plan_step_ref: "step_new",
+              removed_existing_step_refs: [],
+              diff: {
+                step_changes: [
+                  {
+                    kind: "unchanged",
+                    step_name: "Collect source",
+                    step_ref: "existing_step_1",
+                    details: null
+                  },
+                  {
+                    kind: "added",
+                    step_name: addedTarget.name,
+                    step_ref: null,
+                    details: "instructions"
+                  }
+                ],
+                net_steps_added: 1,
+                net_steps_removed: 0,
+                flow_property_changes: {}
+              }
+            }
+          })
+        })
+      }
+    });
+
+    expect(
+      screen.getByRole("heading", {
+        name: m.ai_builder_saved_step_plan_title({ step: 2, name: addedTarget.name })
+      })
+    ).toBeTruthy();
+    expect(
+      screen
+        .getByRole("tab", { name: m.ai_builder_canvas_tab_details() })
+        .getAttribute("data-state")
+    ).toBe("active");
+    expect(
+      screen.getByRole("button", { name: /Write new report/ }).getAttribute("aria-expanded")
+    ).toBe("true");
+    expect(
+      screen.getByRole("button", { name: /Collect source/ }).getAttribute("aria-expanded")
+    ).toBe("false");
+  });
+
   it.each([
     ["architecture_committed", m.ai_builder_generating()],
     ["architecture_revised", m.ai_builder_updating_plan()],
@@ -247,6 +488,32 @@ describe("FlowAIBuilderPlanPane", () => {
     expect(screen.getByRole("button", { name: m.ai_builder_execution_profile() })).toBeTruthy();
   });
 
+  it("keeps whole-flow context before the flow overview", () => {
+    render(FlowAIBuilderPlanPaneHarness, {
+      currentSpace: makeSpace({ transcriptionModels: [] }),
+      state: {
+        session: makeSession(),
+        currentPlan: makePlan({
+          proposal: makeProposal({
+            plan_rationale: "This sequence preserves the requested output."
+          })
+        })
+      }
+    });
+
+    const rationaleHeading = screen
+      .getByRole("button", { name: m.ai_builder_why_this_design() })
+      .closest("h3");
+    const overviewHeading = screen.getByRole("heading", {
+      name: m.ai_builder_how_flow_works(),
+      level: 3
+    });
+    expect(rationaleHeading).toBeTruthy();
+    expect(
+      rationaleHeading!.compareDocumentPosition(overviewHeading) & Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy();
+  });
+
   it("renders backend execution facts in the collapsed execution profile", async () => {
     const state = {
       session: makeSession({ status: "awaiting_approval", target_kind: "create", flow_id: null }),
@@ -327,14 +594,19 @@ describe("FlowAIBuilderPlanPane", () => {
       state: makeApprovedCreatePlanState({ step: {} })
     });
 
-    await fireEvent.click(screen.getByRole("tab", { name: m.ai_builder_canvas_tab_details() }));
-    const stepTrigger = () => screen.getByRole("button", { name: /Transcribe audio/ });
+    const detailsTab = screen.getByRole("tab", { name: m.ai_builder_canvas_tab_details() });
+    await fireEvent.click(detailsTab);
+    await waitFor(() => expect(detailsTab.getAttribute("data-state")).toBe("active"));
+    const stepTrigger = () =>
+      screen.getByRole("button", {
+        name: `${m.ai_builder_step_label({ step: 1 })}: Transcribe audio (${m.ai_builder_badge_new()})`
+      });
     await fireEvent.click(stepTrigger());
-    expect(stepTrigger().getAttribute("aria-expanded")).toBe("true");
+    await waitFor(() => expect(stepTrigger().getAttribute("aria-expanded")).toBe("true"));
 
     await fireEvent.click(screen.getByRole("tab", { name: m.ai_builder_canvas_tab_diagram() }));
     await fireEvent.click(screen.getByRole("tab", { name: m.ai_builder_canvas_tab_details() }));
-    expect(stepTrigger().getAttribute("aria-expanded")).toBe("true");
+    await waitFor(() => expect(stepTrigger().getAttribute("aria-expanded")).toBe("true"));
   });
 
   it("renders the §5 wait-state copy with only backend-real phase lines", () => {

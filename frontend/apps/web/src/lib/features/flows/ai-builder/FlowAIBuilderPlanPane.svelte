@@ -12,7 +12,12 @@
   import FlowAIBuilderCanvas from "./FlowAIBuilderCanvas.svelte";
   import FlowAIBuilderTokenUsage from "./FlowAIBuilderTokenUsage.svelte";
   import { getAIBuilderService } from "./FlowAIBuilderService.svelte.ts";
-  import type { AIBuilderStatus, AIBuilderSuggestChangeIntent, EditAdvisory } from "./protocol";
+  import type {
+    AIBuilderStatus,
+    AIBuilderSuggestChangeIntent,
+    EditAdvisory,
+    StepSpec
+  } from "./protocol";
   import {
     AIBuilderIssueKind,
     buildAIBuilderDiagnosticReport,
@@ -20,7 +25,7 @@
     buildAIBuilderDiagnosticReportSession
   } from "./aiBuilderDiagnosticReport";
   import {
-    getFirstChangedStepIndex,
+    getReviewFocusStepIndex,
     getRemovedStepChanges,
     getStepChangeKind
   } from "./flowAIBuilderPlanDiff";
@@ -47,11 +52,12 @@
 
   const service = getAIBuilderService();
   const isCreateMode = $derived(service.session?.target_kind === "create");
+  const activeStepScope = $derived(service.activeStepScope);
   let assumptionsOpen = $state(false);
   let executionProfileOpen = $state(false);
   // Rationale default: the BUILDER CONTAINER's width (≥768px open, §1.5)
   // decides the initial state until the user changes it — never the viewport.
-  let rationaleOpen = $state(true);
+  let rationaleOpen = $state(false);
   let rationaleTouched = false;
   let paneRoot = $state<HTMLElement | undefined>();
 
@@ -69,7 +75,7 @@
     }
     const observed = container ?? root;
     const applyDefault = (width: number) => {
-      if (!rationaleTouched) rationaleOpen = width >= 768;
+      if (!rationaleTouched) rationaleOpen = !isScopedStepReview && width >= 768;
     };
     const observer = new ResizeObserver((entries) => {
       for (const entry of entries) applyDefault(entry.contentRect.width);
@@ -82,8 +88,8 @@
     state: { currentSpace }
   } = getSpacesManager();
 
-  // Steps visualization: the living diagram (default) or the detailed step cards.
-  let stepsView = $state<"diagram" | "details">("diagram");
+  type StepsView = "diagram" | "details";
+  let stepsViewPreference = $state<{ planId: string; view: StepsView } | null>(null);
 
   // ---- Derivations ---------------------------------------------------------
 
@@ -243,10 +249,36 @@
   const removedStepChanges = $derived(
     getRemovedStepChanges(service.currentPlan?.proposal.edit?.diff ?? null)
   );
+  const scopedTargetExistingStepRef = $derived(
+    service.currentPlan?.proposal.edit?.scoped_target_existing_step_ref ?? null
+  );
+  const scopedTargetPlanStepRef = $derived(
+    service.currentPlan?.proposal.edit?.scoped_target_plan_step_ref ?? null
+  );
+  const isScopedStepReview = $derived(
+    scopedTargetExistingStepRef !== null || scopedTargetPlanStepRef !== null
+  );
+  function isScopedTargetStep(step: StepSpec): boolean {
+    return scopedTargetPlanStepRef
+      ? step.plan_step_ref === scopedTargetPlanStepRef
+      : step.existing_step_ref === scopedTargetExistingStepRef;
+  }
+  const stepsView = $derived.by<StepsView>(() => {
+    const planId = service.currentPlan?.plan_id ?? null;
+    if (planId && stepsViewPreference?.planId === planId) {
+      return stepsViewPreference.view;
+    }
+    return isScopedStepReview ? "details" : "diagram";
+  });
+  function handleStepsViewChange(view: string): void {
+    const planId = service.currentPlan?.plan_id;
+    if (!planId || (view !== "diagram" && view !== "details")) return;
+    stepsViewPreference = { planId, view };
+  }
   const focusStepIndex = $derived.by(() => {
     const plan = service.currentPlan;
     if (!plan) return null;
-    return getFirstChangedStepIndex(plan.proposal.spec.steps, plan.proposal.edit?.diff ?? null);
+    return getReviewFocusStepIndex(plan.proposal.spec.steps, plan.proposal.edit?.diff ?? null);
   });
 
   const attachments = $derived(service.session?.attachments ?? []);
@@ -361,6 +393,13 @@
   {#if service.currentPlan}
     {@const plan = service.currentPlan}
     {@const spec = plan.proposal.spec}
+    {@const indexedSteps = spec.steps.map((step, index) => ({ step, index }))}
+    {@const detailSteps = isScopedStepReview
+      ? [
+          ...indexedSteps.filter(({ step }) => isScopedTargetStep(step)),
+          ...indexedSteps.filter(({ step }) => !isScopedTargetStep(step))
+        ]
+      : indexedSteps}
 
     <!-- Scroll owner in split view (handoff §1.3); natural flow in the narrow
          layouts, where the active pane owns the page scroll. -->
@@ -545,9 +584,18 @@
               id="plan-heading"
               class="text-primary text-[1.125rem] leading-tight font-semibold tracking-[-0.015em]"
             >
-              {spec.flow_name}
+              {isScopedStepReview && activeStepScope
+                ? m.ai_builder_saved_step_plan_title({
+                    step: activeStepScope.stepNumber,
+                    name: activeStepScope.stepName
+                  })
+                : spec.flow_name}
             </h2>
-            {#if spec.flow_description && !descriptionDiff && !hasDescriptionAdvisory}
+            {#if isScopedStepReview && activeStepScope}
+              <p class="text-secondary text-[0.8125rem] leading-relaxed">
+                {m.ai_builder_saved_step_review_scope()}
+              </p>
+            {:else if spec.flow_description && !descriptionDiff && !hasDescriptionAdvisory}
               <p class="text-secondary text-[0.8125rem] leading-relaxed">
                 {spec.flow_description}
               </p>
@@ -596,165 +644,180 @@
             </section>
           {/if}
 
-          <!-- Why Eneo suggests this approach (§5). Open on wide screens,
-               collapsed below 768px (§1.5) — initial state only; after that
-               the user owns it. -->
-          {#if plan.proposal.plan_rationale}
-            <section class="border-default border-t px-5 py-4 md:px-6">
-              <Collapsible.Root open={rationaleOpen} onOpenChange={handleRationaleOpenChange}>
-                <h3 class="text-sm">
-                  <Collapsible.Trigger class="section-heading-trigger">
-                    <span>{m.ai_builder_why_this_design()}</span>
-                    <svg
-                      xmlns="http://www.w3.org/2000/svg"
-                      viewBox="0 0 16 16"
-                      fill="currentColor"
-                      class="size-3.5 shrink-0 transition-transform duration-200 ease-out {rationaleOpen
-                        ? 'rotate-180'
-                        : ''}"
-                      aria-hidden="true"
-                    >
-                      <path
-                        fill-rule="evenodd"
-                        d="M4.22 6.22a.75.75 0 0 1 1.06 0L8 8.94l2.72-2.72a.75.75 0 1 1 1.06 1.06l-3.25 3.25a.75.75 0 0 1-1.06 0L4.22 7.28a.75.75 0 0 1 0-1.06Z"
-                        clip-rule="evenodd"
-                      />
-                    </svg>
-                  </Collapsible.Trigger>
-                </h3>
-                <Collapsible.Content class="collapsible-animate">
-                  <p class="text-secondary mt-2 text-[0.8125rem] leading-relaxed">
-                    {plan.proposal.plan_rationale}
-                  </p>
-                </Collapsible.Content>
-              </Collapsible.Root>
-            </section>
-          {/if}
+          {#snippet supportingPlanContext()}
+            {#if plan.proposal.plan_rationale}
+              <section class="border-default border-t px-5 py-4 md:px-6">
+                <Collapsible.Root open={rationaleOpen} onOpenChange={handleRationaleOpenChange}>
+                  <h3 class="text-sm">
+                    <Collapsible.Trigger class="section-heading-trigger">
+                      <span>
+                        {isScopedStepReview
+                          ? m.ai_builder_why_this_change()
+                          : m.ai_builder_why_this_design()}
+                      </span>
+                      <svg
+                        xmlns="http://www.w3.org/2000/svg"
+                        viewBox="0 0 16 16"
+                        fill="currentColor"
+                        class="size-3.5 shrink-0 transition-transform duration-200 ease-out {rationaleOpen
+                          ? 'rotate-180'
+                          : ''}"
+                        aria-hidden="true"
+                      >
+                        <path
+                          fill-rule="evenodd"
+                          d="M4.22 6.22a.75.75 0 0 1 1.06 0L8 8.94l2.72-2.72a.75.75 0 1 1 1.06 1.06l-3.25 3.25a.75.75 0 0 1-1.06 0L4.22 7.28a.75.75 0 0 1 0-1.06Z"
+                          clip-rule="evenodd"
+                        />
+                      </svg>
+                    </Collapsible.Trigger>
+                  </h3>
+                  <Collapsible.Content class="collapsible-animate">
+                    <p class="text-secondary mt-2 text-[0.8125rem] leading-relaxed">
+                      {plan.proposal.plan_rationale}
+                    </p>
+                  </Collapsible.Content>
+                </Collapsible.Root>
+              </section>
+            {/if}
 
-          {#if plan.proposal.execution_shape}
-            <section class="border-default border-t px-5 py-4 md:px-6">
-              <Collapsible.Root bind:open={executionProfileOpen}>
-                <h3 class="text-sm">
-                  <Collapsible.Trigger class="section-heading-trigger">
-                    <span>{m.ai_builder_execution_profile()}</span>
-                    <svg
-                      xmlns="http://www.w3.org/2000/svg"
-                      viewBox="0 0 16 16"
-                      fill="currentColor"
-                      class="size-3.5 shrink-0 transition-transform duration-200 ease-out {executionProfileOpen
-                        ? 'rotate-180'
-                        : ''}"
-                      aria-hidden="true"
-                    >
-                      <path
-                        fill-rule="evenodd"
-                        d="M4.22 6.22a.75.75 0 0 1 1.06 0L8 8.94l2.72-2.72a.75.75 0 1 1 1.06 1.06l-3.25 3.25a.75.75 0 0 1-1.06 0L4.22 7.28a.75.75 0 0 1 0-1.06Z"
-                        clip-rule="evenodd"
-                      />
-                    </svg>
-                  </Collapsible.Trigger>
-                </h3>
-                <Collapsible.Content class="collapsible-animate">
-                  <p class="text-secondary mt-2 text-[0.8125rem] leading-relaxed">
-                    {m.ai_builder_execution_profile_description()}
-                  </p>
-                  <dl class="mt-3 grid grid-cols-[minmax(0,1fr)_auto] gap-x-4 gap-y-2">
-                    <dt class="text-secondary text-[0.8125rem]">
-                      {m.ai_builder_execution_completion_model()}
-                    </dt>
-                    <dd class="text-primary text-right text-[0.8125rem] font-semibold tabular-nums">
-                      {plan.proposal.execution_shape.completion_model_step_count}
-                    </dd>
-                    <dt class="text-secondary text-[0.8125rem]">
-                      {m.ai_builder_execution_transcription_model()}
-                    </dt>
-                    <dd class="text-primary text-right text-[0.8125rem] font-semibold tabular-nums">
-                      {plan.proposal.execution_shape.transcription_model_step_count}
-                    </dd>
-                    <dt class="text-secondary text-[0.8125rem]">
-                      {m.ai_builder_execution_deterministic()}
-                    </dt>
-                    <dd class="text-primary text-right text-[0.8125rem] font-semibold tabular-nums">
-                      {plan.proposal.execution_shape.deterministic_step_count}
-                    </dd>
-                    <dt class="text-secondary text-[0.8125rem]">
-                      {m.ai_builder_execution_schema_constrained()}
-                    </dt>
-                    <dd class="text-primary text-right text-[0.8125rem] font-semibold tabular-nums">
-                      {plan.proposal.execution_shape.schema_constrained_step_count}
-                    </dd>
-                  </dl>
-                  <h4 class="text-primary mt-4 text-[0.8125rem] font-semibold">
-                    {m.ai_builder_execution_mapped_limits()}
-                  </h4>
-                  {@const mappedStepBounds =
-                    plan.proposal.execution_shape.mapped_step_upper_bounds ?? []}
-                  {#if mappedStepBounds.length > 0}
+            {#if plan.proposal.execution_shape}
+              <section class="border-default border-t px-5 py-4 md:px-6">
+                <Collapsible.Root bind:open={executionProfileOpen}>
+                  <h3 class="text-sm">
+                    <Collapsible.Trigger class="section-heading-trigger">
+                      <span>{m.ai_builder_execution_profile()}</span>
+                      <svg
+                        xmlns="http://www.w3.org/2000/svg"
+                        viewBox="0 0 16 16"
+                        fill="currentColor"
+                        class="size-3.5 shrink-0 transition-transform duration-200 ease-out {executionProfileOpen
+                          ? 'rotate-180'
+                          : ''}"
+                        aria-hidden="true"
+                      >
+                        <path
+                          fill-rule="evenodd"
+                          d="M4.22 6.22a.75.75 0 0 1 1.06 0L8 8.94l2.72-2.72a.75.75 0 1 1 1.06 1.06l-3.25 3.25a.75.75 0 0 1-1.06 0L4.22 7.28a.75.75 0 0 1 0-1.06Z"
+                          clip-rule="evenodd"
+                        />
+                      </svg>
+                    </Collapsible.Trigger>
+                  </h3>
+                  <Collapsible.Content class="collapsible-animate">
+                    <p class="text-secondary mt-2 text-[0.8125rem] leading-relaxed">
+                      {m.ai_builder_execution_profile_description()}
+                    </p>
+                    <dl class="mt-3 grid grid-cols-[minmax(0,1fr)_auto] gap-x-4 gap-y-2">
+                      <dt class="text-secondary text-[0.8125rem]">
+                        {m.ai_builder_execution_completion_model()}
+                      </dt>
+                      <dd
+                        class="text-primary text-right text-[0.8125rem] font-semibold tabular-nums"
+                      >
+                        {plan.proposal.execution_shape.completion_model_step_count}
+                      </dd>
+                      <dt class="text-secondary text-[0.8125rem]">
+                        {m.ai_builder_execution_transcription_model()}
+                      </dt>
+                      <dd
+                        class="text-primary text-right text-[0.8125rem] font-semibold tabular-nums"
+                      >
+                        {plan.proposal.execution_shape.transcription_model_step_count}
+                      </dd>
+                      <dt class="text-secondary text-[0.8125rem]">
+                        {m.ai_builder_execution_deterministic()}
+                      </dt>
+                      <dd
+                        class="text-primary text-right text-[0.8125rem] font-semibold tabular-nums"
+                      >
+                        {plan.proposal.execution_shape.deterministic_step_count}
+                      </dd>
+                      <dt class="text-secondary text-[0.8125rem]">
+                        {m.ai_builder_execution_schema_constrained()}
+                      </dt>
+                      <dd
+                        class="text-primary text-right text-[0.8125rem] font-semibold tabular-nums"
+                      >
+                        {plan.proposal.execution_shape.schema_constrained_step_count}
+                      </dd>
+                    </dl>
+                    <h4 class="text-primary mt-4 text-[0.8125rem] font-semibold">
+                      {m.ai_builder_execution_mapped_limits()}
+                    </h4>
+                    {@const mappedStepBounds =
+                      plan.proposal.execution_shape.mapped_step_upper_bounds ?? []}
+                    {#if mappedStepBounds.length > 0}
+                      <ul
+                        class="text-secondary mt-1.5 flex flex-col gap-1 text-[0.8125rem] leading-relaxed"
+                      >
+                        {#each mappedStepBounds as bound (bound.plan_step_ref)}
+                          <li>
+                            {#if bound.execution_mode === "per_source"}
+                              {m.ai_builder_execution_per_source_limit({
+                                step: executionStepLabel(bound.plan_step_ref),
+                                count: bound.maximum_items
+                              })}
+                            {:else}
+                              {m.ai_builder_execution_per_item_limit({
+                                step: executionStepLabel(bound.plan_step_ref),
+                                count: bound.maximum_items
+                              })}
+                            {/if}
+                          </li>
+                        {/each}
+                      </ul>
+                    {:else}
+                      <p class="text-secondary mt-1.5 text-[0.8125rem] leading-relaxed">
+                        {m.ai_builder_execution_no_mapped_steps()}
+                      </p>
+                    {/if}
+                  </Collapsible.Content>
+                </Collapsible.Root>
+              </section>
+            {/if}
+
+            {#if planAssumptions.length > 0}
+              <section class="border-default border-t px-5 py-4 md:px-6">
+                <Collapsible.Root bind:open={assumptionsOpen}>
+                  <h3 class="text-sm">
+                    <Collapsible.Trigger class="section-heading-trigger">
+                      <span>{m.ai_builder_technical_assumptions()} ({planAssumptions.length})</span>
+                      <svg
+                        xmlns="http://www.w3.org/2000/svg"
+                        viewBox="0 0 16 16"
+                        fill="currentColor"
+                        class="size-3.5 shrink-0 transition-transform duration-200 ease-out {assumptionsOpen
+                          ? 'rotate-180'
+                          : ''}"
+                        aria-hidden="true"
+                      >
+                        <path
+                          fill-rule="evenodd"
+                          d="M4.22 6.22a.75.75 0 0 1 1.06 0L8 8.94l2.72-2.72a.75.75 0 1 1 1.06 1.06l-3.25 3.25a.75.75 0 0 1-1.06 0L4.22 7.28a.75.75 0 0 1 0-1.06Z"
+                          clip-rule="evenodd"
+                        />
+                      </svg>
+                    </Collapsible.Trigger>
+                  </h3>
+                  <Collapsible.Content class="collapsible-animate">
                     <ul
-                      class="text-secondary mt-1.5 flex flex-col gap-1 text-[0.8125rem] leading-relaxed"
+                      class="bg-secondary/40 divide-default mt-2 flex flex-col divide-y rounded-lg px-3 py-0.5"
                     >
-                      {#each mappedStepBounds as bound (bound.plan_step_ref)}
-                        <li>
-                          {#if bound.execution_mode === "per_source"}
-                            {m.ai_builder_execution_per_source_limit({
-                              step: executionStepLabel(bound.plan_step_ref),
-                              count: bound.maximum_items
-                            })}
-                          {:else}
-                            {m.ai_builder_execution_per_item_limit({
-                              step: executionStepLabel(bound.plan_step_ref),
-                              count: bound.maximum_items
-                            })}
-                          {/if}
+                      {#each planAssumptions as assumption (assumption)}
+                        <li class="text-secondary py-2 text-[0.8125rem] leading-relaxed">
+                          {assumption}
                         </li>
                       {/each}
                     </ul>
-                  {:else}
-                    <p class="text-secondary mt-1.5 text-[0.8125rem] leading-relaxed">
-                      {m.ai_builder_execution_no_mapped_steps()}
-                    </p>
-                  {/if}
-                </Collapsible.Content>
-              </Collapsible.Root>
-            </section>
-          {/if}
+                  </Collapsible.Content>
+                </Collapsible.Root>
+              </section>
+            {/if}
+          {/snippet}
 
-          {#if planAssumptions.length > 0}
-            <section class="border-default border-t px-5 py-4 md:px-6">
-              <Collapsible.Root bind:open={assumptionsOpen}>
-                <h3 class="text-sm">
-                  <Collapsible.Trigger class="section-heading-trigger">
-                    <span>{m.ai_builder_technical_assumptions()} ({planAssumptions.length})</span>
-                    <svg
-                      xmlns="http://www.w3.org/2000/svg"
-                      viewBox="0 0 16 16"
-                      fill="currentColor"
-                      class="size-3.5 shrink-0 transition-transform duration-200 ease-out {assumptionsOpen
-                        ? 'rotate-180'
-                        : ''}"
-                      aria-hidden="true"
-                    >
-                      <path
-                        fill-rule="evenodd"
-                        d="M4.22 6.22a.75.75 0 0 1 1.06 0L8 8.94l2.72-2.72a.75.75 0 1 1 1.06 1.06l-3.25 3.25a.75.75 0 0 1-1.06 0L4.22 7.28a.75.75 0 0 1 0-1.06Z"
-                        clip-rule="evenodd"
-                      />
-                    </svg>
-                  </Collapsible.Trigger>
-                </h3>
-                <Collapsible.Content class="collapsible-animate">
-                  <ul
-                    class="bg-secondary/40 divide-default mt-2 flex flex-col divide-y rounded-lg px-3 py-0.5"
-                  >
-                    {#each planAssumptions as assumption (assumption)}
-                      <li class="text-secondary py-2 text-[0.8125rem] leading-relaxed">
-                        {assumption}
-                      </li>
-                    {/each}
-                  </ul>
-                </Collapsible.Content>
-              </Collapsible.Root>
-            </section>
+          {#if !isScopedStepReview}
+            {@render supportingPlanContext()}
           {/if}
 
           <!-- Edit advisories (non-description) -->
@@ -872,21 +935,29 @@
 
           <!-- Steps: the living diagram or the detailed step-card list -->
           <section class="border-default border-t px-5 py-4 md:px-6">
-            <Tabs.Root
-              value={stepsView}
-              onValueChange={(v) => (stepsView = v as "diagram" | "details")}
-            >
+            <Tabs.Root value={stepsView} onValueChange={handleStepsViewChange}>
               <div class="mb-3 flex items-center justify-between gap-3">
                 <h3 class="text-primary text-sm font-semibold">
-                  {m.ai_builder_how_flow_works()}
+                  {isScopedStepReview
+                    ? m.ai_builder_step_change_review_title()
+                    : m.ai_builder_how_flow_works()}
                 </h3>
                 <Tabs.List class="h-8">
-                  <Tabs.Trigger value="diagram" class="px-3 py-1 text-xs">
-                    {m.ai_builder_canvas_tab_diagram()}
-                  </Tabs.Trigger>
-                  <Tabs.Trigger value="details" class="px-3 py-1 text-xs">
-                    {m.ai_builder_canvas_tab_details()}
-                  </Tabs.Trigger>
+                  {#if isScopedStepReview}
+                    <Tabs.Trigger value="details" class="px-3 py-1 text-xs">
+                      {m.ai_builder_canvas_tab_details()}
+                    </Tabs.Trigger>
+                    <Tabs.Trigger value="diagram" class="px-3 py-1 text-xs">
+                      {m.ai_builder_canvas_tab_diagram()}
+                    </Tabs.Trigger>
+                  {:else}
+                    <Tabs.Trigger value="diagram" class="px-3 py-1 text-xs">
+                      {m.ai_builder_canvas_tab_diagram()}
+                    </Tabs.Trigger>
+                    <Tabs.Trigger value="details" class="px-3 py-1 text-xs">
+                      {m.ai_builder_canvas_tab_details()}
+                    </Tabs.Trigger>
+                  {/if}
                 </Tabs.List>
               </div>
               <Tabs.Content value="diagram">
@@ -896,18 +967,19 @@
                 <!-- A list, not cards (§2 StepList): the diagram view's ol/li
                      twin, one li per step. -->
                 <ol class="m-0 flex list-none flex-col p-0">
-                  {#each spec.steps as step, i (step.plan_step_ref)}
+                  {#each detailSteps as { step, index } (`${plan.plan_id}:${step.plan_step_ref}`)}
                     <li>
                       <FlowAIBuilderStepCard
                         {step}
-                        stepNumber={i + 1}
+                        stepNumber={index + 1}
                         planId={plan.plan_id}
                         changeKind={getStepChangeKind(step, plan.proposal.edit?.diff ?? null)}
                         {resolveModelName}
                         resolveInputStepLabel={resolveExecutionStepLabel}
-                        isFirst={i === 0}
-                        isLast={i === spec.steps.length - 1}
+                        isFirst={index === 0}
+                        isLast={index === spec.steps.length - 1}
                         planStatus={plan.status}
+                        openByDefault={isScopedStepReview && isScopedTargetStep(step)}
                         buildDiagnosticReport={() =>
                           buildAIBuilderDiagnosticReport({
                             kind: "quality",
@@ -918,7 +990,7 @@
                             step: {
                               plan_step_ref: step.plan_step_ref,
                               step_name: step.name,
-                              step_number: i + 1,
+                              step_number: index + 1,
                               input_type: step.input_type,
                               output_type: step.output_type
                             },
@@ -934,6 +1006,10 @@
               </Tabs.Content>
             </Tabs.Root>
           </section>
+
+          {#if isScopedStepReview}
+            {@render supportingPlanContext()}
+          {/if}
 
           <!-- Removed steps -->
           {#if removedStepChanges.length > 0}

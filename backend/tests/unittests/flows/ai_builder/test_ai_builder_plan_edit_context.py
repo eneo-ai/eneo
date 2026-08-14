@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 from typing import cast
+from unittest.mock import AsyncMock
 from uuid import UUID, uuid4
 
 import pytest
@@ -18,7 +19,6 @@ from eneo.flows.ai_builder.ai_builder_domain_models import (
 )
 from eneo.flows.ai_builder.ai_builder_error_contract import AIBuilderBadRequestException
 from eneo.flows.ai_builder.ai_builder_plan_edit_context import (
-    _DOWNSTREAM_INPUT_REPAIR_FIELDS,
     AIBuilderPlanEditContext,
     AIBuilderSavedFlowStepEditContext,
     ResolvedAIBuilderEditContext,
@@ -240,6 +240,96 @@ async def test_saved_flow_step_scope_rejects_after_plan_exists() -> None:
         )
 
     assert getattr(exc_info.value, "code", None).value == "stale_plan_revision"
+
+
+@pytest.mark.asyncio
+async def test_plan_step_scope_rejects_conflicting_target_refs() -> None:
+    plan_id = uuid4()
+    session = _edit_session(latest_plan_id=plan_id)
+    plan = SimpleNamespace(
+        id=plan_id,
+        session_id=session.id,
+        spec=_edit_spec(
+            [
+                _edit_step(
+                    "step_a",
+                    "Analyze input",
+                    output_type=OutputType.JSON,
+                    existing_step_ref="existing_step_1",
+                ),
+                _edit_step(
+                    "step_b",
+                    "Create result",
+                    output_type=OutputType.TEXT,
+                    existing_step_ref="existing_step_2",
+                ),
+            ]
+        ),
+    )
+    repo = SimpleNamespace(get_plan=AsyncMock(return_value=plan))
+
+    with pytest.raises(AIBuilderBadRequestException) as exc_info:
+        await resolve_plan_edit_context(
+            repo=cast(object, repo),
+            tenant_id=session.tenant_id,
+            session=session,
+            flow=None,
+            context=AIBuilderPlanEditContext(
+                scope="step",
+                plan_id=plan_id,
+                target_plan_step_ref="step_a",
+                target_existing_step_ref="existing_step_2",
+            ),
+        )
+
+    assert getattr(exc_info.value, "code", None).value == "invalid_existing_step_ref"
+
+
+@pytest.mark.asyncio
+async def test_plan_step_scope_derives_canonical_target_identity() -> None:
+    plan_id = uuid4()
+    session = _edit_session(latest_plan_id=plan_id)
+    plan = SimpleNamespace(
+        id=plan_id,
+        session_id=session.id,
+        spec=_edit_spec(
+            [
+                _edit_step(
+                    "step_a",
+                    "Analyze input",
+                    output_type=OutputType.JSON,
+                    existing_step_ref="existing_step_1",
+                ),
+                _edit_step(
+                    "step_b",
+                    "Create result",
+                    output_type=OutputType.TEXT,
+                    existing_step_ref="existing_step_2",
+                ),
+            ]
+        ),
+    )
+    repo = SimpleNamespace(get_plan=AsyncMock(return_value=plan))
+
+    resolved, _ = await resolve_plan_edit_context(
+        repo=cast(object, repo),
+        tenant_id=session.tenant_id,
+        session=session,
+        flow=None,
+        context=AIBuilderPlanEditContext(
+            scope="step",
+            plan_id=plan_id,
+            target_plan_step_ref="step_b",
+            target_step_name="Stale client label",
+            target_step_number=99,
+        ),
+    )
+
+    assert resolved is not None
+    assert resolved.target_plan_step_ref == "step_b"
+    assert resolved.target_existing_step_ref == "existing_step_2"
+    assert resolved.target_step_name == "Create result"
+    assert resolved.target_step_number == 2
 
 
 def test_scoped_model_revision_ignores_whole_plan_scope() -> None:
@@ -715,6 +805,39 @@ def test_step_scoped_revision_accepts_changed_target_step() -> None:
     )
 
 
+def test_step_scoped_revision_rejects_helper_step_insertion() -> None:
+    context = AIBuilderPlanEditContext(
+        scope="step",
+        plan_id=UUID("00000000-0000-0000-0000-000000000001"),
+        target_plan_step_ref="step_b",
+    )
+    prior = _edit_spec(
+        [
+            _edit_step("step_a", "Analyze input", output_type=OutputType.JSON),
+            _edit_step("step_b", "Create final result", output_type=OutputType.TEXT),
+            _edit_step("step_c", "Publish result", output_type=OutputType.TEXT),
+        ]
+    )
+    proposed = _edit_spec(
+        [
+            _edit_step("step_a", "Analyze input", output_type=OutputType.JSON),
+            _edit_step("step_b", "Create final PDF", output_type=OutputType.PDF),
+            _edit_step("step_helper", "Prepare PDF", output_type=OutputType.TEXT),
+            _edit_step("step_c", "Publish result", output_type=OutputType.TEXT),
+        ]
+    )
+
+    feedback = validate_scoped_plan_revision(
+        context=context,
+        prior_spec=prior,
+        proposed_spec=proposed,
+    )
+
+    assert feedback is not None
+    assert "must not add, remove, or reorder steps" in feedback
+    assert "step_helper" in feedback
+
+
 def test_saved_flow_step_revision_uses_stable_existing_step_refs() -> None:
     context = ResolvedAIBuilderEditContext(
         request=AIBuilderSavedFlowStepEditContext(flow_step_id=uuid4()),
@@ -813,98 +936,6 @@ def test_step_scoped_revision_rejects_unrelated_step_rewrite() -> None:
     assert "step_a" in feedback
 
 
-def test_step_scoped_revision_allows_direct_successor_input_repair() -> None:
-    context = AIBuilderPlanEditContext(
-        scope="step",
-        plan_id=UUID("00000000-0000-0000-0000-000000000001"),
-        target_plan_step_ref="step_b",
-    )
-    prior = _edit_spec(
-        [
-            _edit_step("step_a", "Analyze input", output_type=OutputType.JSON),
-            _edit_step("step_b", "Create final result", output_type=OutputType.TEXT),
-            _edit_step(
-                "step_c",
-                "Format response",
-                input_type=InputType.TEXT,
-                output_type=OutputType.TEXT,
-            ),
-        ]
-    )
-    proposed = _edit_spec(
-        [
-            _edit_step("step_a", "Analyze input", output_type=OutputType.JSON),
-            _edit_step("step_b", "Create final result", output_type=OutputType.JSON),
-            _edit_step(
-                "step_c",
-                "Format response",
-                input_type=InputType.JSON,
-                output_type=OutputType.TEXT,
-            ),
-        ]
-    )
-
-    assert (
-        validate_scoped_plan_revision(
-            context=context,
-            prior_spec=prior,
-            proposed_spec=proposed,
-        )
-        is None
-    )
-
-
-def test_step_scoped_revision_allows_downstream_input_repair() -> None:
-    context = AIBuilderPlanEditContext(
-        scope="step",
-        plan_id=UUID("00000000-0000-0000-0000-000000000001"),
-        target_plan_step_ref="step_b",
-    )
-    prior = _edit_spec(
-        [
-            _edit_step("step_a", "Analyze input", output_type=OutputType.JSON),
-            _edit_step("step_b", "Create final result", output_type=OutputType.TEXT),
-            _edit_step(
-                "step_c",
-                "Review intermediate result",
-                output_type=OutputType.TEXT,
-            ),
-            _edit_step(
-                "step_d",
-                "Format response",
-                input_type=InputType.TEXT,
-                output_type=OutputType.TEXT,
-            ),
-        ]
-    )
-    proposed = _edit_spec(
-        [
-            _edit_step("step_a", "Analyze input", output_type=OutputType.JSON),
-            _edit_step("step_b", "Create final result", output_type=OutputType.JSON),
-            _edit_step(
-                "step_c",
-                "Review intermediate result",
-                output_type=OutputType.TEXT,
-            ),
-            _edit_step(
-                "step_d",
-                "Format response",
-                input_type=InputType.JSON,
-                output_type=OutputType.TEXT,
-            ),
-        ]
-    )
-
-    assert (
-        validate_scoped_plan_revision(
-            context=context,
-            prior_spec=prior,
-            proposed_spec=proposed,
-        )
-        is None
-    )
-
-
 def test_step_scoped_revision_rejects_downstream_semantic_rewrite() -> None:
     context = AIBuilderPlanEditContext(
         scope="step",
@@ -943,7 +974,8 @@ def test_step_scoped_revision_rejects_downstream_semantic_rewrite() -> None:
     )
 
     assert feedback is not None
-    assert "downstream input wiring" in feedback
+    assert "preserve unrelated steps" in feedback
+    assert "step_c" in feedback
     assert "step_c" in feedback
 
 
@@ -975,7 +1007,7 @@ def test_step_scoped_revision_rejects_existing_step_reorder() -> None:
     )
 
     assert feedback is not None
-    assert "preserve the order" in feedback
+    assert "must not add, remove, or reorder steps" in feedback
 
 
 def test_step_scoped_revision_rejects_duplicate_step_refs() -> None:
@@ -1063,10 +1095,6 @@ def test_step_scoped_revision_rejects_runtime_form_field_changes() -> None:
 
     assert feedback is not None
     assert "runtime form fields" in feedback
-
-
-def test_downstream_input_repair_fields_are_valid_step_fields() -> None:
-    assert _DOWNSTREAM_INPUT_REPAIR_FIELDS <= set(StepSpec.model_fields)
 
 
 def test_plan_revision_terminal_output_intent_uses_latest_user_message() -> None:

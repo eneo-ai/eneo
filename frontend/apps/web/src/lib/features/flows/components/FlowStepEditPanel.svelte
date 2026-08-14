@@ -177,6 +177,7 @@
 
   const mode = getFlowUserMode();
   const flowEditor = getFlowEditor();
+  const assistantReloadRevision = flowEditor.assistantReloadRevision;
   const flowResource = flowEditor.state.resource;
   const currentFlowId = $derived($flowResource?.id ?? "");
   const {
@@ -312,7 +313,7 @@
   let stepNameBeforeEdit = $state("");
 
   $effect(() => {
-    assistantState.syncWithActiveStep(activeStep);
+    assistantState.syncWithActiveStep(activeStep, $assistantReloadRevision);
   });
   $effect(() => {
     return () => {

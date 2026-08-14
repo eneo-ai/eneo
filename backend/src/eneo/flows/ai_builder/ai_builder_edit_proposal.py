@@ -21,6 +21,7 @@ from eneo.flows.ai_builder.ai_builder_domain_models import (
 from eneo.flows.ai_builder.ai_builder_edit_compiler import compile_edit_proposal
 from eneo.flows.ai_builder.ai_builder_plan_edit_context import (
     ResolvedAIBuilderEditContext,
+    validate_scoped_edit_proposal,
     validate_scoped_plan_revision,
 )
 from eneo.flows.ai_builder.ai_builder_proposal_capture import (
@@ -111,6 +112,15 @@ async def process_edit_arguments(
             feedback=f"Invalid propose_flow arguments: {exc}",
             failure_kind="parse",
             failure_codes=frozenset({PROPOSAL_PARSE_MODEL_FAILURE_CODE}),
+        )
+    scoped_proposal_feedback = validate_scoped_edit_proposal(
+        context=plan_edit_context,
+        proposal=proposal,
+    )
+    if scoped_proposal_feedback is not None:
+        return ToolProcessingResult(
+            feedback=scoped_proposal_feedback,
+            failure_kind="quality",
         )
     ui_language = compile_context.ui_language if compile_context is not None else None
     try:
@@ -220,10 +230,20 @@ async def process_edit_arguments(
         )
     edit_approval = edit_result.approval.model_copy(
         update={
+            "scoped_target_existing_step_ref": (
+                plan_edit_context.target_existing_step_ref
+                if plan_edit_context is not None and plan_edit_context.scope == "step"
+                else None
+            ),
+            "scoped_target_plan_step_ref": (
+                plan_edit_context.target_plan_step_ref
+                if plan_edit_context is not None and plan_edit_context.scope == "step"
+                else None
+            ),
             "advisories": [
                 *edit_result.approval.advisories,
                 *topology_policy.advisories,
-            ]
+            ],
         }
     )
 

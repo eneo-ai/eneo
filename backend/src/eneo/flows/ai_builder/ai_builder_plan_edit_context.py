@@ -24,6 +24,7 @@ from eneo.flows.flow_authoring_spec import (
 from eneo.flows.step_lineage import existing_step_ref_for_order
 
 if TYPE_CHECKING:
+    from eneo.flows.ai_builder.ai_builder_proposal_intent import OrderedEditProposal
     from eneo.flows.ai_builder.ai_builder_repo import AIBuilderRepository
     from eneo.flows.ai_builder.ai_builder_resource_catalog import (
         AIBuilderResourceCatalog,
@@ -185,10 +186,10 @@ async def resolve_plan_edit_context(
                 code=AIBuilderErrorCode.INVALID_EXISTING_STEP_REF,
                 context={"flow_step_id": str(context.flow_step_id)},
             )
-        target = next(
+        saved_target = next(
             (step for step in flow.steps if step.id == context.flow_step_id), None
         )
-        if target is None:
+        if saved_target is None:
             raise AIBuilderBadRequestException(
                 "The selected Flow step no longer exists.",
                 code=AIBuilderErrorCode.INVALID_EXISTING_STEP_REF,
@@ -198,9 +199,11 @@ async def resolve_plan_edit_context(
             ResolvedAIBuilderEditContext(
                 request=context,
                 scope="step",
-                target_existing_step_ref=existing_step_ref_for_order(target.step_order),
-                target_step_name=target.user_description,
-                target_step_number=target.step_order,
+                target_existing_step_ref=existing_step_ref_for_order(
+                    saved_target.step_order
+                ),
+                target_step_name=saved_target.user_description,
+                target_step_number=saved_target.step_order,
             ),
             None,
         )
@@ -224,25 +227,85 @@ async def resolve_plan_edit_context(
             code=AIBuilderErrorCode.PLAN_SESSION_MISMATCH,
         )
 
-    if context.scope == "step" and _find_target_step(plan.spec, context) is None:
-        raise AIBuilderBadRequestException(
-            "The selected step no longer exists in the current AI Builder plan.",
-            code=AIBuilderErrorCode.INVALID_PLAN_STEP_REF,
-            context={"target_step_ref": step_ref_for_context(context)},
-        )
+    plan_target: StepSpec | None = None
+    target_step_number: int | None = None
+    if context.scope == "step":
+        plan_target = _find_target_step(plan.spec, context)
+        if plan_target is None:
+            raise AIBuilderBadRequestException(
+                "The selected step no longer exists in the current AI Builder plan.",
+                code=AIBuilderErrorCode.INVALID_PLAN_STEP_REF,
+                context={"target_step_ref": step_ref_for_context(context)},
+            )
+        if (
+            context.target_plan_step_ref is not None
+            and context.target_existing_step_ref is not None
+            and plan_target.existing_step_ref != context.target_existing_step_ref
+        ):
+            raise AIBuilderBadRequestException(
+                "The selected plan step and existing Flow step do not identify the same step.",
+                code=AIBuilderErrorCode.INVALID_EXISTING_STEP_REF,
+                context={
+                    "target_plan_step_ref": context.target_plan_step_ref,
+                    "target_existing_step_ref": context.target_existing_step_ref,
+                },
+            )
+        target_step_number = plan.spec.steps.index(plan_target) + 1
 
     return (
         ResolvedAIBuilderEditContext(
             request=context,
             scope=context.scope,
-            target_plan_step_ref=context.target_plan_step_ref,
-            target_existing_step_ref=context.target_existing_step_ref,
-            target_step_name=context.target_step_name,
-            target_step_number=context.target_step_number,
+            target_plan_step_ref=(
+                plan_target.plan_step_ref if plan_target is not None else None
+            ),
+            target_existing_step_ref=(
+                plan_target.existing_step_ref if plan_target is not None else None
+            ),
+            target_step_name=(plan_target.name if plan_target is not None else None),
+            target_step_number=target_step_number,
             plan_id=context.plan_id,
         ),
         plan,
     )
+
+
+def validate_scoped_edit_proposal(
+    *,
+    context: ResolvedAIBuilderEditContext | None,
+    proposal: "OrderedEditProposal",
+) -> str | None:
+    """Reject model-authored changes outside a selected saved Flow step."""
+
+    if context is None or context.scope != "step":
+        return None
+    target_ref = context.target_existing_step_ref
+    if target_ref is None:
+        return None
+
+    if proposal.removed_existing_step_refs:
+        return (
+            "A selected-step edit must not remove steps. Use a whole-flow edit "
+            "when the requested change alters the flow structure."
+        )
+
+    identity_fields = {"kind", "existing_step_ref"}
+    for step in proposal.steps:
+        if step.kind == "add":
+            return (
+                "A selected-step edit must not add steps. Use a whole-flow edit "
+                "when the requested change alters the flow structure."
+            )
+        if step.existing_step_ref == target_ref:
+            continue
+        authored_fields = sorted(step.model_fields_set - identity_fields)
+        if authored_fields:
+            return (
+                f"Step `{step.existing_step_ref}` changed even though the user "
+                f"selected `{target_ref}`. Only the selected step may contain "
+                "model-authored changes."
+            )
+    return None
 
 
 def build_plan_revision_prompt_block(
@@ -283,7 +346,8 @@ def build_plan_revision_prompt_block(
                 "- Scope: one selected step.",
                 f"- Target step: {target_label}.",
                 "- The target step must change in the revised plan. Do not satisfy this by only changing the flow title, description, or an unrelated step.",
-                "- Preserve the other steps unless a direct dataflow adjustment is required by the targeted change.",
+                "- Preserve every other step unchanged. Use a whole-plan edit if the requested change also requires dataflow or downstream-step changes.",
+                "- Do not add, remove, or reorder steps. Use a whole-plan edit when the requested change alters the flow structure.",
                 "- Do not change runtime form fields. You may update the plan title or description only when needed to reflect the selected step change.",
             ]
         )
@@ -308,11 +372,9 @@ def validate_scoped_plan_revision(
     """Return repair feedback when a step-scoped plan edit drifts.
 
     Step edits are intentionally narrower than whole-plan edits. The selected
-    step may change freely. Existing downstream consumers may only repair input
-    wiring so the compiled dataflow stays valid after the selected step changes.
-    Descriptive plan text may follow the selected step change, but runtime
-    inputs and unrelated steps are preserved. Broader rewrites should use
-    whole-plan editing so the user can review the wider intent explicitly.
+    step may change freely, while runtime inputs and every unrelated step are
+    preserved. Broader rewrites should use whole-plan editing so the user can
+    review the wider intent explicitly.
     """
 
     if context is None or context.scope != "step" or prior_spec is None:
@@ -639,14 +701,6 @@ def _unknown_step_model_revision_message(text: str) -> str:
     )
 
 
-_DOWNSTREAM_INPUT_REPAIR_FIELDS = {
-    "input_source",
-    "input_type",
-    "input_bindings",
-    "input_contract",
-}
-
-
 def _validate_non_target_preservation(
     *,
     context: ScopedEditContext,
@@ -678,47 +732,12 @@ def _validate_non_target_preservation(
         _step_identity(step, context): step for step in proposed_spec.steps
     }
 
-    order_feedback = _validate_existing_step_order(
-        prior_refs=prior_refs,
-        proposed_refs=proposed_refs,
-        target_step_ref=target_step_ref,
-    )
-    if order_feedback is not None:
-        return order_feedback
-
-    target_prior_index = prior_refs.index(target_step_ref)
-    downstream_refs = set(prior_refs[target_prior_index + 1 :])
-    proposed_target_index = proposed_refs.index(target_step_ref)
-    added_refs = [ref for ref in proposed_refs if ref not in prior_steps]
-    distant_added_refs = [
-        ref
-        for ref in added_refs
-        if abs(proposed_refs.index(ref) - proposed_target_index) > 1
-    ]
-    if distant_added_refs:
+    if proposed_refs != prior_refs:
         return (
-            "Step-scoped plan edits may only add helper steps directly next to "
-            "the selected step. Use a whole-plan edit for broader structure "
-            f"changes. Distant new step refs: {', '.join(distant_added_refs)}."
-        )
-
-    target_neighbor_feedback = _validate_target_neighbors(
-        prior_refs=prior_refs,
-        proposed_refs=proposed_refs,
-        target_step_ref=target_step_ref,
-    )
-    if target_neighbor_feedback is not None:
-        return target_neighbor_feedback
-
-    removed_refs = [
-        ref
-        for ref in prior_refs
-        if ref != target_step_ref and ref not in proposed_steps
-    ]
-    if removed_refs:
-        return (
-            "Step-scoped plan edits must preserve non-target steps. "
-            f"Missing step refs: {', '.join(removed_refs)}."
+            "Step-scoped plan edits must not add, remove, or reorder steps. "
+            "Use a whole-plan edit when the requested change alters the flow "
+            f"structure. Expected refs: {', '.join(prior_refs)}. Received refs: "
+            f"{', '.join(proposed_refs)}."
         )
 
     for ref, prior_step in prior_steps.items():
@@ -731,18 +750,6 @@ def _validate_non_target_preservation(
         if _step_dump_for_context(prior_step, context) != _step_dump_for_context(
             proposed_step, context
         ):
-            if ref in downstream_refs and _is_input_wiring_only_change(
-                prior_step,
-                proposed_step,
-                context=context,
-            ):
-                continue
-            if ref in downstream_refs:
-                return (
-                    "Step-scoped plan edits may only repair downstream input "
-                    f"wiring. Step `{ref}` changed in a "
-                    "broader way."
-                )
             return (
                 "Step-scoped plan edits must preserve unrelated steps. "
                 f"Step `{ref}` changed even though the user selected "
@@ -785,20 +792,6 @@ def _step_dump_for_context(
     return _step_dump_except(step, ignored_fields)
 
 
-def _is_input_wiring_only_change(
-    prior_step: StepSpec,
-    proposed_step: StepSpec,
-    *,
-    context: ScopedEditContext,
-) -> bool:
-    ignored_fields = set(_DOWNSTREAM_INPUT_REPAIR_FIELDS)
-    if _uses_existing_step_identity(context):
-        ignored_fields.add("plan_step_ref")
-    return _step_dump_except(prior_step, ignored_fields) == (
-        _step_dump_except(proposed_step, ignored_fields)
-    )
-
-
 def _duplicate_refs(refs: list[str]) -> list[str]:
     seen: set[str] = set()
     duplicates: list[str] = []
@@ -807,53 +800,3 @@ def _duplicate_refs(refs: list[str]) -> list[str]:
             duplicates.append(ref)
         seen.add(ref)
     return duplicates
-
-
-def _validate_existing_step_order(
-    *,
-    prior_refs: list[str],
-    proposed_refs: list[str],
-    target_step_ref: str,
-) -> str | None:
-    prior_non_target = [ref for ref in prior_refs if ref != target_step_ref]
-    proposed_non_target = [
-        ref for ref in proposed_refs if ref in prior_refs and ref != target_step_ref
-    ]
-    if proposed_non_target != prior_non_target:
-        return (
-            "Step-scoped plan edits must preserve the order of existing "
-            "non-target steps. Use a whole-plan edit for step reordering."
-        )
-    return None
-
-
-def _validate_target_neighbors(
-    *,
-    prior_refs: list[str],
-    proposed_refs: list[str],
-    target_step_ref: str,
-) -> str | None:
-    prior_index = prior_refs.index(target_step_ref)
-    prior_previous = prior_refs[prior_index - 1] if prior_index > 0 else None
-    prior_next = (
-        prior_refs[prior_index + 1] if prior_index + 1 < len(prior_refs) else None
-    )
-
-    proposed_existing_refs = [ref for ref in proposed_refs if ref in prior_refs]
-    proposed_existing_index = proposed_existing_refs.index(target_step_ref)
-    proposed_previous = (
-        proposed_existing_refs[proposed_existing_index - 1]
-        if proposed_existing_index > 0
-        else None
-    )
-    proposed_next = (
-        proposed_existing_refs[proposed_existing_index + 1]
-        if proposed_existing_index + 1 < len(proposed_existing_refs)
-        else None
-    )
-    if (prior_previous, prior_next) != (proposed_previous, proposed_next):
-        return (
-            "Step-scoped plan edits must keep the selected step in the same "
-            "position. Use a whole-plan edit for structural reordering."
-        )
-    return None

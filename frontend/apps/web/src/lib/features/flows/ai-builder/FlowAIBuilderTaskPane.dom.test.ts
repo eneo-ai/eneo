@@ -69,6 +69,30 @@ describe("FlowAIBuilderTaskPane", () => {
     expect(screen.getByText("PDF-dokument")).toBeTruthy();
   });
 
+  it("keeps a saved-step review focused on the selected step", () => {
+    render(FlowAIBuilderTaskPane, {
+      taskText: "Lägg till den exakta avslutningen.",
+      requirements,
+      messages: conversation,
+      savedFlowStepScope: {
+        stepNumber: 3,
+        stepName: "Sammanställ slutsats och begränsningar"
+      }
+    });
+
+    expect(
+      screen.getByRole("heading", {
+        name: m.ai_builder_saved_step_review_heading({ step: 3 })
+      })
+    ).toBeTruthy();
+    expect(screen.getByText("Sammanställ slutsats och begränsningar")).toBeTruthy();
+    expect(screen.getByText(m.ai_builder_saved_step_review_scope())).toBeTruthy();
+    expect(screen.queryByText(m.ai_builder_task_purpose())).toBeNull();
+    expect(
+      screen.queryByRole("heading", { name: m.ai_builder_decisions_from_answers() })
+    ).toBeNull();
+  });
+
   it("clamps a long task behind an expander that reports the character count", async () => {
     const longTask = "Sammanfatta rapporterna. ".repeat(20).trim();
     render(FlowAIBuilderTaskPane, {

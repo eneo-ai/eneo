@@ -122,6 +122,11 @@ async def assert_edit_spec_materializes_through_authoring_command_async(
         expected_revision=current_flow.draft_revision,
         spec=edit_spec,
         removed_existing_step_refs=frozenset(),
+        updated_existing_step_refs=frozenset(
+            step.existing_step_ref
+            for step in edit_spec.steps
+            if step.existing_step_ref is not None
+        ),
         origin=_authoring_origin(edit_spec),
     )
 

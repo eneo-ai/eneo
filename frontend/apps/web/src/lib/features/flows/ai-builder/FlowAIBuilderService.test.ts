@@ -64,6 +64,50 @@ function makePlan(overrides: Partial<ProposedPlan> = {}): ProposedPlan {
   };
 }
 
+function makeScopedEdit(
+  targetExistingStepRef: string | null,
+  targetPlanStepRef: string | null = null
+): NonNullable<ProposedPlan["proposal"]["edit"]> {
+  return {
+    base_flow_revision: 1,
+    scoped_target_existing_step_ref: targetExistingStepRef,
+    scoped_target_plan_step_ref: targetPlanStepRef,
+    removed_existing_step_refs: [],
+    diff: {
+      step_changes: [],
+      net_steps_added: 0,
+      net_steps_removed: 0,
+      flow_property_changes: {}
+    }
+  };
+}
+
+function makeExistingStep(
+  stepNumber: number,
+  name: string
+): ProposedPlan["proposal"]["spec"]["steps"][number] {
+  return {
+    plan_step_ref: `step_${stepNumber}`,
+    existing_step_ref: `existing_step_${stepNumber}`,
+    name,
+    assistant_spec: {
+      instructions: `Instructions for ${name}`,
+      model_ref: null,
+      knowledge_refs: []
+    },
+    input_source: stepNumber === 1 ? "flow_input" : "previous_step",
+    input_type: "text",
+    output_mode: "compose_text",
+    output_type: "text",
+    input_bindings: null,
+    input_contract: null,
+    output_contract: null,
+    input_config: null,
+    output_config: null,
+    review_policy: null
+  };
+}
+
 function makeAIBuilderError(overrides: Partial<AIBuilderError> = {}): AIBuilderError {
   return {
     schema_version: 2,
@@ -106,6 +150,179 @@ describe("FlowAIBuilderService", () => {
 
     service.clearSavedFlowStepScope();
     expect(service.savedFlowStepScope).toBeNull();
+  });
+
+  it("keeps the saved-step scope while its plan is reviewed", () => {
+    const service = makeService();
+    const scope = {
+      editContext: { kind: "saved_flow_step" as const, flow_step_id: "step-1" },
+      stepName: "Extract facts",
+      stepNumber: 2
+    };
+    service.setSavedFlowStepScope(scope);
+
+    expect(service.activeStepTransportContext).toEqual(scope.editContext);
+
+    service.seedState({
+      currentPlan: makePlan({
+        status: "proposed",
+        proposal: {
+          ...makePlan().proposal,
+          edit: makeScopedEdit("existing_step_2", "step_2"),
+          spec: {
+            ...makePlan().proposal.spec,
+            steps: [
+              makeExistingStep(1, "Collect source"),
+              makeExistingStep(2, "Extract facts"),
+              makeExistingStep(3, "Write report")
+            ]
+          }
+        }
+      })
+    });
+
+    expect(service.savedFlowStepScope).toEqual(scope);
+    expect(service.activeStepTransportContext).toEqual({
+      kind: "proposed_plan",
+      plan_id: "plan-1",
+      scope: "step",
+      target_existing_step_ref: "existing_step_2",
+      target_plan_step_ref: "step_2",
+      target_step_name: "Extract facts",
+      target_step_number: 2
+    });
+  });
+
+  it("uses the backend-resolved step identity when order changed before planning", () => {
+    const service = makeService();
+    service.setSavedFlowStepScope({
+      editContext: { kind: "saved_flow_step", flow_step_id: "selected-step-id" },
+      stepName: "Originally second",
+      stepNumber: 2
+    });
+    service.seedState({
+      currentPlan: makePlan({
+        proposal: {
+          ...makePlan().proposal,
+          edit: makeScopedEdit("existing_step_3", "step_3"),
+          spec: {
+            ...makePlan().proposal.spec,
+            steps: [
+              makeExistingStep(1, "First"),
+              makeExistingStep(3, "Selected after reorder"),
+              makeExistingStep(2, "Moved step")
+            ]
+          }
+        }
+      })
+    });
+
+    expect(service.activeStepScope).toEqual({
+      stepName: "Selected after reorder",
+      stepNumber: 2
+    });
+    expect(service.activeStepTransportContext).toMatchObject({
+      kind: "proposed_plan",
+      target_existing_step_ref: "existing_step_3",
+      target_step_name: "Selected after reorder",
+      target_step_number: 2
+    });
+  });
+
+  it("restores scoped plan transport after a page reload without browser-only scope", () => {
+    const service = makeService();
+    service.seedState({
+      currentPlan: makePlan({
+        proposal: {
+          ...makePlan().proposal,
+          edit: makeScopedEdit("existing_step_2", "step_2"),
+          spec: {
+            ...makePlan().proposal.spec,
+            steps: [makeExistingStep(1, "First"), makeExistingStep(2, "Selected")]
+          }
+        }
+      })
+    });
+
+    expect(service.activeStepScope).toEqual({ stepName: "Selected", stepNumber: 2 });
+    expect(service.activeStepTransportContext).toMatchObject({
+      kind: "proposed_plan",
+      target_existing_step_ref: "existing_step_2"
+    });
+  });
+
+  it("restores proposal-only step scope after reload", () => {
+    const service = makeService();
+    const addedStep = {
+      ...makeExistingStep(2, "New report"),
+      existing_step_ref: null
+    };
+    service.seedState({
+      currentPlan: makePlan({
+        plan_id: "replacement-plan",
+        proposal: {
+          ...makePlan().proposal,
+          edit: makeScopedEdit(null, "step_2"),
+          spec: {
+            ...makePlan().proposal.spec,
+            steps: [makeExistingStep(1, "First"), addedStep]
+          }
+        }
+      })
+    });
+
+    expect(service.activeStepScope).toEqual({ stepName: "New report", stepNumber: 2 });
+    expect(service.activeStepTransportContext).toEqual({
+      kind: "proposed_plan",
+      plan_id: "replacement-plan",
+      scope: "step",
+      target_existing_step_ref: null,
+      target_plan_step_ref: "step_2",
+      target_step_name: "New report",
+      target_step_number: 2
+    });
+  });
+
+  it("suppresses persisted step scope only for the current plan", () => {
+    const service = makeService();
+    const scopedProposal = {
+      ...makePlan().proposal,
+      edit: makeScopedEdit(null, "step_2"),
+      spec: {
+        ...makePlan().proposal.spec,
+        steps: [
+          makeExistingStep(1, "First"),
+          { ...makeExistingStep(2, "New report"), existing_step_ref: null }
+        ]
+      }
+    };
+    service.seedState({
+      session: makeSession({ session_id: "session-1" }),
+      currentPlan: makePlan({ plan_id: "plan-1", proposal: scopedProposal })
+    });
+
+    service.clearActiveStepScope();
+    expect(service.activeStepTransportContext).toBeNull();
+    expect(service.activeStepScope).toBeNull();
+
+    service.seedState({
+      currentPlan: makePlan({ plan_id: "plan-2", proposal: scopedProposal })
+    });
+    expect(service.activeStepTransportContext).toMatchObject({
+      kind: "proposed_plan",
+      plan_id: "plan-2",
+      target_plan_step_ref: "step_2"
+    });
+
+    service.seedState({
+      session: makeSession({ session_id: "session-2" }),
+      currentPlan: makePlan({ plan_id: "plan-1", proposal: scopedProposal })
+    });
+    expect(service.activeStepTransportContext).toMatchObject({
+      kind: "proposed_plan",
+      plan_id: "plan-1",
+      target_plan_step_ref: "step_2"
+    });
   });
 
   it("passes Driver-owned field getters through the reactive facade", () => {
