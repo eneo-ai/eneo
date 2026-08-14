@@ -61,6 +61,7 @@ def build_edit_flow_tool_schema(
             "parameters": {
                 "type": "object",
                 "required": ["steps", "plan_rationale"],
+                "additionalProperties": False,
                 "properties": {
                     "plan_rationale": {
                         "type": "string",
@@ -214,7 +215,7 @@ def _build_assistant_spec_schema(
 ) -> dict[str, Any]:
     schema: dict[str, Any] = {
         "type": "object",
-        "required": ["instructions"],
+        "additionalProperties": False,
         "properties": {
             "instructions": {
                 "type": "string",

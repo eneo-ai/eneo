@@ -9766,6 +9766,11 @@ export interface components {
      */
     AIBuilderPlanEditContext: {
       /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      kind: "proposed_plan";
+      /**
        * Plan Id
        * Format: uuid
        * @description The proposed plan currently shown to the user.
@@ -9872,6 +9877,23 @@ export interface components {
        * @enum {string}
        */
       event: "requirements_summary";
+    };
+    /**
+     * AIBuilderSavedFlowStepEditContext
+     * @description Stable first-turn scope for editing one persisted Flow step.
+     */
+    AIBuilderSavedFlowStepEditContext: {
+      /**
+       * Flow Step Id
+       * Format: uuid
+       * @description Persisted Flow step identity selected before a proposal exists.
+       */
+      flow_step_id: string;
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      kind: "saved_flow_step";
     };
     /**
      * AIBuilderStatus
@@ -27785,6 +27807,7 @@ export interface components {
      *       "acknowledge_duplicate_provider_spend": false,
      *       "client_turn_id": "00000000-0000-0000-0000-000000000703",
      *       "edit_context": {
+     *         "kind": "proposed_plan",
      *         "plan_id": "00000000-0000-0000-0000-000000000702",
      *         "scope": "step",
      *         "target_plan_step_ref": "step_b",
@@ -27823,7 +27846,13 @@ export interface components {
        * @description Caller-generated identity for the latest logical session turn. Reuse it only when retrying the same request payload.
        */
       client_turn_id: string;
-      edit_context?: components["schemas"]["AIBuilderPlanEditContext"] | null;
+      /** Edit Context */
+      edit_context?:
+        | (
+            | components["schemas"]["AIBuilderPlanEditContext"]
+            | components["schemas"]["AIBuilderSavedFlowStepEditContext"]
+          )
+        | null;
       /** File Ids */
       file_ids?: string[] | null;
       /** Message */

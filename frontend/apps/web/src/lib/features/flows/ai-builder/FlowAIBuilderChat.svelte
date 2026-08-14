@@ -113,7 +113,7 @@
   }
 
   function handleQuestionAnswer(answer: StructuredQuestionAnswerPayload) {
-    service.sendMessage(answer.text, answer.questionAnswer, undefined, pendingEditContext);
+    service.sendMessage(answer.text, answer.questionAnswer, undefined, activeEditContext);
   }
 
   // One O(n) projection: question id -> the user's answer text. Later answers
@@ -145,6 +145,14 @@
 
   let inputRef = $state<FlowAIBuilderInput | undefined>();
   let pendingEditContext = $state<AIBuilderPlanEditContext | null>(null);
+  const activeEditContext = $derived(
+    pendingEditContext ?? service.savedFlowStepScope?.editContext ?? null
+  );
+  const savedFlowStepScopeLabel = $derived.by(() => {
+    const scope = service.savedFlowStepScope;
+    if (!scope || pendingEditContext) return null;
+    return m.ai_builder_edit_context_step({ step: scope.stepNumber, name: scope.stepName });
+  });
 
   // --- Plan-review left pane (handoff §2, §3.1) -----------------------------
   // Once a plan exists the raw transcript folds into the structured task pane;
@@ -203,6 +211,7 @@
 
   function clearPendingEditContext() {
     pendingEditContext = null;
+    service.clearSavedFlowStepScope();
     inputRef?.clearActivePlaceholder();
   }
 
@@ -215,11 +224,10 @@
   });
 
   function handleRequirementsConfirm() {
-    service.confirmRequirements();
+    service.confirmRequirements(activeEditContext);
   }
 
   function handleRequirementsChange() {
-    clearPendingEditContext();
     inputRef?.focus({ placeholder: m.ai_builder_requirements_change_hint() });
   }
 
@@ -378,19 +386,8 @@
     <div class="flex-1" aria-hidden="true"></div>
     <div
       class="empty-welcome relative flex w-full max-w-[32rem] flex-col items-center px-6 pb-6 text-center max-sm:px-4"
-      transition:fade={{ duration: 200 }}
+      in:fade={{ duration: 200 }}
     >
-      <span class="welcome-glyph" aria-hidden="true">
-        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none">
-          <path
-            d="M6.75 6.25h3.5v3.5h-3.5v-3.5Zm7 0h3.5v3.5h-3.5v-3.5Zm-7 8h3.5v3.5h-3.5v-3.5Zm3.5-6.25h2.5m-2.5 8h2.5m0-8v8m0-4h4.5"
-            stroke="currentColor"
-            stroke-width="1.5"
-            stroke-linecap="round"
-            stroke-linejoin="round"
-          />
-        </svg>
-      </span>
       <h2
         class="text-primary mt-4 text-[clamp(1.375rem,4vw,1.75rem)] leading-[1.15] font-semibold tracking-[-0.015em] text-balance"
       >
@@ -486,7 +483,8 @@
   >
     <FlowAIBuilderInput
       bind:this={inputRef}
-      editContext={pendingEditContext}
+      editContext={activeEditContext}
+      editContextLabel={savedFlowStepScopeLabel}
       oncleareditcontext={clearPendingEditContext}
       refinement={showTaskSummary}
       {generationWait}
@@ -503,24 +501,6 @@
   .empty-welcome {
     opacity: 0;
     animation: fade-up 0.5s cubic-bezier(0.16, 1, 0.3, 1) 0.1s forwards;
-  }
-
-  .welcome-glyph {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 3rem;
-    height: 3rem;
-    border-radius: 0.875rem;
-    border: 1px solid var(--border-dimmer);
-    background: var(--background-secondary);
-    color: var(--accent-default);
-    box-shadow: var(--shadow-xs);
-  }
-
-  .welcome-glyph svg {
-    width: 1.375rem;
-    height: 1.375rem;
   }
 
   .input-area-hero {

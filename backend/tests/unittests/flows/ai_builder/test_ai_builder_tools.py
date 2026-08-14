@@ -2,9 +2,14 @@
 
 from __future__ import annotations
 
+from uuid import uuid4
+
 import pytest
 
 from eneo.flows.ai_builder import ai_builder_tool_names, ai_builder_tools
+from eneo.flows.ai_builder.ai_builder_edit_tool_schema import (
+    build_edit_flow_tool_schema,
+)
 from eneo.flows.ai_builder.ai_builder_proposal_intent import (
     ProposalIntentArgumentError,
     parse_create_flow_intent_arguments,
@@ -25,6 +30,7 @@ from eneo.flows.ai_builder.ai_builder_tools import (
     extract_plan_rationale,
     validate_propose_flow_tool_arguments,
 )
+from eneo.flows.domain.flow import FlowStep
 
 
 def _empty_catalog() -> AIBuilderResourceCatalog:
@@ -217,6 +223,74 @@ class TestBuildToolSchema:
                     },
                     tool_schema=schema,
                 )
+
+    def test_edit_schema_feedback_identifies_the_invalid_branch_field(self) -> None:
+        step = FlowStep(
+            id=uuid4(),
+            flow_id=uuid4(),
+            tenant_id=uuid4(),
+            assistant_id=uuid4(),
+            step_order=1,
+            user_description="Compare evidence",
+            input_source="flow_input",
+            input_type="text",
+            output_mode="pass_through",
+            output_type="text",
+        )
+        schema = build_edit_flow_tool_schema(
+            [step],
+            resource_catalog=_empty_catalog(),
+            tool_name=PROPOSE_FLOW_TOOL_NAME,
+        )
+
+        with pytest.raises(
+            ProposalToolArgumentsError,
+            match=r"steps\.0.*flow_name.*additionalProperties",
+        ):
+            validate_propose_flow_tool_arguments(
+                arguments={
+                    "plan_rationale": "Update one step.",
+                    "steps": [
+                        {
+                            "kind": "modify",
+                            "existing_step_ref": "existing_step_1",
+                            "flow_name": "This field belongs at the root",
+                        }
+                    ],
+                },
+                tool_schema=schema,
+            )
+
+    def test_edit_schema_feedback_prioritizes_a_missing_required_ref(self) -> None:
+        step = FlowStep(
+            id=uuid4(),
+            flow_id=uuid4(),
+            tenant_id=uuid4(),
+            assistant_id=uuid4(),
+            step_order=1,
+            user_description="Compare evidence",
+            input_source="flow_input",
+            input_type="text",
+            output_mode="pass_through",
+            output_type="text",
+        )
+        schema = build_edit_flow_tool_schema(
+            [step],
+            resource_catalog=_empty_catalog(),
+            tool_name=PROPOSE_FLOW_TOOL_NAME,
+        )
+
+        with pytest.raises(
+            ProposalToolArgumentsError,
+            match=r"steps\.0.*existing_step_ref.*required",
+        ):
+            validate_propose_flow_tool_arguments(
+                arguments={
+                    "plan_rationale": "Update one step.",
+                    "steps": [{"kind": "modify", "input_type": "unsupported"}],
+                },
+                tool_schema=schema,
+            )
 
 
 class TestParseToolCallArguments:

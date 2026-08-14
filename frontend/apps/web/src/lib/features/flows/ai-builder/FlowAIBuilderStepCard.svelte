@@ -151,6 +151,7 @@
         name: step.name
       }),
       editContext: {
+        kind: "proposed_plan",
         scope: "step",
         plan_id: planId,
         target_plan_step_ref: step.plan_step_ref,

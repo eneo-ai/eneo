@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Annotated, Literal, TypeAlias
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -21,12 +21,14 @@ from eneo.flows.flow_authoring_spec import (
     OutputType,
     StepSpec,
 )
+from eneo.flows.step_lineage import existing_step_ref_for_order
 
 if TYPE_CHECKING:
     from eneo.flows.ai_builder.ai_builder_repo import AIBuilderRepository
     from eneo.flows.ai_builder.ai_builder_resource_catalog import (
         AIBuilderResourceCatalog,
     )
+    from eneo.flows.domain.flow import Flow
 
 PlanEditScope = Literal["whole_plan", "step"]
 
@@ -56,6 +58,7 @@ class AIBuilderPlanEditContext(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
+    kind: Literal["proposed_plan"] = "proposed_plan"
     scope: PlanEditScope
     plan_id: UUID = Field(description="The proposed plan currently shown to the user.")
     target_plan_step_ref: str | None = Field(
@@ -94,7 +97,46 @@ class AIBuilderPlanEditContext(BaseModel):
         return self.model_dump(mode="json", exclude_none=True)
 
 
-def step_ref_for_context(context: AIBuilderPlanEditContext) -> str | None:
+class AIBuilderSavedFlowStepEditContext(BaseModel):
+    """Stable first-turn scope for editing one persisted Flow step."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    kind: Literal["saved_flow_step"] = "saved_flow_step"
+    flow_step_id: UUID = Field(
+        description="Persisted Flow step identity selected before a proposal exists."
+    )
+
+    def to_metadata(self) -> dict[str, object]:
+        return self.model_dump(mode="json")
+
+
+AIBuilderEditContext: TypeAlias = Annotated[
+    AIBuilderPlanEditContext | AIBuilderSavedFlowStepEditContext,
+    Field(discriminator="kind"),
+]
+
+
+@dataclass(frozen=True, slots=True)
+class ResolvedAIBuilderEditContext:
+    """Turn-local scope resolved from one API edit-context variant."""
+
+    request: AIBuilderEditContext
+    scope: PlanEditScope
+    target_plan_step_ref: str | None = None
+    target_existing_step_ref: str | None = None
+    target_step_name: str | None = None
+    target_step_number: int | None = None
+    plan_id: UUID | None = None
+
+    def to_metadata(self) -> dict[str, object]:
+        return self.request.to_metadata()
+
+
+ScopedEditContext: TypeAlias = AIBuilderPlanEditContext | ResolvedAIBuilderEditContext
+
+
+def step_ref_for_context(context: ScopedEditContext) -> str | None:
     return context.target_plan_step_ref or context.target_existing_step_ref
 
 
@@ -108,7 +150,7 @@ def _find_step_by_existing_ref(spec: FlowDraftSpecCore, ref: str) -> StepSpec | 
 
 def _find_target_step(
     spec: FlowDraftSpecCore,
-    context: AIBuilderPlanEditContext,
+    context: ScopedEditContext,
 ) -> StepSpec | None:
     if context.target_plan_step_ref:
         return _find_step_by_plan_ref(spec, context.target_plan_step_ref)
@@ -122,12 +164,46 @@ async def resolve_plan_edit_context(
     repo: "AIBuilderRepository",
     tenant_id: UUID,
     session: BuilderSession,
-    context: AIBuilderPlanEditContext | None,
-) -> tuple[AIBuilderPlanEditContext | None, BuilderPlan | None]:
+    flow: "Flow | None",
+    context: AIBuilderEditContext | None,
+) -> tuple[ResolvedAIBuilderEditContext | None, BuilderPlan | None]:
     """Validate an edit context against the session's latest proposed plan."""
 
     if context is None:
         return None, None
+
+    if isinstance(context, AIBuilderSavedFlowStepEditContext):
+        if session.latest_plan_id is not None:
+            raise AIBuilderBadRequestException(
+                "A saved Flow step can only scope the first proposal. Use the current plan for later revisions.",
+                code=AIBuilderErrorCode.STALE_PLAN_REVISION,
+                context={"latest_plan_id": str(session.latest_plan_id)},
+            )
+        if flow is None or session.flow_id is None or flow.id != session.flow_id:
+            raise AIBuilderBadRequestException(
+                "The saved Flow step is not available in this AI Builder session.",
+                code=AIBuilderErrorCode.INVALID_EXISTING_STEP_REF,
+                context={"flow_step_id": str(context.flow_step_id)},
+            )
+        target = next(
+            (step for step in flow.steps if step.id == context.flow_step_id), None
+        )
+        if target is None:
+            raise AIBuilderBadRequestException(
+                "The selected Flow step no longer exists.",
+                code=AIBuilderErrorCode.INVALID_EXISTING_STEP_REF,
+                context={"flow_step_id": str(context.flow_step_id)},
+            )
+        return (
+            ResolvedAIBuilderEditContext(
+                request=context,
+                scope="step",
+                target_existing_step_ref=existing_step_ref_for_order(target.step_order),
+                target_step_name=target.user_description,
+                target_step_number=target.step_order,
+            ),
+            None,
+        )
 
     if session.latest_plan_id != context.plan_id:
         raise AIBuilderBadRequestException(
@@ -155,21 +231,36 @@ async def resolve_plan_edit_context(
             context={"target_step_ref": step_ref_for_context(context)},
         )
 
-    return context, plan
+    return (
+        ResolvedAIBuilderEditContext(
+            request=context,
+            scope=context.scope,
+            target_plan_step_ref=context.target_plan_step_ref,
+            target_existing_step_ref=context.target_existing_step_ref,
+            target_step_name=context.target_step_name,
+            target_step_number=context.target_step_number,
+            plan_id=context.plan_id,
+        ),
+        plan,
+    )
 
 
 def build_plan_revision_prompt_block(
     *,
-    context: AIBuilderPlanEditContext | None,
-    prior_plan: BuilderPlan | None,
+    context: ScopedEditContext | None,
+    prior_spec: FlowDraftSpecCore | None,
 ) -> str | None:
-    if context is None or prior_plan is None:
+    if context is None or prior_spec is None:
         return None
 
     lines = [
         "Plan revision directive:",
-        f"- Current plan id: {context.plan_id}",
-        "- Treat the user's latest message as a revision request for this plan.",
+        *(
+            [f"- Current plan id: {context.plan_id}"]
+            if context.plan_id is not None
+            else ["- Current source: saved Flow draft."]
+        ),
+        "- Treat the user's latest message as a revision request for this flow.",
     ]
 
     if context.scope == "whole_plan":
@@ -180,7 +271,7 @@ def build_plan_revision_prompt_block(
             ]
         )
     else:
-        target = _find_target_step(prior_plan.spec, context)
+        target = _find_target_step(prior_spec, context)
         target_ref = step_ref_for_context(context) or "unknown"
         target_label = (
             f"{target.plan_step_ref} ({target.name})"
@@ -198,10 +289,8 @@ def build_plan_revision_prompt_block(
         )
 
     lines.append("- Prior plan steps:")
-    for index, step in enumerate(prior_plan.spec.steps, start=1):
-        marker = (
-            " (target)" if step == _find_target_step(prior_plan.spec, context) else ""
-        )
+    for index, step in enumerate(prior_spec.steps, start=1):
+        marker = " (target)" if step == _find_target_step(prior_spec, context) else ""
         lines.append(
             f"  {index}. {step.plan_step_ref}: {step.name} | "
             f"{step.input_type}->{step.output_type} | "
@@ -212,7 +301,7 @@ def build_plan_revision_prompt_block(
 
 def validate_scoped_plan_revision(
     *,
-    context: AIBuilderPlanEditContext | None,
+    context: ScopedEditContext | None,
     prior_spec: FlowDraftSpecCore | None,
     proposed_spec: FlowDraftSpecCore,
 ) -> str | None:
@@ -242,15 +331,18 @@ def validate_scoped_plan_revision(
             f"Scoped plan edit target `{target_ref}` disappeared from the revised plan. "
             "Keep the selected step ref and revise that step instead of replacing it with an unrelated step."
         )
-    if proposed_target.model_dump(mode="json") == prior_target.model_dump(mode="json"):
+    if _step_dump_for_context(proposed_target, context) == _step_dump_for_context(
+        prior_target, context
+    ):
         return (
             f"Scoped plan edit target `{target_ref}` was unchanged. "
             "Apply the user's requested change to that selected step, not only to the plan title, description, or another step."
         )
     preservation_feedback = _validate_non_target_preservation(
+        context=context,
         prior_spec=prior_spec,
         proposed_spec=proposed_spec,
-        target_step_ref=prior_target.plan_step_ref,
+        target_step_ref=_step_identity(prior_target, context),
     )
     if preservation_feedback is not None:
         return preservation_feedback
@@ -259,7 +351,7 @@ def validate_scoped_plan_revision(
 
 def resolve_scoped_step_revision_if_requested(
     *,
-    context: AIBuilderPlanEditContext | None,
+    context: ScopedEditContext | None,
     prior_spec: FlowDraftSpecCore | None,
     latest_user_text: str | None,
     resource_catalog: "AIBuilderResourceCatalog | None",
@@ -557,6 +649,7 @@ _DOWNSTREAM_INPUT_REPAIR_FIELDS = {
 
 def _validate_non_target_preservation(
     *,
+    context: ScopedEditContext,
     prior_spec: FlowDraftSpecCore,
     proposed_spec: FlowDraftSpecCore,
     target_step_ref: str,
@@ -570,8 +663,8 @@ def _validate_non_target_preservation(
             "inputs from the user."
         )
 
-    prior_refs = [step.plan_step_ref for step in prior_spec.steps]
-    proposed_refs = [step.plan_step_ref for step in proposed_spec.steps]
+    prior_refs = [_step_identity(step, context) for step in prior_spec.steps]
+    proposed_refs = [_step_identity(step, context) for step in proposed_spec.steps]
 
     duplicate_refs = _duplicate_refs(proposed_refs)
     if duplicate_refs:
@@ -580,8 +673,10 @@ def _validate_non_target_preservation(
             f"Duplicate step refs: {', '.join(duplicate_refs)}."
         )
 
-    prior_steps = {step.plan_step_ref: step for step in prior_spec.steps}
-    proposed_steps = {step.plan_step_ref: step for step in proposed_spec.steps}
+    prior_steps = {_step_identity(step, context): step for step in prior_spec.steps}
+    proposed_steps = {
+        _step_identity(step, context): step for step in proposed_spec.steps
+    }
 
     order_feedback = _validate_existing_step_order(
         prior_refs=prior_refs,
@@ -633,10 +728,13 @@ def _validate_non_target_preservation(
         if proposed_step is None:
             continue
 
-        if prior_step.model_dump(mode="json") != proposed_step.model_dump(mode="json"):
+        if _step_dump_for_context(prior_step, context) != _step_dump_for_context(
+            proposed_step, context
+        ):
             if ref in downstream_refs and _is_input_wiring_only_change(
                 prior_step,
                 proposed_step,
+                context=context,
             ):
                 continue
             if ref in downstream_refs:
@@ -665,9 +763,39 @@ def _step_dump_except(step: StepSpec, fields: set[str]) -> dict[str, object]:
     return data
 
 
-def _is_input_wiring_only_change(prior_step: StepSpec, proposed_step: StepSpec) -> bool:
-    return _step_dump_except(prior_step, _DOWNSTREAM_INPUT_REPAIR_FIELDS) == (
-        _step_dump_except(proposed_step, _DOWNSTREAM_INPUT_REPAIR_FIELDS)
+def _uses_existing_step_identity(context: ScopedEditContext) -> bool:
+    return isinstance(context, ResolvedAIBuilderEditContext) and isinstance(
+        context.request, AIBuilderSavedFlowStepEditContext
+    )
+
+
+def _step_identity(step: StepSpec, context: ScopedEditContext) -> str:
+    if _uses_existing_step_identity(context) and step.existing_step_ref is not None:
+        return step.existing_step_ref
+    return step.plan_step_ref
+
+
+def _step_dump_for_context(
+    step: StepSpec,
+    context: ScopedEditContext,
+) -> dict[str, object]:
+    ignored_fields: set[str] = (
+        {"plan_step_ref"} if _uses_existing_step_identity(context) else set()
+    )
+    return _step_dump_except(step, ignored_fields)
+
+
+def _is_input_wiring_only_change(
+    prior_step: StepSpec,
+    proposed_step: StepSpec,
+    *,
+    context: ScopedEditContext,
+) -> bool:
+    ignored_fields = set(_DOWNSTREAM_INPUT_REPAIR_FIELDS)
+    if _uses_existing_step_identity(context):
+        ignored_fields.add("plan_step_ref")
+    return _step_dump_except(prior_step, ignored_fields) == (
+        _step_dump_except(proposed_step, ignored_fields)
     )
 
 

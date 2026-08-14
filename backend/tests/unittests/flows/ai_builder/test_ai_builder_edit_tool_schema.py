@@ -4,6 +4,9 @@ from __future__ import annotations
 
 from uuid import uuid4
 
+import jsonschema
+import pytest
+
 from eneo.flows.ai_builder.ai_builder_edit_tool_schema import (
     build_edit_flow_tool_schema,
 )
@@ -13,7 +16,10 @@ from eneo.flows.ai_builder.ai_builder_flow_schema_values import (
     builder_output_type_values,
     document_delivery_mode_values,
 )
-from eneo.flows.ai_builder.ai_builder_proposal_intent import SemanticStepIntent
+from eneo.flows.ai_builder.ai_builder_proposal_intent import (
+    OrderedEditProposal,
+    SemanticStepIntent,
+)
 from eneo.flows.ai_builder.ai_builder_resource_catalog import (
     AIBuilderAvailableModelResource,
     AIBuilderResourceCatalog,
@@ -111,6 +117,73 @@ class TestBuildEditFlowToolSchema:
         assert "add" in serialized
         assert "placement" not in serialized
         assert "patch" not in serialized
+
+    def test_schema_and_parser_accept_the_same_partial_assistant_patch(self) -> None:
+        schema = build_edit_flow_tool_schema(
+            [_make_step(1)],
+            resource_catalog=_empty_catalog(),
+            tool_name=PROPOSE_FLOW_TOOL_NAME,
+        )
+        parameters = schema["function"]["parameters"]
+        arguments = {
+            "plan_rationale": "Use the configured model for this step.",
+            "steps": [
+                {
+                    "kind": "modify",
+                    "existing_step_ref": "existing_step_1",
+                    "assistant_spec": {"model_ref": None},
+                }
+            ],
+        }
+
+        jsonschema.validate(arguments, parameters)
+        assert OrderedEditProposal.model_validate(arguments).steps[0].kind == "modify"
+
+        assert parameters["additionalProperties"] is False
+        assistant_schema = _modify_step_schema(schema)["properties"]["assistant_spec"]
+        assert assistant_schema["additionalProperties"] is False
+        assert "required" not in assistant_schema
+
+    @pytest.mark.parametrize(
+        "arguments",
+        [
+            {
+                "plan_rationale": "Keep the flow unchanged.",
+                "steps": [
+                    {
+                        "kind": "modify",
+                        "existing_step_ref": "existing_step_1",
+                    }
+                ],
+                "unexpected": True,
+            },
+            {
+                "plan_rationale": "Update the instructions.",
+                "steps": [
+                    {
+                        "kind": "modify",
+                        "existing_step_ref": "existing_step_1",
+                        "assistant_spec": {
+                            "instructions": "Compare the evidence.",
+                            "unexpected": True,
+                        },
+                    }
+                ],
+            },
+        ],
+    )
+    def test_schema_rejects_fields_the_parser_forbids(
+        self,
+        arguments: dict[str, object],
+    ) -> None:
+        schema = build_edit_flow_tool_schema(
+            [_make_step(1)],
+            resource_catalog=_empty_catalog(),
+            tool_name=PROPOSE_FLOW_TOOL_NAME,
+        )
+
+        with pytest.raises(jsonschema.ValidationError):
+            jsonschema.validate(arguments, schema["function"]["parameters"])
 
     def test_schema_exposes_direct_flow_metadata_fields_not_metadata_patch(self):
         schema = build_edit_flow_tool_schema(

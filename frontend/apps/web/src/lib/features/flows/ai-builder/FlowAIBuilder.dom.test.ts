@@ -23,6 +23,7 @@ vi.mock("$lib/core/Eneo", () => ({
 import FlowAIBuilderHarness from "./test-harnesses/FlowAIBuilderHarness.svelte";
 import type { AIBuilderClientTransport } from "./FlowAIBuilderDriver";
 import type { FlowAIBuilderService } from "./FlowAIBuilderService.svelte.ts";
+import type { AIBuilderSavedFlowStepScope } from "./protocol";
 
 const DEFAULT_MODEL_ID = "11111111-1111-4111-8111-111111111199";
 const DEFAULT_MODEL_RESPONSE = {
@@ -343,6 +344,125 @@ function twoSessionHarness(): { transport: AIBuilderClientTransport } {
 }
 
 describe("FlowAIBuilder shell layout", () => {
+  it("sends the selected saved Flow step scope from the visible composer", async () => {
+    const session = {
+      session_id: "saved-step-session",
+      space_id: "space-1",
+      status: "chatting" as const,
+      target_kind: "edit" as const,
+      flow_id: "flow-1",
+      latest_plan_id: null,
+      conversation: [],
+      latest_turn: null
+    };
+    const fetch = vi.fn(async (path: string, init?: { method?: string }) => {
+      if (path.endsWith("/models")) return DEFAULT_MODEL_RESPONSE;
+      if (path === "/api/v1/flows/ai-builder/sessions" && init?.method === "get") {
+        return { sessions: [] };
+      }
+      if (path === "/api/v1/flows/ai-builder/sessions" && init?.method === "post") {
+        return session;
+      }
+      if (path === "/api/v1/flows/ai-builder/sessions/{session_id}") return session;
+      return {};
+    }) as unknown as AIBuilderClientTransport["fetch"];
+    let submittedBody: unknown;
+    const stream = vi.fn(async (_path, init, handlers) => {
+      submittedBody = init.requestBody["application/json"];
+      handlers.onMessage({ event: "done", data: "" });
+      handlers.onClose();
+    }) as AIBuilderClientTransport["stream"];
+    let service: FlowAIBuilderService | undefined;
+    let builder:
+      { focusSavedFlowStep: (scope: AIBuilderSavedFlowStepScope) => Promise<void> } | undefined;
+
+    render(FlowAIBuilderHarness, {
+      transport: { fetch, stream },
+      targetKind: "edit",
+      flowId: "flow-1",
+      onservice: (instance: FlowAIBuilderService) => (service = instance),
+      onbuilder: (instance: typeof builder) => (builder = instance)
+    });
+
+    await waitFor(() => expect(service?.hasSession).toBe(true));
+    await waitFor(() => expect(builder).toBeDefined());
+    await builder!.focusSavedFlowStep({
+      stepNumber: 2,
+      stepName: "Jämför likheter och skillnader",
+      editContext: {
+        kind: "saved_flow_step",
+        flow_step_id: "22222222-2222-4222-8222-222222222222"
+      }
+    });
+
+    expect(await screen.findByText(/Redigerar steg 2/)).toBeTruthy();
+    const textbox = screen.getByRole("textbox", {
+      name: m.ai_builder_saved_step_prompt_placeholder()
+    }) as HTMLTextAreaElement;
+    expect(textbox.placeholder).toBe(m.ai_builder_saved_step_prompt_placeholder());
+    await waitFor(() => expect(document.activeElement).toBe(textbox));
+    await fireEvent.input(textbox, { target: { value: "Ändra bara det här steget" } });
+    await fireEvent.keyDown(textbox, { key: "Enter" });
+
+    await waitFor(() => expect(stream).toHaveBeenCalledOnce());
+    expect(submittedBody).toMatchObject({
+      message: "Ändra bara det här steget",
+      edit_context: {
+        kind: "saved_flow_step",
+        flow_step_id: "22222222-2222-4222-8222-222222222222"
+      }
+    });
+  });
+
+  it("asks before replacing an unapproved AI edit with a saved-step edit", async () => {
+    let service: FlowAIBuilderService | undefined;
+    let builder:
+      { focusSavedFlowStep: (scope: AIBuilderSavedFlowStepScope) => Promise<void> } | undefined;
+
+    render(FlowAIBuilderHarness, {
+      transport: planSessionHarness(),
+      targetKind: "edit",
+      flowId: "flow-1",
+      onservice: (instance: FlowAIBuilderService) => (service = instance),
+      onbuilder: (instance: typeof builder) => (builder = instance)
+    });
+
+    await waitFor(() => expect(service).toBeDefined());
+    await waitFor(() => expect(builder).toBeDefined());
+    await waitFor(() => expect(service?.isInitializing).toBe(false));
+    service!.seedState({
+      messages: [{ role: "user", content: "Pågående ändring", timestamp: Date.now() }]
+    });
+    await waitFor(() => expect(service?.messages).toHaveLength(1));
+    const startFreshSession = vi.spyOn(service!, "startFreshSession").mockResolvedValue(undefined);
+    const scope: AIBuilderSavedFlowStepScope = {
+      stepNumber: 2,
+      stepName: "Jämför likheter och skillnader",
+      editContext: {
+        kind: "saved_flow_step",
+        flow_step_id: "22222222-2222-4222-8222-222222222222"
+      }
+    };
+
+    await builder!.focusSavedFlowStep(scope);
+
+    expect(await screen.findByText(m.ai_builder_replace_edit_title())).toBeTruthy();
+    expect(startFreshSession).not.toHaveBeenCalled();
+
+    await fireEvent.click(screen.getByRole("button", { name: m.ai_builder_replace_edit_cancel() }));
+    expect(startFreshSession).not.toHaveBeenCalled();
+    await waitFor(() => expect(screen.queryByText(m.ai_builder_replace_edit_title())).toBeNull());
+
+    await builder!.focusSavedFlowStep(scope);
+    await fireEvent.click(
+      await screen.findByRole("button", { name: m.ai_builder_replace_edit_action() })
+    );
+
+    await waitFor(() => expect(startFreshSession).toHaveBeenCalledOnce());
+    expect(startFreshSession).toHaveBeenCalledWith("edit");
+    expect(await screen.findByText(/Redigerar steg 2/)).toBeTruthy();
+  });
+
   it("activates the Plan view when a plan arrives and keeps both panes mounted", async () => {
     render(FlowAIBuilderHarness, { transport: planSessionHarness() });
 
@@ -815,6 +935,71 @@ describe("FlowAIBuilder clarification history", () => {
 });
 
 describe("FlowAIBuilder generation wait state", () => {
+  it("opens the stable split workspace as soon as confirmed requirements start building", async () => {
+    const session = {
+      session_id: "confirmed-build-session",
+      space_id: "space-1",
+      status: "chatting" as const,
+      target_kind: "edit" as const,
+      flow_id: "flow-1",
+      latest_plan_id: null,
+      conversation: [],
+      latest_turn: null
+    };
+    const fetch = vi.fn(async (path: string, init?: { method?: string }) => {
+      if (path.endsWith("/models")) return DEFAULT_MODEL_RESPONSE;
+      if (path === "/api/v1/flows/ai-builder/sessions" && init?.method === "get") {
+        return { sessions: [] };
+      }
+      if (path === "/api/v1/flows/ai-builder/sessions" && init?.method === "post") {
+        return session;
+      }
+      if (path === "/api/v1/flows/ai-builder/sessions/{session_id}") return session;
+      return {};
+    }) as unknown as AIBuilderClientTransport["fetch"];
+    let service: FlowAIBuilderService | undefined;
+
+    render(FlowAIBuilderHarness, {
+      transport: { fetch, stream: vi.fn() },
+      targetKind: "edit",
+      flowId: "flow-1",
+      onservice: (instance: FlowAIBuilderService) => (service = instance)
+    });
+
+    await waitFor(() => expect(service?.hasSession).toBe(true));
+    service!.seedState({
+      messages: [
+        {
+          role: "assistant",
+          content: "",
+          timestamp: Date.now(),
+          requirementsSummary: {
+            requirements_version: "v1",
+            summary: "Jämför underlagen.",
+            key_decisions: [],
+            input_description: "Text",
+            output_description: "Text",
+            assumptions: [],
+            manual_setup_notes: []
+          }
+        },
+        {
+          role: "user",
+          content: "Ja, bygg planen.",
+          timestamp: Date.now(),
+          metadata: { requirements_confirmed: true, requirements_version: "v1" }
+        }
+      ],
+      streamState: "streaming",
+      statusMessage: null,
+      currentPlan: null
+    });
+
+    expect(service!.phase).toBe("building");
+    expect(await screen.findByText(m.ai_builder_wait_expectation())).toBeTruthy();
+    expect(document.getElementById("ai-builder-plan-pane")).toBeTruthy();
+  });
+
   it("keeps the composer editable as a saved draft while generation streams", async () => {
     const draft = {
       session_id: "gen-session",

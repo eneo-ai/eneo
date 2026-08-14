@@ -143,7 +143,8 @@
     onStepChanged,
     onJsonValidationChanged,
     onOpenTranscriptionSettings,
-    onEditWithAI
+    onBuildFlowWithAI,
+    onEditStepWithAI
   }: {
     steps: FlowStep[];
     activeStepId: string | null;
@@ -166,7 +167,8 @@
     onStepChanged?: (detail: { index: number; step: FlowStep }) => void;
     onJsonValidationChanged?: (detail: { hasErrors: boolean; fields: string[] }) => void;
     onOpenTranscriptionSettings?: () => void;
-    onEditWithAI?: () => void;
+    onBuildFlowWithAI?: () => void;
+    onEditStepWithAI?: (step: FlowStep) => void;
   } = $props();
 
   // ---------------------------------------------------------------------------
@@ -839,8 +841,8 @@
                 {m.flow_starter_drafting_action()}
               </Button>
             {/if}
-            {#if onEditWithAI}
-              <Button variant="outline" onclick={onEditWithAI}>
+            {#if onBuildFlowWithAI}
+              <Button variant="outline" onclick={onBuildFlowWithAI}>
                 {m.ai_builder_empty_state_cta()}
               </Button>
             {/if}
@@ -870,17 +872,24 @@
   >
     <div class="flow-step-editor">
       <div class="flow-step-editor-content mx-auto w-full max-w-[1000px]">
-        <div class="mb-4 min-w-0">
-          <span class="text-secondary block text-xs font-medium tracking-[0.02em]">
-            {m.flow_step_position({
-              index: String(activeStep.step_order),
-              total: String(steps.length)
-            })}
-          </span>
-          {#if activeStep.user_description}
-            <h2 class="text-primary mt-1 truncate text-lg font-semibold tracking-[-0.02em]">
-              {activeStep.user_description}
-            </h2>
+        <div class="mb-4 flex min-w-0 items-start justify-between gap-4">
+          <div class="min-w-0">
+            <span class="text-secondary block text-xs font-medium tracking-[0.02em]">
+              {m.flow_step_position({
+                index: String(activeStep.step_order),
+                total: String(steps.length)
+              })}
+            </span>
+            {#if activeStep.user_description}
+              <h2 class="text-primary mt-1 truncate text-lg font-semibold tracking-[-0.02em]">
+                {activeStep.user_description}
+              </h2>
+            {/if}
+          </div>
+          {#if onEditStepWithAI && activeStep.id && !isPublished}
+            <Button variant="outline" size="sm" onclick={() => onEditStepWithAI?.(activeStep)}>
+              {m.flow_step_change_with_ai()}
+            </Button>
           {/if}
         </div>
         {#if stepSummaryModel}
@@ -941,6 +950,7 @@
               onInstructionFocused={() => (focusInstructionPending = false)}
               assistant={assistantState.assistant}
               assistantLoading={assistantState.loading}
+              promptGuideAvailability={assistantState.promptGuideAvailability}
               availableModels={$currentSpace.completion_models}
               {steps}
               {formSchema}
@@ -952,7 +962,14 @@
               onAssistantFieldChange={(detail) => updateAssistantField(detail.field, detail.value)}
               onInstructionDraft={(detail) => queueInstructionDraft(detail.value)}
               onInstructionCommit={(detail) => void updateInstruction(detail.value)}
-              {onEditWithAI}
+              onPreparePromptGuide={async () => {
+                try {
+                  await flowEditor.flushAssistantSaves();
+                  return true;
+                } catch {
+                  return false;
+                }
+              }}
             />
           {/if}
         </FlowStepChapter>
@@ -999,6 +1016,7 @@
               onInstructionFocused={() => (focusInstructionPending = false)}
               assistant={assistantState.assistant}
               assistantLoading={assistantState.loading}
+              promptGuideAvailability={assistantState.promptGuideAvailability}
               availableModels={$currentSpace.completion_models}
               {steps}
               {formSchema}
@@ -1010,7 +1028,14 @@
               onAssistantFieldChange={(detail) => updateAssistantField(detail.field, detail.value)}
               onInstructionDraft={(detail) => queueInstructionDraft(detail.value)}
               onInstructionCommit={(detail) => void updateInstruction(detail.value)}
-              {onEditWithAI}
+              onPreparePromptGuide={async () => {
+                try {
+                  await flowEditor.flushAssistantSaves();
+                  return true;
+                } catch {
+                  return false;
+                }
+              }}
             />
           {/if}
 

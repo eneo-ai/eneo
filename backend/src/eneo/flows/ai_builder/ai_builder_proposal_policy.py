@@ -19,7 +19,6 @@ from eneo.flows.ai_builder.ai_builder_critic_invariants import (
     evaluate_edit_topology_invariants,
 )
 from eneo.flows.ai_builder.ai_builder_domain_models import (
-    BuilderPlan,
     ConversationMessage,
     LintWarning,
 )
@@ -53,7 +52,7 @@ if TYPE_CHECKING:
         CreateCompileContext,
     )
     from eneo.flows.ai_builder.ai_builder_plan_edit_context import (
-        AIBuilderPlanEditContext,
+        ScopedEditContext,
     )
     from eneo.flows.ai_builder.ai_builder_resource_catalog import (
         AIBuilderResourceCatalog,
@@ -268,8 +267,8 @@ def resolve_ui_language(
 def terminal_output_type_for_edit_conversation(
     conversation: list[ConversationMessage],
     *,
-    plan_edit_context: "AIBuilderPlanEditContext | None",
-    prior_plan: BuilderPlan | None,
+    plan_edit_context: "ScopedEditContext | None",
+    prior_spec: FlowDraftSpecCore | None,
 ) -> OutputType | None:
     if plan_edit_context is not None:
         user_messages = [
@@ -278,11 +277,11 @@ def terminal_output_type_for_edit_conversation(
             if message.role == "user" and message.content
         ]
         if not user_messages:
-            return _terminal_output_type_from_prior_plan(prior_plan)
+            return _terminal_output_type_from_prior_spec(prior_spec)
         latest_user_message = user_messages[-1]
         latest_user_content = latest_user_message.content
         if latest_user_content is None:
-            return _terminal_output_type_from_prior_plan(prior_plan)
+            return _terminal_output_type_from_prior_spec(prior_spec)
         output_intent = resolve_output_intent(
             latest_user_content,
             extract_answer_signals([latest_user_message]),
@@ -292,7 +291,7 @@ def terminal_output_type_for_edit_conversation(
         return (
             latest_output_type
             or _terminal_output_type_from_slot_classification(latest_user_message)
-            or _terminal_output_type_from_prior_plan(prior_plan)
+            or _terminal_output_type_from_prior_spec(prior_spec)
         )
 
     output_intent = resolve_output_intent(
@@ -303,12 +302,12 @@ def terminal_output_type_for_edit_conversation(
     return _output_type_from_intent(output_intent.terminal_output)
 
 
-def _terminal_output_type_from_prior_plan(
-    prior_plan: BuilderPlan | None,
+def _terminal_output_type_from_prior_spec(
+    prior_spec: FlowDraftSpecCore | None,
 ) -> OutputType | None:
-    if prior_plan is None or not prior_plan.spec.steps:
+    if prior_spec is None or not prior_spec.steps:
         return None
-    output_type = prior_plan.spec.steps[-1].output_type
+    output_type = prior_spec.steps[-1].output_type
     if output_type in _PRESERVED_PLAN_EDIT_TERMINAL_TYPES:
         return output_type
     return None

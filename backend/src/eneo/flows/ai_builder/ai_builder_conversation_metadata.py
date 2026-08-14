@@ -18,6 +18,7 @@ from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
+    TypeAdapter,
     ValidationError,
     field_validator,
     model_validator,
@@ -35,7 +36,8 @@ from eneo.flows.ai_builder.ai_builder_event_models import (
 )
 from eneo.flows.ai_builder.ai_builder_field_identity import fold_result_field_name
 from eneo.flows.ai_builder.ai_builder_plan_edit_context import (
-    AIBuilderPlanEditContext,
+    AIBuilderEditContext,
+    ResolvedAIBuilderEditContext,
 )
 from eneo.flows.ai_builder.ai_builder_proposal_intent import FlowInputFieldIntent
 from eneo.flows.ai_builder.ai_builder_result_contract import (
@@ -86,6 +88,10 @@ from eneo.flows.flow_review_policy import FlowStepReviewMode
 from eneo.main.logging import get_logger
 
 logger = get_logger(__name__)
+
+_EDIT_CONTEXT_ADAPTER: TypeAdapter[AIBuilderEditContext] = TypeAdapter(
+    AIBuilderEditContext
+)
 
 QUESTION_ANSWER_METADATA_KEY = "question_answer"
 QUESTION_RESPONSE_METADATA_KEY = "question_response"
@@ -1769,12 +1775,45 @@ def file_ids_from_metadata(metadata: object) -> list[UUID]:
     return file_ids
 
 
+def edit_context_from_metadata(metadata: object) -> AIBuilderEditContext | None:
+    metadata_map = _metadata_mapping(metadata)
+    if metadata_map is None:
+        return None
+    raw_context = metadata_map.get(EDIT_CONTEXT_METADATA_KEY)
+    if raw_context is None:
+        return None
+    try:
+        return _EDIT_CONTEXT_ADAPTER.validate_python(raw_context)
+    except ValidationError as error:
+        _warn_invalid_persisted_metadata(EDIT_CONTEXT_METADATA_KEY, error)
+        return None
+
+
+class _ConversationMetadataMessage(Protocol):
+    @property
+    def role(self) -> str: ...
+
+    @property
+    def metadata(self) -> FlowPersistedJsonObject | None: ...
+
+
+def latest_user_edit_context(
+    conversation: Sequence[_ConversationMetadataMessage],
+) -> AIBuilderEditContext | None:
+    """Return scope only when it belongs to the latest user intent."""
+
+    for message in reversed(conversation):
+        if message.role == "user":
+            return edit_context_from_metadata(message.metadata)
+    return None
+
+
 def metadata_for_user_message(
     *,
     question_answer: AIBuilderQuestionAnswerInput | None = None,
     ui_language: str | None = None,
     file_ids: Sequence[UUID] | None = None,
-    edit_context: AIBuilderPlanEditContext | None = None,
+    edit_context: AIBuilderEditContext | ResolvedAIBuilderEditContext | None = None,
 ) -> FlowPersistedJsonObject | None:
     metadata: FlowPersistedJsonObject = {}
     if question_answer is not None:

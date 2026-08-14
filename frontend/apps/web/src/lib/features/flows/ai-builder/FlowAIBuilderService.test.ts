@@ -93,6 +93,21 @@ function makeService() {
 }
 
 describe("FlowAIBuilderService", () => {
+  it("owns and clears the saved-step launch scope", () => {
+    const service = makeService();
+    const scope = {
+      editContext: { kind: "saved_flow_step" as const, flow_step_id: "step-1" },
+      stepName: "Extract facts",
+      stepNumber: 2
+    };
+
+    service.setSavedFlowStepScope(scope);
+    expect(service.savedFlowStepScope).toEqual(scope);
+
+    service.clearSavedFlowStepScope();
+    expect(service.savedFlowStepScope).toBeNull();
+  });
+
   it("passes Driver-owned field getters through the reactive facade", () => {
     const service = makeService();
     const session = makeSession({ session_id: "session-2", status: "awaiting_approval" });

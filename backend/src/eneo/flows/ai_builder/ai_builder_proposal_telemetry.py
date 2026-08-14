@@ -122,6 +122,9 @@ APPLY_TELEMETRY_SCHEMA_VERSION = 1
 logger = get_logger(__name__)
 _FAILURE_CODE_RE = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
 _MAX_ATTEMPT_FAILURE_CODES = 3
+PROPOSAL_PARSE_JSON_FAILURE_CODE = "proposal_parse_json"
+PROPOSAL_PARSE_SCHEMA_FAILURE_CODE = "proposal_parse_schema"
+PROPOSAL_PARSE_MODEL_FAILURE_CODE = "proposal_parse_model"
 
 
 def _safe_str(value: object) -> str | None:

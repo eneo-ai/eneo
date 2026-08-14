@@ -42,6 +42,9 @@ from eneo.flows.ai_builder.ai_builder_error_contract import (
     AIBuilderErrorCode,
 )
 from eneo.flows.ai_builder.ai_builder_flow_context import build_flow_context
+from eneo.flows.ai_builder.ai_builder_form_fields import (
+    extract_form_fields_from_metadata,
+)
 from eneo.flows.ai_builder.ai_builder_framework_policy import (
     aggregate_unprompted_user_text_preserving_case,
 )
@@ -49,7 +52,7 @@ from eneo.flows.ai_builder.ai_builder_output_sections_signals import (
     extract_requested_output_sections,
 )
 from eneo.flows.ai_builder.ai_builder_plan_edit_context import (
-    AIBuilderPlanEditContext,
+    ResolvedAIBuilderEditContext,
     build_plan_revision_prompt_block,
 )
 from eneo.flows.ai_builder.ai_builder_plan_proposal_task import (
@@ -99,8 +102,10 @@ from eneo.flows.ai_builder.ai_builder_turn_controller import (
     resolve_turn_control,
 )
 from eneo.flows.ai_builder.planning_state import PlanningState
+from eneo.flows.application.flow_authoring_snapshot import current_flow_authoring_spec
 from eneo.flows.assistant_authoring_snapshot import AssistantAuthoringSnapshots
 from eneo.flows.domain.mapped_execution_policy import FlowMappedExecutionPolicy
+from eneo.flows.flow_authoring_spec import FlowDraftSpecCore
 from eneo.main.logging import get_logger
 from eneo.observability.failure_events import stable_hash
 from eneo.tokens.token_utils import count_message_tokens, count_tool_tokens
@@ -109,7 +114,7 @@ if TYPE_CHECKING:
     from eneo.completion_models.infrastructure.completion_service import (
         ResolvedCompletionModelRoute,
     )
-    from eneo.flows.domain.flow import Flow, FlowStep
+    from eneo.flows.domain.flow import Flow
 
 logger = get_logger(__name__)
 
@@ -131,7 +136,7 @@ class PlannerRequestPreparationInput:
     mapped_execution_policy: FlowMappedExecutionPolicy
     base_planning_state_version: int
     tenant_id: UUID
-    plan_edit_context: AIBuilderPlanEditContext | None
+    plan_edit_context: ResolvedAIBuilderEditContext | None
     prior_plan_for_revision: BuilderPlan | None
     persisted_planning_state: PlanningState | None
     current_turn_start: int
@@ -175,8 +180,8 @@ class ServerOutputPrepared(_PreparedBase):
 class ProposalPrepared(_PreparedBase):
     message_groups: tuple[ProposalMessageGroup, ...]
     system_prompt_hash: str
-    plan_edit_context: AIBuilderPlanEditContext | None
-    prior_plan_for_revision: BuilderPlan | None
+    plan_edit_context: ResolvedAIBuilderEditContext | None
+    prior_spec_for_revision: FlowDraftSpecCore | None
     resource_catalog: AIBuilderResourceCatalog
     planning_state: PlanningState
     compile_context: CreateCompileContext | None
@@ -271,6 +276,10 @@ async def prepare_planner_request(
         attachment_context=attachment_context_result,
         schema_candidates=discovery_runtime.schema_candidates,
         schema_direction_pending=discovery_runtime.schema_direction_pending,
+        requirements_confirmation_required=(
+            request.plan_edit_context is None
+            or request.plan_edit_context.scope != "step"
+        ),
     )
     if not isinstance(turn_control.decision, GenerateProposal):
         return ServerOutputPrepared(
@@ -298,7 +307,8 @@ async def prepare_planner_request(
         flow_context=flow_context,
         is_edit_mode=request.flow is not None,
         resource_catalog=resource_catalog,
-        current_steps=None if request.flow is None else list(request.flow.steps),
+        flow=request.flow,
+        assistant_snapshots=request.assistant_snapshots,
         plan_edit_context=request.plan_edit_context,
         prior_plan_for_revision=request.prior_plan_for_revision,
         litellm_model=request.completion_model_route.litellm_model,
@@ -321,8 +331,9 @@ def build_proposal_prepared(
     flow_context: str | None,
     is_edit_mode: bool,
     resource_catalog: AIBuilderResourceCatalog,
-    current_steps: list["FlowStep"] | None,
-    plan_edit_context: AIBuilderPlanEditContext | None,
+    flow: "Flow | None",
+    assistant_snapshots: AssistantAuthoringSnapshots | None,
+    plan_edit_context: ResolvedAIBuilderEditContext | None,
     prior_plan_for_revision: BuilderPlan | None,
     litellm_model: str,
     max_input_tokens: int,
@@ -351,9 +362,16 @@ def build_proposal_prepared(
             else ()
         ),
     )
-    plan_revision_context = build_plan_revision_prompt_block(
+    prior_spec_for_revision = _prior_spec_for_revision(
         context=plan_edit_context,
         prior_plan=prior_plan_for_revision,
+        flow=flow,
+        assistant_snapshots=assistant_snapshots,
+        resource_catalog=resource_catalog,
+    )
+    plan_revision_context = build_plan_revision_prompt_block(
+        context=plan_edit_context,
+        prior_spec=prior_spec_for_revision,
     )
     compile_context = create_compile_context_from_planning_state(
         planning_state,
@@ -361,7 +379,7 @@ def build_proposal_prepared(
         requested_output_sections=requested_output_sections,
     )
     proposal_tool_schema = build_propose_flow_tool_schema(
-        current_steps=current_steps,
+        current_steps=None if flow is None else list(flow.steps),
         resource_catalog=resource_catalog,
     )
     incompatible_field_names = (
@@ -440,7 +458,7 @@ def build_proposal_prepared(
         message_groups=prepared_prompt.message_groups,
         system_prompt_hash=prepared_prompt.system_prompt_hash,
         plan_edit_context=plan_edit_context,
-        prior_plan_for_revision=prior_plan_for_revision,
+        prior_spec_for_revision=prior_spec_for_revision,
         resource_catalog=resource_catalog,
         planning_state=planning_state,
         compile_context=compile_context,
@@ -450,6 +468,33 @@ def build_proposal_prepared(
             output_reserve_tokens=max_output_tokens,
             safety_buffer_tokens=budget_policy.conversation_safety_buffer_tokens,
         ),
+    )
+
+
+def _prior_spec_for_revision(
+    *,
+    context: ResolvedAIBuilderEditContext | None,
+    prior_plan: BuilderPlan | None,
+    flow: "Flow | None",
+    assistant_snapshots: AssistantAuthoringSnapshots | None,
+    resource_catalog: AIBuilderResourceCatalog,
+) -> FlowDraftSpecCore | None:
+    if context is None:
+        return None
+    if prior_plan is not None:
+        return prior_plan.spec
+    if flow is None:
+        raise AIBuilderBadRequestException(
+            "The saved Flow step is not available in this AI Builder session.",
+            code=AIBuilderErrorCode.INVALID_EXISTING_STEP_REF,
+        )
+    return current_flow_authoring_spec(
+        current_steps=list(flow.steps),
+        flow_name=flow.name,
+        flow_description=flow.description,
+        assistant_snapshots=assistant_snapshots,
+        assistant_snapshot_projector=resource_catalog.assistant_spec_from_snapshot,
+        form_fields=extract_form_fields_from_metadata(flow.metadata_json),
     )
 
 

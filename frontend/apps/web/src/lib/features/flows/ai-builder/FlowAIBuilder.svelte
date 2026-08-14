@@ -3,6 +3,7 @@
   import { fade } from "svelte/transition";
   import { SvelteSet } from "svelte/reactivity";
   import * as Alert from "$lib/components/ui/alert/index.js";
+  import * as AlertDialog from "$lib/components/ui/alert-dialog/index.js";
   import { Button } from "$lib/components/ui/button/index.js";
   import { Skeleton } from "$lib/components/ui/skeleton/index.js";
   import FlowAIBuilderChat from "./FlowAIBuilderChat.svelte";
@@ -11,8 +12,8 @@
   import FlowAIBuilderPlanPane from "./FlowAIBuilderPlanPane.svelte";
   import { shouldShowEditStartOver } from "./flowAIBuilderReset";
   import { getAIBuilderService } from "./FlowAIBuilderService.svelte.ts";
-  import type { AIBuilderSuggestChangeIntent } from "./protocol";
-  import { onMount } from "svelte";
+  import type { AIBuilderSavedFlowStepScope, AIBuilderSuggestChangeIntent } from "./protocol";
+  import { onMount, tick } from "svelte";
 
   interface Props {
     targetKind?: "create" | "edit";
@@ -32,6 +33,8 @@
   // One-shot seed: only the value present at mount matters, by design.
   // svelte-ignore state_referenced_locally
   let pendingPrefill = $state(initialPrompt);
+  let pendingSavedFlowStepScope = $state<AIBuilderSavedFlowStepScope | null>(null);
+  let showReplaceEditSessionDialog = $state(false);
 
   // A generation attempt was visible in the plan pane; if it fails with no
   // plan to show, the pane stays and owns the failure banner (E1, §4).
@@ -39,7 +42,11 @@
   $effect(() => {
     if (!service.hasSession) {
       hadGenerationStatus = false;
-    } else if (service.statusMessage !== null || service.hasSeenPlanInSession) {
+    } else if (
+      service.statusMessage !== null ||
+      service.hasSeenPlanInSession ||
+      (service.phase === "building" && service.isStreaming)
+    ) {
       hadGenerationStatus = true;
     }
   });
@@ -58,6 +65,7 @@
     service.currentPlan !== null ||
       service.isConflict ||
       service.statusMessage !== null ||
+      (service.phase === "building" && service.isStreaming) ||
       (service.hasSeenPlanInSession && service.isStreaming) ||
       generationFailedWithoutPlan
   );
@@ -207,6 +215,35 @@
   function handleStartOver() {
     chatRef?.resetComposerContext();
     void service.startFreshSession("edit");
+  }
+
+  async function activateSavedFlowStep(scope: AIBuilderSavedFlowStepScope) {
+    service.setSavedFlowStepScope(scope);
+    // The shell can bind before its lazily rendered chat child. Let the scope
+    // render once so the public launch action always reaches the real composer.
+    await tick();
+    chatRef?.focusInput({ placeholder: m.ai_builder_saved_step_prompt_placeholder() });
+  }
+
+  export async function focusSavedFlowStep(scope: AIBuilderSavedFlowStepScope) {
+    if (service.messages.length > 0 || service.currentPlan !== null) {
+      pendingSavedFlowStepScope = scope;
+      showReplaceEditSessionDialog = true;
+      return;
+    }
+    await activateSavedFlowStep(scope);
+  }
+
+  function cancelSavedFlowStepReplacement() {
+    pendingSavedFlowStepScope = null;
+  }
+
+  async function confirmSavedFlowStepReplacement() {
+    const scope = pendingSavedFlowStepScope;
+    if (scope === null) return;
+    await service.startFreshSession("edit");
+    pendingSavedFlowStepScope = null;
+    await activateSavedFlowStep(scope);
   }
 </script>
 
@@ -474,6 +511,27 @@
     </div>
   </div>
 {/if}
+
+<AlertDialog.Root bind:open={showReplaceEditSessionDialog}>
+  <AlertDialog.Content>
+    <AlertDialog.Header>
+      <AlertDialog.Title>{m.ai_builder_replace_edit_title()}</AlertDialog.Title>
+      <AlertDialog.Description>
+        {m.ai_builder_replace_edit_description({
+          stepName: pendingSavedFlowStepScope?.stepName ?? m.flow_step_unnamed()
+        })}
+      </AlertDialog.Description>
+    </AlertDialog.Header>
+    <AlertDialog.Footer>
+      <AlertDialog.Cancel onclick={cancelSavedFlowStepReplacement}>
+        {m.ai_builder_replace_edit_cancel()}
+      </AlertDialog.Cancel>
+      <AlertDialog.Action variant="destructive" onclick={confirmSavedFlowStepReplacement}>
+        {m.ai_builder_replace_edit_action()}
+      </AlertDialog.Action>
+    </AlertDialog.Footer>
+  </AlertDialog.Content>
+</AlertDialog.Root>
 
 <style lang="postcss">
   @reference "@eneo/ui/styles";

@@ -212,7 +212,7 @@ def test_plan_edit_output_intent_preserves_prior_document_terminal_type() -> Non
             )
         ],
         plan_edit_context=context,
-        prior_plan=plan,
+        prior_spec=plan.spec,
     )
 
     assert output_type == OutputType.PDF
@@ -365,7 +365,7 @@ def test_plan_edit_output_intent_uses_latest_explicit_document_change() -> None:
             )
         ],
         plan_edit_context=context,
-        prior_plan=plan,
+        prior_spec=plan.spec,
     )
 
     assert output_type == OutputType.PDF

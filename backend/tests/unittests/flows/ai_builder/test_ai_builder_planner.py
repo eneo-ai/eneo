@@ -64,7 +64,10 @@ from eneo.flows.ai_builder.ai_builder_events import (
     build_text_event,
     encode_ai_builder_stream_event,
 )
-from eneo.flows.ai_builder.ai_builder_plan_edit_context import AIBuilderPlanEditContext
+from eneo.flows.ai_builder.ai_builder_plan_edit_context import (
+    AIBuilderPlanEditContext,
+    AIBuilderSavedFlowStepEditContext,
+)
 from eneo.flows.ai_builder.ai_builder_plan_quality_critic import (
     build_conversation_critic_context,
 )
@@ -529,7 +532,8 @@ def test_named_report_sections_flow_from_request_preparation_into_lowering() -> 
         resource_catalog=build_ai_builder_resource_catalog(
             available_models=[], available_kbs=[], prior_bindings=()
         ),
-        current_steps=None,
+        flow=None,
+        assistant_snapshots=None,
         plan_edit_context=None,
         prior_plan_for_revision=None,
         litellm_model="openai/gpt-5.4",
@@ -702,6 +706,55 @@ def test_prepare_user_question_metadata_preserves_requirements_confirmation_and_
         "requirements_version": "req-v2",
         "ui_language": "en",
     }
+
+
+@pytest.mark.asyncio
+async def test_requirements_confirmation_reuses_latest_saved_step_scope(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    planner = _make_planner()
+    step_id = uuid4()
+    scoped_context = AIBuilderSavedFlowStepEditContext(flow_step_id=step_id)
+    planner.repo.get_session.return_value = SimpleNamespace(
+        conversation=[
+            ConversationMessage(
+                role="user",
+                content="Change this step",
+                metadata={"edit_context": scoped_context.to_metadata()},
+            ),
+            ConversationMessage(role="assistant", content="Confirm requirements"),
+        ],
+        status=SessionStatus.CHATTING,
+        planning_state_version=1,
+        latest_plan_id=None,
+    )
+    resolve_context = AsyncMock(side_effect=RuntimeError("scope captured"))
+    monkeypatch.setattr(
+        "eneo.flows.ai_builder.ai_builder_planner.resolve_plan_edit_context",
+        resolve_context,
+    )
+
+    stream = planner.send_message(
+        session_id=uuid4(),
+        client_turn_id=_TEST_CLIENT_TURN_ID,
+        request_fingerprint=_TEST_REQUEST_FINGERPRINT,
+        request_snapshot=_test_request_snapshot("Confirm"),
+        message="Confirm",
+        question_answer={
+            "kind": "requirements_confirmation",
+            "requirements_confirmed": True,
+        },
+        completion_model_route=_route(),
+        flow=cast(Any, SimpleNamespace(id=uuid4())),
+        max_input_tokens=4096,
+        max_output_tokens=1024,
+        budget_policy=_budget_policy(),
+    )
+
+    with pytest.raises(RuntimeError, match="scope captured"):
+        await anext(stream)
+
+    assert resolve_context.await_args.kwargs["context"] == scoped_context
 
 
 def test_prepare_user_question_metadata_ingests_structured_slot_answer() -> None:
@@ -1734,7 +1787,8 @@ def test_real_proposal_boundary_fits_attachments_and_protects_current_turn() -> 
         "flow_context": None,
         "is_edit_mode": False,
         "resource_catalog": catalog,
-        "current_steps": None,
+        "flow": None,
+        "assistant_snapshots": None,
         "plan_edit_context": None,
         "prior_plan_for_revision": None,
         "litellm_model": model_name,
@@ -1839,7 +1893,8 @@ def test_proposal_boundary_rejects_confirmed_primary_input_shadow() -> None:
                 available_models=None,
                 available_kbs=None,
             ),
-            current_steps=None,
+            flow=None,
+            assistant_snapshots=None,
             plan_edit_context=None,
             prior_plan_for_revision=None,
             litellm_model="gpt-4o-mini",
@@ -2229,7 +2284,7 @@ async def test_send_message_proposal_branch_ignores_in_process_lease_loss(
                 ),
             ),
             system_prompt_hash="proposal-hash",
-            prior_plan_for_revision=None,
+            prior_spec_for_revision=None,
             slot_classification_metadata=None,
             plan_edit_context=None,
             planning_state=PlanningState.empty(),
@@ -2599,7 +2654,7 @@ async def test_send_message_releases_lease_when_stream_is_cancelled(
                 ),
             ),
             system_prompt_hash="proposal-hash",
-            prior_plan_for_revision=None,
+            prior_spec_for_revision=None,
             slot_classification_metadata=None,
             plan_edit_context=None,
             planning_state=PlanningState.empty(),
@@ -2689,7 +2744,7 @@ async def test_send_message_proposal_catalog_uses_prior_plan_bindings(
                 ),
             ),
             system_prompt_hash="proposal-hash",
-            prior_plan_for_revision=cast(BuilderPlan, prior_plan),
+            prior_spec_for_revision=None,
             slot_classification_metadata=None,
             plan_edit_context=None,
             planning_state=PlanningState.empty(),
@@ -2787,7 +2842,7 @@ async def test_stream_proposal_events_dispatches_once_to_the_selected_owner(
             ),
         ),
         system_prompt_hash="proposal-hash",
-        prior_plan_for_revision=None,
+        prior_spec_for_revision=None,
         slot_classification_metadata=None,
         plan_edit_context=None,
         planning_state=PlanningState.empty(),
@@ -2876,7 +2931,7 @@ async def test_stream_proposal_events_commits_planning_state_payload_too_large(
             ),
         ),
         system_prompt_hash="proposal-hash",
-        prior_plan_for_revision=None,
+        prior_spec_for_revision=None,
         slot_classification_metadata=None,
         plan_edit_context=None,
         planning_state=PlanningState.empty(),

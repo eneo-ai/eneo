@@ -38,7 +38,7 @@ from eneo.flows.ai_builder.ai_builder_event_models import (
     StructuredQuestionPayload,
 )
 from eneo.flows.ai_builder.ai_builder_plan_edit_context import (
-    AIBuilderPlanEditContext,
+    AIBuilderEditContext,
 )
 from eneo.flows.ai_builder.ai_builder_telemetry_models import (
     SessionTelemetrySummary,
@@ -369,6 +369,7 @@ class SendMessageRequest(BaseModel):
                     "selected_values": ["structured_json"],
                 },
                 "edit_context": {
+                    "kind": "proposed_plan",
                     "scope": "step",
                     "plan_id": "00000000-0000-0000-0000-000000000702",
                     "target_plan_step_ref": "step_b",
@@ -411,7 +412,7 @@ class SendMessageRequest(BaseModel):
         max_length=AI_BUILDER_MAX_ATTACHMENTS,
     )
     question_answer: AIBuilderQuestionAnswerRequest | None = None
-    edit_context: AIBuilderPlanEditContext | None = None
+    edit_context: AIBuilderEditContext | None = None
     ui_language: str | None = Field(default=None, max_length=16)
     acknowledge_duplicate_provider_spend: bool = Field(
         default=False,

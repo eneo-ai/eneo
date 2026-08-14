@@ -67,7 +67,7 @@ from eneo.flows.ai_builder.ai_builder_events import (
     SSE_EVENT_USAGE as _SSE_EVENT_USAGE,
 )
 from eneo.flows.ai_builder.ai_builder_plan_edit_context import (
-    AIBuilderPlanEditContext,
+    AIBuilderEditContext,
 )
 from eneo.flows.ai_builder.ai_builder_plan_lifecycle import (
     AIBuilderPlanLifecycle,
@@ -515,7 +515,7 @@ class AIBuilderService:
         message: str,
         file_ids: list[UUID] | None = None,
         question_answer: AIBuilderQuestionAnswerInput | None = None,
-        edit_context: AIBuilderPlanEditContext | None = None,
+        edit_context: AIBuilderEditContext | None = None,
         ui_language: str | None = None,
         completion_model_route: ResolvedCompletionModelRoute,
         available_models: list[AIBuilderAvailableModelResource] | None = None,

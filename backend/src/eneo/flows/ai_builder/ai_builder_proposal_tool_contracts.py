@@ -17,7 +17,6 @@ from typing import (
 from uuid import UUID
 
 from eneo.flows.ai_builder.ai_builder_domain_models import (
-    BuilderPlan,
     ConversationMessage,
     FlowBuilderProposalContent,
     TargetKind,
@@ -28,7 +27,7 @@ from eneo.flows.ai_builder.ai_builder_error_contract import (
 )
 from eneo.flows.ai_builder.ai_builder_event_models import AIBuilderStreamEvent
 from eneo.flows.ai_builder.ai_builder_plan_edit_context import (
-    AIBuilderPlanEditContext,
+    ResolvedAIBuilderEditContext,
 )
 from eneo.flows.ai_builder.ai_builder_proposal_telemetry import (
     ProposalTurnTelemetry,
@@ -40,6 +39,7 @@ from eneo.flows.ai_builder.ai_builder_tools import ProposalToolSchema
 from eneo.flows.ai_builder.ai_builder_validation_common import SpecValidationResult
 from eneo.flows.ai_builder.planning_state import AggregationIntent, PlanningState
 from eneo.flows.assistant_authoring_snapshot import AssistantAuthoringSnapshots
+from eneo.flows.flow_authoring_spec import FlowDraftSpecCore
 from eneo.flows.flow_resource_bindings import LocalResourceBinding
 from eneo.tokens.token_utils import count_message_tokens, count_tool_tokens
 
@@ -347,8 +347,8 @@ class ProposalTurnContext:
     assistant_metadata: dict[str, Any] | None = None
     planning_state: PlanningState | None = None
     usage_tracker: ProposalTurnTelemetry | None = None
-    plan_edit_context: AIBuilderPlanEditContext | None = None
-    prior_plan_for_revision: BuilderPlan | None = None
+    plan_edit_context: ResolvedAIBuilderEditContext | None = None
+    prior_spec_for_revision: FlowDraftSpecCore | None = None
     before_provider_call: Callable[[], Awaitable[None]] | None = None
     proposal_call_budget: ProposalCallBudget = field(default_factory=ProposalCallBudget)
     proposal_request_budget: ProposalRequestBudget | None = None

@@ -26,10 +26,11 @@
     saveComposerDraft,
     type ComposerDraftFile
   } from "./flowAIBuilderComposerDraft";
-  import type { AIBuilderPlanEditContext } from "./protocol";
+  import type { AIBuilderEditContext } from "./protocol";
 
   interface Props {
-    editContext?: AIBuilderPlanEditContext | null;
+    editContext?: AIBuilderEditContext | null;
+    editContextLabel?: string | null;
     oncleareditcontext?: () => void;
     /** RefinementComposer mode (handoff §2): visible label, char budget,
      *  Ctrl/Cmd+Enter submit, "updates the plan" hint. On while a proposed
@@ -42,6 +43,7 @@
 
   let {
     editContext = null,
+    editContextLabel = null,
     oncleareditcontext,
     refinement = false,
     generationWait = false
@@ -187,8 +189,10 @@
       !$isUploading &&
       !overLimit
   );
-  const editContextLabel = $derived.by(() => {
+  const resolvedEditContextLabel = $derived.by(() => {
+    if (editContextLabel) return editContextLabel;
     if (!editContext) return null;
+    if (editContext.kind === "saved_flow_step") return null;
     if (editContext.scope === "whole_plan") {
       return m.ai_builder_edit_context_plan();
     }
@@ -509,10 +513,10 @@
       </ul>
     {/if}
 
-    {#if editContextLabel}
+    {#if resolvedEditContextLabel}
       <div class="composer-edit-context" role="status" aria-live="polite">
         <span class="composer-edit-context-dot" aria-hidden="true"></span>
-        <span class="composer-edit-context-text">{editContextLabel}</span>
+        <span class="composer-edit-context-text">{resolvedEditContextLabel}</span>
         <button
           type="button"
           class="composer-edit-context-clear"
@@ -538,7 +542,7 @@
         placeholder={currentPlaceholder}
         disabled={(!service.canSendMessage && !generationWait) || $isUploading}
         rows="1"
-        aria-label={refinement ? m.ai_builder_refine_label() : m.ai_builder_input_placeholder()}
+        aria-label={refinement ? m.ai_builder_refine_label() : currentPlaceholder}
         aria-invalid={overLimit || undefined}
         aria-describedby={overLimit ? "ai-builder-composer-limit" : undefined}
         class="composer-textarea"

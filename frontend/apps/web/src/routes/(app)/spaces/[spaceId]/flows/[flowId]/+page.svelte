@@ -37,11 +37,12 @@
     EneoError,
     type FlowRun,
     type FlowRunRetention,
+    type FlowStep,
     type TranscriptionModel
   } from "@eneo/eneo-js";
   import { toast } from "$lib/components/toast";
   import { m } from "$lib/paraglide/messages";
-  import { untrack } from "svelte";
+  import { tick, untrack } from "svelte";
   import { MediaQuery } from "svelte/reactivity";
   import { slide } from "svelte/transition";
   import FlowDryRun from "$lib/features/flows/components/FlowDryRun.svelte";
@@ -93,10 +94,42 @@
 
   // AI Builder service — initialized lazily when user switches to the AI Builder tab
   let aiBuilderInitialized = $state(false);
+  let aiBuilderHost = $state<FlowAIBuilderEditHost | undefined>();
   function ensureAIBuilder() {
     if (!aiBuilderInitialized) {
       aiBuilderInitialized = true;
     }
+  }
+
+  function openWholeFlowAIBuilder() {
+    ensureAIBuilder();
+    setActiveTab("ai-builder");
+  }
+
+  async function openStepInAIBuilder(step: FlowStep) {
+    if (!step.id) return;
+    try {
+      await flowEditor.flushSaves();
+    } catch (error) {
+      const message =
+        error instanceof EneoError
+          ? error.getReadableMessage()
+          : m.flow_ai_builder_save_before_edit_failed();
+      toast.error(message);
+      return;
+    }
+    if ($saveStatus !== "saved") {
+      toast.error(m.flow_ai_builder_save_before_edit_failed());
+      return;
+    }
+    ensureAIBuilder();
+    setActiveTab("ai-builder");
+    await tick();
+    await aiBuilderHost?.focusSavedFlowStep({
+      editContext: { kind: "saved_flow_step", flow_step_id: step.id },
+      stepName: step.user_description?.trim() || m.flow_step_unnamed(),
+      stepNumber: step.step_order
+    });
   }
 
   const {
@@ -1205,11 +1238,8 @@
                     transcriptionModel?.name ??
                     null}
                   formSchema={formSchemaMetadata}
-                  onEditWithAI={canUseAIBuilder
-                    ? () => {
-                        setActiveTab("ai-builder");
-                      }
-                    : undefined}
+                  onBuildFlowWithAI={canUseAIBuilder ? openWholeFlowAIBuilder : undefined}
+                  onEditStepWithAI={canUseAIBuilder ? openStepInAIBuilder : undefined}
                   onOpenTranscriptionSettings={() => void navigateToStage(2)}
                   onJsonValidationChanged={(detail) => {
                     hasStepJsonValidationErrors = detail.hasErrors;
@@ -1388,6 +1418,7 @@
         class:hidden={activeTab !== "ai-builder"}
       >
         <FlowAIBuilderEditHost
+          bind:this={aiBuilderHost}
           eneo={data.eneo}
           spaceId={$currentSpace.id}
           flowId={$resource.id}

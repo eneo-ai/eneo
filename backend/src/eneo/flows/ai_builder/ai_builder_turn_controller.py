@@ -176,6 +176,7 @@ def resolve_turn_control(
     attachment_context: AIBuilderAttachmentContext | None = None,
     schema_candidates: tuple[DeclaredSchemaCandidate, ...] = (),
     schema_direction_pending: bool = False,
+    requirements_confirmation_required: bool = True,
 ) -> BuilderTurnControl:
     locale = _locale(ui_language)
     attachment_evidence_fingerprint = _attachment_evidence_fingerprint(session_state)
@@ -183,7 +184,9 @@ def resolve_turn_control(
         session_state=session_state,
         selected_discovery_question_ids=selected_discovery_question_ids,
         requirements_confirmed=(
-            confirmed_attachment_evidence_fingerprint == attachment_evidence_fingerprint
+            not requirements_confirmation_required
+            or confirmed_attachment_evidence_fingerprint
+            == attachment_evidence_fingerprint
         ),
     )
     if action_policy.allowed_action_kinds == ("refuse_architecture_commit",):

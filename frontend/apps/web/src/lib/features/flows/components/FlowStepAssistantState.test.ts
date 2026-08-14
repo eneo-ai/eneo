@@ -25,15 +25,22 @@ function makeState(activeStep: { current: FlowStep | null }) {
     updateAssistantImmediately: vi.fn(),
     flushAssistantSaves: vi.fn(async () => {})
   };
+  const availability = vi.fn(async () => ({
+    available: false,
+    disabled_reason: "no_assignment" as const
+  }));
   const state = new FlowStepAssistantState({
     flowEditor: flowEditor as unknown as FlowEditor,
-    eneo: { files: { delete: vi.fn() } } as unknown as Eneo,
+    eneo: {
+      files: { delete: vi.fn() },
+      helpAssistants: { runs: { availability } }
+    } as unknown as Eneo,
     attachmentRules: writable({}),
     newAttachments: writable([]),
     clearUploads: vi.fn(),
     getActiveStep: () => activeStep.current
   });
-  return { state, flowEditor };
+  return { state, flowEditor, availability };
 }
 
 describe("FlowStepAssistantState", () => {
@@ -60,5 +67,19 @@ describe("FlowStepAssistantState", () => {
 
     expect(flowEditor.saveAssistant).not.toHaveBeenCalled();
     expect(flowEditor.updateAssistantImmediately).not.toHaveBeenCalled();
+  });
+
+  it("loads Prompt Guide availability once per selected assistant", async () => {
+    const activeStep = { current: makeStep("assistant-1") };
+    const { state, availability } = makeState(activeStep);
+
+    await state.load("assistant-1");
+    await state.load("assistant-1");
+
+    await vi.waitFor(() => expect(availability).toHaveBeenCalledTimes(1));
+    expect(state.promptGuideAvailability).toEqual({
+      available: false,
+      disabled_reason: "no_assignment"
+    });
   });
 });

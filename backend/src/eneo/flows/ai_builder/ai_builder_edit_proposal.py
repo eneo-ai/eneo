@@ -14,20 +14,25 @@ from eneo.flows.ai_builder.ai_builder_create_compile_context import (
     CreateCompileContext,
 )
 from eneo.flows.ai_builder.ai_builder_domain_models import (
-    BuilderPlan,
     ConversationMessage,
     FlowBuilderProposalContent,
     TargetKind,
 )
 from eneo.flows.ai_builder.ai_builder_edit_compiler import compile_edit_proposal
 from eneo.flows.ai_builder.ai_builder_plan_edit_context import (
-    AIBuilderPlanEditContext,
+    ResolvedAIBuilderEditContext,
     validate_scoped_plan_revision,
+)
+from eneo.flows.ai_builder.ai_builder_proposal_capture import (
+    capture_rejected_proposal_arguments,
 )
 from eneo.flows.ai_builder.ai_builder_proposal_intent import OrderedEditProposal
 from eneo.flows.ai_builder.ai_builder_proposal_policy import (
     evaluate_edit_topology_policy,
     terminal_output_type_for_edit_conversation,
+)
+from eneo.flows.ai_builder.ai_builder_proposal_telemetry import (
+    PROPOSAL_PARSE_MODEL_FAILURE_CODE,
 )
 from eneo.flows.ai_builder.ai_builder_proposal_tool_contracts import (
     CompiledProposal,
@@ -41,6 +46,7 @@ from eneo.flows.ai_builder.ai_builder_resource_catalog import (
 from eneo.flows.ai_builder.ai_builder_session_turn import SessionSendTurn
 from eneo.flows.ai_builder.planning_state import PlanningState
 from eneo.flows.assistant_authoring_snapshot import AssistantAuthoringSnapshots
+from eneo.flows.flow_authoring_spec import FlowDraftSpecCore
 from eneo.main.exceptions import BadRequestException
 from eneo.main.logging import get_logger
 
@@ -65,8 +71,8 @@ async def process_edit_arguments(
     assistant_snapshots: AssistantAuthoringSnapshots | None,
     resource_catalog: AIBuilderResourceCatalog | None = None,
     planning_state: PlanningState | None = None,
-    plan_edit_context: AIBuilderPlanEditContext | None = None,
-    prior_plan_for_revision: BuilderPlan | None = None,
+    plan_edit_context: ResolvedAIBuilderEditContext | None = None,
+    prior_spec_for_revision: FlowDraftSpecCore | None = None,
     compile_context: CreateCompileContext | None = None,
 ) -> ToolProcessingResult:
     if flow is None:
@@ -75,8 +81,8 @@ async def process_edit_arguments(
             failure_kind="validation",
         )
 
+    model_arguments: dict[str, Any] = dict(arguments)
     try:
-        model_arguments = dict(arguments)
         raw_form_fields = model_arguments.get("form_fields")
         if isinstance(raw_form_fields, list):
             normalized_form_fields: list[Any] = []
@@ -96,9 +102,15 @@ async def process_edit_arguments(
         )
     except ValidationError as exc:
         logger.warning("Failed to parse propose_flow edit arguments: %s", exc)
+        capture_rejected_proposal_arguments(
+            model_arguments,
+            session_id=str(turn.session_id),
+            issues=[str(exc)],
+        )
         return ToolProcessingResult(
             feedback=f"Invalid propose_flow arguments: {exc}",
             failure_kind="parse",
+            failure_codes=frozenset({PROPOSAL_PARSE_MODEL_FAILURE_CODE}),
         )
     ui_language = compile_context.ui_language if compile_context is not None else None
     try:
@@ -169,7 +181,7 @@ async def process_edit_arguments(
         terminal_output_type=terminal_output_type_for_edit_conversation(
             conversation,
             plan_edit_context=plan_edit_context,
-            prior_plan=prior_plan_for_revision,
+            prior_spec=prior_spec_for_revision,
         ),
         ui_language=ui_language,
     )
@@ -217,11 +229,7 @@ async def process_edit_arguments(
 
     scoped_revision_feedback = validate_scoped_plan_revision(
         context=plan_edit_context,
-        prior_spec=(
-            prior_plan_for_revision.spec
-            if prior_plan_for_revision is not None
-            else None
-        ),
+        prior_spec=prior_spec_for_revision,
         proposed_spec=compiled_spec,
     )
     if scoped_revision_feedback is not None:

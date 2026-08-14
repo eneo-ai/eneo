@@ -12,14 +12,20 @@ from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
 )
 from eneo.flows.ai_builder.ai_builder_domain_models import (
     BuilderPlan,
+    BuilderSession,
     ConversationMessage,
+    TargetKind,
 )
+from eneo.flows.ai_builder.ai_builder_error_contract import AIBuilderBadRequestException
 from eneo.flows.ai_builder.ai_builder_plan_edit_context import (
     _DOWNSTREAM_INPUT_REPAIR_FIELDS,
     AIBuilderPlanEditContext,
+    AIBuilderSavedFlowStepEditContext,
+    ResolvedAIBuilderEditContext,
     ScopedStepNotice,
     ScopedStepSpecRevision,
     build_plan_revision_prompt_block,
+    resolve_plan_edit_context,
     resolve_scoped_step_revision_if_requested,
     validate_scoped_plan_revision,
 )
@@ -38,6 +44,7 @@ from eneo.flows.ai_builder.ai_builder_slot_classification_contract import (
     SlotClassificationResult,
     SlotClassificationSource,
 )
+from eneo.flows.domain.flow import Flow, FlowStep
 from eneo.flows.flow_authoring_spec import (
     AssistantSpec,
     FlowDraftSpecCore,
@@ -142,6 +149,97 @@ def _step_context(**updates) -> AIBuilderPlanEditContext:
     }
     data.update(updates)
     return AIBuilderPlanEditContext(**data)
+
+
+def _edit_session(*, latest_plan_id: UUID | None = None) -> BuilderSession:
+    return BuilderSession(
+        id=uuid4(),
+        tenant_id=uuid4(),
+        space_id=uuid4(),
+        target_kind=TargetKind.EDIT,
+        flow_id=uuid4(),
+        latest_plan_id=latest_plan_id,
+    )
+
+
+def _saved_flow(*, session: BuilderSession, step_id: UUID, step_order: int = 1) -> Flow:
+    assert session.flow_id is not None
+    return Flow(
+        id=session.flow_id,
+        tenant_id=session.tenant_id,
+        space_id=session.space_id,
+        name="Mötesflöde",
+        steps=[
+            FlowStep(
+                id=step_id,
+                flow_id=session.flow_id,
+                tenant_id=session.tenant_id,
+                assistant_id=uuid4(),
+                step_order=step_order,
+                user_description="Sammanfatta mötet",
+                input_source="flow_input",
+                input_type="text",
+                output_mode="pass_through",
+                output_type="text",
+            )
+        ],
+    )
+
+
+@pytest.mark.asyncio
+async def test_saved_flow_step_scope_resolves_uuid_to_current_step_ref() -> None:
+    step_id = uuid4()
+    session = _edit_session()
+    flow = _saved_flow(session=session, step_id=step_id, step_order=3)
+
+    resolved, prior_plan = await resolve_plan_edit_context(
+        repo=cast(object, SimpleNamespace()),
+        tenant_id=session.tenant_id,
+        session=session,
+        flow=flow,
+        context=AIBuilderSavedFlowStepEditContext(flow_step_id=step_id),
+    )
+
+    assert isinstance(resolved, ResolvedAIBuilderEditContext)
+    assert resolved.target_existing_step_ref == "existing_step_3"
+    assert resolved.target_step_name == "Sammanfatta mötet"
+    assert resolved.target_step_number == 3
+    assert prior_plan is None
+
+
+@pytest.mark.asyncio
+async def test_saved_flow_step_scope_rejects_deleted_step() -> None:
+    session = _edit_session()
+    flow = _saved_flow(session=session, step_id=uuid4())
+
+    with pytest.raises(AIBuilderBadRequestException) as exc_info:
+        await resolve_plan_edit_context(
+            repo=cast(object, SimpleNamespace()),
+            tenant_id=session.tenant_id,
+            session=session,
+            flow=flow,
+            context=AIBuilderSavedFlowStepEditContext(flow_step_id=uuid4()),
+        )
+
+    assert getattr(exc_info.value, "code", None).value == "invalid_existing_step_ref"
+
+
+@pytest.mark.asyncio
+async def test_saved_flow_step_scope_rejects_after_plan_exists() -> None:
+    step_id = uuid4()
+    session = _edit_session(latest_plan_id=uuid4())
+    flow = _saved_flow(session=session, step_id=step_id)
+
+    with pytest.raises(AIBuilderBadRequestException) as exc_info:
+        await resolve_plan_edit_context(
+            repo=cast(object, SimpleNamespace()),
+            tenant_id=session.tenant_id,
+            session=session,
+            flow=flow,
+            context=AIBuilderSavedFlowStepEditContext(flow_step_id=step_id),
+        )
+
+    assert getattr(exc_info.value, "code", None).value == "stale_plan_revision"
 
 
 def test_scoped_model_revision_ignores_whole_plan_scope() -> None:
@@ -376,7 +474,7 @@ def test_scoped_step_revision_changes_terminal_output_for_pdf_file_wording() -> 
     output_type = terminal_output_type_for_edit_conversation(
         conversation,
         plan_edit_context=context,
-        prior_plan=None,
+        prior_spec=None,
     )
 
     result = resolve_scoped_step_revision_if_requested(
@@ -415,7 +513,7 @@ def test_terminal_output_intent_recognizes_pdf_file_wording(
         terminal_output_type_for_edit_conversation(
             conversation,
             plan_edit_context=_step_context(target_plan_step_ref="step_b"),
-            prior_plan=None,
+            prior_spec=None,
         )
         == OutputType.PDF
     )
@@ -435,7 +533,7 @@ def test_terminal_output_intent_uses_latest_slot_classification_for_plan_edit() 
         terminal_output_type_for_edit_conversation(
             conversation,
             plan_edit_context=_step_context(target_plan_step_ref="step_b"),
-            prior_plan=None,
+            prior_spec=None,
         )
         == OutputType.PDF
     )
@@ -465,7 +563,7 @@ def test_scoped_step_revision_uses_slot_classification_for_pdf_output_edit() -> 
         requested_terminal_output_type=terminal_output_type_for_edit_conversation(
             conversation,
             plan_edit_context=context,
-            prior_plan=None,
+            prior_spec=None,
         ),
     )
 
@@ -508,7 +606,7 @@ def test_scoped_step_revision_does_not_patch_input_file_mentions(
         requested_terminal_output_type=terminal_output_type_for_edit_conversation(
             conversation,
             plan_edit_context=context,
-            prior_plan=None,
+            prior_spec=None,
         ),
     )
 
@@ -606,6 +704,68 @@ def test_step_scoped_revision_accepts_changed_target_step() -> None:
     proposed = _edit_spec(
         [_edit_step("step_b", "Create final result", output_type=OutputType.PDF)]
     )
+
+    assert (
+        validate_scoped_plan_revision(
+            context=context,
+            prior_spec=prior,
+            proposed_spec=proposed,
+        )
+        is None
+    )
+
+
+def test_saved_flow_step_revision_uses_stable_existing_step_refs() -> None:
+    context = ResolvedAIBuilderEditContext(
+        request=AIBuilderSavedFlowStepEditContext(flow_step_id=uuid4()),
+        scope="step",
+        target_existing_step_ref="existing_step_2",
+        target_step_name="Compare evidence",
+        target_step_number=2,
+    )
+    proposed = _edit_spec(
+        [
+            _edit_step(
+                "step_a",
+                "Read evidence",
+                output_type=OutputType.TEXT,
+                existing_step_ref="existing_step_1",
+            ),
+            _edit_step(
+                "step_b",
+                "Compare similarities and differences",
+                output_type=OutputType.TEXT,
+                existing_step_ref="existing_step_2",
+            ),
+            _edit_step(
+                "step_c",
+                "Summarize findings",
+                output_type=OutputType.TEXT,
+                existing_step_ref="existing_step_3",
+            ),
+        ]
+    )
+    prior = proposed.model_copy(deep=True)
+    prior.steps = [
+        step.model_copy(
+            update={
+                "plan_step_ref": f"existing_step_{index}",
+                **(
+                    {
+                        "name": "Compare evidence",
+                        "assistant_spec": AssistantSpec(
+                            instructions="Compare evidence.",
+                            model_ref=None,
+                            knowledge_refs=[],
+                        ),
+                    }
+                    if index == 2
+                    else {}
+                ),
+            }
+        )
+        for index, step in enumerate(proposed.steps, start=1)
+    ]
 
     assert (
         validate_scoped_plan_revision(
@@ -931,7 +1091,7 @@ def test_plan_revision_terminal_output_intent_uses_latest_user_message() -> None
         terminal_output_type_for_edit_conversation(
             conversation,
             plan_edit_context=context,
-            prior_plan=None,
+            prior_spec=None,
         )
         is None
     )
@@ -959,7 +1119,7 @@ def test_plan_revision_terminal_output_intent_accepts_current_pdf_edit() -> None
         terminal_output_type_for_edit_conversation(
             conversation,
             plan_edit_context=context,
-            prior_plan=None,
+            prior_spec=None,
         )
         == OutputType.PDF
     )
@@ -979,7 +1139,7 @@ def test_whole_flow_edit_terminal_output_intent_can_use_full_requirements() -> N
         terminal_output_type_for_edit_conversation(
             conversation,
             plan_edit_context=None,
-            prior_plan=None,
+            prior_spec=None,
         )
         == OutputType.PDF
     )
@@ -1018,8 +1178,7 @@ def test_revision_prompt_names_the_target_step_and_prior_refs() -> None:
     )
 
     prompt = build_plan_revision_prompt_block(
-        context=context,
-        prior_plan=prior_plan,
+        context=context, prior_spec=prior_plan.spec
     )
 
     assert prompt is not None

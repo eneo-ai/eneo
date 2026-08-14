@@ -15,11 +15,13 @@
   import SelectModelSpecificSettings from "$lib/features/ai-models/components/SelectModelSpecificSettings.svelte";
   import FlowPromptEditor from "./FlowPromptEditor.svelte";
   import type { FlowFormSchemaMetadata } from "$lib/features/flows/flowFormSchema";
-  import type { LoadedAssistant } from "./FlowStepAssistantState.svelte";
+  import type { LoadedAssistant, PromptGuideAvailability } from "./FlowStepAssistantState.svelte";
   import type { FlowStepUxCopy } from "$lib/features/flows/flowStepUxCopy";
   import PromptVersionDialog from "$lib/features/prompts/components/PromptVersionDialog.svelte";
   import { supportsBehaviorPresets } from "$lib/features/ai-models/ModelKwargCapabilities.js";
   import { buildNextFlowPrompt } from "$lib/features/flows/flowPromptDraft";
+  import PromptGuideModal from "$lib/features/prompt-guide/components/PromptGuideModal.svelte";
+  import { getEneo } from "$lib/core/Eneo";
 
   let {
     step,
@@ -28,6 +30,7 @@
     isTranscribeOnly,
     assistant,
     assistantLoading,
+    promptGuideAvailability,
     availableModels,
     steps,
     formSchema,
@@ -41,7 +44,7 @@
     onAssistantFieldChange,
     onInstructionDraft,
     onInstructionCommit,
-    onEditWithAI,
+    onPreparePromptGuide,
     onInstructionFocused
   }: {
     step: FlowStep;
@@ -50,6 +53,7 @@
     isTranscribeOnly: boolean;
     assistant: LoadedAssistant | null;
     assistantLoading: boolean;
+    promptGuideAvailability: PromptGuideAvailability | null;
     availableModels: CompletionModel[];
     steps: FlowStep[];
     formSchema: FlowFormSchemaMetadata | undefined;
@@ -63,9 +67,31 @@
     onAssistantFieldChange?: (detail: { field: string; value: unknown }) => void;
     onInstructionDraft?: (detail: { value: string }) => void;
     onInstructionCommit?: (detail: { value: string }) => void;
-    onEditWithAI?: () => void;
+    onPreparePromptGuide?: () => Promise<boolean>;
     onInstructionFocused?: () => void;
   } = $props();
+  const eneo = getEneo();
+  let promptGuideOpen = $state(false);
+  let promptGuideRunId = $state<string | null>(null);
+  const promptGuideVisible = $derived(
+    promptGuideAvailability?.available === true ||
+      promptGuideAvailability?.disabled_reason === "no_completion_model"
+  );
+
+  async function openPromptGuide() {
+    if (!promptGuideAvailability?.available) return;
+    if (onPreparePromptGuide && !(await onPreparePromptGuide())) return;
+    promptGuideOpen = true;
+  }
+
+  function applyPromptGuideSuggestion(text: string) {
+    onInstructionCommit?.({ value: text });
+    const runId = promptGuideRunId;
+    promptGuideOpen = false;
+    if (runId) {
+      void eneo.helpAssistants.runs.setStatus({ run_id: runId, status: "completed" });
+    }
+  }
 
   // Collapsed label for the advanced model group — the chosen model's name.
   const modelStatus = $derived(
@@ -123,10 +149,26 @@
         </Tooltip.Provider>
       </svelte:fragment>
       <svelte:fragment slot="toolbar">
-        {#if onEditWithAI && !isPublished}
-          <Button variant="outline" size="sm" onclick={onEditWithAI}>
-            {m.flow_step_edit_with_ai()}
-          </Button>
+        {#if promptGuideVisible && !isPublished}
+          <Tooltip.Provider delayDuration={150}>
+            <Tooltip.Root>
+              <Tooltip.Trigger>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={!promptGuideAvailability?.available}
+                  onclick={() => void openPromptGuide()}
+                >
+                  {m.flow_step_edit_with_ai()}
+                </Button>
+              </Tooltip.Trigger>
+              <Tooltip.Content>
+                {promptGuideAvailability?.available
+                  ? m.prompt_guide_button_tooltip()
+                  : m.prompt_guide_disabled_no_completion_model()}
+              </Tooltip.Content>
+            </Tooltip.Root>
+          </Tooltip.Provider>
         {/if}
       </svelte:fragment>
       {@render instructionEditor()}
@@ -223,3 +265,15 @@
     {/if}
   {/if}
 </FlowStepSection>
+
+{#if assistant?.id && promptGuideAvailability?.available}
+  <PromptGuideModal
+    bind:open={promptGuideOpen}
+    bind:runId={promptGuideRunId}
+    targetType="assistant"
+    targetId={assistant.id}
+    targetPrompt={instructionText}
+    hasUnsavedPromptChanges={false}
+    onApply={applyPromptGuideSuggestion}
+  />
+{/if}

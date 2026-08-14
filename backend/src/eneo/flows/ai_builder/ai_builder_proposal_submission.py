@@ -19,7 +19,6 @@ from eneo.flows.ai_builder.ai_builder_create_proposal import (
     process_create_intent_arguments,
 )
 from eneo.flows.ai_builder.ai_builder_domain_models import (
-    BuilderPlan,
     ConversationMessage,
     TargetKind,
 )
@@ -43,7 +42,7 @@ from eneo.flows.ai_builder.ai_builder_litellm_completion import (
     make_usage_tracked_proposal_completion,
 )
 from eneo.flows.ai_builder.ai_builder_plan_edit_context import (
-    AIBuilderPlanEditContext,
+    ResolvedAIBuilderEditContext,
 )
 from eneo.flows.ai_builder.ai_builder_proposal_capture import (
     capture_malformed_proposal_arguments,
@@ -61,6 +60,8 @@ from eneo.flows.ai_builder.ai_builder_proposal_retry import (
     run_tool_self_correction,
 )
 from eneo.flows.ai_builder.ai_builder_proposal_telemetry import (
+    PROPOSAL_PARSE_JSON_FAILURE_CODE,
+    PROPOSAL_PARSE_SCHEMA_FAILURE_CODE,
     ProposalAttemptFailureKind,
     ProposalRepairReason,
     ProposalTurnTelemetry,
@@ -101,6 +102,7 @@ from eneo.flows.ai_builder.planning_state import (
     PlanningStatePayloadTooLargeError,
 )
 from eneo.flows.assistant_authoring_snapshot import AssistantAuthoringSnapshots
+from eneo.flows.flow_authoring_spec import FlowDraftSpecCore
 from eneo.main.logging import get_logger
 
 if TYPE_CHECKING:
@@ -204,8 +206,8 @@ class ProposalSubmissionOwner:
         assistant_metadata: dict[str, Any] | None = None,
         planning_state: PlanningState | None = None,
         compile_context: "CreateCompileContext | None",
-        plan_edit_context: AIBuilderPlanEditContext | None = None,
-        prior_plan_for_revision: BuilderPlan | None = None,
+        plan_edit_context: ResolvedAIBuilderEditContext | None = None,
+        prior_spec_for_revision: FlowDraftSpecCore | None = None,
         before_provider_call: Callable[[], Awaitable[None]] | None = None,
         proposal_request_budget: ProposalRequestBudget | None = None,
     ) -> AsyncGenerator[AIBuilderStreamEvent, None]:
@@ -228,7 +230,7 @@ class ProposalSubmissionOwner:
             compile_context=compile_context,
             usage_tracker=usage_tracker,
             plan_edit_context=plan_edit_context,
-            prior_plan_for_revision=prior_plan_for_revision,
+            prior_spec_for_revision=prior_spec_for_revision,
             before_provider_call=before_provider_call,
             proposal_request_budget=proposal_request_budget,
         )
@@ -362,8 +364,8 @@ class ProposalSubmissionOwner:
         assistant_snapshots: AssistantAuthoringSnapshots | None,
         request_id: str,
         planning_state: PlanningState | None,
-        plan_edit_context: AIBuilderPlanEditContext | None,
-        prior_plan_for_revision: BuilderPlan | None,
+        plan_edit_context: ResolvedAIBuilderEditContext | None,
+        prior_spec_for_revision: FlowDraftSpecCore | None,
         usage_tracker: ProposalTurnTelemetry | None,
         proposal_tool_schema: ProposalToolSchema,
         compile_context: "CreateCompileContext | None",
@@ -377,7 +379,7 @@ class ProposalSubmissionOwner:
                 planning_state=planning_state,
                 assistant_snapshots=assistant_snapshots,
                 plan_edit_context=plan_edit_context,
-                prior_plan_for_revision=prior_plan_for_revision,
+                prior_spec_for_revision=prior_spec_for_revision,
                 request_id=request_id,
                 usage_tracker=usage_tracker,
                 proposal_tool_schema=proposal_tool_schema,
@@ -401,8 +403,8 @@ class ProposalSubmissionOwner:
         target_kind: TargetKind,
         planning_state: PlanningState | None,
         assistant_snapshots: AssistantAuthoringSnapshots | None,
-        plan_edit_context: AIBuilderPlanEditContext | None,
-        prior_plan_for_revision: BuilderPlan | None,
+        plan_edit_context: ResolvedAIBuilderEditContext | None,
+        prior_spec_for_revision: FlowDraftSpecCore | None,
         request_id: str,
         usage_tracker: ProposalTurnTelemetry | None,
         proposal_tool_schema: ProposalToolSchema,
@@ -423,6 +425,7 @@ class ProposalSubmissionOwner:
             return ToolProcessingResult(
                 feedback=f"Invalid propose_flow arguments: {error}",
                 failure_kind="parse",
+                failure_codes=frozenset({PROPOSAL_PARSE_SCHEMA_FAILURE_CODE}),
             )
         if target_kind == TargetKind.CREATE:
             if planning_state is None or planning_state.architecture_commit is None:
@@ -443,7 +446,7 @@ class ProposalSubmissionOwner:
                 available_kb_refs=invocation.available_kb_refs,
                 resource_catalog=invocation.resource_catalog,
                 plan_edit_context=plan_edit_context,
-                prior_plan_for_revision=prior_plan_for_revision,
+                prior_spec_for_revision=prior_spec_for_revision,
                 compile_context=compile_context,
             )
         else:
@@ -458,7 +461,7 @@ class ProposalSubmissionOwner:
                 resource_catalog=invocation.resource_catalog,
                 planning_state=planning_state,
                 plan_edit_context=plan_edit_context,
-                prior_plan_for_revision=prior_plan_for_revision,
+                prior_spec_for_revision=prior_spec_for_revision,
                 compile_context=compile_context,
             )
         if result.compiled_proposal is None:
@@ -610,7 +613,7 @@ class ProposalSubmissionOwner:
             request_id=ctx.request_id,
             planning_state=planning_state,
             plan_edit_context=ctx.plan_edit_context,
-            prior_plan_for_revision=ctx.prior_plan_for_revision,
+            prior_spec_for_revision=ctx.prior_spec_for_revision,
             usage_tracker=ctx.usage_tracker,
             proposal_tool_schema=ctx.proposal_tool_schema,
             compile_context=ctx.compile_context,
@@ -630,7 +633,7 @@ class ProposalSubmissionOwner:
                 tool_call=tool_call,
                 retry_config=retry_config,
                 reason="parse",
-                failure_codes=frozenset(),
+                failure_codes=frozenset({PROPOSAL_PARSE_JSON_FAILURE_CODE}),
             ):
                 yield event
             return
@@ -650,7 +653,7 @@ class ProposalSubmissionOwner:
                 planning_state=planning_state,
                 assistant_snapshots=assistant_snapshots,
                 plan_edit_context=ctx.plan_edit_context,
-                prior_plan_for_revision=ctx.prior_plan_for_revision,
+                prior_spec_for_revision=ctx.prior_spec_for_revision,
                 request_id=ctx.request_id,
                 usage_tracker=ctx.usage_tracker,
                 proposal_tool_schema=ctx.proposal_tool_schema,
@@ -734,7 +737,7 @@ class ProposalSubmissionOwner:
             request_id=ctx.request_id,
             planning_state=ctx.planning_state,
             plan_edit_context=ctx.plan_edit_context,
-            prior_plan_for_revision=ctx.prior_plan_for_revision,
+            prior_spec_for_revision=ctx.prior_spec_for_revision,
             usage_tracker=ctx.usage_tracker,
             proposal_tool_schema=ctx.proposal_tool_schema,
             compile_context=ctx.compile_context,

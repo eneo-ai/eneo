@@ -16,6 +16,8 @@ from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
     LLMResolvableSlotName,
     SlotClassificationNamedResultEvidenceMetadata,
     SlotClassificationSchemaDirectionMetadata,
+    edit_context_from_metadata,
+    latest_user_edit_context,
     loose_tool_call_name,
     loose_tool_call_names_from_message,
     make_persisted_assistant_tool_call,
@@ -35,7 +37,11 @@ from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
     slot_classification_metadata_from_attempt,
     tool_calls_from_message,
 )
+from eneo.flows.ai_builder.ai_builder_domain_models import ConversationMessage
 from eneo.flows.ai_builder.ai_builder_event_models import RequirementsSummaryPayload
+from eneo.flows.ai_builder.ai_builder_plan_edit_context import (
+    AIBuilderSavedFlowStepEditContext,
+)
 from eneo.flows.ai_builder.ai_builder_slot_classification_contract import (
     SLOT_CLASSIFICATION_SCHEMA_VERSION,
     ClassifiedCheckpointUpdate,
@@ -157,6 +163,52 @@ def test_question_answer_request_discriminator_is_not_persisted() -> None:
     answer = question_answer_from_metadata(metadata)
     assert answer is not None
     assert question_answer_question_id(answer) == "primary_runtime_input"
+
+
+def test_saved_flow_step_edit_context_round_trips_through_metadata() -> None:
+    step_id = uuid4()
+    metadata = metadata_for_user_message(
+        edit_context=AIBuilderSavedFlowStepEditContext(flow_step_id=step_id)
+    )
+
+    context = edit_context_from_metadata(metadata)
+
+    assert isinstance(context, AIBuilderSavedFlowStepEditContext)
+    assert context.flow_step_id == step_id
+
+
+def test_latest_user_edit_context_uses_only_the_latest_user_intent() -> None:
+    step_id = uuid4()
+    scoped_metadata = metadata_for_user_message(
+        edit_context=AIBuilderSavedFlowStepEditContext(flow_step_id=step_id)
+    )
+    conversation = [
+        ConversationMessage(
+            role="user", content="Change this step", metadata=scoped_metadata
+        ),
+        ConversationMessage(role="assistant", content="I need confirmation"),
+        ConversationMessage(role="user", content="Start a different edit"),
+    ]
+
+    assert latest_user_edit_context(conversation) is None
+
+
+def test_latest_user_edit_context_crosses_assistant_control_messages() -> None:
+    step_id = uuid4()
+    scoped_metadata = metadata_for_user_message(
+        edit_context=AIBuilderSavedFlowStepEditContext(flow_step_id=step_id)
+    )
+    conversation = [
+        ConversationMessage(
+            role="user", content="Change this step", metadata=scoped_metadata
+        ),
+        ConversationMessage(role="assistant", content="Confirm the requirements"),
+    ]
+
+    context = latest_user_edit_context(conversation)
+
+    assert isinstance(context, AIBuilderSavedFlowStepEditContext)
+    assert context.flow_step_id == step_id
 
 
 def test_runtime_metadata_field_answer_is_real_and_persists_purpose() -> None:

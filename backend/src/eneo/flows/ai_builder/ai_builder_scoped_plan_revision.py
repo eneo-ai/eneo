@@ -20,7 +20,6 @@ from eneo.flows.ai_builder.ai_builder_create_feedback import (
     format_create_intent_quality_feedback,
 )
 from eneo.flows.ai_builder.ai_builder_domain_models import (
-    BuilderPlan,
     ConversationMessage,
     FlowBuilderProposalContent,
     TargetKind,
@@ -33,7 +32,7 @@ from eneo.flows.ai_builder.ai_builder_error_contract import (
 from eneo.flows.ai_builder.ai_builder_event_models import AIBuilderStreamEvent
 from eneo.flows.ai_builder.ai_builder_events import build_text_event
 from eneo.flows.ai_builder.ai_builder_plan_edit_context import (
-    AIBuilderPlanEditContext,
+    ResolvedAIBuilderEditContext,
     ScopedStepNotice,
     resolve_scoped_step_revision_if_requested,
     validate_scoped_plan_revision,
@@ -56,7 +55,7 @@ from eneo.flows.ai_builder.ai_builder_resource_catalog import (
 )
 from eneo.flows.ai_builder.ai_builder_session_turn import SessionSendTurn
 from eneo.flows.ai_builder.ai_builder_tool_names import PROPOSE_FLOW_TOOL_NAME
-from eneo.flows.flow_authoring_spec import OutputType
+from eneo.flows.flow_authoring_spec import FlowDraftSpecCore, OutputType
 from eneo.main.logging import get_logger
 
 if TYPE_CHECKING:
@@ -76,8 +75,8 @@ class ScopedPlanRevisionRequest:
     available_model_refs: set[str] | None
     available_kb_refs: set[str] | None
     resource_catalog: AIBuilderResourceCatalog | None
-    plan_edit_context: AIBuilderPlanEditContext | None
-    prior_plan_for_revision: BuilderPlan | None
+    plan_edit_context: ResolvedAIBuilderEditContext | None
+    prior_spec_for_revision: FlowDraftSpecCore | None
     request_id: str
     usage_tracker: ProposalTurnTelemetry | None
     compile_context: "CreateCompileContext | None"
@@ -110,7 +109,7 @@ async def run_scoped_plan_revision_attempt(
             available_kb_refs=request.available_kb_refs,
             resource_catalog=request.resource_catalog,
             plan_edit_context=request.plan_edit_context,
-            prior_plan_for_revision=request.prior_plan_for_revision,
+            prior_spec_for_revision=request.prior_spec_for_revision,
             terminal_output_type=terminal_output_type,
         )
     except AIBuilderArchitectureError as error:
@@ -169,18 +168,14 @@ def process_scoped_step_revision_if_requested(
     available_model_refs: set[str] | None,
     available_kb_refs: set[str] | None,
     resource_catalog: AIBuilderResourceCatalog | None,
-    plan_edit_context: AIBuilderPlanEditContext | None,
-    prior_plan_for_revision: BuilderPlan | None,
+    plan_edit_context: ResolvedAIBuilderEditContext | None,
+    prior_spec_for_revision: FlowDraftSpecCore | None,
     terminal_output_type: OutputType | None,
     plan_rationale: str | None = None,
 ) -> ToolProcessingResult | None:
     scoped_revision = resolve_scoped_step_revision_if_requested(
         context=plan_edit_context,
-        prior_spec=(
-            prior_plan_for_revision.spec
-            if prior_plan_for_revision is not None
-            else None
-        ),
+        prior_spec=prior_spec_for_revision,
         latest_user_text=_latest_user_text(conversation),
         resource_catalog=resource_catalog,
         requested_terminal_output_type=terminal_output_type,
@@ -217,11 +212,7 @@ def process_scoped_step_revision_if_requested(
 
     scoped_revision_feedback = validate_scoped_plan_revision(
         context=plan_edit_context,
-        prior_spec=(
-            prior_plan_for_revision.spec
-            if prior_plan_for_revision is not None
-            else None
-        ),
+        prior_spec=prior_spec_for_revision,
         proposed_spec=prepared.spec,
     )
     if scoped_revision_feedback is not None:

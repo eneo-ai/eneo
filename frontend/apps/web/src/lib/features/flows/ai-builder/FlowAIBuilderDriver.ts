@@ -21,7 +21,7 @@ import type {
   AIBuilderModel,
   AIBuilderPhase,
   AIBuilderSendOutcome,
-  AIBuilderPlanEditContext,
+  AIBuilderEditContext,
   AIBuilderSendMessageRequest,
   AIBuilderSession,
   AIBuilderStatus,
@@ -534,7 +534,7 @@ export class FlowAIBuilderDriver {
     message: string,
     questionAnswer?: StructuredQuestionAnswerMetadata,
     fileIds?: string[],
-    editContext?: AIBuilderPlanEditContext | null
+    editContext?: AIBuilderEditContext | null
   ): Promise<AIBuilderSendOutcome> {
     if (
       !this.#state.session ||
@@ -1111,7 +1111,7 @@ export class FlowAIBuilderDriver {
     this.#notify();
   }
 
-  async confirmRequirements(): Promise<void> {
+  async confirmRequirements(editContext?: AIBuilderEditContext | null): Promise<void> {
     if (this.#state.pendingOperation) return;
     const latestSummary = this.#getLatestRequirementsSummary();
     if (!latestSummary) return;
@@ -1124,16 +1124,21 @@ export class FlowAIBuilderDriver {
             requirements_confirmed: true,
             requirements_version: latestSummary.requirements_version
           }
-        : { kind: "requirements_confirmation", requirements_confirmed: true }
+        : { kind: "requirements_confirmation", requirements_confirmed: true },
+      undefined,
+      editContext
     );
   }
 
-  async changeRequirements(feedback?: string): Promise<void> {
+  async changeRequirements(
+    feedback?: string,
+    editContext?: AIBuilderEditContext | null
+  ): Promise<void> {
     if (this.#state.pendingOperation) return;
     const message = feedback?.trim()
       ? m.ai_builder_requirements_change_message({ feedback: feedback.trim() })
       : m.ai_builder_requirements_change_message_empty();
-    await this.sendMessage(message);
+    await this.sendMessage(message, undefined, undefined, editContext);
   }
 
   derivePhase(): AIBuilderPhase {

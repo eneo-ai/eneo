@@ -50,7 +50,14 @@ export type AIBuilderTurnRecoveryState = Extract<
   "failed_before_provider" | "provider_outcome_unknown"
 >;
 
-export type AIBuilderPlanEditContext = NonNullable<AIBuilderSendMessageRequest["edit_context"]>;
+export type AIBuilderEditContext = NonNullable<AIBuilderSendMessageRequest["edit_context"]>;
+
+export type AIBuilderPlanEditContext = Extract<AIBuilderEditContext, { kind: "proposed_plan" }>;
+
+export type AIBuilderSavedFlowStepEditContext = Extract<
+  AIBuilderEditContext,
+  { kind: "saved_flow_step" }
+>;
 
 export type AIBuilderPlanEditScope = AIBuilderPlanEditContext["scope"];
 
@@ -58,6 +65,12 @@ export interface AIBuilderSuggestChangeIntent {
   placeholder?: string;
   prefill?: string;
   editContext?: AIBuilderPlanEditContext | null;
+}
+
+export interface AIBuilderSavedFlowStepScope {
+  editContext: AIBuilderSavedFlowStepEditContext;
+  stepName: string;
+  stepNumber: number;
 }
 
 export type AIBuilderConversationMessage = GeneratedAIBuilderConversationMessage;

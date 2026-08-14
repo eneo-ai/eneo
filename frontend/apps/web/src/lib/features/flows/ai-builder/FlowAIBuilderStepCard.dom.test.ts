@@ -156,6 +156,7 @@ describe("FlowAIBuilderStepCard", () => {
       /(Describe the change|Beskriv ändringen).*6: Create final result/
     );
     expect(intent?.editContext).toEqual({
+      kind: "proposed_plan",
       scope: "step",
       plan_id: "plan-1",
       target_plan_step_ref: "step_f",

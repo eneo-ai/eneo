@@ -338,9 +338,16 @@ describe("FlowAIBuilderDriver", () => {
       ]
     });
 
-    await driver.confirmRequirements();
+    await driver.confirmRequirements({
+      kind: "saved_flow_step",
+      flow_step_id: "11111111-1111-4111-8111-111111111177"
+    });
 
     expect(stream).toHaveBeenCalledOnce();
+    expect(stream.mock.calls[0]?.[1].requestBody["application/json"].edit_context).toEqual({
+      kind: "saved_flow_step",
+      flow_step_id: "11111111-1111-4111-8111-111111111177"
+    });
     expect(driver.state.messages[1]).toMatchObject({
       role: "user",
       metadata: {
@@ -2221,6 +2228,7 @@ describe("FlowAIBuilderDriver", () => {
 
   it("forwards structured plan edit context with AI Builder messages", async () => {
     const editContext = {
+      kind: "proposed_plan" as const,
       scope: "step" as const,
       plan_id: "plan-1",
       target_plan_step_ref: "step_f",

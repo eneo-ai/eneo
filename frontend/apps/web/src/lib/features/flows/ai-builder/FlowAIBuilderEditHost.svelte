@@ -1,10 +1,11 @@
 <script lang="ts">
-  import { onDestroy, untrack } from "svelte";
+  import { onDestroy, tick, untrack } from "svelte";
 
   import type { Eneo } from "@eneo/eneo-js";
 
   import FlowAIBuilder from "./FlowAIBuilder.svelte";
   import { initAIBuilderService } from "./FlowAIBuilderService.svelte.ts";
+  import type { AIBuilderSavedFlowStepScope } from "./protocol";
 
   interface Props {
     eneo: Eneo;
@@ -16,10 +17,18 @@
   let { eneo, spaceId, flowId, onapplied }: Props = $props();
 
   const service = untrack(() => initAIBuilderService(eneo, spaceId, flowId));
+  let builder = $state<FlowAIBuilder | undefined>();
+
+  export async function focusSavedFlowStep(scope: AIBuilderSavedFlowStepScope) {
+    // The host and its lazily rendered Builder child bind in separate update
+    // flushes when the user opens the tab for the first time.
+    await tick();
+    await builder?.focusSavedFlowStep(scope);
+  }
 
   onDestroy(() => {
     service.destroy();
   });
 </script>
 
-<FlowAIBuilder targetKind="edit" onapplied={(detail) => onapplied?.(detail)} />
+<FlowAIBuilder bind:this={builder} targetKind="edit" onapplied={(detail) => onapplied?.(detail)} />

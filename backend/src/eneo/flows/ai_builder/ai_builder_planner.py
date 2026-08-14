@@ -17,8 +17,10 @@ from eneo.flows.ai_builder.ai_builder_conversation_compaction import (
 )
 from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
     AIBuilderQuestionAnswerInput,
+    latest_user_edit_context,
     metadata_for_user_message,
     metadata_with_slot_classification,
+    requirements_confirmation_from_question_answer,
 )
 from eneo.flows.ai_builder.ai_builder_domain_models import (
     ConversationMessage,
@@ -39,7 +41,7 @@ from eneo.flows.ai_builder.ai_builder_events import (
     build_done_event,
 )
 from eneo.flows.ai_builder.ai_builder_plan_edit_context import (
-    AIBuilderPlanEditContext,
+    AIBuilderEditContext,
     resolve_plan_edit_context,
 )
 from eneo.flows.ai_builder.ai_builder_plan_lifecycle import (
@@ -211,7 +213,7 @@ class AIBuilderPlanner:
                         ),
                         resource_catalog=proposal_request.resource_catalog,
                         plan_edit_context=proposal_request.plan_edit_context,
-                        prior_plan_for_revision=proposal_request.prior_plan_for_revision,
+                        prior_spec_for_revision=proposal_request.prior_spec_for_revision,
                         request_id=request_id,
                         usage_tracker=usage_tracker,
                         compile_context=proposal_request.compile_context,
@@ -248,7 +250,7 @@ class AIBuilderPlanner:
                         planning_state=proposal_request.planning_state,
                         compile_context=proposal_request.compile_context,
                         plan_edit_context=proposal_request.plan_edit_context,
-                        prior_plan_for_revision=proposal_request.prior_plan_for_revision,
+                        prior_spec_for_revision=proposal_request.prior_spec_for_revision,
                         before_provider_call=before_provider_call,
                         proposal_request_budget=(
                             replace(
@@ -289,7 +291,7 @@ class AIBuilderPlanner:
         message: str,
         file_ids: list[UUID] | None = None,
         question_answer: AIBuilderQuestionAnswerInput | None = None,
-        edit_context: AIBuilderPlanEditContext | None = None,
+        edit_context: AIBuilderEditContext | None = None,
         ui_language: str | None = None,
         completion_model_route: ResolvedCompletionModelRoute,
         available_models: list[AIBuilderAvailableModelResource] | None = None,
@@ -348,6 +350,12 @@ class AIBuilderPlanner:
         session = turn_preflight.session
         session_status = _session_status_value(session.status)
         conversation = list(session.conversation)
+        if (
+            edit_context is None
+            and requirements_confirmation_from_question_answer(question_answer)
+            is not None
+        ):
+            edit_context = latest_user_edit_context(conversation)
         try:
             (
                 plan_edit_context,
@@ -356,6 +364,7 @@ class AIBuilderPlanner:
                 repo=self.repo,
                 tenant_id=self.user.tenant_id,
                 session=session,
+                flow=flow,
                 context=edit_context,
             )
         except ValidationError as exc:
@@ -611,7 +620,8 @@ class AIBuilderPlanner:
                             flow_context=planner_turn_request.flow_context,
                             is_edit_mode=flow is not None,
                             resource_catalog=planner_turn_request.resource_catalog,
-                            current_steps=(None if flow is None else list(flow.steps)),
+                            flow=flow,
+                            assistant_snapshots=assistant_snapshots,
                             plan_edit_context=plan_edit_context,
                             prior_plan_for_revision=prior_plan_for_revision,
                             litellm_model=litellm_model,

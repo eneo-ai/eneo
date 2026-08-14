@@ -1408,6 +1408,21 @@ def test_server_keeps_pinned_commit_when_only_weak_output_slot_conflicts() -> No
     assert isinstance(decision, GenerateProposal)
 
 
+def test_step_scoped_edit_uses_plan_review_instead_of_duplicate_confirmation() -> None:
+    state = _state(primary_runtime_input="text", terminal_output="structured_text")
+    state.architecture_commit = _finalized_commit_for_state(state)
+
+    decision = resolve_turn_control(
+        session_state=state,
+        selected_discovery_question_ids=(),
+        confirmed_attachment_evidence_fingerprint=None,
+        ui_language="sv",
+        requirements_confirmation_required=False,
+    ).decision
+
+    assert isinstance(decision, GenerateProposal)
+
+
 def test_server_confirmation_uses_model_evidence_level_for_summary_bucket() -> None:
     state = PlanningState.empty()
     state.resolved_slots = {

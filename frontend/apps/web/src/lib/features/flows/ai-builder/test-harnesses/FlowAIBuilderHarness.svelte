@@ -17,6 +17,8 @@
     initialPrompt?: string | null;
     /** Test hook: receive the service instance to drive live session changes. */
     onservice?: (service: FlowAIBuilderService) => void;
+    /** Test hook: receive the mounted shell to exercise its public launch actions. */
+    onbuilder?: (builder: FlowAIBuilder) => void;
   }
 
   let {
@@ -24,7 +26,8 @@
     targetKind = "create",
     flowId = null,
     initialPrompt = null,
-    onservice
+    onservice,
+    onbuilder
   }: Props = $props();
 
   untrack(() => {
@@ -57,6 +60,11 @@
     const service = initAIBuilderService({ client: transport } as never, "space-1", flowId);
     onservice?.(service);
   });
+
+  let builder = $state<FlowAIBuilder | undefined>();
+  $effect(() => {
+    if (builder) onbuilder?.(builder);
+  });
 </script>
 
-<FlowAIBuilder {targetKind} {initialPrompt} />
+<FlowAIBuilder bind:this={builder} {targetKind} {initialPrompt} />

@@ -81,7 +81,7 @@ def _make_request(**overrides: object) -> ScopedPlanRevisionRequest:
         "available_kb_refs": None,
         "resource_catalog": None,
         "plan_edit_context": None,
-        "prior_plan_for_revision": None,
+        "prior_spec_for_revision": None,
         "request_id": "req-1",
         "usage_tracker": ProposalTurnTelemetry(
             request_id="req-1",
@@ -195,7 +195,7 @@ async def test_scoped_revision_uses_bounded_server_tool_call_id() -> None:
                         content="byt modell till gpt 5.4 nano",
                     )
                 ],
-                prior_plan_for_revision=prior_plan,
+                prior_spec_for_revision=prior_plan.spec,
                 plan_edit_context=AIBuilderPlanEditContext(
                     scope="step",
                     plan_id=prior_plan.id,
@@ -258,7 +258,7 @@ async def test_scoped_revision_rejects_unknown_flow_input_key() -> None:
                     content="byt modell till gpt 5.4 nano",
                 )
             ],
-            prior_plan_for_revision=prior_plan,
+            prior_spec_for_revision=prior_plan.spec,
             plan_edit_context=AIBuilderPlanEditContext(
                 scope="step",
                 plan_id=prior_plan.id,
@@ -305,7 +305,7 @@ async def test_scoped_revision_finalizes_terminal_pdf_revision(message: str) -> 
                         content=message,
                     )
                 ],
-                prior_plan_for_revision=prior_plan,
+                prior_spec_for_revision=prior_plan.spec,
                 plan_edit_context=AIBuilderPlanEditContext(
                     scope="step",
                     plan_id=prior_plan.id,
@@ -354,7 +354,7 @@ async def test_scoped_revision_returns_error_for_finalization_feedback_only() ->
                         content="byt modell från gpt-4o mini till gpt 5.4 nano",
                     )
                 ],
-                prior_plan_for_revision=prior_plan,
+                prior_spec_for_revision=prior_plan.spec,
                 plan_edit_context=AIBuilderPlanEditContext(
                     scope="step",
                     plan_id=prior_plan.id,
@@ -434,7 +434,7 @@ async def test_scoped_outline_revision_explains_model_change_on_transcription_st
             target_step_name="Transkribera mötesljud",
             target_step_number=1,
         ),
-        prior_plan_for_revision=prior_plan,
+        prior_spec_for_revision=prior_plan.spec,
         terminal_output_type=OutputType.TEXT,
     )
 
@@ -502,7 +502,7 @@ async def test_scoped_outline_revision_changes_model_on_selected_ai_step() -> No
             target_step_name="Analysera mötet",
             target_step_number=2,
         ),
-        prior_plan_for_revision=prior_plan,
+        prior_spec_for_revision=prior_plan.spec,
         terminal_output_type=OutputType.TEXT,
     )
 
@@ -581,7 +581,7 @@ async def test_scoped_outline_revision_changes_selected_terminal_step_to_pdf(
             target_step_name="Sätt ihop slutligt strukturerat textresultat",
             target_step_number=2,
         ),
-        prior_plan_for_revision=prior_plan,
+        prior_spec_for_revision=prior_plan.spec,
         terminal_output_type=OutputType.PDF,
     )
 

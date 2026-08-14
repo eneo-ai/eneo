@@ -14,6 +14,9 @@ from eneo.flows.ai_builder.ai_builder_create_compile_context import (
 )
 from eneo.flows.ai_builder.ai_builder_domain_models import ConversationMessage
 from eneo.flows.ai_builder.ai_builder_edit_proposal import process_edit_arguments
+from eneo.flows.ai_builder.ai_builder_proposal_capture import (
+    REJECTED_PROPOSAL_CAPTURE_DIR_ENV,
+)
 from eneo.flows.ai_builder.ai_builder_proposal_intent import FlowInputFieldIntent
 from eneo.flows.ai_builder.ai_builder_proposal_policy import resolve_ui_language
 from eneo.flows.ai_builder.ai_builder_resource_catalog import (
@@ -74,6 +77,31 @@ async def test_process_edit_arguments_accepts_ordered_submission() -> None:
     assert result.compiled_proposal.content.spec.steps[0].name == "Analyze case text"
     assert result.compiled_proposal.content.edit is not None
     assert result.compiled_proposal.content.edit.base_flow_revision == 7
+
+
+@pytest.mark.asyncio
+async def test_process_edit_arguments_attributes_and_captures_model_parse_failure(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv(REJECTED_PROPOSAL_CAPTURE_DIR_ENV, str(tmp_path))
+    flow = _flow(_flow_step(step_order=1, user_description="Analyze text"))
+    arguments = {
+        "plan_rationale": " ",
+        "steps": [
+            {
+                "kind": "modify",
+                "existing_step_ref": "existing_step_1",
+            }
+        ],
+    }
+
+    result = await _process(flow=flow, arguments=arguments)
+
+    assert result.failure_kind == "parse"
+    assert result.failure_codes == frozenset({"proposal_parse_model"})
+    captures = list(tmp_path.glob("rejected-proposal-*.json"))
+    assert len(captures) == 1
 
 
 @pytest.mark.asyncio

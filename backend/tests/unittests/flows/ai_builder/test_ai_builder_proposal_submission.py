@@ -1034,7 +1034,7 @@ async def test_proposal_retry_config_finalizes_create_compiled_proposal_with_inv
         request_id="req-outline-retry-finalize",
         planning_state=_committed_text_planning_state(),
         plan_edit_context=None,
-        prior_plan_for_revision=None,
+        prior_spec_for_revision=None,
         usage_tracker=tracker,
         proposal_tool_schema=_make_context().proposal_tool_schema,
         compile_context=compile_context,
@@ -1098,7 +1098,7 @@ async def test_repair_invocation_validates_the_prepared_schema_before_compilatio
         request_id="req-invalid-repair",
         planning_state=planning_state,
         plan_edit_context=None,
-        prior_plan_for_revision=None,
+        prior_spec_for_revision=None,
         usage_tracker=None,
         proposal_tool_schema=schema,
         compile_context=create_compile_context_from_planning_state(planning_state),
@@ -1121,6 +1121,7 @@ async def test_repair_invocation_validates_the_prepared_schema_before_compilatio
         result = await config.process_tool_invocation(invocation)
 
     assert result.failure_kind == "parse"
+    assert result.failure_codes == frozenset({"proposal_parse_schema"})
     assert result.feedback is not None and "steps.0" in result.feedback
     process_create.assert_not_awaited()
     captures = list(tmp_path.glob("rejected-proposal-*.json"))
@@ -1187,6 +1188,10 @@ async def test_initial_parse_failures_capture_identical_arguments_per_session(
             assert events == [{"event": "status", "data": '{"status":"repairing"}'}]
 
     assert repair.call_count == 2
+    assert all(
+        call.args[0].failure_codes == frozenset({"proposal_parse_json"})
+        for call in repair.call_args_list
+    )
     captures = sorted(tmp_path.glob("malformed-proposal-*.txt"))
     assert len(captures) == 2
     captured_contents = [capture.read_text(encoding="utf-8") for capture in captures]
@@ -1273,7 +1278,7 @@ async def test_proposal_retry_config_carries_edit_invocation_context() -> None:
     resource_catalog = MagicMock()
     flow = MagicMock()
     plan_edit_context = MagicMock()
-    prior_plan_for_revision = MagicMock()
+    prior_spec_for_revision = MagicMock()
 
     config = submission._proposal_retry_config(
         target_kind=TargetKind.EDIT,
@@ -1281,7 +1286,7 @@ async def test_proposal_retry_config_carries_edit_invocation_context() -> None:
         request_id="req",
         planning_state=None,
         plan_edit_context=plan_edit_context,
-        prior_plan_for_revision=prior_plan_for_revision,
+        prior_spec_for_revision=prior_spec_for_revision,
         usage_tracker=None,
         proposal_tool_schema=_make_context().proposal_tool_schema,
         compile_context=None,
@@ -1321,8 +1326,8 @@ async def test_proposal_retry_config_carries_edit_invocation_context() -> None:
     assert process_edit.await_args.kwargs["resource_catalog"] is resource_catalog
     assert process_edit.await_args.kwargs["plan_edit_context"] is plan_edit_context
     assert (
-        process_edit.await_args.kwargs["prior_plan_for_revision"]
-        is prior_plan_for_revision
+        process_edit.await_args.kwargs["prior_spec_for_revision"]
+        is prior_spec_for_revision
     )
 
 
@@ -1351,7 +1356,7 @@ async def test_edit_propose_flow_retry_preserves_description_advisory_without_co
         request_id="req-forced-retry-edit-advisory",
         planning_state=None,
         plan_edit_context=None,
-        prior_plan_for_revision=None,
+        prior_spec_for_revision=None,
         usage_tracker=tracker,
         proposal_tool_schema=_make_context().proposal_tool_schema,
         compile_context=None,

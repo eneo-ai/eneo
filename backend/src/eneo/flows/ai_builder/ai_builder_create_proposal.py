@@ -16,14 +16,13 @@ from eneo.flows.ai_builder.ai_builder_create_feedback import (
     format_create_intent_quality_feedback,
 )
 from eneo.flows.ai_builder.ai_builder_domain_models import (
-    BuilderPlan,
     ConversationMessage,
     FlowBuilderProposalContent,
     LintWarning,
     TargetKind,
 )
 from eneo.flows.ai_builder.ai_builder_plan_edit_context import (
-    AIBuilderPlanEditContext,
+    ResolvedAIBuilderEditContext,
     validate_scoped_plan_revision,
 )
 from eneo.flows.ai_builder.ai_builder_proposal_capture import (
@@ -32,6 +31,9 @@ from eneo.flows.ai_builder.ai_builder_proposal_capture import (
 from eneo.flows.ai_builder.ai_builder_proposal_intent import (
     CreateFlowIntent,
     ProposalIntentArgumentError,
+)
+from eneo.flows.ai_builder.ai_builder_proposal_telemetry import (
+    PROPOSAL_PARSE_MODEL_FAILURE_CODE,
 )
 from eneo.flows.ai_builder.ai_builder_proposal_tool_contracts import (
     CompiledProposal,
@@ -80,8 +82,8 @@ async def process_create_intent_arguments(
     available_model_refs: set[str] | None,
     available_kb_refs: set[str] | None,
     resource_catalog: AIBuilderResourceCatalog | None = None,
-    plan_edit_context: AIBuilderPlanEditContext | None = None,
-    prior_plan_for_revision: BuilderPlan | None = None,
+    plan_edit_context: ResolvedAIBuilderEditContext | None = None,
+    prior_spec_for_revision: FlowDraftSpecCore | None = None,
     compile_context: CreateCompileContext | None = None,
 ) -> ToolProcessingResult:
     try:
@@ -107,6 +109,7 @@ async def process_create_intent_arguments(
         return ToolProcessingResult(
             feedback=f"Invalid propose_flow arguments: {error}",
             failure_kind="parse",
+            failure_codes=frozenset({PROPOSAL_PARSE_MODEL_FAILURE_CODE}),
         )
     except AIBuilderArchitectureError as error:
         failure_code = _retryable_architecture_failure_code(error)
@@ -148,7 +151,7 @@ async def process_create_intent_arguments(
             compile_context.final_output_type if compile_context is not None else None
         ),
         plan_edit_context=plan_edit_context,
-        prior_plan_for_revision=prior_plan_for_revision,
+        prior_spec_for_revision=prior_spec_for_revision,
         field_diagnostics=field_diagnostics,
         ui_language=(
             compile_context.ui_language if compile_context is not None else None
@@ -168,8 +171,8 @@ async def _process_create_spec(
     resource_catalog: AIBuilderResourceCatalog | None,
     aggregation_intent: AggregationIntent,
     committed_terminal_output_type: OutputType | None,
-    plan_edit_context: AIBuilderPlanEditContext | None = None,
-    prior_plan_for_revision: BuilderPlan | None = None,
+    plan_edit_context: ResolvedAIBuilderEditContext | None = None,
+    prior_spec_for_revision: FlowDraftSpecCore | None = None,
     field_diagnostics: list[LintWarning] | None = None,
     ui_language: str | None = None,
 ) -> ToolProcessingResult:
@@ -202,11 +205,7 @@ async def _process_create_spec(
 
     scoped_revision_feedback = validate_scoped_plan_revision(
         context=plan_edit_context,
-        prior_spec=(
-            prior_plan_for_revision.spec
-            if prior_plan_for_revision is not None
-            else None
-        ),
+        prior_spec=prior_spec_for_revision,
         proposed_spec=spec,
     )
     if scoped_revision_feedback is not None:

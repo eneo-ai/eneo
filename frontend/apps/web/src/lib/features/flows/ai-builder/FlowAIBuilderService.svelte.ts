@@ -13,8 +13,9 @@ import type {
   AIBuilderDraftSession,
   AIBuilderError,
   AIBuilderModel,
-  AIBuilderPlanEditContext,
+  AIBuilderEditContext,
   AIBuilderPhase,
+  AIBuilderSavedFlowStepScope,
   AIBuilderSendOutcome,
   AIBuilderSession,
   AIBuilderStatus,
@@ -35,6 +36,7 @@ export class FlowAIBuilderService {
   #driver: FlowAIBuilderDriver;
   #stateVersion = $state(0);
   #hasSeenPlanInSession = $state(false);
+  #savedFlowStepScope = $state<AIBuilderSavedFlowStepScope | null>(null);
 
   hasSession = $derived(this.#state.session !== null);
   hasSeenPlanInSession = $derived(this.#hasSeenPlanInSession);
@@ -100,6 +102,7 @@ export class FlowAIBuilderService {
     }
     if (state.currentPlan !== null) {
       this.#hasSeenPlanInSession = true;
+      this.clearSavedFlowStepScope();
     }
   }
 
@@ -113,6 +116,18 @@ export class FlowAIBuilderService {
 
   get currentPlan(): ProposedPlan | null {
     return this.#state.currentPlan;
+  }
+
+  get savedFlowStepScope(): AIBuilderSavedFlowStepScope | null {
+    return this.#savedFlowStepScope;
+  }
+
+  setSavedFlowStepScope(scope: AIBuilderSavedFlowStepScope): void {
+    this.#savedFlowStepScope = scope;
+  }
+
+  clearSavedFlowStepScope(): void {
+    this.#savedFlowStepScope = null;
   }
 
   get isStreaming(): boolean {
@@ -238,6 +253,7 @@ export class FlowAIBuilderService {
   }
 
   async startFreshSession(targetKind: TargetKind): Promise<void> {
+    this.clearSavedFlowStepScope();
     await this.#driver.startFreshSession(targetKind);
   }
 
@@ -246,6 +262,7 @@ export class FlowAIBuilderService {
   }
 
   async resumeSession(sessionId: string): Promise<void> {
+    this.clearSavedFlowStepScope();
     await this.#driver.resumeSession(sessionId);
   }
 
@@ -261,9 +278,13 @@ export class FlowAIBuilderService {
     message: string,
     questionAnswer?: StructuredQuestionAnswerMetadata,
     fileIds?: string[],
-    editContext?: AIBuilderPlanEditContext | null
+    editContext?: AIBuilderEditContext | null
   ): Promise<AIBuilderSendOutcome> {
-    return await this.#driver.sendMessage(message, questionAnswer, fileIds, editContext);
+    const outcome = await this.#driver.sendMessage(message, questionAnswer, fileIds, editContext);
+    if (this.#state.error?.code === "invalid_existing_step_ref") {
+      this.clearSavedFlowStepScope();
+    }
+    return outcome;
   }
 
   async retryLatestTurn(): Promise<void> {
@@ -279,7 +300,9 @@ export class FlowAIBuilderService {
   }
 
   async applyPlan(): Promise<ApplyResult> {
-    return await this.#driver.applyPlan();
+    const result = await this.#driver.applyPlan();
+    this.clearSavedFlowStepScope();
+    return result;
   }
 
   async createFlowFromPlan(): Promise<ApplyResult> {
@@ -290,12 +313,12 @@ export class FlowAIBuilderService {
     return await this.#driver.unpublishAndApplyPlan();
   }
 
-  async confirmRequirements(): Promise<void> {
-    await this.#driver.confirmRequirements();
+  async confirmRequirements(editContext?: AIBuilderEditContext | null): Promise<void> {
+    await this.#driver.confirmRequirements(editContext ?? null);
   }
 
   async changeRequirements(feedback?: string): Promise<void> {
-    await this.#driver.changeRequirements(feedback);
+    await this.#driver.changeRequirements(feedback, null);
   }
 
   async continueEditing(): Promise<void> {
