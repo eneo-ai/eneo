@@ -11,6 +11,9 @@ from eneo.api.documentation.openapi_endpoints import router as documentation_rou
 from eneo.apps.app_runs.api.app_run_router import router as app_run_router
 from eneo.apps.apps.api.app_router import router as app_router
 from eneo.assistants.api.assistant_router import router as assistants_router
+from eneo.authentication.api_key_capacity_router import (
+    router as api_key_capacity_router,
+)
 from eneo.authentication.api_key_router import router as api_key_router
 from eneo.authentication.auth_dependencies import (
     APPS_READ_OVERRIDES,
@@ -211,6 +214,9 @@ router.include_router(
         Depends(require_api_key_scope_check(resource_type="admin", path_param=None)),
     ],
 )
+# Deliberately outside `api_key_router`: that router is admin-scoped, and this
+# endpoint describes the calling key to whichever key is calling.
+router.include_router(api_key_capacity_router)
 router.include_router(
     users_admin_router,
     prefix="/users",

@@ -104,6 +104,17 @@ class CreateRunResult:
 
 
 @dataclass(frozen=True, slots=True)
+class FlowRuntimeCapacity:
+    tenant_id: UUID
+    active_runs: int
+    max_concurrent_runs: int
+
+    @property
+    def available_slots(self) -> int:
+        return max(0, self.max_concurrent_runs - self.active_runs)
+
+
+@dataclass(frozen=True, slots=True)
 class FlowRunVersionedView:
     published_definition: PublishedFlowDefinition
     step_results: Sequence[FlowStepResult]
@@ -206,6 +217,22 @@ class FlowRunService:
             max_concurrent_runs
             if max_concurrent_runs is not None
             else get_settings().flow_max_concurrent_runs_per_tenant
+        )
+
+    async def runtime_capacity(self) -> FlowRuntimeCapacity:
+        """Report how many more concurrent runs this tenant may start.
+
+        A client planning a batch needs the same numbers `_ensure_can_create`
+        enforces, so both read the active count and the configured maximum from
+        here rather than from settings and the repository separately.
+        """
+        active_runs = await self.flow_run_repo.count_active_runs(
+            tenant_id=self.user.tenant_id
+        )
+        return FlowRuntimeCapacity(
+            tenant_id=self.user.tenant_id,
+            active_runs=active_runs,
+            max_concurrent_runs=self.max_concurrent_runs,
         )
 
     def _principal(self) -> FlowPrincipal:

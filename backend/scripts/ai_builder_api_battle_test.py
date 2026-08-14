@@ -12,6 +12,7 @@ import argparse
 import hashlib
 import io
 import json
+import math
 import mimetypes
 import os
 import subprocess
@@ -19,9 +20,10 @@ import sys
 import time
 import unicodedata
 from collections import deque
-from collections.abc import Callable, Iterator, Mapping
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 from dataclasses import dataclass, replace
+from http.client import HTTPException
 from pathlib import Path
 from threading import Lock
 from typing import Any, cast
@@ -47,12 +49,15 @@ from ai_builder_receipt import (  # noqa: E402
     BUNDLE_FILE_FIELD,
     BUNDLE_REFERENCE_FIELDS,
     BUNDLE_SHA256_FIELD,
+    CLEAN_SPACE_LISTING_REQUESTS,
     REPLACEMENTS_FILE,
     SUPPORTED_RECEIPT_ARTIFACT_VERSION,
     Observation,
     ReceiptError,
     ReplacementDescriptor,
     acquisition_validity_checks,
+    capacity_preflight_verdict,
+    capacity_snapshot_request_count,
     load_recoverable_release_receipt,
     observation_from_row,
     observation_identity_failure_count,
@@ -77,6 +82,9 @@ FIXTURE_MANIFEST_FILE = FIXTURE_DIR / "manifest.json"
 SUPPORTED_FIXTURE_MANIFEST_VERSION = 1
 DEFAULT_CONFIRM_MESSAGE = "Ja, det stämmer. Bygg planen."
 MAX_INTERACTIONS_PER_CASE = 6
+# Both the runtime poll loop and the request-demand arithmetic read this. A
+# literal in either place lets the planner agree with a stale formula.
+RUNTIME_POLL_INTERVAL_SECONDS = 1
 SUPPORTED_CASES_FILE_VERSION = 8
 # Bump when the meaning of question-relevance checks changes; receipts
 # across different semantics versions must never be compared.
@@ -451,6 +459,127 @@ def _attachment_fixture_bindings_match(
     return True
 
 
+# One authenticated request each, derived from the call graph rather than
+# restated as prose. Every constant below counts calls that carry the
+# measurement key; the signed-URL artifact download does not and is excluded.
+_SESSION_SETUP_REQUESTS = 2  # create session + list models
+_INTERACTION_REQUESTS = 2  # POST messages + GET session, per turn
+_PLAN_FETCH_REQUESTS = 1  # the loop exits on the first plan, so at most one
+_OBSERVATION_DIAGNOSTIC_REQUESTS = 2  # classifier-slots + proposal-telemetry
+_APPLY_PLAN_REQUESTS = 3  # plan->Flow create + Flow read + Flow delete
+_RUNTIME_FIXED_REQUESTS = 5  # publish, run contract, create run, evidence, URL
+
+
+def runtime_poll_requests(*, timeout_seconds: int) -> int:
+    """Worst-case status polls for one executed Flow.
+
+    The loop polls immediately, then sleeps between attempts, so the bound is
+    one more than the number of sleeps the deadline allows.
+    """
+    if timeout_seconds < 0:
+        raise ValueError("timeout_seconds must not be negative.")
+    return math.ceil(timeout_seconds / RUNTIME_POLL_INTERVAL_SECONDS) + 1
+
+
+def observation_request_demand(case: BattleCase, *, timeout_seconds: int) -> int:
+    """Worst-case charged requests for one observation of one case."""
+    total = (
+        _SESSION_SETUP_REQUESTS
+        + _INTERACTION_REQUESTS * MAX_INTERACTIONS_PER_CASE
+        + _PLAN_FETCH_REQUESTS
+        + _OBSERVATION_DIAGNOSTIC_REQUESTS
+    )
+    if not case.apply_plan:
+        return total
+    total += _APPLY_PLAN_REQUESTS
+    if case.execute_flow:
+        total += (
+            _RUNTIME_FIXED_REQUESTS
+            + len(case.runtime_files)
+            + runtime_poll_requests(timeout_seconds=timeout_seconds)
+        )
+    return total
+
+
+def suite_request_demand(
+    *,
+    cases: Sequence[BattleCase],
+    repetitions: int,
+    timeout_seconds: int,
+) -> JsonObject:
+    """Conservative whole-suite request demand, before the first case runs.
+
+    Pure arithmetic over the selected cases, so a run can prove it has budget
+    without spending any. Counted from the first capacity read onward, which
+    makes a comparison against capacity measured at that read conservative by
+    exactly the requests already spent.
+    """
+    if repetitions < 1:
+        raise ValueError("repetitions must be >= 1.")
+    fixture_uploads = len(
+        {name for case in cases for name in (*case.attachments, *case.runtime_files)}
+    )
+    capacity_reads = capacity_snapshot_request_count(
+        runtime_required=any(case.apply_plan and case.execute_flow for case in cases)
+    )
+    observation_requests = repetitions * sum(
+        observation_request_demand(case, timeout_seconds=timeout_seconds)
+        for case in cases
+    )
+    preflight_requests = capacity_reads + CLEAN_SPACE_LISTING_REQUESTS + fixture_uploads
+    return {
+        "capacity_reads": capacity_reads,
+        "clean_space_listing": CLEAN_SPACE_LISTING_REQUESTS,
+        "fixture_uploads": fixture_uploads,
+        "observation_requests": observation_requests,
+        "observation_count": repetitions * len(cases),
+        "runtime_poll_requests_per_execution": runtime_poll_requests(
+            timeout_seconds=timeout_seconds
+        ),
+        "timeout_seconds": timeout_seconds,
+        "poll_interval_seconds": RUNTIME_POLL_INTERVAL_SECONDS,
+        "max_interactions_per_case": MAX_INTERACTIONS_PER_CASE,
+        "total": preflight_requests + observation_requests,
+    }
+
+
+class CapacityPreflightRefused(Exception):
+    """The measurement target cannot carry the complete acquisition.
+
+    Carries the verdict and the resolved target so the caller writes durable
+    refusal evidence; the suite manifest does not exist yet at this point, and
+    a replacement batch's target comes from its base receipt rather than the
+    command line.
+    """
+
+    def __init__(
+        self,
+        verdict: JsonObject,
+        *,
+        base_url: str | None = None,
+        space_id: str | None = None,
+    ) -> None:
+        self.verdict = verdict
+        self.base_url = base_url
+        self.space_id = space_id
+        super().__init__(
+            "capacity preflight refused acquisition: "
+            + ", ".join(str(reason) for reason in verdict.get("refusals") or ())
+        )
+
+
+def required_runtime_slots(*, cases: Sequence[BattleCase], max_concurrency: int) -> int:
+    """Concurrent Flow runs this suite can have in flight at once.
+
+    Case isolation only serialises repeats of one case, so distinct executing
+    cases can overlap up to the configured concurrency.
+    """
+    executing = {
+        case.case_id for case in cases if case.apply_plan and case.execute_flow
+    }
+    return min(max(1, max_concurrency), len(executing)) if executing else 0
+
+
 @dataclass(frozen=True, slots=True)
 class AcquisitionContract:
     required_case_ids: tuple[str, ...]
@@ -492,6 +621,16 @@ def main() -> int:
                 api_key=api_key,
                 output_dir=output_dir,
             )
+        except CapacityPreflightRefused as refusal:
+            refusal_path = _write_capacity_refusal(
+                output_dir=output_dir,
+                base_url=refusal.base_url or args.base_url.rstrip("/"),
+                space_id=refusal.space_id,
+                verdict=refusal.verdict,
+            )
+            print(f"replacement batch refused: {refusal}", file=sys.stderr)
+            print(f"capacity refusal receipt: {refusal_path}", file=sys.stderr)
+            return 2
         except (ReceiptError, HTTPError, URLError, TimeoutError, ValueError) as error:
             print(f"replacement batch refused: {error}", file=sys.stderr)
             return 2
@@ -532,6 +671,16 @@ def main() -> int:
         bundle_path = _write_bundle(output_dir, bundle, suffix=case.case_id)
         _print_summary(bundle["plan_summary"], bundle_path)
         return 0
+    except CapacityPreflightRefused as refusal:
+        refusal_path = _write_capacity_refusal(
+            output_dir=output_dir,
+            base_url=refusal.base_url or config.base_url,
+            space_id=refusal.space_id or args.space_id,
+            verdict=refusal.verdict,
+        )
+        print(f"acquisition refused: {refusal}", file=sys.stderr)
+        print(f"capacity refusal receipt: {refusal_path}", file=sys.stderr)
+        return 2
     except (HTTPError, URLError, TimeoutError, ValueError) as error:
         started_at = time.strftime("%Y%m%dT%H%M%S")
         bundle_path = (
@@ -1773,6 +1922,113 @@ def _suite_run_context(args: argparse.Namespace) -> JsonObject:
     }
 
 
+def _write_capacity_refusal(
+    *,
+    output_dir: Path,
+    base_url: str,
+    space_id: str | None,
+    verdict: JsonObject,
+) -> Path:
+    """Leave durable non-secret evidence that acquisition was refused.
+
+    The suite manifest is only written after fixtures are provisioned, and a
+    refusal happens before that, so the refusal needs its own receipt.
+    """
+    started_at = time.strftime("%Y%m%dT%H%M%S")
+    path = output_dir / f"capacity-preflight-refusal-{started_at}.json"
+    _write_json_exclusive(
+        path,
+        {
+            "artifact_mode": "capacity_preflight_refusal",
+            "created_at": started_at,
+            "app_version": LOCAL_APP_VERSION,
+            "base_url": base_url,
+            "space_id": space_id,
+            "capacity_preflight": verdict,
+        },
+    )
+    return path
+
+
+def _read_capacity_snapshot(
+    *, config: ApiConfig, path: str
+) -> tuple[JsonObject | None, JsonObject | None]:
+    """Read one capacity endpoint, returning either a snapshot or why not.
+
+    A refusal has to be recorded, so an unreachable, unauthorised or throttled
+    endpoint must reach the verdict as an absent snapshot rather than unwind
+    past the point where the refusal artifact is written. The failure keeps its
+    identity: an operator reading the receipt has to tell 429 exhaustion from
+    403 misconfiguration from 503 infrastructure.
+    """
+    try:
+        return _request_json(config=config, method="GET", path=path), None
+    except HTTPError as error:
+        return None, {"path": path, "kind": "http_status", "status": error.code}
+    except HTTPException as error:
+        # Truncated or malformed responses (IncompleteRead, BadStatusLine)
+        # arrive here after the server already counted the request, so they
+        # must refuse rather than unwind. The class is kept in `detail`.
+        return None, {
+            "path": path,
+            "kind": "response_transport_error",
+            "detail": type(error).__name__,
+        }
+    except (URLError, TimeoutError, OSError) as error:
+        return None, {
+            "path": path,
+            "kind": "unreachable",
+            "detail": type(error).__name__,
+        }
+    except ValueError:
+        return None, {"path": path, "kind": "malformed_response"}
+
+
+def _capacity_preflight(
+    *,
+    config: ApiConfig,
+    cases: list[BattleCase],
+    repetitions: int,
+    timeout_seconds: int,
+    max_concurrency: int,
+    space_id: str,
+) -> JsonObject:
+    """Prove the measurement target can carry the whole suite, before case one.
+
+    Runtime capacity is read first so the request snapshot is the last charged
+    call before the verdict and its `remaining` is the freshest number.
+    """
+    slots_required = required_runtime_slots(
+        cases=cases, max_concurrency=max_concurrency
+    )
+    demand = suite_request_demand(
+        cases=cases,
+        repetitions=repetitions,
+        timeout_seconds=timeout_seconds,
+    )
+    runtime_capacity, runtime_failure = (
+        _read_capacity_snapshot(config=config, path="/flows/runs/capacity/")
+        if slots_required
+        else (None, None)
+    )
+    request_capacity, request_failure = _read_capacity_snapshot(
+        config=config, path="/api-key-capacity/"
+    )
+    verdict = capacity_preflight_verdict(
+        request_capacity=request_capacity,
+        runtime_capacity=runtime_capacity,
+        demand=demand,
+        space_id=space_id,
+        runtime_slots_required=slots_required,
+    )
+    endpoint_failures = [
+        failure for failure in (runtime_failure, request_failure) if failure is not None
+    ]
+    if endpoint_failures:
+        verdict["endpoint_failures"] = endpoint_failures
+    return verdict
+
+
 def _require_clean_measurement_space(
     *,
     config: ApiConfig,
@@ -1987,6 +2243,26 @@ def _run_suite(
         config=config if is_release_run else None,
     )
     failure_execution_provenance = _failure_execution_provenance(release_identity)
+    # The frozen slice gates SEALED acquisition. An exploratory probe spends a
+    # fraction of the budget and is allowed to fail on its own terms.
+    capacity_preflight = (
+        _capacity_preflight(
+            config=config,
+            cases=cases,
+            repetitions=args.repetitions,
+            timeout_seconds=args.timeout_seconds,
+            max_concurrency=_max_concurrency(args),
+            space_id=args.space_id,
+        )
+        if is_release_run
+        else None
+    )
+    if capacity_preflight is not None and capacity_preflight["verdict"] != "pass":
+        raise CapacityPreflightRefused(
+            capacity_preflight,
+            base_url=config.base_url,
+            space_id=args.space_id,
+        )
     _require_clean_measurement_space(
         config=config,
         space_id=args.space_id,
@@ -2011,6 +2287,7 @@ def _run_suite(
             "created_at": started_at,
             "release_identity": release_identity,
             "evaluator_identity": evaluator_identity,
+            "capacity_preflight": capacity_preflight,
             "run_context": run_context,
             "expected_observations": expected_observations,
             "required_case_ids": list(acquisition_contract.required_case_ids),
@@ -2215,6 +2492,7 @@ def _run_suite(
         "release_identity_recheck": release_identity_recheck,
         "release_identity_recheck_checks": release_identity_recheck_checks,
         "evaluator_identity": evaluator_identity,
+        "capacity_preflight": capacity_preflight,
         "run_context": run_context,
         "results": results,
         "observation_summary": _suite_observation_summary(results),
@@ -2350,11 +2628,6 @@ def _run_replacement_batch(
     args.repetitions = receipt.repetitions
     args.concurrency = max_concurrency
 
-    _require_clean_measurement_space(
-        config=config,
-        space_id=args.space_id,
-    )
-
     cases_path = Path(args.cases_file) if args.cases_file else DEFAULT_CASES_FILE
     all_cases = _read_cases_file(cases_path)
     cases_by_id = {case.case_id: case for case in all_cases}
@@ -2401,12 +2674,36 @@ def _run_replacement_batch(
     failure_execution_provenance = _failure_execution_provenance(release_identity)
 
     requested_cases = [case for _, _, case in requested]
+    # Recovery spends real budget of its own, separately from whatever the base
+    # receipt already proved, so this batch carries its own proof.
+    capacity_preflight = _capacity_preflight(
+        config=config,
+        cases=requested_cases,
+        # Each requested slot is one observation, so the batch is already
+        # enumerated; multiplying by repetitions would double-count it.
+        repetitions=1,
+        timeout_seconds=args.timeout_seconds,
+        max_concurrency=max_concurrency,
+        space_id=args.space_id,
+    )
+    if capacity_preflight["verdict"] != "pass":
+        raise CapacityPreflightRefused(
+            capacity_preflight,
+            base_url=config.base_url,
+            space_id=args.space_id,
+        )
+
+    _require_clean_measurement_space(
+        config=config,
+        space_id=args.space_id,
+    )
     provisioned_fixtures = _provision_fixtures(config=config, cases=requested_cases)
     acquisition_contract = AcquisitionContract(
+        # Newly acquired bundles speak the current contract, not whatever the
+        # base receipt recorded.
         required_case_ids=tuple(
             case.case_id for case in requested_cases if case.required
         ),
-        artifact_schema_version=receipt.artifact_schema_version,
         require_clean_source=True,
     )
     started_at = time.strftime("%Y%m%dT%H%M%S")
@@ -2510,7 +2807,11 @@ def _run_replacement_batch(
             )
         )
     _write_json_exclusive(
-        replacements_path, [descriptor.as_json() for descriptor in descriptors]
+        replacements_path,
+        {
+            "capacity_preflight": capacity_preflight,
+            "replacements": [descriptor.as_json() for descriptor in descriptors],
+        },
     )
     print(f"replacement overlay: {replacements_path}")
     return 0
@@ -3357,7 +3658,7 @@ def _execute_and_collect_runtime_evidence(
             )
         if time.monotonic() >= deadline:
             raise TimeoutError(f"case {case_id} runtime execution timed out.")
-        time.sleep(1)
+        time.sleep(RUNTIME_POLL_INTERVAL_SECONDS)
     evidence = _request_json(
         config=config,
         method="GET",

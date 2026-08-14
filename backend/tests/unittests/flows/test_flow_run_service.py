@@ -811,6 +811,49 @@ async def test_create_run_enforces_tenant_concurrency_limit(user):
 
 
 @pytest.mark.asyncio
+async def test_runtime_capacity_reports_the_ceiling_create_run_enforces(user):
+    flow_run_repo = flow_run_repo_mock()
+    service = _flow_run_service(
+        user=user,
+        flow_repo=_flow_repo(),
+        flow_run_repo=flow_run_repo,
+        flow_run_review_checkpoint_repo=AsyncMock(),
+        flow_version_repo=AsyncMock(),
+        runtime_upload_repo=_runtime_upload_repo(),
+        max_concurrent_runs=4,
+    )
+    flow_run_repo.count_active_runs.return_value = 3
+
+    capacity = await service.runtime_capacity()
+
+    assert (capacity.active_runs, capacity.max_concurrent_runs) == (3, 4)
+    assert capacity.available_slots == 1
+    assert capacity.tenant_id == user.tenant_id
+    flow_run_repo.count_active_runs.assert_awaited_once_with(tenant_id=user.tenant_id)
+
+
+@pytest.mark.asyncio
+async def test_runtime_capacity_never_reports_negative_slots(user):
+    flow_run_repo = flow_run_repo_mock()
+    service = _flow_run_service(
+        user=user,
+        flow_repo=_flow_repo(),
+        flow_run_repo=flow_run_repo,
+        flow_run_review_checkpoint_repo=AsyncMock(),
+        flow_version_repo=AsyncMock(),
+        runtime_upload_repo=_runtime_upload_repo(),
+        max_concurrent_runs=2,
+    )
+    # A lowered ceiling can leave more active runs than slots. A client must
+    # read "none free", never a negative budget it could act on.
+    flow_run_repo.count_active_runs.return_value = 5
+
+    capacity = await service.runtime_capacity()
+
+    assert capacity.available_slots == 0
+
+
+@pytest.mark.asyncio
 async def test_create_run_creates_preseeded_run(user):
     flow_repo = _flow_repo()
     flow_run_repo = flow_run_repo_mock()

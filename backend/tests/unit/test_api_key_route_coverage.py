@@ -129,6 +129,7 @@ INTENTIONALLY_UNGUARDED = {
     "/modules": "Separate auth, out of scope",
     "/roles": "Tenant admin scope + admin key guards (TENANT_ADMIN_API_KEY_GUARDS)",
     "/api-keys": "Self-management with ensure_manage_authorized() + scope guard",
+    "/api-key-capacity": "Read-only description of the calling key's own rate-limit budget. There is no resource to permission: the key can only ever see itself, and a session caller with no key is rejected with 403.",
     "/ws": "WebSocket endpoint — separate auth",
     "/audit": "Admin audit endpoints with admin scope + admin key guards",
     "/mcp-servers": "MCP server management is tenant-admin infrastructure with admin scope + admin key guards",
@@ -161,6 +162,7 @@ INTENTIONALLY_SCOPE_FREE = {
     "not the URL, so a path-level scope check would not gate anything. The HelperRunService "
     "enforces edit-permission on the body's target_id and actor identity on the run.",
     "/skills": "Skill catalogue and organisation lifecycle endpoints reject API keys with require_session_auth; service-layer checks authorize the authenticated user",
+    "/api-key-capacity": "Deliberately outside the admin-scoped api_key_router so a space-scoped key can read its own budget. A scope check would gate a resource in the path; this route has no path parameter and returns only the caller's own key.",
 }
 
 

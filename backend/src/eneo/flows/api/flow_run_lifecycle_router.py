@@ -37,12 +37,14 @@ from eneo.flows.api.flow_models import (
     FlowRunRedispatchRequest,
     FlowRunRedispatchResponse,
 )
+from eneo.flows.api.flow_run_contract_models import FlowRunCapacityPublic
 from eneo.flows.api.flow_run_status_capability_models import (
     FlowRunStatusCapabilitiesPublic,
     flow_run_status_capabilities_public,
 )
 from eneo.flows.api.flow_runtime_paths import (
     FLOW_RUN_CANCEL_PATH,
+    FLOW_RUN_CAPACITY_PATH,
     FLOW_RUN_PATH,
     FLOW_RUN_REDISPATCH_PATH,
     FLOW_RUN_STATUS_CAPABILITIES_PATH,
@@ -80,6 +82,17 @@ _FLOW_RUN_IDEMPOTENCY_HEADER_DESCRIPTION = (
 )
 
 _FLOW_RUN_CONCURRENCY_RETRY_AFTER_SECONDS: Final[int] = 60
+_FLOW_RUN_CAPACITY_DESCRIPTION = """
+Return how many more concurrent Flow runs the caller's tenant may start.
+
+Use this before submitting a batch, so a client discovers the tenant ceiling
+up front instead of as a rejected `create_run` partway through. `active_runs`
+counts every non-terminal run in the tenant, including work started by other
+clients and stale queued work that has not been recovered.
+
+This is a snapshot, not a reservation: another caller can consume a slot
+between this response and `create_run`, which still enforces the limit.
+"""
 _FLOW_RUN_STATUS_CAPABILITIES_DESCRIPTION = """
 Return the canonical Flow run status capability table.
 
@@ -213,6 +226,43 @@ async def get_flow_run_status_capabilities(
     ),
 ) -> FlowRunStatusCapabilitiesPublic:
     return flow_run_status_capabilities_public()
+
+
+@router.get(
+    FLOW_RUN_CAPACITY_PATH,
+    response_model=FlowRunCapacityPublic,
+    status_code=status.HTTP_200_OK,
+    operation_id="get_flow_run_capacity",
+    summary="Get flow run capacity",
+    description=_FLOW_RUN_CAPACITY_DESCRIPTION,
+    responses={
+        401: error_response(
+            description="Authentication is required to inspect Flow run capacity.",
+            message="Unauthenticated.",
+            eneo_error_code=ErrorCodes.AUTHENTICATION_ERROR,
+            code="authentication_error",
+        ),
+        403: error_response(
+            description=FLOW_RUN_FORBIDDEN_DESCRIPTION,
+            message="API key space scope does not match requested flow.",
+            eneo_error_code=ErrorCodes.UNAUTHORIZED,
+            code="insufficient_scope",
+            context={"auth_layer": "api_key_scope"},
+        ),
+    },
+)
+async def get_flow_run_capacity(
+    container: Container = Depends(
+        get_container(with_user=True, with_upload_admission=True)
+    ),
+) -> FlowRunCapacityPublic:
+    capacity = await container.flow_run_service().runtime_capacity()
+    return FlowRunCapacityPublic(
+        tenant_id=capacity.tenant_id,
+        active_runs=capacity.active_runs,
+        max_concurrent_runs=capacity.max_concurrent_runs,
+        available_slots=capacity.available_slots,
+    )
 
 
 @router.post(

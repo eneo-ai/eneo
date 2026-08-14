@@ -12,6 +12,7 @@ from jsonschema import Draft202012Validator
 from pydantic import ValidationError
 from referencing import Registry, Resource
 from referencing.jsonschema import DRAFT202012
+from starlette.routing import compile_path
 
 from eneo.authentication.auth_models import (
     FLOW_EVIDENCE_SERVICE_KEY_PERMISSION_RECIPE,
@@ -76,6 +77,26 @@ def flow_route_operations() -> dict[tuple[str, str], str]:
         for method in sorted(route.methods - {"HEAD", "OPTIONS"}):
             operations[(route.path, method.lower())] = route.operation_id or ""
     return operations
+
+
+def test_flow_run_capacity_is_not_captured_by_the_flow_id_route() -> None:
+    """`/flows/{id}/` is registered first, so a sibling literal must not collide.
+
+    A colliding path would resolve through the dynamic route and fail UUID
+    validation instead of returning capacity.
+    """
+    app = get_application()
+    requested = "/api/v1/flows/runs/capacity/"
+    matched = [
+        route.route.operation_id
+        for route in flatten_routes(list(app.routes))
+        if isinstance(route.route, APIRoute)
+        and "GET" in (route.route.methods or set())
+        and compile_path(route.path)[0].match(requested)
+    ]
+
+    assert matched, f"no route serves {requested}"
+    assert matched[0] == "get_flow_run_capacity"
 
 
 def _resolve_component_ref(openapi_spec: dict, schema: dict) -> dict:

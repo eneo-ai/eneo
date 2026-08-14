@@ -136,6 +136,32 @@ async def check_rate_limit(
         raise RateLimitServiceUnavailableError(e) from e
 
 
+async def read_rate_limit_count(redis_client: aioredis.Redis, key: str) -> int:
+    """Return the current window's count without consuming any of it.
+
+    `check_rate_limit` increments, so a caller that only wants to report
+    remaining capacity cannot use it: it would spend the budget it reports on.
+    This returns the bare count rather than a `RateLimitResult`, because
+    `allowed` on that type means "allowed after this request was counted" and
+    would carry a second, quieter meaning here.
+
+    Raises:
+        RateLimitServiceUnavailableError: If Redis is unavailable or the stored
+            counter is not an integer. Remaining capacity is never guessed.
+    """
+    try:
+        raw = await cast(Any, redis_client).get(key)
+    except redis.exceptions.RedisError as e:
+        logger.error(f"Rate limit read error for key {key}: {e}", exc_info=True)
+        raise RateLimitServiceUnavailableError(e) from e
+
+    try:
+        return 0 if raw is None else int(raw)
+    except (TypeError, ValueError) as e:
+        logger.error(f"Rate limit counter for key {key} is not an integer: {raw!r}")
+        raise RateLimitServiceUnavailableError(e) from e
+
+
 async def enforce_rate_limit(
     redis_client: aioredis.Redis,
     user_id: UUID,

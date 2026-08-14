@@ -354,6 +354,7 @@ ENDPOINT_SEQUENCES: tuple[EndpointSequence, ...] = (
             "Call `runtime_paths.redispatch_run_template` only for stale queued recovery. For accepted or outcome-unknown exhaustion, send the observed `dispatch_exhausted_at` as `expected_dispatch_exhausted_at` to rearm that epoch. A zero `redispatched_count` means no broker acceptance was confirmed; poll the returned run.",
             "Back off polling when `status_capabilities.should_poll` is false.",
             "Use run and step polling as the source of truth for status changes.",
+            "Before submitting a batch, call `/api/v1/flows/runs/capacity/` and read `available_slots` for your tenant, instead of discovering the ceiling as a `flow_run_concurrency_limit_reached` rejection partway through. It is a snapshot, not a reservation, so `create_run` stays the authority.",
         ),
         runtime_path_fields=(
             "create_run",
@@ -361,6 +362,7 @@ ENDPOINT_SEQUENCES: tuple[EndpointSequence, ...] = (
             "redispatch_run_template",
             "get_run_template",
         ),
+        endpoint_operation_ids=("get_flow_run_capacity",),
         run_contract_fields=("published_flow_version",),
         receipts=(
             TestReceipt(
