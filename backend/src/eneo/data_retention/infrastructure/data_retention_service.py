@@ -62,6 +62,7 @@ from eneo.flows.flow_retention_tombstone import (
     parse_attempt_retention_counts,
 )
 from eneo.flows.infrastructure.flow_run_history_purge_repo import (
+    FlowRunHistoryPurgeCounts,
     FlowRunHistoryPurgeRepository,
     FlowRunHistoryPurgeResult,
     FlowTemplateAssetPurgeCounts,
@@ -1554,9 +1555,7 @@ class DataRetentionService:
         counts = _empty_flow_runtime_cleanup_counts()
 
         purge_result = await self._purge_all_old_flow_run_history(now=now)
-        abandoned_upload_counts = await FlowRunHistoryPurgeRepository(
-            self.session
-        ).purge_abandoned_runtime_uploads(
+        abandoned_upload_counts = await self.purge_abandoned_flow_runtime_uploads(
             now=now,
             limit=RETENTION_BATCH_SIZE,
         )
@@ -2039,6 +2038,22 @@ class DataRetentionService:
             # so this loop advances without polling the same ineligible run.
 
         return total_result
+
+    async def purge_abandoned_flow_runtime_uploads(
+        self,
+        *,
+        now: datetime,
+        limit: int,
+    ) -> FlowRunHistoryPurgeCounts:
+        """Reclaim runtime uploads never bound to a run, past their horizon.
+
+        The tenant's abandonment horizon and its byte-accurate impact preview are
+        operator-facing settings, so this step has to run wherever flow retention
+        actually runs.
+        """
+        return await FlowRunHistoryPurgeRepository(
+            self.session
+        ).purge_abandoned_runtime_uploads(now=now, limit=limit)
 
     async def purge_soft_deleted_flow_template_assets(
         self,

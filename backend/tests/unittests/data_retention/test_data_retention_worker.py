@@ -107,6 +107,7 @@ class _DataRetentionService:
         self.purge_now_values: list[datetime] = []
         self.purge_limits: list[int] = []
         self.template_asset_purge_limits: list[int] = []
+        self.abandoned_upload_calls: list[tuple[datetime, int]] = []
         self.blocked_now_values: list[datetime] = []
         self.redaction_now_values: list[datetime] = []
         self.builder_now_values: list[datetime] = []
@@ -153,6 +154,17 @@ class _DataRetentionService:
             skipped_undelivered_audit=31,
             skipped_unresolved_webhook=41,
             skipped_active_rerun=37,
+        )
+
+    async def purge_abandoned_flow_runtime_uploads(
+        self, *, now: datetime, limit: int
+    ) -> FlowRunHistoryPurgeCounts:
+        self.abandoned_upload_calls.append((now, limit))
+        return FlowRunHistoryPurgeCounts(
+            flow_runtime_source_candidates=4,
+            flow_runtime_source_candidate_bytes=400,
+            flow_runtime_source_files_deleted=2,
+            flow_runtime_source_bytes_deleted=400,
         )
 
     async def redact_old_flow_debug_evidence(
@@ -206,7 +218,7 @@ async def test_cleanup_old_data_runs_flow_purge_batches_in_separate_transactions
     service = container._service
 
     result = await cleanup_old_data(container=container)
-    expected_independent_cleanup_transactions = 11
+    expected_independent_cleanup_transactions = 12
 
     assert result["success"] is True
     assert result["deleted"]["builder_sessions"] == 13
@@ -215,11 +227,11 @@ async def test_cleanup_old_data_runs_flow_purge_batches_in_separate_transactions
     assert result["deleted"]["flow_runs_lock_deferred"] == 0
     assert result["deleted"]["flow_runs_purged"] == 3
     assert result["deleted"]["flow_generated_files_deleted"] == 16
-    assert result["deleted"]["flow_runtime_source_candidates"] == 12
-    assert result["deleted"]["flow_runtime_source_candidate_bytes"] == 1200
+    assert result["deleted"]["flow_runtime_source_candidates"] == 16
+    assert result["deleted"]["flow_runtime_source_candidate_bytes"] == 1600
     assert result["deleted"]["flow_runtime_source_bindings_deleted"] == 5
-    assert result["deleted"]["flow_runtime_source_files_deleted"] == 3
-    assert result["deleted"]["flow_runtime_source_bytes_deleted"] == 300
+    assert result["deleted"]["flow_runtime_source_files_deleted"] == 5
+    assert result["deleted"]["flow_runtime_source_bytes_deleted"] == 700
     assert result["deleted"]["flow_webhook_deliveries_deleted"] == 22
     assert result["deleted"]["flow_audit_outbox_rows_deleted"] == 26
     assert result["deleted"]["flow_review_checkpoints_deleted"] == 34
@@ -235,9 +247,9 @@ async def test_cleanup_old_data_runs_flow_purge_batches_in_separate_transactions
     assert result["deleted"]["flow_provider_calls"] == 13
     assert result["deleted"]["flow_resolved_input_aggregates"] == 17
     assert result["deleted"]["flow_resolved_input_edges"] == 19
-    assert result["deleted"]["total"] == 263
-    assert "flow_runtime_source_candidate_bytes: 1200" in caplog.text
-    assert "flow_runtime_source_bytes_deleted: 300" in caplog.text
+    assert result["deleted"]["total"] == 265
+    assert "flow_runtime_source_candidate_bytes: 1600" in caplog.text
+    assert "flow_runtime_source_bytes_deleted: 700" in caplog.text
     assert "flow_runs_considered: 3" in caplog.text
     assert "flow_runs_lock_deferred: 0" in caplog.text
     assert "flow_provider_calls: 13" in caplog.text
@@ -257,6 +269,46 @@ async def test_cleanup_old_data_runs_flow_purge_batches_in_separate_transactions
     )
     assert len(set(all_flow_runtime_now_values)) == 1
     assert service.builder_now_values == service.purge_now_values[:1]
+
+
+@pytest.mark.asyncio
+async def test_cleanup_old_data_reclaims_abandoned_flow_runtime_uploads(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The scheduled cleanup must actually run the abandoned-upload reclaim.
+
+    The tenant abandonment horizon and its byte-accurate impact preview are
+    operator-facing settings, and the only sequence that reclaimed those uploads
+    had no caller outside tests — so an administrator could set the horizon,
+    confirm the preview, and have nothing ever deleted.
+    """
+    session = _Session()
+
+    @contextlib.asynccontextmanager
+    async def session_context() -> AsyncIterator[_Session]:
+        yield session
+
+    monkeypatch.setattr(
+        data_retention_worker.sessionmanager, "session", session_context
+    )
+
+    cleanup_old_data = cast(
+        Callable[..., Awaitable[data_retention_worker.CleanupResults]],
+        getattr(data_retention_worker.cleanup_old_data, "__wrapped__"),
+    )
+    container = _Container()
+    service = container._service
+
+    result = await cleanup_old_data(container=container)
+
+    assert result["success"] is True
+    assert len(service.abandoned_upload_calls) == 1
+    reclaim_now, reclaim_limit = service.abandoned_upload_calls[0]
+    assert reclaim_limit == data_retention_worker.RETENTION_BATCH_SIZE
+    # The reclaim shares the run's clock with the rest of the Flow sweep.
+    assert reclaim_now == service.purge_now_values[0]
+    # Its reclaimed bytes reach the operator-visible payload.
+    assert result["deleted"]["flow_runtime_source_bytes_deleted"] == 700
 
 
 @pytest.mark.asyncio
@@ -319,11 +371,11 @@ async def test_cleanup_old_data_preserves_committed_flow_purge_counts_after_late
     assert result["deleted"]["flow_runs_lock_deferred"] == 0
     assert result["deleted"]["flow_runs_purged"] == 2
     assert result["deleted"]["flow_generated_files_deleted"] == 3
-    assert result["deleted"]["flow_runtime_source_candidates"] == 5
-    assert result["deleted"]["flow_runtime_source_candidate_bytes"] == 500
+    assert result["deleted"]["flow_runtime_source_candidates"] == 9
+    assert result["deleted"]["flow_runtime_source_candidate_bytes"] == 900
     assert result["deleted"]["flow_runtime_source_bindings_deleted"] == 2
-    assert result["deleted"]["flow_runtime_source_files_deleted"] == 1
-    assert result["deleted"]["flow_runtime_source_bytes_deleted"] == 100
+    assert result["deleted"]["flow_runtime_source_files_deleted"] == 3
+    assert result["deleted"]["flow_runtime_source_bytes_deleted"] == 500
     assert result["deleted"]["flow_template_assets_purged"] == 29
     assert result["deleted"]["flow_template_asset_files_deleted"] == 31
     assert result["deleted"]["builder_sessions"] == 13
@@ -340,7 +392,7 @@ async def test_cleanup_old_data_preserves_committed_flow_purge_counts_after_late
     assert _SENSITIVE_PAYLOAD not in sanitized_output
     assert "DELETE FROM files" not in sanitized_output
     assert service.blocked_now_values == []
-    assert session.transaction_count == 9
+    assert session.transaction_count == 10
     assert container.session.reset_count == 1
 
 

@@ -309,6 +309,21 @@ async def cleanup_old_data(container: Container) -> CleanupResults:
                         blocked_counts,
                     )
 
+            abandoned_upload_counts = await _run_cleanup_step(
+                session=session,
+                results=results,
+                error_prefix="Failed to reclaim abandoned Flow runtime uploads",
+                action=lambda: retention_service.purge_abandoned_flow_runtime_uploads(
+                    now=flow_runtime_now,
+                    limit=RETENTION_BATCH_SIZE,
+                ),
+            )
+            if abandoned_upload_counts is not None:
+                _record_flow_run_history_purge_counts(
+                    results["deleted"],
+                    abandoned_upload_counts,
+                )
+
             template_asset_counts = await _run_cleanup_step(
                 session=session,
                 results=results,
