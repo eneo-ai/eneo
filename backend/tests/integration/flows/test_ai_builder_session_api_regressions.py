@@ -7554,6 +7554,10 @@ async def test_ai_builder_api_edit_apply_replays_committed_output_change_once(
         db_container=db_container,
         completion_model_factory=completion_model_factory,
         space_name="AI Builder API edit output-only",
+        # The conservative tool-schema reserve no longer fits the 8000-token
+        # fixture default; the planner window must be owned by this test.
+        planner_model_overrides={"max_input_tokens": 128_000},
+        planner_model_is_only_space_model=True,
     )
     async with db_container() as container:
         flow_service = container.flow_service()
@@ -7815,6 +7819,10 @@ async def test_ai_builder_api_edit_mode_transcription_insert_clears_stale_runtim
         db_container=db_container,
         completion_model_factory=completion_model_factory,
         space_name="AI Builder API edit transcription",
+        # The conservative tool-schema reserve no longer fits the 8000-token
+        # fixture default; the planner window must be owned by this test.
+        planner_model_overrides={"max_input_tokens": 128_000},
+        planner_model_is_only_space_model=True,
     )
     async with db_container() as container:
         flow_service = container.flow_service()
@@ -7968,6 +7976,10 @@ async def test_ai_builder_api_create_mode_audio_apply_without_transcription_mode
         db_container=db_container,
         completion_model_factory=completion_model_factory,
         space_name="AI Builder API audio missing transcription model",
+        # The conservative tool-schema reserve no longer fits the 8000-token
+        # fixture default; the planner window must be owned by this test.
+        planner_model_overrides={"max_input_tokens": 128_000},
+        planner_model_is_only_space_model=True,
     )
 
     outline_flow = _make_tool_call(
