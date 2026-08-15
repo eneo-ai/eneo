@@ -4,7 +4,6 @@ from uuid import uuid4
 
 import pytest
 
-from eneo.flows.ai_builder.ai_builder_canonicalization import canonical_question_id
 from eneo.flows.ai_builder.ai_builder_discovery_signal_inference import (
     is_high_confidence_source_to_source_comparison,
 )
@@ -33,7 +32,6 @@ from eneo.flows.ai_builder.ai_builder_framework_policy import (
 from eneo.flows.ai_builder.ai_builder_input_architecture_policy import (
     resolve_input_intent,
 )
-from eneo.flows.ai_builder.ai_builder_keywords import OUTPUT_CHANGE_KEYWORDS
 from eneo.flows.ai_builder.ai_builder_requirements_state import (
     build_requirements_version,
 )
@@ -765,16 +763,6 @@ def test_normalizes_output_question_aliases_to_canonical_mode() -> None:
         "docx_document",
         "structured_json",
     ]
-
-
-def test_canonical_question_id_is_available_from_canonicalization_module() -> None:
-    assert canonical_question_id("final_output_format") == "terminal_output"
-    assert canonical_question_id("final_output_mode") == "terminal_output"
-    assert canonical_question_id("input_material_mode") == "primary_runtime_input"
-
-
-def test_output_change_keywords_live_in_keywords_module() -> None:
-    assert "final pdf" in OUTPUT_CHANGE_KEYWORDS
 
 
 def test_normalizes_output_answer_aliases_to_canonical_mode() -> None:

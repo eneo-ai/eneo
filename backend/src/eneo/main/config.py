@@ -247,7 +247,6 @@ class Settings(BaseSettings):
     redis_db: int = 0
     redis_db_celery_broker: int = 2
     redis_db_celery_result: int = 3
-    redis_db_auth_broker: int = 4
     # Redis connection resilience defaults
     # Safe defaults avoid aggressive timeouts during transient network blips
     redis_conn_timeout: int = 5

@@ -116,7 +116,6 @@ class TestQuestionTaxonomy:
 
 class TestMVSGate:
     def test_vague_swedish_triggers_mvs_not_met(self) -> None:
-        """E1: 'Hjälp mig bygga ett flöde' → MVS not met → not ready for confirmation."""
         conversation = [
             ConversationMessage(
                 role="user",
@@ -128,7 +127,6 @@ class TestMVSGate:
         assert not analysis.ready_for_confirmation
 
     def test_vague_english_triggers_mvs_not_met(self) -> None:
-        """E5: 'Build me a flow' → MVS not met."""
         conversation = [
             ConversationMessage(
                 role="user",
@@ -140,7 +138,6 @@ class TestMVSGate:
         assert not analysis.ready_for_confirmation
 
     def test_rich_swedish_has_mvs_met(self) -> None:
-        """E3: Rich input with document + output → MVS met."""
         conversation = [
             ConversationMessage(
                 role="user",
@@ -151,7 +148,6 @@ class TestMVSGate:
         assert analysis.mvs_met
 
     def test_rich_english_has_mvs_met(self) -> None:
-        """E16: Rich English with task verbs + output → MVS met."""
         conversation = [
             ConversationMessage(
                 role="user",
@@ -205,7 +201,6 @@ class TestMVSGate:
         assert block is None
 
     def test_advanced_explicit_user_has_mvs_met(self) -> None:
-        """E4: Advanced user specifying steps → MVS met, minimal questions."""
         conversation = [
             ConversationMessage(
                 role="user",
@@ -216,11 +211,6 @@ class TestMVSGate:
         ]
         analysis = analyze_discovery(conversation)
         assert analysis.mvs_met
-
-
-# ---------------------------------------------------------------------------
-# E13: Mixed architecture → clarification question
-# ---------------------------------------------------------------------------
 
 
 class TestQuestionBudget:
@@ -390,7 +380,6 @@ class TestQuestionBudget:
         assert all(i.severity == "blocking" for i in high_value) or len(high_value) == 0
 
     def test_advanced_explicit_gets_minimal_questions(self) -> None:
-        """E4: Advanced user specifying steps → few blocking questions only."""
         conversation = [
             ConversationMessage(
                 role="user",
@@ -412,7 +401,6 @@ class TestQuestionBudget:
 
 class TestMixedArchitectureClarification:
     def test_mixed_audio_document_triggers_architecture_question(self) -> None:
-        """E13: Audio + document mention → flow_input_architecture question."""
         conversation = [
             ConversationMessage(
                 role="user",

@@ -22,7 +22,6 @@ REDIS_PORT=6379
 REDIS_DB=0
 REDIS_DB_CELERY_BROKER=2
 REDIS_DB_CELERY_RESULT=3
-REDIS_DB_AUTH_BROKER=4
 
 # ----------------------------------------------------------------------------
 # Security (REQUIRED)

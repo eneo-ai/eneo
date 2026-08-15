@@ -1691,7 +1691,6 @@ async def apply_plan(
 ):
     service = _get_ai_builder_service(container)
 
-    # Verify plan exists and get session for permission check
     plan: BuilderPlan = await service.get_plan(plan_id)
     session: BuilderSession = await service.get_session(plan.session_id)
     await _authorize_ai_builder_request(
@@ -1861,7 +1860,6 @@ async def revise_plan(
 ):
     service = _get_ai_builder_service(container)
 
-    # Verify plan exists and get session for permission check
     plan: BuilderPlan = await service.get_plan(plan_id)
     session: BuilderSession = await service.get_session(plan.session_id)
     await _authorize_ai_builder_request(

@@ -68,9 +68,6 @@ from eneo.flows.ai_builder.ai_builder_session_turn import (
     SessionSendTurn,
 )
 from eneo.flows.ai_builder.ai_builder_tool_names import PROPOSE_FLOW_TOOL_NAME
-from tests.unittests.flows.ai_builder.ai_builder_intent_diagnostic_payloads import (
-    self_correction_intent_with_step_assumptions_payload,
-)
 from tests.unittests.flows.ai_builder.proposal_turn_builders import (
     _make_context,
     _plan_stream_event,
@@ -583,7 +580,35 @@ async def test_run_forced_tool_retry_after_text_repairs_json_text_through_provid
 async def test_forced_tool_retry_surfaces_typed_feedback_for_invalid_tool_arguments() -> (
     None
 ):
-    payload = self_correction_intent_with_step_assumptions_payload()
+    payload = {
+        "flow_name": "Extract facts",
+        "plan_rationale": "Return the requested facts as structured data.",
+        "steps": [
+            {
+                "name": "Transcribe audio",
+                "instructions": "Transcribe the incoming audio to text.",
+            },
+            {
+                "name": "Extract facts",
+                "instructions": "Extract the requested facts from the transcript.",
+                "assumptions": ["The transcript contains the requested facts."],
+                "output_fields": [
+                    {
+                        "name": "facts",
+                        "field_type": "array",
+                        "description": "Facts found in the transcript.",
+                        "required": True,
+                        "item_fields": {
+                            "name": "fact",
+                            "field_type": "string",
+                            "description": "A fact found in the transcript.",
+                            "required": True,
+                        },
+                    }
+                ],
+            },
+        ],
+    }
     repair_completion = AsyncMock(
         return_value=_tool_response(
             tool_name=PROPOSE_FLOW_TOOL_NAME,

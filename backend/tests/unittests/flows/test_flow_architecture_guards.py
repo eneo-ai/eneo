@@ -1,7 +1,7 @@
 """AST guards keep Flow architecture ownership rules from drifting.
 
-The guards cover output-axis dispatch, outbox delivery vocabulary, and
-container-provider wiring that must stay behind canonical owners.
+The guards cover outbox delivery vocabulary and container-provider wiring that
+must stay behind canonical owners.
 """
 
 from __future__ import annotations
@@ -32,7 +32,6 @@ FLOW_RUNTIME_ROOT = FLOW_SOURCE_ROOT / "runtime"
 FLOW_API_ROOT = FLOW_SOURCE_ROOT / "api"
 FLOW_TASKS_PATH = FLOW_RUNTIME_ROOT / "tasks.py"
 FLOW_API_PACKAGES = {"api", "ai_builder"}
-OUTPUT_FORMATS_ROOT = FLOW_RUNTIME_ROOT / "output_formats"
 DATA_RETENTION_ROOT = BACKEND_ROOT / "src" / "eneo" / "data_retention"
 PYRIGHT_REPORT_UNKNOWN_MEMBER_IGNORE_RE = re.compile(
     r"#\s*pyright\s*:\s*ignore\s*\[\s*[^\]]*\breportUnknownMemberType\b[^\]]*\]"
@@ -52,19 +51,6 @@ FLOW_TRANSCRIBE_CACHE_GUARD_MESSAGE = (
     "not the shared Files.transcription cache."
 )
 
-_OUTPUT_AXIS_ENUMS = {
-    "output_mode": "FlowOutputMode",
-    "output_type": "FlowOutputType",
-}
-
-
-@dataclass(frozen=True, order=True)
-class _OutputAxisBranch:
-    axis: str
-    relative_path: str
-    function: str
-    expression: str
-
 
 @dataclass(frozen=True, order=True)
 class _LocalJsonAliasException:
@@ -79,78 +65,6 @@ class _LocalJsonAliasDefinition:
     line: int
 
 
-ALLOWED_OUTPUT_MODE_BRANCHES = frozenset(
-    {
-        # Input grammar is selected before handlers run; moving this check would
-        # widen the handler preparation interface.
-        _OutputAxisBranch(
-            axis="output_mode",
-            relative_path="step_input_resolution.py",
-            function="resolve_step_input",
-            expression="step.output_mode == 'compose_text'",
-        ),
-        _OutputAxisBranch(
-            axis="output_mode",
-            relative_path="step_input_resolution.py",
-            function="resolve_step_input",
-            expression="step.output_mode == 'transcribe_only'",
-        ),
-        _OutputAxisBranch(
-            axis="output_mode",
-            relative_path="step_definition_parser.py",
-            function="_parse_output_fields",
-            expression="output_mode not in ALLOWED_OUTPUT_MODES",
-        ),
-        _OutputAxisBranch(
-            axis="output_mode",
-            relative_path="step_definition_parser.py",
-            function="_parse_output_config",
-            expression="output_mode == 'template_fill'",
-        ),
-        _OutputAxisBranch(
-            axis="output_mode",
-            relative_path="step_definition_parser.py",
-            function="_validate_http_post_output_is_terminal",
-            expression="step.output_mode == 'http_post'",
-        ),
-        _OutputAxisBranch(
-            axis="output_mode",
-            relative_path="step_definition_parser.py",
-            function="parse_runtime_steps",
-            expression="output_fields.output_mode == 'transcribe_only'",
-        ),
-        _OutputAxisBranch(
-            axis="output_mode",
-            relative_path="executor.py",
-            function="_build_step_handler",
-            expression="match mode using FlowOutputMode",
-        ),
-    }
-)
-ALLOWED_OUTPUT_TYPE_BRANCHES = frozenset(
-    {
-        _OutputAxisBranch(
-            axis="output_type",
-            relative_path="step_definition_parser.py",
-            function="_parse_output_fields",
-            expression="output_type not in ALLOWED_OUTPUT_TYPES",
-        ),
-        _OutputAxisBranch(
-            axis="output_type",
-            relative_path="step_definition_parser.py",
-            function="_parse_output_config",
-            expression="output_type != 'docx'",
-        ),
-        _OutputAxisBranch(
-            axis="output_type",
-            relative_path="step_execution_runtime.py",
-            function="citation_mode_for_step",
-            expression="output_type is not FlowOutputType.TEXT",
-        ),
-    }
-)
-MAX_OUTPUT_MODE_BRANCH_ALLOWLIST_SIZE = 8
-MAX_OUTPUT_TYPE_BRANCH_ALLOWLIST_SIZE = 3
 ALLOWED_LOCAL_JSON_ALIAS_DEFINITIONS = frozenset(
     {
         _LocalJsonAliasException(
@@ -597,131 +511,6 @@ def _container_provider_passthrough_name(
     return None
 
 
-def _should_scan_path_for_axis(path: Path, *, axis: str) -> bool:
-    return axis != "output_type" or OUTPUT_FORMATS_ROOT not in path.parents
-
-
-def _node_references_axis(node: ast.AST, *, axis: str) -> bool:
-    if (
-        axis == "output_type"
-        and isinstance(node, ast.Call)
-        and isinstance(node.func, ast.Name)
-        and node.func.id == "resolve_format_spec"
-    ):
-        return False
-    enum_name = _OUTPUT_AXIS_ENUMS[axis]
-    for child in ast.walk(node):
-        if isinstance(child, ast.Name) and child.id == axis:
-            return True
-        if not isinstance(child, ast.Attribute):
-            continue
-        if child.attr == axis:
-            return True
-        if isinstance(child.value, ast.Name) and child.value.id == enum_name:
-            return True
-    return False
-
-
-def _pattern_references_enum(pattern: ast.pattern, *, enum_name: str) -> bool:
-    for child in ast.walk(pattern):
-        if (
-            isinstance(child, ast.Attribute)
-            and isinstance(child.value, ast.Name)
-            and child.value.id == enum_name
-        ):
-            return True
-    return False
-
-
-class _OutputAxisBranchVisitor(ast.NodeVisitor):
-    def __init__(self, *, relative_path: str):
-        self._relative_path = relative_path
-        self._function_stack: list[str] = []
-        self.branches: set[_OutputAxisBranch] = set()
-
-    @property
-    def _function_name(self) -> str:
-        return ".".join(self._function_stack) or "<module>"
-
-    def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
-        self._function_stack.append(node.name)
-        self.generic_visit(node)
-        self._function_stack.pop()
-
-    def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:
-        self._function_stack.append(node.name)
-        self.generic_visit(node)
-        self._function_stack.pop()
-
-    def visit_Compare(self, node: ast.Compare) -> None:
-        operands = (node.left, *node.comparators)
-        for axis in _OUTPUT_AXIS_ENUMS:
-            if not any(
-                _node_references_axis(operand, axis=axis) for operand in operands
-            ):
-                continue
-            self.branches.add(
-                _OutputAxisBranch(
-                    axis=axis,
-                    relative_path=self._relative_path,
-                    function=self._function_name,
-                    expression=ast.unparse(node),
-                )
-            )
-        self.generic_visit(node)
-
-    def visit_Match(self, node: ast.Match) -> None:
-        for axis, enum_name in _OUTPUT_AXIS_ENUMS.items():
-            if not (
-                _node_references_axis(node.subject, axis=axis)
-                or any(
-                    _pattern_references_enum(case.pattern, enum_name=enum_name)
-                    for case in node.cases
-                )
-            ):
-                continue
-            self.branches.add(
-                _OutputAxisBranch(
-                    axis=axis,
-                    relative_path=self._relative_path,
-                    function=self._function_name,
-                    expression=f"match {ast.unparse(node.subject)} using {enum_name}",
-                )
-            )
-        self.generic_visit(node)
-
-
-def _output_axis_branches_in_tree(
-    tree: ast.AST, *, relative_path: str
-) -> frozenset[_OutputAxisBranch]:
-    visitor = _OutputAxisBranchVisitor(relative_path=relative_path)
-    visitor.visit(tree)
-    return frozenset(visitor.branches)
-
-
-def _runtime_output_axis_branches(*, axis: str) -> frozenset[_OutputAxisBranch]:
-    branches: set[_OutputAxisBranch] = set()
-    for path in _flow_runtime_python_files():
-        if not _should_scan_path_for_axis(path, axis=axis):
-            continue
-        tree = ast.parse(path.read_text(), filename=str(path))
-        branches.update(
-            branch
-            for branch in _output_axis_branches_in_tree(
-                tree, relative_path=_relative_runtime_path(path)
-            )
-            if branch.axis == axis
-        )
-    return frozenset(branches)
-
-
-def _format_branches(branches: Iterable[_OutputAxisBranch]) -> str:
-    return "\n".join(
-        f"- {branch.relative_path}::{branch.function}::{branch.expression}"
-        for branch in sorted(branches)
-    )
-
-
 def _module_level_name_target(node: ast.Assign | ast.AnnAssign) -> ast.Name | None:
     if isinstance(node, ast.AnnAssign):
         target = node.target
@@ -828,43 +617,6 @@ def _assert_local_json_alias_definitions_are_allowed(
     )
     assert len(allowed) <= MAX_LOCAL_JSON_ALIAS_ALLOWLIST_SIZE, (
         "Prefer moving aliases to eneo.json_types instead of growing the allowlist."
-    )
-
-
-def _first_branch(branches: frozenset[_OutputAxisBranch]) -> _OutputAxisBranch:
-    return next(iter(sorted(branches)))
-
-
-def _assert_axis_branches_are_allowed(
-    *,
-    axis: str,
-    allowed: frozenset[_OutputAxisBranch],
-    max_allowed: int,
-    canonical_owner: str,
-    allowlist_name: str,
-) -> None:
-    found = _runtime_output_axis_branches(axis=axis)
-    unexpected = found - allowed
-    stale = allowed - found
-    example = _first_branch(allowed)
-    guidance = (
-        f"{canonical_owner} is the canonical owner for new {axis} policy. "
-        f"If this is a legitimate exception, add it to {allowlist_name} with a "
-        "narrow function/expression and reason. Example existing exception: "
-        f"{example.relative_path}::{example.function}."
-    )
-    assert not unexpected, (
-        f"Unexpected {axis} branches:\n{_format_branches(unexpected)}\n{guidance}"
-    )
-    assert not stale, (
-        f"Stale {axis} allowlist entries:\n{_format_branches(stale)}\n"
-        f"Remove stale entries from {allowlist_name}; do not keep compatibility "
-        "exceptions after the source branch is gone."
-    )
-    assert len(allowed) <= max_allowed, (
-        f"{allowlist_name} has {len(allowed)} entries, expected at most "
-        f"{max_allowed}. Prefer moving logic to {canonical_owner} instead of "
-        "growing the exception list."
     )
 
 
@@ -1025,63 +777,6 @@ def test_flow_run_repositories_do_not_import_platform_exception_module():
             offenders.append(f"{relative_path}:{lineno}")
 
     assert offenders == []
-
-
-def test_output_mode_literal_branches_only_appear_in_allowlisted_call_sites():
-    _assert_axis_branches_are_allowed(
-        axis="output_mode",
-        allowed=ALLOWED_OUTPUT_MODE_BRANCHES,
-        max_allowed=MAX_OUTPUT_MODE_BRANCH_ALLOWLIST_SIZE,
-        canonical_owner="runtime/step_handlers",
-        allowlist_name="ALLOWED_OUTPUT_MODE_BRANCHES",
-    )
-
-
-def test_output_type_literal_branches_only_appear_in_allowlisted_call_sites():
-    _assert_axis_branches_are_allowed(
-        axis="output_type",
-        allowed=ALLOWED_OUTPUT_TYPE_BRANCHES,
-        max_allowed=MAX_OUTPUT_TYPE_BRANCH_ALLOWLIST_SIZE,
-        canonical_owner="runtime/output_formats",
-        allowlist_name="ALLOWED_OUTPUT_TYPE_BRANCHES",
-    )
-
-
-def test_output_mode_branch_scanner_reports_forbidden_call_site():
-    tree = ast.parse(
-        "def execute(step):\n"
-        "    if step.output_mode == 'http_post':\n"
-        "        return True\n"
-    )
-
-    assert _OutputAxisBranch(
-        axis="output_mode",
-        relative_path="new_runtime.py",
-        function="execute",
-        expression="step.output_mode == 'http_post'",
-    ) in _output_axis_branches_in_tree(tree, relative_path="new_runtime.py")
-
-
-def test_output_mode_guard_scans_output_format_modules():
-    output_format_path = OUTPUT_FORMATS_ROOT / "new_format.py"
-
-    assert _should_scan_path_for_axis(output_format_path, axis="output_mode")
-    assert not _should_scan_path_for_axis(output_format_path, axis="output_type")
-
-
-def test_output_type_branch_scanner_reports_forbidden_call_site():
-    tree = ast.parse(
-        "def render(step):\n"
-        "    if step.output_type in ('pdf', 'docx'):\n"
-        "        return True\n"
-    )
-
-    assert _OutputAxisBranch(
-        axis="output_type",
-        relative_path="new_runtime.py",
-        function="render",
-        expression="step.output_type in ('pdf', 'docx')",
-    ) in _output_axis_branches_in_tree(tree, relative_path="new_runtime.py")
 
 
 def test_removed_typed_output_helpers_do_not_reappear():

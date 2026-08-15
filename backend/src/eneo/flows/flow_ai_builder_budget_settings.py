@@ -8,8 +8,8 @@ AI_BUILDER_BUDGET_MAX_TOKENS = 10_000_000
 # These are platform safety ceilings, not organization policy defaults. They
 # bound API collection work, persisted message size, synchronous DOCX
 # decompression, and placeholder evidence respectively. Tenant admins choose
-# the effective values up to these ceilings; raising a ceiling requires the
-# release capacity proof recorded in the Flow production roadmap.
+# the effective values up to these ceilings; raising a ceiling requires
+# capacity evidence for the affected storage and runtime paths.
 AI_BUILDER_MAX_ATTACHMENTS_HARD_LIMIT = 100
 AI_BUILDER_MAX_MESSAGE_CHARS_HARD_LIMIT = 50_000
 AI_BUILDER_TEMPLATE_INSPECTION_HARD_LIMIT_BYTES = 200 * 1024 * 1024

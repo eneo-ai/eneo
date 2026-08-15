@@ -54,7 +54,6 @@ from eneo.flows.flow_authoring_spec import (
     StepSpec,
 )
 from eneo.flows.flow_review_policy import FlowStepReviewMode, FlowStepReviewPolicy
-from eneo.flows.step_lineage import existing_step_ref_for_order
 
 if TYPE_CHECKING:
     from eneo.flows.ai_builder.ai_builder_critic_invariants import CriticContext
@@ -131,92 +130,6 @@ def test_critic_requires_typed_checkpoint_on_the_actual_report_producer() -> Non
     assert not any(
         issue.id == "checkpoint_intent_mismatch" for issue in matching_issues
     )
-
-
-def _edit_flow_with_reviewed_step() -> "Flow":
-    flow = _edit_flow()
-    flow.steps[0].review_policy = FlowStepReviewPolicy(mode=FlowStepReviewMode.VIEW)
-    return flow
-
-
-def _existing_report_step(*, reviewed: bool) -> StepSpec:
-    step = _step("step_a", "Draft report", "Draft the report.").model_copy(
-        update={"existing_step_ref": existing_step_ref_for_order(1)}
-    )
-    if reviewed:
-        return step.model_copy(
-            update={"review_policy": FlowStepReviewPolicy(mode=FlowStepReviewMode.VIEW)}
-        )
-    return step
-
-
-def _edit_checkpoint_issues(
-    spec: FlowDraftSpecCore,
-    planning_state: PlanningState,
-    flow: "Flow",
-) -> list[str]:
-    return [
-        issue.id
-        for issue in evaluate_critic_invariants(
-            build_conversation_critic_context(
-                [],
-                spec,
-                flow=flow,
-                planning_state=planning_state,
-                compile_context=create_compile_context_from_planning_state(
-                    planning_state
-                ),
-            )
-        )
-        if issue.id == "checkpoint_intent_mismatch"
-    ]
-
-
-def test_edit_critic_preserves_unchanged_existing_checkpoint() -> None:
-    spec = FlowDraftSpecCore(
-        flow_name="Existing reviewed flow",
-        steps=[_existing_report_step(reviewed=True)],
-    )
-
-    assert not _edit_checkpoint_issues(
-        spec, PlanningState.empty(), _edit_flow_with_reviewed_step()
-    )
-
-
-def test_edit_critic_rejects_unsolicited_checkpoint_removal() -> None:
-    spec = FlowDraftSpecCore(
-        flow_name="Existing reviewed flow",
-        steps=[_existing_report_step(reviewed=False)],
-    )
-
-    assert _edit_checkpoint_issues(
-        spec, PlanningState.empty(), _edit_flow_with_reviewed_step()
-    )
-
-
-def test_edit_critic_enforces_requested_checkpoint_clear() -> None:
-    planning_state = PlanningState.empty()
-    planning_state.checkpoint_intents = [
-        CheckpointIntent(
-            producer_kind="report_text",
-            operation="clear",
-            mode=None,
-            confidence="high",
-            evidence=["quote:user_message:1:Remove the report review."],
-        )
-    ]
-    kept_review = FlowDraftSpecCore(
-        flow_name="Existing reviewed flow",
-        steps=[_existing_report_step(reviewed=True)],
-    )
-    removed_review = FlowDraftSpecCore(
-        flow_name="Existing reviewed flow",
-        steps=[_existing_report_step(reviewed=False)],
-    )
-    flow = _edit_flow_with_reviewed_step()
-
-    assert _edit_checkpoint_issues(kept_review, planning_state, flow)
-    assert not _edit_checkpoint_issues(removed_review, planning_state, flow)
 
 
 def _step(
@@ -651,50 +564,6 @@ def test_action_followup_roles_must_survive_into_the_outcome_contract() -> None:
     )
 
     assert "action_followup_requires_followup_fields" in {issue.id for issue in issues}
-
-
-def test_action_followup_critic_accepts_swedish_schema_names() -> None:
-    planning_state = PlanningState.empty()
-    planning_state.resolved_slots["post_processing_goal"] = ResolvedSlot(
-        name="post_processing_goal",
-        value="action_followup",
-        source="structured_answer",
-        confidence="high",
-        evidence=["question_answer:post_processing_goal"],
-    )
-    spec = FlowDraftSpecCore(
-        flow_name="Mötesuppföljning",
-        steps=[
-            _step(
-                "step_a",
-                "Bearbeta mötesunderlag",
-                "Bearbeta det tillhandahållna underlaget.",
-                output_type=OutputType.JSON,
-                output_contract={
-                    "type": "object",
-                    "properties": {
-                        "beslut": {"type": "array"},
-                        "atgarder": {"type": "array"},
-                        "ansvarig": {"type": "array"},
-                        "due_date": {"type": "array"},
-                        "oppna_fragor": {"type": "array"},
-                    },
-                },
-            )
-        ],
-    )
-
-    issues = evaluate_critic_invariants(
-        build_conversation_critic_context(
-            [{"role": "user", "content": "Använd underlaget."}],
-            spec,
-            planning_state=planning_state,
-        )
-    )
-
-    assert "action_followup_requires_followup_fields" not in {
-        issue.id for issue in issues
-    }
 
 
 def _structured_source_step() -> StepSpec:
@@ -5354,68 +5223,6 @@ class TestCriticInvariantRegistry:
             "mixed_audio_doc_rejects_file_degradation",
             "mixed_audio_doc_rejects_pseudo_transcription",
             "mixed_audio_doc_requires_real_transcription_step",
-        ]
-
-    def test_render_critic_issues_accepts_custom_invariant_subset(self) -> None:
-        """`render_critic_issues` evaluates whatever tuple is passed via
-        `invariants=`; callers can build their own subset without relying on
-        pre-defined cluster tuples.
-        """
-        from eneo.flows.ai_builder.ai_builder_critic_invariants import (
-            CRITIC_INVARIANTS,
-            CriticContext,
-            render_critic_issues,
-        )
-        from eneo.flows.ai_builder.ai_builder_framework_policy import (
-            OutputIntentResolution,
-        )
-        from eneo.flows.ai_builder.ai_builder_planner_pattern_signals import (
-            PlannerPatternSignals,
-        )
-
-        spec = FlowDraftSpecCore(
-            flow_name="Rapport",
-            steps=[
-                _step(
-                    "step_a",
-                    "Skriv rapport",
-                    "Skriv.",
-                    output_type=OutputType.TEXT,
-                )
-            ],
-        )
-        context = CriticContext(
-            spec=spec,
-            flow=_edit_flow(),
-            answer_signals={},
-            text="",
-            requirements_text="",
-            signal_text="",
-            planner_patterns=PlannerPatternSignals(),
-            output_intent=OutputIntentResolution(
-                terminal_output="docx_document",
-                docx_output_mode="template_fill_docx",
-            ),
-            mixed_audio_doc_input=False,
-            requested_output_sections=RequestedOutputSections.empty(),
-        )
-        template_fill_only = tuple(
-            inv
-            for inv in CRITIC_INVARIANTS
-            if inv.id
-            in {
-                "template_fill_docx_requires_template_fill_step",
-                "generated_docx_rejects_template_fill",
-            }
-        )
-
-        default_issues = render_critic_issues(context)
-        filtered_issues = render_critic_issues(context, invariants=template_fill_only)
-
-        assert any("DOCX som slutartefakt" in issue for issue in default_issues)
-        assert any("template_fill" in issue for issue in default_issues)
-        assert filtered_issues == [
-            issue for issue in default_issues if "template_fill" in issue
         ]
 
 

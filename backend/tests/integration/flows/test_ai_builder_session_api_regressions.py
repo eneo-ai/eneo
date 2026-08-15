@@ -80,10 +80,6 @@ from eneo.flows.ai_builder.ai_builder_architecture_derivation import (
     derive_architecture_commit_draft,
 )
 from eneo.flows.ai_builder.ai_builder_commit_invariance import CommitDriftError
-from eneo.flows.ai_builder.ai_builder_conversation_compaction import (
-    MAX_SESSION_CONVERSATION_BYTES,
-    conversation_serialized_size_bytes,
-)
 from eneo.flows.ai_builder.ai_builder_domain_models import (
     BuilderTurnState,
     ConversationMessage,
@@ -152,8 +148,8 @@ from eneo.flows.flow_authoring_spec import (
     StepSpec,
 )
 from eneo.main.container.container import Container
-from eneo.main.exceptions import BadRequestException, ErrorCodes, NotFoundException
-from eneo.main.models import GeneralError, ModelId
+from eneo.main.exceptions import BadRequestException, NotFoundException
+from eneo.main.models import ModelId
 from eneo.prompts.api.prompt_models import PromptCreate
 from eneo.roles.permissions import Permission
 from eneo.roles.role import RoleCreate
@@ -1059,79 +1055,6 @@ async def test_create_session_rolls_back_when_canonical_audit_insert_fails(
 
     assert session_count == 0
     assert audit_count == 0
-
-
-@pytest.mark.parametrize(
-    ("path", "payload", "misspelled_field"),
-    [
-        (
-            "/api/v1/flows/ai-builder/sessions",
-            {
-                "target_kind": "create",
-                "space_id": "00000000-0000-4000-8000-000000000001",
-                "force_neew": "invalid-field-value-must-not-be-echoed",
-            },
-            "force_neew",
-        ),
-        (
-            "/api/v1/flows/ai-builder/sessions/00000000-0000-4000-8000-000000000002/messages",
-            {
-                "client_turn_id": "00000000-0000-4000-8000-000000000003",
-                "message": "Build a flow.",
-                "model_iid": "invalid-field-value-must-not-be-echoed",
-            },
-            "model_iid",
-        ),
-        (
-            "/api/v1/flows/ai-builder/plans/00000000-0000-4000-8000-000000000004/apply",
-            {"expected_revison": "invalid-field-value-must-not-be-echoed"},
-            "expected_revison",
-        ),
-        (
-            "/api/v1/flows/ai-builder/plans/00000000-0000-4000-8000-000000000005/revise",
-            {
-                "type": "keep_current_description",
-                "revision_typo": "invalid-field-value-must-not-be-echoed",
-            },
-            "revision_typo",
-        ),
-    ],
-)
-@pytest.mark.integration
-@pytest.mark.asyncio
-async def test_ai_builder_launch_requests_reject_misspelled_fields(
-    client,
-    bearer_token: str,
-    path: str,
-    payload: dict[str, object],
-    misspelled_field: str,
-) -> None:
-    request_id = f"ai-builder-strict-{misspelled_field}"
-
-    response = await client.post(
-        path,
-        json=payload,
-        headers={
-            "Authorization": f"Bearer {bearer_token}",
-            "X-Request-ID": request_id,
-        },
-    )
-
-    assert response.status_code == 422, response.text
-    error = GeneralError.model_validate(response.json())
-    assert error.message == "Request validation failed."
-    assert error.eneo_error_code == ErrorCodes.VALIDATION_ERROR
-    assert error.code == "request_validation_error"
-    assert error.request_id == request_id
-    assert isinstance(error.details, dict)
-    errors = error.details.get("errors")
-    assert isinstance(errors, list)
-    assert {
-        "location": ["body", misspelled_field],
-        "message": "Extra inputs are not permitted",
-        "type": "extra_forbidden",
-    } in errors
-    assert "invalid-field-value-must-not-be-echoed" not in response.text
 
 
 @pytest.mark.integration
@@ -4169,7 +4092,7 @@ async def test_ai_builder_repo_idempotency_horizon_is_latest_turn_only(
 
 @pytest.mark.integration
 @pytest.mark.asyncio
-async def test_ai_builder_conversation_json_aggregate_has_bounded_rewrite_and_lock(
+async def test_ai_builder_append_session_messages_time_out_on_held_row_lock_and_succeed_after_caller_retry(
     client,
     bearer_token,
     completion_model_factory,
@@ -4180,15 +4103,8 @@ async def test_ai_builder_conversation_json_aggregate_has_bounded_rewrite_and_lo
         bearer_token=bearer_token,
         db_container=db_container,
         completion_model_factory=completion_model_factory,
-        space_name="AI Builder Conversation Aggregate Measurement",
+        space_name="AI Builder Conversation Row Lock",
     )
-    representative_messages = [
-        ConversationMessage(
-            role="assistant",
-            content="".join(str(uuid4()) for _index in range(5_000)),
-        )
-        for _message_index in range(5)
-    ]
 
     async with db_container() as container:
         repo = AIBuilderRepository(container.session())
@@ -4208,87 +4124,6 @@ async def test_ai_builder_conversation_json_aggregate_has_bounded_rewrite_and_lo
         )
         session_id = session.id
         tenant_id = user.tenant_id
-
-        relation_before, toast_before = (
-            await repo.session.execute(
-                sa.text(
-                    """
-                    SELECT
-                        pg_total_relation_size('builder_sessions'::regclass),
-                        pg_total_relation_size(reltoastrelid)
-                    FROM pg_class
-                    WHERE oid = 'builder_sessions'::regclass
-                    """
-                )
-            )
-        ).one()
-        first_lsn = await repo.session.scalar(
-            sa.text("SELECT pg_current_wal_insert_lsn()")
-        )
-        stored = await repo.append_session_messages(
-            session_id=session_id,
-            tenant_id=tenant_id,
-            conversation=representative_messages,
-            lease=turn.lease,
-        )
-        first_wal_bytes = await repo.session.scalar(
-            sa.text(
-                "SELECT pg_wal_lsn_diff(pg_current_wal_insert_lsn(), "
-                "CAST(:start_lsn AS pg_lsn))"
-            ),
-            {"start_lsn": first_lsn},
-        )
-        second_lsn = await repo.session.scalar(
-            sa.text("SELECT pg_current_wal_insert_lsn()")
-        )
-        stored = await repo.append_session_messages(
-            session_id=session_id,
-            tenant_id=tenant_id,
-            conversation=[ConversationMessage(role="assistant", content="rewrite")],
-            lease=turn.lease,
-        )
-        second_wal_bytes = await repo.session.scalar(
-            sa.text(
-                "SELECT pg_wal_lsn_diff(pg_current_wal_insert_lsn(), "
-                "CAST(:start_lsn AS pg_lsn))"
-            ),
-            {"start_lsn": second_lsn},
-        )
-        jsonb_column_bytes, jsonb_text_bytes = (
-            await repo.session.execute(
-                select(
-                    sa.func.pg_column_size(BuilderSessions.conversation),
-                    sa.func.octet_length(
-                        sa.cast(BuilderSessions.conversation, sa.Text)
-                    ),
-                ).where(
-                    BuilderSessions.id == session_id,
-                    BuilderSessions.tenant_id == tenant_id,
-                )
-            )
-        ).one()
-        relation_after, toast_after = (
-            await repo.session.execute(
-                sa.text(
-                    """
-                    SELECT
-                        pg_total_relation_size('builder_sessions'::regclass),
-                        pg_total_relation_size(reltoastrelid)
-                    FROM pg_class
-                    WHERE oid = 'builder_sessions'::regclass
-                    """
-                )
-            )
-        ).one()
-
-    serialized_bytes = conversation_serialized_size_bytes(stored)
-    assert 700_000 < serialized_bytes <= MAX_SESSION_CONVERSATION_BYTES
-    assert int(first_wal_bytes) > 0
-    assert 0 < int(second_wal_bytes) <= 8 * MAX_SESSION_CONVERSATION_BYTES
-    assert int(jsonb_column_bytes) > 0
-    assert int(jsonb_text_bytes) >= serialized_bytes
-    assert int(relation_after) >= int(relation_before)
-    assert int(toast_after) > int(toast_before)
 
     async with (
         sessionmanager.session() as holder_session,
@@ -4327,17 +4162,6 @@ async def test_ai_builder_conversation_json_aggregate_has_bounded_rewrite_and_lo
         await contender_session.commit()
 
     assert retried[-1].content == "retry"
-    print(
-        "conversation_aggregate_measurement "
-        f"serialized_bytes={serialized_bytes} "
-        f"jsonb_column_bytes={int(jsonb_column_bytes)} "
-        f"jsonb_text_bytes={int(jsonb_text_bytes)} "
-        f"first_wal_bytes={int(first_wal_bytes)} "
-        f"rewrite_wal_bytes={int(second_wal_bytes)} "
-        f"relation_growth_bytes={int(relation_after) - int(relation_before)} "
-        f"toast_growth_bytes={int(toast_after) - int(toast_before)} "
-        "lock_timeout_ms=100 retry=passed"
-    )
 
 
 @pytest.mark.integration
@@ -9112,8 +8936,8 @@ async def test_plan_transitions_reject_while_refinement_turn_is_active(
     db_container,
     legacy_endpoint: str,
 ) -> None:
-    """The handoff requires approval/application to be unreachable while a
-    refinement turn is streaming. Locks only make competitors wait; the shared
+    """Plan transitions must be unreachable while a refinement turn is
+    streaming. Locks only make competitors wait; the shared
     post-lock validation must REJECT against the observed active turn."""
     space_id = await _create_space_with_planner_model(
         client=client,

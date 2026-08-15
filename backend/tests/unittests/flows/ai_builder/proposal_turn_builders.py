@@ -18,7 +18,6 @@ from eneo.flows.ai_builder.ai_builder_domain_models import (
     FlowBuilderProposalContent,
     PlanStatus,
 )
-from eneo.flows.ai_builder.ai_builder_edit_compiler import EditCompilationResult
 from eneo.flows.ai_builder.ai_builder_edit_preview_models import (
     EditAdvisory,
     FlowEditDiff,
@@ -189,18 +188,6 @@ def _builder_plan(spec: FlowDraftSpecCore) -> BuilderPlan:
     )
 
 
-def _compiled_outline_proposal_with_validation(
-    validation: SpecValidationResult,
-) -> CompiledProposal:
-    compiled = _compiled_outline_proposal()
-    return CompiledProposal(
-        content=compiled.content,
-        validation=validation,
-        resource_bindings=compiled.resource_bindings,
-        aggregation_intent=compiled.aggregation_intent,
-    )
-
-
 def _compiled_edit_proposal(
     *,
     spec: FlowDraftSpecCore | None = None,
@@ -256,22 +243,4 @@ def _make_flow_spec(
                 output_type=OutputType.TEXT,
             )
         ],
-    )
-
-
-def _make_edit_approval() -> FlowBuilderEditApproval:
-    return FlowBuilderEditApproval(
-        diff=FlowEditDiff(
-            step_changes=[StepChange(kind="unchanged", step_name="Analys")]
-        ),
-        base_flow_revision=7,
-    )
-
-
-def _make_edit_compilation(
-    compiled_spec: FlowDraftSpecCore,
-) -> EditCompilationResult:
-    return EditCompilationResult(
-        spec=compiled_spec,
-        approval=_make_edit_approval(),
     )
