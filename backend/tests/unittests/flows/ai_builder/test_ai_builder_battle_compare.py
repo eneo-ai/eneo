@@ -38,9 +38,9 @@ def _summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
         "app_version": "DEV-test",
         "base_url": "http://localhost:8123/api/v1",
         "evaluator_identity": {
-            "question_relevance_semantics_version": 2,
-            "outcome_classification_semantics_version": 2,
-            "observation_input_identity_semantics_version": 2,
+            "question_relevance_semantics_version": 3,
+            "outcome_classification_semantics_version": 4,
+            "observation_input_identity_semantics_version": 3,
             "requested_model_id": "model-under-test",
             "harness_sha256": "0" * 64,
             "run_context": {
@@ -222,9 +222,9 @@ def _with_identity(
 @pytest.mark.parametrize(
     "field, value",
     [
-        ("outcome_classification_semantics_version", 1),
-        ("question_relevance_semantics_version", 1),
-        ("observation_input_identity_semantics_version", 1),
+        ("outcome_classification_semantics_version", 3),
+        ("question_relevance_semantics_version", 2),
+        ("observation_input_identity_semantics_version", 2),
         ("requested_model_id", "some-other-model"),
         ("harness_sha256", "9" * 64),
     ],

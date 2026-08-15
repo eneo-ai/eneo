@@ -8238,9 +8238,120 @@ def test_first_question_forbidden_and_unclassified_always_fail() -> None:
     assert reason == "unclassified"
 
 
+def _classifier_runs_with_slot_evidence(
+    confidence: str,
+    evidence_level: str,
+) -> tuple[dict[str, object], list[Mapping[str, object]]]:
+    diagnostics = _classifier_diagnostics()
+    raw_runs = diagnostics["classifier_runs"]
+    assert isinstance(raw_runs, list)
+    runs = [run for run in raw_runs if isinstance(run, Mapping)]
+    assert len(runs) == 1
+    slots = runs[0]["slots"]
+    assert isinstance(slots, list)
+    slot = slots[0]
+    assert isinstance(slot, dict)
+    slot["confidence"] = confidence
+    slot["evidence_level"] = evidence_level
+    return diagnostics, runs
+
+
+def test_classifier_commit_grade_matches_product_evidence_semantics() -> None:
+    harness = _battle_harness()
+    cases = (
+        ("high", "inferred", True),
+        ("medium", "explicit", True),
+        ("medium", "inferred", False),
+    )
+    for confidence, evidence_level, expected_commit_grade in cases:
+        _, runs = _classifier_runs_with_slot_evidence(confidence, evidence_level)
+
+        actual = harness._first_run_commit_grade_slot_names(runs)
+
+        assert ("report_disposition" in actual) is expected_commit_grade
+
+    _, unknown_runs = _classifier_runs_with_slot_evidence("high", "explicit")
+    unknown_slots = unknown_runs[0]["slots"]
+    assert isinstance(unknown_slots, list)
+    unknown_slot = unknown_slots[0]
+    assert isinstance(unknown_slot, dict)
+    unknown_slot["value"] = "unknown"
+    assert harness._first_run_commit_grade_slot_names(unknown_runs) == set()
+
+    _, uncited_runs = _classifier_runs_with_slot_evidence("high", "explicit")
+    uncited_slots = uncited_runs[0]["slots"]
+    assert isinstance(uncited_slots, list)
+    uncited_slot = uncited_slots[0]
+    assert isinstance(uncited_slot, dict)
+    uncited_slot["evidence"] = []
+    assert harness._first_run_commit_grade_slot_names(uncited_runs) == set()
+
+
+def test_inferred_medium_preferred_question_is_relevant_in_quality_report() -> None:
+    harness = _battle_harness()
+    diagnostics, _ = _classifier_runs_with_slot_evidence("medium", "inferred")
+    expected = {"preferred_question_event_ids": ["report_disposition"]}
+    interactions = [
+        {
+            "events": [
+                {
+                    "event": "question",
+                    "data": {
+                        "question_id": "report_disposition",
+                        "question": "Hur ska resultatet disponeras?",
+                        "options": [{"id": "one_report"}],
+                    },
+                }
+            ]
+        }
+    ]
+    journey = harness._journey_summary(
+        interactions,
+        expected=expected,
+        interaction_limit=6,
+    )
+
+    report = harness._quality_report(
+        plan={},
+        summary={},
+        expected=expected,
+        event_summary=harness._interaction_event_summary(interactions),
+        journey=journey,
+        classifier_diagnostics=diagnostics,
+    )
+
+    checks = {check["name"]: check for check in report["checks"]}
+    relevance = checks["first_question_relevance"]
+    assert relevance["passed"] is True
+    assert relevance["actual"] == {
+        "question_id": "report_disposition",
+        "reason": "preferred",
+        "first_run_commit_grade_slots": [],
+    }
+    assert relevance["expected"] == "state-aware preferred-first (semantics v3)"
+
+
+def test_inferred_medium_classifier_claim_does_not_violate_forbidden_commit_grade() -> (
+    None
+):
+    harness = _battle_harness()
+    diagnostics, _ = _classifier_runs_with_slot_evidence("medium", "inferred")
+
+    report = harness._quality_report(
+        plan={},
+        summary={},
+        expected={"forbid_classifier_commit_grade_slots": ["report_disposition"]},
+        event_summary={},
+        classifier_diagnostics=diagnostics,
+    )
+
+    checks = {check["name"]: check for check in report["checks"]}
+    assert checks["forbid_classifier_commit_grade_slots"]["passed"] is True
+
+
 def test_evaluator_identity_carries_measurement_semantics_versions() -> None:
     harness = _battle_harness()
-    assert harness.QUESTION_RELEVANCE_SEMANTICS_VERSION == 2
+    assert harness.QUESTION_RELEVANCE_SEMANTICS_VERSION == 3
     assert harness.OUTCOME_CLASSIFICATION_SEMANTICS_VERSION == 4
     assert harness.OBSERVATION_INPUT_IDENTITY_SEMANTICS_VERSION == 3
     assert harness.SUPPORTED_CASES_FILE_VERSION == 8
@@ -8249,7 +8360,7 @@ def test_evaluator_identity_carries_measurement_semantics_versions() -> None:
         run_context={},
         expected_observations=[],
     )
-    assert identity["question_relevance_semantics_version"] == 2
+    assert identity["question_relevance_semantics_version"] == 3
     assert identity["outcome_classification_semantics_version"] == 4
     assert identity["observation_input_identity_semantics_version"] == 3
 

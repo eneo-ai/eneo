@@ -88,7 +88,7 @@ RUNTIME_POLL_INTERVAL_SECONDS = 1
 SUPPORTED_CASES_FILE_VERSION = 8
 # Bump when the meaning of question-relevance checks changes; receipts
 # across different semantics versions must never be compared.
-QUESTION_RELEVANCE_SEMANTICS_VERSION = 2
+QUESTION_RELEVANCE_SEMANTICS_VERSION = 3
 # v2: error-terminated journeys classify as their journey outcome
 # (builder_error / provider_outcome_unknown) instead of being masked as
 # invalid_evidence — a failed turn has no provenance to validate.
@@ -7200,11 +7200,7 @@ def _first_run_commit_grade_slot_names(
         if slot_name is None:
             continue
         summary = _classifier_claim_summary(first_run, claim)
-        if (
-            summary.get("value") != "unknown"
-            and summary.get("confidence") in {"high", "medium"}
-            and bool(_string_list(summary.get("evidence_quotes")))
-        ):
+        if _classifier_claim_is_commit_grade(summary):
             names.add(slot_name)
     return names
 
@@ -7217,7 +7213,7 @@ def _first_question_relevance_verdict(
     forbidden_ids: set[str],
     first_run_commit_grade_slots: set[str],
 ) -> tuple[bool, str]:
-    """Semantics v2: judge the first question against resolved state.
+    """Semantics v3: judge the first question against resolved state.
 
     1. Forbidden or unclassified targets always fail.
     2. Asking a slot the first classifier result already resolved
@@ -7261,10 +7257,19 @@ def _classifier_slot_is_commit_grade(
     if claim is None:
         return False
     summary = _classifier_claim_summary(*claim)
-    return (
-        summary.get("value") != "unknown"
-        and summary.get("confidence") in {"high", "medium"}
-        and bool(_string_list(summary.get("evidence_quotes")))
+    return _classifier_claim_is_commit_grade(summary)
+
+
+def _classifier_claim_is_commit_grade(summary: Mapping[str, object]) -> bool:
+    """Mirror the product's commit-grade rule for model-resolved slots."""
+
+    if summary.get("value") == "unknown" or not _string_list(
+        summary.get("evidence_quotes")
+    ):
+        return False
+    confidence = summary.get("confidence")
+    return confidence == "high" or (
+        confidence == "medium" and summary.get("evidence_level") == "explicit"
     )
 
 
@@ -7402,7 +7407,7 @@ def _quality_report(
                         first_run_commit_grade_slots
                     ),
                 },
-                "state-aware preferred-first (semantics v2)",
+                "state-aware preferred-first (semantics v3)",
             )
         add_check(
             "question_relevance_complete",
