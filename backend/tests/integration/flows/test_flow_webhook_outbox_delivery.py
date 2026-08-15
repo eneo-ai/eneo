@@ -24,6 +24,7 @@ from eneo.database.tables.flow_tables import (
 from eneo.flows.application.flow_run_terminalization import FlowRunTerminalizer
 from eneo.flows.application.flow_webhook_delivery_policy import (
     FLOW_WEBHOOK_DELIVERY_CLAIM_TTL_SECONDS,
+    FLOW_WEBHOOK_DELIVERY_CONCURRENCY,
     FLOW_WEBHOOK_MAX_ATTEMPTS,
 )
 from eneo.flows.domain.flow import (
@@ -46,6 +47,7 @@ from eneo.flows.infrastructure.flow_run_review_checkpoint_repo import (
 )
 from eneo.flows.infrastructure.flow_run_webhook_delivery_repo import (
     FlowRunWebhookDeliveryRepository,
+    FlowRunWebhookDeliveryRow,
 )
 from eneo.flows.infrastructure.flow_version_repo import FlowVersionRepository
 from eneo.flows.published_definition import (
@@ -1880,3 +1882,238 @@ async def test_flow_webhook_delivery_redacts_url_secrets_from_persisted_error(
     assert "user:pass" not in persisted_error
     assert "secret-value" not in persisted_error
     assert "token=%5BREDACTED%5D" in persisted_error
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_flow_webhook_outbox_reaches_but_never_exceeds_invocation_concurrency(
+    setup_database,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+    monkeypatch,
+):
+    """One task invocation runs at most FLOW_WEBHOOK_DELIVERY_CONCURRENCY sends.
+
+    The deployment-wide ceiling a webhook receiver sees is this number times the
+    maintenance-worker process count, so the per-invocation half has to be
+    observed rather than assumed. Claiming more rows than the ceiling is what
+    makes the observation meaningful.
+    """
+    from eneo.flows.runtime import tasks as tasks_module
+
+    row_count = FLOW_WEBHOOK_DELIVERY_CONCURRENCY + 2
+    async with sessionmanager.session() as setup_session:
+        enable_autobegin_for_flow_task_session(setup_session)
+        for row_no in range(row_count):
+            flow, run, step = await _create_running_webhook_run(
+                session=setup_session,
+                admin_user=admin_user,
+                completion_model_factory=completion_model_factory,
+                space_factory=space_factory,
+                assistant_factory=assistant_factory,
+                model_name=f"webhook-ceiling-model-{row_no}",
+            )
+            assert flow.id is not None and step.id is not None
+            await FlowRunWebhookDeliveryRepository(
+                session=setup_session
+            ).insert_pending_delivery(
+                flow_id=flow.id,
+                tenant_id=admin_user.tenant_id,
+                intent=_intent(run_id=run.id, step_id=step.id),
+            )
+        await setup_session.commit()
+
+    in_flight = 0
+    peak_in_flight = 0
+    sent_idempotency_keys: list[str] = []
+    ceiling_reached = asyncio.Event()
+
+    async def _send_http_request(_self, *, headers, **_kwargs):
+        nonlocal in_flight, peak_in_flight
+        sent_idempotency_keys.append(headers["Idempotency-Key"])
+        in_flight += 1
+        peak_in_flight = max(peak_in_flight, in_flight)
+        if in_flight >= FLOW_WEBHOOK_DELIVERY_CONCURRENCY:
+            ceiling_reached.set()
+        try:
+            # Hold every send until a full cohort is simultaneously in flight,
+            # so the peak is observed and not a scheduling accident.
+            await asyncio.wait_for(ceiling_reached.wait(), timeout=30)
+        finally:
+            in_flight -= 1
+        return httpx.Response(
+            200,
+            request=httpx.Request("POST", "https://example.org/hook/case-123"),
+        )
+
+    monkeypatch.setattr(
+        FlowRunWebhookDeliveryService,
+        "_send_http_request",
+        _send_http_request,
+    )
+
+    result = await tasks_module._deliver_flow_webhook_outbox(limit=row_count)
+
+    assert peak_in_flight == FLOW_WEBHOOK_DELIVERY_CONCURRENCY
+    assert in_flight == 0
+    assert result["attempted"] == row_count
+    assert result["delivered"] == row_count
+    # No duplicate while a claim is valid: one send per claim, and the counts
+    # above cannot detect a second send inside one attempt.
+    assert len(sent_idempotency_keys) == row_count
+    assert len(set(sent_idempotency_keys)) == row_count
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_flow_webhook_delivery_claim_replaces_only_after_expiry_and_voids_stale_token(
+    setup_database,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+):
+    """The claim token is the whole overlap contract, against the real predicates.
+
+    Four phases: no competing claim while a claim is valid; reclaim after it
+    expires; the new claimant's outcome persists; the displaced claimant can
+    write nothing. Sibling tests force the CAS result through repository
+    doubles, so the SQL predicates themselves are otherwise unproven.
+    """
+    async with sessionmanager.session() as setup_session:
+        enable_autobegin_for_flow_task_session(setup_session)
+        flow, run, step = await _create_running_webhook_run(
+            session=setup_session,
+            admin_user=admin_user,
+            completion_model_factory=completion_model_factory,
+            space_factory=space_factory,
+            assistant_factory=assistant_factory,
+            model_name="webhook-claim-replacement-model",
+        )
+        assert flow.id is not None and step.id is not None
+        delivery_id = await FlowRunWebhookDeliveryRepository(
+            session=setup_session
+        ).insert_pending_delivery(
+            flow_id=flow.id,
+            tenant_id=admin_user.tenant_id,
+            intent=_intent(run_id=run.id, step_id=step.id),
+        )
+        await setup_session.commit()
+
+    now = datetime.now(timezone.utc)
+
+    async def _claim() -> list[FlowRunWebhookDeliveryRow]:
+        async with sessionmanager.session() as claim_session:
+            enable_autobegin_for_flow_task_session(claim_session)
+            rows = await FlowRunWebhookDeliveryRepository(
+                session=claim_session
+            ).claim_due_delivery_rows(
+                now=now,
+                limit=5,
+                claim_ttl_seconds=FLOW_WEBHOOK_DELIVERY_CLAIM_TTL_SECONDS,
+                max_attempts=FLOW_WEBHOOK_MAX_ATTEMPTS,
+            )
+            await claim_session.commit()
+            return rows
+
+    displaced_rows = await _claim()
+    assert [row.id for row in displaced_rows] == [delivery_id]
+    displaced = displaced_rows[0]
+
+    # Phase 1: the claim is valid, so nothing else may take it.
+    assert await _claim() == []
+
+    # Phase 2: expire the claim, then a second deliverer may take it.
+    async with sessionmanager.session() as expiry_session:
+        enable_autobegin_for_flow_task_session(expiry_session)
+        await expiry_session.execute(
+            sa.update(FlowRunWebhookDeliveries)
+            .where(FlowRunWebhookDeliveries.id == delivery_id)
+            .values(claim_expires_at=now - timedelta(seconds=1))
+        )
+        await expiry_session.commit()
+
+    current_rows = await _claim()
+    assert [row.id for row in current_rows] == [delivery_id]
+    current = current_rows[0]
+    assert current.claim_token != displaced.claim_token
+    assert current.delivery_attempts == displaced.delivery_attempts + 1
+    # Redelivery keeps the sender-side key receivers deduplicate on.
+    assert current.idempotency_key == displaced.idempotency_key
+
+    # Phase 3: the displaced deliverer returns while the row is STILL PENDING
+    # and the replacement claim is outstanding. Only the claim-token predicate
+    # can reject these writes here — after a terminal outcome the status
+    # predicate would reject them on its own, and the test would pass with the
+    # token guard deleted.
+    async with sessionmanager.session() as stale_session:
+        enable_autobegin_for_flow_task_session(stale_session)
+        stale_repo = FlowRunWebhookDeliveryRepository(session=stale_session)
+        assert (
+            await stale_repo.mark_delivery_succeeded(
+                delivery_id=delivery_id,
+                claim_token=displaced.claim_token,
+                delivered_at=now + timedelta(seconds=9),
+            )
+            is False
+        )
+        assert (
+            await stale_repo.record_delivery_failure(
+                delivery_id=delivery_id,
+                claim_token=displaced.claim_token,
+                error_message="late failure from the displaced deliverer",
+                next_delivery_at=now + timedelta(seconds=30),
+                dead_lettered_at=None,
+            )
+            is False
+        )
+        await stale_session.commit()
+
+    async with sessionmanager.session() as intact_session:
+        enable_autobegin_for_flow_task_session(intact_session)
+        intact = (
+            await intact_session.execute(
+                sa.select(
+                    FlowRunWebhookDeliveries.delivery_status,
+                    FlowRunWebhookDeliveries.claim_token,
+                ).where(FlowRunWebhookDeliveries.id == delivery_id)
+            )
+        ).one()
+    assert intact.delivery_status == FlowOutboxDeliveryStatus.PENDING.value
+    assert intact.claim_token == current.claim_token
+
+    # Phase 4: the current claimant still owns the row and records the outcome.
+    delivered_at = now + timedelta(seconds=5)
+    async with sessionmanager.session() as outcome_session:
+        enable_autobegin_for_flow_task_session(outcome_session)
+        assert (
+            await FlowRunWebhookDeliveryRepository(
+                session=outcome_session
+            ).mark_delivery_succeeded(
+                delivery_id=delivery_id,
+                claim_token=current.claim_token,
+                delivered_at=delivered_at,
+            )
+            is True
+        )
+        await outcome_session.commit()
+
+    async with sessionmanager.session() as check_session:
+        enable_autobegin_for_flow_task_session(check_session)
+        stored = (
+            await check_session.execute(
+                sa.select(
+                    FlowRunWebhookDeliveries.delivery_status,
+                    FlowRunWebhookDeliveries.delivered_at,
+                    FlowRunWebhookDeliveries.delivery_last_error,
+                    FlowRunWebhookDeliveries.claim_token,
+                ).where(FlowRunWebhookDeliveries.id == delivery_id)
+            )
+        ).one()
+
+    assert stored.delivery_status == FlowOutboxDeliveryStatus.DELIVERED.value
+    assert stored.delivered_at == delivered_at
+    assert stored.delivery_last_error is None
+    assert stored.claim_token is None

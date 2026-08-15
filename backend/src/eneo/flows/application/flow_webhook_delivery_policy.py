@@ -5,6 +5,14 @@ from eneo.flows.flow_run_redaction import redact_string
 
 FLOW_WEBHOOK_DELIVERY_INTERVAL_SECONDS = 30
 FLOW_WEBHOOK_DELIVERY_BATCH_SIZE = 50
+# Bounds simultaneous outbound requests within ONE task invocation, not across
+# the deployment: every maintenance-worker process runs its own invocation, so
+# the ceiling a receiver sees is that process count x this value. Raising it
+# raises the deployment-wide ceiling by the same factor.
+#
+# Delivery is at-least-once. A claim whose outcome is unknown when it expires is
+# redelivered under the same idempotency key, so receivers must deduplicate on
+# that key.
 FLOW_WEBHOOK_DELIVERY_CONCURRENCY = 10
 FLOW_WEBHOOK_DELIVERY_CLAIM_TTL_SECONDS = 300
 FLOW_WEBHOOK_MAX_ATTEMPTS = 5
