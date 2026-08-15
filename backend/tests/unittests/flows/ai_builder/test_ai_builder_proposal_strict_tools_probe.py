@@ -7,7 +7,6 @@ import sys
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
 from typing import cast
-from uuid import UUID
 
 import httpx
 import litellm
@@ -69,10 +68,12 @@ def _probe() -> ModuleType:
 
 
 def test_shipping_strict_route_matches_sealed_probe_protocol() -> None:
+    # The probe seals the measured completion-model row as well; the shipping
+    # decision keys on the provider route only, so the same model in another
+    # database behaves identically.
     probe = _probe()
 
     assert PINNED_LUNA_NATIVE_STRICT_TOOLS_ROUTE == (
-        UUID(probe.PROBE_MODEL_ID),
         "openai",
         probe.PROBE_MODEL_ROUTE,
         None,

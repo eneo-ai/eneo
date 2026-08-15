@@ -44,6 +44,7 @@ from eneo.flows.ai_builder.ai_builder_schema_evidence import (
     build_declared_schema_candidate,
 )
 from eneo.flows.ai_builder.ai_builder_slot_classification_contract import (
+    NAMED_RESULT_DELTA_CITATION_MAX_ITEMS,
     ClassifiedEvidence,
     ClassifiedSchemaDirection,
     SlotClassificationInput,
@@ -415,6 +416,88 @@ def test_parser_distinguishes_json_shape_notation_from_literal_field_punctuation
     assert result is not None
     assert result.named_result_evidence is not None
     assert result.named_result_evidence.names == (expected_name,)
+
+
+_PROCUREMENT_PROMPT = (
+    "Skapa JSON med bids[] och requirements[]. Varje bedömningspost ska bära "
+    "supplier_reference, requirement_reference, stated_evidence, rubric_value, "
+    "uncertainty och source_reference. Lägg manual_review_items[] separat. "
+    "Beräkna inget värde som inte uttryckligen följer av utvärderingsmodellen."
+)
+_PROCUREMENT_NAMES = [
+    "bids",
+    "requirements",
+    "supplier_reference",
+    "requirement_reference",
+    "stated_evidence",
+    "rubric_value",
+    "uncertainty",
+    "source_reference",
+    "manual_review_items",
+]
+_PROCUREMENT_QUOTES = [
+    "Skapa JSON med bids[] och requirements[].",
+    "Varje bedömningspost ska bära supplier_reference, requirement_reference, "
+    "stated_evidence, rubric_value, uncertainty och source_reference.",
+    "Lägg manual_review_items[] separat.",
+]
+
+
+def _named_result_response(names: list[str], quotes: list[str]) -> str:
+    return json.dumps(
+        {
+            "slots": [],
+            "file_roles": [],
+            "checkpoint_updates": [],
+            "form_intake": None,
+            "named_result_evidence": {
+                "operation": "update",
+                "names": names,
+                "removed_names": [],
+                "confidence": "high",
+                "reason": "The user enumerated the result fields sentence by sentence.",
+                "evidence": [_evidence(quote) for quote in quotes],
+            },
+            "example_output_constraints": None,
+            "schema_direction": None,
+            "secondary_obligations": [],
+            "assumptions": [],
+            "contradictions": [],
+        }
+    )
+
+
+def test_parser_admits_names_cited_across_several_sentences() -> None:
+    # A real Luna classification: nine names spread over three cited
+    # sentences. Every name must survive; the delta is atomic.
+    result = parse_slot_classification_response(
+        _named_result_response(_PROCUREMENT_NAMES, _PROCUREMENT_QUOTES),
+        allowed_slot_values={},
+        classification_input=_classification_input(_PROCUREMENT_PROMPT),
+    )
+
+    assert result is not None
+    assert result.named_result_evidence is not None
+    assert list(result.named_result_evidence.names) == _PROCUREMENT_NAMES
+
+
+def test_parser_rejects_delta_citing_more_quotes_than_the_contract_allows() -> None:
+    quotes = [
+        f"Fält nummer {index} heter falt_{index}."
+        for index in range(NAMED_RESULT_DELTA_CITATION_MAX_ITEMS + 1)
+    ]
+    text = " ".join(quotes)
+    names = [f"falt_{index}" for index in range(len(quotes))]
+
+    result = parse_slot_classification_response(
+        _named_result_response(names, quotes),
+        allowed_slot_values={},
+        classification_input=_classification_input(text),
+    )
+
+    # Overflow is a malformed delta: the whole classification is a visible
+    # parse failure, never a silently truncated citation list.
+    assert result is None
 
 
 @pytest.mark.parametrize(
@@ -2235,8 +2318,8 @@ def test_classification_prompt_places_evidence_bounds_in_model_contract() -> Non
         "slot, file_role, form_intake, and checkpoint_update classification" in prompt
     )
     assert (
-        f"up to {classification_contract.NAMED_RESULT_EVIDENCE_MAX_ITEMS} exact evidence "
-        "quotes" in prompt
+        f"up to {classification_contract.NAMED_RESULT_DELTA_CITATION_MAX_ITEMS} exact "
+        "evidence quotes" in prompt
     )
     assert (
         f"at most {classification_contract.CLASSIFICATION_EVIDENCE_MAX_LENGTH}"

@@ -35,7 +35,7 @@ from eneo.flows.ai_builder.ai_builder_schema_evidence import (
 from eneo.flows.ai_builder.ai_builder_slot_classification_contract import (
     CLASSIFICATION_EVIDENCE_MAX_ITEMS,
     CLASSIFICATION_EVIDENCE_MAX_LENGTH,
-    NAMED_RESULT_EVIDENCE_MAX_ITEMS,
+    NAMED_RESULT_DELTA_CITATION_MAX_ITEMS,
     SLOT_CLASSIFICATION_SCHEMA_VERSION,
     SlotClassificationAttempt,
     SlotClassificationBias,
@@ -730,7 +730,7 @@ def _build_slot_classification_prompt(
         "contain, for every terminal output type. Use update "
         "with names for additions and removed_names for removals. Cite "
         "current user_message or structured_answer evidence containing every changed "
-        f"name using up to {NAMED_RESULT_EVIDENCE_MAX_ITEMS} exact evidence "
+        f"name using up to {NAMED_RESULT_DELTA_CITATION_MAX_ITEMS} exact evidence "
         "quotes, and use only as many quotes as needed. "
         "Report only additions or removals explicitly requested in the cited "
         "current evidence; do not attempt to reconstruct a complete field snapshot. "
