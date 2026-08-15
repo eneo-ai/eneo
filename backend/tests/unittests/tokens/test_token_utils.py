@@ -1,12 +1,12 @@
 import base64
 import io
 import json
-import time
 from unittest.mock import patch
 
 import litellm
 from PIL import Image
 
+from eneo.tokens import token_utils
 from eneo.tokens.token_utils import (
     _MAX_TOOL_SCHEMA_EXPANSION_CHARS,
     TokenCountSource,
@@ -344,11 +344,12 @@ def test_only_a_direct_definition_reference_is_priced():
 
 def test_a_refused_schema_stops_the_walk_instead_of_serializing_the_rest():
     # Once the answer is a refusal there is nothing left to measure, and a
-    # catalogue may be tens of megabytes. Work must not scale with what
-    # follows the reference that already failed.
-    definition = {"type": "string", "description": "C" * 200_000}
+    # catalogue may be tens of megabytes. The guard is bounded work, so count
+    # the serializations rather than the seconds: elapsed time passes this on a
+    # fast machine even when every remaining target is serialized again.
+    definition = {"type": "string", "description": "C" * 20_000}
 
-    def elapsed_for(references: int) -> float:
+    def serializations_for(references: int) -> int:
         properties = {
             f"property_{index}": {"$ref": "#/$defs/shared"}
             for index in range(references)
@@ -360,28 +361,25 @@ def test_a_refused_schema_stops_the_walk_instead_of_serializing_the_rest():
                     "name": "propose_flow",
                     "parameters": {
                         "type": "object",
-                        "$defs": {"shared": definition, "unsupported": definition},
-                        "properties": {
-                            "first": {"$ref": "#"},
-                            **properties,
-                        },
+                        "$defs": {"shared": definition},
+                        # An unsupported reference decides the refusal before
+                        # any of the supported ones are reached.
+                        "properties": {"first": {"$ref": "#"}, **properties},
                         "required": ["first", *sorted(properties)],
                         "additionalProperties": False,
                     },
                 },
             }
         ]
-        started = time.perf_counter()
-        payload = _tool_reserve_payload(tools)
+        with patch(
+            "eneo.tokens.token_utils._serialized",
+            wraps=token_utils._serialized,
+        ) as serialized:
+            payload = _tool_reserve_payload(tools)
         assert not payload.bounded
-        return time.perf_counter() - started
+        return serialized.call_count
 
-    few = elapsed_for(10)
-    many = elapsed_for(900)
-
-    # Ninety times the references must not cost anything like ninety times the
-    # work once the refusal is already decided.
-    assert many < max(few * 10, 0.5)
+    assert serializations_for(900) == serializations_for(10)
 
 
 def test_a_reference_this_counter_cannot_resolve_is_refused():
@@ -415,7 +413,8 @@ def test_a_reference_this_counter_cannot_resolve_is_refused():
 def test_tool_reserve_counts_the_pointer_as_well_as_the_definition():
     # A pointer is bytes on the wire too, and a long definition name repeated
     # across properties is most of the payload. Replacing the pointer with its
-    # target priced a 220,000-character schema at a tenth of its size.
+    # target priced this roughly 22,000-character schema at a tenth of its
+    # size; the same defect on a 20,000-character name cost ten times more.
     name = "n" * 2_000
     tools = [
         {
