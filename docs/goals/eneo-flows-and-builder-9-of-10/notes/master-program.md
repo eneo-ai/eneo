@@ -1,6 +1,6 @@
 # Eneo Flows + Flow AI Builder — Master Program (living document)
 
-Status: EXECUTION PHASE, program **v10.9** (v10.2 architecture retained;
+Status: EXECUTION PHASE, program **v10.10** (v10.2 architecture retained;
 repair-economics order adjudicated 2026-08-12 and the post-smoke hold
 and post-citation order adjudicated 2026-08-13, then the sealed ×3
 conformance order adjudicated 2026-08-14 by max-effort Fable
@@ -101,6 +101,59 @@ lineage; the named-result completion design gate has approved the admission
 corrections and still owes the finalized provider-schema projection contract
 (per-name obligated-field map versus top-level placement); the selected-step
 edit-path defects found in review are their own slice).
+
+v10.10 (2026-08-15, after the sealed 158×3 on `eeb8371e8`) reframes the
+plan-economics program around the whole loss budget rather than the repair
+column alone, and separates its classes instead of summing them. Of 424
+plan-eligible observations the lineage did not first-pass-accept 56: 21
+repaired, 10 Builder errors, 21 stalled at a question the case could not
+answer, 4 interaction limits. The ledger derived from the sealed attempt
+failure ladders (`sealed-158x3-eeb8371e8/LOSS-LEDGER.md`, one row per
+observation; exclusive buckets, detailed arithmetic canonical there) classifies
+them as: **product failures directly owned, 36** — 22 observations whose only
+failure is the presence critic (18 repairs + 4 errors; the deliberate
+transitional cost of letting obligations reach planning, removed by
+construction when CP5's projection lands — the presence family occurs in 24
+observations, but two carry an earlier independent failure and are MIXED, so
+D1 alone can claim at most 22 recoveries), 6/6 stable
+`docx_output_mode` stalls on the two attached-template cases (the existing
+template resolver is not re-applied after the same-turn classifier merge;
+present in ddb3 too), 4 errors from
+`requested_output_sections_require_section_writers` (2 in ddb3: example-output
+headings are promoted to high-confidence mandatory sections and a hidden "one
+writer per two sections" rule is enforced by repair), and 4 interaction limits
+that are NOT variance — one case reaches the limit 3/3 because unchanged
+attachment evidence is re-interpreted on every turn and both the rendered
+requirements summary and its confirmation fingerprint change with it (six
+summaries, ≈38.7k tokens in one observation); **stalls awaiting adjudication,
+15** — the Builder asked `terminal_output`, `post_processing_goal`,
+`primary_runtime_input` or `comparison_scope` and the case neither allows nor
+answers it; some prompts genuinely leave the choice open ("DOCX eller PDF")
+and some already settle the slot (a runtime-sample case that says documents
+are uploaded at run time; a summary case naming the uploaded decision as the
+input), so each is classified by prompt quote into product (slot resolution)
+or clarification policy before any denominator is rebased; **residual, 3**
+(one mixed source-refs projection terminal, one architecture materialization,
+one assembly-invariant repair); **mixed, 2** (a parse-model failure and a
+source-refs projection failure that preceded the presence critic; D1 removes
+the presence failure, the residual owner keeps the observation). The D1
+prerequisites measured the projection
+wire on the real strict route: acceptance and marginal cost pass at widths 9
+and 16 (615 provider tokens for 7 obligations against 642 charged), but a
+free-form `container` never returns a declared key (0/25) so parent binding
+must be closed or server-resolved; parent capture loses `documents` in 1 of 3
+sessions and a later confirmation turn does not repair it (the classifier
+contract asks for current evidence; the model cited the earlier turn, so the
+guard rejected the delta by design and no recovery path exists); and the base
+create schema undercounts by ~2,544 tokens against a 2,000-token reserve — so
+token truth, a stable confirmation owner and a typed recovery path precede
+widening the schema. Finally, the one hard-coded model
+route introduced with the strict-tools measurement is replaced by a typed,
+fail-closed completion-model capability, and product routing or feature
+selection on literal catalog identities is now a standing ruling (protocol
+names stay inside their adapters). No forecast is stated until the 15 stalls
+are adjudicated; the next sealed ×3 reports the product families against the
+`eeb8371e8` baseline on the unchanged corpus.
 
 This file owns execution and is the SOLE execution-order owner;
 `cp0-matrix-freeze.md` owns evidence and the gate inventory.
@@ -304,6 +357,56 @@ frozen manifest, never restated as a prose constant.
   Builder integration proofs that had been silently failing on both lines
   script the current product again; the classifier never fits an 8000-token
   fixture model, so those tests give the space a real planner model.
+- The sealed `eeb8371e8` 158×3 (2026-08-15, suite
+  `ai-builder-api-battle-suite-20260815T135215`, summary SHA-256
+  `c75355ea38d212b56842300ba6167dcab758e751bd08f921a0218ba4858b71b6`,
+  474/474 integrity-verified, `GIT_COMMIT` build identity, Luna 90824b05,
+  CP4 contracts v8, evaluator v3) is the ownership baseline of the integrated
+  lineage. Of 424 plan-eligible observations: accepted 389 (91.75%; per
+  repetition 127/129/133), first pass 368 (86.79%), repaired 21 (4.95%),
+  Builder errors 10 (2.36%), stalled at an unanswered question 21,
+  interaction limit 4; against ddb3 that is −1.9 / −4.0 / +2.1 / +0.9 points
+  and +4 stalls. Case-grain outcome stability is 135/158 (ddb3 136/158), so
+  variance did not widen. Attribution: 20 of 21 repairs and 4 of 10 errors are
+  `named_result_obligations_must_survive`; without that family the run is at
+  ≈91.5% first pass and ≈1.4% errors, at or above every guardrail. Errors
+  otherwise: 4× `requested_output_sections_require_section_writers` (2 in
+  ddb3), 1 source-refs projection terminal (mixed across repetitions), 1
+  dotted-placeholder template case. Stalls: `docx_output_mode` 6/6 on the two
+  attached-template cases (identical in ddb3), `terminal_output` 3/3 on the
+  "DOCX eller PDF" board-packet prompt and 2/3 on the tenant-complaint prompt
+  (identical in ddb3), `post_processing_goal` 3/3 on the deliberately
+  ambiguous one-question case (1/3 in ddb3: the purpose question now precedes
+  the disposition question the case expects), and 6 singletons. The 4
+  interaction limits are `file_role_discrimination_exemplar_not_docx_template`
+  3/3 (2/3 in ddb3) and `…_example_output_text_terminal` 1/3: six
+  requirements summaries per observation with no question asked — the
+  confirmation loop, not variance. Conformance
+  under the CP4 contracts: 252/464 evaluated (54.31%); 72 cases pass 3/3, 61
+  fail 3/3, 25 mixed. Stable-fail families: leaf fields 32 of 81 (ddb3 42),
+  `min_source_ref_steps` 12, output-schema 10, review-policy target 9, file
+  roles 8/6/5, `plan_created` 4, input-contract schema 3; first-question
+  relevance has no stable failure family left (49/49 in the smoke). Persisted
+  named results are present in 63.9% of observations (ddb3 29.5%). This is
+  ownership evidence, not the N=5 release verdict.
+- D1 prerequisites (2026-08-15, unsealed driver over the probe's request
+  construction because the probe modification itself dirties the tree; the
+  receipts seal once `--tool-schema-file` lands): the flat `result_keys`
+  projection on the real strict route is accepted at widths 9 and 16 with
+  every property present and the narrowed `field_type` respected; a
+  free-form `container: ["string","null"]` returned a declared key 0/25 times
+  (the model writes the short semantic name and self-references the root),
+  while a closed `$defs` enum binds 9/9 at +4,420 provider tokens; the
+  marginal cost 9→16 is 615 provider tokens against 642 charged and 0→16 is
+  1,380 against 1,443, so cap 16 stands; the base create schema costs ~2,823
+  provider tokens while charging 279 (offset ≈2,544, above the 2,000-token
+  reserve; `count_tool_tokens` also ignores `$defs`). Three fresh captures of
+  the nested public-record case: admission is lossless (emitted == admitted,
+  `declared_shape: array` persisted for every emitted parent) but the model
+  omitted `documents` in 1 of 3 first turns and the confirmation turn, which
+  re-emitted all eight names as a high-confidence `update`, persisted nothing;
+  every compiled contract was flat (`documents` and `candidate_passages` as
+  `type: string`).
 
 ## THE ARCHITECTURE VERDICT (peer pass 31, max effort — adopted)
 
@@ -887,6 +990,226 @@ ownership defect below.
     deletion candidate. Inferred role/owner grounding and singular-versus-batch
     audio UX remain inputs to the post-CP5 attribution loop; these runs do not
     authorize a prompt heuristic or topology rewrite.
+    v10.10 state (A0, A0-b and A1 landed; the D1 design memo is in the gate):
+    the projection is D1-linear — a flat `result_keys` map (field_type,
+    description, required, container) inside the one prepared schema, depth
+    bounded by `MAX_STRUCTURED_FIELD_DEPTH`; cap, literal-key, depth and
+    unsupported-grain admission belong to the one typed projector that runs
+    before confirmation (CONFIRM-STABILITY), and `build_proposal_prepared`
+    only consumes the admitted typed projection; no `extra_fields`, S1
+    repairable — and its measured
+    consequences bind the remaining design decisions: (i) `container` is bound
+    server-side by folded identity against declared keys and model-declared
+    top-level fields, or closed by enum; a free-form string is measured
+    unusable and is not an option; (ii) the confirmation-turn named-result
+    delta that is emitted but not persisted is NOT a parser defect — the
+    classifier contract asks for current evidence and the model cited the
+    earlier turn — but the first-turn omission it would have repaired is
+    general (a parent lost 1/3 in one case, a whole five-child block lost 1/3
+    in another, admission lossless, no later recovery), so recovery happens
+    through ONE server-gated event (CP5-RECOVER, mechanism gate-owned, own
+    acceptance proof, before D1). CP5-RECOVER changes persisted named-result
+    state only; CONFIRM-STABILITY alone owns the disclosed summary and its
+    requirements version — the single confirmation identity — and that
+    disclosure includes every named-result obligation with its shape, so a
+    recovery automatically invalidates a prior confirmation; CONFIRM-STABILITY
+    therefore precedes it. CONFIRM-STABILITY also owns pre-confirmation
+    projection admission (cap, literal keys, unsupported grain) through one
+    typed projector; D1 is then the provider-schema materialization of that
+    already-admitted projection. The slice bodies below are the tracked
+    contracts. The presence critic becomes a compiler
+    postcondition when D1 lands; the ×3 cohort is predeclared from the sealed
+    `eeb8371e8` observations that hit it (ledger rows owned by CP5-D1; the two
+    MIXED rows are measured but not claimed), and the slice is green when the
+    presence family is zero, acceptance and conformance are flat or better on
+    the 32 stable leaf cases, and no new family replaces it. D1 does not start
+    before TOKEN-TRUTH has sealed conservative accounting for the base, 9-key,
+    16-key and legal worst-case schemas at both budget consumers and
+    CONFIRM-STABILITY / CP5-RECOVER have their proofs: widening the schema on
+    an undercounted budget with no recovery path is the wrong order.
+- [ ] STRICT-CAP Native strict-tool-schema capability (user directive
+    2026-08-15): strict tool schemas are a transport/model feature like
+    `supports_tool_calling`, so the owner is a typed completion-model
+    capability (`supports_strict_tool_schema`, fail-closed default false, set
+    per model through the existing completion-model admin contract) — NOT the
+    model-kwargs parameter capabilities and NOT a provider-derived default
+    (one measured route does not justify inferring support for every model of
+    a provider). The Builder reads the resolved capability;
+    `PINNED_LUNA_NATIVE_STRICT_TOOLS_ROUTE` is deleted; tests cover
+    absent/false/true with no route-name branching; the probe (with its
+    `--tool-schema-file` change) seals the measured model's capability instead
+    of a code constant; the measurement model row is set true. Migration
+    reversible and tested. Docs-site/SDK follow the OpenAPI change. Proof:
+    typed contract tests plus the sealed capability probe — no battle cohort.
+- [ ] CONFIRM-STABILITY Confirmed planning evidence is stable (NEW; 4
+    interaction limits, one case 3/3 in `eeb8371e8`, the same case 2/3 in
+    ddb3): unchanged attachment and user evidence must yield the same
+    requirements summary and version, so one confirmation matches. Today the
+    same-turn merge replaces the example-output interpretation with each new
+    classifier result (`_merged_model_example_output_constraints`,
+    `planning_state_builder.py` ~985); the requirements version hashes the
+    whole rendered summary (`ai_builder_requirements_state.py` ~94) and the
+    confirmation fingerprint hashes the full regenerated constraint/inference
+    dumps (`ai_builder_turn_controller.py` ~288–349), so headings, style
+    fields and wording move on every turn and the Builder re-emits the summary
+    until the interaction limit (six summaries, ≈38.7k tokens in one
+    observation). Owner: planning-state attachment interpretation — confirmed
+    semantic evidence is preserved until new user or attachment evidence
+    authorizes its replacement. Confirmation has ONE truth: a typed
+    disclosure payload from which the summary is rendered and whose hash is
+    the requirements version (`build_requirements_version` already hashes the
+    visible payload); the parallel raw-state attachment fingerprint is
+    RETIRED (Builder is unreleased; a duplicate identity has no compatibility
+    value), so hidden state cannot invalidate a confirmation and visible
+    changes always do. This slice also owns pre-confirmation projection
+    admission (cap, literal keys, unsupported grain) through one typed
+    projector that D1 later materializes into the provider schema; it runs
+    before a confirmation can be returned, so an impossible request refuses
+    before the user confirms it, and a behaviour test proves an inadmissible
+    projection is rejected before any requirements summary is emitted.
+    A narrower hash that ignores changed evidence is FORBIDDEN: it would let
+    new classifier evidence inherit an old confirmation. The disclosed
+    summary is the complete bounded disclosure:
+    every projected obligation up to the cap with its declared shape (today it
+    shows eight names and says structure is not fixed). Green: the 3/3 case
+    ×3 shows one identical requirements payload/version across turns, one
+    confirmation, plan creation, bounded planner calls and tokens; a changed
+    attachment or user message — or a recovered obligation — invalidates the
+    confirmation and yields a new complete version.
+- [ ] TEMPLATE-MODE Attached template settles `docx_output_mode` — REUSE the
+    existing resolver: `resolve_docx_mode_from_template_evidence`
+    (`planning_state_builder.py` ~1211) already commits fill mode as a visible
+    assumption for exactly one explicit, commit-grade, model-classified
+    template with a prompt quote, and keeps the question for multiple or
+    inferred templates; it runs on conversation rebuild and carry-forward but
+    is not re-applied at the same-turn classifier merge point, so the first
+    turn asks. Fix: invoke it at the canonical merge point; no phrase matching,
+    no duplicate logic in the issue rule. Cohort: the two attached-template
+    cases ×3 (6/6 stalled in both ddb3 and eeb8371e8) plus one inferred-template
+    and one multi-template case that must still ask.
+- [ ] SECTION-WRITERS Example structure is not mandatory topology: the
+    requested sections already reach request preparation and the planning
+    prompt (`ai_builder_planner_request_preparation.py` ~354,
+    `ai_builder_plan_proposal_task.py` ~158), so "project the list" is not the
+    fix. Two defects: confirmed example-output headings are promoted to
+    high-confidence *requested* sections
+    (`ai_builder_output_sections_signals.py` ~84), and the critic's hidden
+    "one writer for at most two adjacent sections" rule
+    (`ai_builder_critic_invariants.py` ~1355) is a server opinion the model
+    cannot see, enforced by repair (4 errors, 2 in ddb3 — all four from
+    example-output cases). Fix: stop elevating example headings into hard
+    obligations, and downgrade/delete the hidden topology critic. Deterministic
+    lowering of explicit user headings into section writers is NOT authorized
+    by this evidence; it may be introduced only if a separate explicit-heading
+    behaviour test demonstrates an unmet public contract. Full-path tests
+    distinguish explicit user headings from example headings; the critic is
+    never a terminal-error owner on a supported archetype.
+- [ ] STALL-POLICY Adjudicate the 15 stalls by prompt quote, then separate
+    clarification accounting from product economics. Each stalled question is
+    classified: (i) the prompt already settles the slot (e.g. a runtime-sample
+    prompt says documents are uploaded at run time and the case forbids
+    `primary_runtime_input`; a summary prompt names the uploaded decision as
+    the input; a cyber-incident prompt states the transformation and the PDF)
+    → PRODUCT-owned classifier/slot-resolution defect, attributed and fixed
+    like any other family; (ii) the prompt genuinely leaves the choice open
+    (`terminal_output` on "DOCX eller PDF"; purpose before disposition is
+    intended precedence, `ai_builder_discovery_issue_rules.py` ~238, and the
+    ambiguous-report case carries a stale expected question id) → intended
+    clarification: the case allows the question (observation leaves the
+    plan-eligible denominator) or scripts a genuine user choice (a different
+    interaction; fresh captures required, offline re-evaluation is not
+    evidence). Applied corpus-wide with the prompt quote (CP4 discipline),
+    old/new denominators printed, published as a new rebased lineage — never
+    counted as accepted-plan recovery and never before the broad comparison
+    run on the unchanged corpus.
+- [ ] TOKEN-TRUTH Prepared-schema token accounting (raised; now a D1
+    prerequisite): the charged tool-schema tokens under-count the provider by
+    ≈2,544 on the base create schema and ignore `$defs`; the reserve is 2,000
+    and the count is consumed at two sites (attachment fitting and `fit()`).
+    Owner: the shared `count_tool_tokens` (`token_utils.py`) and its two
+    existing consumers — no second estimator. Sealed with the probe receipts
+    once the probe change lands: base, realistic 9-key and 16-key, AND the
+    legal worst case derived from the typed caps (16 obligations × maximum
+    name length, whichever container form D1 adopts), verified conservative
+    at BOTH consumers; no product-prompt change.
+- [ ] CP5-RECOVER Named-result recovery (before D1; after
+    CONFIRM-STABILITY): obligations the first turn omitted (measured 1/3 —
+    a parent in one case, a whole child block in another; admission
+    lossless; the confirmation turn re-emitted them but the current-evidence
+    guard rightly rejected a stale-cited delta) must reach planning through
+    ONE server-gated event, never through a stale-citation fallback on
+    ordinary turns. The design gate chooses the mechanism with the fewest new
+    concepts that satisfies the guards below: either a targeted full-snapshot
+    named-result pass at the confirmation event that `replace`s the persisted
+    snapshot (shapes re-derived from citations; no tombstones), or an
+    explicit additive `recover` transition (active fold → no-op, absent fold
+    → append with citation-derived name and shape, bounded tombstones that
+    survive cache/replay/compaction, server-derived recovery-allowed flag).
+    Guards either way: existing identities stay byte-for-byte unchanged, a
+    recovered parent keeps its declared shape, ordinary turns keep the
+    `update` / `clear` current-evidence rules, nothing mutates an active
+    identity from stale evidence, and a recovery changes persisted state only
+    and thereby forces re-confirmation through CONFIRM-STABILITY's
+    projection. Acceptance: behaviour tests for current re-add, clear,
+    clear-then-recover, cache, replay and compaction, plus the exact turn
+    trace: the
+    user confirms requirements v1; a recovery learned on that turn changes the
+    persisted obligation set, so the Builder emits a complete v2 summary
+    (every recovered name with its declared shape disclosed) and NO plan; the
+    user confirms v2; the plan is created. Bounded at two user confirmation
+    turns; a recovery that does not change the disclosed set produces no new
+    version. Targeted cohort — the two captured omission cases (public-record
+    parent, meeting-action child block) ×3 must reach the repository-declared
+    obligation set within that trace with zero normal-path repairs; when the
+    first turn already emits the full set, one confirmation suffices.
+- [ ] FLOW-QUALITY Produced-flow quality checkpoint — bounded, reporting-only
+    (user direction 2026-08-15: the Builder is the de-facto way Flows are
+    created, edited and maintained, so the produced Flow must be excellent on
+    every axis, not only accepted). Population: the plan-bearing observations
+    of the sealed receipt (`eeb8371e8`: 389 of 474 — 368 first pass + 21
+    repaired), never the whole slot count. One attributed report over that
+    population, then specifically sliced follow-ups; this is a checkpoint that
+    closes, not a permanent quality owner. Facts, from existing owners only:
+    (1) *Questions* — already scored per observation (ids, count,
+    first-question relevance v3, preferred/allowed/forbidden, repeated,
+    reopened, min/max, stalls); the report adds one economics line (questions
+    per accepted plan, by family). Wording is human-reviewed under the
+    existing question owner with a receipt: one Swedish/English inventory of
+    the surviving canonical questions showing each explains the consequence of
+    the choice, uses plain municipal language and has matching translations
+    (decision 8c).
+    (2) *Input fields (inmatningsfält)* — the typed contract already carries
+    field type, requiredness and `options` (`FlowInputFieldIntent`), and in
+    create mode the server-owned compile context supplies the fields; the
+    harness plan summary keeps only names, and the sealed corpus produced 182
+    fields with zero options and has no option contracts, so "zero selects" is
+    NOT yet attributable. Correction: extend `_summarize_plan` with the
+    complete typed field facts (no second report schema) and author four
+    focused case contracts — single-select with exact options, multiselect
+    with exact options, required vs optional, and an open text field that
+    must NOT become a select. Expected options are authored in the case, never
+    inferred by the evaluator from prose.
+    (3)+(4) *Underlag → text and run economy are ONE static topology report*,
+    not a cost model: production already publishes `execution_shape` (model
+    steps, transcription, deterministic, schema-constrained, mapped bounds —
+    static facts, explicitly not provider-call estimates), and the harness
+    already records input source, source refs, duplicate refs, implicit
+    previous-step reads, primary-JSON-extraction and cleanup-chain metrics and
+    enforces no duplicate source refs plus case-specific
+    `max_all_previous_steps`. Report the factual vector per plan —
+    `execution_shape`, raw-flow-input consumer count, `all_previous_steps`
+    count, total/max source-ref fan-in, duplicate-ref count,
+    post-extraction cleanup-step count — with no weighting, no scalar score
+    and no ×1000 arithmetic. Measured runtime tokens are comparable only
+    within the same case, model, build, inputs and runtime configuration
+    (today three executions of one case), so lineage comparison uses a frozen
+    executed cohort, never cross-case totals. Extract-once assembly defaults
+    or new contracts are authorized only when an archetype-specific contract
+    shows the extra read is avoidable without reducing output quality; no new
+    critic, no prompt heuristic, no efficiency repair loop.
+    Closure: the report is filed as a receipt with a family map; each family
+    that names a product owner becomes its own slice with a predeclared
+    cohort; the rest stays reporting.
 - [x] CP6 Authoring rejects unindexed array paths — LANDED
     `269bc55ee`.
     (RELEASE-CRITICAL, direction FROZEN in v9.1 — "parity" alone could
@@ -1062,7 +1385,7 @@ ownership defect below.
     named slices are a starting set, not assumed sufficient. The live
     registry owner is `ai_builder_critic_invariants.CRITIC_INVARIANTS`.
 
-### Execution order (v10.9 — the ONE canonical order)
+### Execution order (v10.10 — the ONE canonical order)
 
 1. **Foundation complete:** CP8b → CP8c → CP6 → JSON-to-text removal
    → CP-D3 → current develop integration. Frozen arithmetic did not
@@ -1105,23 +1428,60 @@ ownership defect below.
     (a sentence-final period is no longer read as a dotted path; a delta may
     cite every sentence that names results). FIELD's provenance join is
     complete but its conformance guard remains open.
-13. **158×1 smoke on the integrated lineage, then sealed 158×3** against the
-    `ddb3ccd84f98` guardrails, with the CP4 contracts and v3 evaluator making
-    the conformance scalar non-comparable to the old receipt except through the
-    offline same-474 map already recorded (205→226). Report repairs and provider
-    calls per accepted plan separately: obligations now reach the critic that
-    still acts as a repair owner, so a repair rise here is the cost the obligated-field projection removes.
-14. **CP5 design gate, then its slices in order**: the named-result shape
-    evidence lifecycle (literal `[]`/`{}` notation persisted and updated),
-    the obligated-field projection into the one prepared schema (a bounded
-    per-name map with a single staged validator, or top-level placement as a
-    permanent rule if that validator cannot stay single-owner), non-JSON
-    outcome binding through the existing placement owners, and nested
-    template placeholder evidence — each with a predeclared ×3 cohort. Alongside: the selected-step revision defects
-    found in review (mixed intent silently dropped by the deterministic path,
-    DOCX artifact revision compiles to an unsupported pass-through mode,
-    negation-blind token gate) as one bounded edit-path slice; **CP-EDIT**,
-    **CP-D6**, **CP7**; the post-CP5 re-attribution loop runs alongside.
+13. **158×1 smoke and sealed 158×3 on `eeb8371e8` complete (2026-08-15).**
+    Guardrail breach attributed to one deliberately unlocked family (the
+    presence critic: 20 repairs + 4 errors); stability flat (135/158 vs
+    136/158); the 56-observation loss ledger is derived from the sealed
+    attempt failure ladders (`LOSS-LEDGER.md`, exclusive buckets: CP5-D1-only
+    22, TEMPLATE-MODE 6, SECTION-WRITERS 4, CONFIRM-STABILITY 4, mixed
+    D1/residual 2, residual 3, 15 stalls
+    unadjudicated). The `eeb8371e8` receipt is the comparison baseline for
+    every following slice; the ddb3 guardrails stay the release floor.
+14. **Plan-economics tranche — proofs match the slice type; corpus changes
+    come last:**
+    (a) **STRICT-CAP** — first: user directive, and every later probe receipt
+    must seal a capability, not a constant; the probe's `--tool-schema-file`
+    lands with it. Proof: typed contract tests + sealed capability probe.
+    (b) **TOKEN-TRUTH** — sealed schema-token probe from clean source for
+    base, realistic 9/16 and the legal worst case from the typed caps,
+    conservative at both budget consumers, including container behaviour.
+    Proof: probe receipts. Must precede D1 only.
+    (c) **CONFIRM-STABILITY** (sole owner of the disclosed summary and the
+    requirements version as the single confirmation identity; raw-state
+    fingerprint retired; pre-confirmation projection admission through the
+    one typed projector) then **CP5-RECOVER** (persisted named-result state
+    only, gate-owned mechanism; recovery invalidates confirmation through
+    that owner); local behaviour tests first, then their targeted `eeb8371e8`
+    cohorts ×3. May run before or alongside (b).
+    (d) **CP5-D1** provider-schema materialization of the already-admitted
+    projection, with the container-binding decision (removes the 24
+    presence-critic failures by construction and can claim at most the 22
+    D1-only observations; the critic becomes a postcondition). Cohort ×3
+    predeclared from the ledger rows.
+    (e) **TEMPLATE-MODE** (6 stable stalls; reuse the resolver at the merge
+    point). Cohort ×3.
+    (f) **SECTION-WRITERS** (stop promoting example headings; downgrade or
+    delete the hidden critic). Cohort ×3.
+    (g) **Broad 158×1 on the UNCHANGED corpus** against the `eeb8371e8`
+    baseline — the product comparison, before any case SHA changes.
+    (h) **FLOW-QUALITY checkpoint** — the reporting-only produced-flow
+    report over the plan-bearing observations of the freshest sealed receipt
+    (N = plans, stated in the report), after (g) and before N=5; its output
+    is a family map and specifically sliced follow-ups.
+    (i) **STALL-POLICY** — prompt-quote adjudication of the 15 stalls; the
+    product-owned ones become attributed slices; the clarification ones
+    change contracts offline (allow) or with fresh captures (scripted answer)
+    and publish a new rebased lineage; the four input-field option contracts
+    from FLOW-QUALITY ride in the same corpus release.
+    Then CP5's remaining slices (non-JSON
+    outcome binding through the existing placement owners, nested template
+    placeholder evidence), the selected-step revision defects as one bounded
+    edit-path slice (mixed intent silently dropped, DOCX artifact revision
+    compiles to an unsupported pass-through mode, negation-blind token gate,
+    and the deletion of the model-family word list in favour of the catalog
+    check that already guards it), **CP-EDIT**, **CP-D6**, **CP7**; the
+    post-CP5 re-attribution loop (source refs 12, output-schema 10,
+    review-policy 9, file roles) runs alongside on the fresh ×3.
 15. **MEASURE-BUDGET is landed; before N=5** the harness must still prove its
     worst-case demand constants by counting real requests (the current proof is
     one-sided) and seal capacity for all 790 observations.
@@ -1356,6 +1716,21 @@ user opts object storage in) or explicitly descoped by the user.
 ### Standing rulings — NOT slices (adjudicated; apply when touched)
 - END STATE (above) is adopted and binding: no second skeleton
   compiler; surface closure means OMIT AND REJECT, never omit-and-strip.
+- NO CATALOG-IDENTITY ROUTING (user decision 2026-08-15): product code never
+  selects a feature, route or behaviour from a literal model name, model
+  family, catalog row id, tenant or environment identity. Product selection
+  consumes a typed capability resolved by the completion-model owner; each
+  capability defines its own source — persisted administration (strict tool
+  schemas: fail-closed, set per model), provider metadata, or a fixed adapter
+  fact — and nothing forces every model-specific fact into admin
+  configuration. Measurement identity lives in receipts and the tracked
+  manifest; keyword lists that stand in for a catalog check are deleted in
+  favour of the catalog. Protocol and provider names remain legitimate inside
+  their own provider adapters and OpenAPI examples. A temporary exception is
+  not a slice outcome — it is a defect with an owner and a removal date. The
+  strict-tools route is the first removal (STRICT-CAP); the model-family word
+  list in the selected-step edit path is the second (folded into the edit-path
+  slice).
 - NON-REPAIRABLE CODES — a PROPERTY invariant, not a count. Every
   non-model-repairable code must (a) depend only on server/external
   state or denote a compiler defect, (b) never consume a model retry,
@@ -1550,7 +1925,10 @@ same captured observations before and after the contract release.
 
 All comparable Builder receipts use completion-model UUID
 `90824b05-9913-4210-968f-9294eb017d31`, verified in the live model catalog as
-enabled, non-deprecated `gpt-5.6-luna`. A model change starts a new evidence
+enabled, non-deprecated `gpt-5.6-luna`. That identity is a measurement fact
+recorded in receipts and this cadence, never a constant in product code; the
+capabilities the Builder relies on for that model (native strict tools) are
+persisted on its catalog row. A model change starts a new evidence
 lineage and must not be compared as product movement. Completed suites may be
 followed immediately by the next planned suite, but measurement runs must not
 overlap. This cadence supersedes both the earlier N=1-only per-slice
@@ -1632,3 +2010,24 @@ interpretation and the fixed 45-minute spacing rule by user decision on
    prompt mentions metadata. CP9b implements with its frozen
    acceptance criteria; the 19 battle contracts stay frozen (product
    branch), so NO rescoring and NO rebaseline.
+8. ~~Template mode and terminal choice~~ — DECIDED 2026-08-15 16:20 by the
+   user: (a) when the user attaches a Word template and says it is to be
+   filled, do NOT ask `docx_output_mode` — commit fill mode; when a DOCX is
+   attached as context or inspiration to build from, asking is right. This is
+   exactly the existing resolver's guard (one explicit, commit-grade template
+   role with a prompt quote → fill; inferred or multiple → ask), so
+   TEMPLATE-MODE reuses it and adds no phrase matching. (b) When the prompt
+   explicitly leaves the terminal alternative open ("DOCX eller PDF"), the
+   Builder does NOT assume: it asks, and uses the question to guide the user
+   to the right path; those stalls are clarification policy and the affected
+   cases must allow or answer the question. Every other `terminal_output`
+   stall stays under the same prompt-settled-versus-open adjudication as the
+   rest (STALL-POLICY). (c) The users are municipal and government staff new
+   to the system: every question must earn its place — ask what steers the
+   flow, never what the evidence already answers, and phrase the choice with
+   its consequence in plain language so the question itself is help, not
+   friction. Acceptance for the wording review: one Swedish/English inventory
+   of the surviving canonical questions under the existing question owner,
+   each entry showing the consequence of the choice, plain municipal language
+   and matching translations (FLOW-QUALITY (1)); the BALANCED rule (decision
+   7) stands.
