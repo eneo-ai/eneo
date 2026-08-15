@@ -10,6 +10,7 @@ from dependency_injector import providers
 
 from eneo.database.database import sessionmanager
 from eneo.database.tables.flow_tables import FlowRuns, Flows, FlowVersions
+from eneo.database.tables.spaces_table import Spaces
 from eneo.flows.application.flow_run_service import CreateRunResult
 from eneo.flows.domain.flow import Flow, FlowStep
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
@@ -18,6 +19,7 @@ from eneo.flows.infrastructure.flow_repo import FlowRepository
 from eneo.flows.infrastructure.flow_version_repo import FlowVersionRepository
 from eneo.flows.published_definition import build_published_definition_json
 from eneo.main.container.container import Container
+from eneo.main.exceptions import BadRequestException
 
 
 async def _create_published_flow_with_two_versions(
@@ -291,3 +293,135 @@ async def test_publication_pointer_lock_allows_concurrent_flow_version_insert(
             if not insert_task.done():
                 await asyncio.wait_for(insert_task, timeout=5)
             await version_session.rollback()
+
+
+async def _create_unpublished_flow(
+    *,
+    container: Container,
+    admin_user,
+) -> UUID:
+    """A publishable draft, built through the service so its step is flow-owned."""
+    session = container.session()
+    space = Spaces(
+        tenant_id=admin_user.tenant_id,
+        user_id=admin_user.id,
+        name=f"flow-edit-publish-race-{uuid4().hex}",
+    )
+    session.add(space)
+    await session.flush()
+    flow_service = container.flow_service()
+    flow = await flow_service.create_flow(
+        space_id=space.id,
+        name="Flow edit publish race flow",
+        description="Proves a draft edit cannot revert a concurrent publish.",
+        steps=[],
+    )
+    assert flow.id is not None
+    assistant, _ = await flow_service.create_flow_assistant(
+        flow_id=flow.id,
+        name="Flow edit publish race assistant",
+    )
+    await flow_service.update_flow(
+        flow_id=flow.id,
+        steps=[
+            FlowStep(
+                id=None,
+                flow_id=flow.id,
+                tenant_id=admin_user.tenant_id,
+                assistant_id=assistant.id,
+                step_order=1,
+                user_description="Return the submitted input",
+                input_source="flow_input",
+                input_type="text",
+                output_mode="pass_through",
+                output_type="text",
+            )
+        ],
+    )
+    return flow.id
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_flow_edit_rejects_publication_committed_after_its_read(
+    db_container,
+    admin_user,
+    test_tenant,
+    object_content_runtime_ready,
+) -> None:
+    """A draft edit must not silently unpublish a concurrently published Flow.
+
+    `update_flow` refuses to mutate a published Flow, but that check reads the
+    row while the write used to carry no precondition — so a publish landing in
+    between was reverted by the stale `published_version` the edit wrote back,
+    with no error to either caller.
+    """
+    async with db_container() as setup_container:
+        flow_id = await _create_unpublished_flow(
+            container=setup_container,
+            admin_user=admin_user,
+        )
+        await setup_container.session().commit()
+
+    async with (
+        sessionmanager.session() as publish_session,
+        sessionmanager.session() as edit_session,
+    ):
+        publish_container = Container(
+            session=providers.Object(publish_session),
+            user=providers.Object(admin_user),
+            tenant=providers.Object(test_tenant),
+        )
+        edit_container = Container(
+            session=providers.Object(edit_session),
+            user=providers.Object(admin_user),
+            tenant=providers.Object(test_tenant),
+        )
+        edit_service = edit_container.flow_service()
+        original_validate = (
+            edit_service._validate_step_security_classification_for_steps
+        )
+        publishes = 0
+
+        async def _publish_between_read_and_write(**kwargs: object) -> None:
+            nonlocal publishes
+            await original_validate(**kwargs)  # pyright: ignore[reportArgumentType]
+            if publishes:
+                return
+            publishes += 1
+            await publish_session.begin()
+            await publish_container.flow_service().publish_flow(flow_id=flow_id)
+            await publish_session.commit()
+
+        edit_service._validate_step_security_classification_for_steps = (
+            _publish_between_read_and_write
+        )
+
+        await edit_session.begin()
+        try:
+            with pytest.raises(BadRequestException) as exc_info:
+                await edit_service.update_flow(
+                    flow_id=flow_id,
+                    name="Edited while a publish was committing",
+                )
+        finally:
+            if edit_session.in_transaction():
+                await edit_session.rollback()
+
+    assert publishes == 1
+    assert exc_info.value.code == "stale_revision"
+
+    async with (
+        sessionmanager.session() as verification_session,
+        verification_session.begin(),
+    ):
+        published_version, name = (
+            await verification_session.execute(
+                sa.select(Flows.published_version, Flows.name).where(
+                    Flows.id == flow_id
+                )
+            )
+        ).one()
+
+    assert published_version == 1
+    assert name == "Flow edit publish race flow"

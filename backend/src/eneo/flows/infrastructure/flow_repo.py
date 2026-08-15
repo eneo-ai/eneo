@@ -777,11 +777,20 @@ class FlowRepository:
     ) -> Flow:
         flow_id = flow.require_persisted_id()
 
-        stmt = (
+        # Every update is revision-fenced. This statement writes the whole row,
+        # `published_version` included, so an unfenced write silently reverts a
+        # publish that committed after the caller read the flow. A caller that
+        # carries its own optimistic-concurrency token passes it; everyone else
+        # is fenced on the revision their own `flow` was read at.
+        fenced_revision = (
+            flow.draft_revision if expected_revision is None else expected_revision
+        )
+        flow_in_db = await self.session.scalar(
             sa.update(Flows)
             .where(Flows.id == flow_id)
             .where(Flows.tenant_id == tenant_id)
             .where(Flows.deleted_at.is_(None))
+            .where(Flows.draft_revision == fenced_revision)
             .values(
                 name=flow.name,
                 description=flow.description,
@@ -793,24 +802,19 @@ class FlowRepository:
             )
             .returning(Flows)
         )
-        if expected_revision is not None:
-            stmt = stmt.where(Flows.draft_revision == expected_revision)
-        flow_in_db = await self.session.scalar(stmt)
         if flow_in_db is None:
-            if expected_revision is not None:
-                exists_stmt = (
-                    sa.select(Flows.id)
-                    .where(Flows.id == flow_id)
-                    .where(Flows.tenant_id == tenant_id)
-                    .where(Flows.deleted_at.is_(None))
+            existing_id = await self.session.scalar(
+                sa.select(Flows.id)
+                .where(Flows.id == flow_id)
+                .where(Flows.tenant_id == tenant_id)
+                .where(Flows.deleted_at.is_(None))
+            )
+            if existing_id is not None:
+                raise BadRequestException(
+                    "Flödet ändrades av en annan användare. "
+                    "Dina ändringar beräknas mot den nya versionen.",
+                    code="stale_revision",
                 )
-                existing_id = await self.session.scalar(exists_stmt)
-                if existing_id is not None:
-                    raise BadRequestException(
-                        "Flödet ändrades av en annan användare. "
-                        "Dina ändringar beräknas mot den nya versionen.",
-                        code="stale_revision",
-                    )
             raise NotFoundException("Flow not found.")
 
         await self._sync_flow_steps(
