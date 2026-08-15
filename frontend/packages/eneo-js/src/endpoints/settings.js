@@ -98,8 +98,7 @@ export function initSettings(client) {
       });
       return {
         ...res,
-        max_files_per_run: res.max_files_per_run ?? null,
-        audio_max_files_per_run: res.audio_max_files_per_run ?? null
+        max_files_per_run: res.max_files_per_run ?? null
       };
     },
 
@@ -116,8 +115,7 @@ export function initSettings(client) {
       });
       return {
         ...res,
-        max_files_per_run: res.max_files_per_run ?? null,
-        audio_max_files_per_run: res.audio_max_files_per_run ?? null
+        max_files_per_run: res.max_files_per_run ?? null
       };
     },
 

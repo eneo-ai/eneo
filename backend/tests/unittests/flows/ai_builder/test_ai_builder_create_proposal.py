@@ -13,6 +13,7 @@ from eneo.flows.ai_builder.ai_builder_architecture_errors import (
     AIBuilderArchitectureError,
 )
 from eneo.flows.ai_builder.ai_builder_create_compile_context import (
+    CreateCompileContext,
     create_compile_context_from_planning_state,
 )
 from eneo.flows.ai_builder.ai_builder_create_proposal import (
@@ -354,6 +355,60 @@ async def test_outline_validation_failure_preserves_duplicate_step_name_code() -
 
 
 @pytest.mark.asyncio
+async def test_outline_validation_failure_preserves_citation_family() -> None:
+    invalid_spec = FlowDraftSpecCore(
+        flow_name="Invalid cited JSON",
+        steps=[
+            StepSpec(
+                plan_step_ref="step_a",
+                name="Extract JSON",
+                assistant_spec=AssistantSpec(instructions="Extract structured data."),
+                input_source=InputSource.FLOW_INPUT,
+                input_type=InputType.TEXT,
+                output_mode=OutputMode.PASS_THROUGH,
+                output_type=OutputType.JSON,
+                output_contract={
+                    "type": "object",
+                    "properties": {"summary": {"type": "string"}},
+                },
+                output_config={"citation_mode": "inline_inref_sidecar"},
+            )
+        ],
+    )
+
+    with patch(
+        "eneo.flows.ai_builder.ai_builder_create_proposal."
+        "compile_create_intent_to_spec",
+        return_value=invalid_spec,
+    ):
+        result = await _process_create_intent_arguments(
+            turn=_make_turn(),
+            conversation=[],
+            arguments={
+                "flow_name": "Invalid cited JSON",
+                "plan_rationale": "Exercise final validation telemetry.",
+                "steps": [
+                    {
+                        "name": "Extract JSON",
+                        "instructions": "Extract structured data.",
+                    }
+                ],
+            },
+            tool_call_id="call-invalid-citation",
+            available_model_refs=None,
+            available_kb_refs=None,
+            compile_context=CreateCompileContext(
+                final_output_type=OutputType.JSON,
+            ),
+        )
+
+    assert result.compiled_proposal is not None
+    assert [error.code for error in result.compiled_proposal.validation.errors] == [
+        "citation_mode_unsupported"
+    ]
+
+
+@pytest.mark.asyncio
 async def test_outline_assembly_rejection_succeeds_after_model_correction() -> None:
     state = PlanningState.empty()
     state.architecture_commit = finalize_architecture_commit(
@@ -537,18 +592,19 @@ async def test_report_citations_degrade_to_one_user_visible_warning() -> None:
     warnings = [
         warning
         for warning in compiled.validation.warnings
-        if warning.code == "document_report_citations_downgraded"
+        if warning.code == "citation_mode_unsupported"
     ]
     assert len(warnings) == 1
     assert warnings[0].message == (
-        "Rapporten kommer inte att innehålla källhänvisningar."
+        "Källhänvisningar inaktiverades eftersom resultatet inte kan innehålla "
+        "infogade källhänvisningar."
     )
 
     stored = build_flow_builder_proposal(compiled)
     assert [
         (warning.code, warning.severity.value)
         for warning in stored.content.lint_warnings
-    ] == [("document_report_citations_downgraded", "warning")]
+    ] == [("citation_mode_unsupported", "warning")]
 
 
 @pytest.mark.asyncio
@@ -960,3 +1016,57 @@ async def test_confirmed_create_shadow_field_is_rejected_explicitly() -> None:
     assert result.compiled_proposal is None
     assert result.failure_kind == "validation"
     assert result.failure_codes == frozenset({"confirmed_form_field_incompatible"})
+
+
+@pytest.mark.asyncio
+async def test_confirmed_source_output_collision_is_model_repairable() -> None:
+    result = await _process_create_intent_arguments(
+        turn=_make_turn(),
+        conversation=[],
+        arguments={
+            "flow_name": "Document case summary",
+            "plan_rationale": "Extract and summarize the case.",
+            "steps": [
+                {
+                    "name": "Extract source facts",
+                    "instructions": "Extract the case id from the document.",
+                    "output_fields": [
+                        {
+                            "name": "case_id",
+                            "field_type": "string",
+                            "description": "Case id found in the source.",
+                        }
+                    ],
+                },
+                {
+                    "name": "Write summary",
+                    "instructions": "Write the final summary.",
+                },
+            ],
+        },
+        tool_call_id="call-source-output-collision",
+        available_model_refs=None,
+        available_kb_refs=None,
+        compile_context=CreateCompileContext(
+            runtime_input_type=InputType.DOCUMENT,
+            runtime_input_fields=(
+                ConfirmedRuntimeMetadataField(
+                    value=FlowInputFieldIntent(
+                        variable_name="case_id",
+                        label="Case id",
+                        provenance="user_confirmed",
+                    ),
+                    purpose="shape_result",
+                    structured_answer_message_id="message-runtime-fields",
+                ),
+            ),
+        ),
+    )
+
+    assert result.compiled_proposal is None
+    assert result.failure_kind == "validation"
+    assert result.failure_codes == frozenset(
+        {"confirmed_runtime_input_source_output_collision"}
+    )
+    assert result.feedback is not None
+    assert "case_id" in result.feedback

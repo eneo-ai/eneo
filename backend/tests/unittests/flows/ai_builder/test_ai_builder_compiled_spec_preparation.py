@@ -435,3 +435,33 @@ def test_prepare_compiled_spec_for_session_rejects_text_document_pass_through() 
     assert result.validation is not None
     assert not result.validation.valid
     assert result.validation.errors[0].code == "flow_step_invalid"
+
+
+def test_prepare_compiled_spec_preserves_citation_validation_family() -> None:
+    spec = _make_spec()
+    spec = spec.model_copy(
+        update={
+            "steps": [
+                spec.steps[0].model_copy(
+                    update={
+                        "output_type": OutputType.JSON,
+                        "output_config": {"citation_mode": "inline_inref_sidecar"},
+                    }
+                )
+            ]
+        }
+    )
+
+    result = prepare_compiled_spec_for_session(
+        spec=spec,
+        target_kind=TargetKind.CREATE,
+        available_model_refs=None,
+        available_kb_refs=None,
+        resource_catalog=None,
+        terminal_output_type=OutputType.JSON,
+    )
+
+    assert result.validation is not None
+    assert [error.code for error in result.validation.errors] == [
+        "citation_mode_unsupported"
+    ]

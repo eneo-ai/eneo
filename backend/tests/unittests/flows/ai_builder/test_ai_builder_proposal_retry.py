@@ -47,6 +47,7 @@ from eneo.flows.ai_builder.ai_builder_proposal_retry import (
     run_tool_self_correction,
 )
 from eneo.flows.ai_builder.ai_builder_proposal_telemetry import (
+    PROPOSAL_PARSE_JSON_FAILURE_CODE,
     PROPOSAL_TELEMETRY_LOG_KEY,
     ProposalTurnTelemetry,
 )
@@ -531,51 +532,20 @@ async def test_run_forced_tool_retry_after_text_surfaces_tool_user_message() -> 
 
 
 @pytest.mark.asyncio
-async def test_run_forced_tool_retry_after_text_returns_feedback_for_malformed_json_text() -> (
-    None
-):
-    call_proposal_completion = AsyncMock()
-    payload = self_correction_intent_with_step_assumptions_payload()
-    assistant_text = f"```json\n{json.dumps(payload, ensure_ascii=False)}\n```"
-
-    async def process_invocation(
-        invocation: ToolRetryInvocation,
-    ) -> ToolProcessingResult:
-        try:
-            parse_create_flow_intent_arguments(invocation.arguments)
-        except ProposalIntentArgumentError as error:
-            return ToolProcessingResult(
-                feedback=f"Invalid propose_flow arguments: {error}",
-                failure_kind="parse",
-            )
-        return ToolProcessingResult(events=(_plan_stream_event(),))
-
-    result = await run_forced_tool_retry_after_text(
-        _make_forced_tool_after_text_request(
-            assistant_text=assistant_text,
-            forced_proposal_temperature=0.1,
-            repair_completion=call_proposal_completion,
-            process_tool_invocation=process_invocation,
-            target_kind=TargetKind.CREATE,
-        )
-    )
-
-    assert result.events is None
-    assert result.feedback is not None
-    # Step-level assumptions now hoist to the root instead of erroring;
-    # the malformed item_fields shape remains the visible parse failure.
-    assert "steps.1.assumptions" not in result.feedback
-    assert "item_fields" in result.feedback
-    assert result.failure_kind == "parse"
-    call_proposal_completion.assert_not_awaited()
-
-
-@pytest.mark.asyncio
-async def test_run_forced_tool_retry_after_text_accepts_json_arguments_returned_as_text() -> (
+async def test_run_forced_tool_retry_after_text_repairs_json_text_through_provider() -> (
     None
 ):
     processed_arguments: dict[str, object] = {}
-    call_proposal_completion = AsyncMock()
+    call_proposal_completion = AsyncMock(
+        return_value=_tool_response(
+            tool_name=PROPOSE_FLOW_TOOL_NAME,
+            arguments={
+                "flow_name": "Provider-repaired outline",
+                "plan_rationale": "The provider returned the forced tool call.",
+                "steps": [{"name": "Analyze", "instructions": "Analyze input."}],
+            },
+        )
+    )
     turn = _make_turn()
 
     async def process_invocation(
@@ -605,48 +575,168 @@ async def test_run_forced_tool_retry_after_text_accepts_json_arguments_returned_
 
     assert result.events is not None
     assert [event.event for event in result.events] == ["plan"]
-    assert processed_arguments["flow_name"] == "Text JSON outline"
-    call_proposal_completion.assert_not_awaited()
+    assert processed_arguments["flow_name"] == "Provider-repaired outline"
+    call_proposal_completion.assert_awaited_once()
 
 
 @pytest.mark.asyncio
-async def test_run_forced_tool_retry_after_text_preserves_json_text_validation_feedback() -> (
+async def test_forced_tool_retry_surfaces_typed_feedback_for_invalid_tool_arguments() -> (
     None
 ):
-    call_proposal_completion = AsyncMock()
-    turn = _make_turn()
+    payload = self_correction_intent_with_step_assumptions_payload()
+    repair_completion = AsyncMock(
+        return_value=_tool_response(
+            tool_name=PROPOSE_FLOW_TOOL_NAME,
+            arguments=payload,
+        )
+    )
 
     async def process_invocation(
-        _: ToolRetryInvocation,
+        invocation: ToolRetryInvocation,
     ) -> ToolProcessingResult:
-        return ToolProcessingResult(
-            feedback="Validation errors:\n1. Missing required field report_period.",
-            failure_kind="validation",
-        )
+        try:
+            parse_create_flow_intent_arguments(invocation.arguments)
+        except ProposalIntentArgumentError as error:
+            return ToolProcessingResult(
+                feedback=f"Invalid propose_flow arguments: {error}",
+                failure_kind="parse",
+            )
+        return ToolProcessingResult(events=(_plan_stream_event(),))
 
     result = await run_forced_tool_retry_after_text(
         _make_forced_tool_after_text_request(
-            assistant_text=json.dumps(
-                {
-                    "flow_name": "Invalid text JSON outline",
-                    "plan_rationale": "The model returned invalid JSON as prose.",
-                    "steps": [],
-                }
-            ),
-            turn=turn,
+            assistant_text="Här är mitt förslag.",
             forced_proposal_temperature=0.1,
-            repair_completion=call_proposal_completion,
+            repair_completion=repair_completion,
             process_tool_invocation=process_invocation,
             target_kind=TargetKind.CREATE,
         )
     )
 
     assert result.events is None
-    assert result.feedback == (
-        "Validation errors:\n1. Missing required field report_period."
+    assert result.feedback is not None
+    assert "steps.1.assumptions" in result.feedback
+    assert "item_fields" in result.feedback
+    assert result.failure_kind == "parse"
+    repair_completion.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "tool_names",
+    [
+        (),
+        ("unexpected_tool",),
+        (PROPOSE_FLOW_TOOL_NAME, PROPOSE_FLOW_TOOL_NAME),
+    ],
+)
+async def test_forced_tool_retry_rejects_non_single_proposal_tool_response(
+    tool_names: tuple[str, ...],
+) -> None:
+    tool_calls = [
+        SimpleNamespace(
+            id=f"call_{index}",
+            function=SimpleNamespace(
+                name=tool_name,
+                arguments=json.dumps({"flow_name": f"Flow {index}", "steps": []}),
+            ),
+        )
+        for index, tool_name in enumerate(tool_names)
+    ]
+    response = SimpleNamespace(
+        choices=[
+            SimpleNamespace(
+                message=SimpleNamespace(
+                    content=None,
+                    tool_calls=tool_calls,
+                ),
+                finish_reason="tool_calls",
+            )
+        ]
     )
-    assert result.failure_kind == "validation"
-    call_proposal_completion.assert_not_awaited()
+    repair_completion = AsyncMock(return_value=response)
+    process_invocation = AsyncMock(
+        return_value=ToolProcessingResult(events=(_plan_stream_event(),))
+    )
+
+    result = await run_forced_tool_retry_after_text(
+        _make_forced_tool_after_text_request(
+            assistant_text="Här är mitt förslag.",
+            forced_proposal_temperature=0.1,
+            repair_completion=repair_completion,
+            process_tool_invocation=process_invocation,
+            target_kind=TargetKind.CREATE,
+        )
+    )
+
+    assert result.events is None
+    repair_completion.assert_awaited_once()
+    process_invocation.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_self_correction_reuses_forced_tool_contract_after_text_output() -> None:
+    requests: list[ProposalCompletionRequest] = []
+    proposal_tool_schema = {
+        "type": "function",
+        "function": {
+            "name": PROPOSE_FLOW_TOOL_NAME,
+            "parameters": {"type": "object"},
+        },
+    }
+    text_response = SimpleNamespace(
+        choices=[
+            SimpleNamespace(
+                message=SimpleNamespace(
+                    content="Här är en korrigerad plan.",
+                    tool_calls=None,
+                ),
+                finish_reason="stop",
+            )
+        ]
+    )
+    repaired_response = _tool_response(
+        tool_name=PROPOSE_FLOW_TOOL_NAME,
+        arguments={
+            "flow_name": "Repaired",
+            "plan_rationale": "Use the forced tool contract.",
+            "steps": [{"name": "Analyze", "instructions": "Analyze input."}],
+        },
+    )
+    responses = [text_response, repaired_response]
+
+    async def repair_completion(
+        request: ProposalCompletionRequest,
+    ) -> SimpleNamespace:
+        requests.append(request)
+        return responses.pop(0)
+
+    events = [
+        event
+        async for event in run_tool_self_correction(
+            _make_self_correction_request(
+                repair_completion=repair_completion,
+                process_tool_invocation=AsyncMock(
+                    return_value=ToolProcessingResult(events=(_plan_stream_event(),))
+                ),
+                self_correction_temperature=0.2,
+                self_correction_bumped_temperature=0.4,
+                max_self_correction_retries=2,
+                forced_proposal_temperature=0.1,
+                target_kind=TargetKind.CREATE,
+                tool_schemas=[proposal_tool_schema],
+            )
+        )
+    ]
+
+    assert events[-1].event == "plan"
+    assert len(requests) == 2
+    expected_tool_choice = {
+        "type": "function",
+        "function": {"name": PROPOSE_FLOW_TOOL_NAME},
+    }
+    assert all(request.tool_schemas == [proposal_tool_schema] for request in requests)
+    assert all(request.tool_choice == expected_tool_choice for request in requests)
 
 
 @pytest.mark.asyncio
@@ -683,6 +773,7 @@ async def test_run_forced_tool_retry_after_text_preserves_forced_payload_parse_f
     assert "Invalid tool call arguments:" in result.feedback
     assert "Expecting property name enclosed" in result.feedback
     assert result.failure_kind == "parse"
+    assert result.failure_codes == frozenset({PROPOSAL_PARSE_JSON_FAILURE_CODE})
 
 
 @pytest.mark.asyncio
@@ -787,7 +878,6 @@ async def test_run_forced_tool_retry_after_text_preserves_information_request_em
 @pytest.mark.asyncio
 async def test_repair_loop_logs_only_bounded_failure_classification() -> None:
     assistant_secret = "MODEL_ASSISTANT_SECRET_bm42"
-    json_text_secret = "MODEL_JSON_TEXT_SECRET_bm42"
     feedback_secret = "USER_DERIVED_FEEDBACK_SECRET_bm42"
     failure_codes = frozenset({"empty_steps"})
 
@@ -826,19 +916,8 @@ async def test_repair_loop_logs_only_bounded_failure_classification() -> None:
                 )
             )
         ]
-        json_text_outcome = await run_forced_tool_retry_after_text(
-            _make_forced_tool_after_text_request(
-                assistant_text=json.dumps({"flow_name": json_text_secret, "steps": []}),
-                repair_completion=AsyncMock(),
-                process_tool_invocation=AsyncMock(return_value=failed_repair),
-                forced_proposal_temperature=0.1,
-                target_kind=TargetKind.CREATE,
-            )
-        )
-
     assert events[-1].event == "error"
-    assert json_text_outcome.failure_kind == "quality"
-    assert len(records) == 3
+    assert len(records) == 2
     for record in records:
         rendered_message = record.getMessage()
         serialized_args = repr(record.args)
@@ -848,7 +927,7 @@ async def test_repair_loop_logs_only_bounded_failure_classification() -> None:
             if key not in {"args", "msg"}
         }
         serialized_structured_fields = json.dumps(structured_fields, default=str)
-        for secret in (assistant_secret, json_text_secret, feedback_secret):
+        for secret in (assistant_secret, feedback_secret):
             assert secret not in rendered_message
             assert secret not in serialized_args
             assert secret not in serialized_structured_fields

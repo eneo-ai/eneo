@@ -158,6 +158,94 @@ def build_structured_field_schema() -> dict[str, Any]:
     return _structured_field_schema(depth=1)
 
 
+def _create_structured_field_schema(*, depth: int) -> dict[str, Any]:
+    common_properties: dict[str, Any] = {
+        "name": {
+            "type": "string",
+            "description": (
+                "JSON schema key. Localized names are normalized by the typed "
+                "admission boundary; put user-facing wording in the description."
+            ),
+        },
+        "description": {
+            "type": "string",
+            "description": (
+                "Human-readable field meaning. Do not include template variables."
+            ),
+        },
+        "required": {"type": "boolean"},
+    }
+
+    def closed_branch(properties: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "required": list(properties),
+            "properties": properties,
+            "additionalProperties": False,
+        }
+
+    scalar_branch = closed_branch(
+        {
+            "name": common_properties["name"],
+            "field_type": {
+                "type": "string",
+                "enum": ["string", "number", "boolean"],
+            },
+            "description": common_properties["description"],
+            "required": common_properties["required"],
+        }
+    )
+
+    branches = [scalar_branch]
+    if depth < MAX_STRUCTURED_FIELD_DEPTH:
+        branches.append(
+            closed_branch(
+                {
+                    "name": common_properties["name"],
+                    "field_type": {"type": "string", "enum": ["object"]},
+                    "description": common_properties["description"],
+                    "required": common_properties["required"],
+                    "fields": {
+                        "type": "array",
+                        "minItems": 1,
+                        "items": _create_structured_field_schema(depth=depth + 1),
+                    },
+                }
+            )
+        )
+
+    item_fields_schema: dict[str, Any]
+    if depth >= MAX_STRUCTURED_FIELD_DEPTH:
+        item_fields_schema = {"type": "null"}
+    else:
+        item_fields_schema = {
+            "anyOf": [
+                {"type": "null"},
+                {
+                    "type": "array",
+                    "minItems": 1,
+                    "items": _create_structured_field_schema(depth=depth + 1),
+                },
+            ]
+        }
+    branches.append(
+        closed_branch(
+            {
+                "name": common_properties["name"],
+                "field_type": {"type": "string", "enum": ["array"]},
+                "description": common_properties["description"],
+                "required": common_properties["required"],
+                "item_fields": item_fields_schema,
+            }
+        )
+    )
+    return {"anyOf": branches}
+
+
+def build_create_structured_field_schema() -> dict[str, Any]:
+    return _create_structured_field_schema(depth=1)
+
+
 def build_review_mode_schema() -> dict[str, Any]:
     return {
         "type": ["string", "null"],

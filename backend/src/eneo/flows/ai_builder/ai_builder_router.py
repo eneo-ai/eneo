@@ -1780,46 +1780,48 @@ async def approve_and_apply_create_plan(
             )
         ),
     ],
-    container: ContainerWithUserDep,
+    container: ContainerWithUserExplicitTransactionDep,
 ):
-    service = _get_ai_builder_service(container)
+    database_session = cast(AsyncSession, container.session())
+    async with database_session.begin():
+        service = _get_ai_builder_service(container)
 
-    plan: BuilderPlan = await service.get_plan(plan_id)
-    session: BuilderSession = await service.get_session(plan.session_id)
-    await _authorize_ai_builder_request(
-        request,
-        container,
-        action=FlowApiAction.BUILDER_PLAN_APPLY,
-        space_id=session.space_id,
-        session=session,
-    )
-
-    outcome = await service.approve_and_apply_create_plan(plan_id=plan_id)
-    result = outcome.result
-
-    # Audit — a replay returns the original outcome without side effects, so
-    # it must not emit a second creation event.
-    if not outcome.replayed:
-        user = container.user()
-        audit_service = _get_audit_service(container)
-        await audit_service.log(
-            tenant_id=user.tenant_id,
-            actor_id=user.id,
-            action=ActionType.AI_BUILDER_FLOW_APPLIED,
-            entity_type=EntityType.FLOW,
-            entity_id=result.flow_id,
-            description=f"Approved and created flow from AI builder plan: "
-            f"{result.steps_created} steps created",
-            metadata=AuditMetadata.standard(
-                actor=user,
-                target=SimpleNamespace(id=result.flow_id, name=result.flow_name),
-                extra={
-                    "plan_id": str(plan_id),
-                    "combined_approve_and_apply": True,
-                    "steps_created": result.steps_created,
-                },
-            ),
+        plan: BuilderPlan = await service.get_plan(plan_id)
+        session: BuilderSession = await service.get_session(plan.session_id)
+        await _authorize_ai_builder_request(
+            request,
+            container,
+            action=FlowApiAction.BUILDER_PLAN_APPLY,
+            space_id=session.space_id,
+            session=session,
         )
+
+        outcome = await service.approve_and_apply_create_plan(plan_id=plan_id)
+        result = outcome.result
+
+        # Audit — a replay returns the original outcome without side effects, so
+        # it must not emit a second creation event.
+        if not outcome.replayed:
+            user = container.user()
+            audit_service = _get_audit_service(container)
+            await audit_service.log(
+                tenant_id=user.tenant_id,
+                actor_id=user.id,
+                action=ActionType.AI_BUILDER_FLOW_APPLIED,
+                entity_type=EntityType.FLOW,
+                entity_id=result.flow_id,
+                description=f"Approved and created flow from AI builder plan: "
+                f"{result.steps_created} steps created",
+                metadata=AuditMetadata.standard(
+                    actor=user,
+                    target=SimpleNamespace(id=result.flow_id, name=result.flow_name),
+                    extra={
+                        "plan_id": str(plan_id),
+                        "combined_approve_and_apply": True,
+                        "steps_created": result.steps_created,
+                    },
+                ),
+            )
 
     return result
 

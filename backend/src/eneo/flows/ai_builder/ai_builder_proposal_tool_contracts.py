@@ -35,6 +35,7 @@ from eneo.flows.ai_builder.ai_builder_proposal_telemetry import (
 )
 from eneo.flows.ai_builder.ai_builder_resource_catalog import AIBuilderResourceCatalog
 from eneo.flows.ai_builder.ai_builder_session_turn import SessionSendTurn
+from eneo.flows.ai_builder.ai_builder_tool_names import PROPOSE_FLOW_TOOL_NAME
 from eneo.flows.ai_builder.ai_builder_tools import ProposalToolSchema
 from eneo.flows.ai_builder.ai_builder_validation_common import SpecValidationResult
 from eneo.flows.ai_builder.planning_state import AggregationIntent, PlanningState
@@ -86,7 +87,6 @@ class ForcedToolChoiceParam(TypedDict):
     function: ForcedToolChoiceFunctionParam
 
 
-ToolChoiceParam: TypeAlias = Literal["auto", "none", "required"] | ForcedToolChoiceParam
 MAX_PROPOSAL_PROVIDER_CALLS = 4
 
 
@@ -277,9 +277,12 @@ class ProposalCompletionRequest:
     message_groups: tuple[ProposalMessageGroup, ...]
     tool_schemas: list[dict[str, Any]]
     route: ResolvedCompletionModelRoute
+    target_kind: TargetKind
     max_output_tokens: int
     temperature: float
-    tool_choice: ToolChoiceParam | None = None
+    tool_choice: ForcedToolChoiceParam = field(
+        default_factory=lambda: forced_tool_choice(PROPOSE_FLOW_TOOL_NAME)
+    )
     counts_as_repair: bool = False
     request_budget: ProposalRequestBudget | None = None
     call_budget: ProposalCallBudget = field(default_factory=ProposalCallBudget)
@@ -362,12 +365,15 @@ class ProposalTurnContext:
     def base_planning_state_version(self) -> int:
         return self.turn.base_planning_state_version
 
+    @property
+    def target_kind(self) -> TargetKind:
+        return TargetKind.EDIT if self.flow is not None else TargetKind.CREATE
+
     def completion_request(
         self,
         *,
         temperature: float,
         message_groups: tuple[ProposalMessageGroup, ...] | None = None,
-        tool_choice: ToolChoiceParam | None = None,
         counts_as_repair: bool = False,
     ) -> ProposalCompletionRequest:
         return ProposalCompletionRequest(
@@ -376,9 +382,10 @@ class ProposalTurnContext:
             ),
             tool_schemas=[cast(dict[str, Any], self.proposal_tool_schema)],
             route=self.route,
+            target_kind=self.target_kind,
             max_output_tokens=self.max_output_tokens,
             temperature=temperature,
-            tool_choice=tool_choice,
+            tool_choice=forced_tool_choice(PROPOSE_FLOW_TOOL_NAME),
             counts_as_repair=counts_as_repair,
             request_budget=self.proposal_request_budget,
             call_budget=self.proposal_call_budget,

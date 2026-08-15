@@ -16,6 +16,8 @@ from uuid import UUID
 
 from pytest import CaptureFixture, MonkeyPatch, mark, raises
 
+_TEST_SESSION_ID = "00000000-0000-0000-0000-000000000001"
+
 
 def _battle_harness() -> ModuleType:
     module_path = (
@@ -34,14 +36,52 @@ def _battle_harness() -> ModuleType:
     return module
 
 
-def _allow_clean_measurement_space(
+def _allow_measurement_preflight(
     harness: ModuleType,
     monkeypatch: MonkeyPatch,
 ) -> None:
+    """Neutralise the environment preflight for tests about something else.
+
+    Both gates refuse acquisition before the first case; a test that is not
+    about the environment has to pass them to reach what it does measure.
+    """
     monkeypatch.setattr(
         harness,
         "_require_clean_measurement_space",
         lambda **_kwargs: None,
+    )
+    monkeypatch.setattr(
+        harness,
+        "_capacity_preflight",
+        lambda **kwargs: harness.capacity_preflight_verdict(
+            request_capacity={
+                "key_id": "00000000-0000-0000-0000-000000000030",
+                "scope_type": "space",
+                "scope_id": kwargs["space_id"],
+                "limit_source": "unlimited",
+                "limit": None,
+                "current_count": None,
+                "remaining": None,
+                "window_seconds": 3600,
+                "fail_open": False,
+            },
+            runtime_capacity={
+                "tenant_id": "00000000-0000-0000-0000-000000000010",
+                "active_runs": 0,
+                "max_concurrent_runs": 4,
+                "available_slots": 4,
+            },
+            demand=harness.suite_request_demand(
+                cases=kwargs["cases"],
+                repetitions=kwargs["repetitions"],
+                timeout_seconds=kwargs["timeout_seconds"],
+            ),
+            space_id=kwargs["space_id"],
+            runtime_slots_required=harness.required_runtime_slots(
+                cases=kwargs["cases"],
+                max_concurrency=kwargs["max_concurrency"],
+            ),
+        ),
     )
 
 
@@ -101,6 +141,271 @@ def test_force_new_is_not_a_battle_harness_cli_option(
 
     assert exc_info.value.code == 2
     assert "unrecognized arguments: --force-new" in capsys.readouterr().err
+
+
+def test_sealed_targeted_suite_is_incompatible_with_full_release_suite(
+    monkeypatch: MonkeyPatch,
+    capsys: CaptureFixture[str],
+) -> None:
+    harness = _battle_harness()
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "ai_builder_api_battle_test.py",
+            "--run-suite",
+            "--sealed-targeted-suite",
+            "--case-id",
+            "simple_document_metadata_json",
+        ],
+    )
+
+    with raises(SystemExit) as exc_info:
+        harness._parse_args()
+
+    assert exc_info.value.code == 2
+    assert "not allowed with argument --run-suite" in capsys.readouterr().err
+
+
+@mark.parametrize(
+    ("case_ids", "expected_case_ids"),
+    [
+        (
+            ["interview_open_meeting_audio"],
+            ["interview_open_meeting_audio"],
+        ),
+        (
+            [
+                "simple_document_metadata_json",
+                "interview_open_meeting_audio",
+            ],
+            [
+                "simple_document_metadata_json",
+                "interview_open_meeting_audio",
+            ],
+        ),
+    ],
+)
+def test_sealed_targeted_suite_promotes_every_selected_case_to_required(
+    case_ids: list[str],
+    expected_case_ids: list[str],
+) -> None:
+    harness = _battle_harness()
+
+    cases = harness._cases_from_args(
+        SimpleNamespace(
+            cases_file=None,
+            run_suite=False,
+            sealed_targeted_suite=True,
+            case_id=case_ids,
+            cohort=None,
+            max_cases=None,
+            file_ids=None,
+        )
+    )
+
+    assert [case.case_id for case in cases] == expected_case_ids
+    assert all(case.required for case in cases)
+
+
+def test_sealed_targeted_suite_requires_an_explicit_selection() -> None:
+    harness = _battle_harness()
+
+    with raises(ValueError, match="requires at least one --case-id or --cohort"):
+        harness._cases_from_args(
+            SimpleNamespace(
+                cases_file=None,
+                run_suite=False,
+                sealed_targeted_suite=True,
+                case_id=None,
+                cohort=None,
+                max_cases=None,
+                file_ids=None,
+            )
+        )
+
+
+def test_sealed_targeted_suite_accepts_a_cohort_selection() -> None:
+    harness = _battle_harness()
+
+    cases = harness._cases_from_args(
+        SimpleNamespace(
+            cases_file=None,
+            run_suite=False,
+            sealed_targeted_suite=True,
+            case_id=None,
+            cohort=["smoke_v3"],
+            max_cases=None,
+            file_ids=None,
+        )
+    )
+
+    assert len(cases) == 12
+    assert all("smoke_v3" in case.cohorts and case.required for case in cases)
+
+
+@mark.parametrize(
+    ("overrides", "expected_message"),
+    [
+        ({"file_ids": ["arbitrary-file-id"]}, "--file-id"),
+        ({"max_cases": 1}, "--max-cases"),
+    ],
+)
+def test_sealed_targeted_suite_rejects_exploratory_input_or_truncation_overrides(
+    overrides: dict[str, object],
+    expected_message: str,
+) -> None:
+    harness = _battle_harness()
+    arguments: dict[str, object] = {
+        "cases_file": None,
+        "run_suite": False,
+        "sealed_targeted_suite": True,
+        "case_id": ["attachment_docx_template_placeholders_to_fields"],
+        "cohort": None,
+        "max_cases": None,
+        "file_ids": None,
+    }
+    arguments.update(overrides)
+
+    with raises(ValueError, match=expected_message):
+        harness._cases_from_args(SimpleNamespace(**arguments))
+
+
+def test_single_case_sealed_targeted_suite_uses_release_acquisition_and_repetitions(
+    tmp_path: Path,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    harness = _battle_harness()
+    captured: dict[str, object] = {}
+    args = SimpleNamespace(
+        reanalyze_bundle=None,
+        api_key="test-key",
+        output_dir=str(tmp_path),
+        replacement_suite_dir=None,
+        space_id="space-1",
+        base_url="http://localhost:8123/api/v1",
+        timeout_seconds=1,
+        cases_file=None,
+        run_suite=False,
+        sealed_targeted_suite=True,
+        case_id=["interview_open_meeting_audio"],
+        cohort=None,
+        max_cases=None,
+        file_ids=None,
+        repetitions=3,
+        concurrency=1,
+        model_id="model-a",
+    )
+
+    monkeypatch.setattr(harness, "_parse_args", lambda: args)
+
+    def run_suite(**kwargs: object) -> int:
+        captured.update(kwargs)
+        return 0
+
+    monkeypatch.setattr(harness, "_run_suite", run_suite)
+
+    assert harness.main() == 0
+    cases = captured["cases"]
+    assert isinstance(cases, list)
+    assert [case.case_id for case in cases] == ["interview_open_meeting_audio"]
+    assert all(case.required for case in cases)
+    assert captured["args"] is args
+    assert args.repetitions == 3
+    acquisition_contract = captured["acquisition_contract"]
+    assert acquisition_contract.required_case_ids == ("interview_open_meeting_audio",)
+    assert acquisition_contract.require_clean_source is True
+    assert (
+        acquisition_contract.artifact_schema_version
+        == harness.SUPPORTED_RECEIPT_ARTIFACT_VERSION
+    )
+
+
+def test_sealed_targeted_suite_uses_release_identity_preflight_gates(
+    tmp_path: Path,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    harness = _battle_harness()
+    args = SimpleNamespace(
+        cases_file=None,
+        run_suite=False,
+        sealed_targeted_suite=True,
+        case_id=["interview_open_meeting_audio"],
+        cohort=None,
+        max_cases=None,
+        file_ids=None,
+        repetitions=1,
+        concurrency=1,
+        space_id="space-1",
+        model_id="model-a",
+    )
+    cases = harness._cases_from_args(args)
+    acquisition_contract = harness._acquisition_contract_from_args(
+        args,
+        selected_cases=cases,
+    )
+    config = harness.ApiConfig(
+        base_url="http://localhost:8123/api/v1",
+        api_key="test-key",
+        timeout_seconds=1,
+    )
+    captured: dict[str, object] = {}
+
+    def stop_after_identity_preflight(**kwargs: object) -> dict[str, object]:
+        captured.update(kwargs)
+        raise ValueError("identity preflight reached")
+
+    monkeypatch.setattr(
+        harness,
+        "_release_run_identity",
+        stop_after_identity_preflight,
+    )
+
+    with raises(ValueError, match="identity preflight reached"):
+        harness._run_suite(
+            cases=cases,
+            config=config,
+            args=args,
+            output_dir=tmp_path,
+            acquisition_contract=acquisition_contract,
+        )
+
+    assert captured == {
+        "cases": cases,
+        "cases_path": harness.DEFAULT_CASES_FILE,
+        "requested_model_id": "model-a",
+        "require_clean_source": True,
+        # Passing config is what makes the canonical identity owner verify
+        # target /version; exploratory suites pass None here.
+        "config": config,
+    }
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_full_release_suite_selection_remains_unfiltered_and_unmodified(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    harness = _battle_harness()
+    cases = [
+        harness.BattleCase(case_id="required", prompt="Build it.", required=True),
+        harness.BattleCase(case_id="benchmark", prompt="Build that."),
+    ]
+    monkeypatch.setattr(harness, "_read_cases_file", lambda _path: cases)
+
+    selected = harness._cases_from_args(
+        SimpleNamespace(
+            cases_file=None,
+            run_suite=True,
+            sealed_targeted_suite=False,
+            case_id=None,
+            cohort=None,
+            max_cases=None,
+            file_ids=None,
+        )
+    )
+
+    assert selected == cases
+    assert [case.required for case in selected] == [True, False]
 
 
 def test_observation_acquisition_serializes_repetitions_of_one_case() -> None:
@@ -844,6 +1149,7 @@ def _live_provenance_fixture(
         "planner_interaction_count": 1,
         "planner_observations": [{"interaction_index": 1, "model_id": "openai/gpt-a"}],
         "missing_planner_interaction_indices": [],
+        "terminal_error_interaction_indices": [],
         "planner_observed_ids": ["openai/gpt-a"],
         "classifier_observed_ids": ["openai/gpt-a"],
         "observed_ids": ["openai/gpt-a"],
@@ -923,7 +1229,11 @@ def _empty_observation_input_identity(harness: ModuleType) -> dict[str, object]:
     }
     return {
         **payload,
+        "attachment_file_ids": [],
+        "attachment_fixture_bindings": [],
         "attachment_fixtures": [],
+        "classifier_session_id": _TEST_SESSION_ID,
+        "attachment_evidence_status": "not_required",
         "runtime_evidence_status": "not_required",
         "verified": True,
         "mismatches": [],
@@ -974,6 +1284,7 @@ def _complete_reanalysis_bundle(
         "case_contract": case_contract,
         "case_contract_sha256": harness._canonical_sha256(case_contract),
         "repetition": 1,
+        "session_id": _TEST_SESSION_ID,
         "interactions": [
             {
                 "events": [
@@ -987,7 +1298,7 @@ def _complete_reanalysis_bundle(
         "plan": None,
         "observation_input_identity": _empty_observation_input_identity(harness),
         "classifier_diagnostics": {
-            "session_id": "00000000-0000-0000-0000-000000000001",
+            "session_id": _TEST_SESSION_ID,
             "classifier_runs": [
                 {
                     "message_id": "assistant-1",
@@ -1060,7 +1371,7 @@ def _complete_live_case_bundle(
             "case_identity": harness._case_identity(case),
             "case_contract": case_contract,
             "case_contract_sha256": harness._canonical_sha256(case_contract),
-            "session_id": "session-1",
+            "session_id": _TEST_SESSION_ID,
             "plan_id": "plan-1",
             "plan_summary": {"step_count": 1},
             "event_summary": {},
@@ -1957,6 +2268,25 @@ def test_evidence_report_recomputes_attachment_identity_from_classifier() -> Non
     }
 
 
+def test_evidence_report_rejects_classifier_diagnostics_from_another_session() -> None:
+    harness = _battle_harness()
+    bundle = _complete_reanalysis_bundle(
+        harness,
+        case_id="classifier-session-drift",
+        expected={},
+    )
+    bundle["classifier_diagnostics"]["session_id"] = (
+        "00000000-0000-0000-0000-000000000009"
+    )
+
+    report = harness._observation_evidence_report(bundle)
+
+    assert report["valid"] is False
+    assert "observation_input_identity_consistent" in {
+        check["name"] for check in report["failed_checks"]
+    }
+
+
 def test_verified_reanalysis_requires_unchanged_suite_receipt_member(
     tmp_path: Path,
 ) -> None:
@@ -2103,6 +2433,147 @@ def test_suite_result_keeps_error_terminated_journey_outcome(
     assert result["expectation_verdict"] == "not_evaluated"
 
 
+@mark.parametrize(
+    ("diagnostics_session_id", "expected_error"),
+    [
+        (_TEST_SESSION_ID, None),
+        (
+            "00000000-0000-0000-0000-000000000009",
+            "Classifier diagnostics do not belong to the session",
+        ),
+    ],
+)
+def test_execute_flow_case_requires_matching_diagnostics_before_scoring_error(
+    tmp_path: Path,
+    monkeypatch: MonkeyPatch,
+    diagnostics_session_id: str,
+    expected_error: str | None,
+) -> None:
+    harness = _battle_harness()
+    case = harness.BattleCase(
+        case_id="typed-builder-error",
+        prompt="Build and run the Flow.",
+        apply_plan=True,
+        execute_flow=True,
+        runtime_files=("05_lokalkalkyl.csv",),
+        expected={
+            "expected_runtime_evidence": {
+                "source_file_count": 1,
+                "source_record_count": 1,
+                "required_final_field_label_groups": [["summary"]],
+                "required_visible_degradation_markers": [["framgår ej"]],
+                "source_display_count": 1,
+                "model_call_count": 1,
+                "max_total_tokens": 10,
+            }
+        },
+    )
+    config = harness.ApiConfig(
+        base_url="http://localhost:8123/api/v1",
+        api_key="test-key",
+        timeout_seconds=1,
+    )
+
+    def request_json(**kwargs: object) -> dict[str, object]:
+        path = kwargs["path"]
+        method = kwargs["method"]
+        if method == "POST" and path == "/flows/ai-builder/sessions":
+            return {"session_id": _TEST_SESSION_ID}
+        if path == f"/flows/ai-builder/sessions/{_TEST_SESSION_ID}/models":
+            return {
+                "default_model_id": "model-a",
+                "models": [{"id": "model-a", "name": "gpt-a", "provider": "openai"}],
+            }
+        if path == f"/flows/ai-builder/sessions/{_TEST_SESSION_ID}":
+            return {
+                "latest_plan_id": None,
+                "telemetry": {
+                    "llm_calls_made_total": 0,
+                    "repair_attempts_total": 0,
+                    "parse_repair_attempts_total": 0,
+                    "prompt_tokens_total": 0,
+                    "completion_tokens_total": 0,
+                    "total_tokens_total": 0,
+                    "wall_clock_ms_total": 1,
+                },
+            }
+        if path.endswith("/_diagnostics/classifier-slots"):
+            return {"session_id": diagnostics_session_id, "classifier_runs": []}
+        raise AssertionError(f"unexpected request: {method} {path}")
+
+    monkeypatch.setattr(harness, "_request_json", request_json)
+    monkeypatch.setattr(
+        harness,
+        "_send_message_stream",
+        lambda **_kwargs: iter(
+            [
+                {
+                    "event": "error",
+                    "data": {
+                        "code": "session_message_in_progress",
+                        "message": "Another message is already in progress.",
+                    },
+                }
+            ]
+        ),
+    )
+    monkeypatch.setattr(harness, "_optional_request_json", lambda **_kwargs: None)
+    monkeypatch.setattr(
+        harness,
+        "_git_output",
+        lambda *args: "a" * 40 if args == ("rev-parse", "HEAD") else "",
+    )
+
+    def run_case() -> dict[str, object]:
+        return harness._run_case(
+            case=case,
+            config=config,
+            args=SimpleNamespace(
+                space_id="space-1",
+                model_id="model-a",
+                file_ids=(),
+                ui_language="sv",
+                auto_confirm_requirements=False,
+                confirm_message=harness.DEFAULT_CONFIRM_MESSAGE,
+                timeout_seconds=1,
+            ),
+            existing_session_id=None,
+            artifact_output_dir=tmp_path,
+        )
+
+    if expected_error is not None:
+        with raises(ValueError, match=expected_error):
+            run_case()
+        return
+
+    bundle = run_case()
+
+    assert bundle["artifact_mode"] == "live_execution"
+    assert bundle["journey"]["outcome_class"] == "builder_error"
+    runtime_checks = [
+        check
+        for check in bundle["quality_report"]["checks"]
+        if check["name"].startswith("runtime_")
+    ]
+    assert runtime_checks
+    assert all(check["passed"] is False for check in runtime_checks)
+
+    bundle["case_contract_sha256"] = harness._case_contract_sha256(case)
+    bundle["repetition"] = 1
+    observation_row = {
+        **harness.seal_observation(bundle)["observation"],
+        "bundle_file": "typed-builder-error.json",
+        "bundle_sha256": "b" * 64,
+    }
+    observation = harness.observation_from_row(
+        observation_row,
+        where="typed builder error",
+    )
+    assert observation.observation_status == "error_terminated"
+    assert observation.outcome_class == "builder_error"
+    assert harness.observation_is_replacement_eligible(observation) is False
+
+
 def test_acquisition_validity_ignores_product_failures_and_catches_execution_failures() -> (
     None
 ):
@@ -2146,7 +2617,7 @@ def test_acquisition_contract_is_non_configurable_and_reported(
     monkeypatch: MonkeyPatch,
 ) -> None:
     harness = _battle_harness()
-    _allow_clean_measurement_space(harness, monkeypatch)
+    _allow_measurement_preflight(harness, monkeypatch)
     gate = harness.AcquisitionContract(
         required_case_ids=("required-positive",),
     )
@@ -2198,7 +2669,12 @@ def test_acquisition_contract_is_non_configurable_and_reported(
     release_args = type(
         "Args",
         (),
-        {"repetitions": 1, "space_id": "space-1", "model_id": "model-a"},
+        {
+            "repetitions": 1,
+            "space_id": "space-1",
+            "timeout_seconds": 900,
+            "model_id": "model-a",
+        },
     )()
     exit_code = harness._run_suite(
         cases=[case, benchmark_case],
@@ -2255,7 +2731,7 @@ def test_release_run_fails_on_invalid_evidence_even_for_benchmark_cases(
     did not acquire cleanly, regardless of which case broke.
     """
     harness = _battle_harness()
-    _allow_clean_measurement_space(harness, monkeypatch)
+    _allow_measurement_preflight(harness, monkeypatch)
     gate = harness.AcquisitionContract(
         required_case_ids=("required-positive",),
     )
@@ -2291,7 +2767,12 @@ def test_release_run_fails_on_invalid_evidence_even_for_benchmark_cases(
     release_args = type(
         "Args",
         (),
-        {"repetitions": 1, "space_id": "space-1", "model_id": "model-a"},
+        {
+            "repetitions": 1,
+            "space_id": "space-1",
+            "timeout_seconds": 900,
+            "model_id": "model-a",
+        },
     )()
     exit_code = harness._run_suite(
         cases=[case, benchmark_case],
@@ -2326,7 +2807,7 @@ def test_release_run_fails_on_benchmark_execution_failure(
 ) -> None:
     """An execution failure on a NON-required case fails acquisition."""
     harness = _battle_harness()
-    _allow_clean_measurement_space(harness, monkeypatch)
+    _allow_measurement_preflight(harness, monkeypatch)
     gate = harness.AcquisitionContract(
         required_case_ids=("required-positive",),
     )
@@ -2378,7 +2859,12 @@ def test_release_run_fails_on_benchmark_execution_failure(
     release_args = type(
         "Args",
         (),
-        {"repetitions": 1, "space_id": "space-1", "model_id": "model-a"},
+        {
+            "repetitions": 1,
+            "space_id": "space-1",
+            "timeout_seconds": 900,
+            "model_id": "model-a",
+        },
     )()
     exit_code = harness._run_suite(
         cases=[case, benchmark_case],
@@ -2434,20 +2920,54 @@ def test_release_run_passes_when_a_required_case_dies_in_the_product(
     scores it.
     """
     harness = _battle_harness()
-    _allow_clean_measurement_space(harness, monkeypatch)
+    _allow_measurement_preflight(harness, monkeypatch)
     gate = harness.AcquisitionContract(
         required_case_ids=("required-positive",),
+    )
+    fixtures = (
+        "01_protokoll_bun_2026_02_25.pdf",
+        "02_tjansteskrivelse_underlag.docx",
+        "03_barnkonsekvensanalys.docx",
+        "04_remissvar.docx",
+        "05_lokalkalkyl.csv",
+        "06_tidigare_beslut.pdf",
     )
     case = harness.BattleCase(
         case_id="required-positive",
         prompt="Build the required positive case.",
         required=True,
+        apply_plan=True,
+        execute_flow=True,
+        attachments=fixtures,
+        runtime_files=fixtures,
+    )
+    manifest = harness._fixture_manifest()
+    provisioned = {
+        name: {
+            "file_id": f"fixture-file-{index}",
+            "content_sha256": manifest[name],
+            "path": f"scripts/fixtures/ai_builder_battle/{name}",
+        }
+        for index, name in enumerate(fixtures, start=1)
+    }
+    monkeypatch.setattr(
+        harness,
+        "_provision_fixtures",
+        lambda **_kwargs: provisioned,
     )
     release_identity = _release_identity_fixture(
         harness,
         case_id=case.case_id,
         prompt=case.prompt,
+        harness_sha256=hashlib.sha256(Path(harness.__file__).read_bytes()).hexdigest(),
+        cases_sha256=hashlib.sha256(
+            harness.DEFAULT_CASES_FILE.read_bytes()
+        ).hexdigest(),
     )
+    release_identity["target"] = {
+        "expected_source_revision": "a" * 40,
+        "verified": True,
+    }
     monkeypatch.setattr(
         harness,
         "_release_run_identity",
@@ -2457,19 +2977,78 @@ def test_release_run_passes_when_a_required_case_dies_in_the_product(
     def execute_case(**kwargs: object) -> dict[str, object]:
         selected_case = kwargs["case"]
         assert isinstance(selected_case, harness.BattleCase)
+        selected_provisioned = kwargs["provisioned_fixtures"]
+        assert isinstance(selected_provisioned, Mapping)
+        attached_file_ids = harness._case_file_ids(
+            selected_case,
+            selected_provisioned,
+        )
         bundle = _complete_live_case_bundle(harness, selected_case)
-        # No provenance to validate on an error-terminated turn.
-        bundle["observation_input_identity"]["sha256"] = "f" * 64
-        journey = bundle.setdefault("journey", {})
-        assert isinstance(journey, dict)
-        journey["outcome_class"] = "builder_error"
+        bundle_case = bundle["case"]
+        assert isinstance(bundle_case, dict)
+        bundle_case["file_ids"] = list(attached_file_ids)
+        build = release_identity["build"]
+        assert isinstance(build, dict)
+        provenance = _live_provenance_fixture(
+            harness,
+            prompt=selected_case.prompt,
+            harness_sha256=str(build["harness_sha256"]),
+            cases_sha256=str(build["cases_sha256"]),
+        )
+        terminal_model = harness._resolved_model_identity(
+            session_models={
+                "models": [{"id": "model-a", "name": "gpt-a", "provider": "openai"}]
+            },
+            requested_model_id="model-a",
+            planner_observed_model_ids=[],
+            classifier_observed_model_ids=[],
+            planner_interaction_count=1,
+            planner_observations=[],
+            missing_planner_interaction_indices=[],
+            terminal_error_interaction_indices=[1],
+        )
+        provenance["model"] = {
+            **terminal_model,
+            "sha256": harness._canonical_sha256(terminal_model),
+        }
+        bundle.update(
+            {
+                "plan_id": None,
+                "plan": None,
+                "plan_summary": {},
+                "interactions": [{"events": [{"event": "error", "data": {}}]}],
+                "journey": {"outcome_class": "builder_error"},
+                "classifier_diagnostics": {
+                    "session_id": "00000000-0000-0000-0000-000000000001",
+                    "classifier_runs": [],
+                },
+                "runtime_evidence": None,
+                "live_execution_provenance": provenance,
+                "observation_input_identity": harness._observation_input_identity(
+                    case=selected_case,
+                    session_id=_TEST_SESSION_ID,
+                    attached_file_ids=attached_file_ids,
+                    classifier_diagnostics={
+                        "session_id": "00000000-0000-0000-0000-000000000001",
+                        "classifier_runs": [],
+                    },
+                    runtime_evidence=None,
+                    provisioned_fixtures=selected_provisioned,
+                ),
+            }
+        )
         return bundle
 
     monkeypatch.setattr(harness, "_run_case", execute_case)
     release_args = type(
         "Args",
         (),
-        {"repetitions": 1, "space_id": "space-1", "model_id": "model-a"},
+        {
+            "repetitions": 1,
+            "space_id": "space-1",
+            "timeout_seconds": 900,
+            "model_id": "model-a",
+        },
     )()
     exit_code = harness._run_suite(
         cases=[case],
@@ -2489,10 +3068,291 @@ def test_release_run_passes_when_a_required_case_dies_in_the_product(
     assert summary["sentinel_verdict"] == "pass"
     assert summary["invalid_evidence_observation_count"] == 0
     assert summary["required_invalid_evidence_observation_count"] == 0
+    assert summary["identity_failed_check_count"] == 0
     result = summary["results"][0]
     assert result["observation_status"] == "error_terminated"
     assert result["outcome_class"] == "builder_error"
     assert result["evidence_valid"] is False
+    receipt = harness.load_recoverable_release_receipt(suite_dir)
+    assert receipt.observations[0].observation_status == "error_terminated"
+    assert harness.observation_is_replacement_eligible(receipt.observations[0]) is False
+
+
+@mark.parametrize(
+    ("attachment_state", "expected_status", "expected_pass"),
+    [
+        ("not_required", "not_required", True),
+        ("not_observed", "not_observed", True),
+        ("complete", "complete", True),
+        ("invalid", "invalid", False),
+        ("wrong_session", "invalid", False),
+        ("incomplete", "incomplete", False),
+    ],
+)
+def test_terminal_input_identity_accepts_only_valid_classifier_phases(
+    attachment_state: str,
+    expected_status: str,
+    expected_pass: bool,
+) -> None:
+    harness = _battle_harness()
+    attachment_fixture = "generic_case_template.docx"
+    attachment_file_id = "00000000-0000-0000-0000-000000000002"
+    runtime_fixture = "generic_case_template.docx"
+    attachments = (
+        ()
+        if attachment_state in {"not_required", "invalid", "wrong_session"}
+        else (attachment_fixture,)
+    )
+    case = harness.BattleCase(
+        case_id=f"terminal-{attachment_state}",
+        prompt="Build and run the Flow.",
+        required=True,
+        apply_plan=True,
+        execute_flow=True,
+        attachments=attachments,
+        runtime_files=(runtime_fixture,),
+    )
+    manifest = harness._fixture_manifest()
+    provisioned = (
+        {
+            attachment_fixture: {
+                "file_id": attachment_file_id,
+                "content_sha256": manifest[attachment_fixture],
+                "path": f"scripts/fixtures/ai_builder_battle/{attachment_fixture}",
+            }
+        }
+        if attachments
+        else {}
+    )
+    attached_file_ids = (attachment_file_id,) if attachments else ()
+    if attachment_state == "invalid":
+        classifier_diagnostics: dict[str, object] = {
+            "session_id": "not-a-uuid",
+            "classifier_runs": [],
+        }
+    elif attachment_state == "wrong_session":
+        classifier_diagnostics = {
+            "session_id": "00000000-0000-0000-0000-000000000009",
+            "classifier_runs": [],
+        }
+    elif attachment_state in {"not_required", "not_observed"}:
+        classifier_diagnostics = {
+            "session_id": "00000000-0000-0000-0000-000000000001",
+            "classifier_runs": [],
+        }
+    else:
+        classifier_diagnostics = _classifier_diagnostics()
+        classifier_runs = classifier_diagnostics["classifier_runs"]
+        assert isinstance(classifier_runs, list)
+        classifier_run = classifier_runs[0]
+        assert isinstance(classifier_run, dict)
+        source_inventory = classifier_run["source_inventory"]
+        assert isinstance(source_inventory, list)
+        uploaded_source = source_inventory[-1]
+        assert isinstance(uploaded_source, dict)
+        uploaded_source["file_id"] = attachment_file_id
+        file_roles = classifier_run["file_roles"]
+        assert isinstance(file_roles, list)
+        file_role = file_roles[0]
+        assert isinstance(file_role, dict)
+        file_role["file_id"] = attachment_file_id
+        if attachment_state == "incomplete":
+            other_file_id = "00000000-0000-0000-0000-000000000003"
+            uploaded_source["file_id"] = other_file_id
+            file_role["file_id"] = other_file_id
+
+    input_identity = harness._observation_input_identity(
+        case=case,
+        session_id=_TEST_SESSION_ID,
+        attached_file_ids=attached_file_ids,
+        classifier_diagnostics=classifier_diagnostics,
+        runtime_evidence=None,
+        provisioned_fixtures=provisioned,
+    )
+    release_identity = _release_identity_fixture(
+        harness,
+        case_id=case.case_id,
+        prompt=case.prompt,
+    )
+    provenance = _live_provenance_fixture(harness, prompt=case.prompt)
+    terminal_model = harness._resolved_model_identity(
+        session_models={
+            "models": [{"id": "model-a", "name": "gpt-a", "provider": "openai"}]
+        },
+        requested_model_id="model-a",
+        planner_observed_model_ids=[],
+        classifier_observed_model_ids=[],
+        planner_interaction_count=1,
+        planner_observations=[],
+        missing_planner_interaction_indices=[],
+        terminal_error_interaction_indices=[1],
+    )
+    provenance["model"] = {
+        **terminal_model,
+        "sha256": harness._canonical_sha256(terminal_model),
+    }
+
+    checks = harness._required_case_identity_checks(
+        case=case,
+        release_identity=release_identity,
+        provenance=provenance,
+        journey_outcome="builder_error",
+        observation_input_identity=input_identity,
+    )
+
+    input_check = next(
+        check for check in checks if check["name"] == "suite_observation_input_identity"
+    )
+    assert input_identity["attachment_evidence_status"] == expected_status
+    assert input_check["passed"] is expected_pass
+
+
+def test_terminal_input_identity_rejects_unmapped_direct_attachment() -> None:
+    harness = _battle_harness()
+    fixture = "05_lokalkalkyl.csv"
+    case = harness.BattleCase(
+        case_id="terminal-unmapped-attachment",
+        prompt="Build and run the Flow.",
+        required=True,
+        apply_plan=True,
+        execute_flow=True,
+        file_ids=("direct-file",),
+        attachments=(fixture,),
+        runtime_files=(fixture,),
+    )
+    manifest = harness._fixture_manifest()
+    provisioned = {
+        fixture: {
+            "file_id": "fixture-file",
+            "content_sha256": manifest[fixture],
+            "path": f"scripts/fixtures/ai_builder_battle/{fixture}",
+        }
+    }
+    release_identity = _release_identity_fixture(
+        harness,
+        case_id=case.case_id,
+        prompt=case.prompt,
+    )
+    provenance = _live_provenance_fixture(harness, prompt=case.prompt)
+    terminal_model = harness._resolved_model_identity(
+        session_models={
+            "models": [{"id": "model-a", "name": "gpt-a", "provider": "openai"}]
+        },
+        requested_model_id="model-a",
+        planner_observed_model_ids=[],
+        classifier_observed_model_ids=[],
+        planner_interaction_count=1,
+        planner_observations=[],
+        missing_planner_interaction_indices=[],
+        terminal_error_interaction_indices=[1],
+    )
+    provenance["model"] = {
+        **terminal_model,
+        "sha256": harness._canonical_sha256(terminal_model),
+    }
+
+    input_identity = harness._observation_input_identity(
+        case=case,
+        session_id=_TEST_SESSION_ID,
+        attached_file_ids=("direct-file", "fixture-file"),
+        classifier_diagnostics={
+            "session_id": "00000000-0000-0000-0000-000000000001",
+            "classifier_runs": [],
+        },
+        runtime_evidence=None,
+        provisioned_fixtures=provisioned,
+    )
+    checks = harness._required_case_identity_checks(
+        case=case,
+        release_identity=release_identity,
+        provenance=provenance,
+        journey_outcome="builder_error",
+        observation_input_identity=input_identity,
+    )
+
+    input_check = next(
+        check for check in checks if check["name"] == "suite_observation_input_identity"
+    )
+    assert input_check["passed"] is False
+
+
+@mark.parametrize(
+    ("prior_usage_events", "expected_pass"),
+    [
+        (
+            [{"event": "usage", "data": {"last_model": "openai/gpt-a"}}],
+            True,
+        ),
+        (
+            [{"event": "usage", "data": {"last_model": "openai/gpt-wrong"}}],
+            False,
+        ),
+        (
+            [
+                {"event": "usage", "data": {"last_model": "openai/gpt-a"}},
+                {"event": "usage", "data": {"last_model": "openai/gpt-other"}},
+            ],
+            False,
+        ),
+    ],
+)
+def test_terminal_model_identity_validates_prior_model_evidence(
+    tmp_path: Path,
+    monkeypatch: MonkeyPatch,
+    prior_usage_events: list[dict[str, object]],
+    expected_pass: bool,
+) -> None:
+    harness = _battle_harness()
+    case = harness.BattleCase(
+        case_id="terminal-wrong-prior-model",
+        prompt="Build the Flow.",
+        required=True,
+    )
+    release_identity = _release_identity_fixture(
+        harness,
+        case_id=case.case_id,
+        prompt=case.prompt,
+    )
+    monkeypatch.setattr(
+        harness,
+        "_git_output",
+        lambda *args: (
+            ""
+            if args == ("status", "--porcelain", "--untracked-files=no")
+            else "a" * 40
+        ),
+    )
+    cases_path = tmp_path / "cases.json"
+    cases_path.write_text("{}", encoding="utf-8")
+    provenance = harness._live_execution_provenance(
+        case=case,
+        cases_path=cases_path,
+        latest_session={},
+        classifier_diagnostics={
+            "session_id": "00000000-0000-0000-0000-000000000001",
+            "classifier_runs": [],
+        },
+        requested_model_id="model-a",
+        session_models={
+            "models": [{"id": "model-a", "name": "gpt-a", "provider": "openai"}]
+        },
+        interactions=[
+            {"events": prior_usage_events},
+            {"events": [{"event": "error", "data": {}}]},
+        ],
+    )
+
+    checks = harness._required_case_identity_checks(
+        case=case,
+        release_identity=release_identity,
+        provenance=provenance,
+        journey_outcome="builder_error",
+    )
+
+    model_check = next(
+        check for check in checks if check["name"] == "suite_requested_model_identity"
+    )
+    assert model_check["passed"] is expected_pass
 
 
 def test_release_run_requires_explicit_model_before_execution(
@@ -2609,7 +3469,7 @@ def test_release_run_validates_failure_identity_before_acquisition(
     assert list(tmp_path.iterdir()) == []
 
 
-def test_release_receipt_version_defaults_to_v5_and_rejects_other_versions(
+def test_release_receipt_version_defaults_to_v6_and_rejects_other_versions(
     tmp_path: Path,
 ) -> None:
     harness = _battle_harness()
@@ -2618,7 +3478,7 @@ def test_release_receipt_version_defaults_to_v5_and_rejects_other_versions(
         required_case_ids=("required-case",),
     )
 
-    assert gate.artifact_schema_version == "ai-builder-live-release.v5"
+    assert gate.artifact_schema_version == "ai-builder-live-release.v6"
     assert gate.artifact_schema_version == harness.SUPPORTED_RECEIPT_ARTIFACT_VERSION
 
     cases_path = tmp_path / "cases.json"
@@ -2652,7 +3512,7 @@ def test_suite_receipts_preserve_canonical_case_identity_for_every_outcome(
     monkeypatch: MonkeyPatch,
 ) -> None:
     harness = _battle_harness()
-    _allow_clean_measurement_space(harness, monkeypatch)
+    _allow_measurement_preflight(harness, monkeypatch)
     cases = [
         harness.BattleCase(
             case_id="success-case",
@@ -2693,7 +3553,11 @@ def test_suite_receipts_preserve_canonical_case_identity_for_every_outcome(
             api_key="test-key",
             timeout_seconds=1,
         ),
-        args=type("Args", (), {"repetitions": 1, "space_id": "space-1"})(),
+        args=type(
+            "Args",
+            (),
+            {"repetitions": 1, "space_id": "space-1", "timeout_seconds": 900},
+        )(),
         output_dir=tmp_path,
     )
 
@@ -2896,7 +3760,7 @@ def test_suite_identity_rechecks_a_to_b_before_green_summary(
     monkeypatch: MonkeyPatch,
 ) -> None:
     harness = _battle_harness()
-    _allow_clean_measurement_space(harness, monkeypatch)
+    _allow_measurement_preflight(harness, monkeypatch)
     case = harness.BattleCase(
         case_id="required-identity",
         prompt="Build the required identity case.",
@@ -2955,6 +3819,7 @@ def test_suite_identity_rechecks_a_to_b_before_green_summary(
             {
                 "repetitions": 1,
                 "space_id": "space-1",
+                "timeout_seconds": 900,
                 "model_id": "model-a",
             },
         )(),
@@ -2992,7 +3857,7 @@ def test_final_identity_probe_failure_still_writes_failed_summary(
     monkeypatch: MonkeyPatch,
 ) -> None:
     harness = _battle_harness()
-    _allow_clean_measurement_space(harness, monkeypatch)
+    _allow_measurement_preflight(harness, monkeypatch)
     case = harness.BattleCase(
         case_id="required-final-probe",
         prompt="Build it.",
@@ -3054,6 +3919,7 @@ def test_final_identity_probe_failure_still_writes_failed_summary(
         args=SimpleNamespace(
             repetitions=1,
             space_id="space-1",
+            timeout_seconds=900,
             model_id="model-a",
         ),
         output_dir=tmp_path,
@@ -3097,7 +3963,7 @@ def test_replacement_batch_reuses_context_and_preflights_publication(
     monkeypatch: MonkeyPatch,
 ) -> None:
     harness = _battle_harness()
-    _allow_clean_measurement_space(harness, monkeypatch)
+    _allow_measurement_preflight(harness, monkeypatch)
     suite_dir = tmp_path / "release-suite"
     suite_dir.mkdir()
     output_dir = tmp_path / "replacement-output"
@@ -3309,7 +4175,11 @@ def test_replacement_batch_reuses_context_and_preflights_publication(
         ("provider-a", 4, provisioned),
         ("provider-b", 2, provisioned),
     ]
-    descriptors = json.loads((suite_dir / "replacements.json").read_text())
+    overlay = json.loads((suite_dir / "replacements.json").read_text())
+    # The recovery batch binds its own capacity proof to the overlay, because
+    # it spends capacity separately from whatever the base already proved.
+    assert overlay["capacity_preflight"]["verdict"] == "pass"
+    descriptors = overlay["replacements"]
     assert [(item["case_id"], item["repetition"]) for item in descriptors] == [
         ("provider-a", 4),
         ("provider-b", 2),
@@ -3330,7 +4200,7 @@ def test_required_identity_drift_does_not_become_builder_expectation_failure(
     capsys: CaptureFixture[str],
 ) -> None:
     harness = _battle_harness()
-    _allow_clean_measurement_space(harness, monkeypatch)
+    _allow_measurement_preflight(harness, monkeypatch)
     case = harness.BattleCase(
         case_id="required-identity-drift",
         prompt="Build the required identity case.",
@@ -3369,7 +4239,12 @@ def test_required_identity_drift_does_not_become_builder_expectation_failure(
         args=type(
             "Args",
             (),
-            {"repetitions": 1, "space_id": "space-1", "model_id": "model-a"},
+            {
+                "repetitions": 1,
+                "space_id": "space-1",
+                "timeout_seconds": 900,
+                "model_id": "model-a",
+            },
         )(),
         output_dir=tmp_path,
         acquisition_contract=acquisition_contract,
@@ -3430,6 +4305,7 @@ def test_release_run_rejects_dirty_source_before_creating_output(
                 {
                     "repetitions": 1,
                     "space_id": "space-1",
+                    "timeout_seconds": 900,
                     "model_id": "model-1",
                 },
             )(),
@@ -3782,24 +4658,37 @@ def test_observation_input_identity_distinguishes_fixture_bytes_from_runtime_con
     runtime_fixture_sha256 = harness._fixture_manifest()[runtime_fixture]
     runtime_source_sha256 = "b" * 64
     extracted_evidence_sha256 = "a" * 64
+    attachment_file_id = "00000000-0000-0000-0000-000000000002"
     case = harness.BattleCase(
         case_id="fixture-identity",
         prompt="Build it.",
         attachments=("generic_case_template.docx",),
         runtime_files=(runtime_fixture,),
     )
-    diagnostics = {
-        "classifier_runs": [
-            {
-                "source_inventory": [
-                    {
-                        "kind": "uploaded_file",
-                        "file_id": "file-1",
-                        "source_sha256": extracted_evidence_sha256,
-                    }
-                ]
-            }
-        ]
+    diagnostics = _classifier_diagnostics()
+    classifier_runs = diagnostics["classifier_runs"]
+    assert isinstance(classifier_runs, list)
+    classifier_run = classifier_runs[0]
+    assert isinstance(classifier_run, dict)
+    source_inventory = classifier_run["source_inventory"]
+    assert isinstance(source_inventory, list)
+    uploaded_source = source_inventory[1]
+    assert isinstance(uploaded_source, dict)
+    uploaded_source["file_id"] = attachment_file_id
+    uploaded_source["source_sha256"] = extracted_evidence_sha256
+    file_roles = classifier_run["file_roles"]
+    assert isinstance(file_roles, list)
+    file_role = file_roles[0]
+    assert isinstance(file_role, dict)
+    file_role["file_id"] = attachment_file_id
+    attachment_fixture = "generic_case_template.docx"
+    attachment_fixture_sha256 = harness._fixture_manifest()[attachment_fixture]
+    provisioned_fixtures = {
+        attachment_fixture: {
+            "file_id": attachment_file_id,
+            "content_sha256": attachment_fixture_sha256,
+            "path": f"scripts/fixtures/ai_builder_battle/{attachment_fixture}",
+        }
     }
     runtime_evidence = {
         "run_contract": {
@@ -3843,9 +4732,11 @@ def test_observation_input_identity_distinguishes_fixture_bytes_from_runtime_con
 
     identity = harness._observation_input_identity(
         case=case,
-        attached_file_ids=("file-1",),
+        session_id=_TEST_SESSION_ID,
+        attached_file_ids=(attachment_file_id,),
         classifier_diagnostics=diagnostics,
         runtime_evidence=runtime_evidence,
+        provisioned_fixtures=provisioned_fixtures,
     )
     assert identity["verified"] is True
     assert identity["runtime_fixture_sha256s"] == [runtime_fixture_sha256]
@@ -3862,9 +4753,11 @@ def test_observation_input_identity_distinguishes_fixture_bytes_from_runtime_con
     runtime_edge["source"]["checksum"] = "c" * 64
     changed_projection = harness._observation_input_identity(
         case=case,
-        attached_file_ids=("file-1",),
+        session_id=_TEST_SESSION_ID,
+        attached_file_ids=(attachment_file_id,),
         classifier_diagnostics=diagnostics,
         runtime_evidence=runtime_evidence,
+        provisioned_fixtures=provisioned_fixtures,
     )
     assert changed_projection["verified"] is True
     assert changed_projection["sha256"] != identity["sha256"]
@@ -3875,9 +4768,11 @@ def test_observation_input_identity_distinguishes_fixture_bytes_from_runtime_con
     runtime_edge["source"]["byte_size"] = 359
     mismatched_size = harness._observation_input_identity(
         case=case,
-        attached_file_ids=("file-1",),
+        session_id=_TEST_SESSION_ID,
+        attached_file_ids=(attachment_file_id,),
         classifier_diagnostics=diagnostics,
         runtime_evidence=runtime_evidence,
+        provisioned_fixtures=provisioned_fixtures,
     )
     assert mismatched_size["verified"] is False
     assert mismatched_size["mismatches"] == ["runtime_evidence"]
@@ -3886,19 +4781,19 @@ def test_observation_input_identity_distinguishes_fixture_bytes_from_runtime_con
     # An attachment that produced no well-formed extraction digest is an
     # unevaluable observation; which digest it produced is reported, never
     # pinned to a constant captured months ago.
-    diagnostics["classifier_runs"][0]["source_inventory"][0]["source_sha256"] = "nope"
+    uploaded_source["source_sha256"] = "nope"
     missing_evidence = harness._observation_input_identity(
         case=case,
-        attached_file_ids=("file-1",),
+        session_id=_TEST_SESSION_ID,
+        attached_file_ids=(attachment_file_id,),
         classifier_diagnostics=diagnostics,
         runtime_evidence=runtime_evidence,
+        provisioned_fixtures=provisioned_fixtures,
     )
     assert missing_evidence["verified"] is False
     assert missing_evidence["mismatches"] == ["attachment_evidence"]
 
-    diagnostics["classifier_runs"][0]["source_inventory"][0]["source_sha256"] = (
-        extracted_evidence_sha256
-    )
+    uploaded_source["source_sha256"] = extracted_evidence_sha256
     stale_attempt = runtime_evidence["step_attempts"][0]
     stale_attempt["superseded_by_attempt_id"] = "attempt-2"
     runtime_evidence["step_attempts"].append(
@@ -3914,9 +4809,11 @@ def test_observation_input_identity_distinguishes_fixture_bytes_from_runtime_con
     runtime_evidence["step_results"][0]["current_attempt_no"] = 2
     untracked = harness._observation_input_identity(
         case=case,
-        attached_file_ids=("file-1",),
+        session_id=_TEST_SESSION_ID,
+        attached_file_ids=(attachment_file_id,),
         classifier_diagnostics=diagnostics,
         runtime_evidence=runtime_evidence,
+        provisioned_fixtures=provisioned_fixtures,
     )
     assert untracked["verified"] is False
     assert untracked["mismatches"] == ["runtime_evidence"]
@@ -4339,6 +5236,13 @@ def test_required_case_identity_rejects_each_manifest_drift() -> None:
 
     baseline = checks_for(_live_provenance_fixture(harness, prompt=case.prompt))
     assert all(check["passed"] is True for check in baseline.values())
+
+    dirty_source_provenance = _live_provenance_fixture(harness, prompt=case.prompt)
+    source = dirty_source_provenance["source"]
+    assert isinstance(source, dict)
+    source["tracked_clean"] = False
+    dirty_source = checks_for(dirty_source_provenance)
+    assert dirty_source["suite_source_revision_identity"]["passed"] is False
 
     source_drift = checks_for(
         _live_provenance_fixture(
@@ -5204,7 +6108,7 @@ def test_release_inventory_owns_required_dimensions_and_named_cases() -> None:
     acquisition_contract = harness._read_acquisition_contract(cases_path, cases=cases)
     by_id = {case.case_id: case for case in cases}
 
-    assert acquisition_contract.artifact_schema_version == "ai-builder-live-release.v5"
+    assert acquisition_contract.artifact_schema_version == "ai-builder-live-release.v6"
     assert acquisition_contract.require_clean_source is True
     assert not hasattr(acquisition_contract, "thresholds")
     required_dimensions = {
@@ -5898,7 +6802,7 @@ def test_benchmark_quality_failure_is_reported_without_failing_required_gate(
     tmp_path: Path, monkeypatch: MonkeyPatch
 ) -> None:
     harness = _battle_harness()
-    _allow_clean_measurement_space(harness, monkeypatch)
+    _allow_measurement_preflight(harness, monkeypatch)
 
     def fail_quality_check(*, case: Any, **_: Any) -> dict[str, Any]:
         bundle = _complete_live_case_bundle(
@@ -5936,6 +6840,7 @@ def test_benchmark_quality_failure_is_reported_without_failing_required_gate(
             {
                 "repetitions": 1,
                 "space_id": "space-1",
+                "timeout_seconds": 900,
             },
         )(),
         output_dir=tmp_path,
@@ -6760,7 +7665,8 @@ def test_first_question_forbidden_and_unclassified_always_fail() -> None:
 def test_evaluator_identity_carries_measurement_semantics_versions() -> None:
     harness = _battle_harness()
     assert harness.QUESTION_RELEVANCE_SEMANTICS_VERSION == 2
-    assert harness.OBSERVATION_INPUT_IDENTITY_SEMANTICS_VERSION == 2
+    assert harness.OUTCOME_CLASSIFICATION_SEMANTICS_VERSION == 4
+    assert harness.OBSERVATION_INPUT_IDENTITY_SEMANTICS_VERSION == 3
     assert harness.SUPPORTED_CASES_FILE_VERSION == 8
     identity = harness._suite_evaluator_identity(
         release_identity={},
@@ -6768,7 +7674,8 @@ def test_evaluator_identity_carries_measurement_semantics_versions() -> None:
         expected_observations=[],
     )
     assert identity["question_relevance_semantics_version"] == 2
-    assert identity["observation_input_identity_semantics_version"] == 2
+    assert identity["outcome_classification_semantics_version"] == 4
+    assert identity["observation_input_identity_semantics_version"] == 3
 
 
 def test_planner_evidence_skips_planner_less_interactions() -> None:
@@ -6788,11 +7695,507 @@ def test_planner_evidence_skips_planner_less_interactions() -> None:
         },
     ]
 
-    observed, observations, missing, count = (
+    observed, observations, missing, terminal_errors, count = (
         harness._planner_model_evidence_from_interactions(interactions)
     )
 
     assert observed == ["openai/gpt"]
     assert [o["interaction_index"] for o in observations] == [1]
     assert missing == [3]
+    assert terminal_errors == []
     assert count == 3
+
+
+def _demand_case(
+    harness: ModuleType,
+    *,
+    case_id: str,
+    apply_plan: bool = False,
+    execute_flow: bool = False,
+    runtime_files: tuple[str, ...] = (),
+    attachments: tuple[str, ...] = (),
+) -> Any:
+    return harness.BattleCase(
+        case_id=case_id,
+        prompt="p",
+        apply_plan=apply_plan,
+        execute_flow=execute_flow,
+        runtime_files=runtime_files,
+        attachments=attachments,
+    )
+
+
+def test_observation_demand_charges_only_the_calls_a_case_makes() -> None:
+    harness = _battle_harness()
+    plain = _demand_case(harness, case_id="plain")
+    applied = _demand_case(harness, case_id="applied", apply_plan=True)
+    executed = _demand_case(
+        harness,
+        case_id="executed",
+        apply_plan=True,
+        execute_flow=True,
+        runtime_files=("a.pdf", "b.pdf"),
+    )
+
+    plain_demand = harness.observation_request_demand(plain, timeout_seconds=900)
+    applied_demand = harness.observation_request_demand(applied, timeout_seconds=900)
+    executed_demand = harness.observation_request_demand(executed, timeout_seconds=900)
+
+    # 2 session setup + 6 turns x 2 + 1 plan fetch + 2 diagnostics.
+    assert plain_demand == 17
+    # The Flow lifecycle is charged only when the plan is applied.
+    assert applied_demand == plain_demand + 3
+    # Runtime adds its fixed calls, one upload per file, and the poll bound.
+    assert executed_demand == applied_demand + 5 + 2 + 901
+
+
+def test_runtime_poll_bound_counts_the_first_poll_before_any_sleep() -> None:
+    harness = _battle_harness()
+
+    # The loop polls, checks the deadline, then sleeps, so a zero-second
+    # deadline still spends one request.
+    assert harness.runtime_poll_requests(timeout_seconds=0) == 1
+    assert harness.runtime_poll_requests(timeout_seconds=5) == 6
+
+
+def test_suite_demand_counts_each_fixture_once_across_cases() -> None:
+    harness = _battle_harness()
+    cases = [
+        _demand_case(harness, case_id="a", attachments=("shared.pdf",)),
+        _demand_case(harness, case_id="b", attachments=("shared.pdf", "other.docx")),
+    ]
+
+    demand = harness.suite_request_demand(
+        cases=cases, repetitions=3, timeout_seconds=900
+    )
+
+    assert demand["fixture_uploads"] == 2
+    assert demand["observation_count"] == 6
+    assert demand["observation_requests"] == 6 * 17
+    # No case executes a Flow, so only the request-capacity read is spent.
+    assert demand["capacity_reads"] == 1
+    assert demand["total"] == 1 + 1 + 2 + 6 * 17
+
+
+def test_suite_demand_for_the_frozen_corpus_exceeds_the_default_ceilings() -> None:
+    # The number this gate exists to produce. If it ever drops below the
+    # tenant default, the dedicated measurement key stops being a requirement
+    # and this test should be the thing that says so.
+    harness = _battle_harness()
+    cases = harness._read_cases_file(harness.DEFAULT_CASES_FILE)
+
+    demand = harness.suite_request_demand(
+        cases=cases, repetitions=3, timeout_seconds=900
+    )
+
+    assert demand["total"] == 10_852
+    assert demand["total"] > 10_000
+
+
+_SPACE_ID = "00000000-0000-0000-0000-000000000020"
+
+
+def _passing_capacity_inputs(harness: ModuleType) -> dict[str, Any]:
+    return {
+        "request_capacity": {
+            "key_id": "00000000-0000-0000-0000-000000000030",
+            "scope_type": "space",
+            "scope_id": _SPACE_ID,
+            "limit_source": "explicit",
+            "limit": 20000,
+            "current_count": 10,
+            "remaining": 19990,
+            "window_seconds": 3600,
+            "fail_open": False,
+        },
+        "runtime_capacity": {
+            "tenant_id": "00000000-0000-0000-0000-000000000010",
+            "active_runs": 0,
+            "max_concurrent_runs": 4,
+            "available_slots": 4,
+        },
+        "demand": {
+            "total": 10_852,
+            "capacity_reads": 2,
+            "clean_space_listing": 1,
+            "fixture_uploads": 10,
+            "observation_requests": 10_839,
+            "observation_count": 474,
+        },
+        "space_id": _SPACE_ID,
+        "runtime_slots_required": 1,
+    }
+
+
+def test_capacity_preflight_passes_only_on_a_sufficient_idle_measurement_target() -> (
+    None
+):
+    harness = _battle_harness()
+
+    verdict = harness.capacity_preflight_verdict(**_passing_capacity_inputs(harness))
+
+    assert verdict["verdict"] == "pass"
+    assert verdict["refusals"] == []
+
+
+@mark.parametrize(
+    ("mutation", "expected_refusal"),
+    [
+        ({"request_capacity": None}, "request_capacity_unavailable"),
+        ({"runtime_capacity": None}, "runtime_capacity_unavailable"),
+        (
+            {"request_capacity_scope_type": "tenant"},
+            "measurement_key_not_space_scoped",
+        ),
+        (
+            {"request_capacity_scope_id": "00000000-0000-0000-0000-0000000000ff"},
+            "measurement_key_scope_mismatch",
+        ),
+        ({"request_capacity_fail_open": True}, "rate_limit_policy_fail_open"),
+        (
+            {
+                "request_capacity_current_count": 19_500,
+                "request_capacity_remaining": 500,
+            },
+            "insufficient_request_budget",
+        ),
+        (
+            {"runtime_capacity_active_runs": 1, "runtime_capacity_available_slots": 3},
+            "measurement_tenant_not_idle",
+        ),
+        (
+            {
+                "runtime_capacity_max_concurrent_runs": 0,
+                "runtime_capacity_available_slots": 0,
+            },
+            "insufficient_runtime_slots",
+        ),
+    ],
+)
+def test_capacity_preflight_refuses_each_unsafe_measurement_target(
+    mutation: dict[str, Any],
+    expected_refusal: str,
+) -> None:
+    harness = _battle_harness()
+    inputs = _passing_capacity_inputs(harness)
+    for key, value in mutation.items():
+        if key.startswith("request_capacity_"):
+            inputs["request_capacity"][key.removeprefix("request_capacity_")] = value
+        elif key.startswith("runtime_capacity_"):
+            inputs["runtime_capacity"][key.removeprefix("runtime_capacity_")] = value
+        else:
+            inputs[key] = value
+
+    verdict = harness.capacity_preflight_verdict(**inputs)
+
+    assert verdict["verdict"] == "fail"
+    assert expected_refusal in verdict["refusals"]
+
+
+def test_capacity_preflight_accepts_an_unlimited_key_under_a_fail_open_policy() -> None:
+    # An unlimited key returns before the limiter consults its store, so
+    # fail-open cannot make its budget unreliable.
+    harness = _battle_harness()
+    inputs = _passing_capacity_inputs(harness)
+    inputs["request_capacity"] = {
+        "key_id": "00000000-0000-0000-0000-000000000030",
+        "scope_type": "space",
+        "scope_id": _SPACE_ID,
+        "limit_source": "unlimited",
+        "limit": None,
+        "current_count": None,
+        "remaining": None,
+        "window_seconds": 3600,
+        "fail_open": True,
+    }
+
+    verdict = harness.capacity_preflight_verdict(**inputs)
+
+    assert verdict["verdict"] == "pass"
+
+
+def test_required_runtime_slots_follows_the_executing_cases_and_concurrency() -> None:
+    harness = _battle_harness()
+    executing = [
+        _demand_case(harness, case_id=f"e{index}", apply_plan=True, execute_flow=True)
+        for index in range(3)
+    ]
+    plain = [_demand_case(harness, case_id="p")]
+
+    assert harness.required_runtime_slots(cases=plain, max_concurrency=4) == 0
+    assert harness.required_runtime_slots(cases=executing, max_concurrency=4) == 3
+    assert harness.required_runtime_slots(cases=executing, max_concurrency=2) == 2
+
+
+def test_capacity_refusal_makes_no_clean_space_or_fixture_calls(
+    monkeypatch: MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    # The whole point of preflighting is to spend nothing when the target
+    # cannot carry the suite. Anything past the two reads is spent budget.
+    harness = _battle_harness()
+    requested: list[str] = []
+
+    def request_json(**kwargs: object) -> dict[str, object]:
+        path = str(kwargs.get("path"))
+        requested.append(path)
+        if path == "/flows/runs/capacity/":
+            return {
+                "tenant_id": "00000000-0000-0000-0000-000000000010",
+                "active_runs": 2,
+                "max_concurrent_runs": 4,
+                "available_slots": 2,
+            }
+        if path == "/api-key-capacity/":
+            return {
+                "key_id": "00000000-0000-0000-0000-000000000030",
+                "scope_type": "space",
+                "scope_id": _SPACE_ID,
+                "limit_source": "unlimited",
+                "limit": None,
+                "current_count": None,
+                "remaining": None,
+                "window_seconds": 3600,
+                "fail_open": False,
+            }
+        raise AssertionError(f"unexpected request past the capacity preflight: {path}")
+
+    def fail_if_called(**_kwargs: object) -> None:
+        raise AssertionError("refused acquisition must not provision fixtures")
+
+    monkeypatch.setattr(harness, "_request_json", request_json)
+    monkeypatch.setattr(harness, "_provision_fixtures", fail_if_called)
+    monkeypatch.setattr(harness, "_release_run_identity", lambda **_k: {})
+    monkeypatch.setattr(harness, "_failure_execution_provenance", lambda _i: {})
+
+    case = _demand_case(harness, case_id="only", apply_plan=True, execute_flow=True)
+    args = SimpleNamespace(
+        repetitions=1,
+        timeout_seconds=900,
+        space_id=_SPACE_ID,
+        model_id="openai/gpt",
+        cases_file=None,
+        concurrency=1,
+    )
+
+    with raises(harness.CapacityPreflightRefused) as refusal:
+        harness._run_suite(
+            cases=[case],
+            config=SimpleNamespace(base_url="http://x", api_key="k", timeout_seconds=9),
+            args=args,
+            output_dir=tmp_path,
+            acquisition_contract=harness.AcquisitionContract(
+                required_case_ids=("only",)
+            ),
+        )
+
+    assert "measurement_tenant_not_idle" in refusal.value.verdict["refusals"]
+    assert requested == ["/flows/runs/capacity/", "/api-key-capacity/"]
+
+
+def test_capacity_refusal_writes_a_durable_non_secret_receipt(tmp_path: Path) -> None:
+    harness = _battle_harness()
+    verdict = {"verdict": "fail", "refusals": ["insufficient_request_budget"]}
+
+    path = harness._write_capacity_refusal(
+        output_dir=tmp_path,
+        base_url="http://x",
+        space_id=_SPACE_ID,
+        verdict=verdict,
+    )
+
+    written = json.loads(path.read_text())
+    assert written["artifact_mode"] == "capacity_preflight_refusal"
+    assert written["capacity_preflight"] == verdict
+    assert "secret" not in path.read_text()
+
+
+def test_a_capped_journey_stays_within_the_planned_request_demand(
+    monkeypatch: MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    # Arithmetic-only tests can agree with a stale formula. This counts the
+    # transport calls a maximal capped journey actually makes and holds them
+    # to the bound the planner promised.
+    harness = _battle_harness()
+    case = harness.BattleCase(case_id="capped", prompt="Bygg ett flöde.")
+    charged: list[str] = []
+
+    def request_json(**kwargs: object) -> dict[str, object]:
+        path = str(kwargs["path"])
+        charged.append(path)
+        if kwargs["method"] == "POST" and path == "/flows/ai-builder/sessions":
+            return {"session_id": _TEST_SESSION_ID}
+        if path.endswith("/models"):
+            return {
+                "default_model_id": "model-a",
+                "models": [{"id": "model-a", "name": "gpt-a", "provider": "openai"}],
+            }
+        if path == f"/flows/ai-builder/sessions/{_TEST_SESSION_ID}":
+            return {
+                "latest_plan_id": None,
+                "telemetry": {
+                    "llm_calls_made_total": 0,
+                    "repair_attempts_total": 0,
+                    "parse_repair_attempts_total": 0,
+                    "prompt_tokens_total": 0,
+                    "completion_tokens_total": 0,
+                    "total_tokens_total": 0,
+                    "wall_clock_ms_total": 1,
+                },
+            }
+        if path.endswith("/_diagnostics/classifier-slots"):
+            return {"session_id": _TEST_SESSION_ID, "classifier_runs": []}
+        raise AssertionError(f"unexpected request: {path}")
+
+    def optional_request_json(**kwargs: object) -> None:
+        charged.append(str(kwargs["path"]))
+        return None
+
+    def send_message_stream(**kwargs: object) -> Iterator[dict[str, object]]:
+        charged.append(f"/flows/ai-builder/sessions/{_TEST_SESSION_ID}/messages")
+        return iter(
+            [
+                {
+                    "event": "question",
+                    "data": {
+                        "question_id": "q",
+                        "question": "Vilken källa?",
+                        "options": [{"id": "a", "label": "A"}],
+                    },
+                }
+            ]
+        )
+
+    monkeypatch.setattr(harness, "_request_json", request_json)
+    monkeypatch.setattr(harness, "_optional_request_json", optional_request_json)
+    monkeypatch.setattr(harness, "_send_message_stream", send_message_stream)
+    monkeypatch.setattr(
+        harness,
+        "_git_output",
+        lambda *args: "a" * 40 if args == ("rev-parse", "HEAD") else "",
+    )
+
+    harness._run_case(
+        case=case,
+        config=harness.ApiConfig(
+            base_url="http://localhost:8123/api/v1",
+            api_key="test-key",
+            timeout_seconds=1,
+        ),
+        args=SimpleNamespace(
+            space_id="space-1",
+            model_id="model-a",
+            file_ids=(),
+            ui_language="sv",
+            auto_confirm_requirements=False,
+            confirm_message=harness.DEFAULT_CONFIRM_MESSAGE,
+            timeout_seconds=1,
+        ),
+        existing_session_id=None,
+        artifact_output_dir=tmp_path,
+    )
+
+    planned = harness.observation_request_demand(case, timeout_seconds=1)
+    assert len(charged) <= planned, (
+        f"journey spent {len(charged)} requests against a planned bound of "
+        f"{planned}: {charged}"
+    )
+
+
+def test_a_refused_replacement_batch_leaves_a_receipt_not_a_traceback(
+    monkeypatch: MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    # Recovery spends budget too. Its refusal has to be as durable as a normal
+    # suite's, and it used to escape main()'s handler entirely.
+    harness = _battle_harness()
+    verdict = {
+        "verdict": "fail",
+        "refusals": ["insufficient_request_budget"],
+        "demand": {"total": 10_852},
+    }
+
+    def refuse(**_kwargs: object) -> int:
+        raise harness.CapacityPreflightRefused(verdict)
+
+    monkeypatch.setattr(harness, "_run_replacement_batch", refuse)
+    monkeypatch.setattr(
+        harness,
+        "_parse_args",
+        lambda: SimpleNamespace(
+            reanalyze_bundle=None,
+            api_key="test-key",
+            output_dir=str(tmp_path),
+            replacement_suite_dir="some-suite",
+            base_url="http://localhost:8123/api/v1",
+            timeout_seconds=900,
+            space_id="space-1",
+        ),
+    )
+
+    exit_code = harness.main()
+
+    assert exit_code == 2
+    receipt = next(tmp_path.glob("capacity-preflight-refusal-*.json"))
+    written = json.loads(receipt.read_text())
+    assert written["capacity_preflight"] == verdict
+    assert "test-key" not in receipt.read_text()
+
+
+def test_capacity_preflight_holds_the_exact_finite_budget_boundary() -> None:
+    # The snapshot is taken after the capacity reads were already counted, so
+    # the budget that must remain is the demand minus those reads. One request
+    # either side of that line decides the run.
+    harness = _battle_harness()
+    inputs = _passing_capacity_inputs(harness)
+    total = 10_852
+    reads = 2
+    inputs["demand"] = {
+        "total": total,
+        "capacity_reads": reads,
+        "clean_space_listing": 1,
+        "fixture_uploads": 10,
+        "observation_requests": total - reads - 11,
+        "observation_count": 474,
+    }
+
+    exact = json.loads(json.dumps(inputs))
+    exact["request_capacity"]["limit"] = 30_000
+    exact["request_capacity"]["current_count"] = 30_000 - (total - reads)
+    exact["request_capacity"]["remaining"] = total - reads
+    assert harness.capacity_preflight_verdict(**exact)["verdict"] == "pass"
+
+    short = json.loads(json.dumps(exact))
+    short["request_capacity"]["current_count"] += 1
+    short["request_capacity"]["remaining"] -= 1
+    verdict = harness.capacity_preflight_verdict(**short)
+    assert verdict["verdict"] == "fail"
+    assert "insufficient_request_budget" in verdict["refusals"]
+
+
+def test_a_truncated_capacity_response_refuses_instead_of_unwinding(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    # The server has already counted the request by the time the body is read,
+    # so a truncated response has to become recorded refusal evidence.
+    from http.client import IncompleteRead
+
+    harness = _battle_harness()
+
+    def request_json(**_kwargs: object) -> dict[str, object]:
+        raise IncompleteRead(b"", 12)
+
+    monkeypatch.setattr(harness, "_request_json", request_json)
+
+    snapshot, failure = harness._read_capacity_snapshot(
+        config=SimpleNamespace(base_url="http://x", api_key="k", timeout_seconds=9),
+        path="/api-key-capacity/",
+    )
+
+    assert snapshot is None
+    assert failure == {
+        "path": "/api-key-capacity/",
+        "kind": "response_transport_error",
+        "detail": "IncompleteRead",
+    }

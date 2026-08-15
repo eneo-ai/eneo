@@ -1,11 +1,10 @@
 from __future__ import annotations
 
 import json
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Sequence
 from dataclasses import dataclass, replace
 from hashlib import sha256
-from typing import Any, cast
-from uuid import uuid4
+from typing import Any
 
 from eneo.flows.ai_builder.ai_builder_architecture_errors import (
     AIBuilderArchitectureError,
@@ -59,7 +58,6 @@ from eneo.flows.ai_builder.ai_builder_proposal_tool_contracts import (
     ToolRetryConfig,
     ToolRetryInvocation,
     append_protected_repair_group,
-    forced_tool_choice,
 )
 from eneo.flows.ai_builder.ai_builder_tool_names import PROPOSE_FLOW_TOOL_NAME
 from eneo.flows.ai_builder.ai_builder_tool_parsing import (
@@ -764,7 +762,7 @@ async def _request_self_correction_events(
         message = choice.message
         assistant_text = _safe_assistant_text(message.content)
 
-        if message.tool_calls:
+        if _sole_proposal_tool_call(message.tool_calls) is not None:
             retry_feedback: (
                 tuple[
                     LLMCompletionToolCall,
@@ -906,6 +904,8 @@ async def _request_self_correction_events(
                     ),
                 )
                 continue
+        elif message.tool_calls:
+            _record_attempt_failure(ctx, failure_kind="missing_submission_tool")
 
         if assistant_text:
             _record_attempt_failure(ctx, failure_kind="missing_submission_tool")
@@ -1000,18 +1000,6 @@ async def _execute_forced_tool_retry(
     if looks_like_information_request(request.assistant_text):
         return ForcedToolRetryOutcome()
 
-    direct_outcome = await _try_process_json_text_as_tool_arguments(
-        ctx=ctx,
-        assistant_text=request.assistant_text,
-        retry_config=request.retry_config,
-    )
-    if (
-        direct_outcome.events is not None
-        or direct_outcome.feedback is not None
-        or direct_outcome.failure_kind is not None
-    ):
-        return direct_outcome
-
     forced_message_groups = append_protected_repair_group(
         request.correction_message_groups,
         _text_retry_group_messages(
@@ -1025,7 +1013,6 @@ async def _execute_forced_tool_retry(
             ctx.completion_request(
                 message_groups=forced_message_groups,
                 temperature=request.forced_proposal_temperature,
-                tool_choice=forced_tool_choice(PROPOSE_FLOW_TOOL_NAME),
                 counts_as_repair=True,
             )
         )
@@ -1064,63 +1051,62 @@ async def _execute_forced_tool_retry(
         _record_attempt_failure(ctx, failure_kind="missing_submission_tool")
         return ForcedToolRetryOutcome()
 
-    for tool_call in message.tool_calls:
-        if tool_call.function.name != PROPOSE_FLOW_TOOL_NAME:
-            continue
-        try:
-            arguments = parse_tool_call_arguments(tool_call.function.arguments)
-        except ToolArgumentParseError as error:
-            capture_malformed_proposal_arguments(
+    tool_call = _sole_proposal_tool_call(message.tool_calls)
+    if tool_call is None:
+        _record_attempt_failure(ctx, failure_kind="missing_submission_tool")
+        return ForcedToolRetryOutcome()
+    try:
+        arguments = parse_tool_call_arguments(tool_call.function.arguments)
+    except ToolArgumentParseError as error:
+        capture_malformed_proposal_arguments(
+            tool_call.function.arguments,
+            session_id=str(ctx.session_id),
+            error_message=str(error),
+        )
+        failure_codes = frozenset({PROPOSAL_PARSE_JSON_FAILURE_CODE})
+        _record_attempt_failure(
+            ctx,
+            failure_kind="parse",
+            failure_codes=failure_codes,
+        )
+        logger.warning("Forced proposal retry returned invalid payload: %s", error)
+        return ForcedToolRetryOutcome(
+            feedback=_invalid_tool_arguments_message(error),
+            failure_kind="parse",
+            failure_codes=failure_codes,
+            failure_fingerprint=_proposal_failure_fingerprint(
                 tool_call.function.arguments,
-                session_id=str(ctx.session_id),
-                error_message=str(error),
-            )
-            failure_codes = frozenset({PROPOSAL_PARSE_JSON_FAILURE_CODE})
-            _record_attempt_failure(
-                ctx,
                 failure_kind="parse",
                 failure_codes=failure_codes,
-            )
-            logger.warning("Forced proposal retry returned invalid payload: %s", error)
-            return ForcedToolRetryOutcome(
-                feedback=_invalid_tool_arguments_message(error),
-                failure_kind="parse",
-                failure_codes=failure_codes,
-                failure_fingerprint=_proposal_failure_fingerprint(
-                    tool_call.function.arguments,
-                    failure_kind="parse",
-                    failure_codes=failure_codes,
-                ),
-            )
-
-        repair_outcome = await _classify_processed_repair_attempt(
-            retry_config=request.retry_config,
-            invocation=_build_tool_retry_invocation(
-                ctx=ctx,
-                arguments=arguments,
-                assistant_content=request.assistant_text,
-                tool_call_id=tool_call.id,
             ),
         )
-        if repair_outcome.events is None:
-            _record_attempt_failure(
-                ctx,
-                failure_kind=repair_outcome.failure_kind or "validation",
-                failure_codes=repair_outcome.failure_codes,
-            )
-            logger.warning(
-                "Forced tool retry returned an invalid result",
-                extra={
-                    "failure_kind": repair_outcome.failure_kind or "unknown",
-                    "failure_codes_count": len(repair_outcome.failure_codes),
-                    "feedback_present": bool(repair_outcome.feedback),
-                    "feedback_length": len(repair_outcome.feedback or ""),
-                },
-            )
 
-        return repair_outcome
+    repair_outcome = await _classify_processed_repair_attempt(
+        retry_config=request.retry_config,
+        invocation=_build_tool_retry_invocation(
+            ctx=ctx,
+            arguments=arguments,
+            assistant_content=request.assistant_text,
+            tool_call_id=tool_call.id,
+        ),
+    )
+    if repair_outcome.events is None:
+        _record_attempt_failure(
+            ctx,
+            failure_kind=repair_outcome.failure_kind or "validation",
+            failure_codes=repair_outcome.failure_codes,
+        )
+        logger.warning(
+            "Forced tool retry returned an invalid result",
+            extra={
+                "failure_kind": repair_outcome.failure_kind or "unknown",
+                "failure_codes_count": len(repair_outcome.failure_codes),
+                "feedback_present": bool(repair_outcome.feedback),
+                "feedback_length": len(repair_outcome.feedback or ""),
+            },
+        )
 
-    return ForcedToolRetryOutcome()
+    return repair_outcome
 
 
 async def run_forced_tool_retry_after_text(
@@ -1139,72 +1125,13 @@ async def run_forced_tool_retry_after_text(
         )
 
 
-async def _try_process_json_text_as_tool_arguments(
-    *,
-    ctx: ProposalTurnContext,
-    assistant_text: str,
-    retry_config: ToolRetryConfig,
-) -> ForcedToolRetryOutcome:
-    arguments = _parse_json_object_text(assistant_text)
-    if arguments is None:
-        return ForcedToolRetryOutcome()
-
-    repair_outcome = await _classify_processed_repair_attempt(
-        retry_config=retry_config,
-        invocation=_build_tool_retry_invocation(
-            ctx=ctx,
-            arguments=arguments,
-            assistant_content="Här är mitt korrigerade förslag:",
-            tool_call_id=f"call_text_{uuid4().hex}",
-        ),
-    )
-    if repair_outcome.events is not None:
-        logger.info(
-            "Accepted %s arguments returned as JSON text during forced retry.",
-            PROPOSE_FLOW_TOOL_NAME,
-        )
-        return repair_outcome
-
-    _record_attempt_failure(
-        ctx,
-        failure_kind=repair_outcome.failure_kind or "validation",
-        failure_codes=repair_outcome.failure_codes,
-    )
-
-    logger.warning(
-        "JSON text fallback for propose_flow returned an invalid result",
-        extra={
-            "failure_kind": repair_outcome.failure_kind or "unknown",
-            "failure_codes_count": len(repair_outcome.failure_codes),
-            "feedback_present": bool(repair_outcome.feedback),
-            "feedback_length": len(repair_outcome.feedback or ""),
-        },
-    )
-    return repair_outcome
-
-
-def _parse_json_object_text(text: str) -> dict[str, Any] | None:
-    stripped = text.strip()
-    if stripped.startswith("```"):
-        stripped = _strip_json_fence(stripped)
-    if not (stripped.startswith("{") and stripped.endswith("}")):
+def _sole_proposal_tool_call(
+    tool_calls: Sequence[LLMCompletionToolCall] | None,
+) -> LLMCompletionToolCall | None:
+    if tool_calls is None or len(tool_calls) != 1:
         return None
-    try:
-        parsed = json.loads(stripped)
-    except json.JSONDecodeError:
-        return None
-    return cast(dict[str, Any], parsed) if isinstance(parsed, dict) else None
-
-
-def _strip_json_fence(text: str) -> str:
-    lines = text.splitlines()
-    if not lines or not lines[0].startswith("```"):
-        return text
-    if lines[-1].strip() == "```":
-        lines = lines[1:-1]
-    else:
-        lines = lines[1:]
-    return "\n".join(lines).strip()
+    tool_call = tool_calls[0]
+    return tool_call if tool_call.function.name == PROPOSE_FLOW_TOOL_NAME else None
 
 
 def _safe_assistant_text(value: Any) -> str | None:

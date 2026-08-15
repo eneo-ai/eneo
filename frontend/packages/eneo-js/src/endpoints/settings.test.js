@@ -3,6 +3,54 @@ import { describe, expect, it, vi } from "vitest";
 import { initSettings } from "./settings";
 
 describe("settings flow policy endpoints", () => {
+  it("returns the resolved audio count while keeping the generic file count nullable", async () => {
+    const limits = { audio_max_files_per_run: 10 };
+    const fetch = vi.fn(async () => limits);
+    const settings = initSettings({ fetch });
+
+    await expect(settings.getFlowInputLimits()).resolves.toEqual({
+      ...limits,
+      max_files_per_run: null
+    });
+  });
+
+  it("does not invent a nullable audio count when the get response breaches its contract", async () => {
+    const fetch = vi.fn(async () => ({ max_files_per_run: null }));
+    const settings = initSettings({ fetch });
+
+    const limits = await settings.getFlowInputLimits();
+
+    expect(limits).not.toHaveProperty("audio_max_files_per_run");
+  });
+
+  it("forwards an audio reset and returns the resolved audio count", async () => {
+    const limits = {
+      audio_max_files_per_run: 10,
+      max_files_per_run: null
+    };
+    const fetch = vi.fn(async () => limits);
+    const settings = initSettings({ fetch });
+
+    await expect(
+      settings.updateFlowInputLimits({ audio_max_files_per_run: null })
+    ).resolves.toEqual(limits);
+    expect(fetch).toHaveBeenCalledWith("/api/v1/settings/flow-input-limits", {
+      method: "patch",
+      requestBody: {
+        "application/json": { audio_max_files_per_run: null }
+      }
+    });
+  });
+
+  it("does not invent a nullable audio count when the update response breaches its contract", async () => {
+    const fetch = vi.fn(async () => ({ max_files_per_run: null }));
+    const settings = initSettings({ fetch });
+
+    const limits = await settings.updateFlowInputLimits({});
+
+    expect(limits).not.toHaveProperty("audio_max_files_per_run");
+  });
+
   it("gets flow retention policy from canonical settings route", async () => {
     const fetch = vi.fn(async () => ({ run_debug_evidence_days: 7 }));
     const settings = initSettings({ fetch });

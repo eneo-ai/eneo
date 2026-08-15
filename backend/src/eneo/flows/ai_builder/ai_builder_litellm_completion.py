@@ -12,6 +12,7 @@ from eneo.completion_models.infrastructure.completion_service import (
     completion_evidence_field_domain,
     completion_evidence_json_type,
 )
+from eneo.flows.ai_builder.ai_builder_domain_models import TargetKind
 from eneo.flows.ai_builder.ai_builder_error_contract import (
     AIBuilderProviderRequestEvidence,
     record_ai_builder_provider_failure,
@@ -34,6 +35,19 @@ from eneo.flows.ai_builder.ai_builder_token_usage import (
 from eneo.main.logging import get_logger
 
 logger = get_logger(__name__)
+
+# The one provider route whose native strict-tool behavior the sealed
+# strict-tools probe verified: provider type, LiteLLM model name and API base.
+# It is deliberately not tied to a completion-model row id, because row ids are
+# generated per database and the same route must behave identically in every
+# deployment. Delete this sealed decision when native strict-tool support
+# becomes a persisted resolved-route capability instead of one measured model
+# exception.
+PINNED_LUNA_NATIVE_STRICT_TOOLS_ROUTE = (
+    "openai",
+    "openai/gpt-5.6-luna",
+    None,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -80,11 +94,12 @@ async def call_proposal_completion(
     call_kind: ProposalCallKind | None = None,
     before_provider_call: Callable[[], Awaitable[None]] | None = None,
 ) -> LLMCompletionResponse:
+    tool_schemas = _outbound_proposal_tool_schemas(request)
     message_groups = request.message_groups
     if request.request_budget is not None:
         message_groups = request.request_budget.fit(
             message_groups=message_groups,
-            tool_schemas=request.tool_schemas,
+            tool_schemas=tool_schemas,
             model_name=request.route.litellm_model,
         )
     messages = flatten_proposal_message_groups(message_groups)
@@ -100,6 +115,7 @@ async def call_proposal_completion(
     incident_evidence = _proposal_request_evidence(
         request=request,
         messages=messages,
+        tool_schemas=tool_schemas,
         provider_kwargs=provider_kwargs,
     )
     if before_provider_call is not None:
@@ -113,8 +129,9 @@ async def call_proposal_completion(
         raw_response = await litellm_client.acompletion(
             model=request.route.litellm_model,
             messages=messages,
-            tools=request.tool_schemas,
+            tools=tool_schemas,
             tool_choice=request.tool_choice,
+            parallel_tool_calls=False,
             stream=False,
             drop_params=True,
             max_tokens=request.max_output_tokens,
@@ -147,10 +164,36 @@ async def call_proposal_completion(
     return response
 
 
+def _outbound_proposal_tool_schemas(
+    request: ProposalCompletionRequest,
+) -> list[dict[str, Any]]:
+    route_identity = (
+        request.route.provider_type,
+        request.route.litellm_model,
+        request.route.litellm_kwargs.get("api_base"),
+    )
+    if (
+        request.target_kind != TargetKind.CREATE
+        or route_identity != PINNED_LUNA_NATIVE_STRICT_TOOLS_ROUTE
+    ):
+        return request.tool_schemas
+    return [
+        {
+            **tool_schema,
+            "function": {
+                **cast(dict[str, Any], tool_schema["function"]),
+                "strict": True,
+            },
+        }
+        for tool_schema in request.tool_schemas
+    ]
+
+
 def _proposal_request_evidence(
     *,
     request: ProposalCompletionRequest,
     messages: Sequence[Mapping[str, Any]],
+    tool_schemas: list[dict[str, Any]],
     provider_kwargs: Mapping[str, object],
 ) -> AIBuilderProviderRequestEvidence:
     outgoing_fields = [
@@ -166,13 +209,18 @@ def _proposal_request_evidence(
         ),
         CompletionEvidenceField(
             name="tools",
-            json_type=completion_evidence_json_type(request.tool_schemas),
+            json_type=completion_evidence_json_type(tool_schemas),
             domain="tool_contract",
         ),
         CompletionEvidenceField(
             name="tool_choice",
             json_type=completion_evidence_json_type(request.tool_choice),
             domain="tool_selection",
+        ),
+        CompletionEvidenceField(
+            name="parallel_tool_calls",
+            json_type="boolean",
+            domain="transport_control",
         ),
         CompletionEvidenceField(
             name="stream",

@@ -12,6 +12,7 @@ from jsonschema import Draft202012Validator
 from pydantic import ValidationError
 from referencing import Registry, Resource
 from referencing.jsonschema import DRAFT202012
+from starlette.routing import compile_path
 
 from eneo.authentication.auth_models import (
     FLOW_EVIDENCE_SERVICE_KEY_PERMISSION_RECIPE,
@@ -76,6 +77,26 @@ def flow_route_operations() -> dict[tuple[str, str], str]:
         for method in sorted(route.methods - {"HEAD", "OPTIONS"}):
             operations[(route.path, method.lower())] = route.operation_id or ""
     return operations
+
+
+def test_flow_run_capacity_is_not_captured_by_the_flow_id_route() -> None:
+    """`/flows/{id}/` is registered first, so a sibling literal must not collide.
+
+    A colliding path would resolve through the dynamic route and fail UUID
+    validation instead of returning capacity.
+    """
+    app = get_application()
+    requested = "/api/v1/flows/runs/capacity/"
+    matched = [
+        route.route.operation_id
+        for route in flatten_routes(list(app.routes))
+        if isinstance(route.route, APIRoute)
+        and "GET" in (route.route.methods or set())
+        and compile_path(route.path)[0].match(requested)
+    ]
+
+    assert matched, f"no route serves {requested}"
+    assert matched[0] == "get_flow_run_capacity"
 
 
 def _resolve_component_ref(openapi_spec: dict, schema: dict) -> dict:
@@ -974,6 +995,26 @@ def test_openapi_flow_settings_update_requests_reject_unknown_fields(
     ]
 
     assert missing_strict_contract == []
+
+
+def test_openapi_flow_input_audio_count_separates_effective_response_from_reset(
+    openapi_spec: dict,
+) -> None:
+    schemas = openapi_spec.get("components", {}).get("schemas", {})
+    public_schema = schemas["FlowInputLimitsPublic"]
+    update_schema = schemas["FlowInputLimitsUpdate"]
+
+    public_audio_count = public_schema["properties"]["audio_max_files_per_run"]
+    assert "audio_max_files_per_run" in public_schema["required"]
+    assert public_audio_count["type"] == "integer"
+    assert public_audio_count["minimum"] == 1
+    assert public_audio_count["maximum"] == 100
+    assert not _schema_allows_null(public_audio_count)
+
+    update_audio_count = update_schema["properties"]["audio_max_files_per_run"]
+    assert "audio_max_files_per_run" not in update_schema.get("required", [])
+    assert _schema_allows_null(update_audio_count)
+    assert "use the default audio ceiling" in update_audio_count["description"]
 
 
 def test_openapi_tenant_update_public_does_not_expose_raw_flow_settings(

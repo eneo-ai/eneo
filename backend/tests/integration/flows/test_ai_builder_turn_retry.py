@@ -17,6 +17,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import UUID, uuid4
 
 import pytest
+import sqlalchemy as sa
 from httpx import ASGITransport, AsyncClient, Response
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import select
@@ -272,6 +273,7 @@ async def _create_space_with_model(
     bearer_token: str,
     db_container,
     completion_model_factory,
+    max_input_tokens: int | None = None,
 ) -> str:
     response = await client.post(
         "/api/v1/spaces/",
@@ -282,11 +284,25 @@ async def _create_space_with_model(
     space_id = response.json()["id"]
     async with db_container() as container:
         session = container.session()
+        overrides: dict[str, object] = (
+            {} if max_input_tokens is None else {"max_input_tokens": max_input_tokens}
+        )
         model = await completion_model_factory(
             session,
             "gpt-4o-mini",
             litellm_model_name="openai/gpt-4o-mini",
+            **overrides,
         )
+        if max_input_tokens is not None:
+            # Space creation maps every enabled tenant model, and the 8000-token
+            # `fixture-gpt-4` tenant default sorts first, so it — not this model —
+            # would be the resolved planner. Own the space's model set outright
+            # when the planner's context window matters.
+            await session.execute(
+                sa.delete(SpacesCompletionModels).where(
+                    SpacesCompletionModels.space_id == UUID(space_id)
+                )
+            )
         session.add(
             SpacesCompletionModels(
                 space_id=UUID(space_id),
@@ -391,26 +407,33 @@ def _parse_sse_payload(response: Response) -> list[dict[str, object]]:
 
 
 def _proposal_response(*, flow_name: str) -> MagicMock:
+    # The create-mode proposal tool is a semantic contract: every step property
+    # is required, additional ones (output_type and other Flow mechanics the
+    # backend compiles) are rejected, and `assumptions` is mandatory.
     proposal = _make_tool_call(
         name=PROPOSE_FLOW_TOOL_NAME,
         arguments={
             "flow_name": flow_name,
             "flow_description": "Sammanfattar dokument till en PDF-rapport.",
             "plan_rationale": "Extrahera en grundad sammanfattning till rapporten.",
+            "assumptions": [],
             "steps": [
                 {
                     "name": "Extrahera sammanfattning",
                     "instructions": (
                         "Sammanfatta dokumentunderlaget tydligt på svenska."
                     ),
-                    "output_type": "json",
                     "output_fields": [
                         {
                             "name": "summary",
                             "field_type": "string",
                             "description": "En kort sammanfattning.",
+                            "required": True,
                         }
                     ],
+                    "model_ref": None,
+                    "knowledge_refs": [],
+                    "citations_requested": False,
                 }
             ],
         },
@@ -852,11 +875,15 @@ async def test_ai_builder_turn_retry_survives_hard_process_failures(
     tmp_path: Path,
 ) -> None:
     marker_path = tmp_path / "provider-markers.txt"
+    # The AFTER_PROVIDER_RETURN crash lands on the requirement classifier's parse
+    # boundary, which is only reached when the planner model's context window can
+    # admit the classification request at all.
     space_id = await _create_space_with_model(
         client=client,
         bearer_token=bearer_token,
         db_container=db_container,
         completion_model_factory=completion_model_factory,
+        max_input_tokens=128_000,
     )
     before_provider_session = await _create_session(
         client=client,

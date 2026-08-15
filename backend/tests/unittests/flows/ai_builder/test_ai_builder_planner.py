@@ -11,6 +11,7 @@ from typing import Any, cast
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import UUID, uuid4
 
+import jsonschema
 import pytest
 from pydantic import ValidationError
 
@@ -101,6 +102,10 @@ from eneo.flows.ai_builder.ai_builder_resource_catalog import (
     AIBuilderResourceCatalog,
     build_ai_builder_resource_catalog,
 )
+from eneo.flows.ai_builder.ai_builder_runtime_input_requirements import (
+    ConfirmedRuntimeInputRequirement,
+    render_confirmed_runtime_input_requirements,
+)
 from eneo.flows.ai_builder.ai_builder_schema_evidence import (
     SCHEMA_MAX_JSON_BYTES,
     DeclaredSchemaCandidate,
@@ -123,6 +128,7 @@ from eneo.flows.ai_builder.ai_builder_settings import AIBuilderBudgetPolicy
 from eneo.flows.ai_builder.ai_builder_tools import (
     ProposalToolSchema,
     build_propose_flow_tool_schema,
+    validate_propose_flow_tool_arguments,
 )
 from eneo.flows.ai_builder.ai_builder_turn_controller import (
     AskCanonicalQuestion,
@@ -138,6 +144,7 @@ from eneo.flows.ai_builder.planning_state import (
     ArchitectureCommit,
     ConfirmedRuntimeMetadataField,
     FileRoleEvidence,
+    PlanningSignal,
     PlanningState,
     PlanningStatePayloadTooLargeError,
     ResolvedSlot,
@@ -493,6 +500,325 @@ def _budget_policy() -> AIBuilderBudgetPolicy:
         conversation_safety_buffer_tokens=128,
         minimum_conversation_budget_tokens=256,
     )
+
+
+def _build_create_proposal_for_architecture(
+    state: PlanningState,
+) -> ProposalPrepared:
+    return build_proposal_prepared(
+        requirements_state=RequirementsState(),
+        ui_language="en",
+        slot_classification_metadata=None,
+        conversation=[ConversationMessage(role="user", content="Build the flow.")],
+        planning_state=state,
+        attachment_context=None,
+        flow_context=None,
+        is_edit_mode=False,
+        resource_catalog=build_ai_builder_resource_catalog(
+            available_models=[], available_kbs=[], prior_bindings=()
+        ),
+        flow=None,
+        assistant_snapshots=None,
+        plan_edit_context=None,
+        prior_plan_for_revision=None,
+        litellm_model="openai/gpt-5.4",
+        max_input_tokens=4096,
+        max_output_tokens=1024,
+        budget_policy=_budget_policy(),
+        attachment_file_count=0,
+        current_turn_start=0,
+    )
+
+
+_UNSUPPORTED_NATIVE_STRICT_SCHEMA_KEYWORDS = frozenset(
+    {
+        "allOf",
+        "contains",
+        "dependentRequired",
+        "dependentSchemas",
+        "else",
+        "if",
+        "maxContains",
+        "maxProperties",
+        "minContains",
+        "minProperties",
+        "not",
+        "oneOf",
+        "patternProperties",
+        "propertyNames",
+        "then",
+        "unevaluatedItems",
+        "unevaluatedProperties",
+        "uniqueItems",
+    }
+)
+
+
+def _assert_native_strict_schema(node: object, *, path: str = "$") -> None:
+    if isinstance(node, list):
+        for index, item in enumerate(node):
+            _assert_native_strict_schema(item, path=f"{path}[{index}]")
+        return
+    if not isinstance(node, dict):
+        return
+
+    schema_type = node.get("type")
+    schema_types = schema_type if isinstance(schema_type, list) else [schema_type]
+    if schema_type is not None:
+        assert all(isinstance(value, str) for value in schema_types), path
+        assert set(schema_types) <= {
+            "array",
+            "boolean",
+            "integer",
+            "null",
+            "number",
+            "object",
+            "string",
+        }, path
+
+    if "object" in schema_types:
+        properties = node.get("properties")
+        required = node.get("required")
+        assert isinstance(properties, dict), path
+        assert isinstance(required, list), path
+        assert all(isinstance(name, str) for name in required), path
+        assert set(required) == set(properties), path
+        assert node.get("additionalProperties") is False, path
+
+    any_of = node.get("anyOf")
+    if any_of is not None:
+        assert isinstance(any_of, list) and len(any_of) >= 2, path
+        assert all(isinstance(branch, dict) for branch in any_of), path
+    assert not (_UNSUPPORTED_NATIVE_STRICT_SCHEMA_KEYWORDS & node.keys()), path
+
+    for key, value in node.items():
+        _assert_native_strict_schema(value, path=f"{path}.{key}")
+
+
+def test_prepared_create_schema_is_native_strict_compatible() -> None:
+    prepared = _build_create_proposal_for_architecture(_document_architecture_state())
+    tool_schema = prepared.proposal_tool_schema
+    parameters = tool_schema["function"]["parameters"]
+
+    assert "strict" not in tool_schema["function"]
+    jsonschema.Draft202012Validator.check_schema(parameters)
+    _assert_native_strict_schema(parameters)
+
+    raw_create_payload = {
+        "flow_name": "Case assessment",
+        "flow_description": None,
+        "plan_rationale": "Extract the case facts and prepare a decision summary.",
+        "steps": [
+            {
+                "name": "Assess case",
+                "instructions": "Assess the submitted case material.",
+                "output_fields": [
+                    {
+                        "name": "assessment",
+                        "field_type": "object",
+                        "description": "The structured case assessment.",
+                        "required": True,
+                        "fields": [
+                            {
+                                "name": "summary",
+                                "field_type": "string",
+                                "description": "A concise case summary.",
+                                "required": True,
+                            },
+                            {
+                                "name": "actions",
+                                "field_type": "array",
+                                "description": "Recommended follow-up actions.",
+                                "required": True,
+                                "item_fields": [
+                                    {
+                                        "name": "owner",
+                                        "field_type": "string",
+                                        "description": "The action owner.",
+                                        "required": True,
+                                    }
+                                ],
+                            },
+                        ],
+                    }
+                ],
+                "model_ref": None,
+                "knowledge_refs": [
+                    " knowledge.policy ",
+                    "knowledge.policy",
+                ],
+                "citations_requested": False,
+            }
+        ],
+        "assumptions": [],
+    }
+    validate_propose_flow_tool_arguments(
+        arguments=raw_create_payload,
+        tool_schema=tool_schema,
+    )
+    parsed = parse_create_flow_intent_arguments(raw_create_payload)
+    assert parsed.steps[0].knowledge_refs == ["knowledge.policy"]
+
+
+def test_prepared_edit_schema_is_not_native_strict() -> None:
+    tool_schema = build_propose_flow_tool_schema(
+        resource_catalog=build_ai_builder_resource_catalog(
+            available_models=[],
+            available_kbs=[],
+        ),
+        current_steps=[],
+    )
+    encoded = json.dumps(tool_schema, ensure_ascii=False, sort_keys=True)
+
+    assert "strict" not in tool_schema["function"]
+    assert "uniqueItems" in encoded
+
+
+def _audio_text_transcription_state(
+    *,
+    post_processing_goal: str | None,
+    secondary_obligation: str | None = None,
+) -> PlanningState:
+    state = PlanningState.empty()
+    state.architecture_commit = ArchitectureCommit(
+        tuples_chain=[
+            StepTriple(
+                input_type="audio",
+                output_type="text",
+                output_mode="transcribe_only",
+            )
+        ],
+        chosen_patterns=["audio_transcription"],
+        required_capabilities=["input_audio", "output_mode_transcribe_only"],
+        committed_at=datetime(2026, 8, 13, tzinfo=timezone.utc),
+        architecture_hash="c" * 64,
+    )
+    if post_processing_goal is not None:
+        state.resolved_slots["post_processing_goal"] = ResolvedSlot(
+            name="post_processing_goal",
+            value=post_processing_goal,
+            source="structured_answer",
+            confidence="high",
+        )
+    if secondary_obligation is not None:
+        state.signals.append(
+            PlanningSignal(
+                question_id="result_obligation",
+                value=secondary_obligation,
+                confidence="high",
+                source="model",
+            )
+        )
+    return state
+
+
+def test_create_preparation_projects_explicit_transcript_only_context() -> None:
+    state = _audio_text_transcription_state(
+        post_processing_goal="stop_after_primary_operation"
+    )
+
+    prepared = _build_create_proposal_for_architecture(state)
+
+    assert prepared.compile_context is not None
+    assert prepared.compile_context.is_pure_audio_transcription is True
+    prompt = prepared.llm_messages[0]["content"]
+    assert isinstance(prompt, str)
+    assert "exactly one semantic transcription step" in prompt
+    steps_schema = prepared.proposal_tool_schema["function"]["parameters"][
+        "properties"
+    ]["steps"]
+    assert steps_schema["maxItems"] == 1
+    assert set(steps_schema["items"]["properties"]) == {"name", "instructions"}
+
+
+@pytest.mark.parametrize(
+    ("post_processing_goal", "secondary_obligation"),
+    [
+        (None, None),
+        ("summarize_or_overview", None),
+        ("action_followup", None),
+        ("stop_after_primary_operation", "summary"),
+    ],
+)
+def test_audio_text_post_processing_fails_before_proposal(
+    post_processing_goal: str | None,
+    secondary_obligation: str | None,
+) -> None:
+    state = _audio_text_transcription_state(
+        post_processing_goal=post_processing_goal,
+        secondary_obligation=secondary_obligation,
+    )
+
+    with pytest.raises(AIBuilderBadRequestException) as exc_info:
+        _build_create_proposal_for_architecture(state)
+
+    assert exc_info.value.code is AIBuilderErrorCode.ARCHITECTURE_MATERIALIZATION_FAILED
+    assert exc_info.value.context == {
+        "reason": "audio_transcription_post_processing_unsupported",
+        "post_processing_goal": post_processing_goal,
+        "secondary_obligations": (
+            [secondary_obligation] if secondary_obligation is not None else []
+        ),
+    }
+
+
+def test_create_preparation_keeps_audio_report_prompt_and_generic_schema() -> None:
+    state = PlanningState.empty()
+    state.architecture_commit = ArchitectureCommit(
+        tuples_chain=[
+            StepTriple(
+                input_type="audio",
+                output_type="text",
+                output_mode="transcribe_only",
+            ),
+            StepTriple(
+                input_type="text",
+                output_type="pdf",
+                output_mode="render_verbatim",
+            ),
+        ],
+        chosen_patterns=["audio_transcription", "audio_to_artifact_report"],
+        required_capabilities=["input_audio", "output_pdf"],
+        committed_at=datetime(2026, 8, 13, tzinfo=timezone.utc),
+        architecture_hash="d" * 64,
+    )
+    state.resolved_slots["post_processing_goal"] = ResolvedSlot(
+        name="post_processing_goal",
+        value="action_followup",
+        source="structured_answer",
+        confidence="high",
+    )
+
+    prepared = _build_create_proposal_for_architecture(state)
+
+    assert prepared.compile_context is not None
+    assert prepared.compile_context.is_pure_audio_transcription is False
+    assert prepared.proposal_tool_schema == build_propose_flow_tool_schema(
+        resource_catalog=prepared.resource_catalog
+    )
+    prompt = prepared.llm_messages[0]["content"]
+    assert isinstance(prompt, str)
+    assert "start propose_flow steps with the analysis" in prompt
+    assert "exactly one semantic transcription step" not in prompt
+    assert "Next steps or actions" in prompt
+
+
+def test_create_preparation_without_runtime_fields_keeps_generic_provider_contract() -> (
+    None
+):
+    state = _document_architecture_state()
+
+    prepared = _build_create_proposal_for_architecture(state)
+    baseline_schema = build_propose_flow_tool_schema(
+        resource_catalog=prepared.resource_catalog
+    )
+
+    assert prepared.compile_context is not None
+    assert prepared.compile_context.confirmed_runtime_input_requirements == ()
+    assert prepared.proposal_tool_schema == baseline_schema
+    prompt = prepared.llm_messages[0]["content"]
+    assert isinstance(prompt, str)
+    assert "Confirmed runtime inputs:" not in prompt
 
 
 def test_named_report_sections_flow_from_request_preparation_into_lowering() -> None:
@@ -1751,7 +2077,19 @@ async def test_prepare_planner_request_uses_proposal_task_after_confirmation() -
     assert isinstance(prepared, ProposalPrepared)
     assert prepared.llm_messages[0]["role"] == "system"
     assert "Call exactly one `propose_flow` tool" in prepared.llm_messages[0]["content"]
-    assert "case_id" not in prepared.llm_messages[0]["content"]
+    rendered_requirement = render_confirmed_runtime_input_requirements(
+        (
+            ConfirmedRuntimeInputRequirement(
+                name="case_id",
+                purpose="interpret_input",
+            ),
+        )
+    )
+    assert rendered_requirement in prepared.llm_messages[0]["content"]
+    output_fields_description = prepared.proposal_tool_schema["function"]["parameters"][
+        "properties"
+    ]["steps"]["items"]["properties"]["output_fields"]["description"]
+    assert rendered_requirement in output_fields_description
     assert prepared.compile_context is not None
     assert [
         field.value.variable_name
@@ -1909,6 +2247,55 @@ def test_proposal_boundary_rejects_confirmed_primary_input_shadow() -> None:
         )
 
     assert exc_info.value.code is AIBuilderErrorCode.ARCHITECTURE_MATERIALIZATION_FAILED
+    assert exc_info.value.context == {
+        "reason": "confirmed_form_field_incompatible",
+        "field_names": ["text"],
+    }
+
+
+def test_proposal_boundary_defaults_missing_runtime_type_to_text() -> None:
+    state = PlanningState.empty()
+    state.input_fields = [
+        ConfirmedRuntimeMetadataField(
+            value=FlowInputFieldIntent(
+                variable_name="text",
+                label="Text",
+                provenance="user_confirmed",
+            ),
+            purpose="interpret_input",
+            structured_answer_message_id="message-runtime-fields",
+        )
+    ]
+
+    with pytest.raises(AIBuilderBadRequestException) as exc_info:
+        build_proposal_prepared(
+            requirements_state=RequirementsState(),
+            ui_language="en",
+            slot_classification_metadata=None,
+            conversation=[ConversationMessage(role="user", content="Summarize text")],
+            planning_state=state,
+            attachment_context=None,
+            flow_context=None,
+            is_edit_mode=False,
+            resource_catalog=build_ai_builder_resource_catalog(
+                available_models=None,
+                available_kbs=None,
+            ),
+            flow=None,
+            assistant_snapshots=None,
+            plan_edit_context=None,
+            prior_plan_for_revision=None,
+            litellm_model="gpt-4o-mini",
+            max_input_tokens=4096,
+            max_output_tokens=256,
+            budget_policy=AIBuilderBudgetPolicy(
+                conversation_safety_buffer_tokens=128,
+                minimum_conversation_budget_tokens=256,
+            ),
+            attachment_file_count=0,
+            current_turn_start=0,
+        )
+
     assert exc_info.value.context == {
         "reason": "confirmed_form_field_incompatible",
         "field_names": ["text"],

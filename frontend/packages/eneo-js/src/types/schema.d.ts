@@ -2266,6 +2266,42 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/api-key-capacity/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get API key request capacity
+     * @description Return how much request budget the calling API key has left in the current
+     *     rate-limit window.
+     *
+     *     Use this before submitting a large batch, so a client knows its own ceiling up
+     *     front instead of discovering it as a `429` partway through. Reading this
+     *     endpoint is itself one request against the same window, so `remaining` is
+     *     already net of this call.
+     *
+     *     `limit_source` is the discriminator. An unlimited key keeps no counter at all,
+     *     so `limit`, `current_count` and `remaining` are `null` rather than zero.
+     *
+     *     `fail_open` reports whether the deployment lets requests through when the
+     *     rate-limit store is unreachable. A client that needs a trustworthy budget
+     *     should refuse to rely on `remaining` while it is true.
+     *
+     *     This endpoint describes the authenticated key only. Session-authenticated
+     *     callers have no API key and receive `403`.
+     */
+    get: operations["get_api_key_capacity"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/api-keys": {
     parameters: {
       query?: never;
@@ -4103,6 +4139,34 @@ export interface paths {
      * @description List all plan revisions generated within a specific AI Builder session.
      */
     get: operations["list_ai_builder_session_plans"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/flows/runs/capacity/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get flow run capacity
+     * @description Return how many more concurrent Flow runs the caller's tenant may start.
+     *
+     *     Use this before submitting a batch, so a client discovers the tenant ceiling
+     *     up front instead of as a rejected `create_run` partway through. `active_runs`
+     *     counts every non-terminal run in the tenant, including work started by other
+     *     clients and stale queued work that has not been recovered.
+     *
+     *     This is a snapshot, not a reservation: another caller can consume a slot
+     *     between this response and `create_run`, which still enforces the limit.
+     */
+    get: operations["get_flow_run_capacity"];
     put?: never;
     post?: never;
     delete?: never;
@@ -10410,6 +10474,70 @@ export interface components {
      * @enum {string}
      */
     AnalysisProcessingMode: "sync" | "auto";
+    /**
+     * ApiKeyCapacityPublic
+     * @example {
+     *       "current_count": 412,
+     *       "fail_open": false,
+     *       "key_id": "00000000-0000-0000-0000-000000000030",
+     *       "limit": 20000,
+     *       "limit_source": "explicit",
+     *       "remaining": 19588,
+     *       "scope_id": "00000000-0000-0000-0000-000000000020",
+     *       "scope_type": "space",
+     *       "window_seconds": 3600
+     *     }
+     */
+    ApiKeyCapacityPublic: {
+      /**
+       * Current Count
+       * @description Requests already counted in the current window, including this one. Null only when unlimited.
+       */
+      current_count: number | null;
+      /**
+       * Fail Open
+       * @description True when the deployment allows requests while the rate-limit store is unreachable, which makes any remaining-budget claim unreliable.
+       */
+      fail_open: boolean;
+      /**
+       * Key Id
+       * Format: uuid
+       * @description Id of the authenticated API key.
+       */
+      key_id: string;
+      /**
+       * Limit
+       * @description Requests allowed per window. Null only when unlimited.
+       */
+      limit: number | null;
+      /**
+       * Limit Source
+       * @description How the effective limit was decided: `unlimited` for a key set to `-1`, `explicit` for a per-key limit, `scope_default` for the configured default for this scope kind.
+       * @enum {string}
+       */
+      limit_source: "unlimited" | "explicit" | "scope_default";
+      /**
+       * Remaining
+       * @description `limit` minus `current_count`, never negative. Null only when unlimited. A snapshot, not a reservation.
+       */
+      remaining: number | null;
+      /**
+       * Scope Id
+       * @description Scoped resource the key is bound to. Null for a tenant-scoped key.
+       */
+      scope_id: string | null;
+      /**
+       * Scope Type
+       * @description Scope kind the key authenticates as.
+       * @enum {string}
+       */
+      scope_type: "tenant" | "space" | "assistant" | "app";
+      /**
+       * Window Seconds
+       * @description Length of the fixed rate-limit window. The count resets when the current window ends.
+       */
+      window_seconds: number;
+    };
     /** ApiKeyCreateRequest */
     ApiKeyCreateRequest: {
       /** Allowed Ips */
@@ -15931,9 +16059,9 @@ export interface components {
     FlowInputLimitsPublic: {
       /**
        * Audio Max Files Per Run
-       * @description Null means no tenant-level audio file count ceiling.
+       * @description Effective tenant-level audio file count ceiling for each Flow run. Resetting the stored override to null restores the default; this response always returns the resolved positive integer.
        */
-      audio_max_files_per_run: number | null;
+      audio_max_files_per_run: number;
       /** Audio Max Size Bytes */
       audio_max_size_bytes: number;
       /**
@@ -17512,6 +17640,42 @@ export interface components {
        * @description Redriven audit outbox row identifier.
        */
       outbox_id: string;
+    };
+    /**
+     * FlowRunCapacityPublic
+     * @description How many more concurrent runs the caller's tenant may start right now.
+     *
+     *     Clients that submit batches read this before the first run instead of
+     *     discovering the ceiling as a rejected `create_run`.
+     * @example {
+     *       "active_runs": 1,
+     *       "available_slots": 3,
+     *       "max_concurrent_runs": 4,
+     *       "tenant_id": "00000000-0000-0000-0000-000000000010"
+     *     }
+     */
+    FlowRunCapacityPublic: {
+      /**
+       * Active Runs
+       * @description Runs currently occupying tenant concurrency, in any non-terminal status. Includes work queued or running from other clients.
+       */
+      active_runs: number;
+      /**
+       * Available Slots
+       * @description `max_concurrent_runs` minus `active_runs`, never negative. A snapshot, not a reservation: another client can consume a slot between this call and `create_run`.
+       */
+      available_slots: number;
+      /**
+       * Max Concurrent Runs
+       * @description Configured ceiling this tenant is held to. `create_run` rejects a run once `active_runs` reaches it.
+       */
+      max_concurrent_runs: number;
+      /**
+       * Tenant Id
+       * Format: uuid
+       * @description Tenant the capacity is measured for.
+       */
+      tenant_id: string;
     };
     /**
      * FlowRunContractPublic
@@ -39616,6 +39780,62 @@ export interface operations {
       };
     };
   };
+  get_api_key_capacity: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Request capacity for the authenticated API key. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiKeyCapacityPublic"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+    };
+  };
   list_api_keys_api_v1_api_keys_get: {
     parameters: {
       query?: {
@@ -48021,6 +48241,61 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  get_flow_run_capacity: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["FlowRunCapacityPublic"];
+        };
+      };
+      /** @description Authentication is required to inspect Flow run capacity. */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "code": "authentication_error",
+           *       "eneo_error_code": 9005,
+           *       "message": "Unauthenticated."
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden. Caller scope, tenant or space permission, and run visibility are evaluated before returning Flow runtime data. Machine-readable codes include `insufficient_scope`, `flow_run_access_denied`, and `flow_service_key_principal_not_supported`. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "code": "insufficient_scope",
+           *       "context": {
+           *         "auth_layer": "api_key_scope"
+           *       },
+           *       "eneo_error_code": 9001,
+           *       "message": "API key space scope does not match requested flow."
+           *     }
+           */
           "application/json": components["schemas"]["GeneralError"];
         };
       };

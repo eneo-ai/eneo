@@ -380,6 +380,48 @@ class FormFieldPublic(BaseModel):
     )
 
 
+class FlowRunCapacityPublic(BaseModel):
+    """How many more concurrent runs the caller's tenant may start right now.
+
+    Clients that submit batches read this before the first run instead of
+    discovering the ceiling as a rejected `create_run`.
+    """
+
+    model_config = ConfigDict(
+        extra="forbid",
+        from_attributes=True,
+        json_schema_extra={
+            "example": {
+                "tenant_id": "00000000-0000-0000-0000-000000000010",
+                "active_runs": 1,
+                "max_concurrent_runs": 4,
+                "available_slots": 3,
+            }
+        },
+    )
+
+    tenant_id: UUID = Field(description="Tenant the capacity is measured for.")
+    active_runs: int = Field(
+        description=(
+            "Runs currently occupying tenant concurrency, in any non-terminal "
+            "status. Includes work queued or running from other clients."
+        )
+    )
+    max_concurrent_runs: int = Field(
+        description=(
+            "Configured ceiling this tenant is held to. `create_run` rejects a "
+            "run once `active_runs` reaches it."
+        )
+    )
+    available_slots: int = Field(
+        description=(
+            "`max_concurrent_runs` minus `active_runs`, never negative. A "
+            "snapshot, not a reservation: another client can consume a slot "
+            "between this call and `create_run`."
+        )
+    )
+
+
 class FlowRunContractPublic(BaseModel):
     model_config = ConfigDict(
         extra="forbid", json_schema_extra={"example": FLOW_RUN_CONTRACT_PUBLIC_EXAMPLE}

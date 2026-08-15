@@ -41,10 +41,7 @@ from eneo.flows.domain.rag_evidence_policy import resolve_flow_rag_evidence_poli
 from eneo.flows.enums import FlowRunLifecycleSource
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_document_limits import resolve_flow_document_render_limits
-from eneo.flows.flow_input_limits import (
-    DEFAULT_MAX_AUDIO_FILES_PER_RUN,
-    resolve_flow_input_limits,
-)
+from eneo.flows.flow_input_limits import resolve_flow_input_limits
 from eneo.flows.flow_run_dispatch_request import (
     FlowRunDispatchMalformedPayload,
     FlowRunServiceKeyDispatchRequest,
@@ -383,8 +380,7 @@ async def _execute_flow_run_async_traced(
                 ),
                 config=FlowRunExecutorConfig.from_settings(
                     max_inline_text_bytes=get_settings().flow_max_inline_text_bytes,
-                    max_audio_files=flow_limits.audio_max_files_per_run
-                    or DEFAULT_MAX_AUDIO_FILES_PER_RUN,
+                    max_audio_files=flow_limits.audio_max_files_per_run,
                     max_generic_files=flow_limits.max_files_per_run,
                     document_render_limits=document_render_limits,
                     runtime_policy=runtime_policy,

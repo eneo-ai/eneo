@@ -9,9 +9,6 @@ from eneo.flows.ai_builder.ai_builder_assembly.document_report.diagnostics impor
     append_combined_model_selection_diagnostics as _append_combined_model_selection_diagnostics,
 )
 from eneo.flows.ai_builder.ai_builder_assembly.document_report.diagnostics import (
-    degrade_document_report_citations as _degrade_document_report_citations,
-)
-from eneo.flows.ai_builder.ai_builder_assembly.document_report.diagnostics import (
     raise_document_report_compose_topology_missing as _raise_document_report_compose_topology_missing,
 )
 from eneo.flows.ai_builder.ai_builder_assembly.document_report.merge import (
@@ -48,6 +45,7 @@ from eneo.flows.ai_builder.ai_builder_output_sections_signals import (
 from eneo.flows.ai_builder.ai_builder_proposal_intent import SemanticStepIntent
 from eneo.flows.ai_builder.ai_builder_source_reader_contracts import (
     SourceCaptureField,
+    allocate_injected_source_field_name,
     complete_structured_source_reader_fields,
     structured_fields_have_document_items,
 )
@@ -71,6 +69,7 @@ def admit_document_report_semantic_shape(
     source_reader_required_fields: tuple[SourceCaptureField, ...],
     report_disposition: ReportDisposition | None,
     ui_language: str | None,
+    reserved_source_output_field_names: frozenset[str] = frozenset(),
 ) -> tuple[tuple[SemanticStepIntent, ...], tuple[bool, ...]]:
     semantic_steps = tuple(steps)
     eligibility = tuple(semantic_origin_eligibility)
@@ -87,16 +86,24 @@ def admit_document_report_semantic_shape(
         semantic_step = semantic_steps[0]
         source_fields = tuple(semantic_step.output_fields or ())
         if not source_fields:
-            source_fields = _structured_fields_from_source_capture_fields(
-                source_reader_required_fields
+            source_fields = complete_structured_source_reader_fields(
+                (),
+                required_fields=source_reader_required_fields,
+                reserved_field_names=reserved_source_output_field_names,
             )
         if not source_fields:
             if report_disposition is None:
                 return semantic_steps, eligibility
-            source_fields = (_default_document_report_source_field(ui_language),)
+            source_fields = (
+                _default_document_report_source_field(
+                    ui_language,
+                    reserved_field_names=reserved_source_output_field_names,
+                ),
+            )
         source_fields = complete_structured_source_reader_fields(
             source_fields,
             required_fields=(),
+            reserved_field_names=reserved_source_output_field_names,
         )
         if report_disposition is not None:
             source_fields = _admitted_document_report_source_fields(
@@ -131,8 +138,14 @@ def admit_document_report_semantic_shape(
     reader_step = semantic_steps[0]
     source_fields = complete_structured_source_reader_fields(
         tuple(reader_step.output_fields or ())
-        or (_default_document_report_source_field(ui_language),),
+        or (
+            _default_document_report_source_field(
+                ui_language,
+                reserved_field_names=reserved_source_output_field_names,
+            ),
+        ),
         required_fields=(),
+        reserved_field_names=reserved_source_output_field_names,
     )
     admitted_reader = reader_step.model_copy(
         update={
@@ -180,6 +193,8 @@ def _document_report_source_array_field(
 
 def _default_document_report_source_field(
     ui_language: str | None,
+    *,
+    reserved_field_names: frozenset[str],
 ) -> StructuredFieldDraft:
     description = (
         "Source-grounded material needed to write the requested report."
@@ -187,22 +202,12 @@ def _default_document_report_source_field(
         else "Källgrundat underlag som behövs för att skriva den begärda rapporten."
     )
     return StructuredFieldDraft(
-        name="source_material",
+        name=allocate_injected_source_field_name(
+            "source_material",
+            reserved_field_names=reserved_field_names,
+        ),
         field_type="string",
         description=description,
-    )
-
-
-def _structured_fields_from_source_capture_fields(
-    fields: tuple[SourceCaptureField, ...],
-) -> tuple[StructuredFieldDraft, ...]:
-    return tuple(
-        StructuredFieldDraft(
-            name=field.name,
-            field_type="string",
-            description=field.description or f"Source-derived value for {field.name}.",
-        )
-        for field in fields
     )
 
 
@@ -289,12 +294,6 @@ def lower_document_report_topology(
         or planned_steps[-2].role != "body_writer"
     ):
         fail_closed()
-
-    planned_steps = _degrade_document_report_citations(
-        planned_steps,
-        field_diagnostics=field_diagnostics,
-        ui_language=ui_language,
-    )
 
     combined_producer_model_refs: list[str] = []
     renderer_step = planned_steps[-1]

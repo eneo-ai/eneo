@@ -9,6 +9,7 @@ from eneo.flows.ai_builder.ai_builder_assembly.plan import (
     FlowAssemblyPlan,
     PlannedStep,
 )
+from eneo.flows.ai_builder.ai_builder_domain_models import LintSeverity, LintWarning
 from eneo.flows.ai_builder.ai_builder_new_step_compiler import (
     compile_new_step_draft,
     make_plan_step_ref,
@@ -21,6 +22,10 @@ from eneo.flows.ai_builder.ai_builder_source_reader_contracts import (
     apply_terminal_output_schema,
     source_capture_fields_by_step_index,
 )
+from eneo.flows.ai_builder.ai_builder_step_transition_policy import (
+    normalize_ai_builder_step_citation_mode,
+    supports_inline_inref_citation,
+)
 from eneo.flows.flow_authoring_name import normalize_flow_name
 from eneo.flows.flow_authoring_spec import (
     FlowDraftSpecCore,
@@ -32,7 +37,11 @@ from eneo.flows.source_identity import without_runtime_source_identity_draft_fie
 logger = logging.getLogger(__name__)
 
 
-def lower_assembly_plan(plan: FlowAssemblyPlan) -> FlowDraftSpecCore:
+def lower_assembly_plan(
+    plan: FlowAssemblyPlan,
+    *,
+    field_diagnostics: list[LintWarning] | None = None,
+) -> FlowDraftSpecCore:
     flow_name = normalize_flow_name(plan.flow_name)
     step_drafts: list[NewStepDraft] = []
     for index, planned_step in enumerate(plan.steps):
@@ -60,6 +69,11 @@ def lower_assembly_plan(plan: FlowAssemblyPlan) -> FlowDraftSpecCore:
         terminal_output_schema=plan.terminal_output_schema,
     )
     compiled_steps: list[StepSpec] = []
+    citation_warning: LintWarning | None = None
+    flow_supports_inline_citations = supports_inline_inref_citation(
+        output_type=plan.steps[-1].output_type,
+        output_mode=plan.steps[-1].output_mode,
+    )
     for index, (planned_step, step_draft) in enumerate(
         zip(plan.steps, step_drafts, strict=True)
     ):
@@ -79,6 +93,18 @@ def lower_assembly_plan(plan: FlowAssemblyPlan) -> FlowDraftSpecCore:
         )
         if planned_step.output_mode != compiled_step.output_mode:
             raise ValueError("Planned step output_mode diverged during lowering.")
+        compiled_step, citation_change = normalize_ai_builder_step_citation_mode(
+            compiled_step,
+            ui_language=plan.ui_language,
+            flow_supports_inline_citations=flow_supports_inline_citations,
+        )
+        if citation_change is not None and citation_warning is None:
+            citation_warning = LintWarning(
+                step_ref=compiled_step.plan_step_ref,
+                code=citation_change.code,
+                message=citation_change.message,
+                severity=LintSeverity(citation_change.severity),
+            )
         if planned_step.output_mode == OutputMode.COMPOSE_TEXT:
             compiled_step = bind_document_report_compose_inputs(
                 step=compiled_step,
@@ -91,6 +117,8 @@ def lower_assembly_plan(plan: FlowAssemblyPlan) -> FlowDraftSpecCore:
                 ui_language=plan.ui_language,
             )
         compiled_steps.append(compiled_step)
+    if citation_warning is not None and field_diagnostics is not None:
+        field_diagnostics.append(citation_warning)
     compiled_steps = apply_terminal_output_schema(
         compiled_steps,
         terminal_output_schema=plan.terminal_output_schema,

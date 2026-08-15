@@ -6,9 +6,12 @@ from eneo.flows.ai_builder.ai_builder_new_step_models import (
 )
 from eneo.flows.ai_builder.ai_builder_source_reader_contracts import (
     SourceCaptureField,
+    allocate_injected_source_field_name,
     complete_structured_source_reader_fields,
+    source_contract_shadow_form_field_names,
     structured_fields_have_document_items,
 )
+from eneo.flows.flow_authoring_spec import FormFieldSpec
 
 
 def _field(
@@ -23,6 +26,64 @@ def _field(
         field_type=field_type,
         description=description,
         item_fields=item_fields,
+    )
+
+
+def test_source_contract_collision_uses_exact_folded_identity_only() -> None:
+    form_field = FormFieldSpec(
+        name="case_id",
+        type="text",
+        label="Case report identifier",
+        required=True,
+    )
+
+    assert source_contract_shadow_form_field_names(
+        output_fields_by_step=((_field("case_id"),),),
+        form_fields=(form_field,),
+    ) == ("case_id",)
+    assert (
+        source_contract_shadow_form_field_names(
+            output_fields_by_step=((_field("source_case_id"),),),
+            form_fields=(form_field,),
+        )
+        == ()
+    )
+    differently_named_field = FormFieldSpec(
+        name="runtime_case_reference",
+        type="text",
+        label="Case id",
+        required=True,
+    )
+    assert (
+        source_contract_shadow_form_field_names(
+            output_fields_by_step=((_field("case_id"),),),
+            form_fields=(differently_named_field,),
+        )
+        == ()
+    )
+
+
+def test_source_reader_completion_renames_only_injected_confirmed_collision() -> None:
+    authored = _field("title")
+
+    completed = complete_structured_source_reader_fields(
+        (authored,),
+        required_fields=(SourceCaptureField(name="case_id"),),
+        reserved_field_names=frozenset({"case_id"}),
+    )
+
+    assert completed[0] == authored
+    assert [field.name for field in completed] == ["title", "source_case_id"]
+
+
+def test_injected_source_field_allocator_avoids_reserved_and_occupied_names() -> None:
+    assert (
+        allocate_injected_source_field_name(
+            "case_id",
+            reserved_field_names=frozenset({"CASE-ID"}),
+            occupied_field_names=frozenset({"source_case_id"}),
+        )
+        == "source_source_case_id"
     )
 
 

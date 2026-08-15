@@ -31,6 +31,7 @@ class FlowStepValidationError(BadRequestException):
 
 class FlowGraphIssueCode(StrEnum):
     AUDIO_DOCUMENT_TRANSCRIPT_CHAIN_INVALID = "audio_document_transcript_chain_invalid"
+    CITATION_MODE_UNSUPPORTED = "citation_mode_unsupported"
     DUPLICATE_STEP_NAME = "duplicate_step_name"
     DUPLICATE_STEP_ORDER = "duplicate_step_order"
     FLOW_AUDIO_TRANSCRIPTION_INVALID = "flow_audio_transcription_invalid"

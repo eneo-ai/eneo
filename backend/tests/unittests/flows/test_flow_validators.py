@@ -1831,18 +1831,21 @@ def test_validate_steps_allows_explicit_empty_template_bindings_for_publish():
 
 
 def test_validate_steps_rejects_inline_citation_mode_for_non_text_output() -> None:
-    with pytest.raises(
-        BadRequestException,
-        match="citation_mode 'inline_inref_sidecar' requires output_type 'text'",
-    ):
-        validate_steps(
-            [
-                _step(
-                    output_type="json",
-                    output_config={"citation_mode": "inline_inref_sidecar"},
-                )
-            ]
+    steps = [
+        _step(
+            output_type="json",
+            output_config={"citation_mode": "inline_inref_sidecar"},
         )
+    ]
+    _assert_validate_steps_rejects(
+        steps,
+        expected_type=FlowStepValidationError,
+        match="citation_mode 'inline_inref_sidecar' requires output_type 'text'",
+        step_order=1,
+    )
+    assert [issue.code for issue in collect_step_graph_issues(steps)] == [
+        FlowGraphIssueCode.CITATION_MODE_UNSUPPORTED
+    ]
 
 
 def test_validate_steps_rejects_inline_citation_mode_for_transcribe_only_output() -> (

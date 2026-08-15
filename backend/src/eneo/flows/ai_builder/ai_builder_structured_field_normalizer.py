@@ -56,30 +56,11 @@ def normalize_structured_field_list(
     ]
 
 
-# Step-level keys the model sprinkles into field objects (seen live twice
-# on 2026-08-06: output_fields[0].model_ref). Dropping them loses nothing —
-# these concerns belong to the step, never to a field.
-_STRAY_STEP_KEYS_ON_FIELDS = frozenset({"model_ref", "knowledge_refs"})
-
-
 def _admit_structured_field_item(value: Any, *, path: str) -> dict[str, Any]:
     if isinstance(value, StructuredFieldDraft):
         draft = value
     elif isinstance(value, dict):
         raw_item = cast(dict[str, Any], value)
-        stray_keys = _STRAY_STEP_KEYS_ON_FIELDS & raw_item.keys()
-        if stray_keys:
-            raw_item = {
-                key: item_value
-                for key, item_value in raw_item.items()
-                if key not in stray_keys
-            }
-        if "field_type" not in raw_item:
-            # A field's own shape states its type: declared children make it
-            # an object, declared item_fields an array, and a leaf is a
-            # string. Inferring it loses nothing and spares a repair round
-            # (live capture 2026-08-06).
-            raw_item = {**raw_item, "field_type": _inferred_field_type(raw_item)}
         try:
             draft = StructuredFieldDraft.model_validate(raw_item)
         except ValidationError as error:
@@ -92,37 +73,7 @@ def _admit_structured_field_item(value: Any, *, path: str) -> dict[str, Any]:
             path,
             "must be a field object with name, field_type, and description.",
         )
-    _require_container_shape(draft, path=path)
     return draft.model_dump()
-
-
-def _inferred_field_type(raw_item: dict[str, Any]) -> str:
-    if raw_item.get("item_fields") is not None:
-        return "array"
-    if raw_item.get("fields") is not None:
-        return "object"
-    return "string"
-
-
-def _require_container_shape(draft: StructuredFieldDraft, *, path: str) -> None:
-    # The typed model already requires object fields to declare children;
-    # these rules cover the converse misuses it permits.
-    if draft.field_type != "object" and draft.fields:
-        raise StructuredFieldAdmissionError(
-            f"{path}.fields",
-            "child fields belong to object fields; use item_fields for arrays.",
-        )
-    if draft.field_type != "array" and draft.item_fields:
-        raise StructuredFieldAdmissionError(
-            f"{path}.item_fields",
-            "item_fields belong to array fields.",
-        )
-    for child_path, children in (
-        (f"{path}.fields", draft.fields),
-        (f"{path}.item_fields", draft.item_fields),
-    ):
-        for index, child in enumerate(children or []):
-            _require_container_shape(child, path=f"{child_path}[{index}]")
 
 
 def _admission_error_path(path: str, error: ValidationError) -> str:

@@ -15,6 +15,7 @@ from eneo.flows.api.flow_runtime_paths import (
     FLOW_REVIEW_RESUME_PATH,
     FLOW_RUN_ARTIFACT_SIGNED_URL_PATH,
     FLOW_RUN_CANCEL_PATH,
+    FLOW_RUN_CAPACITY_PATH,
     FLOW_RUN_EVIDENCE_EXPORT_PATH,
     FLOW_RUN_EVIDENCE_PATH,
     FLOW_RUN_PATH,
@@ -116,6 +117,12 @@ FLOW_RUNTIME_ENDPOINT_CONTRACTS: tuple[FlowRuntimeEndpointContract, ...] = (
         route_path=FLOW_RUN_STATUS_CAPABILITIES_PATH,
         method="get",
         operation_id="get_flow_run_status_capabilities",
+        success_status=status.HTTP_200_OK,
+    ),
+    FlowRuntimeEndpointContract(
+        route_path=FLOW_RUN_CAPACITY_PATH,
+        method="get",
+        operation_id="get_flow_run_capacity",
         success_status=status.HTTP_200_OK,
     ),
     FlowRuntimeEndpointContract(

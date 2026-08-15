@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from datetime import datetime, timezone
 from uuid import UUID
 
@@ -16,9 +17,14 @@ from eneo.flows.ai_builder.ai_builder_resource_catalog import (
     AIBuilderResourceCatalog,
     build_ai_builder_resource_catalog,
 )
+from eneo.flows.ai_builder.ai_builder_runtime_input_requirements import (
+    ConfirmedRuntimeInputRequirement,
+    render_confirmed_runtime_input_requirements,
+)
 from eneo.flows.ai_builder.ai_builder_schema_evidence import (
     build_schema_evidence,
 )
+from eneo.flows.ai_builder.ai_builder_tools import build_propose_flow_tool_schema
 from eneo.flows.ai_builder.planning_state import (
     ArchitectureCommit,
     ExampleOutputCitation,
@@ -53,6 +59,71 @@ def _empty_catalog() -> AIBuilderResourceCatalog:
         available_models=[],
         available_kbs=[],
     )
+
+
+def test_create_prompt_projects_confirmed_runtime_input_identity_and_purpose() -> None:
+    state = PlanningState.empty()
+    requirements = (
+        ConfirmedRuntimeInputRequirement(name="audience", purpose="interpret_input"),
+        ConfirmedRuntimeInputRequirement(name="case_id", purpose="shape_result"),
+        ConfirmedRuntimeInputRequirement(name="policy", purpose="whole_flow"),
+    )
+    rendered = render_confirmed_runtime_input_requirements(requirements)
+
+    create_prompt = build_plan_proposal_system_prompt(
+        planning_state=state,
+        confirmed_requirements=_requirements(),
+        attachment_context=None,
+        flow_context=None,
+        is_edit_mode=False,
+        resource_catalog=_empty_catalog(),
+        confirmed_runtime_inputs=requirements,
+    )
+    edit_prompt = build_plan_proposal_system_prompt(
+        planning_state=state,
+        confirmed_requirements=_requirements(),
+        attachment_context=None,
+        flow_context=None,
+        is_edit_mode=True,
+        resource_catalog=_empty_catalog(),
+        confirmed_runtime_inputs=requirements,
+    )
+
+    assert "Confirmed runtime inputs:" in create_prompt
+    assert rendered in create_prompt
+    assert "server-owned runtime inputs" in create_prompt
+    assert "Confirmed runtime inputs:" not in edit_prompt
+
+
+def test_runtime_input_projection_preserves_long_and_delimited_names_exactly() -> None:
+    common_prefix = "field_" + "x" * 90
+    names = (f'{common_prefix}_a, "quoted"', f"{common_prefix}_b\nsecond line")
+    requirements = tuple(
+        ConfirmedRuntimeInputRequirement(name=name, purpose="shape_result")
+        for name in names
+    )
+    rendered = render_confirmed_runtime_input_requirements(requirements)
+
+    prompt = build_plan_proposal_system_prompt(
+        planning_state=PlanningState.empty(),
+        confirmed_requirements=_requirements(),
+        attachment_context=None,
+        flow_context=None,
+        is_edit_mode=False,
+        resource_catalog=_empty_catalog(),
+        confirmed_runtime_inputs=requirements,
+    )
+    schema = build_propose_flow_tool_schema(
+        resource_catalog=_empty_catalog(),
+        confirmed_runtime_inputs=requirements,
+    )
+    schema_description = schema["function"]["parameters"]["properties"]["steps"][
+        "items"
+    ]["properties"]["output_fields"]["description"]
+
+    assert rendered in prompt
+    assert rendered in schema_description
+    assert [item["name"] for item in json.loads(rendered)] == list(names)
 
 
 def _planning_state_with_architecture(
@@ -840,3 +911,27 @@ def test_plan_proposal_prompt_scopes_audio_transcription_to_backend():
     assert "Human review checkpoints are compiler-owned in create mode" in prompt
     assert "Do not set review_mode" in prompt
     assert "separate AI step" in prompt
+
+
+def test_pure_audio_prompt_requests_one_mechanics_free_transcription_step() -> None:
+    prompt = build_plan_proposal_system_prompt(
+        planning_state=_planning_state_with_architecture(
+            StepTriple(
+                input_type="audio",
+                output_type="text",
+                output_mode="transcribe_only",
+            ),
+            chosen_patterns=["audio_transcription"],
+        ),
+        confirmed_requirements=_requirements(summary="Transcribe uploaded audio."),
+        attachment_context=None,
+        flow_context=None,
+        is_edit_mode=False,
+        is_pure_audio_transcription=True,
+        resource_catalog=_empty_catalog(),
+    )
+
+    assert "exactly one semantic transcription step" in prompt
+    assert "only `name` and `instructions`" in prompt
+    assert "backend owns upload and transcription mechanics" in prompt
+    assert "start propose_flow steps with the analysis" not in prompt

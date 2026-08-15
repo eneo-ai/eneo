@@ -306,11 +306,14 @@ class FlowInputLimitsPublic(BaseModel):
         le=FLOW_INPUT_MAX_FILES_COUNT,
         description="Null means no tenant-level file count ceiling.",
     )
-    audio_max_files_per_run: int | None = Field(
-        ...,
+    audio_max_files_per_run: int = Field(
         ge=1,
         le=FLOW_INPUT_MAX_AUDIO_FILES_COUNT,
-        description="Null means no tenant-level audio file count ceiling.",
+        description=(
+            "Effective tenant-level audio file count ceiling for each Flow run. "
+            "Resetting the stored override to null restores the default; this "
+            "response always returns the resolved positive integer."
+        ),
     )
     file_max_size_ceiling_bytes: int = Field(
         ge=FLOW_INPUT_MIN_LIMIT_BYTES,

@@ -353,11 +353,21 @@ def test_normalize_ai_builder_spec_clears_invalid_citation_sidecar_config() -> N
     normalized, changes = normalize_ai_builder_spec(spec)
 
     assert normalized.steps[0].output_config == {"template_asset_id": "template-1"}
-    assert [
-        change.code
+    citation_changes = [
+        change
         for _step_spec, change in changes
-        if change.code == "output_config_citation_mode_cleared"
-    ] == ["output_config_citation_mode_cleared"]
+        if change.code == "citation_mode_unsupported"
+    ]
+    assert [
+        (change.code, change.severity, change.message) for change in citation_changes
+    ] == [
+        (
+            "citation_mode_unsupported",
+            "warning",
+            "Källhänvisningar inaktiverades eftersom resultatet inte kan innehålla "
+            "infogade källhänvisningar.",
+        )
+    ]
 
 
 def test_normalize_ai_builder_spec_clears_stale_template_identity_on_mode_change() -> (

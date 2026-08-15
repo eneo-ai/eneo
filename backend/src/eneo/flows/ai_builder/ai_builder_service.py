@@ -120,7 +120,9 @@ SSE_EVENT_STATUS = _SSE_EVENT_STATUS
 SSE_EVENT_USAGE = _SSE_EVENT_USAGE
 SSE_EVENT_DONE = _SSE_EVENT_DONE
 
-_AI_BUILDER_CONTROLLED_TOOL_KEYS = frozenset({"tools", "tool_choice", "function_call"})
+_AI_BUILDER_CONTROLLED_TOOL_KEYS = frozenset(
+    {"tools", "tool_choice", "function_call", "parallel_tool_calls"}
+)
 
 configure_litellm_runtime(litellm)
 

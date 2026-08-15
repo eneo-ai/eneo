@@ -65,6 +65,7 @@ def test_flow_authoring_command_discriminates_create_and_edit() -> None:
             "expected_revision": 7,
             "spec": spec.model_dump(mode="json"),
             "removed_existing_step_refs": [],
+            "updated_existing_step_refs": [],
             "origin": {
                 "kind": "ai_builder",
                 "session_id": str(uuid4()),

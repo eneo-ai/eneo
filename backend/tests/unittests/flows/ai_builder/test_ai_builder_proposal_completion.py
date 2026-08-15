@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import httpx
 import pytest
@@ -44,6 +44,7 @@ from eneo.flows.ai_builder.ai_builder_error_contract import (
     AIBuilderProviderOutcomeUnknownException,
 )
 from eneo.flows.ai_builder.ai_builder_litellm_completion import (
+    PINNED_LUNA_NATIVE_STRICT_TOOLS_ROUTE,
     call_proposal_completion,
     make_usage_tracked_proposal_completion,
 )
@@ -63,21 +64,27 @@ from eneo.flows.ai_builder.ai_builder_proposal_tool_contracts import (
 from eneo.flows.ai_builder.ai_builder_proposal_tool_contracts import (
     ProposalCompletionRequest as ProposalCompletionRequestContract,
 )
+from eneo.flows.ai_builder.ai_builder_resource_catalog import (
+    build_ai_builder_resource_catalog,
+)
 from eneo.flows.ai_builder.ai_builder_slot_classification_contract import (
     SlotClassificationInput,
     SlotClassificationSource,
 )
 from eneo.flows.ai_builder.ai_builder_slot_classifier import classify_slots
 from eneo.flows.ai_builder.ai_builder_tool_names import PROPOSE_FLOW_TOOL_NAME
+from eneo.flows.ai_builder.ai_builder_tools import build_propose_flow_tool_schema
 from eneo.model_providers.infrastructure.litellm_provider import (
     ResolvedLiteLLMProvider,
 )
 from eneo.tenants.tenant import TenantInDB
+from tests.unittests.flows.ai_builder.proposal_turn_builders import _make_context
 
 
 def _route(
     *,
     model: str = "openai/gpt-5.4",
+    resolved_model_id: UUID | None = None,
     provider_type: str = "openai",
     kwargs: dict[str, object] | None = None,
     supported: SupportedModelKwargs | None = None,
@@ -89,6 +96,11 @@ def _route(
         litellm_kwargs=kwargs or {},
         supported_model_kwargs=supported
         or SupportedModelKwargs(temperature=ModelKwargCapability(supported=True)),
+        **(
+            {"resolved_model_id": resolved_model_id}
+            if resolved_model_id is not None
+            else {}
+        ),
         **({"requested_model_kwargs": requested} if requested is not None else {}),
     )
 
@@ -98,6 +110,7 @@ def _completion_request(
     messages: list[dict[str, Any]],
     **kwargs: Any,
 ) -> ProposalCompletionRequestContract:
+    kwargs.setdefault("target_kind", TargetKind.CREATE)
     return ProposalCompletionRequestContract(
         message_groups=(
             ProposalMessageGroup(
@@ -127,11 +140,13 @@ def _unprocessable_entity_error() -> UnprocessableEntityError:
 
 async def _resolved_route(
     capabilities: dict[str, object] | None,
+    *,
+    model_id: UUID | None = None,
 ) -> ResolvedCompletionModelRoute:
     now = datetime.now(timezone.utc)
     tenant = TenantInDB.model_construct(id=uuid4(), name="Test tenant")
     model = CompletionModel(
-        id=uuid4(),
+        id=model_id or uuid4(),
         created_at=now,
         updated_at=now,
         name="gpt-test",
@@ -169,6 +184,14 @@ async def _resolved_route(
         return await completion_service.resolve_model_route(model)
 
 
+@pytest.mark.asyncio
+async def test_resolved_route_carries_selected_model_identity() -> None:
+    model_id = uuid4()
+    route = await _resolved_route(None, model_id=model_id)
+
+    assert route.resolved_model_id == model_id
+
+
 def _make_response_with_text(
     text: str,
     *,
@@ -198,6 +221,237 @@ def test_forced_tool_choice_builds_provider_shape_once() -> None:
         "type": "function",
         "function": {"name": PROPOSE_FLOW_TOOL_NAME},
     }
+
+
+def test_proposal_turn_context_forces_sole_prepared_tool_for_every_request() -> None:
+    proposal_tool_schema = {
+        "type": "function",
+        "function": {
+            "name": PROPOSE_FLOW_TOOL_NAME,
+            "parameters": {"type": "object"},
+        },
+    }
+    ctx = _make_context(proposal_tool_schema=proposal_tool_schema)
+
+    initial_request = ctx.completion_request(temperature=0.2)
+    repair_request = ctx.completion_request(
+        temperature=0.4,
+        counts_as_repair=True,
+    )
+
+    expected_tool_choice = forced_tool_choice(PROPOSE_FLOW_TOOL_NAME)
+    assert initial_request.tool_schemas == [proposal_tool_schema]
+    assert repair_request.tool_schemas == [proposal_tool_schema]
+    assert initial_request.target_kind == TargetKind.CREATE
+    assert repair_request.target_kind == TargetKind.CREATE
+    assert (
+        _make_context(flow=MagicMock()).completion_request(temperature=0.2).target_kind
+        == TargetKind.EDIT
+    )
+    assert initial_request.tool_choice == expected_tool_choice
+    assert repair_request.tool_choice == expected_tool_choice
+
+
+def _nested_key_values(value: object, key: str) -> list[object]:
+    if isinstance(value, list):
+        return [
+            nested_value
+            for item in value
+            for nested_value in _nested_key_values(item, key)
+        ]
+    if not isinstance(value, dict):
+        return []
+    return [
+        *([value[key]] if key in value else []),
+        *(
+            nested_value
+            for nested in value.values()
+            for nested_value in _nested_key_values(nested, key)
+        ),
+    ]
+
+
+(
+    _PINNED_LUNA_PROVIDER_TYPE,
+    _PINNED_LUNA_LITELLM_MODEL,
+    _PINNED_LUNA_API_BASE,
+) = PINNED_LUNA_NATIVE_STRICT_TOOLS_ROUTE
+# The measured completion-model row; the strict-tools decision must not depend
+# on it because row ids differ per database.
+_PINNED_LUNA_MODEL_ID = UUID("90824b05-9913-4210-968f-9294eb017d31")
+
+assert _PINNED_LUNA_API_BASE is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    (
+        "target_kind",
+        "model_id",
+        "provider_type",
+        "litellm_model",
+        "route_kwargs",
+        "counts_as_repair",
+        "expected_strict_values",
+    ),
+    [
+        pytest.param(
+            TargetKind.CREATE,
+            _PINNED_LUNA_MODEL_ID,
+            _PINNED_LUNA_PROVIDER_TYPE,
+            _PINNED_LUNA_LITELLM_MODEL,
+            {},
+            False,
+            [True],
+            id="pinned-luna-create-initial",
+        ),
+        pytest.param(
+            TargetKind.CREATE,
+            _PINNED_LUNA_MODEL_ID,
+            _PINNED_LUNA_PROVIDER_TYPE,
+            _PINNED_LUNA_LITELLM_MODEL,
+            {},
+            True,
+            [True],
+            id="pinned-luna-create-repair",
+        ),
+        pytest.param(
+            TargetKind.CREATE,
+            _PINNED_LUNA_MODEL_ID,
+            _PINNED_LUNA_PROVIDER_TYPE,
+            "openai/gpt-5.4",
+            {},
+            False,
+            [],
+            id="other-openai-create",
+        ),
+        pytest.param(
+            TargetKind.CREATE,
+            _PINNED_LUNA_MODEL_ID,
+            "azure",
+            _PINNED_LUNA_LITELLM_MODEL,
+            {},
+            False,
+            [],
+            id="other-provider-create",
+        ),
+        pytest.param(
+            TargetKind.CREATE,
+            UUID("11111111-1111-1111-1111-111111111111"),
+            _PINNED_LUNA_PROVIDER_TYPE,
+            _PINNED_LUNA_LITELLM_MODEL,
+            {},
+            False,
+            [True],
+            id="same-route-other-database-row-create",
+        ),
+        pytest.param(
+            TargetKind.CREATE,
+            _PINNED_LUNA_MODEL_ID,
+            _PINNED_LUNA_PROVIDER_TYPE,
+            _PINNED_LUNA_LITELLM_MODEL,
+            {"api_base": "https://openai-compatible.invalid/v1"},
+            False,
+            [],
+            id="other-openai-endpoint-create",
+        ),
+        pytest.param(
+            TargetKind.EDIT,
+            _PINNED_LUNA_MODEL_ID,
+            _PINNED_LUNA_PROVIDER_TYPE,
+            _PINNED_LUNA_LITELLM_MODEL,
+            {},
+            False,
+            [],
+            id="pinned-luna-edit",
+        ),
+    ],
+)
+async def test_outbound_proposal_tools_seal_native_strict_to_pinned_luna_create(
+    target_kind: TargetKind,
+    model_id: UUID,
+    provider_type: str,
+    litellm_model: str,
+    route_kwargs: dict[str, object],
+    counts_as_repair: bool,
+    expected_strict_values: list[object],
+) -> None:
+    response = _make_response_with_text("ok")
+    litellm_client = SimpleNamespace(acompletion=AsyncMock(return_value=response))
+    tool_schema = build_propose_flow_tool_schema(
+        resource_catalog=build_ai_builder_resource_catalog(
+            available_models=[],
+            available_kbs=[],
+        ),
+        current_steps=[] if target_kind == TargetKind.EDIT else None,
+    )
+    tool_choice = forced_tool_choice(PROPOSE_FLOW_TOOL_NAME)
+
+    await call_proposal_completion(
+        litellm_client=litellm_client,
+        request=_completion_request(
+            messages=[{"role": "user", "content": "Build a flow"}],
+            tool_schemas=[tool_schema],
+            route=_route(
+                resolved_model_id=model_id,
+                provider_type=provider_type,
+                model=litellm_model,
+                kwargs=route_kwargs,
+            ),
+            max_output_tokens=1024,
+            temperature=0.2,
+            tool_choice=tool_choice,
+            target_kind=target_kind,
+            counts_as_repair=counts_as_repair,
+        ),
+    )
+
+    call_kwargs = litellm_client.acompletion.await_args.kwargs
+    assert _nested_key_values(call_kwargs["tools"], "strict") == (
+        expected_strict_values
+    )
+    assert (
+        call_kwargs["tools"][0]["function"]["parameters"]
+        is (tool_schema["function"]["parameters"])
+    )
+    assert "strict" not in tool_schema["function"]
+    assert call_kwargs["tool_choice"] == tool_choice
+    assert call_kwargs["parallel_tool_calls"] is False
+    assert "response_format" not in call_kwargs
+
+
+@pytest.mark.asyncio
+async def test_edit_context_repair_omits_native_strict_on_pinned_luna() -> None:
+    response = _make_response_with_text("ok")
+    litellm_client = SimpleNamespace(acompletion=AsyncMock(return_value=response))
+    tool_schema = build_propose_flow_tool_schema(
+        resource_catalog=build_ai_builder_resource_catalog(
+            available_models=[],
+            available_kbs=[],
+        ),
+        current_steps=[],
+    )
+    ctx = _make_context(
+        flow=MagicMock(),
+        proposal_tool_schema=tool_schema,
+        route=_route(
+            resolved_model_id=_PINNED_LUNA_MODEL_ID,
+            provider_type=_PINNED_LUNA_PROVIDER_TYPE,
+            model=_PINNED_LUNA_LITELLM_MODEL,
+        ),
+    )
+
+    await call_proposal_completion(
+        litellm_client=litellm_client,
+        request=ctx.completion_request(
+            temperature=0.2,
+            counts_as_repair=True,
+        ),
+    )
+
+    call_kwargs = litellm_client.acompletion.await_args.kwargs
+    assert _nested_key_values(call_kwargs["tools"], "strict") == []
+    assert call_kwargs["tools"] == [tool_schema]
 
 
 @pytest.mark.asyncio
@@ -306,7 +560,7 @@ async def test_call_proposal_completion_forces_drop_params_true_on_provider_call
 
 
 @pytest.mark.asyncio
-async def test_call_proposal_completion_passes_string_tool_choice() -> None:
+async def test_call_proposal_completion_disables_parallel_tool_calls() -> None:
     response = _make_response_with_text("ok")
     litellm_client = SimpleNamespace(acompletion=AsyncMock(return_value=response))
 
@@ -318,12 +572,12 @@ async def test_call_proposal_completion_passes_string_tool_choice() -> None:
             route=_route(),
             max_output_tokens=1024,
             temperature=0.2,
-            tool_choice="auto",
+            tool_choice=forced_tool_choice(PROPOSE_FLOW_TOOL_NAME),
         ),
     )
 
     call_kwargs = litellm_client.acompletion.await_args.kwargs
-    assert call_kwargs["tool_choice"] == "auto"
+    assert call_kwargs["parallel_tool_calls"] is False
 
 
 @pytest.mark.asyncio
@@ -400,7 +654,9 @@ async def test_luna_proposal_call_uses_real_pinned_reasoning_capability() -> Non
 
     call_kwargs = litellm_client.acompletion.await_args.kwargs
     assert call_kwargs["reasoning_effort"] == "none"
-    assert call_kwargs["tools"] == [{"function": {"name": PROPOSE_FLOW_TOOL_NAME}}]
+    assert [tool["function"]["name"] for tool in call_kwargs["tools"]] == [
+        PROPOSE_FLOW_TOOL_NAME
+    ]
 
 
 @pytest.mark.asyncio
@@ -744,6 +1000,11 @@ async def test_proposal_failure_emits_one_allowlisted_incident_evidence() -> Non
     }
     assert outgoing_by_name["messages"]["json_type"] == "array"
     assert outgoing_by_name["tools"]["json_type"] == "array"
+    assert outgoing_by_name["parallel_tool_calls"] == {
+        "name": "parallel_tool_calls",
+        "json_type": "boolean",
+        "domain": "transport_control",
+    }
     assert outgoing_by_name["api_key"] == {
         "name": "api_key",
         "json_type": "string",
@@ -995,6 +1256,7 @@ async def test_protected_only_overflow_rejects_before_provider_work_or_call_slot
                 ),
                 tool_schemas=[],
                 route=_route(),
+                target_kind=TargetKind.CREATE,
                 max_output_tokens=10,
                 temperature=0.2,
                 request_budget=request_budget,
@@ -1151,6 +1413,7 @@ async def test_repair_time_overflow_uses_same_completion_boundary_rejection(
                 ),
                 tool_schemas=[],
                 route=_route(),
+                target_kind=TargetKind.CREATE,
                 max_output_tokens=0,
                 temperature=0.2,
                 counts_as_repair=True,
@@ -1231,6 +1494,7 @@ async def test_second_repair_overflow_rechecks_the_shared_completion_boundary(
                 message_groups=message_groups,
                 tool_schemas=[],
                 route=_route(),
+                target_kind=TargetKind.CREATE,
                 max_output_tokens=0,
                 temperature=0.2,
                 counts_as_repair=counts_as_repair,
@@ -1247,6 +1511,7 @@ async def test_second_repair_overflow_rechecks_the_shared_completion_boundary(
                 message_groups=second_repair_groups,
                 tool_schemas=[],
                 route=_route(),
+                target_kind=TargetKind.CREATE,
                 max_output_tokens=0,
                 temperature=0.2,
                 counts_as_repair=True,

@@ -42,7 +42,14 @@ REPLACEMENTS_FILE = "replacements.json"
 # because the harness writes it and the release reader refuses anything else;
 # two copies of a schema version is how a reader ends up scoring a shape it
 # does not understand.
-SUPPORTED_RECEIPT_ARTIFACT_VERSION = "ai-builder-live-release.v5"
+# v6 added the sealed capacity preflight. There is deliberately no lane for
+# older receipts, and a lane would not help: a receipt is also bound to the
+# harness and corpus digests that produced it, so a receipt from a different
+# instrument is refused on identity even if its schema were accepted. Changing
+# this instrument therefore ends the readability of its predecessors' receipts;
+# that cost is real and belongs to whoever plans the next measurement, not to a
+# compatibility shim here.
+SUPPORTED_RECEIPT_ARTIFACT_VERSION = "ai-builder-live-release.v6"
 RELEASE_SUMMARY_ARTIFACT_MODE = "live_execution_summary"
 # The two tracked inputs whose digests a release receipt records. Re-hashing
 # them at judging time is only meaningful because the evaluator is pinned to
@@ -472,10 +479,28 @@ def load_release_receipt(suite_dir: Path) -> Receipt:
     return receipt
 
 
+def replacement_overlay_capacity_preflight(
+    payload: Any, *, where: str
+) -> Mapping[str, Any]:
+    """The proof that the recovery acquisition itself was allowed to run.
+
+    It lives on the overlay because a replacement batch spends capacity of its
+    own, separately from whatever the base receipt already proved.
+    """
+
+    overlay = _mapping(payload, where=where, key="replacement overlay")
+    return _mapping(
+        overlay.get("capacity_preflight"), where=where, key="capacity_preflight"
+    )
+
+
 def replacement_descriptors_from_payload(
     payload: Any, *, where: str
 ) -> tuple[ReplacementDescriptor, ...]:
-    raw_descriptors = _sequence(payload, where=where, key="replacements")
+    overlay = _mapping(payload, where=where, key="replacement overlay")
+    raw_descriptors = _sequence(
+        overlay.get("replacements"), where=where, key="replacements"
+    )
     if not raw_descriptors:
         raise ReceiptError(f"{where}: replacements must not be empty.")
     descriptors: list[ReplacementDescriptor] = []
@@ -557,8 +582,16 @@ def _apply_replacements(receipt: Receipt, *, suite_dir: Path) -> Receipt:
     replacements_path = suite_dir / REPLACEMENTS_FILE
     if not replacements_path.exists():
         return receipt
+    overlay_payload = _read_json(replacements_path)
     descriptors = replacement_descriptors_from_payload(
-        _read_json(replacements_path), where=str(replacements_path)
+        overlay_payload, where=str(replacements_path)
+    )
+    # The recovery run spends its own budget, so it carries its own proof.
+    require_passed_capacity_preflight(
+        replacement_overlay_capacity_preflight(
+            overlay_payload, where=str(replacements_path)
+        ),
+        where=str(replacements_path),
     )
     base_by_slot = {
         observation.slot: observation for observation in receipt.observations
@@ -681,6 +714,274 @@ def release_identity_recheck_checks(
     return checks
 
 
+# The reads a preflight spends: the request budget always, tenant runtime
+# concurrency only when a selected case executes a Flow. One owner, because a
+# writer and a reader that disagree about this reject valid receipts.
+_REQUEST_CAPACITY_READS = 1
+_RUNTIME_CAPACITY_READS = 1
+CLEAN_SPACE_LISTING_REQUESTS = 1
+
+
+def capacity_snapshot_request_count(*, runtime_required: bool) -> int:
+    """Charged requests one capacity preflight spends before it decides."""
+
+    return _REQUEST_CAPACITY_READS + (
+        _RUNTIME_CAPACITY_READS if runtime_required else 0
+    )
+
+
+def _capacity_int(value: object) -> int | None:
+    return value if isinstance(value, int) and not isinstance(value, bool) else None
+
+
+def _capacity_str(payload: Mapping[str, Any], key: str) -> str | None:
+    value = payload.get(key)
+    return value if isinstance(value, str) and value else None
+
+
+def capacity_preflight_verdict(
+    *,
+    request_capacity: Mapping[str, object] | None,
+    runtime_capacity: Mapping[str, object] | None,
+    demand: Mapping[str, object],
+    space_id: str,
+    runtime_slots_required: int,
+) -> JsonObject:
+    """Decide whether the complete acquisition may start. Refuses by default.
+
+    Every branch names its refusal, so a receipt reader can tell an exhausted
+    budget from a misdirected key from an unreachable endpoint.
+    """
+    refusals: list[str] = []
+    if runtime_slots_required < 0:
+        refusals.append("runtime_slots_not_computed")
+    # A demand is only evidence if every term it was summed from is present and
+    # the sum still holds. A bare total is a number someone could have typed.
+    parts = {
+        name: _capacity_int(demand.get(name))
+        for name in (
+            "capacity_reads",
+            "clean_space_listing",
+            "fixture_uploads",
+            "observation_requests",
+            "observation_count",
+            "total",
+        )
+    }
+    total_demand = parts["total"]
+    capacity_reads = parts["capacity_reads"]
+    unspent_demand: int | None = None
+    expected_reads = capacity_snapshot_request_count(
+        runtime_required=runtime_slots_required > 0
+    )
+    summed = (
+        None
+        if any(value is None for value in parts.values())
+        else parts["capacity_reads"]
+        + parts["clean_space_listing"]
+        + parts["fixture_uploads"]
+        + parts["observation_requests"]
+    )
+    if (
+        summed is None
+        or total_demand is None
+        or capacity_reads is None
+        or total_demand <= 0
+        or any(value < 0 for value in parts.values() if value is not None)
+        or summed != total_demand
+        or capacity_reads != expected_reads
+        # A sealed acquisition always lists the space once and always does
+        # work; a demand that sums correctly to "no observations" describes no
+        # suite that could have run.
+        or parts["clean_space_listing"] != CLEAN_SPACE_LISTING_REQUESTS
+        or not parts["observation_count"]
+        or not parts["observation_requests"]
+    ):
+        refusals.append("demand_not_computed")
+    else:
+        # The snapshot was taken after the capacity reads were already counted
+        # against the window, so they are not part of what remains.
+        unspent_demand = total_demand - capacity_reads
+
+    if request_capacity is None:
+        refusals.append("request_capacity_unavailable")
+    else:
+        scope_type = _capacity_str(request_capacity, "scope_type")
+        scope_id = _capacity_str(request_capacity, "scope_id")
+        window_seconds = _capacity_int(request_capacity.get("window_seconds"))
+        if _capacity_str(request_capacity, "key_id") is None:
+            refusals.append("measurement_key_not_identified")
+        if not isinstance(request_capacity.get("fail_open"), bool):
+            refusals.append("rate_limit_policy_unknown")
+        if window_seconds is None or window_seconds <= 0:
+            refusals.append("rate_limit_window_unknown")
+        if scope_type != "space":
+            refusals.append("measurement_key_not_space_scoped")
+        elif scope_id != space_id:
+            refusals.append("measurement_key_scope_mismatch")
+        limit_source = _capacity_str(request_capacity, "limit_source")
+        if limit_source == "unlimited":
+            # An unlimited key never consults the rate-limit store, so a
+            # fail-open deployment cannot make its budget untrustworthy. It
+            # also keeps no counter, so reporting one contradicts itself.
+            if any(
+                request_capacity.get(field) is not None
+                for field in ("limit", "current_count", "remaining")
+            ):
+                refusals.append("request_budget_unknown")
+        elif limit_source in {"explicit", "scope_default"}:
+            if request_capacity.get("fail_open") is True:
+                refusals.append("rate_limit_policy_fail_open")
+            limit = _capacity_int(request_capacity.get("limit"))
+            current_count = _capacity_int(request_capacity.get("current_count"))
+            remaining = _capacity_int(request_capacity.get("remaining"))
+            if (
+                limit is None
+                or current_count is None
+                or remaining is None
+                or limit < 0
+                or current_count < 0
+                or remaining < 0
+                or remaining != max(0, limit - current_count)
+            ):
+                # A finite key reports all three, and they have to agree; a
+                # standalone `remaining` is a number with no provenance.
+                refusals.append("request_budget_unknown")
+            elif unspent_demand is not None and remaining < unspent_demand:
+                refusals.append("insufficient_request_budget")
+        else:
+            refusals.append("request_budget_unknown")
+
+    if runtime_slots_required <= 0:
+        # No case in this batch executes a Flow, so tenant run concurrency is
+        # not a precondition for it and is not read.
+        pass
+    elif runtime_capacity is None:
+        refusals.append("runtime_capacity_unavailable")
+    else:
+        active_runs = _capacity_int(runtime_capacity.get("active_runs"))
+        max_concurrent_runs = _capacity_int(runtime_capacity.get("max_concurrent_runs"))
+        available_slots = _capacity_int(runtime_capacity.get("available_slots"))
+        if (
+            active_runs is None
+            or max_concurrent_runs is None
+            or available_slots is None
+            or _capacity_str(runtime_capacity, "tenant_id") is None
+            or active_runs < 0
+            or max_concurrent_runs < 0
+            or available_slots != max(0, max_concurrent_runs - active_runs)
+        ):
+            # The snapshot has to be the whole public reading, and internally
+            # consistent: a free-standing slot count proves nothing.
+            refusals.append("runtime_capacity_unknown")
+        else:
+            if active_runs != 0:
+                # Pre-existing tenant work is an environment failure to recover
+                # through the runtime owner, never a Builder product outcome.
+                refusals.append("measurement_tenant_not_idle")
+            if max_concurrent_runs < runtime_slots_required:
+                refusals.append("insufficient_runtime_slots")
+
+    return {
+        "verdict": "pass" if not refusals else "fail",
+        "refusals": refusals,
+        "demand": dict(demand),
+        "runtime_slots_required": runtime_slots_required,
+        "space_id": space_id,
+        "request_capacity": dict(request_capacity) if request_capacity else None,
+        "runtime_capacity": dict(runtime_capacity) if runtime_capacity else None,
+    }
+
+
+def require_passed_capacity_preflight(
+    capacity_preflight: Mapping[str, Any],
+    *,
+    where: str,
+    expected_observation_count: int | None = None,
+) -> None:
+    """Refuse a run that was never proved able to complete its acquisition.
+
+    The recorded verdict is not trusted: the same pure function the harness
+    used to decide is re-run over the sealed snapshots, so a proof with
+    missing, malformed or internally inconsistent facts cannot pass, and one
+    that planned for a different run is named as such.
+
+    Whether the recorded demand is the RIGHT number for this corpus is owned by
+    the harness that computed it, which the receipt binds by source, harness
+    and corpus digest. Recomputing it here would be a second cost model that
+    drifts from the first. Neither layer resists a coordinated rewrite of the
+    manifest, summary and proof together; that needs signing or immutable
+    storage, outside this reader's boundary.
+    """
+
+    demand = _mapping(
+        capacity_preflight.get("demand"), where=where, key="capacity_preflight.demand"
+    )
+    space_id = _capacity_str(capacity_preflight, "space_id")
+    if space_id is None:
+        raise ReceiptError(f"{where}: capacity_preflight.space_id is missing.")
+    slots_required = _capacity_int(capacity_preflight.get("runtime_slots_required"))
+    if slots_required is None:
+        raise ReceiptError(
+            f"{where}: capacity_preflight.runtime_slots_required is missing."
+        )
+    request_capacity = capacity_preflight.get("request_capacity")
+    runtime_capacity = capacity_preflight.get("runtime_capacity")
+    rederived = capacity_preflight_verdict(
+        request_capacity=(
+            _mapping(request_capacity, where=where, key="request_capacity")
+            if request_capacity is not None
+            else None
+        ),
+        runtime_capacity=(
+            _mapping(runtime_capacity, where=where, key="runtime_capacity")
+            if runtime_capacity is not None
+            else None
+        ),
+        demand=demand,
+        space_id=space_id,
+        runtime_slots_required=slots_required,
+    )
+    refusals = cast(list[str], rederived["refusals"])
+    if refusals:
+        raise ReceiptError(
+            f"{where}: acquisition was refused by the capacity preflight "
+            f"({', '.join(refusals)}); its receipts are not release evidence."
+        )
+    if capacity_preflight.get("verdict") != rederived["verdict"]:
+        raise ReceiptError(
+            f"{where}: capacity_preflight.verdict is "
+            f"{capacity_preflight.get('verdict')!r} but its facts clear the gate; "
+            "the sealed proof disagrees with itself."
+        )
+    # The recorded outcome has to be the outcome its own facts produce. A proof
+    # that lists refusals or a failed capacity read while calling itself a pass
+    # is describing an acquisition that did not happen the way it claims.
+    recorded_refusals = _string_tuple(
+        capacity_preflight.get("refusals"), where=where, key="refusals"
+    )
+    endpoint_failures = _sequence(
+        capacity_preflight.get("endpoint_failures"),
+        where=where,
+        key="endpoint_failures",
+    )
+    if recorded_refusals or endpoint_failures:
+        raise ReceiptError(
+            f"{where}: capacity_preflight records "
+            f"{len(recorded_refusals)} refusal(s) and {len(endpoint_failures)} "
+            "failed capacity read(s) while claiming a pass; the sealed proof "
+            "disagrees with itself."
+        )
+    if expected_observation_count is not None:
+        sealed_count = _capacity_int(demand.get("observation_count"))
+        if sealed_count != expected_observation_count:
+            raise ReceiptError(
+                f"{where}: the capacity proof planned for {sealed_count!r} "
+                f"observations but the run expected {expected_observation_count}; "
+                "the proof does not describe this acquisition."
+            )
+
+
 def _require_base_release_receipt(
     receipt: Receipt, *, manifest: Mapping[str, Any], where: str
 ) -> None:
@@ -708,7 +1009,7 @@ def _require_base_release_receipt(
             f"{where}: manifest schema {manifest_version!r} does not match the "
             f"summary's {receipt.artifact_schema_version!r}."
         )
-    for component in ("release_identity", "evaluator_identity"):
+    for component in ("release_identity", "evaluator_identity", "capacity_preflight"):
         manifest_component = _mapping(
             manifest.get(component), where=where, key=component
         )
@@ -722,6 +1023,23 @@ def _require_base_release_receipt(
                 f"{where}: {component} differs between the manifest and the "
                 "summary; these are not two records of one run."
             )
+    # Equality proves the two records agree, not that the run was ever allowed
+    # to start. Two matching failed proofs would otherwise pass.
+    require_passed_capacity_preflight(
+        _mapping(
+            receipt.summary.get("capacity_preflight"),
+            where=where,
+            key="capacity_preflight",
+        ),
+        where=where,
+        expected_observation_count=len(
+            _sequence(
+                manifest.get("expected_observations"),
+                where=where,
+                key="expected_observations",
+            )
+        ),
+    )
     identity = _mapping(
         receipt.summary.get("release_identity"), where=where, key="release_identity"
     )

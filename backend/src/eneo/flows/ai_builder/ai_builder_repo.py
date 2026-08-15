@@ -579,7 +579,10 @@ class AIBuilderRepository:
                     BuilderSessionFiles.session_id == session_id,
                     BuilderSessionFiles.tenant_id == tenant_id,
                 )
-                .order_by(BuilderSessionFiles.created_at.asc())
+                .order_by(
+                    BuilderSessionFiles.created_at.asc(),
+                    BuilderSessionFiles.file_id.asc(),
+                )
             )
             result = await self.session.execute(stmt)
             return list(result.scalars().all())
@@ -1031,18 +1034,10 @@ class AIBuilderRepository:
                     raise AIBuilderProviderOutcomeUnknownException()
 
             attachment_file_ids = tuple(
-                (
-                    await self.session.execute(
-                        select(BuilderSessionFiles.file_id)
-                        .where(
-                            BuilderSessionFiles.session_id == session_id,
-                            BuilderSessionFiles.tenant_id == tenant_id,
-                        )
-                        .order_by(BuilderSessionFiles.created_at.asc())
-                    )
+                await self.list_session_file_ids(
+                    session_id=session_id,
+                    tenant_id=tenant_id,
                 )
-                .scalars()
-                .all()
             )
             return SessionTurnPreflight(
                 session=_session_from_row(row, database_now=database_now),
@@ -1159,18 +1154,10 @@ class AIBuilderRepository:
                     )
 
             attachment_file_ids = tuple(
-                (
-                    await self.session.execute(
-                        select(BuilderSessionFiles.file_id)
-                        .where(
-                            BuilderSessionFiles.session_id == session_id,
-                            BuilderSessionFiles.tenant_id == tenant_id,
-                        )
-                        .order_by(BuilderSessionFiles.created_at.asc())
-                    )
+                await self.list_session_file_ids(
+                    session_id=session_id,
+                    tenant_id=tenant_id,
                 )
-                .scalars()
-                .all()
             )
             if (
                 _turn_preparation_baseline(row, attachment_file_ids)

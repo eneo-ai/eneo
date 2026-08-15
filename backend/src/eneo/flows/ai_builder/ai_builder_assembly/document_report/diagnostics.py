@@ -1,12 +1,10 @@
 from __future__ import annotations
 
-from dataclasses import replace
 from typing import NoReturn
 
 from eneo.flows.ai_builder.ai_builder_architecture_errors import (
     AIBuilderArchitectureError,
 )
-from eneo.flows.ai_builder.ai_builder_assembly.plan import PlannedStep
 from eneo.flows.ai_builder.ai_builder_domain_models import LintWarning
 from eneo.flows.flow_authoring_spec import InputType, OutputMode, OutputType
 
@@ -14,30 +12,6 @@ DOCUMENT_REPORT_COMPOSE_TOPOLOGY_MISSING_FEEDBACK = (
     "Document report flows with a committed report disposition must end with "
     "a deterministic compose_text body writer before the renderer."
 )
-
-
-def _degrade_document_report_citations(
-    planned_steps: tuple[PlannedStep, ...],
-    *,
-    field_diagnostics: list[LintWarning] | None,
-    ui_language: str | None,
-) -> tuple[PlannedStep, ...]:
-    if any(step.citations_requested for step in planned_steps):
-        planned_steps = tuple(
-            replace(step, citations_requested=False) for step in planned_steps
-        )
-        if field_diagnostics is not None:
-            field_diagnostics.append(
-                LintWarning(
-                    code="document_report_citations_downgraded",
-                    message=(
-                        "The report will not include source citations."
-                        if ui_language == "en"
-                        else "Rapporten kommer inte att innehålla källhänvisningar."
-                    ),
-                )
-            )
-    return planned_steps
 
 
 def _append_combined_model_selection_diagnostics(
@@ -95,7 +69,6 @@ def _raise_document_report_compose_topology_missing(
 append_combined_model_selection_diagnostics = (
     _append_combined_model_selection_diagnostics
 )
-degrade_document_report_citations = _degrade_document_report_citations
 raise_document_report_compose_topology_missing = (
     _raise_document_report_compose_topology_missing
 )

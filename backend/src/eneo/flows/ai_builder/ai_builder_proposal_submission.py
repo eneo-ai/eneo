@@ -80,7 +80,6 @@ from eneo.flows.ai_builder.ai_builder_proposal_tool_contracts import (
     ToolProcessingResult,
     ToolRetryConfig,
     ToolRetryInvocation,
-    forced_tool_choice,
 )
 from eneo.flows.ai_builder.ai_builder_repo import AIBuilderRepository
 from eneo.flows.ai_builder.ai_builder_resource_catalog import (
@@ -241,7 +240,6 @@ class ProposalSubmissionOwner:
                 call_kind="proposal_initial",
                 request=ctx.completion_request(
                     temperature=proposal_temperature,
-                    tool_choice=forced_tool_choice(PROPOSE_FLOW_TOOL_NAME),
                 ),
                 before_provider_call=before_provider_call,
             )
@@ -602,7 +600,7 @@ class ProposalSubmissionOwner:
         ctx: ProposalTurnContext,
         tool_call: RuntimeToolCall,
     ) -> AsyncGenerator[AIBuilderStreamEvent, None]:
-        target_kind = TargetKind.CREATE if ctx.flow is None else TargetKind.EDIT
+        target_kind = ctx.target_kind
         is_create = target_kind == TargetKind.CREATE
         assistant_snapshots = None if is_create else ctx.assistant_snapshots
         planning_state = ctx.planning_state
@@ -732,7 +730,7 @@ class ProposalSubmissionOwner:
             reason="missing_submission_tool",
         )
         retry_config = self._proposal_retry_config(
-            target_kind=TargetKind.CREATE if ctx.flow is None else TargetKind.EDIT,
+            target_kind=ctx.target_kind,
             assistant_snapshots=ctx.assistant_snapshots,
             request_id=ctx.request_id,
             planning_state=ctx.planning_state,

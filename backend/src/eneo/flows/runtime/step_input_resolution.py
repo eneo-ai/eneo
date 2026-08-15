@@ -23,7 +23,6 @@ from eneo.flows.domain.step_output import (
     interpret_step_text,
 )
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
-from eneo.flows.flow_input_limits import DEFAULT_MAX_AUDIO_FILES_PER_RUN
 from eneo.flows.flow_run_input_envelope import read_semantic_flow_input_payload
 from eneo.flows.flow_run_provenance import (
     FlowResolvedInputEdge,
@@ -83,7 +82,7 @@ class StepInputResolutionDeps:
     audit_service: Any | None
     actor: Any
     max_generic_files: int | None
-    max_audio_files: int | None
+    max_audio_files: int
     max_inline_text_bytes: int
     logger: Any
 
@@ -192,7 +191,7 @@ async def resolve_step_input(
                 version_metadata=version_metadata,
                 files=files,
                 requested_ids=requested_ids,
-                max_audio_files=deps.max_audio_files or DEFAULT_MAX_AUDIO_FILES_PER_RUN,
+                max_audio_files=deps.max_audio_files,
                 max_inline_text_bytes=deps.max_inline_text_bytes,
             )
             audio_deps = AudioRuntimeDeps(

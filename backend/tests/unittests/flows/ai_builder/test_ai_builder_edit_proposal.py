@@ -596,6 +596,55 @@ async def test_edit_preserving_body_writer_renderer_adjacency_has_no_topology_ad
 
 
 @pytest.mark.asyncio
+async def test_edit_reports_step_local_citation_capability_advisory() -> None:
+    flow = _flow(
+        _flow_step(
+            step_order=1,
+            user_description="Fill the decision template",
+            output_mode="template_fill",
+            output_type="docx",
+            output_config={
+                "citation_mode": "inline_inref_sidecar",
+                "template_asset_id": str(uuid4()),
+            },
+        )
+    )
+
+    result = await _process(
+        flow=flow,
+        conversation=[
+            ConversationMessage(
+                role="user",
+                content="Keep the template step.",
+                metadata={"ui_language": "en"},
+            )
+        ],
+        arguments={
+            "plan_rationale": "Keep the existing template step.",
+            "steps": [{"kind": "modify", "existing_step_ref": "existing_step_1"}],
+        },
+    )
+
+    assert result.failure_kind is None
+    assert result.compiled_proposal is not None
+    edit = result.compiled_proposal.content.edit
+    assert edit is not None
+    assert [
+        (advisory.code, advisory.severity, advisory.message, advisory.field)
+        for advisory in edit.advisories
+        if advisory.code == "citation_mode_unsupported"
+    ] == [
+        (
+            "citation_mode_unsupported",
+            "warning",
+            "Source citations were disabled because the output cannot include "
+            "inline citations.",
+            "existing_step_1.output_config.citation_mode",
+        )
+    ]
+
+
+@pytest.mark.asyncio
 async def test_edit_enforces_template_preparation_stage_limit() -> None:
     flow = _flow(
         _flow_step(

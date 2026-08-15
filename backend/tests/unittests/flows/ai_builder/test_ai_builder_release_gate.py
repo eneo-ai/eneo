@@ -229,8 +229,9 @@ def _summary(
         else "fail"
     )
     return {
-        "artifact_schema_version": "ai-builder-live-release.v5",
+        "artifact_schema_version": "ai-builder-live-release.v6",
         "artifact_mode": "live_execution_summary",
+        "capacity_preflight": _capacity_preflight_for(len(rows)),
         "repetitions": 5,
         "sentinel_verdict": sentinel,
         "execution_failure_observation_count": execution_failure_count,
@@ -263,6 +264,51 @@ def _summary(
     }
 
 
+_MEASUREMENT_SPACE_ID = "00000000-0000-0000-0000-000000000020"
+# The reader re-derives the verdict from these facts, so a receipt fixture has
+# to carry the same capacity evidence a real run seals.
+_PASSED_CAPACITY_PREFLIGHT: dict[str, Any] = {
+    "verdict": "pass",
+    "refusals": [],
+    "demand": {
+        "total": 10_852,
+        "capacity_reads": 2,
+        "clean_space_listing": 1,
+        "fixture_uploads": 10,
+        "observation_requests": 10_839,
+        # The sealed plan must describe the run it belongs to, so fixtures set
+        # this to the slot count `_suite_dir` writes.
+        "observation_count": 20,
+    },
+    "runtime_slots_required": 1,
+    "space_id": _MEASUREMENT_SPACE_ID,
+    "request_capacity": {
+        "key_id": "00000000-0000-0000-0000-000000000030",
+        "scope_type": "space",
+        "scope_id": _MEASUREMENT_SPACE_ID,
+        "limit_source": "explicit",
+        "limit": 20_000,
+        "current_count": 2,
+        "remaining": 19_998,
+        "window_seconds": 3600,
+        "fail_open": False,
+    },
+    "runtime_capacity": {
+        "tenant_id": "00000000-0000-0000-0000-000000000010",
+        "active_runs": 0,
+        "max_concurrent_runs": 4,
+        "available_slots": 4,
+    },
+}
+
+
+def _capacity_preflight_for(observation_count: int) -> dict[str, Any]:
+    """A sealed proof that describes this many observations."""
+    proof = json.loads(json.dumps(_PASSED_CAPACITY_PREFLIGHT))
+    proof["demand"]["observation_count"] = observation_count
+    return proof
+
+
 def _perfect_rows(case_count: int = 10) -> list[dict[str, Any]]:
     return [
         _observation(f"case_{index}", repetition)
@@ -291,6 +337,7 @@ def _suite_dir(
                 "artifact_schema_version": summary["artifact_schema_version"],
                 "release_identity": summary["release_identity"],
                 "evaluator_identity": summary["evaluator_identity"],
+                "capacity_preflight": summary["capacity_preflight"],
                 "expected_observations": [
                     {
                         "case_id": row["case_id"],
@@ -339,7 +386,13 @@ def _write_replacements(
             }
         )
     (suite_dir / "replacements.json").write_text(
-        json.dumps(descriptors), encoding="utf-8"
+        json.dumps(
+            {
+                "capacity_preflight": _PASSED_CAPACITY_PREFLIGHT,
+                "replacements": descriptors,
+            }
+        ),
+        encoding="utf-8",
     )
 
 
@@ -350,12 +403,19 @@ def _rewrite_replacement_bundle(
     bundle = json.loads(bundle_path.read_text())
     mutate(bundle)
     bundle_path.write_text(json.dumps(bundle), encoding="utf-8")
-    descriptors = json.loads((suite_dir / "replacements.json").read_text())
+    overlay = json.loads((suite_dir / "replacements.json").read_text())
+    descriptors = overlay["replacements"]
     descriptors[0]["replacement_bundle_sha256"] = hashlib.sha256(
         bundle_path.read_bytes()
     ).hexdigest()
     (suite_dir / "replacements.json").write_text(
-        json.dumps(descriptors), encoding="utf-8"
+        json.dumps(
+            {
+                "capacity_preflight": _PASSED_CAPACITY_PREFLIGHT,
+                "replacements": descriptors,
+            }
+        ),
+        encoding="utf-8",
     )
 
 
@@ -772,8 +832,10 @@ def test_duplicate_replacements_for_one_slot_are_invalid(
     suite_dir = _suite_dir(tmp_path, rows)
     _write_replacements(suite_dir, [(_observation("case_0", 1), {})])
     path = suite_dir / "replacements.json"
-    descriptors = json.loads(path.read_text())
-    path.write_text(json.dumps([descriptors[0], descriptors[0]]), encoding="utf-8")
+    overlay = json.loads(path.read_text())
+    duplicated = overlay["replacements"][0]
+    overlay["replacements"] = [duplicated, duplicated]
+    path.write_text(json.dumps(overlay), encoding="utf-8")
 
     with pytest.raises(receipts.ReceiptError, match="duplicate replacement"):
         receipts.load_release_receipt(suite_dir)
@@ -1522,3 +1584,134 @@ def test_the_compare_entry_point_still_runs(tmp_path: Path) -> None:
         check=False,
     )
     assert result.returncode == 0, result.stderr
+
+
+def _rewrite_capacity_preflight(suite_dir: Path, proof: Any) -> None:
+    for name in ("suite-summary.json", "release-manifest.json"):
+        path = suite_dir / name
+        payload = json.loads(path.read_text())
+        payload["capacity_preflight"] = proof
+        path.write_text(json.dumps(payload), encoding="utf-8")
+
+
+def test_a_receipt_whose_acquisition_was_refused_is_not_release_evidence(
+    receipts: ModuleType, tmp_path: Path
+) -> None:
+    # Sealing the proof in both records only proves they agree. A refused run
+    # spent partial budget and must never be scored.
+    suite_dir = _suite_dir(tmp_path, _perfect_rows(4))
+    exhausted = json.loads(json.dumps(_PASSED_CAPACITY_PREFLIGHT))
+    exhausted["request_capacity"]["remaining"] = 10
+    exhausted["verdict"] = "fail"
+    exhausted["refusals"] = ["insufficient_request_budget"]
+    _rewrite_capacity_preflight(suite_dir, exhausted)
+
+    with pytest.raises(receipts.ReceiptError, match="refused by the capacity"):
+        receipts.load_release_receipt(suite_dir)
+
+
+def test_a_refusal_relabelled_as_a_pass_is_still_refused(
+    receipts: ModuleType, tmp_path: Path
+) -> None:
+    # The verdict is re-derived from the sealed facts, so editing the word
+    # alone cannot promote a refusal.
+    suite_dir = _suite_dir(tmp_path, _perfect_rows(4))
+    relabelled = json.loads(json.dumps(_PASSED_CAPACITY_PREFLIGHT))
+    relabelled["runtime_capacity"]["active_runs"] = 2
+    relabelled["runtime_capacity"]["available_slots"] = 2
+    relabelled["verdict"] = "pass"
+    relabelled["refusals"] = []
+    _rewrite_capacity_preflight(suite_dir, relabelled)
+
+    with pytest.raises(receipts.ReceiptError, match="refused by the capacity"):
+        receipts.load_release_receipt(suite_dir)
+
+
+def test_a_receipt_without_a_sealed_capacity_proof_is_not_release_evidence(
+    receipts: ModuleType, tmp_path: Path
+) -> None:
+    suite_dir = _suite_dir(tmp_path, _perfect_rows(4))
+    for name in ("suite-summary.json", "release-manifest.json"):
+        path = suite_dir / name
+        payload = json.loads(path.read_text())
+        del payload["capacity_preflight"]
+        path.write_text(json.dumps(payload), encoding="utf-8")
+
+    with pytest.raises(receipts.ReceiptError, match="capacity_preflight"):
+        receipts.load_release_receipt(suite_dir)
+
+
+@pytest.mark.parametrize(
+    ("truncation", "reason"),
+    [
+        ({"demand": {"total": 1, "capacity_reads": 1}}, "bare total"),
+        (
+            {"runtime_capacity": {"active_runs": 0, "max_concurrent_runs": 1}},
+            "runtime snapshot without tenant or slots",
+        ),
+    ],
+)
+def test_a_truncated_capacity_proof_is_not_release_evidence(
+    receipts: ModuleType,
+    tmp_path: Path,
+    truncation: dict[str, Any],
+    reason: str,
+) -> None:
+    # A proof is only evidence if it carries the facts it claims to have
+    # checked. A total with no breakdown is a number someone could have typed.
+    suite_dir = _suite_dir(tmp_path, _perfect_rows(4))
+    proof = json.loads(json.dumps(_PASSED_CAPACITY_PREFLIGHT))
+    proof.update(truncation)
+    _rewrite_capacity_preflight(suite_dir, proof)
+
+    with pytest.raises(receipts.ReceiptError, match="refused by the capacity"):
+        receipts.load_release_receipt(suite_dir)
+
+
+def test_a_capacity_proof_whose_demand_does_not_add_up_is_refused(
+    receipts: ModuleType, tmp_path: Path
+) -> None:
+    suite_dir = _suite_dir(tmp_path, _perfect_rows(4))
+    proof = json.loads(json.dumps(_PASSED_CAPACITY_PREFLIGHT))
+    proof["demand"]["observation_requests"] += 1
+    _rewrite_capacity_preflight(suite_dir, proof)
+
+    with pytest.raises(receipts.ReceiptError, match="refused by the capacity"):
+        receipts.load_release_receipt(suite_dir)
+
+
+@pytest.mark.parametrize(
+    ("mutation", "guard"),
+    [
+        ({"verdict": "fail"}, "recorded verdict"),
+        ({"refusals": ["insufficient_request_budget"]}, "recorded refusals"),
+        (
+            {
+                "endpoint_failures": [
+                    {
+                        "path": "/api-key-capacity/",
+                        "kind": "http_status",
+                        "status": 429,
+                    }
+                ]
+            },
+            "failed capacity read",
+        ),
+    ],
+)
+def test_a_proof_whose_outcome_contradicts_its_facts_is_refused(
+    receipts: ModuleType,
+    tmp_path: Path,
+    mutation: dict[str, Any],
+    guard: str,
+) -> None:
+    # Each guard is exercised alone, so removing any one of them fails here
+    # rather than hiding behind the others. The capacity facts always clear the
+    # gate; only the recorded outcome disagrees.
+    suite_dir = _suite_dir(tmp_path, _perfect_rows(4))
+    proof = json.loads(json.dumps(_capacity_preflight_for(20)))
+    proof.update(mutation)
+    _rewrite_capacity_preflight(suite_dir, proof)
+
+    with pytest.raises(receipts.ReceiptError, match="disagrees with itself"):
+        receipts.load_release_receipt(suite_dir)

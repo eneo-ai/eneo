@@ -18,7 +18,7 @@ class FlowInputLimits:
     file_max_size_bytes: int
     audio_max_size_bytes: int
     max_files_per_run: int | None = None  # None = unlimited
-    audio_max_files_per_run: int | None = DEFAULT_MAX_AUDIO_FILES_PER_RUN
+    audio_max_files_per_run: int = DEFAULT_MAX_AUDIO_FILES_PER_RUN
 
 
 FLOW_INPUT_LIMIT_KEYS = frozenset(FlowInputLimits.__dataclass_fields__)
@@ -180,9 +180,7 @@ def resolve_flow_input_limits(
 
     if "audio_max_files_per_run" in input_limits:
         raw = input_limits["audio_max_files_per_run"]
-        if raw is None:
-            audio_max_files = None
-        else:
+        if raw is not None:
             audio_max_files = _parse_optional_file_count(
                 raw, "audio_max_files_per_run", FLOW_INPUT_MAX_AUDIO_FILES_COUNT
             )

@@ -19,6 +19,8 @@ UPLOAD_STEP_RUNTIME_FILE_PATH: Final[str] = "/{id}/steps/{step_id}/runtime-files
 DELETE_RUNTIME_FILE_PATH: Final[str] = "/{id}/runtime-files/{file_id}/"
 
 FLOW_RUN_STATUS_CAPABILITIES_PATH: Final[str] = "/runs/status-capabilities/"
+# Collection-level, so it is never captured by the earlier `/{id}/` route.
+FLOW_RUN_CAPACITY_PATH: Final[str] = "/runs/capacity/"
 FLOW_RUNS_PATH: Final[str] = "/{id}/runs/"
 FLOW_RUN_PATH: Final[str] = "/{id}/runs/{run_id}/"
 FLOW_RUN_CANCEL_PATH: Final[str] = "/{id}/runs/{run_id}/cancel/"

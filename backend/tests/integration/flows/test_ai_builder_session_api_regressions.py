@@ -3,8 +3,9 @@ from __future__ import annotations
 import asyncio
 import io
 import json
-from collections.abc import AsyncGenerator
-from dataclasses import replace
+from collections.abc import AsyncGenerator, AsyncIterator
+from contextlib import asynccontextmanager
+from dataclasses import dataclass, replace
 from datetime import datetime, timedelta, timezone
 from typing import cast
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -116,8 +117,10 @@ from eneo.flows.ai_builder.ai_builder_session_turn import (
     SessionTurnAcceptance,
 )
 from eneo.flows.ai_builder.ai_builder_slot_classification_contract import (
+    CLASSIFICATION_EVIDENCE_MAX_LENGTH,
     ClassifiedEvidence,
     ClassifiedSlot,
+    SlotClassificationAttempt,
     SlotClassificationInput,
     SlotClassificationResult,
 )
@@ -229,6 +232,75 @@ def _make_tool_call(
     tool_call.function.name = name
     tool_call.function.arguments = json.dumps(arguments)
     return tool_call
+
+
+def _structured_answer_message(
+    *,
+    question_id: str,
+    value: str,
+    content: str,
+) -> ConversationMessage:
+    """A user turn that answered a server-owned structured question.
+
+    Slots replayed from this metadata are commit-grade; slots inferred from
+    freeform prose are not.
+    """
+
+    return ConversationMessage(
+        role="user",
+        content=content,
+        metadata={
+            "question_answer": {
+                "question_id": question_id,
+                "selected_option_id": value,
+                "answer": value,
+            },
+            "ui_language": "sv",
+        },
+    )
+
+
+def _semantic_create_proposal_step(
+    *,
+    name: str,
+    instructions: str,
+    output_fields: list[dict[str, object]] | None = None,
+    model_ref: str | None = None,
+    knowledge_refs: list[str] | None = None,
+    citations_requested: bool = False,
+) -> dict[str, object]:
+    """One step in the create-mode semantic proposal contract.
+
+    The create tool schema marks every step property required and forbids
+    additional ones (mechanics such as output_type are compiled server-side),
+    so a synthetic provider payload has to carry the full property set.
+    """
+
+    return {
+        "name": name,
+        "instructions": instructions,
+        "output_fields": output_fields,
+        "model_ref": model_ref,
+        "knowledge_refs": list(knowledge_refs or []),
+        "citations_requested": citations_requested,
+    }
+
+
+def _semantic_create_proposal_arguments(
+    *,
+    flow_name: str,
+    flow_description: str | None,
+    plan_rationale: str,
+    steps: list[dict[str, object]],
+    assumptions: list[str] | None = None,
+) -> dict[str, object]:
+    return {
+        "flow_name": flow_name,
+        "flow_description": flow_description,
+        "plan_rationale": plan_rationale,
+        "steps": steps,
+        "assumptions": list(assumptions or []),
+    }
 
 
 def _parse_sse_payload(body: str) -> list[dict[str, object]]:
@@ -401,6 +473,8 @@ async def _create_space_with_planner_model(
     db_container,
     completion_model_factory,
     space_name: str,
+    planner_model_overrides: dict[str, object] | None = None,
+    planner_model_is_only_space_model: bool = False,
 ) -> str:
     space_id = await _create_space_via_api(
         client=client,
@@ -414,7 +488,20 @@ async def _create_space_with_planner_model(
             session,
             "gpt-4o-mini",
             litellm_model_name="openai/gpt-4o-mini",
+            **(planner_model_overrides or {}),
         )
+        if planner_model_is_only_space_model:
+            # Space creation maps every enabled tenant model, including the
+            # session-wide 8000-token `fixture-gpt-4` tenant default. That
+            # fixture sorts first and is also org-default, so it — not the
+            # model configured here — is what `resolve_planner_model` returns.
+            # Tests that depend on the planner's context window must own the
+            # space's model set outright.
+            await session.execute(
+                sa.delete(SpacesCompletionModels).where(
+                    SpacesCompletionModels.space_id == UUID(space_id)
+                )
+            )
         session.add(
             SpacesCompletionModels(
                 space_id=UUID(space_id),
@@ -681,31 +768,30 @@ async def _create_proposed_ai_builder_plan(
         return session_id, tenant_id, stored_plan.plan.id, turn.lease
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
-async def test_create_session_is_committed_at_final_response_body_boundary(
+@dataclass(frozen=True)
+class _PausedResponseBoundary:
+    status: int
+    payload: dict[str, object]
+    request_task: asyncio.Task[None]
+
+
+@asynccontextmanager
+async def _pause_request_cleanup_after_final_response(
+    *,
     app,
-    client,
+    method: str,
+    path: str,
     bearer_token: str,
-    completion_model_factory,
-    db_container,
-) -> None:
-    space_id = await _create_space_with_planner_model(
-        client=client,
-        bearer_token=bearer_token,
-        db_container=db_container,
-        completion_model_factory=completion_model_factory,
-        space_name="AI Builder response boundary durability",
-    )
-    request_body = json.dumps({"target_kind": "create", "space_id": space_id}).encode()
+    body: bytes,
+) -> AsyncIterator[_PausedResponseBoundary]:
     scope: Scope = {
         "type": "http",
         "asgi": {"version": "3.0"},
         "http_version": "1.1",
-        "method": "POST",
+        "method": method,
         "scheme": "http",
-        "path": "/api/v1/flows/ai-builder/sessions",
-        "raw_path": b"/api/v1/flows/ai-builder/sessions",
+        "path": path,
+        "raw_path": path.encode(),
         "query_string": b"",
         "root_path": "",
         "headers": [
@@ -723,11 +809,8 @@ async def test_create_session_is_committed_at_final_response_body_boundary(
     response_status: int | None = None
     response_body = bytearray()
 
-    def is_create_session_request(request: Request) -> bool:
-        return (
-            request.method == "POST"
-            and request.url.path == "/api/v1/flows/ai-builder/sessions"
-        )
+    def is_target_request(request: Request) -> bool:
+        return request.method == method and request.url.path == path
 
     async def gated_transaction_session(
         request: Request,
@@ -736,7 +819,7 @@ async def test_create_session_is_committed_at_final_response_body_boundary(
             try:
                 yield session
             finally:
-                if is_create_session_request(request):
+                if is_target_request(request):
                     cleanup_started.set()
                     await release_cleanup.wait()
 
@@ -747,7 +830,7 @@ async def test_create_session_is_committed_at_final_response_body_boundary(
             try:
                 yield session
             finally:
-                if is_create_session_request(request):
+                if is_target_request(request):
                     cleanup_started.set()
                     await release_cleanup.wait()
 
@@ -762,11 +845,7 @@ async def test_create_session_is_committed_at_final_response_body_boundary(
         nonlocal request_received
         if not request_received:
             request_received = True
-            return {
-                "type": "http.request",
-                "body": request_body,
-                "more_body": False,
-            }
+            return {"type": "http.request", "body": body, "more_body": False}
         await release_cleanup.wait()
         return {"type": "http.disconnect"}
 
@@ -781,7 +860,7 @@ async def test_create_session_is_committed_at_final_response_body_boundary(
         if not message.get("more_body", False):
             final_body_received.set()
 
-    post_task = asyncio.create_task(app(scope, receive, send))
+    request_task = asyncio.create_task(app(scope, receive, send))
 
     async def wait_for_response_boundary() -> None:
         await final_body_received.wait()
@@ -790,15 +869,65 @@ async def test_create_session_is_committed_at_final_response_body_boundary(
     response_boundary_wait = asyncio.create_task(wait_for_response_boundary())
     try:
         completed, _ = await asyncio.wait(
-            {post_task, response_boundary_wait},
+            {request_task, response_boundary_wait},
             return_when=asyncio.FIRST_COMPLETED,
         )
         assert response_boundary_wait in completed
-        assert not post_task.done()
-        assert response_status == 201
+        assert not request_task.done()
+        assert response_status is not None
+        yield _PausedResponseBoundary(
+            status=response_status,
+            payload=cast(dict[str, object], json.loads(response_body)),
+            request_task=request_task,
+        )
+    finally:
+        release_cleanup.set()
+        try:
+            await request_task
+        finally:
+            if not response_boundary_wait.done():
+                response_boundary_wait.cancel()
+            try:
+                await response_boundary_wait
+            except asyncio.CancelledError:
+                pass
+            if previous_transaction_override is None:
+                app.dependency_overrides.pop(get_session_with_transaction, None)
+            else:
+                app.dependency_overrides[get_session_with_transaction] = (
+                    previous_transaction_override
+                )
+            if previous_session_override is None:
+                app.dependency_overrides.pop(get_session, None)
+            else:
+                app.dependency_overrides[get_session] = previous_session_override
 
-        response_payload = cast(dict[str, object], json.loads(response_body))
-        session_id = UUID(cast(str, response_payload["session_id"]))
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_create_session_is_committed_at_final_response_body_boundary(
+    app,
+    client,
+    bearer_token: str,
+    completion_model_factory,
+    db_container,
+) -> None:
+    space_id = await _create_space_with_planner_model(
+        client=client,
+        bearer_token=bearer_token,
+        db_container=db_container,
+        completion_model_factory=completion_model_factory,
+        space_name="AI Builder response boundary durability",
+    )
+    async with _pause_request_cleanup_after_final_response(
+        app=app,
+        method="POST",
+        path="/api/v1/flows/ai-builder/sessions",
+        bearer_token=bearer_token,
+        body=json.dumps({"target_kind": "create", "space_id": space_id}).encode(),
+    ) as response:
+        assert response.status == 201
+        session_id = UUID(cast(str, response.payload["session_id"]))
         headers = {"Authorization": f"Bearer {bearer_token}"}
         session_response, models_response = await asyncio.gather(
             client.get(
@@ -828,28 +957,7 @@ async def test_create_session_is_committed_at_final_response_body_boundary(
             )
 
         assert audit_count == 1
-        assert not post_task.done()
-    finally:
-        release_cleanup.set()
-        try:
-            await post_task
-        finally:
-            if not response_boundary_wait.done():
-                response_boundary_wait.cancel()
-            try:
-                await response_boundary_wait
-            except asyncio.CancelledError:
-                pass
-            if previous_transaction_override is None:
-                app.dependency_overrides.pop(get_session_with_transaction, None)
-            else:
-                app.dependency_overrides[get_session_with_transaction] = (
-                    previous_transaction_override
-                )
-            if previous_session_override is None:
-                app.dependency_overrides.pop(get_session, None)
-            else:
-                app.dependency_overrides[get_session] = previous_session_override
+        assert not response.request_task.done()
 
 
 @pytest.mark.integration
@@ -1991,12 +2099,18 @@ async def test_ai_builder_message_and_attachments_are_committed_before_first_pro
     completion_model_factory,
     db_container,
 ):
+    # The default fixture context window is too small for the requirement
+    # classifier, which is the first provider call on an attachment turn; the
+    # Builder would otherwise answer with a deterministic discovery question
+    # before any provider work and this durability proof could not observe it.
     space_id = await _create_space_with_planner_model(
         client=client,
         bearer_token=bearer_token,
         db_container=db_container,
         completion_model_factory=completion_model_factory,
         space_name="AI Builder Attachment Persistence",
+        planner_model_overrides={"max_input_tokens": 128_000},
+        planner_model_is_only_space_model=True,
     )
     file_id = await _upload_reference_file(
         client=client,
@@ -2108,6 +2222,7 @@ async def test_ai_builder_message_and_attachments_are_committed_before_first_pro
                     "client_turn_id": str(client_turn_id),
                     "message": "Använd det bifogade referensmaterialet.",
                     "model_id": None,
+                    "reasoning_effort": None,
                     "file_ids": [file_id],
                     "question_answer": None,
                     "edit_context": None,
@@ -2594,6 +2709,11 @@ async def test_ai_builder_known_provider_rejection_commits_and_replays_without_r
         db_container=db_container,
         completion_model_factory=completion_model_factory,
         space_name=f"AI Builder Known Rejection {expected_exception_class}",
+        # The first provider call of a turn is the requirement classifier, which
+        # only runs when the planner model's context window can admit it; the
+        # fixture tenant default (8000) cannot.
+        planner_model_overrides={"max_input_tokens": 128_000},
+        planner_model_is_only_space_model=True,
     )
     session_id = await _create_ai_builder_session(
         client=client,
@@ -2754,6 +2874,11 @@ async def test_ai_builder_unknown_provider_outcome_requires_explicit_acknowledge
         db_container=db_container,
         completion_model_factory=completion_model_factory,
         space_name="AI Builder Unknown Provider Outcome",
+        # The first provider call of a turn is the requirement classifier, which
+        # only runs when the planner model's context window can admit it; the
+        # fixture tenant default (8000) cannot.
+        planner_model_overrides={"max_input_tokens": 128_000},
+        planner_model_is_only_space_model=True,
     )
     session_id = await _create_ai_builder_session(
         client=client,
@@ -2871,6 +2996,11 @@ async def test_ai_builder_pre_provider_failure_resumes_same_durable_turn(
         db_container=db_container,
         completion_model_factory=completion_model_factory,
         space_name="AI Builder Pre-provider Resume",
+        # The retry must reach the provider, and the first provider call of a
+        # turn is the requirement classifier, which only runs when the planner
+        # model's context window can admit it.
+        planner_model_overrides={"max_input_tokens": 128_000},
+        planner_model_is_only_space_model=True,
     )
     session_id = await _create_ai_builder_session(
         client=client,
@@ -2983,6 +3113,90 @@ async def test_ai_builder_repo_accept_session_turn_can_reclaim_expired_open_leas
             lock_expires_at=datetime.now(timezone.utc) + timedelta(seconds=30),
         )
         assert reclaimed.lease == reclaimed_lease
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_ai_builder_turn_baseline_orders_tied_attachments_deterministically(
+    client,
+    bearer_token,
+    db_container,
+):
+    space_id = await _create_space_via_api(
+        client=client,
+        bearer_token=bearer_token,
+        name="AI Builder Stable Attachment Order",
+    )
+    async with db_container() as container:
+        repo = AIBuilderRepository(container.session())
+        user = container.user()
+        session = await repo.create_session(
+            tenant_id=user.tenant_id,
+            space_id=UUID(space_id),
+            actor_user_id=user.id,
+            target_kind=TargetKind.CREATE,
+            flow_id=None,
+        )
+        file_service = container.file_service()
+        files = [
+            await file_service.save_generated_file(
+                payload=f"attachment-{index}".encode(),
+                name=f"attachment-{index}.txt",
+                mimetype="text/plain",
+                file_type=FileType.TEXT,
+            )
+            for index in range(6)
+        ]
+        expected_file_ids = tuple(sorted(file.id for file in files))
+        tied_created_at = datetime(2026, 1, 1, tzinfo=timezone.utc)
+        await container.session().execute(
+            insert(BuilderSessionFiles).values(
+                [
+                    {
+                        "session_id": session.id,
+                        "file_id": file_id,
+                        "tenant_id": user.tenant_id,
+                        "created_at": tied_created_at,
+                    }
+                    for file_id in reversed(expected_file_ids)
+                ]
+            )
+        )
+
+        listed_file_ids = await repo.list_session_file_ids(
+            session_id=session.id,
+            tenant_id=user.tenant_id,
+        )
+        client_turn_id = uuid4()
+        preflight = await repo.preflight_session_turn(
+            session_id=session.id,
+            tenant_id=user.tenant_id,
+            client_turn_id=client_turn_id,
+            request_fingerprint="a" * 64,
+            acknowledge_duplicate_provider_spend=False,
+        )
+
+        assert listed_file_ids == list(expected_file_ids)
+        assert preflight.baseline.attachment_file_ids == expected_file_ids
+
+        message = ConversationMessage(role="user", content="Use all attachments")
+        await repo.accept_session_turn(
+            session_id=session.id,
+            tenant_id=user.tenant_id,
+            lease=SessionSendLease(request_id=uuid4(), lock_token=uuid4()),
+            lock_lease_seconds=30,
+            acceptance=SessionTurnAcceptance(
+                client_turn_id=client_turn_id,
+                request_fingerprint="a" * 64,
+                request={
+                    "client_turn_id": str(client_turn_id),
+                    "message": message.content,
+                },
+                user_message=message,
+                file_ids=(),
+            ),
+            preparation_baseline=preflight.baseline,
+        )
 
 
 @pytest.mark.integration
@@ -5449,12 +5663,33 @@ async def test_ai_builder_repo_commit_turn_rolls_back_pinned_architecture_drift(
         "Skapa ett enkelt flöde som tar emot en kort text från användaren "
         "och sammanfattar den i tre tydliga punkter."
     )
+    # Only commit-grade slots derive an architecture: a heuristic reading of
+    # freeform text cannot pin one, so the architecture is committed from the
+    # user's own structured answers.
+    text_input_answer = _structured_answer_message(
+        question_id="primary_runtime_input",
+        value="text",
+        content="Text",
+    )
+    text_output_answer = _structured_answer_message(
+        question_id="terminal_output",
+        value="structured_text",
+        content="Strukturerad text",
+    )
+    pdf_output_answer = _structured_answer_message(
+        question_id="terminal_output",
+        value="pdf_document",
+        content="PDF-dokument",
+    )
     prior_state = build_planning_state_from_conversation(
-        [ConversationMessage(role="user", content=text_request)]
+        [
+            ConversationMessage(role="user", content=text_request),
+            text_input_answer,
+            text_output_answer,
+        ]
     )
     prior_draft = derive_architecture_commit_draft(prior_state)
     assert prior_draft is not None
-    prior_state.architecture_commit = finalize_architecture_commit(prior_draft)
 
     async with db_container() as container:
         repo = AIBuilderRepository(container.session())
@@ -5475,15 +5710,24 @@ async def test_ai_builder_repo_commit_turn_rolls_back_pinned_architecture_drift(
         await repo.commit_turn(
             turn=first_turn,
             new_messages=[
-                ConversationMessage(role="assistant", content="Architecture pinned")
+                text_input_answer,
+                text_output_answer,
+                ConversationMessage(role="assistant", content="Architecture pinned"),
             ],
-            architecture_commit=prior_state.architecture_commit,
+            architecture_commit=finalize_architecture_commit(prior_draft),
         )
         await repo.release_session_send(
             session_id=session.id,
             tenant_id=user.tenant_id,
             lease=first_turn.lease,
         )
+        pinned_state = await repo.load_planning_state(
+            session_id=session.id,
+            tenant_id=user.tenant_id,
+        )
+
+    assert pinned_state is not None
+    assert pinned_state.architecture_commit is not None
 
     async with db_container() as container:
         repo = AIBuilderRepository(container.session())
@@ -5499,10 +5743,11 @@ async def test_ai_builder_repo_commit_turn_rolls_back_pinned_architecture_drift(
             await repo.commit_turn(
                 turn=turn,
                 new_messages=[
+                    pdf_output_answer,
                     ConversationMessage(
                         role="assistant",
                         content="Should roll back",
-                    )
+                    ),
                 ],
             )
 
@@ -5528,10 +5773,12 @@ async def test_ai_builder_repo_commit_turn_rolls_back_pinned_architecture_drift(
 
     assert [message.content for message in fetched.conversation] == [
         text_request,
+        "Text",
+        "Strukturerad text",
         "Architecture pinned",
         "Ändra slutresultatet till PDF istället.",
     ]
-    assert loaded == prior_state
+    assert loaded == pinned_state
     assert turn_state == BuilderTurnState.OPEN.value
     assert active_request_id == turn.lease.request_id
 
@@ -6006,7 +6253,6 @@ async def test_server_question_with_lost_lease_rolls_back(
                     turn=stale_turn,
                     decision=AskCanonicalQuestion(
                         slot_name="primary_runtime_input",
-                        prompt="Vilken indata ska flödet använda?",
                     ),
                     conversation=[],
                     new_messages_start=0,
@@ -6061,6 +6307,9 @@ async def test_handle_edit_flow_with_lost_lease_rolls_back(
     )
     from eneo.flows.ai_builder.ai_builder_resource_catalog import (
         build_ai_builder_resource_catalog,
+    )
+    from eneo.flows.ai_builder.ai_builder_tools import (
+        build_propose_flow_tool_schema,
     )
 
     async with db_container() as container:
@@ -6139,6 +6388,10 @@ async def test_handle_edit_flow_with_lost_lease_rolls_back(
             available_models=[],
             available_kbs=[],
         )
+        proposal_tool_schema = build_propose_flow_tool_schema(
+            resource_catalog=resource_catalog,
+            current_steps=list(flow.steps),
+        )
         completion_model_route = _route(kwargs={"api_key": "sk-test"})
         with pytest.raises(BadRequestException) as exc:
             _ = [
@@ -6158,6 +6411,8 @@ async def test_handle_edit_flow_with_lost_lease_rolls_back(
                     available_model_refs=None,
                     available_kb_refs=None,
                     resource_catalog=resource_catalog,
+                    proposal_tool_schema=proposal_tool_schema,
+                    compile_context=None,
                     max_output_tokens=512,
                     proposal_temperature=0.3,
                     request_id="req-edit-lost-lease",
@@ -6829,11 +7084,15 @@ async def test_ai_builder_api_does_not_repeat_report_disposition_after_structure
         db_container=db_container,
         completion_model_factory=completion_model_factory,
         space_name="AI Builder report-disposition monotonicity",
+        # The requirement classifier only runs when the planner model's context
+        # window can admit it; the fixture tenant default (8000) cannot.
+        planner_model_overrides={"max_input_tokens": 128_000},
+        planner_model_is_only_space_model=True,
     )
 
     classification_call_count = 0
 
-    async def classify_report_shape(**kwargs: object) -> SlotClassificationResult:
+    async def classify_report_shape(**kwargs: object) -> SlotClassificationAttempt:
         nonlocal classification_call_count
         classification_input = kwargs.get("classification_input")
         assert isinstance(classification_input, SlotClassificationInput)
@@ -6846,41 +7105,47 @@ async def test_ai_builder_api_does_not_repeat_report_disposition_after_structure
         )
         classification_call_count += 1
         if classification_call_count == 1:
-            return SlotClassificationResult(
+            return SlotClassificationAttempt(
+                outcome="resolved",
+                result=SlotClassificationResult(
+                    slots=(
+                        ClassifiedSlot(
+                            slot_name="primary_runtime_input",
+                            value="documents",
+                            confidence="high",
+                            reason="The flow reads several uploaded documents.",
+                            evidence=evidence,
+                        ),
+                        ClassifiedSlot(
+                            slot_name="document_material_scope",
+                            value="multiple_documents_case",
+                            confidence="high",
+                            reason="Each run handles a document set.",
+                            evidence=evidence,
+                        ),
+                        ClassifiedSlot(
+                            slot_name="post_processing_goal",
+                            value="structure_key_information",
+                            confidence="high",
+                            reason="The requested result is a structured report.",
+                            evidence=evidence,
+                        ),
+                    )
+                ),
+            )
+        return SlotClassificationAttempt(
+            outcome="resolved",
+            result=SlotClassificationResult(
                 slots=(
                     ClassifiedSlot(
-                        slot_name="primary_runtime_input",
-                        value="documents",
-                        confidence="high",
-                        reason="The flow reads several uploaded documents.",
-                        evidence=evidence,
-                    ),
-                    ClassifiedSlot(
-                        slot_name="document_material_scope",
-                        value="multiple_documents_case",
-                        confidence="high",
-                        reason="Each run handles a document set.",
-                        evidence=evidence,
-                    ),
-                    ClassifiedSlot(
-                        slot_name="post_processing_goal",
-                        value="structure_key_information",
-                        confidence="high",
-                        reason="The requested result is a structured report.",
+                        slot_name="report_disposition",
+                        value="synthesized_overview",
+                        confidence="medium",
+                        reason="Older classifier inference from the whole transcript.",
                         evidence=evidence,
                     ),
                 )
-            )
-        return SlotClassificationResult(
-            slots=(
-                ClassifiedSlot(
-                    slot_name="report_disposition",
-                    value="synthesized_overview",
-                    confidence="medium",
-                    reason="Older classifier inference from the whole transcript.",
-                    evidence=evidence,
-                ),
-            )
+            ),
         )
 
     mock_classifier = AsyncMock(side_effect=classify_report_shape)
@@ -6917,19 +7182,14 @@ async def test_ai_builder_api_does_not_repeat_report_disposition_after_structure
                 "ui_language": "sv",
             },
         )
+        async with db_container() as container:
+            classified_state = await AIBuilderRepository(
+                container.session()
+            ).load_planning_state(
+                session_id=UUID(session_id),
+                tenant_id=container.user().tenant_id,
+            )
         third_events = await _send_builder_message(
-            client=client,
-            bearer_token=bearer_token,
-            session_id=session_id,
-            message="Vanlig genererad PDF",
-            question_answer={
-                "question_id": "pdf_generation_mode",
-                "selected_option_ids": ["generated_pdf"],
-                "selected_values": ["generated_pdf"],
-                "ui_language": "sv",
-            },
-        )
-        fourth_events = await _send_builder_message(
             client=client,
             bearer_token=bearer_token,
             session_id=session_id,
@@ -6947,30 +7207,28 @@ async def test_ai_builder_api_does_not_repeat_report_disposition_after_structure
         == "terminal_output"
         for event in first_events
     )
-    assert any(
-        event["event"] == "question"
-        and cast(dict[str, object], event["data"]).get("question_id")
-        == "pdf_generation_mode"
-        for event in second_events
-    ), [
-        (
-            event["event"],
-            cast(dict[str, object], event["data"]).get("question_id"),
-        )
-        for event in second_events
-    ]
-    assert any(
-        event["event"] == "question"
-        and cast(dict[str, object], event["data"]).get("question_id")
-        == "report_disposition"
-        for event in third_events
-    ), _builder_event_outline(third_events)
-    assert not any(event["event"] == "error" for event in fourth_events), fourth_events
+    # `report_disposition` has no discovery question of its own: the classifier
+    # owns it, so the second turn resolves it from model evidence and moves on.
     assert not any(
         event["event"] == "question"
         and cast(dict[str, object], event["data"]).get("question_id")
         == "report_disposition"
-        for event in fourth_events
+        for event in second_events
+    ), _builder_event_outline(second_events)
+    assert classified_state is not None
+    classified_disposition = classified_state.resolved_slots["report_disposition"]
+    assert classified_disposition.value == "synthesized_overview"
+    assert classified_disposition.source == "model"
+    # The third turn carries the user's structured answer while the classifier
+    # keeps replaying its older inference for the same slot; the answer wins and
+    # the slot is never re-asked.
+    assert classification_call_count >= 3
+    assert not any(event["event"] == "error" for event in third_events), third_events
+    assert not any(
+        event["event"] == "question"
+        and cast(dict[str, object], event["data"]).get("question_id")
+        == "report_disposition"
+        for event in third_events
     )
     async with db_container() as container:
         repo = AIBuilderRepository(container.session())
@@ -7264,81 +7522,95 @@ async def test_ai_builder_api_create_mode_can_generate_approve_apply_and_publish
         db_container=db_container,
         completion_model_factory=completion_model_factory,
         space_name="AI Builder API create/apply/publish",
+        # The requirement classifier only runs when the planner model's context
+        # window can admit it; the fixture tenant default (8000) cannot.
+        planner_model_overrides={"max_input_tokens": 128_000},
+        planner_model_is_only_space_model=True,
     )
 
     outline_flow = _make_tool_call(
         tool_call_id="call_plan",
         name=PROPOSE_FLOW_TOOL_NAME,
-        arguments={
-            "flow_name": "Dokumentsammanfattning till PDF",
-            "flow_description": "Sammanfattar uppladdade dokument i en PDF-rapport.",
-            "plan_rationale": "Extrahera en grundad sammanfattning och skapa en PDF-rapport.",
-            "steps": [
-                {
-                    "name": "Extrahera sammanfattning",
-                    "instructions": (
+        arguments=_semantic_create_proposal_arguments(
+            flow_name="Dokumentsammanfattning till PDF",
+            flow_description="Sammanfattar uppladdade dokument i en PDF-rapport.",
+            plan_rationale=(
+                "Extrahera en grundad sammanfattning och skapa en PDF-rapport."
+            ),
+            steps=[
+                _semantic_create_proposal_step(
+                    name="Extrahera sammanfattning",
+                    instructions=(
                         "Sammanfatta dokumentunderlaget på tydlig svenska med de "
                         "viktigaste punkterna för en mänsklig läsare."
                     ),
-                    "output_type": "json",
-                    "output_fields": [
+                    output_fields=[
                         {
                             "name": "summary",
                             "field_type": "string",
                             "description": "Kort sammanfattning grundad i källmaterialet.",
+                            "required": True,
                         }
                     ],
-                },
+                ),
             ],
-        },
+        ),
     )
 
     mock_completion = AsyncMock(
         return_value=_make_llm_response(tool_calls=[outline_flow])
     )
 
-    async def classify_create_request(**kwargs: object) -> SlotClassificationResult:
+    async def classify_create_request(**kwargs: object) -> SlotClassificationAttempt:
         classification_input = kwargs.get("classification_input")
         assert isinstance(classification_input, SlotClassificationInput)
         source = classification_input.sources[-1]
-        evidence = (ClassifiedEvidence(source_id=source.source_id, quote=source.text),)
-        return SlotClassificationResult(
-            slots=tuple(
-                ClassifiedSlot(
-                    slot_name=slot_name,
-                    value=value,
-                    confidence="high",
-                    reason=reason,
-                    evidence=evidence,
+        evidence = (
+            ClassifiedEvidence(
+                source_id=source.source_id,
+                quote=source.text[:CLASSIFICATION_EVIDENCE_MAX_LENGTH],
+            ),
+        )
+        return SlotClassificationAttempt(
+            outcome="resolved",
+            result=SlotClassificationResult(
+                slots=tuple(
+                    ClassifiedSlot(
+                        slot_name=slot_name,
+                        value=value,
+                        confidence="high",
+                        reason=reason,
+                        evidence=evidence,
+                    )
+                    for slot_name, value, reason in (
+                        (
+                            "primary_runtime_input",
+                            "documents",
+                            "The request explicitly uploads documents.",
+                        ),
+                        (
+                            "document_material_scope",
+                            "multiple_documents_case",
+                            "The request explicitly refers to uploaded documents.",
+                        ),
+                        (
+                            "terminal_output",
+                            "pdf_document",
+                            "The requested result is a PDF report.",
+                        ),
+                        (
+                            "post_processing_goal",
+                            "summarize_or_overview",
+                            "The requested processing is summarization.",
+                        ),
+                        (
+                            "output_reader",
+                            "human_reader",
+                            "The request names a human reader.",
+                        ),
+                    )
                 )
-                for slot_name, value, reason in (
-                    (
-                        "primary_runtime_input",
-                        "documents",
-                        "The request explicitly uploads documents.",
-                    ),
-                    (
-                        "document_material_scope",
-                        "multiple_documents_case",
-                        "The request explicitly refers to uploaded documents.",
-                    ),
-                    (
-                        "terminal_output",
-                        "pdf_document",
-                        "The requested result is a PDF report.",
-                    ),
-                    (
-                        "post_processing_goal",
-                        "summarize_or_overview",
-                        "The requested processing is summarization.",
-                    ),
-                    (
-                        "output_reader",
-                        "human_reader",
-                        "The request names a human reader.",
-                    ),
-                )
-            )
+            ),
         )
 
     with (
@@ -7682,6 +7954,15 @@ async def test_ai_builder_api_edit_mode_invalid_existing_step_ref_returns_typed_
             tenant_id=builder_session.tenant_id,
             plan_id=plan.id,
         )
+        # A real proposal turn commits planning state alongside the plan; apply
+        # treats a missing state as corruption, so the shortcut that injects an
+        # approved plan has to install it too.
+        await repo.save_planning_state(
+            session_id=builder_session.id,
+            tenant_id=builder_session.tenant_id,
+            state=PlanningState.empty(),
+            base_version=None,
+        )
 
     apply_response = await client.post(
         f"/api/v1/flows/ai-builder/plans/{plan.id}/apply",
@@ -7866,28 +8147,34 @@ async def test_ai_builder_api_create_mode_audio_apply_without_transcription_mode
     outline_flow = _make_tool_call(
         tool_call_id="call_plan",
         name=PROPOSE_FLOW_TOOL_NAME,
-        arguments={
-            "flow_name": "Ljudtranskribering till PDF",
-            "flow_description": "Transkriberar uppladdat ljud och skapar en PDF-sammanfattning.",
-            "plan_rationale": "Transkribera först och generera sedan PDF-sammanfattningen.",
-            "steps": [
-                {
-                    "name": "Skapa PDF-sammanfattning",
-                    "instructions": (
+        arguments=_semantic_create_proposal_arguments(
+            flow_name="Ljudtranskribering till PDF",
+            flow_description=(
+                "Transkriberar uppladdat ljud och skapar en PDF-sammanfattning."
+            ),
+            plan_rationale=(
+                "Transkribera först och generera sedan PDF-sammanfattningen."
+            ),
+            steps=[
+                _semantic_create_proposal_step(
+                    name="Skapa PDF-sammanfattning",
+                    instructions=(
                         "Sammanfatta transkriberingen på tydlig svenska med de "
                         "viktigaste punkterna för en mänsklig läsare."
                     ),
-                    "output_type": "text",
-                },
-                {
-                    "name": "Generera PDF-dokument",
-                    "instructions": (
-                        "Skapa ett läsbart PDF-dokument utifrån sammanfattningen."
-                    ),
-                    "output_type": "pdf",
-                },
+                    output_fields=[
+                        {
+                            "name": "summary",
+                            "field_type": "string",
+                            "description": (
+                                "Kort sammanfattning grundad i transkriberingen."
+                            ),
+                            "required": True,
+                        }
+                    ],
+                ),
             ],
-        },
+        ),
     )
 
     mock_completion = AsyncMock(
@@ -8000,6 +8287,15 @@ async def test_ai_builder_api_create_mode_invalid_existing_step_ref_returns_type
             session_id=session.id,
             tenant_id=user.tenant_id,
             plan_id=plan.id,
+        )
+        # A real proposal turn commits planning state alongside the plan; apply
+        # treats a missing state as corruption, so the shortcut that injects an
+        # approved plan has to install it too.
+        await repo.save_planning_state(
+            session_id=session.id,
+            tenant_id=user.tenant_id,
+            state=PlanningState.empty(),
+            base_version=None,
         )
 
     apply_response = await client.post(
@@ -8134,6 +8430,10 @@ async def test_ai_builder_api_audio_report_confirms_core_output_before_runtime_m
         db_container=db_container,
         completion_model_factory=completion_model_factory,
         space_name="AI Builder API audio report prompt",
+        # The requirement classifier only runs when the planner model's context
+        # window can admit it; the fixture tenant default (8000) cannot.
+        planner_model_overrides={"max_input_tokens": 128_000},
+        planner_model_is_only_space_model=True,
     )
 
     requirements_summary = _make_tool_call(
@@ -8153,28 +8453,38 @@ async def test_ai_builder_api_audio_report_confirms_core_output_before_runtime_m
         },
     )
 
-    async def classify_audio_request(**kwargs: object) -> SlotClassificationResult:
+    async def classify_audio_request(**kwargs: object) -> SlotClassificationAttempt:
         classification_input = kwargs.get("classification_input")
         assert isinstance(classification_input, SlotClassificationInput)
         source = classification_input.sources[-1]
-        evidence = (ClassifiedEvidence(source_id=source.source_id, quote=source.text),)
-        return SlotClassificationResult(
-            slots=(
-                ClassifiedSlot(
-                    slot_name="primary_runtime_input",
-                    value="audio",
-                    confidence="high",
-                    reason="The user explicitly says an audio file is uploaded.",
-                    evidence=evidence,
-                ),
-                ClassifiedSlot(
-                    slot_name="post_processing_goal",
-                    value="structure_key_information",
-                    confidence="high",
-                    reason="The request explicitly names the report fields to extract.",
-                    evidence=evidence,
-                ),
-            )
+        evidence = (
+            ClassifiedEvidence(
+                source_id=source.source_id,
+                quote=source.text[:CLASSIFICATION_EVIDENCE_MAX_LENGTH],
+            ),
+        )
+        return SlotClassificationAttempt(
+            outcome="resolved",
+            result=SlotClassificationResult(
+                slots=(
+                    ClassifiedSlot(
+                        slot_name="primary_runtime_input",
+                        value="audio",
+                        confidence="high",
+                        reason="The user explicitly says an audio file is uploaded.",
+                        evidence=evidence,
+                    ),
+                    ClassifiedSlot(
+                        slot_name="post_processing_goal",
+                        value="structure_key_information",
+                        confidence="high",
+                        reason=(
+                            "The request explicitly names the report fields to extract."
+                        ),
+                        evidence=evidence,
+                    ),
+                )
+            ),
         )
 
     with (
@@ -8222,18 +8532,6 @@ async def test_ai_builder_api_audio_report_confirms_core_output_before_runtime_m
                     "ui_language": "sv",
                 },
             )
-            third_events = await _send_builder_message(
-                client=client,
-                bearer_token=bearer_token,
-                session_id=session_id,
-                message="Inga extra fält",
-                question_answer={
-                    "question_id": "runtime_metadata_fields",
-                    "selected_option_ids": ["no_extra_metadata"],
-                    "selected_values": ["no_extra_metadata"],
-                    "ui_language": "sv",
-                },
-            )
 
     question_ids = [
         cast(dict[str, object], event["data"]).get("question_id")
@@ -8241,15 +8539,102 @@ async def test_ai_builder_api_audio_report_confirms_core_output_before_runtime_m
         if event["event"] == "question"
     ]
     assert question_ids == ["terminal_output"]
-    assert any(
-        event["event"] == "question"
-        and cast(dict[str, object], event["data"]).get("question_id")
-        == "runtime_metadata_fields"
-        for event in second_events
-    ), _builder_event_outline(second_events)
-    assert any(event["event"] == "requirements_summary" for event in third_events), (
-        _builder_event_outline(third_events)
+    # Runtime metadata is settled by a visible assumption rather than a
+    # question, so it must never displace the core-output question and it must
+    # only surface once the core output is confirmed.
+    assert all(
+        cast(dict[str, object], event["data"]).get("question_id")
+        != "runtime_metadata_fields"
+        for event in first_events + second_events
+        if event["event"] == "question"
+    ), _builder_event_outline(first_events + second_events)
+    requirements_event = next(
+        (event for event in second_events if event["event"] == "requirements_summary"),
+        None,
     )
+    assert requirements_event is not None, _builder_event_outline(second_events)
+    assumptions = cast(dict[str, object], requirements_event["data"])["assumptions"]
+    assert any(
+        "formulärfält" in assumption for assumption in cast(list[str], assumptions)
+    ), assumptions
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_approve_and_create_commits_flow_at_final_response_body_boundary(
+    app,
+    client,
+    bearer_token: str,
+    completion_model_factory,
+    db_container,
+) -> None:
+    space_id = await _create_space_with_planner_model(
+        client=client,
+        bearer_token=bearer_token,
+        db_container=db_container,
+        completion_model_factory=completion_model_factory,
+        space_name="AI Builder create response boundary durability",
+    )
+    session_id, tenant_id, plan_id, _ = await _create_proposed_ai_builder_plan(
+        client=client,
+        bearer_token=bearer_token,
+        db_container=db_container,
+        space_id=space_id,
+    )
+    async with _pause_request_cleanup_after_final_response(
+        app=app,
+        method="POST",
+        path=f"/api/v1/flows/ai-builder/plans/{plan_id}/create",
+        bearer_token=bearer_token,
+        body=b"",
+    ) as response:
+        assert response.status == 200
+        flow_id = UUID(cast(str, response.payload["flow_id"]))
+        flow_response = await client.get(
+            f"/api/v1/flows/{flow_id}/",
+            headers={"Authorization": f"Bearer {bearer_token}"},
+        )
+
+        assert flow_response.status_code == 200, flow_response.text
+        assert flow_response.json()["id"] == str(flow_id)
+        async with db_container() as container:
+            persisted = (
+                await container.session().execute(
+                    select(
+                        Flows.space_id,
+                        BuilderPlans.status,
+                        BuilderSessions.status,
+                        BuilderSessions.flow_id,
+                    )
+                    .select_from(BuilderPlans)
+                    .join(
+                        BuilderSessions, BuilderSessions.id == BuilderPlans.session_id
+                    )
+                    .join(Flows, Flows.id == BuilderSessions.flow_id)
+                    .where(
+                        BuilderPlans.id == plan_id,
+                        BuilderPlans.tenant_id == tenant_id,
+                        BuilderSessions.id == session_id,
+                    )
+                )
+            ).one()
+            audit_count = await container.session().scalar(
+                select(sa.func.count(AuditLogTable.id)).where(
+                    AuditLogTable.tenant_id == tenant_id,
+                    AuditLogTable.action == ActionType.AI_BUILDER_FLOW_APPLIED.value,
+                    AuditLogTable.entity_type == EntityType.FLOW.value,
+                    AuditLogTable.entity_id == flow_id,
+                )
+            )
+
+        assert persisted == (
+            UUID(space_id),
+            PlanStatus.APPLIED.value,
+            SessionStatus.APPLIED.value,
+            flow_id,
+        )
+        assert audit_count == 1
+        assert not response.request_task.done()
 
 
 @pytest.mark.integration

@@ -18,6 +18,10 @@ from eneo.flows.ai_builder.ai_builder_resource_catalog import (
     AIBuilderResourceCatalog,
     build_ai_builder_resource_catalog,
 )
+from eneo.flows.ai_builder.ai_builder_runtime_input_requirements import (
+    ConfirmedRuntimeInputRequirement,
+    render_confirmed_runtime_input_requirements,
+)
 from eneo.flows.ai_builder.ai_builder_tool_parsing import (
     ToolArgumentParseError,
     parse_tool_call_arguments,
@@ -100,108 +104,288 @@ class TestBuildToolSchema:
         assert "final_output_type" not in properties
         assert "input_fields" not in properties
 
+    def test_create_schema_requires_every_declared_property(self) -> None:
+        schema = build_propose_flow_tool_schema(resource_catalog=_empty_catalog())
+        parameters = schema["function"]["parameters"]
+        step_schema = parameters["properties"]["steps"]["items"]
+
+        assert parameters["additionalProperties"] is False
+        assert set(parameters["required"]) == set(parameters["properties"])
+        assert step_schema["additionalProperties"] is False
+        assert set(step_schema["required"]) == set(step_schema["properties"])
+        assert "default" not in step_schema["properties"]["citations_requested"]
+
+    def test_create_schema_projects_runtime_identity_without_argument_shape_change(
+        self,
+    ) -> None:
+        requirements = (
+            ConfirmedRuntimeInputRequirement(
+                name="audience", purpose="interpret_input"
+            ),
+            ConfirmedRuntimeInputRequirement(name="case_id", purpose="shape_result"),
+            ConfirmedRuntimeInputRequirement(name="policy", purpose="whole_flow"),
+        )
+        rendered = render_confirmed_runtime_input_requirements(requirements)
+        baseline = build_propose_flow_tool_schema(resource_catalog=_empty_catalog())
+        contextual = build_propose_flow_tool_schema(
+            resource_catalog=_empty_catalog(),
+            confirmed_runtime_inputs=requirements,
+        )
+
+        baseline_parameters = baseline["function"]["parameters"]
+        contextual_parameters = contextual["function"]["parameters"]
+        baseline_step = baseline_parameters["properties"]["steps"]["items"]
+        contextual_step = contextual_parameters["properties"]["steps"]["items"]
+        assert set(contextual_parameters["properties"]) == set(
+            baseline_parameters["properties"]
+        )
+        assert contextual_parameters["required"] == baseline_parameters["required"]
+        assert set(contextual_step["properties"]) == set(baseline_step["properties"])
+        assert contextual_step["required"] == baseline_step["required"]
+        assert (
+            contextual_step["properties"]["output_fields"]["items"]
+            == baseline_step["properties"]["output_fields"]["items"]
+        )
+        description = contextual_step["properties"]["output_fields"]["description"]
+        assert rendered in description
+
+        baseline_edit = build_propose_flow_tool_schema(
+            resource_catalog=_empty_catalog(), current_steps=[]
+        )
+        contextual_edit = build_propose_flow_tool_schema(
+            resource_catalog=_empty_catalog(),
+            current_steps=[],
+            confirmed_runtime_inputs=requirements,
+        )
+        assert contextual_edit == baseline_edit
+
+    def test_pure_audio_create_schema_accepts_exactly_one_semantic_step(self) -> None:
+        schema = build_propose_flow_tool_schema(
+            resource_catalog=_empty_catalog(),
+            is_pure_audio_transcription=True,
+        )
+        parameters = schema["function"]["parameters"]
+        steps_schema = parameters["properties"]["steps"]
+        step_schema = steps_schema["items"]
+
+        assert steps_schema["minItems"] == 1
+        assert steps_schema["maxItems"] == 1
+        assert step_schema["type"] == "object"
+        assert step_schema["required"] == ["name", "instructions"]
+        assert set(step_schema["properties"]) == {"name", "instructions"}
+        assert step_schema["additionalProperties"] is False
+        validate_propose_flow_tool_arguments(
+            arguments={
+                "flow_name": "Meeting transcript",
+                "flow_description": None,
+                "plan_rationale": "Return the transcript.",
+                "steps": [
+                    {
+                        "name": "Transcribe meeting audio",
+                        "instructions": "Transcribe the uploaded meeting audio.",
+                    }
+                ],
+                "assumptions": [],
+            },
+            tool_schema=schema,
+        )
+
+        with pytest.raises(ProposalToolArgumentsError):
+            validate_propose_flow_tool_arguments(
+                arguments={
+                    "flow_name": "Meeting transcript",
+                    "flow_description": None,
+                    "plan_rationale": "Return the transcript.",
+                    "steps": [
+                        {
+                            "name": "Transcribe meeting audio",
+                            "instructions": "Transcribe the uploaded meeting audio.",
+                            "output_fields": None,
+                        }
+                    ],
+                    "assumptions": [],
+                },
+                tool_schema=schema,
+            )
+
+    def test_create_structured_fields_use_closed_shape_branches(self) -> None:
+        schema = build_propose_flow_tool_schema(resource_catalog=_empty_catalog())
+        step_schema = schema["function"]["parameters"]["properties"]["steps"]["items"]
+        output_fields_schema = step_schema["properties"]["output_fields"]
+
+        assert output_fields_schema["type"] == ["array", "null"]
+        assert output_fields_schema["minItems"] == 1
+
+        field_schema = output_fields_schema["items"]
+        scalar_branch, object_branch, array_branch = field_schema["anyOf"]
+        assert scalar_branch["properties"]["field_type"]["enum"] == [
+            "string",
+            "number",
+            "boolean",
+        ]
+        assert set(scalar_branch["properties"]) == {
+            "name",
+            "field_type",
+            "description",
+            "required",
+        }
+        assert "pattern" not in scalar_branch["properties"]["name"]
+
+        assert object_branch["properties"]["field_type"]["enum"] == ["object"]
+        assert object_branch["properties"]["fields"]["minItems"] == 1
+        assert "item_fields" not in object_branch["properties"]
+
+        assert array_branch["properties"]["field_type"]["enum"] == ["array"]
+        assert "fields" not in array_branch["properties"]
+        null_items, nested_items = array_branch["properties"]["item_fields"]["anyOf"]
+        assert null_items == {"type": "null"}
+        assert nested_items["type"] == "array"
+        assert nested_items["minItems"] == 1
+
+        for branch in field_schema["anyOf"]:
+            assert branch["additionalProperties"] is False
+            assert set(branch["required"]) == set(branch["properties"])
+            assert "const" not in branch["properties"]["field_type"]
+
+        depth_four_schema = object_branch["properties"]["fields"]["items"]
+        for _ in range(2):
+            depth_four_schema = depth_four_schema["anyOf"][1]["properties"]["fields"][
+                "items"
+            ]
+        assert len(depth_four_schema["anyOf"]) == 2
+        depth_four_array = depth_four_schema["anyOf"][1]
+        assert depth_four_array["properties"]["item_fields"] == {"type": "null"}
+
+    def test_create_schema_admits_explicit_empty_lists_and_nullable_scalars(
+        self,
+    ) -> None:
+        schema = build_propose_flow_tool_schema(resource_catalog=_empty_catalog())
+
+        validate_propose_flow_tool_arguments(
+            arguments={
+                "flow_name": "Report",
+                "flow_description": None,
+                "plan_rationale": "Create the report.",
+                "steps": [
+                    {
+                        "name": "Write",
+                        "instructions": "Write the report.",
+                        "output_fields": None,
+                        "model_ref": None,
+                        "knowledge_refs": [],
+                        "citations_requested": False,
+                    }
+                ],
+                "assumptions": [],
+            },
+            tool_schema=schema,
+        )
+
     @pytest.mark.parametrize(
-        ("retired_key", "retired_value"),
+        ("property_name", "value"),
+        [("output_fields", []), ("knowledge_refs", None)],
+    )
+    def test_create_step_schema_rejects_invalid_empty_or_nullable_lists(
+        self,
+        property_name: str,
+        value: object,
+    ) -> None:
+        schema = build_propose_flow_tool_schema(resource_catalog=_empty_catalog())
+        step = {
+            "name": "Write",
+            "instructions": "Write the report.",
+            "output_fields": None,
+            "model_ref": None,
+            "knowledge_refs": [],
+            "citations_requested": False,
+        }
+        step[property_name] = value
+
+        with pytest.raises(ProposalToolArgumentsError):
+            validate_propose_flow_tool_arguments(
+                arguments={
+                    "flow_name": "Report",
+                    "flow_description": None,
+                    "plan_rationale": "Create the report.",
+                    "steps": [step],
+                    "assumptions": [],
+                },
+                tool_schema=schema,
+            )
+
+    def test_edit_step_schema_keeps_its_existing_optional_shape(self) -> None:
+        schema = build_propose_flow_tool_schema(
+            resource_catalog=_empty_catalog(), current_steps=[]
+        )
+        add_step_schema = schema["function"]["parameters"]["properties"]["steps"][
+            "items"
+        ]["oneOf"][1]["properties"]["step"]
+        field_schema = add_step_schema["properties"]["output_fields"]["items"]
+
+        assert add_step_schema["required"] == ["name", "instructions"]
+        assert field_schema["properties"]["name"]["pattern"]
+        assert "anyOf" not in field_schema
+
+    @pytest.mark.parametrize(
+        ("scope", "retired_key", "retired_value", "expected_path"),
         [
-            ("output_type", None),
-            ("output_type", "text"),
-            ("review_mode", None),
-            ("review_mode", "view"),
-            ("uses_form_fields", []),
-            ("uses_form_fields", ["case_id"]),
+            ("root", "input_fields", [], "input_fields"),
+            ("step", "output_type", "text", "steps.0.output_type"),
+            ("step", "review_mode", "view", "steps.0.review_mode"),
+            ("step", "uses_form_fields", ["case_id"], "steps.0.uses_form_fields"),
+            (
+                "step",
+                "uses_previous_fields",
+                [{"from_step": 1, "field_path": "case_id"}],
+                "steps.0.uses_previous_fields",
+            ),
         ],
     )
-    def test_create_parser_rejects_retired_step_keys_before_normalization(
+    def test_create_parser_rejects_properties_outside_the_typed_create_model(
         self,
+        scope: str,
         retired_key: str,
-        retired_value: str | None,
+        retired_value: object,
+        expected_path: str,
     ) -> None:
-        with pytest.raises(
-            ProposalIntentArgumentError,
-            match=rf"steps\.0\.{retired_key}",
-        ):
-            parse_create_flow_intent_arguments(
-                {
-                    "flow_name": "Report",
-                    "plan_rationale": "Create the report.",
-                    "steps": [
-                        {
-                            "name": "Write",
-                            "instructions": "Write the report.",
-                            retired_key: retired_value,
-                        }
-                    ],
-                }
-            )
+        arguments: dict[str, object] = {
+            "flow_name": "Report",
+            "plan_rationale": "Create the report.",
+            "steps": [{"name": "Write", "instructions": "Write the report."}],
+        }
+        if scope == "root":
+            arguments[retired_key] = retired_value
+        else:
+            steps = arguments["steps"]
+            assert isinstance(steps, list)
+            step = steps[0]
+            assert isinstance(step, dict)
+            step[retired_key] = retired_value
 
-    def test_create_parser_rejects_retired_root_input_fields(self) -> None:
-        with pytest.raises(
-            ProposalIntentArgumentError,
-            match=r"input_fields",
-        ):
-            parse_create_flow_intent_arguments(
-                {
-                    "flow_name": "Report",
-                    "plan_rationale": "Create the report.",
-                    "input_fields": [
-                        {
-                            "name": "case_id",
-                            "label": "Case id",
-                            "type": "text",
-                            "required": True,
-                        }
-                    ],
-                    "steps": [
-                        {
-                            "name": "Write",
-                            "instructions": "Write the report.",
-                        }
-                    ],
-                }
-            )
+        with pytest.raises(ProposalIntentArgumentError, match=expected_path):
+            parse_create_flow_intent_arguments(arguments)
 
-    def test_create_parser_strips_model_authored_previous_refs(self) -> None:
-        intent = parse_create_flow_intent_arguments(
-            {
-                "flow_name": "Report",
-                "plan_rationale": "Create the report.",
-                "steps": [
-                    {
-                        "name": "Write",
-                        "instructions": "Write the report.",
-                        "uses_previous_fields": [
-                            {"from_step": 99, "field_path": "", "label": ""}
-                        ],
-                        "uses_previous_outputs": [
-                            {"from_step": 99, "output": "structured"}
-                        ],
-                    }
-                ],
-            }
-        )
-
-        step = intent.steps[0]
-        assert step.uses_previous_fields == []
-        assert step.uses_previous_outputs == []
-
-    def test_create_parser_tolerates_retired_reasoning_key_without_persisting_it(
+    def test_create_parser_rejects_unknown_root_keys_through_the_typed_model(
         self,
     ) -> None:
-        intent = parse_create_flow_intent_arguments(
-            {
-                "flow_name": "Report",
-                "plan_rationale": "Create the report.",
-                "reasoning": "Private model scratchpad",
-                "steps": [
-                    {
-                        "name": "Write",
-                        "instructions": "Write the report.",
-                    }
-                ],
-            }
-        )
+        with pytest.raises(ProposalIntentArgumentError) as excinfo:
+            parse_create_flow_intent_arguments(
+                {
+                    "flow_name": "Report",
+                    "plan_rationale": "Create the report.",
+                    "reasoning": "Private model scratchpad",
+                    "steps": [
+                        {
+                            "name": "Write",
+                            "instructions": "Write the report.",
+                        }
+                    ],
+                }
+            )
 
-        assert "reasoning" not in intent.model_dump()
+        assert excinfo.value.issues == (
+            "reasoning: Extra inputs are not permitted [extra_forbidden]",
+        )
 
     def test_active_proposal_schemas_reject_non_object_step_before_normalization(
         self,
@@ -214,12 +398,14 @@ class TestBuildToolSchema:
         )
 
         for schema in schemas:
-            with pytest.raises(ProposalToolArgumentsError, match="steps.0"):
+            with pytest.raises(ProposalToolArgumentsError):
                 validate_propose_flow_tool_arguments(
                     arguments={
                         "flow_name": "Report",
+                        "flow_description": None,
                         "plan_rationale": "Create the report.",
                         "steps": ["Write the report"],
+                        "assumptions": [],
                     },
                     tool_schema=schema,
                 )
