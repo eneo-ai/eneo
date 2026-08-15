@@ -30,7 +30,6 @@ from eneo.flows.ai_builder.planning_state import (
     FileRoleEvidence,
     PlanningState,
     PlanningStatePayloadTooLargeError,
-    ResolvedSlot,
     SchemaEvidence,
     SignalConfidence,
     enforce_planning_state_payload_cap,
@@ -143,15 +142,6 @@ def attachment_file_roles(
         )
         for item in attachment_context.evidence
     ]
-
-
-def apply_attachment_structural_evidence_to_planning_state(
-    state: PlanningState,
-    attachment_context: AIBuilderAttachmentContext | None,
-) -> None:
-    if attachment_context is None:
-        return
-    _apply_structural_template_docx_mode(state, attachment_context)
 
 
 _FILE_ROLE_PRIORITY: tuple[FileRole, ...] = (
@@ -323,66 +313,6 @@ def _template_placeholder_schema(placeholders: tuple[str, ...]) -> JsonObject:
             "type": "object",
             "properties": properties,
         },
-    )
-
-
-def _apply_structural_template_docx_mode(
-    state: PlanningState,
-    attachment_context: AIBuilderAttachmentContext,
-) -> None:
-    """Reconcile docx fill mode with the placeholders in one attached template.
-
-    A single attached file whose bytes carry template placeholders has already
-    answered how the document is produced. Several templates have not: which one
-    the flow fills is the user's choice, so the question stays.
-
-    The conclusion is derived, never remembered. Roles are reclassified on every
-    turn, so a mode this rule wrote earlier is withdrawn as soon as a second
-    template appears or the terminal output stops being docx. Authored,
-    classified, and policy values are left alone.
-    """
-
-    existing_mode = state.resolved_slots.get("docx_output_mode")
-    resolved_here = (
-        existing_mode is not None and existing_mode.source == "attachment_structure"
-    )
-    if (
-        existing_mode is not None
-        and not resolved_here
-        and existing_mode.source != "policy_default"
-    ):
-        return
-    terminal_output = state.resolved_slots.get("terminal_output")
-    placeholder_templates = [
-        item
-        for item in attachment_context.evidence
-        if item.inferred_role == "template"
-        if any(
-            marker.startswith(TEMPLATE_PLACEHOLDER_EVIDENCE_PREFIX)
-            for marker in item.role_evidence
-        )
-    ]
-    template_count = sum(item.role == "template" for item in state.file_roles)
-    if (
-        terminal_output is None
-        or terminal_output.value != "docx_document"
-        or len(placeholder_templates) != 1
-        or template_count != 1
-    ):
-        if resolved_here:
-            del state.resolved_slots["docx_output_mode"]
-        return
-    template = placeholder_templates[0]
-    state.resolved_slots["docx_output_mode"] = ResolvedSlot(
-        name="docx_output_mode",
-        value="template_fill_docx",
-        source="attachment_structure",
-        evidence=[
-            f"file:{template.file_id}:{marker}"
-            for marker in template.role_evidence
-            if marker.startswith(TEMPLATE_PLACEHOLDER_EVIDENCE_PREFIX)
-        ][:3],
-        confidence="high",
     )
 
 
@@ -757,7 +687,6 @@ def _validate_attachment_planning_state_payload(
 ) -> None:
     state = PlanningState.empty()
     state.file_roles = attachment_file_roles(attachment_context)
-    apply_attachment_structural_evidence_to_planning_state(state, attachment_context)
     try:
         enforce_planning_state_payload_cap(
             cast(JsonObject, state.model_dump(mode="json"))

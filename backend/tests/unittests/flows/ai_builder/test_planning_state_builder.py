@@ -652,6 +652,28 @@ class TestAttachmentDerivedSlotPreservation:
         assert carried.value == "template_fill_docx"
         assert carried.is_commit_grade
 
+    def test_drops_carried_slot_when_the_terminal_is_no_longer_docx(self) -> None:
+        # Keeping a file attached preserves its structural mode, but choosing a
+        # different terminal contradicts it outright — and no later pass
+        # reconciles dependent slots on this path.
+        file_id = uuid4()
+        rebuilt = _state()
+        rebuilt.resolved_slots["terminal_output"] = ResolvedSlot(
+            name="terminal_output",
+            value="pdf_document",
+            source="structured_answer",
+            evidence=["question_answer:terminal_output"],
+            confidence="high",
+        )
+        persisted = _state()
+        persisted.resolved_slots["docx_output_mode"] = self._structural_slot(file_id)
+
+        carry_forward_persisted_planner_state(
+            rebuilt, persisted, attached_file_ids={file_id}
+        )
+
+        assert "docx_output_mode" not in rebuilt.resolved_slots
+
     def test_drops_slot_when_its_file_is_detached(self) -> None:
         rebuilt = _state()
         persisted = _state()
@@ -5136,6 +5158,47 @@ class TestDocxModeFromTemplateEvidence:
             evidence=["quote:user_message:m-1:använd mallen för svaret"],
             evidence_level=evidence_level,
         )
+
+    @staticmethod
+    def _placeholder_role(
+        file_id: str = "00000000-0000-0000-0000-000000000803",
+    ) -> FileRoleEvidence:
+        return FileRoleEvidence(
+            file_id=file_id,
+            filename="mall.docx",
+            file_type="document",
+            mimetype=(
+                "application/vnd.openxmlformats-officedocument."
+                "wordprocessingml.document"
+            ),
+            has_readable_text=True,
+            coverage="fully_seen",
+            role="template",
+            source="heuristic",
+            confidence="medium",
+            evidence=["content:template_placeholder:kundnamn"],
+            template_placeholders=["kundnamn"],
+        )
+
+    def test_one_owner_settles_fill_from_either_evidence_kind(self) -> None:
+        from_placeholders = self._docx_state()
+        from_placeholders.file_roles = [self._placeholder_role()]
+        from_words = self._docx_state()
+        from_words.file_roles = [self._template_role(evidence_level="explicit")]
+
+        resolve_docx_mode_from_template_evidence(from_placeholders)
+        resolve_docx_mode_from_template_evidence(from_words)
+
+        placeholder_slot = from_placeholders.resolved_slots["docx_output_mode"]
+        assert placeholder_slot.value == "template_fill_docx"
+        assert placeholder_slot.source == "attachment_structure"
+        assert placeholder_slot.evidence == [
+            "file:00000000-0000-0000-0000-000000000803"
+            ":content:template_placeholder:kundnamn"
+        ]
+        word_slot = from_words.resolved_slots["docx_output_mode"]
+        assert word_slot.value == "template_fill_docx"
+        assert word_slot.source == "model"
 
     @staticmethod
     def _docx_state() -> PlanningState:

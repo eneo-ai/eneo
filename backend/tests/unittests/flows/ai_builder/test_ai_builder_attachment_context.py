@@ -14,7 +14,6 @@ from eneo.flows.ai_builder.ai_builder_attachment_context import (
     _FILE_ROLE_PRIORITY,
     AIBuilderAttachmentContext,
     AIBuilderAttachmentContextPolicy,
-    apply_attachment_structural_evidence_to_planning_state,
     attachment_file_roles,
     build_ai_builder_attachment_context,
     build_ai_builder_attachment_context_for_model,
@@ -190,7 +189,6 @@ def test_file_role_state_preserves_readability_and_exact_coverage() -> None:
     state = PlanningState.empty()
 
     state.file_roles = attachment_file_roles(result)
-    apply_attachment_structural_evidence_to_planning_state(state, result)
 
     roles_by_id = {item.file_id: item for item in state.file_roles}
     assert roles_by_id[readable.id].has_readable_text is True
@@ -275,7 +273,6 @@ def test_template_placeholder_evidence_keeps_full_identity_beyond_display_cap() 
         state = PlanningState.empty()
 
         state.file_roles = attachment_file_roles(result)
-        apply_attachment_structural_evidence_to_planning_state(state, result)
 
         evidence = result.output_schema_evidence
         assert evidence is not None
@@ -317,7 +314,6 @@ def test_template_placeholder_total_deduplicates_across_multiple_templates() -> 
     state = PlanningState.empty()
 
     state.file_roles = attachment_file_roles(result)
-    apply_attachment_structural_evidence_to_planning_state(state, result)
 
     evidence = result.output_schema_evidence
     assert evidence is not None
@@ -551,7 +547,6 @@ def test_non_template_transcription_does_not_become_placeholder_schema() -> None
     state = PlanningState.empty()
 
     state.file_roles = attachment_file_roles(result)
-    apply_attachment_structural_evidence_to_planning_state(state, result)
 
     assert state.file_roles[0].role == "runtime_input_sample"
     assert state.output_schema_evidence is None
@@ -574,7 +569,6 @@ def test_json_schema_attachment_is_a_neutral_candidate() -> None:
     state = PlanningState.empty()
 
     state.file_roles = attachment_file_roles(result)
-    apply_attachment_structural_evidence_to_planning_state(state, result)
 
     assert state.input_schema_evidence is None
     assert state.output_schema_evidence is None

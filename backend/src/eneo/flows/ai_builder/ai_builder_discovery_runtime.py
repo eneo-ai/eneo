@@ -13,7 +13,6 @@ from eneo.flows.ai_builder.ai_builder_attachment_context import (
     AI_BUILDER_ATTACHMENT_LIMIT_MESSAGE,
     AI_BUILDER_MAX_ATTACHMENTS,
     AIBuilderAttachmentContext,
-    apply_attachment_structural_evidence_to_planning_state,
     attachment_file_roles,
     render_ai_builder_attachment_evidence,
 )
@@ -516,7 +515,6 @@ async def build_runtime_discovery_context(
         attachment_file_roles=attachment_file_roles(attachment_context),
         mapped_execution_policy=mapped_execution_policy,
     )
-    apply_attachment_structural_evidence_to_planning_state(state, attachment_context)
     structured_direction = resolve_structured_schema_direction(
         conversation=conversation,
         candidates=schema_candidates,
@@ -763,12 +761,9 @@ async def build_runtime_discovery_context(
             direction=classified_direction,
         )
         schema_direction_pending = False
-    # Attachment evidence can settle the docx mode only once the terminal output
-    # is known, and classification can name the terminal output, the template
-    # role, or both in this same turn. Re-read both attachment rules here —
-    # before defaults fill a mode the attachment already answers — so the first
-    # turn reaches the conclusion a later turn already reaches.
-    apply_attachment_structural_evidence_to_planning_state(state, attachment_context)
+    # Classification can name the terminal output, the template role, or both in
+    # this same turn, so the template evidence is only complete now — before
+    # defaults fill a mode the attachment already answers.
     resolve_docx_mode_from_template_evidence(state)
     apply_policy_defaults_from_resolved_slots(state, freeform_text=text)
     return _complete_runtime_discovery_context(

@@ -1237,30 +1237,50 @@ def _model_slot_is_relevant(*, slot_name: str, state: PlanningState) -> bool:
     )
 
 
+_TEMPLATE_DERIVED_DOCX_MODE_SOURCES: frozenset[SlotSource] = frozenset(
+    {"model", "attachment_structure"}
+)
+
+
 def resolve_docx_mode_from_template_evidence(state: PlanningState) -> None:
     """Reconcile docx fill mode with the template evidence available now.
 
-    An explicit authored choice always wins. When exactly one attached file
-    carries an explicit, commit-grade, model-classified template role, the
-    user has already said what the template is for — asking again wastes
-    the question budget. Multiple templates, inferred roles, or missing
-    evidence keep the question path.
+    Two kinds of evidence say a docx is produced by filling a template: the
+    user's own words, classified onto the file, and the placeholders in the
+    file's own bytes. They reach the same conclusion, so this is one decision
+    with one owner rather than a rule per evidence kind — only the recorded
+    provenance differs, and placeholders take it because a document that
+    carries fields is its own proof.
 
-    File roles are reclassified on every turn, so this conclusion is derived,
-    never remembered: the value is recomputed and withdrawn as soon as the
-    evidence stops carrying it — a second template arriving in a later turn
-    must reopen the question rather than inherit the single-template
-    assumption. A model-source `docx_output_mode` is this function's own
-    earlier conclusion: the slot is not model-resolvable
-    (`NON_LLM_RESOLVABLE_SLOT_NAMES`), so classification never authors it.
+    Exactly one template settles the mode. Several do not: which one the flow
+    fills is the user's choice, so the question stays, as it does for a merely
+    inferred role or no template at all. Any authoritative source outranks this
+    rule; only a policy default and this rule's own earlier conclusion are
+    replaceable, and a `model` or `attachment_structure` mode for this slot is
+    always the latter, because the slot is not model-resolvable
+    (`NON_LLM_RESOLVABLE_SLOT_NAMES`).
+
+    The conclusion is derived, never remembered — but only a contradiction
+    revokes it, not silence. A role that is no longer a template, a second
+    template, or a terminal that is no longer docx all revoke it. Roles missing
+    altogether do not: a state rebuilt without its attachments has none, and a
+    mode read out of file bytes cannot be recovered from conversation
+    (`_carry_forward_attachment_derived_slots` owns why).
     """
 
     current = state.resolved_slots.get("docx_output_mode")
-    resolved_here = current is not None and current.source == "model"
+    resolved_here = (
+        current is not None and current.source in _TEMPLATE_DERIVED_DOCX_MODE_SOURCES
+    )
     if current is not None and not resolved_here and current.source != "policy_default":
         return
-    template = _sole_explicit_template_role(state)
     terminal_output = state.resolved_slots.get("terminal_output")
+    terminal_still_docx = (
+        terminal_output is None or terminal_output.value == "docx_document"
+    )
+    if resolved_here and not state.file_roles and terminal_still_docx:
+        return
+    template = _sole_template_role_settling_fill_mode(state)
     if (
         template is None
         or terminal_output is None
@@ -1269,7 +1289,44 @@ def resolve_docx_mode_from_template_evidence(state: PlanningState) -> None:
         if resolved_here:
             del state.resolved_slots["docx_output_mode"]
         return
-    state.resolved_slots["docx_output_mode"] = ResolvedSlot(
+    state.resolved_slots["docx_output_mode"] = _template_fill_docx_mode(template)
+
+
+def _sole_template_role_settling_fill_mode(
+    state: PlanningState,
+) -> FileRoleEvidence | None:
+    templates = [item for item in state.file_roles if item.role == "template"]
+    if len(templates) != 1:
+        return None
+    template = templates[0]
+    if template.template_placeholders or _is_explicit_model_template(template):
+        return template
+    return None
+
+
+def _is_explicit_model_template(template: FileRoleEvidence) -> bool:
+    return (
+        template.source == "model"
+        and template.evidence_level == "explicit"
+        and template.confidence in {"high", "medium"}
+        and any(entry.startswith("quote:") for entry in template.evidence)
+    )
+
+
+def _template_fill_docx_mode(template: FileRoleEvidence) -> ResolvedSlot:
+    if template.template_placeholders:
+        return ResolvedSlot(
+            name="docx_output_mode",
+            value="template_fill_docx",
+            source="attachment_structure",
+            confidence="high",
+            evidence=[
+                f"file:{template.file_id}:{TEMPLATE_PLACEHOLDER_EVIDENCE_PREFIX}"
+                f"{placeholder}"
+                for placeholder in template.template_placeholders
+            ][:3],
+        )
+    return ResolvedSlot(
         name="docx_output_mode",
         value="template_fill_docx",
         source="model",
@@ -1277,22 +1334,6 @@ def resolve_docx_mode_from_template_evidence(state: PlanningState) -> None:
         evidence=[entry for entry in template.evidence if entry.startswith("quote:")],
         evidence_level="explicit",
     )
-
-
-def _sole_explicit_template_role(state: PlanningState) -> FileRoleEvidence | None:
-    explicit_templates = [
-        item
-        for item in state.file_roles
-        if item.role == "template"
-        and item.source == "model"
-        and item.evidence_level == "explicit"
-        and item.confidence in {"high", "medium"}
-        and any(entry.startswith("quote:") for entry in item.evidence)
-    ]
-    template_count = sum(item.role == "template" for item in state.file_roles)
-    if len(explicit_templates) != 1 or template_count != 1:
-        return None
-    return explicit_templates[0]
 
 
 def _reconcile_dependent_slot_relevance(state: PlanningState) -> None:

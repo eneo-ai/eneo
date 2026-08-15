@@ -1057,6 +1057,7 @@ async def test_runtime_planning_state_uses_structural_template_for_docx_mode() -
                         inferred_role="template",
                         role_confidence="medium",
                         role_evidence=("content:template_placeholder:kundnamn",),
+                        template_placeholders=("kundnamn",),
                     ),
                 ),
                 included_file_ids=[],
@@ -1281,6 +1282,7 @@ async def test_same_turn_placeholder_template_settles_docx_mode() -> None:
                     inferred_role="template",
                     role_confidence="medium",
                     role_evidence=("content:template_placeholder:diarienummer",),
+                    template_placeholders=("diarienummer",),
                 ),
             ),
             included_file_ids=[file_id],
@@ -1358,6 +1360,7 @@ async def test_classified_second_template_withdraws_structural_docx_mode() -> No
                     inferred_role="template",
                     role_confidence="medium",
                     role_evidence=("content:template_placeholder:diarienummer",),
+                    template_placeholders=("diarienummer",),
                 ),
                 AIBuilderAttachmentEvidence(
                     file_id=second_file_id,
