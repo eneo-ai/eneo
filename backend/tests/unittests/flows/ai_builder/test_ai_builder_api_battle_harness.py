@@ -1938,6 +1938,582 @@ def test_field_expectations_require_explicit_aliases() -> None:
     assert explicit_checks["expected_leaf_output_fields"]["passed"] is True
 
 
+def _prompt_quote_occurs_on_token_boundaries(prompt: str, quote: str) -> bool:
+    """True when `quote` appears in `prompt` as a whole name, not inside a longer one.
+
+    A bare substring test would accept "risks" against a prompt that only ever says
+    "identified_risks", which would let a sub-token masquerade as the prompt's own
+    naming of a result. An occurrence counts only when neither neighbouring
+    character continues an identifier.
+    """
+    haystack = prompt.casefold()
+    needle = quote.casefold()
+    if not needle:
+        return False
+    start = haystack.find(needle)
+    while start != -1:
+        end = start + len(needle)
+        before_ok = start == 0 or not (
+            haystack[start - 1].isalnum() or haystack[start - 1] == "_"
+        )
+        after_ok = end == len(haystack) or not (
+            haystack[end].isalnum() or haystack[end] == "_"
+        )
+        if before_ok and after_ok:
+            return True
+        start = haystack.find(needle, start + 1)
+    return False
+
+
+def test_prompt_quote_boundary_rejects_a_name_embedded_in_a_longer_identifier() -> None:
+    prompt = "Flödet ska returnera identified_risks och en kort sammanfattning."
+    # "risks" only ever occurs as the tail of a longer identifier here.
+    assert "risks" in prompt
+    assert _prompt_quote_occurs_on_token_boundaries(prompt, "risks") is False
+    assert _prompt_quote_occurs_on_token_boundaries(prompt, "identified_risks") is True
+    # A standalone occurrence is still admitted, including at a sentence end.
+    assert (
+        _prompt_quote_occurs_on_token_boundaries("Lista alla risks.", "risks") is True
+    )
+    assert _prompt_quote_occurs_on_token_boundaries("risks först", "risks") is True
+
+
+@mark.parametrize(
+    ("case_id", "group_index", "prompt_quote", "field_name"),
+    [
+        (
+            "attachment_pdf_report_degraderad_extraktion_synlig",
+            3,
+            "beslutets lydelse",
+            "beslutets_lydelse",
+        ),
+        (
+            "complex_social_case_timeline_redaction",
+            2,
+            "viktiga händelser",
+            "viktiga_handelser",
+        ),
+        ("easy_library_event_copy_text", 2, "datum/tid", "datum_tid"),
+        (
+            "easy_preschool_incident_note_json",
+            0,
+            "vad som hände",
+            "vad_som_hande",
+        ),
+        (
+            "easy_preschool_incident_note_json",
+            2,
+            "om vårdnadshavare behöver kontaktas",
+            "om_vardnadshavare_behover_kontaktas",
+        ),
+        (
+            "easy_spreadsheet_case_statistics_json",
+            0,
+            "antal ärenden per kategori",
+            "antal_arenden_per_kategori",
+        ),
+        (
+            "easy_spreadsheet_case_statistics_json",
+            1,
+            "antal per status",
+            "antal_per_status",
+        ),
+        (
+            "hard_school_student_support_timeline",
+            1,
+            "insatser",
+            "insatser",
+        ),
+        (
+            "hard_school_student_support_timeline",
+            2,
+            "ansvariga",
+            "ansvariga",
+        ),
+        (
+            "hard_school_student_support_timeline",
+            4,
+            "skyddsfaktorer",
+            "skyddsfaktorer",
+        ),
+        (
+            "medium_decision_letter_template_attachment",
+            3,
+            "överklagandehänvisning",
+            "overklagandehanvisning",
+        ),
+        (
+            "medium_document_analysis_pdf",
+            2,
+            "datum eller år",
+            "datum_eller_ar",
+        ),
+        (
+            "medium_document_analysis_pdf",
+            3,
+            "författare eller avsändare",
+            "forfattare_eller_avsandare",
+        ),
+        (
+            "medium_document_analysis_pdf",
+            5,
+            "centrala slutsatser",
+            "centrala_slutsatser",
+        ),
+        (
+            "medium_water_leak_citizen_notice",
+            0,
+            "vad som hänt",
+            "vad_som_hant",
+        ),
+        (
+            "medium_water_leak_citizen_notice",
+            1,
+            "berörda abonnenter",
+            "berorda_abonnenter",
+        ),
+        (
+            "ordinary_language_human_review_policy",
+            3,
+            "osäkerheter",
+            "osakerheter",
+        ),
+        (
+            "attachment_pdf_report_granskat_beslutsunderlag",
+            0,
+            "källhänvisningar per påstående",
+            "kallhanvisningar_per_pastaende",
+        ),
+        (
+            "complex_meeting_audio_policy_pdf",
+            6,
+            "juridisk uppföljning",
+            "juridisk_uppfoljning",
+        ),
+        (
+            "complex_procurement_multi_document_matrix",
+            4,
+            "sekretesskänsliga delar",
+            "sekretesskansliga_delar",
+        ),
+        (
+            "easy_library_event_copy_text",
+            3,
+            "kort webbanpassad text",
+            "kort_webbanpassad_text",
+        ),
+        (
+            "easy_library_event_copy_text",
+            4,
+            "mycket kort version för sociala medier",
+            "mycket_kort_version_for_sociala_medier",
+        ),
+        (
+            "hard_budget_variance_management_report",
+            0,
+            "förvaltningar",
+            "forvaltningar",
+        ),
+        (
+            "hard_budget_variance_management_report",
+            1,
+            "stora avvikelser",
+            "stora_avvikelser",
+        ),
+        (
+            "hard_budget_variance_management_report",
+            2,
+            "möjliga orsaker",
+            "mojliga_orsaker",
+        ),
+        (
+            "hard_crisis_situation_report_multi_unit",
+            1,
+            "påverkan per verksamhet",
+            "paverkan_per_verksamhet",
+        ),
+        (
+            "hard_crisis_situation_report_multi_unit",
+            2,
+            "kritiska beroenden",
+            "kritiska_beroenden",
+        ),
+        (
+            "hard_crisis_situation_report_multi_unit",
+            3,
+            "beslutade åtgärder",
+            "beslutade_atgarder",
+        ),
+        (
+            "hard_crisis_situation_report_multi_unit",
+            5,
+            "kommunikationsbehov",
+            "kommunikationsbehov",
+        ),
+        (
+            "hard_environment_incident_synthesis",
+            2,
+            "möjliga lagrum",
+            "mojliga_lagrum",
+        ),
+        (
+            "hard_gdpr_subject_access_package",
+            0,
+            "personuppgifter om den registrerade",
+            "personuppgifter_om_den_registrerade",
+        ),
+        (
+            "hard_gdpr_subject_access_package",
+            5,
+            "strukturerad utlämningslista",
+            "strukturerad_utlamningslista",
+        ),
+        (
+            "hard_procurement_scoring_with_human_review",
+            2,
+            "poänggrund",
+            "poanggrund",
+        ),
+        (
+            "hard_procurement_scoring_with_human_review",
+            4,
+            "osäkra tolkningar",
+            "osakra_tolkningar",
+        ),
+        (
+            "hard_property_maintenance_contract_followup",
+            3,
+            "garanti- eller vitesrisker",
+            "garanti_eller_vitesrisker",
+        ),
+        (
+            "hard_property_maintenance_contract_followup",
+            4,
+            "vitesrisker",
+            "vitesrisker",
+        ),
+        (
+            "interview_input_building_supplement",
+            1,
+            "vad som återstår",
+            "vad_som_aterstar",
+        ),
+        (
+            "medium_audio_to_protocol_pdf_with_metadata",
+            2,
+            "ansvariga",
+            "ansvariga",
+        ),
+        (
+            "medium_elderly_care_deviation_report",
+            0,
+            "klassificera avvikelsen",
+            "klassificera_avvikelsen",
+        ),
+        (
+            "medium_elderly_care_deviation_report",
+            2,
+            "bakomliggande orsaker",
+            "bakomliggande_orsaker",
+        ),
+        (
+            "medium_elderly_care_deviation_report",
+            4,
+            "ansvarig funktion",
+            "ansvarig_funktion",
+        ),
+        (
+            "medium_parks_work_order_prioritization",
+            4,
+            "arbetsorderlista",
+            "arbetsorderlista",
+        ),
+        (
+            "medium_school_absence_followup_json",
+            0,
+            "elever",
+            "elever",
+        ),
+        (
+            "ordinary_json_integration_failures",
+            5,
+            "möjliga nästa kontroller",
+            "mojliga_nasta_kontroller",
+        ),
+        (
+            "ordinary_report_event_financing",
+            4,
+            "andra finansieringskällor",
+            "andra_finansieringskallor",
+        ),
+        (
+            "ordinary_report_procurement_comparison",
+            2,
+            "angivet belägg",
+            "angivet_belagg",
+        ),
+        (
+            "attachment_pdf_report_granskat_beslutsunderlag",
+            1,
+            "motstridigheter mellan handlingarna",
+            "motstridigheter_mellan_handlingarna",
+        ),
+        (
+            "complex_social_case_timeline_redaction",
+            5,
+            "känsliga personuppgifter",
+            "kansliga_personuppgifter",
+        ),
+        (
+            "declared_terminal_everyday_fardtjanst_json",
+            2,
+            "uppgivet ledsagarbehov",
+            "uppgivet_ledsagarbehov",
+        ),
+        (
+            "declared_terminal_everyday_fardtjanst_json",
+            4,
+            "vilka intyg som faktiskt bifogats",
+            "vilka_intyg_som_faktiskt_bifogats",
+        ),
+        (
+            "docx_template_fill_tjanstgoringsintyg_generated_docx",
+            4,
+            "uppgifter som saknas i utdraget",
+            "uppgifter_som_saknas_i_utdraget",
+        ),
+        (
+            "easy_email_reply_with_case_metadata",
+            1,
+            "bedöma brådska",
+            "bedoma_bradska",
+        ),
+        (
+            "easy_spreadsheet_case_statistics_json",
+            4,
+            "JSON-sammanfattning",
+            "json_sammanfattning",
+        ),
+        (
+            "easy_spreadsheet_case_statistics_json",
+            4,
+            "kort JSON-sammanfattning",
+            "kort_json_sammanfattning",
+        ),
+        (
+            "hard_archive_retention_classification",
+            6,
+            "oklarheter",
+            "oklarheter",
+        ),
+        (
+            "hard_budget_variance_management_report",
+            4,
+            "risk för helårsprognos",
+            "risk_for_helarsprognos",
+        ),
+        (
+            "hard_budget_variance_management_report",
+            5,
+            "föreslagna åtgärder",
+            "foreslagna_atgarder",
+        ),
+        (
+            "hard_crisis_situation_report_multi_unit",
+            4,
+            "öppna risker",
+            "oppna_risker",
+        ),
+        (
+            "hard_environment_incident_synthesis",
+            5,
+            "föreslagna förelägganden",
+            "foreslagna_forelagganden",
+        ),
+        (
+            "hard_mixed_audio_documents_decision_basis",
+            3,
+            "tidsfrister",
+            "tidsfrister",
+        ),
+        (
+            "interview_input_building_supplement",
+            0,
+            "vad som besvarats",
+            "vad_som_besvarats",
+        ),
+        (
+            "medium_document_analysis_pdf",
+            6,
+            "koncis sammanfattning",
+            "koncis_sammanfattning",
+        ),
+        (
+            "medium_elderly_care_deviation_report",
+            1,
+            "bedöma allvarlighetsgrad",
+            "bedoma_allvarlighetsgrad",
+        ),
+        (
+            "medium_elderly_care_deviation_report",
+            3,
+            "åtgärder",
+            "atgarder",
+        ),
+        (
+            "medium_finance_invoice_anomaly_review",
+            0,
+            "avvikande belopp",
+            "avvikande_belopp",
+        ),
+        (
+            "medium_finance_invoice_anomaly_review",
+            5,
+            "rekommenderad kontroll",
+            "rekommenderad_kontroll",
+        ),
+        (
+            "medium_housing_company_tenant_complaint",
+            4,
+            "ansvarig intern funktion",
+            "ansvarig_intern_funktion",
+        ),
+        (
+            "medium_housing_company_tenant_complaint",
+            5,
+            "ett kort svar till hyresgästen",
+            "ett_kort_svar_till_hyresgasten",
+        ),
+        (
+            "medium_public_records_redaction_package",
+            1,
+            "sekretesskänsliga uppgifter",
+            "sekretesskansliga_uppgifter",
+        ),
+        (
+            "medium_school_absence_followup_json",
+            1,
+            "oroande mönster",
+            "oroande_monster",
+        ),
+        (
+            "medium_school_absence_followup_json",
+            3,
+            "vilka uppgifter som saknas",
+            "vilka_uppgifter_som_saknas",
+        ),
+        (
+            "medium_school_absence_followup_json",
+            4,
+            "rekommenderad uppföljning",
+            "rekommenderad_uppfoljning",
+        ),
+        (
+            "medium_water_leak_citizen_notice",
+            3,
+            "risker",
+            "risker",
+        ),
+        (
+            "ordinary_report_committee_meeting",
+            1,
+            "uttalade beslut",
+            "uttalade_beslut",
+        ),
+        (
+            "simple_document_metadata_json",
+            6,
+            "en kort sammanfattning",
+            "en_kort_sammanfattning",
+        ),
+    ],
+)
+def test_prompt_backed_case_field_contracts_use_exact_emitted_names(
+    case_id: str,
+    group_index: int,
+    prompt_quote: str,
+    field_name: str,
+) -> None:
+    harness = _battle_harness()
+    cases_path = (
+        Path(__file__).resolve().parents[4]
+        / "scripts"
+        / "ai_builder_api_battle_cases.json"
+    )
+    case = next(
+        candidate
+        for candidate in harness._read_cases_file(cases_path)
+        if candidate.case_id == case_id
+    )
+    assert _prompt_quote_occurs_on_token_boundaries(case.prompt, prompt_quote)
+    # The quote and the alternative must be the SAME name under the evaluator's own
+    # normalisation. Without this the table could pair any prompt phrase with any
+    # field name and still look source-justified.
+    assert harness._field_name_matches(prompt_quote, field_name)
+    assert case.expected is not None
+    group = case.expected["expected_leaf_output_field_groups"][group_index]
+    # The alternative must be carried by THIS group, not merely satisfied by some
+    # other member of it, so the table cannot drift away from the corpus.
+    assert field_name in group
+    report = harness._quality_report(
+        plan={},
+        summary={
+            "terminal_output_type": "json",
+            "steps": [
+                {
+                    "output_type": "json",
+                    "output_contract_leaf_properties": [field_name],
+                }
+            ],
+        },
+        expected={"expected_leaf_output_field_groups": [group]},
+        event_summary={},
+    )
+
+    checks = {check["name"]: check for check in report["checks"]}
+    assert checks["expected_leaf_output_fields"]["passed"] is True
+
+
+def test_no_leaf_field_name_satisfies_two_groups_of_one_case() -> None:
+    """One emitted field must never discharge two distinct named results.
+
+    Each group in `expected_leaf_output_field_groups` is one obligation, and the
+    evaluator accepts a group as soon as any member matches. A name shared by two
+    groups therefore lets a single emitted field satisfy both, silently inflating
+    conformance. Checked through `_field_name_matches` so the invariant tracks the
+    real normalisation rather than a copy of it.
+    """
+    harness = _battle_harness()
+    cases_path = (
+        Path(__file__).resolve().parents[4]
+        / "scripts"
+        / "ai_builder_api_battle_cases.json"
+    )
+    collisions: list[str] = []
+    for case in harness._read_cases_file(cases_path):
+        if case.expected is None:
+            continue
+        groups = case.expected.get("expected_leaf_output_field_groups") or []
+        for left_index, left in enumerate(groups):
+            for right_index, right in enumerate(
+                groups[left_index + 1 :], left_index + 1
+            ):
+                shared = sorted(
+                    {
+                        name
+                        for name in left
+                        for other in right
+                        if harness._field_name_matches(name, other)
+                    }
+                )
+                if shared:
+                    collisions.append(
+                        f"{case.case_id}: {shared} shared by groups "
+                        f"{left_index} and {right_index}"
+                    )
+    assert collisions == []
+
+
 def test_field_expectations_include_nested_container_properties() -> None:
     harness = _battle_harness()
     plan = {

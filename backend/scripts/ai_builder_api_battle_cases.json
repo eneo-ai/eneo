@@ -89,7 +89,8 @@
           ],
           [
             "sammanfattning",
-            "summary"
+            "summary",
+            "en_kort_sammanfattning"
           ]
         ]
       },
@@ -221,7 +222,8 @@
             "urgency_level",
             "urgency_reason",
             "priority",
-            "urgency_assessment"
+            "urgency_assessment",
+            "bedoma_bradska"
           ],
           [
             "saknade_uppgifter",
@@ -253,11 +255,13 @@
           [
             "kategori",
             "category",
-            "cases_by_category"
+            "cases_by_category",
+            "antal_arenden_per_kategori"
           ],
           [
             "status",
-            "cases_by_status"
+            "cases_by_status",
+            "antal_per_status"
           ],
           [
             "aldsta_oppna_arende",
@@ -269,7 +273,9 @@
           ],
           [
             "sammanfattning",
-            "summary"
+            "summary",
+            "json_sammanfattning",
+            "kort_json_sammanfattning"
           ]
         ]
       },
@@ -333,12 +339,14 @@
             "datum",
             "date",
             "date_or_year",
-            "year"
+            "year",
+            "datum_eller_ar"
           ],
           [
             "forfattare",
             "author",
-            "author_or_sender"
+            "author_or_sender",
+            "forfattare_eller_avsandare"
           ],
           [
             "kategori",
@@ -349,12 +357,14 @@
             "conclusion",
             "conclusions",
             "key_conclusions",
-            "central_conclusions"
+            "central_conclusions",
+            "centrala_slutsatser"
           ],
           [
             "sammanfattning",
             "summary",
-            "short_summary"
+            "short_summary",
+            "koncis_sammanfattning"
           ]
         ]
       },
@@ -607,7 +617,8 @@
           [
             "ansvarig",
             "owner",
-            "responsible"
+            "responsible",
+            "ansvariga"
           ],
           [
             "oppna_fragor",
@@ -647,7 +658,8 @@
           [
             "sekretess",
             "confidentiality",
-            "secrecy"
+            "secrecy",
+            "sekretesskansliga_uppgifter"
           ],
           [
             "maskering",
@@ -687,13 +699,15 @@
           [
             "elev",
             "student",
-            "student_id"
+            "student_id",
+            "elever"
           ],
           [
             "monster",
             "pattern",
             "absence_pattern",
-            "typ_av_monster"
+            "typ_av_monster",
+            "oroande_monster"
           ],
           [
             "riskniva",
@@ -702,12 +716,14 @@
           ],
           [
             "saknade_uppgifter",
-            "missing_information"
+            "missing_information",
+            "vilka_uppgifter_som_saknas"
           ],
           [
             "uppfoljning",
             "follow_up",
-            "recommended_action"
+            "recommended_action",
+            "rekommenderad_uppfoljning"
           ]
         ]
       },
@@ -810,7 +826,8 @@
           [
             "overklagande",
             "appeal",
-            "appeal_instruction"
+            "appeal_instruction",
+            "overklagandehanvisning"
           ]
         ]
       },
@@ -896,7 +913,8 @@
             "handelse",
             "incident",
             "event",
-            "what_happened"
+            "what_happened",
+            "vad_som_hande"
           ],
           [
             "roller",
@@ -910,7 +928,8 @@
             "guardian",
             "parent_contact",
             "parent_contact_needed",
-            "guardian_contact_needed"
+            "guardian_contact_needed",
+            "om_vardnadshavare_behover_kontaktas"
           ],
           [
             "uppfoljning",
@@ -960,17 +979,20 @@
           [
             "datum",
             "date",
-            "time"
+            "time",
+            "datum_tid"
           ],
           [
             "webbtext",
             "web_text",
-            "copy"
+            "copy",
+            "kort_webbanpassad_text"
           ],
           [
             "sociala_medier",
             "social_media",
-            "short_version"
+            "short_version",
+            "mycket_kort_version_for_sociala_medier"
           ]
         ]
       },
@@ -1047,26 +1069,31 @@
           [
             "avvikelse",
             "deviation",
-            "incident_type"
+            "incident_type",
+            "klassificera_avvikelsen"
           ],
           [
             "allvarlighetsgrad",
-            "severity"
+            "severity",
+            "bedoma_allvarlighetsgrad"
           ],
           [
             "orsak",
             "root_cause",
-            "cause"
+            "cause",
+            "bakomliggande_orsaker"
           ],
           [
             "atgard",
             "action",
-            "actions"
+            "actions",
+            "atgarder"
           ],
           [
             "ansvarig",
             "responsible",
-            "owner"
+            "owner",
+            "ansvarig_funktion"
           ]
         ]
       },
@@ -1154,13 +1181,15 @@
             "incident",
             "event",
             "summary",
-            "cause_or_uncertainty"
+            "cause_or_uncertainty",
+            "vad_som_hant"
           ],
           [
             "abonnenter",
             "subscribers",
             "affected_subscribers",
-            "affected_residents"
+            "affected_residents",
+            "berorda_abonnenter"
           ],
           [
             "rad",
@@ -1170,7 +1199,8 @@
           ],
           [
             "risk",
-            "risks"
+            "risks",
+            "risker"
           ]
         ]
       },
@@ -1220,12 +1250,14 @@
           [
             "ansvarig",
             "owner",
-            "responsible"
+            "responsible",
+            "ansvarig_intern_funktion"
           ],
           [
             "svar",
             "reply",
-            "tenant_reply"
+            "tenant_reply",
+            "ett_kort_svar_till_hyresgasten"
           ]
         ]
       },
@@ -1249,7 +1281,8 @@
         "expected_leaf_output_field_groups": [
           [
             "belopp",
-            "amount"
+            "amount",
+            "avvikande_belopp"
           ],
           [
             "referens",
@@ -1272,7 +1305,8 @@
           ],
           [
             "kontroll",
-            "recommended_check"
+            "recommended_check",
+            "rekommenderad_kontroll"
           ]
         ]
       },
@@ -1317,7 +1351,8 @@
           ],
           [
             "arbetsorder",
-            "work_order"
+            "work_order",
+            "arbetsorderlista"
           ]
         ]
       },
@@ -1351,8 +1386,6 @@
             "decision",
             "decision_points",
             "decisions",
-            "meeting_items",
-            "meeting_points",
             "spoken_decisions_candidates",
             "structured_decisions"
           ],
@@ -1361,8 +1394,6 @@
             "motion",
             "motions",
             "proposal",
-            "meeting_items",
-            "meeting_points",
             "motions_candidates",
             "structured_motions"
           ],
@@ -1371,8 +1402,6 @@
             "reservation",
             "reservations",
             "dissent",
-            "meeting_items",
-            "meeting_points",
             "reservations_candidates",
             "structured_reservations"
           ],
@@ -1395,8 +1424,6 @@
             "oppna_fragor",
             "open_question",
             "open_questions",
-            "meeting_items",
-            "meeting_points",
             "open_questions_candidates",
             "structured_open_questions"
           ],
@@ -1419,7 +1446,8 @@
             "risk",
             "risk_or_note",
             "actionable_conclusion",
-            "recommended_actions"
+            "recommended_actions",
+            "juridisk_uppfoljning"
           ]
         ]
       },
@@ -1467,7 +1495,8 @@
           [
             "sekretess",
             "confidentiality",
-            "secrecy"
+            "secrecy",
+            "sekretesskansliga_delar"
           ],
           [
             "fragor",
@@ -1504,7 +1533,8 @@
           ],
           [
             "handelser",
-            "events"
+            "events",
+            "viktiga_handelser"
           ],
           [
             "beslut",
@@ -1518,7 +1548,8 @@
           [
             "personuppgifter",
             "personal_data",
-            "pii"
+            "pii",
+            "kansliga_personuppgifter"
           ],
           [
             "risker",
@@ -1633,7 +1664,8 @@
           [
             "tidsfrist",
             "deadline",
-            "due_date"
+            "due_date",
+            "tidsfrister"
           ]
         ]
       },
@@ -1669,7 +1701,8 @@
           ],
           [
             "lagrum",
-            "legal_basis"
+            "legal_basis",
+            "mojliga_lagrum"
           ],
           [
             "avvikelser",
@@ -1683,7 +1716,8 @@
           [
             "forelaggande",
             "injunction",
-            "recommended_action"
+            "recommended_action",
+            "foreslagna_forelagganden"
           ]
         ]
       },
@@ -1718,7 +1752,8 @@
           [
             "poang",
             "score",
-            "points"
+            "points",
+            "poanggrund"
           ],
           [
             "leverantor",
@@ -1729,7 +1764,8 @@
             "osakerhet",
             "uncertainty",
             "osakra",
-            "osaker"
+            "osaker",
+            "osakra_tolkningar"
           ]
         ]
       },
@@ -1757,7 +1793,8 @@
           [
             "personuppgift",
             "personal_data",
-            "pii"
+            "pii",
+            "personuppgifter_om_den_registrerade"
           ],
           [
             "registrerad",
@@ -1779,7 +1816,8 @@
           [
             "utlamning",
             "disclosure",
-            "release_list"
+            "release_list",
+            "strukturerad_utlamningslista"
           ]
         ]
       },
@@ -1816,24 +1854,29 @@
           ],
           [
             "paverkan",
-            "impact"
+            "impact",
+            "paverkan_per_verksamhet"
           ],
           [
             "beroende",
-            "dependency"
+            "dependency",
+            "kritiska_beroenden"
           ],
           [
             "atgard",
             "action",
-            "actions"
+            "actions",
+            "beslutade_atgarder"
           ],
           [
             "risk",
-            "risks"
+            "risks",
+            "oppna_risker"
           ],
           [
             "kommunikation",
-            "communication"
+            "communication",
+            "kommunikationsbehov"
           ]
         ]
       },
@@ -1881,12 +1924,14 @@
           [
             "insats",
             "support_action",
-            "intervention"
+            "intervention",
+            "insatser"
           ],
           [
             "ansvarig",
             "owner",
-            "responsible"
+            "responsible",
+            "ansvariga"
           ],
           [
             "riskfaktor",
@@ -1894,7 +1939,8 @@
           ],
           [
             "skyddsfaktor",
-            "protective_factor"
+            "protective_factor",
+            "skyddsfaktorer"
           ],
           [
             "saknade_uppgifter",
@@ -1962,7 +2008,8 @@
           [
             "oklarhet",
             "uncertainty",
-            "follow_up_question"
+            "follow_up_question",
+            "oklarheter"
           ]
         ]
       },
@@ -1993,15 +2040,18 @@
           [
             "forvaltning",
             "department",
-            "administration"
+            "administration",
+            "forvaltningar"
           ],
           [
             "avvikelse",
-            "variance"
+            "variance",
+            "stora_avvikelser"
           ],
           [
             "orsak",
-            "cause"
+            "cause",
+            "mojliga_orsaker"
           ],
           [
             "prognos",
@@ -2009,12 +2059,14 @@
           ],
           [
             "risk",
-            "risks"
+            "risks",
+            "risk_for_helarsprognos"
           ],
           [
             "atgard",
             "action",
-            "recommended_action"
+            "recommended_action",
+            "foreslagna_atgarder"
           ]
         ]
       },
@@ -2100,11 +2152,13 @@
           ],
           [
             "garanti",
-            "warranty"
+            "warranty",
+            "garanti_eller_vitesrisker"
           ],
           [
             "vite",
-            "penalty"
+            "penalty",
+            "vitesrisker"
           ],
           [
             "rekommenderad_atgard",
@@ -2380,7 +2434,8 @@
           ],
           [
             "osakerhet",
-            "uncertainty"
+            "uncertainty",
+            "osakerheter"
           ]
         ]
       },
@@ -3947,13 +4002,15 @@
             "addressed_requests",
             "besvarade_punkter",
             "besvarats",
-            "besvarade"
+            "besvarade",
+            "vad_som_besvarats"
           ],
           [
             "remaining_gaps",
             "kvarstaende_brister",
             "aterstar",
-            "aterstaende"
+            "aterstaende",
+            "vad_som_aterstar"
           ]
         ],
         "preferred_question_event_ids": [
@@ -4853,7 +4910,8 @@
           [
             "next_checks",
             "nasta_kontroller",
-            "possible_next_checks"
+            "possible_next_checks",
+            "mojliga_nasta_kontroller"
           ]
         ]
       },
@@ -4985,7 +5043,8 @@
           ],
           [
             "funding_sources",
-            "finansieringskallor"
+            "finansieringskallor",
+            "andra_finansieringskallor"
           ],
           [
             "review_questions",
@@ -5023,7 +5082,8 @@
           ],
           [
             "decisions",
-            "beslut"
+            "beslut",
+            "uttalade_beslut"
           ],
           [
             "assignments",
@@ -5222,7 +5282,8 @@
           ],
           [
             "evidence",
-            "belagg"
+            "belagg",
+            "angivet_belagg"
           ],
           [
             "deviation",
@@ -7194,7 +7255,8 @@
           ],
           [
             "saknade_uppgifter",
-            "missing_information"
+            "missing_information",
+            "uppgifter_som_saknas_i_utdraget"
           ]
         ],
         "forbidden_question_event_ids": [
@@ -8401,7 +8463,8 @@
             "beslut",
             "beslutslydelse",
             "decision",
-            "decision_text"
+            "decision_text",
+            "beslutets_lydelse"
           ],
           [
             "extraktionskvalitet",
@@ -8722,12 +8785,14 @@
             "kallhanvisningar",
             "kallhanvisning",
             "kallreferenser",
-            "source_references"
+            "source_references",
+            "kallhanvisningar_per_pastaende"
           ],
           [
             "motstridigheter",
             "motstridighet",
-            "conflicts"
+            "conflicts",
+            "motstridigheter_mellan_handlingarna"
           ],
           [
             "saknad_information",
@@ -9823,7 +9888,8 @@
             "ledsagarbehov",
             "behov_av_ledsagare",
             "companion_need",
-            "escort_need"
+            "escort_need",
+            "uppgivet_ledsagarbehov"
           ],
           [
             "sokt_giltighetstid",
@@ -9834,7 +9900,8 @@
             "bifogade_intyg",
             "intyg",
             "submitted_certificates",
-            "attachments_received"
+            "attachments_received",
+            "vilka_intyg_som_faktiskt_bifogats"
           ],
           [
             "kompletteringsbehov",
