@@ -1,14 +1,15 @@
 #!/usr/bin/env python3
-"""Measure pinned-Luna strict-tool provider capability without product mutation.
+"""Measure one model's strict-tool provider capability without product mutation.
 
-It asks whether the configured Luna route accepts one closed strict request and
-returns conformant arguments. The measured request is the fixed synthetic schema,
-prompt and output cap unless the caller supplies its own; either way the receipt
-seals the exact tool schema, prompt text and output cap it sent, together with
-the route's `supports_strict_tool_schema` capability. It is one single-message
-call with fixed transport controls, not a replay of a full Builder turn.
-Delete this runner and its focused test after the Flow Builder proposal schema's
-provider-capability decision is recorded; this is not a permanent health check.
+It asks whether the named model's resolved route accepts one closed strict
+request and returns conformant arguments. The measured model, tool schema,
+prompt and output cap all come from the caller; the receipt seals every one of
+them, together with the route's `supports_strict_tool_schema` capability and
+the token count the provider reported for that exact request. It is one
+single-message call with fixed transport controls, not a replay of a full
+Builder turn. Delete this runner and its focused test after the Flow Builder
+proposal schema's provider-capability decision is recorded; this is not a
+permanent health check.
 """
 
 from __future__ import annotations
@@ -90,21 +91,28 @@ from eneo.flows.ai_builder.ai_builder_tools import (  # noqa: E402
 from eneo.main.config import get_settings  # noqa: E402
 from eneo.tenants.tenant_repo import TenantRepository  # noqa: E402
 
-PROBE_MODEL_ID = "90824b05-9913-4210-968f-9294eb017d31"
-PROBE_MODEL_ROUTE = "openai/gpt-5.6-luna"
-PROBE_RESOLVED_MODEL_NAME = "gpt-5.6-luna"
+# The measured model is named by the caller, never by this file: a runner that
+# pins one tenant's model identity can only ever certify that tenant's model,
+# and the receipt has to say which model it measured anyway.
+PROBE_MODEL_ID_ENV = "ENEO_PROBE_MODEL_ID"
 PROBE_TOOL_NAME = "propose_flow"
 PARALLEL_TOOL_CALLS = False
-RECEIPT_SCHEMA_VERSION = "pinned-luna-strict-tool-capability-receipt.v2"
-PROTOCOL_VERSION = "pinned-luna-strict-tool-provider-capability.v2"
+RECEIPT_SCHEMA_VERSION = "strict-tool-capability-receipt.v3"
+PROTOCOL_VERSION = "strict-tool-provider-capability.v3"
 _MAX_ARGUMENT_BYTES = 16_384
 _MAX_RECEIPT_BYTES = 131_072
 _DEFAULT_MAX_OUTPUT_TOKENS = 256
 # A real Builder proposal spends thousands of completion tokens, so the cap is a
 # bounded flag rather than a constant; the ceiling keeps one probe call cheap.
 _MAX_OUTPUT_TOKEN_CEILING = 8_192
-# Schema and prompt inputs must leave room for the sealed receipt around them.
-_MAX_MEASUREMENT_INPUT_BYTES = 32_768
+# Schema and prompt inputs must leave room for the sealed receipt around them,
+# and they are bounded separately because they differ by an order of magnitude:
+# the Flow Builder create schema at the projection cap and the longest legal
+# obligated names serializes to about 34 KiB, while its prompt is a few hundred
+# bytes. One shared bound large enough for the schema would let a prompt of
+# escape-heavy control characters outgrow the receipt it must fit inside.
+_MAX_MEASUREMENT_SCHEMA_BYTES = 49_152
+_MAX_MEASUREMENT_PROMPT_BYTES = 8_192
 _PROVIDER_RETRY_LIMIT = 0
 _PROVIDER_EXCEPTIONS = cast(
     tuple[type[Exception], ...],
@@ -168,6 +176,7 @@ class ProbeMeasurement(_SealedModel):
     receipt then carries all three values, so verification needs no other input.
     """
 
+    model_id: Annotated[str, StringConstraints(min_length=1, max_length=128)]
     tool_schema: dict[str, object]
     prompt: Annotated[str, StringConstraints(min_length=1)]
     max_output_tokens: Annotated[int, Field(ge=1, le=_MAX_OUTPUT_TOKEN_CEILING)] = (
@@ -176,9 +185,9 @@ class ProbeMeasurement(_SealedModel):
 
     @model_validator(mode="after")
     def measures_one_strict_probe_tool(self) -> ProbeMeasurement:
-        if len(self.prompt.encode()) > _MAX_MEASUREMENT_INPUT_BYTES:
+        if len(self.prompt.encode()) > _MAX_MEASUREMENT_PROMPT_BYTES:
             raise ValueError("probe prompt is too large to seal")
-        if len(json.dumps(self.tool_schema).encode()) > _MAX_MEASUREMENT_INPUT_BYTES:
+        if len(json.dumps(self.tool_schema).encode()) > _MAX_MEASUREMENT_SCHEMA_BYTES:
             raise ValueError("probe tool schema is too large to seal")
         function = _string_keyed_object(self.tool_schema.get("function"))
         if self.tool_schema.get("type") != "function" or function is None:
@@ -196,8 +205,9 @@ class ProbeMeasurement(_SealedModel):
         return self
 
 
-def default_measurement() -> ProbeMeasurement:
+def default_measurement(model_id: str) -> ProbeMeasurement:
     return ProbeMeasurement(
+        model_id=model_id,
         tool_schema=synthetic_tool_schema(),
         prompt=PROBE_PROMPT,
         max_output_tokens=_DEFAULT_MAX_OUTPUT_TOKENS,
@@ -272,8 +282,21 @@ class ResponseChecks(_SealedModel):
         return all(self.model_dump().values())
 
 
+class ProviderTokenUsage(_SealedModel):
+    """What the provider reported for this exact request.
+
+    Sealed beside the schema that produced it, so a token-accounting claim can
+    be checked against a provider count rather than against another estimate.
+    """
+
+    prompt_tokens: NonNegativeInt | None
+    completion_tokens: NonNegativeInt | None
+    total_tokens: NonNegativeInt | None
+
+
 class ProbeResponseEvidence(_SealedModel):
     finish_reason: str | None
+    usage: ProviderTokenUsage
     tool_call_count: NonNegativeInt
     tool_name: Literal["propose_flow"] | None
     arguments: dict[str, object] | None
@@ -330,8 +353,8 @@ class ProbeCallOutcome(_SealedModel):
 
 
 class CapabilityProtocol(_SealedModel):
-    version: Literal["pinned-luna-strict-tool-provider-capability.v2"]
-    fixed_model_id: Literal["90824b05-9913-4210-968f-9294eb017d31"]
+    version: Literal["strict-tool-provider-capability.v3"]
+    measured_model_id: Annotated[str, StringConstraints(min_length=1, max_length=128)]
     one_provider_call: Literal[True]
     provider_retry_limit: Literal[0]
     mutates_product_or_session: Literal[False]
@@ -340,6 +363,7 @@ class CapabilityProtocol(_SealedModel):
 class CapabilityRequest(_SealedModel):
     """The sealed request, verifiable offline from the receipt alone."""
 
+    model_id: Annotated[str, StringConstraints(min_length=1, max_length=128)]
     tool_schema: dict[str, object]
     schema_sha256: Sha256
     tool_choice: dict[str, object]
@@ -351,6 +375,7 @@ class CapabilityRequest(_SealedModel):
     @model_validator(mode="after")
     def sealed_request_is_one_strict_probe_call(self) -> CapabilityRequest:
         measurement = ProbeMeasurement(
+            model_id=self.model_id,
             tool_schema=self.tool_schema,
             prompt=self.prompt,
             max_output_tokens=self.max_output_tokens,
@@ -361,7 +386,7 @@ class CapabilityRequest(_SealedModel):
 
 
 class CapabilityReceipt(_SealedModel):
-    schema_version: Literal["pinned-luna-strict-tool-capability-receipt.v2"]
+    schema_version: Literal["strict-tool-capability-receipt.v3"]
     protocol: CapabilityProtocol
     source_before: SourceIdentity
     source_after: SourceIdentity
@@ -396,6 +421,7 @@ class ReceiptVerificationError(ValueError):
 class ProbeArguments(_SealedModel):
     output_dir: Path | None
     verify_receipt: Path | None
+    model_id: str | None = None
     tool_schema_file: Path | None = None
     prompt_file: Path | None = None
     max_output_tokens: Annotated[int, Field(ge=1, le=_MAX_OUTPUT_TOKEN_CEILING)] = (
@@ -514,13 +540,16 @@ def _proposal_route_identity_sha256(
     )
 
 
-def proposal_route_identity(route: ResolvedCompletionModelRoute) -> RuntimeIdentity:
+def proposal_route_identity(
+    route: ResolvedCompletionModelRoute, *, requested_model_id: str
+) -> RuntimeIdentity:
     """Return only safe route evidence; caller fills persisted model flags."""
 
     sanitized = _sanitize_builder_route_kwargs(route.litellm_kwargs)
     sanitized_route = replace(route, litellm_kwargs=sanitized)
     route_kwargs = _safe_route_kwargs_identity(sanitized_route)
     return _empty_runtime_identity(
+        requested_model_id=requested_model_id,
         litellm_model=route.litellm_model,
         provider_type=route.provider_type,
         route_kwargs=route_kwargs,
@@ -530,9 +559,10 @@ def proposal_route_identity(route: ResolvedCompletionModelRoute) -> RuntimeIdent
 def _request_controls_are_exact(
     kwargs: Mapping[str, object],
     measurement: ProbeMeasurement,
+    expected_litellm_model: str,
 ) -> bool:
     return (
-        kwargs.get("model") == PROBE_MODEL_ROUTE
+        kwargs.get("model") == expected_litellm_model
         and kwargs.get("messages") == [{"role": "user", "content": measurement.prompt}]
         and kwargs.get("tools") == [measurement.tool_schema]
         and kwargs.get("tool_choice") == forced_tool_choice(PROBE_TOOL_NAME)
@@ -557,11 +587,13 @@ class _RecordingLiteLLMClient:
         request: ProposalCompletionRequest,
         expected_prepared_request_sha256: str,
         measurement: ProbeMeasurement,
+        expected_litellm_model: str,
     ) -> None:
         self._provider_completion = provider_completion
         self._proposal_request = request
         self._expected_prepared_request_sha256 = expected_prepared_request_sha256
         self._measurement = measurement
+        self._expected_litellm_model = expected_litellm_model
         self.call_count = 0
         self.request: RequestObservation | None = None
         self.failure: SafeProviderFailure | None = None
@@ -584,7 +616,9 @@ class _RecordingLiteLLMClient:
             effective_values=kwargs,
         )
         self.request = RequestObservation(
-            controls_valid=_request_controls_are_exact(kwargs, self._measurement),
+            controls_valid=_request_controls_are_exact(
+                kwargs, self._measurement, self._expected_litellm_model
+            ),
             effective_request=safe_request,
             expected_prepared_request_sha256=(self._expected_prepared_request_sha256),
         )
@@ -620,6 +654,7 @@ def _remote_response_observed(error: Exception) -> bool:
 
 def _capability_request_value(measurement: ProbeMeasurement) -> dict[str, object]:
     return {
+        "model_id": measurement.model_id,
         "tool_schema": measurement.tool_schema,
         "schema_sha256": canonical_sha256(measurement.tool_schema),
         "tool_choice": forced_tool_choice(PROBE_TOOL_NAME),
@@ -631,12 +666,14 @@ def _capability_request_value(measurement: ProbeMeasurement) -> dict[str, object
 
 
 def _runtime_preflight_passes(identity: RuntimeIdentity) -> bool:
+    """Whether the resolved model is one the Builder would send strict tools on.
+
+    The route, provider and model name are sealed rather than asserted: they
+    are properties of whichever model the caller named, and a runner that
+    demanded particular values could only ever measure one deployment.
+    """
     return (
-        identity.requested_model_id == PROBE_MODEL_ID
-        and identity.resolved_model_id == PROBE_MODEL_ID
-        and identity.resolved_model_name == PROBE_RESOLVED_MODEL_NAME
-        and identity.litellm_model == PROBE_MODEL_ROUTE
-        and identity.provider_type == "openai"
+        identity.requested_model_id == identity.resolved_model_id
         and identity.enabled
         and not identity.deprecated
         and not identity.migrated
@@ -699,9 +736,9 @@ def build_receipt(
     runtime_before: RuntimeIdentity,
     runtime_after: RuntimeIdentity,
     outcome: ProbeCallOutcome,
-    measurement: ProbeMeasurement | None = None,
+    measurement: ProbeMeasurement,
 ) -> CapabilityReceipt:
-    measured = measurement or default_measurement()
+    measured = measurement
     verdict, reason_codes = _decide_verdict(
         source_before=source_before,
         source_after=source_after,
@@ -713,7 +750,7 @@ def build_receipt(
         schema_version=RECEIPT_SCHEMA_VERSION,
         protocol=CapabilityProtocol(
             version=PROTOCOL_VERSION,
-            fixed_model_id=PROBE_MODEL_ID,
+            measured_model_id=measured.model_id,
             one_provider_call=True,
             provider_retry_limit=_PROVIDER_RETRY_LIMIT,
             mutates_product_or_session=False,
@@ -852,9 +889,10 @@ def _passes_same_schema(
 
 def evaluate_response(
     response: LLMCompletionResponse,
-    measurement: ProbeMeasurement | None = None,
+    measurement: ProbeMeasurement,
 ) -> ProbeResponseEvidence:
-    measured = measurement or default_measurement()
+    measured = measurement
+    usage = _provider_token_usage(response)
     finish_reason: str | None = None
     tool_calls = ()
     if len(response.choices) == 1:
@@ -867,6 +905,7 @@ def evaluate_response(
     if finish_reason == "length":
         return ProbeResponseEvidence(
             finish_reason=finish_reason,
+            usage=usage,
             tool_call_count=len(tool_calls),
             tool_name=PROBE_TOOL_NAME if single_call else None,
             arguments=None,
@@ -893,6 +932,7 @@ def evaluate_response(
     )
     return ProbeResponseEvidence(
         finish_reason=finish_reason,
+        usage=usage,
         tool_call_count=len(tool_calls),
         tool_name=PROBE_TOOL_NAME if single_call else None,
         arguments=dict(parsed) if parsed is not None and checks.all_pass else None,
@@ -901,13 +941,22 @@ def evaluate_response(
     )
 
 
+def _provider_token_usage(response: LLMCompletionResponse) -> ProviderTokenUsage:
+    usage = response.usage
+    return ProviderTokenUsage(
+        prompt_tokens=usage.prompt_tokens if usage else None,
+        completion_tokens=usage.completion_tokens if usage else None,
+        total_tokens=usage.total_tokens if usage else None,
+    )
+
+
 async def run_probe_call(
     *,
     route: ResolvedCompletionModelRoute,
     provider_completion: ProviderCompletion,
-    measurement: ProbeMeasurement | None = None,
+    measurement: ProbeMeasurement,
 ) -> ProbeCallOutcome:
-    measured = measurement or default_measurement()
+    measured = measurement
     probe_route = replace(
         route,
         litellm_kwargs=_sanitize_builder_route_kwargs(route.litellm_kwargs),
@@ -953,6 +1002,7 @@ async def run_probe_call(
         request,
         expected_prepared_request_sha256=canonical_sha256(prepared_request),
         measurement=measured,
+        expected_litellm_model=probe_route.litellm_model,
     )
     try:
         raw_response = await client.acompletion(**prepared_request)
@@ -1014,6 +1064,7 @@ def _read_source_identity() -> SourceIdentity:
 
 def _empty_runtime_identity(
     *,
+    requested_model_id: str,
     litellm_model: str = "unresolved",
     provider_type: str = "unresolved",
     route_kwargs: EffectiveValuesIdentity | None = None,
@@ -1023,7 +1074,7 @@ def _empty_runtime_identity(
         effective_values={},
     )
     return RuntimeIdentity(
-        requested_model_id=PROBE_MODEL_ID,
+        requested_model_id=requested_model_id,
         resolved_model_id="unresolved",
         resolved_model_name="unresolved",
         litellm_model=litellm_model,
@@ -1045,6 +1096,7 @@ def _empty_runtime_identity(
 
 async def _resolve_runtime_identity(
     tenant_id: str,
+    model_id: str,
 ) -> tuple[RuntimeIdentity, ResolvedCompletionModelRoute]:
     settings = get_settings()
     sessionmanager.init(settings.database_url)
@@ -1054,7 +1106,7 @@ async def _resolve_runtime_identity(
         if tenant is None:
             raise RuntimeError("Probe tenant is unavailable")
         model = await CompletionModelRepository(session=session, tenant=tenant).one(
-            UUID(PROBE_MODEL_ID)
+            UUID(model_id)
         )
         route = await CompletionService(
             context_builder=ContextBuilder(),
@@ -1068,7 +1120,7 @@ async def _resolve_runtime_identity(
         )
         safe_kwargs = _safe_route_kwargs_identity(route)
         identity = RuntimeIdentity(
-            requested_model_id=PROBE_MODEL_ID,
+            requested_model_id=model_id,
             resolved_model_id=str(model.id),
             resolved_model_name=model.name,
             litellm_model=route.litellm_model,
@@ -1091,7 +1143,7 @@ async def _resolve_runtime_identity(
 
 SourceReader = Callable[[], SourceIdentity]
 RuntimeResolver = Callable[
-    [str], Awaitable[tuple[RuntimeIdentity, ResolvedCompletionModelRoute]]
+    [str, str], Awaitable[tuple[RuntimeIdentity, ResolvedCompletionModelRoute]]
 ]
 
 
@@ -1102,16 +1154,16 @@ async def run_live_probe(
     source_reader: SourceReader = _read_source_identity,
     runtime_resolver: RuntimeResolver = _resolve_runtime_identity,
     provider_completion: ProviderCompletion = _litellm_provider_completion,
-    measurement: ProbeMeasurement | None = None,
+    measurement: ProbeMeasurement,
 ) -> Path:
     if output_dir.resolve().is_relative_to(backend_dir.parent.resolve()):
         raise ValueError("Live receipt output must be outside the source checkout")
-    measured = measurement or default_measurement()
+    measured = measurement
     source_before = source_reader()
-    runtime_before = _empty_runtime_identity()
+    runtime_before = _empty_runtime_identity(requested_model_id=measured.model_id)
     outcome = ProbeCallOutcome(call_count=0, request=None, response=None, failure=None)
     if source_before.source_clean:
-        runtime_before, route = await runtime_resolver(tenant_id)
+        runtime_before, route = await runtime_resolver(tenant_id, measured.model_id)
         if _runtime_preflight_passes(runtime_before):
             outcome = await run_probe_call(
                 route=route,
@@ -1119,7 +1171,7 @@ async def run_live_probe(
                 measurement=measured,
             )
     runtime_after = (
-        (await runtime_resolver(tenant_id))[0]
+        (await runtime_resolver(tenant_id, measured.model_id))[0]
         if outcome.call_count == 1
         else runtime_before
     )
@@ -1140,14 +1192,22 @@ async def run_live_probe(
 def parse_args(argv: list[str] | None = None) -> ProbeArguments:
     parser = ArgumentParser(
         description=(
-            "Measure pinned-Luna strict-tool provider capability or verify its receipt. "
-            "The live request uses the fixed synthetic schema, prompt and output cap "
-            "unless the matching Builder ones are supplied."
+            "Measure one model's strict-tool provider capability or verify its "
+            "receipt. The live request uses the fixed synthetic schema, prompt and "
+            "output cap unless the matching Builder ones are supplied."
         )
     )
     mode = parser.add_mutually_exclusive_group(required=True)
     mode.add_argument("--output-dir", type=Path)
     mode.add_argument("--verify-receipt", type=Path)
+    parser.add_argument(
+        "--model-id",
+        default=os.environ.get(PROBE_MODEL_ID_ENV),
+        help=(
+            "Completion model to measure; defaults to the "
+            f"{PROBE_MODEL_ID_ENV} environment variable."
+        ),
+    )
     parser.add_argument("--tool-schema-file", type=Path, default=None)
     parser.add_argument("--prompt-file", type=Path, default=None)
     parser.add_argument(
@@ -1163,6 +1223,8 @@ def parse_args(argv: list[str] | None = None) -> ProbeArguments:
     )
     if live_only and parsed.output_dir is None:
         parser.error("measurement options only apply to a live --output-dir run")
+    if parsed.output_dir is not None and not parsed.model_id:
+        parser.error(f"--model-id (or {PROBE_MODEL_ID_ENV}) names the model to measure")
     if not 1 <= parsed.max_output_tokens <= _MAX_OUTPUT_TOKEN_CEILING:
         parser.error(
             f"--max-output-tokens must be between 1 and {_MAX_OUTPUT_TOKEN_CEILING}"
@@ -1170,6 +1232,7 @@ def parse_args(argv: list[str] | None = None) -> ProbeArguments:
     return ProbeArguments(
         output_dir=cast(Path | None, parsed.output_dir),
         verify_receipt=cast(Path | None, parsed.verify_receipt),
+        model_id=cast(str | None, parsed.model_id),
         tool_schema_file=cast(Path | None, parsed.tool_schema_file),
         prompt_file=cast(Path | None, parsed.prompt_file),
         max_output_tokens=cast(int, parsed.max_output_tokens),
@@ -1184,14 +1247,19 @@ def measurement_from_arguments(arguments: ProbeArguments) -> ProbeMeasurement:
     transport controls.
     """
 
+    if not arguments.model_id:
+        raise RuntimeError("The measured model id is missing")
     return ProbeMeasurement(
+        model_id=arguments.model_id,
         tool_schema=(
             _load_json_object(arguments.tool_schema_file)
             if arguments.tool_schema_file is not None
             else synthetic_tool_schema()
         ),
         prompt=(
-            _read_bounded_text(arguments.prompt_file)
+            _read_bounded_text(
+                arguments.prompt_file, limit=_MAX_MEASUREMENT_PROMPT_BYTES
+            )
             if arguments.prompt_file is not None
             else PROBE_PROMPT
         ),
@@ -1199,12 +1267,14 @@ def measurement_from_arguments(arguments: ProbeArguments) -> ProbeMeasurement:
     )
 
 
-def _read_bounded_text(path: Path) -> str:
-    return read_bounded_file(path, limit=_MAX_MEASUREMENT_INPUT_BYTES).decode("utf-8")
+def _read_bounded_text(path: Path, *, limit: int) -> str:
+    return read_bounded_file(path, limit=limit).decode("utf-8")
 
 
 def _load_json_object(path: Path) -> dict[str, object]:
-    schema = _string_keyed_object(json.loads(_read_bounded_text(path)))
+    schema = _string_keyed_object(
+        json.loads(_read_bounded_text(path, limit=_MAX_MEASUREMENT_SCHEMA_BYTES))
+    )
     if schema is None:
         raise ValueError("Tool schema file must contain a JSON object")
     return schema

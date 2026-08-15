@@ -67,6 +67,14 @@ def _probe() -> ModuleType:
     return module
 
 
+# The runner no longer names a model, so the test does.
+_MEASURED_MODEL_ID = "90824b05-9913-4210-968f-9294eb017d31"
+
+
+def _measurement(probe: ModuleType) -> object:
+    return probe.default_measurement(_MEASURED_MODEL_ID)
+
+
 def _route(
     *,
     kwargs: dict[str, object] | None = None,
@@ -228,10 +236,12 @@ def _runtime(
     route: ResolvedCompletionModelRoute | None = None,
 ) -> object:
     selected_route = route or _route()
-    projection = probe.proposal_route_identity(selected_route)
+    projection = probe.proposal_route_identity(
+        selected_route, requested_model_id=_MEASURED_MODEL_ID
+    )
     return probe.RuntimeIdentity(
-        requested_model_id=probe.PROBE_MODEL_ID,
-        resolved_model_id=probe.PROBE_MODEL_ID,
+        requested_model_id=_MEASURED_MODEL_ID,
+        resolved_model_id=_MEASURED_MODEL_ID,
         resolved_model_name="gpt-5.6-luna",
         litellm_model=selected_route.litellm_model,
         provider_type=selected_route.provider_type,
@@ -262,7 +272,9 @@ def _passing_outcome(probe: ModuleType) -> object:
             effective_request=safe_kwargs,
             expected_prepared_request_sha256=(safe_kwargs.effective_values_sha256),
         ),
-        response=probe.evaluate_response(_response(VALID_ARGUMENTS)),
+        response=probe.evaluate_response(
+            _response(VALID_ARGUMENTS), _measurement(probe)
+        ),
         failure=None,
     )
 
@@ -316,7 +328,7 @@ def test_capability_contract_is_one_closed_strict_localized_tool() -> None:
 def test_capability_request_has_no_production_or_temperature_claim() -> None:
     probe = _probe()
 
-    request = probe._capability_request_value(probe.default_measurement())
+    request = probe._capability_request_value(_measurement(probe))
 
     assert "temperature" not in request
     assert "production_schema_diagnostic" not in request
@@ -328,7 +340,7 @@ def test_capability_request_has_no_production_or_temperature_claim() -> None:
 def test_response_evaluation_accepts_every_schema_valid_branch_order() -> None:
     probe = _probe()
 
-    passed = probe.evaluate_response(_response(VALID_ARGUMENTS))
+    passed = probe.evaluate_response(_response(VALID_ARGUMENTS), _measurement(probe))
     reversed_arguments = {
         **VALID_ARGUMENTS,
         "avsnitt": [
@@ -346,7 +358,9 @@ def test_response_evaluation_accepts_every_schema_valid_branch_order() -> None:
             }
         ],
     }
-    reversed_valid = probe.evaluate_response(_response(reversed_arguments))
+    reversed_valid = probe.evaluate_response(
+        _response(reversed_arguments), _measurement(probe)
+    )
     missing_nullable = probe.evaluate_response(
         _response(
             {
@@ -365,7 +379,8 @@ def test_response_evaluation_accepts_every_schema_valid_branch_order() -> None:
                     }
                 ],
             }
-        )
+        ),
+        _measurement(probe),
     )
     mixed_branches = probe.evaluate_response(
         _response(
@@ -392,7 +407,8 @@ def test_response_evaluation_accepts_every_schema_valid_branch_order() -> None:
                     }
                 ],
             }
-        )
+        ),
+        _measurement(probe),
     )
 
     assert passed.checks.all_pass is True
@@ -412,6 +428,7 @@ def test_response_evaluation_accepts_every_schema_valid_branch_order() -> None:
             response=reversed_valid,
             failure=None,
         ),
+        measurement=_measurement(probe),
     )
     assert receipt.verdict == "pass"
     assert missing_nullable.checks.same_schema_validation is False
@@ -424,7 +441,9 @@ def test_length_completion_is_inconclusive_before_schema_validation(
     arguments: dict[str, object] | str,
 ) -> None:
     probe = _probe()
-    response = probe.evaluate_response(_response(arguments, finish_reason="length"))
+    response = probe.evaluate_response(
+        _response(arguments, finish_reason="length"), _measurement(probe)
+    )
     source = _source(probe)
     runtime = _runtime(probe)
     receipt = probe.build_receipt(
@@ -438,6 +457,7 @@ def test_length_completion_is_inconclusive_before_schema_validation(
             response=response,
             failure=None,
         ),
+        measurement=_measurement(probe),
     )
 
     assert response.finish_reason == "length"
@@ -456,7 +476,8 @@ def test_proposal_route_identity_changes_without_retaining_provider_values() -> 
                 "api_key": "one",
                 "organization": "organization-a",
             }
-        )
+        ),
+        requested_model_id=_MEASURED_MODEL_ID,
     )
     second = probe.proposal_route_identity(
         _route(
@@ -465,7 +486,8 @@ def test_proposal_route_identity_changes_without_retaining_provider_values() -> 
                 "api_key": "one",
                 "organization": "organization-b",
             }
-        )
+        ),
+        requested_model_id=_MEASURED_MODEL_ID,
     )
 
     assert first.proposal_route_identity_sha256 != (
@@ -499,10 +521,12 @@ async def test_probe_litellm_call_records_exact_effective_request_identity() -> 
             }
         ),
         provider_completion=provider_completion,
+        measurement=_measurement(probe),
     )
     second = await probe.run_probe_call(
         route=_route(kwargs={"api_base": "https://deployment-b.invalid"}),
         provider_completion=provider_completion,
+        measurement=_measurement(probe),
     )
 
     assert first.call_count == second.call_count == 1
@@ -553,7 +577,9 @@ async def test_only_canonical_provider_errors_become_probe_outcomes() -> None:
         )
 
     outcome = await probe.run_probe_call(
-        route=_route(), provider_completion=provider_failure
+        route=_route(),
+        provider_completion=provider_failure,
+        measurement=_measurement(probe),
     )
 
     assert outcome.failure is not None
@@ -577,6 +603,7 @@ async def test_only_canonical_provider_errors_become_probe_outcomes() -> None:
         runtime_before=runtime,
         runtime_after=runtime,
         outcome=outcome,
+        measurement=_measurement(probe),
     )
     assert receipt.verdict == "inconclusive"
     assert receipt.reason_codes == ("request_rejection_without_remote_provenance",)
@@ -590,7 +617,11 @@ async def test_local_provider_adapter_defect_aborts_without_sealing_outcome() ->
         raise ValueError("local normalization defect")
 
     with pytest.raises(ValueError, match="local normalization defect"):
-        await probe.run_probe_call(route=_route(), provider_completion=local_defect)
+        await probe.run_probe_call(
+            route=_route(),
+            provider_completion=local_defect,
+            measurement=_measurement(probe),
+        )
 
 
 @pytest.mark.parametrize(
@@ -653,6 +684,7 @@ async def test_transport_rejection_without_canonical_attribution_is_inconclusive
             }
         ),
         provider_completion=probe._litellm_provider_completion,
+        measurement=_measurement(probe),
     )
 
     assert request_count == 1
@@ -700,6 +732,7 @@ async def test_transport_rejection_without_canonical_attribution_is_inconclusive
         runtime_before=runtime,
         runtime_after=runtime,
         outcome=outcome,
+        measurement=_measurement(probe),
     )
     assert receipt.verdict == "inconclusive"
     assert receipt.reason_codes == ("provider_result_inconclusive",)
@@ -743,6 +776,7 @@ def test_canonical_tool_schema_attribution_is_fail(
         runtime_before=runtime,
         runtime_after=runtime,
         outcome=outcome,
+        measurement=_measurement(probe),
     )
     assert receipt.verdict == "fail"
     assert receipt.reason_codes == ("configured_route_rejected_strict_request",)
@@ -781,6 +815,7 @@ async def test_native_litellm_responses_success_is_one_request_and_pass(
     outcome = await probe.run_probe_call(
         route=route,
         provider_completion=probe._litellm_provider_completion,
+        measurement=_measurement(probe),
     )
 
     assert request_count == 1
@@ -794,6 +829,7 @@ async def test_native_litellm_responses_success_is_one_request_and_pass(
         runtime_before=runtime,
         runtime_after=runtime,
         outcome=outcome,
+        measurement=_measurement(probe),
     )
     assert receipt.verdict == "pass"
     assert receipt.reason_codes == ("strict_request_accepted_with_conformant_response",)
@@ -832,6 +868,7 @@ async def test_native_incomplete_response_is_one_request_and_inconclusive(
     outcome = await probe.run_probe_call(
         route=route,
         provider_completion=probe._litellm_provider_completion,
+        measurement=_measurement(probe),
     )
 
     assert request_count == 1
@@ -846,6 +883,7 @@ async def test_native_incomplete_response_is_one_request_and_inconclusive(
         runtime_before=runtime,
         runtime_after=runtime,
         outcome=outcome,
+        measurement=_measurement(probe),
     )
     assert receipt.verdict == "inconclusive"
     assert receipt.reason_codes == ("provider_response_nonconformant",)
@@ -861,6 +899,7 @@ def test_sealed_receipt_round_trips_offline_at_mode_0600(tmp_path: Path) -> None
         runtime_before=runtime,
         runtime_after=runtime,
         outcome=_passing_outcome(probe),
+        measurement=_measurement(probe),
     )
 
     path = probe.write_receipt(tmp_path / "probe", receipt)
@@ -885,6 +924,7 @@ def test_offline_verifier_rejects_extra_fields_hash_and_verdict_tampering(
         runtime_before=runtime,
         runtime_after=runtime,
         outcome=_passing_outcome(probe),
+        measurement=_measurement(probe),
     )
     payload = json.loads(receipt.model_dump_json())
 
@@ -965,6 +1005,7 @@ def test_non_capability_provider_failures_are_inconclusive(
         runtime_before=runtime,
         runtime_after=runtime,
         outcome=outcome,
+        measurement=_measurement(probe),
     )
 
     assert receipt.verdict == "inconclusive"
@@ -987,7 +1028,7 @@ async def test_dirty_source_prevents_route_and_provider_calls(tmp_path: Path) ->
     route_calls = 0
     provider_calls = 0
 
-    async def resolve_runtime(_tenant_id: str) -> object:
+    async def resolve_runtime(_tenant_id: str, _model_id: str) -> object:
         nonlocal route_calls
         route_calls += 1
         return _runtime(probe), _route()
@@ -1003,6 +1044,7 @@ async def test_dirty_source_prevents_route_and_provider_calls(tmp_path: Path) ->
         source_reader=lambda: _source(probe, clean=False),
         runtime_resolver=resolve_runtime,
         provider_completion=provider_completion,
+        measurement=_measurement(probe),
     )
     verified = probe.verify_receipt(path)
 
@@ -1019,6 +1061,7 @@ async def test_live_receipt_cannot_make_the_source_dirty() -> None:
         await probe.run_live_probe(
             output_dir=probe.backend_dir / "probe-output",
             tenant_id="tenant",
+            measurement=_measurement(probe),
         )
 
 
@@ -1030,7 +1073,7 @@ async def test_live_probe_resolves_same_route_before_and_after_one_call(
     route_calls = 0
     provider_calls = 0
 
-    async def resolve_runtime(_tenant_id: str) -> object:
+    async def resolve_runtime(_tenant_id: str, _model_id: str) -> object:
         nonlocal route_calls
         route_calls += 1
         return _runtime(probe), _route()
@@ -1046,6 +1089,7 @@ async def test_live_probe_resolves_same_route_before_and_after_one_call(
         source_reader=lambda: _source(probe),
         runtime_resolver=resolve_runtime,
         provider_completion=provider_completion,
+        measurement=_measurement(probe),
     )
 
     assert probe.verify_receipt(path).verdict == "pass"
@@ -1053,10 +1097,45 @@ async def test_live_probe_resolves_same_route_before_and_after_one_call(
     assert provider_calls == 1
 
 
-def test_cli_has_no_model_override() -> None:
+def test_the_measured_model_is_named_by_the_caller(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    # A runner that pinned one model could only certify one deployment, so the
+    # model is an argument and the receipt is where it is recorded.
     probe = _probe()
+    monkeypatch.delenv(probe.PROBE_MODEL_ID_ENV, raising=False)
+
     with pytest.raises(SystemExit):
-        probe.parse_args(["--model-id", "another-model"])
+        probe.parse_args(["--output-dir", str(tmp_path / "receipt")])
+
+    monkeypatch.setenv(probe.PROBE_MODEL_ID_ENV, "model-from-environment")
+    from_environment = probe.parse_args(["--output-dir", str(tmp_path / "receipt")])
+    assert from_environment.model_id == "model-from-environment"
+
+    explicit = probe.parse_args(
+        ["--output-dir", str(tmp_path / "receipt"), "--model-id", "explicit-model"]
+    )
+    assert explicit.model_id == "explicit-model"
+
+
+def test_the_receipt_seals_the_model_and_what_the_provider_charged() -> None:
+    # The reserve this program corrects is checked against a provider count, so
+    # the receipt has to carry that count beside the schema that produced it.
+    probe = _probe()
+    receipt = probe.build_receipt(
+        source_before=_source(probe),
+        source_after=_source(probe),
+        runtime_before=_runtime(probe),
+        runtime_after=_runtime(probe),
+        outcome=_passing_outcome(probe),
+        measurement=_measurement(probe),
+    )
+
+    assert receipt.protocol.measured_model_id == _MEASURED_MODEL_ID
+    assert receipt.request.model_id == _MEASURED_MODEL_ID
+    assert receipt.outcome.response is not None
+    assert receipt.outcome.response.usage.prompt_tokens == 12
+    assert receipt.outcome.response.usage.completion_tokens == 8
 
 
 def _builder_shaped_schema() -> dict[str, object]:
@@ -1096,6 +1175,8 @@ async def test_supplied_schema_prompt_and_cap_are_sent_and_sealed(
             [
                 "--output-dir",
                 str(tmp_path / "receipt"),
+                "--model-id",
+                _MEASURED_MODEL_ID,
                 "--tool-schema-file",
                 str(schema_path),
                 "--prompt-file",
@@ -1111,7 +1192,7 @@ async def test_supplied_schema_prompt_and_cap_are_sent_and_sealed(
         sent.append(dict(kwargs))
         return _raw_response(file_arguments)
 
-    async def resolve_runtime(_tenant_id: str) -> object:
+    async def resolve_runtime(_tenant_id: str, _model_id: str) -> object:
         return _runtime(probe), _route()
 
     path = await probe.run_live_probe(
@@ -1146,6 +1227,7 @@ def test_receipt_arguments_must_satisfy_the_schema_it_sealed(tmp_path: Path) -> 
         runtime_before=_runtime(probe),
         runtime_after=_runtime(probe),
         outcome=_passing_outcome(probe),
+        measurement=_measurement(probe),
     )
     tampered = receipt.model_dump(mode="json")
     tampered["request"]["tool_schema"] = _builder_shaped_schema()
@@ -1175,6 +1257,8 @@ def test_output_cap_stays_within_one_bounded_probe_call(tmp_path: Path) -> None:
             [
                 "--output-dir",
                 str(tmp_path / "receipt"),
+                "--model-id",
+                _MEASURED_MODEL_ID,
                 "--max-output-tokens",
                 str(probe._MAX_OUTPUT_TOKEN_CEILING + 1),
             ]
@@ -1191,6 +1275,8 @@ def _measure_schema_file(
             [
                 "--output-dir",
                 str(tmp_path / "receipt"),
+                "--model-id",
+                _MEASURED_MODEL_ID,
                 "--tool-schema-file",
                 str(schema_path),
             ]
@@ -1260,21 +1346,96 @@ def test_a_schema_outside_the_strict_subset_never_reaches_the_provider(
 def test_a_measurement_input_larger_than_its_receipt_is_refused(
     tmp_path: Path,
 ) -> None:
+    # Prompt and schema are bounded separately: the Builder create schema is
+    # tens of kilobytes while its prompt is a few hundred bytes, and one shared
+    # bound wide enough for the schema would admit a prompt that cannot be
+    # sealed.
     probe = _probe()
     prompt_path = tmp_path / "prompt.txt"
-    prompt_path.write_text("a" * (probe._MAX_MEASUREMENT_INPUT_BYTES + 1))
+    prompt_path.write_text("a" * (probe._MAX_MEASUREMENT_PROMPT_BYTES + 1))
+    schema_path = tmp_path / "schema.json"
+    schema = _builder_shaped_schema()
+    function = schema["function"]
+    assert isinstance(function, dict)
+    function["strict"] = True
+    function["description"] = "d" * probe._MAX_MEASUREMENT_SCHEMA_BYTES
+    schema_path.write_text(json.dumps(schema), encoding="utf-8")
 
-    with pytest.raises(ValueError, match="exceeds"):
-        probe.measurement_from_arguments(
-            probe.parse_args(
-                [
-                    "--output-dir",
-                    str(tmp_path / "receipt"),
-                    "--prompt-file",
-                    str(prompt_path),
-                ]
+    for option, path in (
+        ("--prompt-file", prompt_path),
+        ("--tool-schema-file", schema_path),
+    ):
+        with pytest.raises(ValueError, match="exceeds"):
+            probe.measurement_from_arguments(
+                probe.parse_args(
+                    [
+                        "--output-dir",
+                        str(tmp_path / "receipt"),
+                        "--model-id",
+                        _MEASURED_MODEL_ID,
+                        option,
+                        str(path),
+                    ]
+                )
             )
-        )
+
+
+def test_the_largest_permitted_measurement_still_fits_one_receipt() -> None:
+    # The receipt seals the schema, the prompt and the returned arguments, so
+    # the input bounds are only honest if their worst case fits inside it.
+    probe = _probe()
+    filler = {
+        f"property_{index}": {"type": "string", "description": "\u00e5" * 64}
+        for index in range(80)
+    }
+    schema: dict[str, object] = {
+        "type": "function",
+        "function": {
+            "name": "propose_flow",
+            "strict": True,
+            "parameters": {
+                "type": "object",
+                "properties": filler,
+                "required": sorted(filler),
+                "additionalProperties": False,
+            },
+        },
+    }
+    assert (
+        probe._MAX_MEASUREMENT_SCHEMA_BYTES
+        >= len(json.dumps(schema).encode())
+        > probe._MAX_MEASUREMENT_SCHEMA_BYTES // 2
+    )
+    measurement = probe.ProbeMeasurement(
+        model_id=_MEASURED_MODEL_ID,
+        tool_schema=schema,
+        prompt="\u00e5" * (probe._MAX_MEASUREMENT_PROMPT_BYTES // 2),
+        max_output_tokens=probe._MAX_OUTPUT_TOKEN_CEILING,
+    )
+    arguments = {
+        name: "v" * (probe._MAX_ARGUMENT_BYTES // len(filler) - 24) for name in filler
+    }
+    receipt = probe.build_receipt(
+        source_before=_source(probe),
+        source_after=_source(probe),
+        runtime_before=_runtime(probe),
+        runtime_after=_runtime(probe),
+        outcome=probe.ProbeCallOutcome(
+            call_count=1,
+            request=probe.RequestObservation(
+                controls_valid=True,
+                effective_request=_empty_effective_identity(probe),
+                expected_prepared_request_sha256=(
+                    _empty_effective_identity(probe).effective_values_sha256
+                ),
+            ),
+            response=probe.evaluate_response(_response(arguments), measurement),
+            failure=None,
+        ),
+        measurement=measurement,
+    )
+
+    assert len(receipt.model_dump_json().encode()) <= probe._MAX_RECEIPT_BYTES
 
 
 def test_a_measurement_input_that_is_not_a_regular_file_is_refused(
@@ -1286,7 +1447,7 @@ def test_a_measurement_input_that_is_not_a_regular_file_is_refused(
     os.mkfifo(fifo_path)
 
     with pytest.raises(ValueError, match="not a regular file"):
-        probe.read_bounded_file(fifo_path, limit=probe._MAX_MEASUREMENT_INPUT_BYTES)
+        probe.read_bounded_file(fifo_path, limit=probe._MAX_MEASUREMENT_PROMPT_BYTES)
 
 
 def test_receipt_verification_reads_no_more_than_its_ceiling(tmp_path: Path) -> None:
@@ -1315,6 +1476,7 @@ def test_an_empty_argument_object_still_satisfies_a_schema_that_allows_it() -> N
         },
     }
     measurement = probe.ProbeMeasurement(
+        model_id=_MEASURED_MODEL_ID,
         tool_schema=empty_schema,
         prompt="Mät tomt objekt.",
         max_output_tokens=256,
