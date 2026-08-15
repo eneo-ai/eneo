@@ -3,7 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 from unittest.mock import AsyncMock, MagicMock
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 
@@ -1100,6 +1100,257 @@ async def test_runtime_planning_state_uses_structural_template_for_docx_mode() -
 
     analysis = analyze_discovery(conversation, planning_state=state)
     assert "docx_output_mode" not in analysis.selected_question_ids
+
+
+_TEMPLATE_QUOTE = "yttrandet skrivs alltid i tjänsteskrivelsemallen som jag bifogar"
+_TEMPLATE_PROMPT = (
+    f"Stadsbyggnadskontoret svarar på remisser och {_TEMPLATE_QUOTE}. "
+    "Leverera den ifyllda mallen som DOCX."
+)
+
+
+def _template_classifier_response(
+    *,
+    file_ids: tuple[UUID, ...],
+    evidence_level: str,
+) -> MagicMock:
+    return _make_response(
+        json.dumps(
+            {
+                "slots": [
+                    {
+                        "slot_name": "terminal_output",
+                        "value": "docx_document",
+                        "confidence": "high",
+                        "reason": "The user asks for the filled template as DOCX.",
+                        "evidence": [_cited(_TEMPLATE_QUOTE)],
+                        "evidence_level": "explicit",
+                    }
+                ],
+                "file_roles": [
+                    {
+                        "file_id": str(file_id),
+                        "role": "template",
+                        "confidence": "high",
+                        "reason": "The user names the attachment as the mall to fill.",
+                        "evidence": [_cited(_TEMPLATE_QUOTE)],
+                        "evidence_level": evidence_level,
+                    }
+                    for file_id in file_ids
+                ],
+            }
+        )
+    )
+
+
+def _template_attachment_context(
+    file_ids: tuple[UUID, ...],
+) -> AIBuilderAttachmentContext:
+    # No placeholder markers: the structural template path must stay out of the
+    # way so these tests observe the classifier-evidence path only.
+    return AIBuilderAttachmentContext(
+        context=None,
+        evidence=tuple(
+            AIBuilderAttachmentEvidence(
+                file_id=file_id,
+                filename=f"mall-{index}.docx",
+                file_type=FileType.DOCUMENT,
+                mimetype=(
+                    "application/vnd.openxmlformats-officedocument."
+                    "wordprocessingml.document"
+                ),
+                has_readable_text=True,
+                excerpt="Tjänsteskrivelse\nÄrendet\nBakgrund\nFörslag till beslut",
+                coverage="fully_seen",
+                inferred_role="context_only",
+                role_confidence="low",
+                role_evidence=("fallback:unclassified_file",),
+            )
+            for index, file_id in enumerate(file_ids)
+        ),
+        included_file_ids=list(file_ids),
+        total_chars=0,
+        truncated=False,
+    )
+
+
+async def _template_turn_state(
+    *,
+    file_ids: tuple[UUID, ...],
+    evidence_level: str,
+) -> tuple[list[ConversationMessage], PlanningState]:
+    litellm_client = AsyncMock()
+    litellm_client.acompletion.return_value = _template_classifier_response(
+        file_ids=file_ids,
+        evidence_level=evidence_level,
+    )
+    conversation = [
+        ConversationMessage(
+            message_id="user-1",
+            role="user",
+            content=_TEMPLATE_PROMPT,
+            metadata={"ui_language": "sv"},
+        )
+    ]
+    context = await build_runtime_discovery_context(
+        conversation,
+        litellm_client=litellm_client,
+        completion_model_route=_route(),
+        tenant_id=uuid4(),
+        max_input_tokens=100_000,
+        max_output_tokens=2_000,
+        ui_language="sv",
+        attachment_context=_template_attachment_context(file_ids),
+    )
+    return conversation, context.planning_state
+
+
+@pytest.mark.asyncio
+async def test_same_turn_explicit_template_settles_docx_mode() -> None:
+    conversation, state = await _template_turn_state(
+        file_ids=(uuid4(),),
+        evidence_level="explicit",
+    )
+
+    slot = state.resolved_slots["docx_output_mode"]
+    assert slot.value == "template_fill_docx"
+    assert slot.source == "model"
+    assert slot.evidence_level == "explicit"
+    analysis = analyze_discovery(conversation, planning_state=state)
+    assert "docx_output_mode" not in analysis.selected_question_ids
+
+
+@pytest.mark.asyncio
+async def test_same_turn_inferred_template_still_asks_docx_mode() -> None:
+    conversation, state = await _template_turn_state(
+        file_ids=(uuid4(),),
+        evidence_level="inferred",
+    )
+
+    assert state.resolved_slots["docx_output_mode"].source == "policy_default"
+    analysis = analyze_discovery(conversation, planning_state=state)
+    assert "docx_output_mode" in analysis.selected_question_ids
+
+
+@pytest.mark.asyncio
+async def test_second_template_in_a_later_turn_reopens_docx_mode() -> None:
+    first_file_id = uuid4()
+    second_file_id = uuid4()
+    second_quote = "den andra mallen bifogar jag också"
+    prior_classification = slot_classification_metadata_from_attempt(
+        SlotClassificationAttempt(
+            outcome="resolved",
+            result=SlotClassificationResult(
+                slots=(
+                    ClassifiedSlot(
+                        slot_name="terminal_output",
+                        value="docx_document",
+                        confidence="high",
+                        reason="The user asks for the filled template as DOCX.",
+                        evidence=(
+                            ClassifiedEvidence(
+                                source_id="user_message:user-1",
+                                quote=_TEMPLATE_QUOTE,
+                            ),
+                        ),
+                        evidence_level="explicit",
+                    ),
+                ),
+                file_roles=(
+                    ClassifiedFileRole(
+                        file_id=first_file_id,
+                        role="template",
+                        confidence="high",
+                        reason="The user names the attachment as the mall to fill.",
+                        evidence=(
+                            ClassifiedEvidence(
+                                source_id="user_message:user-1",
+                                quote=_TEMPLATE_QUOTE,
+                            ),
+                        ),
+                        evidence_level="explicit",
+                    ),
+                ),
+            ),
+        ),
+        prompt_hash="a" * 64,
+        classification_input=SlotClassificationInput(
+            sources=(
+                SlotClassificationSource(
+                    source_id="user_message:user-1",
+                    kind="user_message",
+                    text=_TEMPLATE_PROMPT,
+                    message_id="user-1",
+                ),
+                SlotClassificationSource(
+                    source_id=f"uploaded_file:{first_file_id}",
+                    kind="uploaded_file",
+                    text="filename: mall-0.docx",
+                    file_id=first_file_id,
+                    coverage="fully_seen",
+                ),
+            )
+        ),
+        model="openai/gpt-test",
+        provider="openai",
+    )
+    assert prior_classification is not None
+    prior_metadata = metadata_with_slot_classification(
+        {"ui_language": "sv"},
+        prior_classification,
+    )
+    litellm_client = AsyncMock()
+    litellm_client.acompletion.return_value = _make_response(
+        json.dumps(
+            {
+                "slots": [],
+                "file_roles": [
+                    {
+                        "file_id": str(second_file_id),
+                        "role": "template",
+                        "confidence": "high",
+                        "reason": "The user attaches a second mall to fill.",
+                        "evidence": [_cited(second_quote, message_id="user-2")],
+                        "evidence_level": "explicit",
+                    }
+                ],
+            }
+        )
+    )
+    conversation = [
+        ConversationMessage(
+            message_id="user-1",
+            role="user",
+            content=_TEMPLATE_PROMPT,
+            metadata=prior_metadata,
+        ),
+        ConversationMessage(
+            message_id="user-2",
+            role="user",
+            content=f"Förresten, {second_quote}.",
+            metadata={"ui_language": "sv"},
+        ),
+    ]
+
+    context = await build_runtime_discovery_context(
+        conversation,
+        litellm_client=litellm_client,
+        completion_model_route=_route(),
+        tenant_id=uuid4(),
+        max_input_tokens=100_000,
+        max_output_tokens=2_000,
+        ui_language="sv",
+        attachment_context=_template_attachment_context(
+            (first_file_id, second_file_id)
+        ),
+    )
+    state = context.planning_state
+
+    assert [role.role for role in state.file_roles] == ["template", "template"]
+    docx_mode = state.resolved_slots.get("docx_output_mode")
+    assert docx_mode is None or docx_mode.value != "template_fill_docx"
+    analysis = analyze_discovery(conversation, planning_state=state)
+    assert "docx_output_mode" in analysis.selected_question_ids
 
 
 @pytest.mark.asyncio

@@ -83,6 +83,7 @@ from eneo.flows.ai_builder.planning_state_builder import (
     carry_forward_persisted_planner_state,
     llm_resolvable_slot_values_for_state,
     merge_llm_resolved_slots,
+    resolve_docx_mode_from_template_evidence,
 )
 from eneo.flows.domain.flow import Flow
 from eneo.flows.domain.mapped_execution_policy import FlowMappedExecutionPolicy
@@ -762,6 +763,10 @@ async def build_runtime_discovery_context(
             direction=classified_direction,
         )
         schema_direction_pending = False
+    # The classifier can name the terminal output and the template role in the
+    # same turn, so template evidence is only complete now — before defaults
+    # fill the mode the attachment already settles.
+    resolve_docx_mode_from_template_evidence(state)
     apply_policy_defaults_from_resolved_slots(state, freeform_text=text)
     return _complete_runtime_discovery_context(
         state,

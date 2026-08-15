@@ -1238,21 +1238,48 @@ def _model_slot_is_relevant(*, slot_name: str, state: PlanningState) -> bool:
 
 
 def resolve_docx_mode_from_template_evidence(state: PlanningState) -> None:
-    """Resolve template fill silently for one explicitly named template.
+    """Reconcile docx fill mode with the template evidence available now.
 
     An explicit authored choice always wins. When exactly one attached file
     carries an explicit, commit-grade, model-classified template role, the
     user has already said what the template is for — asking again wastes
     the question budget. Multiple templates, inferred roles, or missing
     evidence keep the question path.
+
+    File roles are reclassified on every turn, so this conclusion is derived,
+    never remembered: the value is recomputed and withdrawn as soon as the
+    evidence stops carrying it — a second template arriving in a later turn
+    must reopen the question rather than inherit the single-template
+    assumption. A model-source `docx_output_mode` is this function's own
+    earlier conclusion: the slot is not model-resolvable
+    (`NON_LLM_RESOLVABLE_SLOT_NAMES`), so classification never authors it.
     """
 
-    terminal_output = state.resolved_slots.get("terminal_output")
-    if terminal_output is None or terminal_output.value != "docx_document":
-        return
     current = state.resolved_slots.get("docx_output_mode")
-    if current is not None and current.source != "policy_default":
+    resolved_here = current is not None and current.source == "model"
+    if current is not None and not resolved_here and current.source != "policy_default":
         return
+    template = _sole_explicit_template_role(state)
+    terminal_output = state.resolved_slots.get("terminal_output")
+    if (
+        template is None
+        or terminal_output is None
+        or terminal_output.value != "docx_document"
+    ):
+        if resolved_here:
+            del state.resolved_slots["docx_output_mode"]
+        return
+    state.resolved_slots["docx_output_mode"] = ResolvedSlot(
+        name="docx_output_mode",
+        value="template_fill_docx",
+        source="model",
+        confidence=template.confidence,
+        evidence=[entry for entry in template.evidence if entry.startswith("quote:")],
+        evidence_level="explicit",
+    )
+
+
+def _sole_explicit_template_role(state: PlanningState) -> FileRoleEvidence | None:
     explicit_templates = [
         item
         for item in state.file_roles
@@ -1264,16 +1291,8 @@ def resolve_docx_mode_from_template_evidence(state: PlanningState) -> None:
     ]
     template_count = sum(item.role == "template" for item in state.file_roles)
     if len(explicit_templates) != 1 or template_count != 1:
-        return
-    template = explicit_templates[0]
-    state.resolved_slots["docx_output_mode"] = ResolvedSlot(
-        name="docx_output_mode",
-        value="template_fill_docx",
-        source="model",
-        confidence=template.confidence,
-        evidence=[entry for entry in template.evidence if entry.startswith("quote:")],
-        evidence_level="explicit",
-    )
+        return None
+    return explicit_templates[0]
 
 
 def _reconcile_dependent_slot_relevance(state: PlanningState) -> None:
