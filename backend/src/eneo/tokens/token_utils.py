@@ -11,12 +11,25 @@ scaffolding overhead. Images are priced from their pixel dimensions with the
 provider's documented formula — litellm's own image handling misprices
 Anthropic models (~30% too low) and requires the full base64 payload, which
 is expensive to build just for counting.
+
+Two questions are answered here and they must not be confused:
+
+* a **reserve** — how much room a budget must keep free — may exceed what the
+  provider charges but must never fall short, because falling short admits a
+  request the provider then refuses. `measure_tool_tokens` and
+  `measure_provider_input_reserve` answer it, and their fallbacks bound the
+  payload rather than estimate it.
+* a **report** — what the provider will say it charged — stands in for a
+  missing `prompt_tokens` and is what drift logging compares against, so it
+  aims at that number rather than above it. `measure_provider_input_tokens`
+  answers it.
 """
 
 import base64
 import io
 import json
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any, Optional, cast
@@ -142,7 +155,16 @@ def count_tokens(text: str, model_name: str = "") -> int:
         return len(text) // 4
 
 
-def _fallback_message_tokens(messages: list[dict[str, Any]]) -> int:
+def _fallback_message_tokens(
+    messages: list[dict[str, Any]], model_name: str = ""
+) -> int:
+    """Estimate messages when tokenizing failed, for reporting only.
+
+    A character heuristic is roughly right for prose and roughly wrong for
+    everything else, so a reserve must not use it — see
+    `_fallback_message_reserve_tokens`.
+    """
+    del model_name
     total = 0
     for message in messages:
         total += _FALLBACK_MESSAGE_OVERHEAD_TOKENS
@@ -167,8 +189,177 @@ def _fallback_message_tokens(messages: list[dict[str, Any]]) -> int:
     return total
 
 
+def _utf8_upper_bound_tokens(text: str) -> int:
+    """Tokens `text` cannot exceed.
+
+    Every token of a byte-pair encoding covers at least one UTF-8 byte, so the
+    byte length bounds the count for any model and any script. It needs no
+    tokenizer, which is what makes it usable when tokenizing has failed, and it
+    stays an upper bound where a character heuristic does not: `len // 4`
+    under-counts CJK, emoji, and punctuation-dense identifiers several-fold.
+    """
+    return len(text.encode())
+
+
+# A provider prices a tool from its expanded schema, so a `$defs` entry reached
+# through `$ref` costs its whole definition at every use site. Expansion is
+# bounded by the nodes it may produce, because a schema whose definitions
+# reference each other can unfold exponentially, and tool schemas arrive from
+# MCP servers under limits far larger than any context window
+# (`mcp_server.py` permits a 1 MiB definition).
+_MAX_TOOL_SCHEMA_EXPANDED_NODES = 500_000
+_LOCAL_SCHEMA_POINTER_PREFIX = "#/"
+
+# What an unbounded schema reserves. This is a refusal, not a measurement: no
+# context window admits it, so every budget that subtracts it declines the
+# request whether or not the caller inspects `TokenCount.source`. Deriving the
+# number from the partial expansion instead would let many small references
+# exhaust the bound while still reporting a cost a caller would accept.
+_UNBOUNDED_TOOL_SCHEMA_TOKENS = 1 << 40
+
+
+@dataclass(frozen=True)
+class _ToolReservePayload:
+    """The serialized tool schemas a reserve is measured from.
+
+    `bounded` is false when expansion stopped early, and then `text` is a
+    fragment that must never be priced as if it were the whole schema.
+    """
+
+    text: str
+    bounded: bool
+
+
+class _NodeBudget:
+    """Bounds the nodes one expansion may materialize.
+
+    Running out only makes a payload untrustworthy if a reference was written
+    out along the way. Without one the traversal is a copy, so the untouched
+    remainder is already exactly what the provider receives, and a large but
+    plain catalog is measured rather than refused.
+    """
+
+    def __init__(self, limit: int) -> None:
+        self._remaining = limit
+        self.substitutions = 0
+        self.exhausted = False
+
+    def spend(self) -> bool:
+        if self._remaining <= 0:
+            self.exhausted = True
+            return False
+        self._remaining -= 1
+        return True
+
+    @property
+    def truncated_an_expansion(self) -> bool:
+        return self.exhausted and self.substitutions > 0
+
+
+def _resolve_local_pointer(pointer: str, root: object) -> object | None:
+    node = root
+    for raw_step in pointer[len(_LOCAL_SCHEMA_POINTER_PREFIX) :].split("/"):
+        step = raw_step.replace("~1", "/").replace("~0", "~")
+        if not isinstance(node, dict):
+            return None
+        typed = cast("dict[str, Any]", node)
+        if step not in typed:
+            return None
+        node = typed[step]
+    return node
+
+
+def _expand_schema_references(
+    node: object,
+    *,
+    root: object,
+    active: frozenset[str],
+    budget: _NodeBudget,
+) -> object:
+    """Write every local `$ref` out where it is used, keeping `$defs` in place.
+
+    A reference already being expanded on this path is left exactly as written,
+    so a recursive schema terminates. `$defs` is kept rather than dropped for
+    the same reason: the provider is sent those bytes too, and a definition an
+    unresolved reference still points at must keep costing something.
+    """
+    if not budget.spend():
+        return node
+    if isinstance(node, list):
+        return [
+            _expand_schema_references(item, root=root, active=active, budget=budget)
+            for item in cast("list[Any]", node)
+        ]
+    if not isinstance(node, dict):
+        return node
+    typed = cast("dict[str, Any]", node)
+    pointer = typed.get("$ref")
+    expanded_reference: dict[str, Any] = {}
+    if (
+        isinstance(pointer, str)
+        and pointer.startswith(_LOCAL_SCHEMA_POINTER_PREFIX)
+        and pointer not in active
+    ):
+        target = _resolve_local_pointer(pointer, root)
+        if isinstance(target, dict):
+            budget.substitutions += 1
+            expanded_reference = cast(
+                "dict[str, Any]",
+                _expand_schema_references(
+                    cast("dict[str, Any]", target),
+                    root=root,
+                    active=active | {pointer},
+                    budget=budget,
+                ),
+            )
+    siblings = {
+        key: _expand_schema_references(value, root=root, active=active, budget=budget)
+        for key, value in typed.items()
+        if key != "$ref" or not expanded_reference
+    }
+    return {**expanded_reference, **siblings}
+
+
+def _tool_reserve_payload(tools: list[dict[str, Any]]) -> _ToolReservePayload:
+    budget = _NodeBudget(_MAX_TOOL_SCHEMA_EXPANDED_NODES)
+    expanded: list[object] = []
+    for tool in tools:
+        function = tool.get("function")
+        # Local pointers in a tool schema are written against its parameter
+        # object, which is the document the provider validates arguments with.
+        parameters = (
+            cast("dict[str, Any]", function).get("parameters")
+            if isinstance(function, dict)
+            else None
+        )
+        root: dict[str, Any] = (
+            cast("dict[str, Any]", parameters) if isinstance(parameters, dict) else tool
+        )
+        expanded.append(
+            _expand_schema_references(
+                tool,
+                root=root,
+                active=frozenset(),
+                budget=budget,
+            )
+        )
+    return _ToolReservePayload(
+        text=json.dumps(expanded, ensure_ascii=False, separators=(",", ":")),
+        bounded=not budget.truncated_an_expansion,
+    )
+
+
+def _fallback_tool_reserve_tokens(tools: list[dict[str, Any]]) -> int:
+    """Upper-bound tool schemas when tokenizing failed, for a reserve."""
+    payload = _tool_reserve_payload(tools)
+    if not payload.bounded:
+        return _UNBOUNDED_TOOL_SCHEMA_TOKENS
+    return _utf8_upper_bound_tokens(payload.text)
+
+
 def _fallback_tool_tokens(tools: list[dict[str, Any]]) -> int:
-    return len(json.dumps(tools)) // 4
+    """Estimate tool schemas when tokenizing failed, for reporting only."""
+    return len(_tool_reserve_payload(tools).text) // 4
 
 
 def _measure_messages_with_litellm(
@@ -183,14 +374,25 @@ def _measure_messages_with_litellm(
     return text_tokens + image_tokens
 
 
-def measure_message_tokens(
+def _fallback_message_reserve_tokens(
     messages: list[dict[str, Any]], model_name: str = ""
-) -> TokenCount:
-    """Measure OpenAI-format chat messages and identify the counter used.
+) -> int:
+    """Upper-bound messages when tokenizing failed, for a reserve.
 
-    Includes per-message scaffolding overhead and image_url content blocks,
-    so the input must have the same shape as the payload sent to the provider.
+    Images keep their provider formula, which prices them from pixel
+    dimensions rather than text; everything else is bounded by its bytes.
     """
+    stripped, image_tokens = _split_image_blocks(messages, model_name)
+    serialized = json.dumps(stripped, ensure_ascii=False, separators=(",", ":"))
+    return _utf8_upper_bound_tokens(serialized) + image_tokens
+
+
+def _measure_messages(
+    messages: list[dict[str, Any]],
+    model_name: str,
+    *,
+    fallback: Callable[[list[dict[str, Any]], str], int],
+) -> TokenCount:
     if not messages:
         return TokenCount(tokens=0, source=TokenCountSource.LITELLM)
 
@@ -205,9 +407,20 @@ def measure_message_tokens(
             f"({len(messages)} messages), using fallback estimate: {e}"
         )
         return TokenCount(
-            tokens=_fallback_message_tokens(messages),
+            tokens=fallback(messages, model_name),
             source=TokenCountSource.FALLBACK_ESTIMATE,
         )
+
+
+def measure_message_tokens(
+    messages: list[dict[str, Any]], model_name: str = ""
+) -> TokenCount:
+    """Measure OpenAI-format chat messages and identify the counter used.
+
+    Includes per-message scaffolding overhead and image_url content blocks,
+    so the input must have the same shape as the payload sent to the provider.
+    """
+    return _measure_messages(messages, model_name, fallback=_fallback_message_tokens)
 
 
 def measure_message_token_delta(
@@ -233,8 +446,8 @@ def measure_message_token_delta(
             model_name,
             error,
         )
-        base_tokens = _fallback_message_tokens(base_messages)
-        composed_tokens = _fallback_message_tokens(composed_messages)
+        base_tokens = _fallback_message_tokens(base_messages, model_name)
+        composed_tokens = _fallback_message_tokens(composed_messages, model_name)
         source = TokenCountSource.FALLBACK_ESTIMATE
 
     return TokenCount(
@@ -251,10 +464,38 @@ def count_message_tokens(messages: list[dict[str, Any]], model_name: str = "") -
 def measure_tool_tokens(
     tools: list[dict[str, Any]], model_name: str = ""
 ) -> TokenCount:
-    """Measure tool definitions and identify the counter used."""
+    """Reserve context for tool definitions, and identify the counter used.
+
+    This is the reserve contract: it answers "how much room must I keep free",
+    so it may exceed what the provider charges but must never fall short.
+    Neither available reading is safe alone, and each covers the other's blind
+    spot, so the reserve is the larger of the two:
+
+    * litellm's function estimator adds per-tool and per-property scaffolding,
+      which is the higher reading for a flat tool carrying a long description;
+    * it walks neither nested properties nor `$defs`, so a deep schema is
+      measured instead from its expanded serialization. Against the Flow
+      Builder's create schema the estimator charged 279 tokens where the
+      provider billed roughly 2,823, and a container enum behind one `$ref`
+      cost 4,420 tokens it did not see at all.
+
+    Taking the larger also means no caller reserves less than it did before.
+    """
     if not tools:
         return TokenCount(tokens=0, source=TokenCountSource.LITELLM)
 
+    payload = _tool_reserve_payload(tools)
+    if not payload.bounded:
+        logger.error(
+            "Tool schema expansion for model '%s' (%d tools) exceeded its node "
+            "bound; reserving an unbounded cost so the request is declined",
+            model_name,
+            len(tools),
+        )
+        return TokenCount(
+            tokens=_UNBOUNDED_TOOL_SCHEMA_TOKENS,
+            source=TokenCountSource.FALLBACK_ESTIMATE,
+        )
     try:
         with_tools = litellm.token_counter(  # type: ignore[reportPrivateImportUsage]
             model=model_name,
@@ -264,19 +505,54 @@ def measure_tool_tokens(
         without_tools = litellm.token_counter(  # type: ignore[reportPrivateImportUsage]
             model=model_name, messages=[{"role": "user", "content": ""}]
         )
+        expanded = litellm.token_counter(  # type: ignore[reportPrivateImportUsage]
+            model=model_name, text=payload.text
+        )
         return TokenCount(
-            tokens=max(with_tools - without_tools, 0),
+            tokens=max(with_tools - without_tools, expanded, 0),
             source=TokenCountSource.LITELLM,
         )
     except Exception as e:
         logger.error(
             f"Tool token counting failed for model '{model_name}' "
-            f"({len(tools)} tools), falling back to len//4: {e}"
+            f"({len(tools)} tools), falling back to the byte bound: {e}"
         )
         return TokenCount(
-            tokens=_fallback_tool_tokens(tools),
+            tokens=_fallback_tool_reserve_tokens(tools),
             source=TokenCountSource.FALLBACK_ESTIMATE,
         )
+
+
+def measure_provider_input_reserve(
+    messages: list[dict[str, Any]],
+    tools: list[dict[str, Any]],
+    model_name: str = "",
+) -> TokenCount:
+    """Reserve context for one provider call's messages and tools.
+
+    The admission counterpart of `measure_provider_input_tokens`: a gate that
+    under-reserves admits a request the provider then refuses, so both halves
+    use the reserve contract and neither falls back to a character heuristic.
+    Use this wherever the number decides whether a request may proceed, and the
+    reporting function wherever it stands in for what the provider billed.
+    """
+
+    message_reserve = _measure_messages(
+        messages, model_name, fallback=_fallback_message_reserve_tokens
+    )
+    tool_reserve = measure_tool_tokens(tools, model_name)
+    estimated = TokenCountSource.FALLBACK_ESTIMATE in (
+        message_reserve.source,
+        tool_reserve.source,
+    )
+    return TokenCount(
+        tokens=message_reserve.tokens + tool_reserve.tokens,
+        source=(
+            TokenCountSource.FALLBACK_ESTIMATE
+            if estimated
+            else TokenCountSource.LITELLM
+        ),
+    )
 
 
 def measure_provider_input_tokens(
@@ -284,7 +560,13 @@ def measure_provider_input_tokens(
     tools: list[dict[str, Any]],
     model_name: str = "",
 ) -> TokenCount:
-    """Measure the exact chat messages and tools proposed for one provider call."""
+    """Predict what the provider will report for one call's messages and tools.
+
+    This is the reporting contract: it stands in for `prompt_tokens` when a
+    response omits usage, and it is what drift logging compares against, so it
+    aims at the provider's own number rather than above it. Deciding whether a
+    request fits is `measure_provider_input_reserve`.
+    """
 
     stripped_messages, image_tokens = _split_image_blocks(messages, model_name)
     try:

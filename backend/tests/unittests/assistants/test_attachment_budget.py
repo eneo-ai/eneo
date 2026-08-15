@@ -34,7 +34,7 @@ from eneo.skills.domain.skill import (
     SkillTurnPlan,
 )
 from eneo.spaces.space_repo import AssistantMCPServerProjection
-from eneo.tokens.token_utils import TokenCountSource, measure_provider_input_tokens
+from eneo.tokens.token_utils import TokenCountSource, measure_provider_input_reserve
 
 
 def _settings(**overrides):
@@ -648,11 +648,11 @@ async def test_changed_on_demand_candidates_share_the_attachment_ceiling(
         )
 
     monkeypatch.setattr(
-        "eneo.completion_models.domain.skill_activation.measure_provider_input_tokens",
+        "eneo.completion_models.domain.skill_activation.measure_provider_input_reserve",
         measure_provider_input,
     )
     monkeypatch.setattr(
-        "eneo.assistants.assistant_service.measure_provider_input_tokens",
+        "eneo.assistants.assistant_service.measure_provider_input_reserve",
         measure_provider_input,
     )
     bindings = (
@@ -716,7 +716,7 @@ async def test_save_skill_share_uses_raw_model_window(monkeypatch):
         measure_skill_share,
     )
     monkeypatch.setattr(
-        "eneo.completion_models.domain.skill_activation.measure_provider_input_tokens",
+        "eneo.completion_models.domain.skill_activation.measure_provider_input_reserve",
         lambda *_args, **_kwargs: SimpleNamespace(
             tokens=7_000,
             source=TokenCountSource.LITELLM,
@@ -770,9 +770,19 @@ async def test_full_save_stages_blocked_on_demand_candidate(monkeypatch):
         ),
     )
     monkeypatch.setattr(
-        "eneo.completion_models.domain.skill_activation.measure_provider_input_tokens",
+        "eneo.completion_models.domain.skill_activation.measure_provider_input_reserve",
         lambda *_args, **_kwargs: SimpleNamespace(
             tokens=91,
+            source=TokenCountSource.LITELLM,
+        ),
+    )
+    # The baseline gate runs before candidate staging and would refuse this
+    # deliberately narrow window on the real reserve, so pin it under the
+    # ceiling to keep the blocked candidate the reason for the refusal.
+    monkeypatch.setattr(
+        "eneo.assistants.assistant_service.measure_provider_input_reserve",
+        lambda *_args, **_kwargs: SimpleNamespace(
+            tokens=10,
             source=TokenCountSource.LITELLM,
         ),
     )
@@ -1070,7 +1080,7 @@ async def test_preflight_baseline_uses_the_exact_initial_turn_runtime_prompt(
 
     baseline = await service.get_preflight_baseline(assistant.id)
     assert expected_runtime.tool_definition is not None
-    expected_prompt_tokens = measure_provider_input_tokens(
+    expected_prompt_tokens = measure_provider_input_reserve(
         [{"role": "system", "content": expected_runtime.prompt}],
         [function_definition_to_tool(expected_runtime.tool_definition)],
         assistant.completion_model.get_model_route(),

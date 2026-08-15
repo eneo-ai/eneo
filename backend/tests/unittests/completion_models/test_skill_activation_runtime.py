@@ -406,7 +406,7 @@ def test_activation_rejects_when_complete_follow_up_exceeds_model_input_limit():
     provider_tools = [{"type": "function", "function": {"name": "lookup"}}]
 
     with patch(
-        "eneo.completion_models.domain.skill_activation.measure_provider_input_tokens",
+        "eneo.completion_models.domain.skill_activation.measure_provider_input_reserve",
         return_value=TokenCount(tokens=1_001, source=TokenCountSource.LITELLM),
     ) as measure:
         runtime.apply_provider_tool_calls(
@@ -493,7 +493,7 @@ def test_provider_candidate_assessment_is_exact_and_non_mutating(
         ) as measure_share,
         patch(
             "eneo.completion_models.domain.skill_activation."
-            "measure_provider_input_tokens",
+            "measure_provider_input_reserve",
             return_value=TokenCount(
                 tokens=provider_tokens,
                 source=TokenCountSource.LITELLM,
@@ -551,7 +551,7 @@ def test_provider_candidate_assessment_uses_explicit_payload_limit(
     )
 
     with patch(
-        "eneo.completion_models.domain.skill_activation.measure_provider_input_tokens",
+        "eneo.completion_models.domain.skill_activation.measure_provider_input_reserve",
         return_value=TokenCount(
             tokens=provider_tokens,
             source=TokenCountSource.LITELLM,
@@ -618,7 +618,7 @@ def test_model_limit_rejects_oversized_earlier_skill_and_keeps_later_fit():
         )
 
     with patch(
-        "eneo.completion_models.domain.skill_activation.measure_provider_input_tokens",
+        "eneo.completion_models.domain.skill_activation.measure_provider_input_reserve",
         side_effect=measure_staged_payload,
     ):
         runtime.apply_provider_tool_calls(
@@ -708,7 +708,7 @@ def test_provider_round_bounds_activation_work_and_closes_every_internal_call():
             new=record_apply_round_batch_size,
         ),
         patch(
-            "eneo.completion_models.domain.skill_activation.measure_provider_input_tokens",
+            "eneo.completion_models.domain.skill_activation.measure_provider_input_reserve",
             return_value=TokenCount(tokens=900, source=TokenCountSource.LITELLM),
         ) as measure_provider_payload,
     ):
@@ -756,7 +756,7 @@ def test_overflowed_repeat_does_not_record_an_accepted_skill_as_rejected():
     )
 
     with patch(
-        "eneo.completion_models.domain.skill_activation.measure_provider_input_tokens",
+        "eneo.completion_models.domain.skill_activation.measure_provider_input_reserve",
         return_value=TokenCount(tokens=900, source=TokenCountSource.LITELLM),
     ):
         results = _apply_activation_requests(
@@ -800,7 +800,7 @@ def test_activation_rejects_when_complete_follow_up_cannot_be_measured():
     ]
 
     with patch(
-        "eneo.completion_models.domain.skill_activation.measure_provider_input_tokens",
+        "eneo.completion_models.domain.skill_activation.measure_provider_input_reserve",
         return_value=TokenCount(
             tokens=1,
             source=TokenCountSource.FALLBACK_ESTIMATE,

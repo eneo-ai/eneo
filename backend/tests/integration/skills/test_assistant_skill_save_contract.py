@@ -457,7 +457,7 @@ async def test_retained_on_demand_candidate_rejection_rolls_back_new_always_bind
         )
 
     monkeypatch.setattr(
-        "eneo.completion_models.domain.skill_activation.measure_provider_input_tokens",
+        "eneo.completion_models.domain.skill_activation.measure_provider_input_reserve",
         measure_provider_payload,
     )
 
@@ -596,7 +596,7 @@ async def test_blocked_binding_is_staged_before_binding_save(
         )
 
     monkeypatch.setattr(
-        "eneo.completion_models.domain.skill_activation.measure_provider_input_tokens",
+        "eneo.completion_models.domain.skill_activation.measure_provider_input_reserve",
         measure_provider_payload,
     )
     if blocked_mode is SkillActivationMode.ALWAYS:
@@ -832,7 +832,7 @@ async def test_on_demand_candidate_and_persistent_attachment_overflow_rolls_back
         )
 
     monkeypatch.setattr(
-        "eneo.completion_models.domain.skill_activation.measure_provider_input_tokens",
+        "eneo.completion_models.domain.skill_activation.measure_provider_input_reserve",
         measure_provider_payload,
     )
 
@@ -997,7 +997,7 @@ async def test_mcp_schema_activation_preflight_is_atomic(
         )
 
     monkeypatch.setattr(
-        "eneo.completion_models.domain.skill_activation.measure_provider_input_tokens",
+        "eneo.completion_models.domain.skill_activation.measure_provider_input_reserve",
         measure_provider_payload,
     )
 
@@ -1189,7 +1189,7 @@ async def test_add_mcp_route_rejects_overflow_without_persisting_association(
         )
 
     monkeypatch.setattr(
-        "eneo.completion_models.domain.skill_activation.measure_provider_input_tokens",
+        "eneo.completion_models.domain.skill_activation.measure_provider_input_reserve",
         measure_provider_payload,
     )
 

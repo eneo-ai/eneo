@@ -2170,7 +2170,7 @@ async def test_always_candidate_counts_mcp_baseline_and_fitting_control_can_ask(
         lambda **_kwargs: 0,
     )
     monkeypatch.setattr(
-        "eneo.assistants.assistant_service.measure_provider_input_tokens",
+        "eneo.assistants.assistant_service.measure_provider_input_reserve",
         lambda *_args, **_kwargs: TokenCount(
             tokens=8_000,
             source=TokenCountSource.LITELLM,

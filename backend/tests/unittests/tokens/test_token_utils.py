@@ -2,6 +2,7 @@ import base64
 import io
 from unittest.mock import patch
 
+import litellm
 from PIL import Image
 
 from eneo.tokens.token_utils import (
@@ -13,7 +14,9 @@ from eneo.tokens.token_utils import (
     log_token_count_drift,
     measure_message_token_delta,
     measure_message_tokens,
+    measure_provider_input_reserve,
     measure_provider_input_tokens,
+    measure_tool_tokens,
 )
 
 
@@ -95,6 +98,256 @@ def test_count_tool_tokens_positive():
 
 def test_count_tool_tokens_empty():
     assert count_tool_tokens([]) == 0
+
+
+def _referencing_tool(definition: dict) -> list[dict]:
+    """A tool whose three properties share one `$defs` entry."""
+    return [
+        {
+            "type": "function",
+            "function": {
+                "name": "propose_flow",
+                "parameters": {
+                    "type": "object",
+                    "$defs": {"shared": definition},
+                    "properties": {
+                        name: {"$ref": "#/$defs/shared"}
+                        for name in ("first", "second", "third")
+                    },
+                    "required": ["first", "second", "third"],
+                    "additionalProperties": False,
+                },
+            },
+        }
+    ]
+
+
+def test_tool_reserve_charges_a_shared_definition_at_every_use_site():
+    # A provider prices the expanded schema, so an enum behind one `$ref` is
+    # paid for by each property that references it. Reserving only the
+    # reference's own bytes under-reserved the measured Builder schema by
+    # thousands of tokens.
+    definition = {
+        "type": "string",
+        "enum": ["candidate_passages", "page_or_section", "excerpt_reference"],
+    }
+    referencing = _referencing_tool(definition)
+    without_reference = [
+        {
+            "type": "function",
+            "function": {
+                "name": "propose_flow",
+                "parameters": {
+                    "type": "object",
+                    "properties": dict.fromkeys(
+                        ("first", "second", "third"), definition
+                    ),
+                    "required": ["first", "second", "third"],
+                    "additionalProperties": False,
+                },
+            },
+        }
+    ]
+
+    assert count_tool_tokens(referencing) > count_tool_tokens(without_reference)
+
+
+def test_tool_reserve_is_never_below_the_litellm_estimate():
+    # The estimate carries per-tool scaffolding the serialized schema does not,
+    # and it is the larger reading for a flat tool with a long description. No
+    # consumer may reserve less than it did before this became structural.
+    catalogue = [
+        {
+            "type": "function",
+            "function": {
+                "name": "activate_skill",
+                "description": "Load one Skill.\n"
+                + "\n".join(f"- key_{index}: Skill {index}" for index in range(30)),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "skill_key": {
+                            "type": "string",
+                            "enum": [f"key_{index}" for index in range(30)],
+                        }
+                    },
+                    "required": ["skill_key"],
+                    "additionalProperties": False,
+                },
+            },
+        }
+    ]
+    for tools in (_TOOLS, catalogue):
+        estimate = litellm.token_counter(
+            model="openai/gpt-4o",
+            messages=[{"role": "user", "content": ""}],
+            tools=tools,
+        ) - litellm.token_counter(
+            model="openai/gpt-4o", messages=[{"role": "user", "content": ""}]
+        )
+        assert count_tool_tokens(tools, "openai/gpt-4o") >= estimate
+
+
+def test_tool_reserve_terminates_on_cyclic_references_and_still_charges_them():
+    self_cycle = _referencing_tool(
+        {
+            "type": "object",
+            "properties": {"child": {"$ref": "#/$defs/shared"}},
+            "required": ["child"],
+            "additionalProperties": False,
+        }
+    )
+    mutual_cycle = [
+        {
+            "type": "function",
+            "function": {
+                "name": "propose_flow",
+                "parameters": {
+                    "type": "object",
+                    "$defs": {
+                        "left": {
+                            "type": "object",
+                            "properties": {"right": {"$ref": "#/$defs/right"}},
+                            "required": ["right"],
+                            "additionalProperties": False,
+                        },
+                        "right": {
+                            "type": "object",
+                            "properties": {"left": {"$ref": "#/$defs/left"}},
+                            "required": ["left"],
+                            "additionalProperties": False,
+                        },
+                    },
+                    "properties": {"root": {"$ref": "#/$defs/left"}},
+                    "required": ["root"],
+                    "additionalProperties": False,
+                },
+            },
+        }
+    ]
+
+    for tools in (self_cycle, mutual_cycle):
+        measured = measure_tool_tokens(tools, "openai/gpt-4o")
+        # An unresolved reference keeps its definition, so the cycle still costs
+        # what it puts on the wire rather than silently disappearing.
+        assert measured.source is TokenCountSource.LITELLM
+        assert measured.tokens > count_tool_tokens(_TOOLS, "openai/gpt-4o")
+
+
+def test_tool_reserve_declines_a_schema_whose_expansion_cannot_be_bounded():
+    # Definitions that reference each other unfold exponentially. The reserve
+    # must not answer with a number any budget would accept.
+    depth = 24
+    definitions: dict[str, object] = {"level_0": {"type": "string"}}
+    for level in range(1, depth):
+        reference = {"$ref": f"#/$defs/level_{level - 1}"}
+        definitions[f"level_{level}"] = {
+            "type": "object",
+            "properties": {"left": reference, "right": reference},
+            "required": ["left", "right"],
+            "additionalProperties": False,
+        }
+    tools = [
+        {
+            "type": "function",
+            "function": {
+                "name": "propose_flow",
+                "parameters": {
+                    "type": "object",
+                    "$defs": definitions,
+                    "properties": {"root": {"$ref": f"#/$defs/level_{depth - 1}"}},
+                    "required": ["root"],
+                    "additionalProperties": False,
+                },
+            },
+        }
+    ]
+
+    measured = measure_tool_tokens(tools, "openai/gpt-4o")
+
+    assert measured.source is TokenCountSource.FALLBACK_ESTIMATE
+    # Larger than any context window, so every budget subtracting it refuses,
+    # whether or not the caller inspects the source.
+    assert measured.tokens > 1_000_000_000
+
+
+def test_a_large_plain_catalogue_is_measured_rather_than_refused():
+    # Running out of expansion budget only makes a payload untrustworthy when a
+    # reference was written out. Without one the traversal is a copy, so a big
+    # but plain tool catalogue must still get a real number.
+    catalogue = [
+        {
+            "type": "function",
+            "function": {
+                "name": f"tool_{index}",
+                "description": "Search the knowledge base.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {"query": {"type": "string"}},
+                    "required": ["query"],
+                    "additionalProperties": False,
+                },
+            },
+        }
+        for index in range(8)
+    ]
+
+    with patch("eneo.tokens.token_utils._MAX_TOOL_SCHEMA_EXPANDED_NODES", 4):
+        measured = measure_tool_tokens(catalogue, "openai/gpt-4o")
+
+    assert measured.source is TokenCountSource.LITELLM
+    assert measured.tokens == count_tool_tokens(catalogue, "openai/gpt-4o")
+
+
+def test_tool_reserve_fallback_stays_an_upper_bound_for_dense_scripts():
+    # len // 4 under-counts anything that is not ASCII prose, and a reserve
+    # built on it admits a request the provider then refuses.
+    for text in (
+        "公開情報の開示判断における候補箇所",
+        "🚒🧯🔥🚨" * 12,
+        "!@#$%^&*()" * 12,
+    ):
+        tools = [
+            {
+                "type": "function",
+                "function": {
+                    "name": "propose_flow",
+                    "description": text,
+                    "parameters": {
+                        "type": "object",
+                        "properties": {"value": {"type": "string"}},
+                        "required": ["value"],
+                        "additionalProperties": False,
+                    },
+                },
+            }
+        ]
+        real = count_tool_tokens(tools, "openai/gpt-4o")
+        with patch(
+            "eneo.tokens.token_utils.litellm.token_counter",
+            side_effect=RuntimeError("boom"),
+        ):
+            fallback = measure_tool_tokens(tools, "openai/gpt-4o")
+
+        assert fallback.source is TokenCountSource.FALLBACK_ESTIMATE
+        assert fallback.tokens >= real
+
+
+def test_provider_input_reserve_bounds_both_halves_when_tokenizing_fails():
+    messages = [{"role": "user", "content": "公開情報の開示判断における候補箇所"}]
+
+    measured = measure_provider_input_reserve(messages, _TOOLS, "openai/gpt-4o")
+    assert measured.source is TokenCountSource.LITELLM
+    assert measured.tokens >= count_tool_tokens(_TOOLS, "openai/gpt-4o")
+
+    with patch(
+        "eneo.tokens.token_utils.litellm.token_counter",
+        side_effect=RuntimeError("boom"),
+    ):
+        fallback = measure_provider_input_reserve(messages, _TOOLS, "openai/gpt-4o")
+
+    assert fallback.source is TokenCountSource.FALLBACK_ESTIMATE
+    assert fallback.tokens >= measured.tokens
 
 
 def test_count_message_tokens_fallback_when_litellm_fails():

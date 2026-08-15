@@ -26614,13 +26614,13 @@ export interface components {
       model_name: string;
       /**
        * Prompt Tokens
-       * @description Model-aware estimate of the initial system message and Skill tool definitions. Includes skill_context_tokens.
+       * @description Context reserved for the initial system message and Skill tool definitions. This is the budget the server enforces, so it can sit above what the provider ends up charging. Includes skill_context_tokens.
        * @default 0
        */
       prompt_tokens?: number;
       /**
        * Skill Context Tokens
-       * @description Model-aware Skill-owned subset of prompt_tokens. Already included; do not add it to the preflight total again.
+       * @description Skill-owned subset of the reserved prompt_tokens. Already included; do not add it to the preflight total again.
        * @default 0
        */
       skill_context_tokens?: number;

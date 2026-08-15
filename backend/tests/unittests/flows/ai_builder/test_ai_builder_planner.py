@@ -11,6 +11,7 @@ from typing import Any, cast
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import UUID, uuid4
 
+import litellm
 import pytest
 from pydantic import ValidationError
 
@@ -1933,7 +1934,9 @@ async def test_prepare_planner_request_passes_attachment_context_into_proposal_p
             flow=None,
             assistant_snapshots=None,
             attachment_files=[_make_file()],
-            max_input_tokens=4096,
+            # The create tool schema alone costs thousands of tokens, so a
+            # window that cannot hold it leaves no room for attachment text.
+            max_input_tokens=32_768,
             max_output_tokens=1024,
             budget_policy=AIBuilderBudgetPolicy(
                 conversation_safety_buffer_tokens=128,
@@ -2142,6 +2145,139 @@ def test_real_proposal_boundary_fits_attachments_and_protects_current_turn() -> 
         impossible_budget.fit(
             message_groups=baseline.message_groups,
             tool_schemas=[tool_schema_for_budget],
+            model_name=model_name,
+        )
+
+
+def _litellm_function_estimate(tool_schema: dict[str, Any], model_name: str) -> int:
+    """What the tool schema cost before the reserve counted its nesting.
+
+    Reproduced here rather than kept in production so the two consumer tests
+    below can show the request the old charge would have admitted.
+    """
+    empty = [{"role": "user", "content": ""}]
+    return litellm.token_counter(
+        model=model_name, messages=empty, tools=[tool_schema]
+    ) - litellm.token_counter(model=model_name, messages=empty)
+
+
+def test_proposal_attachment_fitting_reserves_the_whole_create_schema() -> None:
+    # The Builder expands attachment text into whatever room the tool reserve
+    # says is left, so a schema charged at a fraction of its cost let the
+    # attachment overrun the window. Size the window so it fits the old charge
+    # and not the real schema: the attachment text must now be excluded.
+    model_name = "gpt-4o-mini"
+    current_turn = ConversationMessage(
+        role="user", content="Build the confirmed reporting flow."
+    )
+    attachment_text = "ATTACHMENT-EVIDENCE " * 2_000
+    attachment_context = build_ai_builder_attachment_context(
+        [_make_file(attachment_text)]
+    )
+    assert attachment_context is not None
+    policy = AIBuilderBudgetPolicy(
+        conversation_safety_buffer_tokens=128,
+        minimum_conversation_budget_tokens=256,
+    )
+    common = {
+        "requirements_state": RequirementsState(),
+        "ui_language": "en",
+        "slot_classification_metadata": None,
+        "planning_state": PlanningState.empty(),
+        "flow_context": None,
+        "is_edit_mode": False,
+        "resource_catalog": build_ai_builder_resource_catalog(
+            available_models=None, available_kbs=None
+        ),
+        "flow": None,
+        "assistant_snapshots": None,
+        "plan_edit_context": None,
+        "prior_plan_for_revision": None,
+        "litellm_model": model_name,
+        "max_output_tokens": 256,
+        "budget_policy": policy,
+        "attachment_file_count": 1,
+    }
+    baseline = build_proposal_prepared(
+        **common,
+        conversation=[current_turn],
+        attachment_context=None,
+        max_input_tokens=100_000,
+        current_turn_start=0,
+    )
+    tool_schema = cast(dict[str, Any], baseline.proposal_tool_schema)
+    old_charge = _litellm_function_estimate(tool_schema, model_name)
+    true_reserve = count_tool_tokens([tool_schema], model_name)
+    assert true_reserve > old_charge
+
+    system_prompt_tokens = count_message_tokens(baseline.llm_messages[:1], model_name)
+    fixed = (
+        system_prompt_tokens
+        + 256
+        + policy.conversation_safety_buffer_tokens
+        + policy.minimum_conversation_budget_tokens
+    )
+    prepared = build_proposal_prepared(
+        **common,
+        conversation=[current_turn],
+        # Room for the schema as it used to be charged, but not as it costs.
+        max_input_tokens=fixed + old_charge + 64,
+        attachment_context=attachment_context,
+        current_turn_start=0,
+    )
+
+    system_content = prepared.llm_messages[0]["content"]
+    assert isinstance(system_content, str)
+    assert "ATTACHMENT-EVIDENCE" not in system_content
+
+
+def test_proposal_request_budget_refuses_a_window_only_the_old_charge_fitted() -> None:
+    # `fit()` reserves the tool schema before evicting history. At a window
+    # sized for the old charge the same request was admitted and then rejected
+    # by the provider; it must now be refused locally instead.
+    model_name = "gpt-4o-mini"
+    current_turn = ConversationMessage(role="user", content="Build a reporting flow.")
+    prepared = build_proposal_prepared(
+        requirements_state=RequirementsState(),
+        ui_language="en",
+        slot_classification_metadata=None,
+        planning_state=PlanningState.empty(),
+        flow_context=None,
+        is_edit_mode=False,
+        resource_catalog=build_ai_builder_resource_catalog(
+            available_models=None, available_kbs=None
+        ),
+        flow=None,
+        assistant_snapshots=None,
+        plan_edit_context=None,
+        prior_plan_for_revision=None,
+        litellm_model=model_name,
+        max_output_tokens=256,
+        budget_policy=AIBuilderBudgetPolicy(
+            conversation_safety_buffer_tokens=128,
+            minimum_conversation_budget_tokens=256,
+        ),
+        attachment_file_count=0,
+        conversation=[current_turn],
+        attachment_context=None,
+        max_input_tokens=100_000,
+        current_turn_start=0,
+    )
+    tool_schema = cast(dict[str, Any], prepared.proposal_tool_schema)
+    assert prepared.request_budget is not None
+    protected_tokens = count_message_tokens(prepared.llm_messages, model_name)
+    window = (
+        protected_tokens
+        + _litellm_function_estimate(tool_schema, model_name)
+        + prepared.request_budget.output_reserve_tokens
+        + prepared.request_budget.safety_buffer_tokens
+    )
+    budget = replace(prepared.request_budget, context_window_tokens=window)
+
+    with pytest.raises(AIBuilderKnownProviderRejectionException):
+        budget.fit(
+            message_groups=prepared.message_groups,
+            tool_schemas=[tool_schema],
             model_name=model_name,
         )
 

@@ -26,7 +26,7 @@ from eneo.skills.domain.skill import (
 )
 from eneo.tokens.token_utils import (
     TokenCountSource,
-    measure_provider_input_tokens,
+    measure_provider_input_reserve,
 )
 
 SKILL_ACTIVATION_TOOL_NAME = "eneo_activate_skill"
@@ -880,7 +880,7 @@ class SkillActivationRuntime:
             if not newly_accepted:
                 break
 
-            provider_measurement = measure_provider_input_tokens(
+            provider_measurement = measure_provider_input_reserve(
                 cast("list[dict[str, Any]]", staged_messages),
                 cast("list[dict[str, Any]]", provider_tools or []),
                 self._model_route,
@@ -914,7 +914,7 @@ class SkillActivationRuntime:
                         _probe_deferred,
                         _probe_accepted,
                     ) = stage_round(probe_rejections)
-                    probe_measurement = measure_provider_input_tokens(
+                    probe_measurement = measure_provider_input_reserve(
                         cast("list[dict[str, Any]]", probe_messages),
                         cast("list[dict[str, Any]]", provider_tools or []),
                         self._model_route,

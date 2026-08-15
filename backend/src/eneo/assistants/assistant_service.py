@@ -106,7 +106,10 @@ from eneo.spaces.space_service import SpaceService
 from eneo.templates.assistant_template.assistant_template_service import (
     AssistantTemplateService,
 )
-from eneo.tokens.token_utils import log_token_count_drift, measure_provider_input_tokens
+from eneo.tokens.token_utils import (
+    log_token_count_drift,
+    measure_provider_input_reserve,
+)
 from eneo.users.user import UserInDB
 from eneo.workflows.step_repo import StepRepository
 
@@ -762,7 +765,7 @@ class AssistantService:
             )
         )
         provider_input_token_limit = attachment_token_ceiling(model.max_input_tokens)
-        baseline_measurement = measure_provider_input_tokens(
+        baseline_measurement = measure_provider_input_reserve(
             provider_input.messages,
             provider_input.tools,
             model.get_model_route(),
@@ -1788,7 +1791,7 @@ class AssistantService:
                 if runtime.tool_definition is not None
                 else []
             )
-            prompt_tokens = measure_provider_input_tokens(
+            prompt_tokens = measure_provider_input_reserve(
                 messages,
                 tools,
                 model.get_model_route(),

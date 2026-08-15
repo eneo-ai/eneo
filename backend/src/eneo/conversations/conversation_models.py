@@ -113,17 +113,19 @@ class PreflightResponse(BaseModel):
     prompt_tokens: int = Field(
         default=0,
         description=(
-            "Model-aware estimate of the initial system message and Skill tool "
-            "definitions. Includes skill_context_tokens."
+            "Context reserved for the initial system message and Skill tool "
+            "definitions. This is the budget the server enforces, so it can sit "
+            "above what the provider ends up charging. Includes "
+            "skill_context_tokens."
         ),
     )
-    # LiteLLM-measured Skill-owned subset of prompt_tokens. Callers must not add
-    # it to the total a second time.
+    # The Skill-owned subset of prompt_tokens, reserved the same way. Callers
+    # must not add it to the total a second time.
     skill_context_tokens: int = Field(
         default=0,
         description=(
-            "Model-aware Skill-owned subset of prompt_tokens. Already included; "
-            "do not add it to the preflight total again."
+            "Skill-owned subset of the reserved prompt_tokens. Already "
+            "included; do not add it to the preflight total again."
         ),
     )
 
