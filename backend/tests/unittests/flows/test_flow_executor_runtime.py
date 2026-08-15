@@ -1336,6 +1336,69 @@ async def test_execute_cancels_when_flow_deleted_before_step_execution(user):
     )
 
 
+@pytest.mark.parametrize(
+    "handler_name",
+    [
+        "_handle_attempt_start_failure",
+        "_handle_typed_step_failure",
+        "_handle_generic_step_failure",
+    ],
+)
+@pytest.mark.asyncio
+async def test_step_failure_reports_the_run_outcome_when_its_write_was_refused(
+    user, handler_name: str
+):
+    """A cancel mid-step must not be reported as this step failing.
+
+    The step-result write is refused once the run stops being active, so when a
+    user cancels while a step is in flight the failure path's attempt evidence —
+    model, provider, tokens, provenance — is refused with it. The success path
+    already reads that refusal as "terminalization won; report the run's
+    outcome"; the failure paths discarded it, terminalized an already-terminal
+    run again, and told the caller this step had failed.
+
+    All three handlers implement the decision separately, so each is exercised:
+    removing the branch from any one of them fails its own case.
+    """
+    executor, _, flow_run_repo, _ = _build_executor(user)
+    run = _run(status=FlowRunStatus.QUEUED, user=user)
+    cancelled_run = run.model_copy(update={"status": FlowRunStatus.CANCELLED})
+    step = _runtime_step(step_order=1, input_source="flow_input")
+    claimed = _claimed_step_result(
+        run_id=run.id,
+        flow_id=run.flow_id,
+        tenant_id=user.tenant_id,
+        step_id=step.step_id,
+        assistant_id=step.assistant_id,
+    )
+
+    flow_run_repo.save_step_result = AsyncMock(return_value=None)
+    flow_run_repo.get = AsyncMock(return_value=cancelled_run)
+
+    shared_kwargs: dict[str, object] = {
+        "run_id": run.id,
+        "tenant_id": user.tenant_id,
+        "step": step,
+        "claimed": claimed,
+    }
+    if handler_name == "_handle_typed_step_failure":
+        shared_kwargs |= {
+            "attempt_no": 1,
+            "typed_exc": TypedIOValidationException("bad output"),
+            "failed_input_payload": None,
+        }
+    elif handler_name == "_handle_generic_step_failure":
+        shared_kwargs |= {
+            "attempt_no": 1,
+            "exc": OpenAIException("llm boom", code="provider_error"),
+        }
+
+    result = await getattr(executor, handler_name)(**shared_kwargs)
+
+    assert result == {"status": "skipped", "reason": "run_cancelled"}
+    executor.flow_run_terminalizer.terminalize_run.assert_not_awaited()
+
+
 @pytest.mark.asyncio
 async def test_step_execution_failure_marks_attempt_and_run_failed(user):
     executor, flow_repo, flow_run_repo, flow_version_repo = _build_executor(user)

@@ -1741,12 +1741,21 @@ class FlowRunExecutor:
         )
         run_error_message = error_message or failure_plan.run_error_message
         await self._rollback()
-        await self.flow_run_repo.save_step_result(
+        saved_result = await self.flow_run_repo.save_step_result(
             run_id,
             failure_plan.failed_result,
             tenant_id=tenant_id,
             attempt_no=None,
         )
+        # Terminalization won the race; report the persisted run outcome rather
+        # than this step's failure.
+        if saved_result is None:
+            await self._commit()
+            return await self._return_after_terminalized_step_write(
+                run_id=run_id,
+                flow_id=claimed.flow_id,
+                tenant_id=tenant_id,
+            )
         await self._terminalize_run(
             run_id=run_id,
             tenant_id=tenant_id,
@@ -1870,12 +1879,21 @@ class FlowRunExecutor:
             ),
             output_payload_json=failure_plan.failed_result.output_payload_json,
         )
-        await self.flow_run_repo.save_step_result(
+        saved_result = await self.flow_run_repo.save_step_result(
             run_id,
             failure_plan.failed_result,
             tenant_id=tenant_id,
             attempt_no=attempt_no,
         )
+        # Terminalization won the race; report the persisted run outcome rather
+        # than this step's failure.
+        if saved_result is None:
+            await self._commit()
+            return await self._return_after_terminalized_step_write(
+                run_id=run_id,
+                flow_id=claimed.flow_id,
+                tenant_id=tenant_id,
+            )
         await self._terminalize_run(
             run_id=run_id,
             tenant_id=tenant_id,
@@ -1994,12 +2012,21 @@ class FlowRunExecutor:
             ),
             output_payload_json=failure_plan.failed_result.output_payload_json,
         )
-        await self.flow_run_repo.save_step_result(
+        saved_result = await self.flow_run_repo.save_step_result(
             run_id,
             failure_plan.failed_result,
             tenant_id=tenant_id,
             attempt_no=attempt_no,
         )
+        # Terminalization won the race; report the persisted run outcome rather
+        # than this step's failure.
+        if saved_result is None:
+            await self._commit()
+            return await self._return_after_terminalized_step_write(
+                run_id=run_id,
+                flow_id=claimed.flow_id,
+                tenant_id=tenant_id,
+            )
         await self._terminalize_run(
             run_id=run_id,
             tenant_id=tenant_id,
