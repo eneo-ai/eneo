@@ -14,6 +14,7 @@ from eneo.ai_models.completion_models.completion_model import (
     CompletionModelResponse,
     ModelKwargs,
     ResponseType,
+    sends_strict_tool_schemas,
 )
 from eneo.audit.application.audit_metadata import AuditMetadata
 from eneo.audit.domain.action_types import ActionType
@@ -142,6 +143,7 @@ class CompletionRouteEvidence:
     configuration_fields: tuple[CompletionEvidenceField, ...]
     unclassified_configuration_field_count: int
     model_kwargs_capabilities: tuple[CompletionModelKwargCapabilityEvidence, ...]
+    supports_strict_tool_schema: bool = False
 
     def to_log_value(self) -> dict[str, object]:
         return {
@@ -157,6 +159,9 @@ class CompletionRouteEvidence:
                 capability.to_log_value()
                 for capability in self.model_kwargs_capabilities
             ],
+            # Names the capability that shaped the outgoing tool contract, so a
+            # provider rejection can be read without the model row.
+            "supports_strict_tool_schema": self.supports_strict_tool_schema,
         }
 
 
@@ -168,6 +173,9 @@ class ResolvedCompletionModelRoute:
     supported_model_kwargs: SupportedModelKwargs
     requested_model_kwargs: ModelKwargs = field(default_factory=ModelKwargs)
     resolved_model_id: UUID | None = None
+    # Effective strict-tool-schema capability of this route. Callers that build
+    # tool schemas read it here instead of inspecting the model or provider.
+    supports_strict_tool_schema: bool = False
 
     def prepare_provider_kwargs(
         self,
@@ -249,6 +257,7 @@ class ResolvedCompletionModelRoute:
                 unclassified_configuration_field_count
             ),
             model_kwargs_capabilities=model_kwargs_capabilities,
+            supports_strict_tool_schema=self.supports_strict_tool_schema,
         )
 
 
@@ -436,6 +445,7 @@ class CompletionService:
             supported_model_kwargs=supported_model_kwargs,
             provider_type=adapter.provider_type,
             resolved_model_id=model.id,
+            supports_strict_tool_schema=sends_strict_tool_schemas(model),
         )
 
     async def resolve_structured_output_capability(

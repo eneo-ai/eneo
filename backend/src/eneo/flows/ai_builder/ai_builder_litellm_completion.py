@@ -36,19 +36,6 @@ from eneo.main.logging import get_logger
 
 logger = get_logger(__name__)
 
-# The one provider route whose native strict-tool behavior the sealed
-# strict-tools probe verified: provider type, LiteLLM model name and API base.
-# It is deliberately not tied to a completion-model row id, because row ids are
-# generated per database and the same route must behave identically in every
-# deployment. Delete this sealed decision when native strict-tool support
-# becomes a persisted resolved-route capability instead of one measured model
-# exception.
-PINNED_LUNA_NATIVE_STRICT_TOOLS_ROUTE = (
-    "openai",
-    "openai/gpt-5.6-luna",
-    None,
-)
-
 
 @dataclass(frozen=True, slots=True)
 class CompletionMetadata:
@@ -167,14 +154,11 @@ async def call_proposal_completion(
 def _outbound_proposal_tool_schemas(
     request: ProposalCompletionRequest,
 ) -> list[dict[str, Any]]:
-    route_identity = (
-        request.route.provider_type,
-        request.route.litellm_model,
-        request.route.litellm_kwargs.get("api_base"),
-    )
+    # Only the create schema is built strict-compatible; the edit schema still
+    # carries constructs that native strict tools reject.
     if (
         request.target_kind != TargetKind.CREATE
-        or route_identity != PINNED_LUNA_NATIVE_STRICT_TOOLS_ROUTE
+        or not request.route.supports_strict_tool_schema
     ):
         return request.tool_schemas
     return [

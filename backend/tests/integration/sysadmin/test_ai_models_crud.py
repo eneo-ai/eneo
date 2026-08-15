@@ -330,6 +330,151 @@ async def test_sysadmin_explicit_capabilities_survive_create_update_reload(
 
 @pytest.mark.integration
 @pytest.mark.asyncio
+async def test_sysadmin_strict_tool_schema_declaration_survives_partial_updates(
+    client,
+    super_admin_token,
+    db_container,
+):
+    create_response = await client.post(
+        "/api/v1/sysadmin/completion-models/create",
+        headers={"X-API-Key": super_admin_token},
+        json={
+            "name": "strict-tool-schema-round-trip",
+            "nickname": "Strict tool schema round trip",
+            "family": "openai",
+            "max_input_tokens": 8000,
+            "max_output_tokens": 4096,
+            "is_deprecated": False,
+            "stability": "stable",
+            "hosting": "usa",
+            "vision": False,
+            "reasoning": False,
+            "supports_tool_calling": True,
+            "supports_strict_tool_schema": True,
+        },
+    )
+
+    assert create_response.status_code == 200
+    created = create_response.json()
+    model_id = created["id"]
+    assert created["supports_strict_tool_schema"] is True
+
+    async with db_container() as container:
+        session = container.session()
+        db_model = await session.scalar(
+            sa.select(CompletionModels).where(CompletionModels.id == model_id)
+        )
+        assert db_model is not None
+        assert db_model.supports_strict_tool_schema is True
+
+    update_response = await client.put(
+        f"/api/v1/sysadmin/completion-models/{model_id}/metadata",
+        headers={"X-API-Key": super_admin_token},
+        json={"description": "Measured against the pinned route"},
+    )
+
+    assert update_response.status_code == 200
+    assert update_response.json()["supports_strict_tool_schema"] is True
+
+    async with db_container() as container:
+        session = container.session()
+        db_model = await session.scalar(
+            sa.select(CompletionModels).where(CompletionModels.id == model_id)
+        )
+        assert db_model is not None
+        assert db_model.supports_strict_tool_schema is True
+        assert CompletionModel.model_validate(db_model).supports_strict_tool_schema
+
+    resent_name_response = await client.put(
+        f"/api/v1/sysadmin/completion-models/{model_id}/metadata",
+        headers={"X-API-Key": super_admin_token},
+        json={
+            "name": "strict-tool-schema-round-trip",
+            "nickname": "Strict tool schema round trip II",
+        },
+    )
+
+    assert resent_name_response.status_code == 200
+    assert resent_name_response.json()["supports_strict_tool_schema"] is True
+
+    rename_response = await client.put(
+        f"/api/v1/sysadmin/completion-models/{model_id}/metadata",
+        headers={"X-API-Key": super_admin_token},
+        json={"name": "strict-tool-schema-round-trip-moved"},
+    )
+
+    assert rename_response.status_code == 200
+    assert rename_response.json()["supports_strict_tool_schema"] is False
+
+    async with db_container() as container:
+        session = container.session()
+        db_model = await session.scalar(
+            sa.select(CompletionModels).where(CompletionModels.id == model_id)
+        )
+        assert db_model is not None
+        assert db_model.supports_strict_tool_schema is False
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_an_explicit_litellm_route_decides_what_counts_as_a_move(
+    client,
+    super_admin_token,
+    db_container,
+):
+    create_response = await client.post(
+        "/api/v1/sysadmin/completion-models/create",
+        headers={"X-API-Key": super_admin_token},
+        json={
+            "name": "strict-explicit-route",
+            "nickname": "Strict explicit route",
+            "family": "openai",
+            "max_input_tokens": 8000,
+            "max_output_tokens": 4096,
+            "is_deprecated": False,
+            "stability": "stable",
+            "hosting": "usa",
+            "vision": False,
+            "reasoning": False,
+            "supports_tool_calling": True,
+            "supports_strict_tool_schema": True,
+            "litellm_model_name": "openai/gpt-5.6-luna",
+        },
+    )
+
+    assert create_response.status_code == 200
+    model_id = create_response.json()["id"]
+
+    # The explicit route overrides the display name, so renaming moves nothing.
+    rename_response = await client.put(
+        f"/api/v1/sysadmin/completion-models/{model_id}/metadata",
+        headers={"X-API-Key": super_admin_token},
+        json={"name": "strict-explicit-route-renamed"},
+    )
+
+    assert rename_response.status_code == 200
+    assert rename_response.json()["supports_strict_tool_schema"] is True
+
+    reroute_response = await client.put(
+        f"/api/v1/sysadmin/completion-models/{model_id}/metadata",
+        headers={"X-API-Key": super_admin_token},
+        json={"litellm_model_name": "openai/gpt-5.4"},
+    )
+
+    assert reroute_response.status_code == 200
+    assert reroute_response.json()["supports_strict_tool_schema"] is False
+
+    async with db_container() as container:
+        session = container.session()
+        db_model = await session.scalar(
+            sa.select(CompletionModels).where(CompletionModels.id == model_id)
+        )
+        assert db_model is not None
+        assert db_model.supports_strict_tool_schema is False
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
 async def test_update_nonexistent_completion_model(client, super_admin_token):
     """Test that updating a non-existent model returns 404."""
     from uuid import uuid4

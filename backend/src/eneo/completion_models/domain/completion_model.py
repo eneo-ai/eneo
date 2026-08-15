@@ -50,6 +50,7 @@ class CompletionModel(AIModel):
         is_org_default: bool,
         reasoning: bool,
         supports_tool_calling: bool = False,
+        supports_strict_tool_schema: bool = False,
         token_limit: Optional[int] = None,
         base_url: Optional[str] = None,
         litellm_model_name: Optional[str] = None,
@@ -117,6 +118,7 @@ class CompletionModel(AIModel):
         self.reasoning = reasoning
         self.vision = vision
         self.supports_tool_calling = supports_tool_calling
+        self.supports_strict_tool_schema = supports_strict_tool_schema
         self.max_input_tokens = resolved_max_input_tokens
         self.max_output_tokens = resolved_max_output_tokens
         self.deployment_name = deployment_name
@@ -225,6 +227,7 @@ class CompletionModel(AIModel):
             is_org_default=completion_model_db.is_default,
             reasoning=completion_model_db.reasoning,
             supports_tool_calling=completion_model_db.supports_tool_calling,
+            supports_strict_tool_schema=completion_model_db.supports_strict_tool_schema,
             token_limit=token_limit,
             base_url=completion_model_db.base_url,
             litellm_model_name=completion_model_db.litellm_model_name,

@@ -358,6 +358,7 @@ of adding a parallel path.
 | Builder operating limits and prompt reserves | `flow_ai_builder_budget_settings` plus `ai_builder_settings` |
 | Builder attachment inspection and model-aware admission | `ai_builder_attachment_context` |
 | Builder proposal wire contract | `ProposalPrepared.proposal_tool_schema` built by `ai_builder_proposal_intent` |
+| Strict tool schemas on the wire | the completion model's `supports_strict_tool_schema` capability, read from `ResolvedCompletionModelRoute` |
 | Builder create compilation | `ai_builder_create_compiler` and `ai_builder_assembly` |
 | Flow package layout rules | [package-layout.md](./package-layout.md) |
 

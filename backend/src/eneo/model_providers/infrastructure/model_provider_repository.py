@@ -119,6 +119,27 @@ class ModelProviderRepository:
         if affected_row_count(result) == 0:
             raise NotFoundException(f"ModelProvider {provider_id} not found")
 
+    async def clear_strict_tool_schema_declarations(self, provider_id: UUID) -> int:
+        """Withdraw strict tool schema declarations attached to this provider.
+
+        A declaration is made against the route a model resolved to. When the
+        provider's endpoint moves, that route is a different one, so the models
+        return to permissive schemas until an admin declares them again.
+        """
+        from eneo.database.tables.ai_models_table import CompletionModels
+
+        stmt = (
+            sa.update(CompletionModels)
+            .where(
+                CompletionModels.provider_id == provider_id,
+                CompletionModels.tenant_id == self.tenant_id,
+                CompletionModels.supports_strict_tool_schema.is_(True),
+            )
+            .values(supports_strict_tool_schema=False)
+        )
+        result = await self.session.execute(stmt)
+        return affected_row_count(result)
+
     async def count_models_for_provider(self, provider_id: UUID) -> int:
         """Count how many models are using this provider."""
         from eneo.database.tables.ai_models_table import (

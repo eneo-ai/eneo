@@ -43,6 +43,7 @@ def _make_model(
     vision: bool = False,
     reasoning: bool = False,
     supports_tool_calling: bool = False,
+    supports_strict_tool_schema: bool = False,
     is_deprecated: bool = False,
     security_classification: SecurityClassification | None = None,
     model_id=None,
@@ -72,6 +73,7 @@ def _make_model(
         is_org_default=False,
         reasoning=reasoning,
         supports_tool_calling=supports_tool_calling,
+        supports_strict_tool_schema=supports_strict_tool_schema,
         security_classification=security_classification,
     )
 
@@ -328,6 +330,51 @@ class TestToolCallingLoss:
         result = await service.validate_migration(from_model.id, to_model.id, uuid4())
 
         assert "lacks_tool_calling" not in result.warning_codes
+
+
+class TestStrictToolSchemaLoss:
+    """Migration compares the strict support each model effectively sends."""
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("source", "target", "warns"),
+        [
+            pytest.param((True, True), (True, False), True, id="target-declines"),
+            pytest.param(
+                (True, True),
+                (False, True),
+                True,
+                id="target-cannot-call-tools",
+            ),
+            pytest.param((True, True), (True, True), False, id="both-send-strict"),
+            pytest.param(
+                (False, True),
+                (True, False),
+                False,
+                id="source-never-sent-strict",
+            ),
+        ],
+    )
+    async def test_strict_tool_schema_loss_follows_effective_support(
+        self,
+        source: tuple[bool, bool],
+        target: tuple[bool, bool],
+        warns: bool,
+    ):
+        from_model = _make_model(
+            supports_tool_calling=source[0],
+            supports_strict_tool_schema=source[1],
+        )
+        to_model = _make_model(
+            supports_tool_calling=target[0],
+            supports_strict_tool_schema=target[1],
+        )
+
+        service = _build_service(repo_side_effect=[from_model, to_model])
+
+        result = await service.validate_migration(from_model.id, to_model.id, uuid4())
+
+        assert ("lacks_strict_tool_schema" in result.warning_codes) is warns
 
 
 class TestKwargsReset:

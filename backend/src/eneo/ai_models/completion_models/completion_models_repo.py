@@ -4,9 +4,11 @@ import sqlalchemy as sa
 from sqlalchemy.exc import IntegrityError
 
 from eneo.ai_models.completion_models.completion_model import (
+    COMPLETION_MODEL_ROUTE_FIELDS,
     CompletionModel,
     CompletionModelCreate,
     CompletionModelUpdate,
+    moves_completion_model_route,
 )
 from eneo.completion_models.domain.model_kwargs_capabilities import (
     persist_explicit_model_kwargs_capabilities,
@@ -107,6 +109,7 @@ class CompletionModelsRepository:
     async def update_model(
         self, model: CompletionModelUpdate
     ) -> CompletionModel | None:
+        model = await self._withdraw_strict_declaration_on_route_change(model)
         if "model_kwargs_capabilities" in model.model_fields_set:
             persisted_capabilities = (
                 persist_explicit_model_kwargs_capabilities(
@@ -125,6 +128,50 @@ class CompletionModelsRepository:
         return await self.delegate.update(
             model, exclude=COMPLETION_MODEL_DB_WRITE_EXCLUDE
         )
+
+    async def _withdraw_strict_declaration_on_route_change(
+        self, model: CompletionModelUpdate
+    ) -> CompletionModelUpdate:
+        """Drop a strict tool schema declaration this write invalidates.
+
+        The declaration belongs to one provider route, so moving the route
+        withdraws it. The same request may declare the new route explicitly.
+        """
+        written = model.model_fields_set
+        provided = {
+            field: getattr(model, field)
+            for field in COMPLETION_MODEL_ROUTE_FIELDS
+            if field in written
+        }
+        if not provided or "supports_strict_tool_schema" in written:
+            return model
+
+        current = (
+            await self.session.execute(
+                sa.select(
+                    *(
+                        getattr(CompletionModels, field)
+                        for field in COMPLETION_MODEL_ROUTE_FIELDS
+                    ),
+                    ModelProviders.provider_type,
+                )
+                .outerjoin(
+                    ModelProviders, CompletionModels.provider_id == ModelProviders.id
+                )
+                .where(CompletionModels.id == model.id)
+            )
+        ).one_or_none()
+        if current is None:
+            return model
+
+        *route_values, provider_type = current
+        if not moves_completion_model_route(
+            current=dict(zip(COMPLETION_MODEL_ROUTE_FIELDS, route_values)),
+            provided=provided,
+            provider_type=provider_type,
+        ):
+            return model
+        return model.model_copy(update={"supports_strict_tool_schema": False})
 
     async def delete_model(self, id: UUID) -> None:
         # Spaces are containers — a model "enabled" on a space without any

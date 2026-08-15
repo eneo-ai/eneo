@@ -17,6 +17,9 @@ from sqlalchemy import and_
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql.elements import ColumnElement
 
+from eneo.ai_models.completion_models.completion_model import (
+    sends_strict_tool_schemas,
+)
 from eneo.ai_models.migration.base_migration_service import (
     BaseModelMigrationService,
 )
@@ -104,6 +107,13 @@ class CompletionModelMigrationService(BaseModelMigrationService):
         if from_model.supports_tool_calling and not to_model.supports_tool_calling:
             issues.append("Target model lacks tool calling support")
             issue_codes.append("lacks_tool_calling")
+
+        # Effective strict support is the same rule the resolved route applies.
+        if sends_strict_tool_schemas(from_model) and not sends_strict_tool_schemas(
+            to_model
+        ):
+            issues.append("Target model lacks strict tool schema support")
+            issue_codes.append("lacks_strict_tool_schema")
 
         target_level = (
             to_model.security_classification.security_level

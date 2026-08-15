@@ -10,6 +10,27 @@ if TYPE_CHECKING:
 logger = get_logger(__name__)
 
 
+def lookup_provider_field(
+    *,
+    credentials: dict[str, Any],
+    config: dict[str, Any],
+    field: str,
+) -> Optional[str]:
+    """Return one provider field exactly as a request resolves it.
+
+    Credentials answer first; config is consulted only when the credential key
+    is absent, so an empty credential value deliberately shadows config. Both
+    request-time resolution and anything that compares provider configuration
+    must use this rule, or they disagree about which endpoint a model uses.
+    """
+    value = credentials.get(field)
+    if value is None and config:
+        value = config.get(field)
+    if value is None or value == "":
+        return None
+    return value
+
+
 class TenantModelCredentialResolver:
     """
     Credential resolver for tenant-specific models.
@@ -82,14 +103,13 @@ class TenantModelCredentialResolver:
 
         First checks credentials dict, then config dict.
         """
-        # Check credentials first
-        value = self._credentials.get(field)
+        value = lookup_provider_field(
+            credentials=self._credentials,
+            config=self._config,
+            field=field,
+        )
 
-        # Check config if not in credentials
-        if value is None and self._config:
-            value = self._config.get(field)
-
-        if value is not None and value != "":
+        if value is not None:
             # Decrypt if requested
             if decrypt and self.encryption and self.encryption.is_active():
                 try:

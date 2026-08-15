@@ -12717,6 +12717,12 @@ export interface components {
       stability?: string | null;
       readonly supported_model_kwargs: components["schemas"]["SupportedModelKwargs"];
       /**
+       * Supports Strict Tool Schema
+       * @description Declared support for native strict tool schemas on this model's provider route. Effective support also requires supports_tool_calling, and the declaration is withdrawn when the model resolves to a different provider route or its provider endpoint moves.
+       * @default false
+       */
+      supports_strict_tool_schema?: boolean;
+      /**
        * Supports Tool Calling
        * @default false
        */
@@ -12774,6 +12780,12 @@ export interface components {
       reasoning: boolean;
       /** Stability */
       stability?: string | null;
+      /**
+       * Supports Strict Tool Schema
+       * @description Declared support for native strict tool schemas on this model's provider route. Effective support also requires supports_tool_calling, and the declaration is withdrawn when the model resolves to a different provider route or its provider endpoint moves.
+       * @default false
+       */
+      supports_strict_tool_schema?: boolean;
       /**
        * Supports Tool Calling
        * @default false
@@ -12866,6 +12878,12 @@ export interface components {
       /** Stability */
       stability?: string | null;
       readonly supported_model_kwargs: components["schemas"]["SupportedModelKwargs"];
+      /**
+       * Supports Strict Tool Schema
+       * @description Declared support for native strict tool schemas on this model's provider route. Effective support also requires supports_tool_calling, and the declaration is withdrawn when the model resolves to a different provider route or its provider endpoint moves.
+       * @default false
+       */
+      supports_strict_tool_schema?: boolean;
       /**
        * Supports Tool Calling
        * @default false
@@ -12986,6 +13004,12 @@ export interface components {
       stability?: string | null;
       readonly supported_model_kwargs: components["schemas"]["SupportedModelKwargs"];
       /**
+       * Supports Strict Tool Schema
+       * @description Declared support for native strict tool schemas on this model's provider route. Effective support also requires supports_tool_calling, and the declaration is withdrawn when the model resolves to a different provider route or its provider endpoint moves.
+       * @default false
+       */
+      supports_strict_tool_schema?: boolean;
+      /**
        * Supports Tool Calling
        * @default false
        */
@@ -13053,6 +13077,12 @@ export interface components {
       /** Stability */
       stability?: string | null;
       readonly supported_model_kwargs: components["schemas"]["SupportedModelKwargs"];
+      /**
+       * Supports Strict Tool Schema
+       * @description Declared support for native strict tool schemas on this model's provider route. Effective support also requires supports_tool_calling, and the declaration is withdrawn when the model resolves to a different provider route or its provider endpoint moves.
+       * @default false
+       */
+      supports_strict_tool_schema?: boolean;
       /**
        * Supports Tool Calling
        * @default false
@@ -26009,6 +26039,11 @@ export interface components {
       reasoning?: boolean | null;
       /** Stability */
       stability?: string | null;
+      /**
+       * Supports Strict Tool Schema
+       * @description Declared support for native strict tool schemas on this model's provider route. Effective support also requires supports_tool_calling, and the declaration is withdrawn when the model resolves to a different provider route or its provider endpoint moves.
+       */
+      supports_strict_tool_schema?: boolean | null;
       /** Supports Tool Calling */
       supports_tool_calling?: boolean | null;
       /** Vision */
@@ -30225,6 +30260,11 @@ export interface components {
       reasoning?: boolean;
       security_classification?: components["schemas"]["ModelId"] | null;
       /**
+       * Supports Strict Tool Schema
+       * @default false
+       */
+      supports_strict_tool_schema?: boolean;
+      /**
        * Supports Tool Calling
        * @default false
        */
@@ -30263,6 +30303,8 @@ export interface components {
       security_classification?: components["schemas"]["ModelId"] | null;
       /** Stability */
       stability?: string | null;
+      /** Supports Strict Tool Schema */
+      supports_strict_tool_schema?: boolean | null;
       /** Supports Tool Calling */
       supports_tool_calling?: boolean | null;
       /** Vision */
@@ -42465,6 +42507,12 @@ export interface operations {
                 /** Stability */
                 stability?: string | null;
                 /**
+                 * Supports Strict Tool Schema
+                 * @description Declared support for native strict tool schemas on this model's provider route. Effective support also requires supports_tool_calling, and the declaration is withdrawn when the model resolves to a different provider route or its provider endpoint moves.
+                 * @default false
+                 */
+                supports_strict_tool_schema?: boolean;
+                /**
                  * Supports Tool Calling
                  * @default false
                  */
@@ -42902,6 +42950,12 @@ export interface operations {
                   components["schemas"]["SecurityClassificationPublic"] | null;
                 /** Stability */
                 stability?: string | null;
+                /**
+                 * Supports Strict Tool Schema
+                 * @description Declared support for native strict tool schemas on this model's provider route. Effective support also requires supports_tool_calling, and the declaration is withdrawn when the model resolves to a different provider route or its provider endpoint moves.
+                 * @default false
+                 */
+                supports_strict_tool_schema?: boolean;
                 /**
                  * Supports Tool Calling
                  * @default false
@@ -45178,6 +45232,12 @@ export interface operations {
                       components["schemas"]["SecurityClassificationPublic"] | null;
                     /** Stability */
                     stability?: string | null;
+                    /**
+                     * Supports Strict Tool Schema
+                     * @description Declared support for native strict tool schemas on this model's provider route. Effective support also requires supports_tool_calling, and the declaration is withdrawn when the model resolves to a different provider route or its provider endpoint moves.
+                     * @default false
+                     */
+                    supports_strict_tool_schema?: boolean;
                     /**
                      * Supports Tool Calling
                      * @default false

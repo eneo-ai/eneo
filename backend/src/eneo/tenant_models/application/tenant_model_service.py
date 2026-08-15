@@ -21,6 +21,9 @@ from uuid import UUID
 
 import sqlalchemy as sa
 
+from eneo.ai_models.completion_models.completion_model import (
+    moves_completion_model_route,
+)
 from eneo.ai_models.display_name_validation import (
     validate_unique_display_name as _validate_unique_display_name,
 )
@@ -213,6 +216,7 @@ class TenantCompletionModelService:
         new_model.vision = payload.vision
         new_model.reasoning = payload.reasoning
         new_model.supports_tool_calling = payload.supports_tool_calling
+        new_model.supports_strict_tool_schema = payload.supports_strict_tool_schema
         new_model.family = payload.family
         new_model.hosting = payload.hosting
         new_model.org = None
@@ -269,8 +273,18 @@ class TenantCompletionModelService:
         _ensure_tenant_owned(model)
 
         provided = payload.model_fields_set
+        # Moving the route withdraws a strict tool schema declaration made
+        # against the previous one, unless the same update declares the new
+        # route below. The edit dialog resends the unchanged name, so the shared
+        # rule compares values rather than presence.
+        renames_route = moves_completion_model_route(
+            current={"name": model.name},
+            provided={"name": payload.name} if payload.name is not None else {},
+        )
         if payload.name is not None:
             model.name = payload.name
+        if renames_route:
+            model.supports_strict_tool_schema = False
         if payload.display_name is not None:
             await _validate_unique_display_name(
                 self.session,
@@ -293,6 +307,8 @@ class TenantCompletionModelService:
             model.reasoning = payload.reasoning
         if payload.supports_tool_calling is not None:
             model.supports_tool_calling = payload.supports_tool_calling
+        if payload.supports_strict_tool_schema is not None:
+            model.supports_strict_tool_schema = payload.supports_strict_tool_schema
         if payload.hosting is not None:
             model.hosting = payload.hosting
         if payload.open_source is not None:

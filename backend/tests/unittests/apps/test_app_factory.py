@@ -155,6 +155,7 @@ def test_create_app_from_db_preserves_completion_model_provider_type(
         vision=False,
         reasoning=False,
         supports_tool_calling=True,
+        supports_strict_tool_schema=False,
         base_url=None,
         litellm_model_name=None,
         model_kwargs_capabilities=persist_explicit_model_kwargs_capabilities(

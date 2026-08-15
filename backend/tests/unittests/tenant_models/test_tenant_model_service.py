@@ -74,6 +74,77 @@ async def test_completion_model_route_changes_clear_capabilities_without_lookup(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("payload", "expected"),
+    [
+        pytest.param(
+            TenantCompletionModelUpdate(name="moved-model"),
+            False,
+            id="rename-withdraws-the-declaration",
+        ),
+        pytest.param(
+            TenantCompletionModelUpdate(name="declared-model"),
+            True,
+            id="resent-unchanged-name-keeps-it",
+        ),
+        pytest.param(
+            TenantCompletionModelUpdate(description="Same route, new blurb"),
+            True,
+            id="unrelated-edit-keeps-it",
+        ),
+        pytest.param(
+            TenantCompletionModelUpdate(
+                name="moved-model",
+                supports_strict_tool_schema=True,
+            ),
+            True,
+            id="rename-may-redeclare-the-new-route",
+        ),
+    ],
+)
+async def test_strict_tool_schema_declaration_follows_the_model_route(
+    payload: TenantCompletionModelUpdate,
+    expected: bool,
+) -> None:
+    tenant_id = uuid4()
+    model = SimpleNamespace(
+        id=uuid4(),
+        tenant_id=tenant_id,
+        provider_id=uuid4(),
+        name="declared-model",
+        nickname="Declared model",
+        reasoning=False,
+        model_kwargs_capabilities=None,
+        supports_strict_tool_schema=True,
+    )
+    result = MagicMock()
+    result.scalar_one_or_none.return_value = model
+    session = MagicMock()
+    session.execute = AsyncMock(return_value=result)
+    session.flush = AsyncMock()
+
+    with (
+        patch(
+            "eneo.tenant_models.application.tenant_model_service.ModelProviderRepository"
+        ),
+        patch(
+            "eneo.tenant_models.application.tenant_model_service.CompletionModelRepository"
+        ) as completion_repository_type,
+    ):
+        completion_repository_type.return_value.one = AsyncMock(
+            return_value=SimpleNamespace(id=model.id, name=model.name)
+        )
+        service = TenantCompletionModelService(
+            session=session,
+            user=MagicMock(tenant_id=tenant_id),
+        )
+
+        await service.update(model.id, payload)
+
+    assert model.supports_strict_tool_schema is expected
+
+
+@pytest.mark.asyncio
 async def test_completion_model_update_tags_explicit_admin_capabilities() -> None:
     tenant_id = uuid4()
     model = SimpleNamespace(

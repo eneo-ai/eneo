@@ -1,12 +1,13 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from decimal import Decimal
 from enum import Enum
-from typing import TYPE_CHECKING, Any, Optional, Union, cast
+from typing import TYPE_CHECKING, Any, Optional, Protocol, Union, cast
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, computed_field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, computed_field, model_validator
 
 from eneo.completion_models.domain.model_kwargs_capabilities import (
     SupportedModelKwargs,
@@ -162,6 +163,54 @@ class Completion:
     skill_context_tokens: Optional[int] = None
 
 
+# Writing any of these can give a completion model a different provider route.
+COMPLETION_MODEL_ROUTE_FIELDS = ("name", "litellm_model_name")
+
+
+class DeclaredToolCapabilities(Protocol):
+    supports_tool_calling: bool
+    supports_strict_tool_schema: bool
+
+
+def sends_strict_tool_schemas(model: DeclaredToolCapabilities) -> bool:
+    """Return the effective strict tool schema support of one model.
+
+    A strict tool schema is still a tool schema, so a model that cannot call
+    tools never gets one, whatever it declares.
+    """
+    return model.supports_strict_tool_schema and model.supports_tool_calling
+
+
+def moves_completion_model_route(
+    *,
+    current: Mapping[str, object],
+    provided: Mapping[str, object],
+    provider_type: str | None = None,
+) -> bool:
+    """Return whether a write gives the model a different provider route.
+
+    Compares the routes the canonical resolver produces, so a rename that the
+    model's explicit LiteLLM route overrides is not mistaken for a move. Every
+    write interface asks this before keeping a strict tool schema declaration.
+    """
+    proposed = {**current, **provided}
+    return _resolved_route(current, provider_type) != _resolved_route(
+        proposed, provider_type
+    )
+
+
+def _resolved_route(fields: Mapping[str, object], provider_type: str | None) -> str:
+    name = fields.get("name")
+    litellm_model_name = fields.get("litellm_model_name")
+    return resolve_model_route(
+        model_name=str(name) if name is not None else "",
+        provider_type=provider_type,
+        litellm_model_name=(
+            str(litellm_model_name) if litellm_model_name is not None else None
+        ),
+    )
+
+
 class CompletionModelBase(BaseModel):
     name: str
     nickname: Optional[str] = None
@@ -180,6 +229,16 @@ class CompletionModelBase(BaseModel):
     vision: bool
     reasoning: bool
     supports_tool_calling: bool = False
+    supports_strict_tool_schema: bool = Field(
+        default=False,
+        description=(
+            "Declared support for native strict tool schemas on this model's "
+            "provider route. Effective support also requires "
+            "supports_tool_calling, and the declaration is withdrawn when the "
+            "model resolves to a different provider route or its provider "
+            "endpoint moves."
+        ),
+    )
     base_url: Optional[str] = None
     litellm_model_name: Optional[str] = None
     model_kwargs_capabilities: Optional[SupportedModelKwargs] = None
@@ -307,6 +366,7 @@ class CompletionModelPublic(CompletionModel):
             vision=completion_model.vision,
             reasoning=completion_model.reasoning,
             supports_tool_calling=completion_model.supports_tool_calling,
+            supports_strict_tool_schema=completion_model.supports_strict_tool_schema,
             base_url=completion_model.base_url,
             litellm_model_name=completion_model.litellm_model_name,
             model_kwargs_capabilities=completion_model.model_kwargs_capabilities,

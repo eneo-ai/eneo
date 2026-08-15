@@ -186,6 +186,66 @@ async def test_model_route_preserves_explicit_admin_reasoning_capability():
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("supports_strict_tool_schema", [True, False])
+async def test_model_route_carries_the_supports_strict_tool_schema_capability(
+    supports_strict_tool_schema: bool,
+):
+    completion_model = _make_completion_model()
+    completion_model.supports_strict_tool_schema = supports_strict_tool_schema
+    adapter = MagicMock()
+    adapter.provider_type = "openai"
+    adapter.resolve_litellm_params.return_value = ("openai/custom-model", {})
+    service = CompletionService(
+        context_builder=_DummyContextBuilder(),
+        tenant=SimpleNamespace(id=uuid4()),
+        session=AsyncMock(),
+    )
+    service._get_adapter = AsyncMock(return_value=adapter)
+
+    route = await service.resolve_model_route(completion_model)
+
+    assert route.supports_strict_tool_schema is supports_strict_tool_schema
+
+
+@pytest.mark.asyncio
+async def test_model_route_drops_strict_schemas_without_tool_calling():
+    completion_model = _make_completion_model()
+    completion_model.supports_strict_tool_schema = True
+    completion_model.supports_tool_calling = False
+    adapter = MagicMock()
+    adapter.provider_type = "openai"
+    adapter.resolve_litellm_params.return_value = ("openai/custom-model", {})
+    service = CompletionService(
+        context_builder=_DummyContextBuilder(),
+        tenant=SimpleNamespace(id=uuid4()),
+        session=AsyncMock(),
+    )
+    service._get_adapter = AsyncMock(return_value=adapter)
+
+    route = await service.resolve_model_route(completion_model)
+
+    assert route.supports_strict_tool_schema is False
+
+
+@pytest.mark.asyncio
+async def test_model_route_without_measured_capability_is_not_strict_capable():
+    completion_model = _make_completion_model()
+    adapter = MagicMock()
+    adapter.provider_type = "openai"
+    adapter.resolve_litellm_params.return_value = ("openai/gpt-5.6-luna", {})
+    service = CompletionService(
+        context_builder=_DummyContextBuilder(),
+        tenant=SimpleNamespace(id=uuid4()),
+        session=AsyncMock(),
+    )
+    service._get_adapter = AsyncMock(return_value=adapter)
+
+    route = await service.resolve_model_route(completion_model)
+
+    assert route.supports_strict_tool_schema is False
+
+
+@pytest.mark.asyncio
 async def test_non_streaming_omits_temperature_for_legacy_untagged_slider():
     completion_model = _make_completion_model()
     completion_model.reasoning = True

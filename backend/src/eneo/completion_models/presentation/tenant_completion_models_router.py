@@ -35,6 +35,7 @@ class TenantCompletionModelCreate(BaseModel):
     vision: bool = False
     reasoning: bool = False
     supports_tool_calling: bool = False
+    supports_strict_tool_schema: bool = False
     hosting: str = "swe"
     family: str = "openai"
     is_active: bool = True
@@ -57,6 +58,7 @@ class TenantCompletionModelUpdate(BaseModel):
     vision: bool | None = None
     reasoning: bool | None = None
     supports_tool_calling: bool | None = None
+    supports_strict_tool_schema: bool | None = None
     hosting: str | None = None
     open_source: bool | None = None
     stability: str | None = None

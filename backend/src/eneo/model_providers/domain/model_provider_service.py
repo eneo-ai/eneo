@@ -5,6 +5,9 @@ from uuid import UUID, uuid4
 from eneo.main.exceptions import BadRequestException, NameCollisionException
 from eneo.model_providers.domain.model_defaults_lookup import resolve_model_defaults
 from eneo.model_providers.domain.model_provider import ModelProvider
+from eneo.model_providers.infrastructure.litellm_provider import (
+    resolve_provider_request_identity,
+)
 from eneo.model_providers.infrastructure.model_provider_repository import (
     ModelProviderRepository,
 )
@@ -338,6 +341,7 @@ class ModelProviderService:
         """Update an existing provider."""
         # Get existing provider
         provider = await self.repository.get_by_id(provider_id)
+        request_identity_before = self._resolved_request_identity(provider)
 
         # Check for duplicate names if name is being changed
         if name is not None and name != provider.name:
@@ -359,7 +363,20 @@ class ModelProviderService:
         if is_active is not None:
             provider.is_active = is_active
 
+        if self._resolved_request_identity(provider) != request_identity_before:
+            await self.repository.clear_strict_tool_schema_declarations(provider_id)
+
         return await self.repository.update(provider)
+
+    def _resolved_request_identity(
+        self, provider: ModelProvider
+    ) -> tuple[tuple[str, str | None], ...]:
+        """Return the provider settings that decide where a request executes."""
+        return resolve_provider_request_identity(
+            provider_type=provider.provider_type,
+            credentials=provider.credentials,
+            config=provider.config,
+        )
 
     async def delete(self, provider_id: UUID) -> None:
         """Delete a provider.

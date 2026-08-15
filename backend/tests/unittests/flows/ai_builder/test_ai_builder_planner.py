@@ -11,7 +11,6 @@ from typing import Any, cast
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import UUID, uuid4
 
-import jsonschema
 import pytest
 from pydantic import ValidationError
 
@@ -128,6 +127,7 @@ from eneo.flows.ai_builder.ai_builder_settings import AIBuilderBudgetPolicy
 from eneo.flows.ai_builder.ai_builder_tools import (
     ProposalToolSchema,
     build_propose_flow_tool_schema,
+    validate_native_strict_schema,
     validate_propose_flow_tool_arguments,
 )
 from eneo.flows.ai_builder.ai_builder_turn_controller import (
@@ -530,69 +530,20 @@ def _build_create_proposal_for_architecture(
     )
 
 
-_UNSUPPORTED_NATIVE_STRICT_SCHEMA_KEYWORDS = frozenset(
-    {
-        "allOf",
-        "contains",
-        "dependentRequired",
-        "dependentSchemas",
-        "else",
-        "if",
-        "maxContains",
-        "maxProperties",
-        "minContains",
-        "minProperties",
-        "not",
-        "oneOf",
-        "patternProperties",
-        "propertyNames",
-        "then",
-        "unevaluatedItems",
-        "unevaluatedProperties",
-        "uniqueItems",
-    }
-)
-
-
-def _assert_native_strict_schema(node: object, *, path: str = "$") -> None:
-    if isinstance(node, list):
-        for index, item in enumerate(node):
-            _assert_native_strict_schema(item, path=f"{path}[{index}]")
-        return
-    if not isinstance(node, dict):
-        return
-
-    schema_type = node.get("type")
-    schema_types = schema_type if isinstance(schema_type, list) else [schema_type]
-    if schema_type is not None:
-        assert all(isinstance(value, str) for value in schema_types), path
-        assert set(schema_types) <= {
-            "array",
-            "boolean",
-            "integer",
-            "null",
-            "number",
-            "object",
-            "string",
-        }, path
-
-    if "object" in schema_types:
-        properties = node.get("properties")
-        required = node.get("required")
-        assert isinstance(properties, dict), path
-        assert isinstance(required, list), path
-        assert all(isinstance(name, str) for name in required), path
-        assert set(required) == set(properties), path
-        assert node.get("additionalProperties") is False, path
-
-    any_of = node.get("anyOf")
-    if any_of is not None:
-        assert isinstance(any_of, list) and len(any_of) >= 2, path
-        assert all(isinstance(branch, dict) for branch in any_of), path
-    assert not (_UNSUPPORTED_NATIVE_STRICT_SCHEMA_KEYWORDS & node.keys()), path
-
-    for key, value in node.items():
-        _assert_native_strict_schema(value, path=f"{path}.{key}")
+def test_property_names_are_not_read_as_schema_keywords() -> None:
+    # A property may legitimately be called "type" or "required"; only schemas
+    # carry keywords.
+    validate_native_strict_schema(
+        {
+            "type": "object",
+            "properties": {
+                "type": {"type": "string"},
+                "required": {"type": ["string", "null"]},
+            },
+            "required": ["type", "required"],
+            "additionalProperties": False,
+        }
+    )
 
 
 def test_prepared_create_schema_is_native_strict_compatible() -> None:
@@ -601,8 +552,7 @@ def test_prepared_create_schema_is_native_strict_compatible() -> None:
     parameters = tool_schema["function"]["parameters"]
 
     assert "strict" not in tool_schema["function"]
-    jsonschema.Draft202012Validator.check_schema(parameters)
-    _assert_native_strict_schema(parameters)
+    validate_native_strict_schema(parameters)
 
     raw_create_payload = {
         "flow_name": "Case assessment",

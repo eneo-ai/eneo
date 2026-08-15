@@ -71,6 +71,123 @@ class ProposalToolArgumentsError(ValueError):
     """The provider returned arguments outside the prepared proposal schema."""
 
 
+class NativeStrictSchemaError(ValueError):
+    """The schema is outside the subset providers accept as strict tools."""
+
+
+# Keywords providers reject in a native strict tool schema.
+_UNSUPPORTED_NATIVE_STRICT_KEYWORDS = frozenset(
+    {
+        "allOf",
+        "contains",
+        "dependentRequired",
+        "dependentSchemas",
+        "else",
+        "if",
+        "maxContains",
+        "maxProperties",
+        "minContains",
+        "minProperties",
+        "not",
+        "oneOf",
+        "patternProperties",
+        "propertyNames",
+        "then",
+        "unevaluatedItems",
+        "unevaluatedProperties",
+        "uniqueItems",
+    }
+)
+_NATIVE_STRICT_TYPES = frozenset(
+    {"array", "boolean", "integer", "null", "number", "object", "string"}
+)
+
+
+def validate_native_strict_schema(parameters: dict[str, Any]) -> None:
+    """Confirm one parameter schema is valid and native-strict compatible.
+
+    Providers accept a narrow JSON Schema subset when a tool is marked strict:
+    closed objects, a `required` list naming every property, no unsupported
+    keywords. A schema outside it is rejected before the request, so a provider
+    rejection means the provider, not the schema.
+    """
+    validator_class = validator_for(parameters)
+    try:
+        validator_class.check_schema(parameters)
+    except jsonschema.SchemaError as error:
+        raise NativeStrictSchemaError(
+            f"invalid JSON Schema: {error.message}"
+        ) from error
+    if parameters.get("type") != "object":
+        raise NativeStrictSchemaError("tool parameters must be an object schema")
+    _check_native_strict_node(parameters, path="$")
+
+
+def _check_native_strict_node(node: object, *, path: str) -> None:
+    """Check one schema node, then only the places schemas actually live.
+
+    Walking every nested dictionary would treat a property map as a schema, so
+    a property named `type` or `required` would be read as a keyword.
+    """
+    if not isinstance(node, dict):
+        return
+
+    schema = cast(dict[str, object], node)
+    schema_type = schema.get("type")
+    schema_types: list[object] = (
+        cast(list[object], schema_type)
+        if isinstance(schema_type, list)
+        else [schema_type]
+    )
+    if schema_type is not None and not set(
+        value for value in schema_types if isinstance(value, str)
+    ) == set(schema_types):
+        raise NativeStrictSchemaError(f"{path}: schema type must be a string")
+    if schema_type is not None and not set(schema_types) <= _NATIVE_STRICT_TYPES:
+        raise NativeStrictSchemaError(f"{path}: unsupported schema type")
+
+    properties = schema.get("properties")
+    if "object" in schema_types:
+        required = schema.get("required")
+        if not isinstance(properties, dict) or not isinstance(required, list):
+            raise NativeStrictSchemaError(
+                f"{path}: object needs properties and required"
+            )
+        if set(cast(list[object], required)) != set(
+            cast(dict[str, object], properties)
+        ):
+            raise NativeStrictSchemaError(f"{path}: required must name every property")
+        if schema.get("additionalProperties") is not False:
+            raise NativeStrictSchemaError(f"{path}: object must be closed")
+
+    branches = schema.get("anyOf")
+    if branches is not None and (
+        not isinstance(branches, list) or len(cast(list[object], branches)) < 2
+    ):
+        raise NativeStrictSchemaError(f"{path}: anyOf needs at least two branches")
+
+    unsupported = _UNSUPPORTED_NATIVE_STRICT_KEYWORDS & schema.keys()
+    if unsupported:
+        raise NativeStrictSchemaError(
+            f"{path}: unsupported keyword {sorted(unsupported)[0]}"
+        )
+
+    if isinstance(properties, dict):
+        for name, value in cast(dict[str, object], properties).items():
+            _check_native_strict_node(value, path=f"{path}.properties.{name}")
+    for keyword in ("items", "additionalProperties", "not"):
+        _check_native_strict_node(schema.get(keyword), path=f"{path}.{keyword}")
+    for keyword in ("anyOf", "prefixItems"):
+        nested = schema.get(keyword)
+        if isinstance(nested, list):
+            for index, branch in enumerate(cast(list[object], nested)):
+                _check_native_strict_node(branch, path=f"{path}.{keyword}[{index}]")
+    definitions = schema.get("$defs")
+    if isinstance(definitions, dict):
+        for name, value in cast(dict[str, object], definitions).items():
+            _check_native_strict_node(value, path=f"{path}.$defs.{name}")
+
+
 def validate_propose_flow_tool_arguments(
     *,
     arguments: dict[str, Any],

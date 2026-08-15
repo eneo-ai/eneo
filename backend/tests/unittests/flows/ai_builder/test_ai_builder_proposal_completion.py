@@ -44,7 +44,6 @@ from eneo.flows.ai_builder.ai_builder_error_contract import (
     AIBuilderProviderOutcomeUnknownException,
 )
 from eneo.flows.ai_builder.ai_builder_litellm_completion import (
-    PINNED_LUNA_NATIVE_STRICT_TOOLS_ROUTE,
     call_proposal_completion,
     make_usage_tracked_proposal_completion,
 )
@@ -89,11 +88,13 @@ def _route(
     kwargs: dict[str, object] | None = None,
     supported: SupportedModelKwargs | None = None,
     requested: ModelKwargs | None = None,
+    supports_strict_tool_schema: bool = False,
 ) -> ResolvedCompletionModelRoute:
     return ResolvedCompletionModelRoute(
         litellm_model=model,
         provider_type=provider_type,
         litellm_kwargs=kwargs or {},
+        supports_strict_tool_schema=supports_strict_tool_schema,
         supported_model_kwargs=supported
         or SupportedModelKwargs(temperature=ModelKwargCapability(supported=True)),
         **(
@@ -271,25 +272,11 @@ def _nested_key_values(value: object, key: str) -> list[object]:
     ]
 
 
-(
-    _PINNED_LUNA_PROVIDER_TYPE,
-    _PINNED_LUNA_LITELLM_MODEL,
-    _PINNED_LUNA_API_BASE,
-) = PINNED_LUNA_NATIVE_STRICT_TOOLS_ROUTE
-# The measured completion-model row; the strict-tools decision must not depend
-# on it because row ids differ per database.
-_PINNED_LUNA_MODEL_ID = UUID("90824b05-9913-4210-968f-9294eb017d31")
-
-assert _PINNED_LUNA_API_BASE is None
-
-
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     (
         "target_kind",
-        "model_id",
-        "provider_type",
-        "litellm_model",
+        "supports_strict_tool_schema",
         "route_kwargs",
         "counts_as_repair",
         "expected_strict_values",
@@ -297,81 +284,49 @@ assert _PINNED_LUNA_API_BASE is None
     [
         pytest.param(
             TargetKind.CREATE,
-            _PINNED_LUNA_MODEL_ID,
-            _PINNED_LUNA_PROVIDER_TYPE,
-            _PINNED_LUNA_LITELLM_MODEL,
+            True,
             {},
             False,
             [True],
-            id="pinned-luna-create-initial",
+            id="capable-route-create-initial",
         ),
         pytest.param(
             TargetKind.CREATE,
-            _PINNED_LUNA_MODEL_ID,
-            _PINNED_LUNA_PROVIDER_TYPE,
-            _PINNED_LUNA_LITELLM_MODEL,
+            True,
             {},
             True,
             [True],
-            id="pinned-luna-create-repair",
+            id="capable-route-create-repair",
         ),
         pytest.param(
             TargetKind.CREATE,
-            _PINNED_LUNA_MODEL_ID,
-            _PINNED_LUNA_PROVIDER_TYPE,
-            "openai/gpt-5.4",
+            False,
             {},
             False,
             [],
-            id="other-openai-create",
+            id="unmeasured-route-create",
         ),
         pytest.param(
             TargetKind.CREATE,
-            _PINNED_LUNA_MODEL_ID,
-            "azure",
-            _PINNED_LUNA_LITELLM_MODEL,
-            {},
-            False,
-            [],
-            id="other-provider-create",
-        ),
-        pytest.param(
-            TargetKind.CREATE,
-            UUID("11111111-1111-1111-1111-111111111111"),
-            _PINNED_LUNA_PROVIDER_TYPE,
-            _PINNED_LUNA_LITELLM_MODEL,
-            {},
-            False,
-            [True],
-            id="same-route-other-database-row-create",
-        ),
-        pytest.param(
-            TargetKind.CREATE,
-            _PINNED_LUNA_MODEL_ID,
-            _PINNED_LUNA_PROVIDER_TYPE,
-            _PINNED_LUNA_LITELLM_MODEL,
+            True,
             {"api_base": "https://openai-compatible.invalid/v1"},
             False,
-            [],
-            id="other-openai-endpoint-create",
+            [True],
+            id="capable-custom-endpoint-create",
         ),
         pytest.param(
             TargetKind.EDIT,
-            _PINNED_LUNA_MODEL_ID,
-            _PINNED_LUNA_PROVIDER_TYPE,
-            _PINNED_LUNA_LITELLM_MODEL,
+            True,
             {},
             False,
             [],
-            id="pinned-luna-edit",
+            id="capable-route-edit",
         ),
     ],
 )
-async def test_outbound_proposal_tools_seal_native_strict_to_pinned_luna_create(
+async def test_outbound_proposal_tools_follow_the_route_capability_on_create(
     target_kind: TargetKind,
-    model_id: UUID,
-    provider_type: str,
-    litellm_model: str,
+    supports_strict_tool_schema: bool,
     route_kwargs: dict[str, object],
     counts_as_repair: bool,
     expected_strict_values: list[object],
@@ -393,10 +348,8 @@ async def test_outbound_proposal_tools_seal_native_strict_to_pinned_luna_create(
             messages=[{"role": "user", "content": "Build a flow"}],
             tool_schemas=[tool_schema],
             route=_route(
-                resolved_model_id=model_id,
-                provider_type=provider_type,
-                model=litellm_model,
                 kwargs=route_kwargs,
+                supports_strict_tool_schema=supports_strict_tool_schema,
             ),
             max_output_tokens=1024,
             temperature=0.2,
@@ -421,7 +374,7 @@ async def test_outbound_proposal_tools_seal_native_strict_to_pinned_luna_create(
 
 
 @pytest.mark.asyncio
-async def test_edit_context_repair_omits_native_strict_on_pinned_luna() -> None:
+async def test_edit_context_repair_omits_native_strict_on_a_capable_route() -> None:
     response = _make_response_with_text("ok")
     litellm_client = SimpleNamespace(acompletion=AsyncMock(return_value=response))
     tool_schema = build_propose_flow_tool_schema(
@@ -434,11 +387,7 @@ async def test_edit_context_repair_omits_native_strict_on_pinned_luna() -> None:
     ctx = _make_context(
         flow=MagicMock(),
         proposal_tool_schema=tool_schema,
-        route=_route(
-            resolved_model_id=_PINNED_LUNA_MODEL_ID,
-            provider_type=_PINNED_LUNA_PROVIDER_TYPE,
-            model=_PINNED_LUNA_LITELLM_MODEL,
-        ),
+        route=_route(supports_strict_tool_schema=True),
     )
 
     await call_proposal_completion(

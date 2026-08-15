@@ -42,6 +42,11 @@ class CompletionModels(BasePublic):
     vision: Mapped[bool] = mapped_column(server_default="False")
     reasoning: Mapped[bool] = mapped_column(server_default="False")
     supports_tool_calling: Mapped[bool] = mapped_column(server_default="False")
+    # Declared like supports_tool_calling: an admin marks the model once its
+    # provider route is known to accept strict tool schemas. Undeclared means
+    # unsupported, and renaming the model or moving the provider endpoint
+    # withdraws the declaration, because it was made against that route.
+    supports_strict_tool_schema: Mapped[bool] = mapped_column(server_default="False")
     base_url: Mapped[Optional[str]] = mapped_column()
     litellm_model_name: Mapped[Optional[str]] = mapped_column()
     model_kwargs_capabilities: Mapped[Optional[dict[str, object]]] = mapped_column(

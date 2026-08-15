@@ -14,6 +14,7 @@ import pytest
 from litellm.caching.llm_caching_handler import LLMClientCache
 from litellm.exceptions import BadRequestError
 from litellm.llms.custom_httpx.http_handler import AsyncHTTPHandler
+from pydantic import ValidationError
 
 from eneo.completion_models.domain.model_kwargs_capabilities import (
     SupportedModelKwargs,
@@ -22,7 +23,6 @@ from eneo.completion_models.infrastructure.completion_service import (
     ResolvedCompletionModelRoute,
 )
 from eneo.flows.ai_builder.ai_builder_litellm_completion import (
-    PINNED_LUNA_NATIVE_STRICT_TOOLS_ROUTE,
     CompletionTokenUsage,
     LLMCompletionChoice,
     LLMCompletionMessage,
@@ -67,26 +67,30 @@ def _probe() -> ModuleType:
     return module
 
 
-def test_shipping_strict_route_matches_sealed_probe_protocol() -> None:
-    # The probe seals the measured completion-model row as well; the shipping
-    # decision keys on the provider route only, so the same model in another
-    # database behaves identically.
-    probe = _probe()
-
-    assert PINNED_LUNA_NATIVE_STRICT_TOOLS_ROUTE == (
-        "openai",
-        probe.PROBE_MODEL_ROUTE,
-        None,
-    )
-
-
-def _route(*, kwargs: dict[str, object] | None = None) -> ResolvedCompletionModelRoute:
+def _route(
+    *,
+    kwargs: dict[str, object] | None = None,
+    supports_strict_tool_schema: bool = True,
+) -> ResolvedCompletionModelRoute:
     return ResolvedCompletionModelRoute(
         litellm_model="openai/gpt-5.6-luna",
         provider_type="openai",
         litellm_kwargs=kwargs or {},
         supported_model_kwargs=SupportedModelKwargs(),
+        supports_strict_tool_schema=supports_strict_tool_schema,
     )
+
+
+def test_probe_measures_only_a_route_the_builder_would_send_strict_on() -> None:
+    # The probe and the Flow Builder must read the same capability: measuring a
+    # route the product keeps permissive would certify nothing.
+    probe = _probe()
+
+    capable = _runtime(probe, route=_route())
+    incapable = _runtime(probe, route=_route(supports_strict_tool_schema=False))
+
+    assert probe._runtime_preflight_passes(capable)
+    assert not probe._runtime_preflight_passes(incapable)
 
 
 def _response(
@@ -235,6 +239,7 @@ def _runtime(
         deprecated=False,
         migrated=False,
         supports_tool_calling=True,
+        supports_strict_tool_schema=selected_route.supports_strict_tool_schema,
         provider_active=True,
         sanitized_route_kwargs=projection.sanitized_route_kwargs,
         proposal_route_identity_sha256=(projection.proposal_route_identity_sha256),
@@ -311,7 +316,7 @@ def test_capability_contract_is_one_closed_strict_localized_tool() -> None:
 def test_capability_request_has_no_production_or_temperature_claim() -> None:
     probe = _probe()
 
-    request = probe._capability_request_value()
+    request = probe._capability_request_value(probe.default_measurement())
 
     assert "temperature" not in request
     assert "production_schema_diagnostic" not in request
@@ -1052,3 +1057,270 @@ def test_cli_has_no_model_override() -> None:
     probe = _probe()
     with pytest.raises(SystemExit):
         probe.parse_args(["--model-id", "another-model"])
+
+
+def _builder_shaped_schema() -> dict[str, object]:
+    return {
+        "type": "function",
+        "function": {
+            "name": "propose_flow",
+            "strict": True,
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "result_keys": {"type": "string", "enum": ["documents"]}
+                },
+                "required": ["result_keys"],
+                "additionalProperties": False,
+            },
+        },
+    }
+
+
+@pytest.mark.asyncio
+async def test_supplied_schema_prompt_and_cap_are_sent_and_sealed(
+    tmp_path: Path,
+) -> None:
+    probe = _probe()
+    file_schema = _builder_shaped_schema()
+    file_arguments: dict[str, object] = {"result_keys": "documents"}
+    assert probe._passes_same_schema(file_arguments, probe.synthetic_tool_schema()) is (
+        False
+    )
+    schema_path = tmp_path / "propose-flow.json"
+    schema_path.write_text(json.dumps(file_schema), encoding="utf-8")
+    prompt_path = tmp_path / "prompt.txt"
+    prompt_path.write_text("Bygg ett flöde för handläggning.", encoding="utf-8")
+    measurement = probe.measurement_from_arguments(
+        probe.parse_args(
+            [
+                "--output-dir",
+                str(tmp_path / "receipt"),
+                "--tool-schema-file",
+                str(schema_path),
+                "--prompt-file",
+                str(prompt_path),
+                "--max-output-tokens",
+                "2560",
+            ]
+        )
+    )
+    sent: list[dict[str, object]] = []
+
+    async def provider_completion(**kwargs: object) -> object:
+        sent.append(dict(kwargs))
+        return _raw_response(file_arguments)
+
+    async def resolve_runtime(_tenant_id: str) -> object:
+        return _runtime(probe), _route()
+
+    path = await probe.run_live_probe(
+        output_dir=tmp_path / "receipt",
+        tenant_id="tenant",
+        source_reader=lambda: _source(probe),
+        runtime_resolver=resolve_runtime,
+        provider_completion=provider_completion,
+        measurement=measurement,
+    )
+    sealed = json.loads(path.read_text(encoding="utf-8"))
+
+    assert sent[0]["tools"] == [file_schema]
+    assert sent[0]["messages"] == [
+        {"role": "user", "content": "Bygg ett flöde för handläggning."}
+    ]
+    assert sent[0]["max_tokens"] == 2560
+    assert sealed["request"]["tool_schema"] == file_schema
+    assert sealed["request"]["schema_sha256"] == probe.canonical_sha256(file_schema)
+    assert sealed["request"]["prompt"] == "Bygg ett flöde för handläggning."
+    assert sealed["request"]["max_output_tokens"] == 2560
+    assert sealed["runtime_before"]["supports_strict_tool_schema"] is True
+    assert sealed["outcome"]["response"]["arguments"] == file_arguments
+    assert probe.verify_receipt(path).verdict == "pass"
+
+
+def test_receipt_arguments_must_satisfy_the_schema_it_sealed(tmp_path: Path) -> None:
+    probe = _probe()
+    receipt = probe.build_receipt(
+        source_before=_source(probe),
+        source_after=_source(probe),
+        runtime_before=_runtime(probe),
+        runtime_after=_runtime(probe),
+        outcome=_passing_outcome(probe),
+    )
+    tampered = receipt.model_dump(mode="json")
+    tampered["request"]["tool_schema"] = _builder_shaped_schema()
+    tampered["request"]["schema_sha256"] = probe.canonical_sha256(
+        _builder_shaped_schema()
+    )
+
+    with pytest.raises(ValidationError):
+        probe.CapabilityReceipt.model_validate(tampered)
+
+
+def test_measurement_options_require_a_live_run() -> None:
+    probe = _probe()
+    receipt = Path("probe.json")
+
+    with pytest.raises(SystemExit):
+        probe.parse_args(
+            ["--verify-receipt", str(receipt), "--max-output-tokens", "512"]
+        )
+
+
+def test_output_cap_stays_within_one_bounded_probe_call(tmp_path: Path) -> None:
+    probe = _probe()
+
+    with pytest.raises(SystemExit):
+        probe.parse_args(
+            [
+                "--output-dir",
+                str(tmp_path / "receipt"),
+                "--max-output-tokens",
+                str(probe._MAX_OUTPUT_TOKEN_CEILING + 1),
+            ]
+        )
+
+
+def _measure_schema_file(
+    probe: ModuleType, tmp_path: Path, schema: dict[str, object]
+) -> object:
+    schema_path = tmp_path / "measured.json"
+    schema_path.write_text(json.dumps(schema), encoding="utf-8")
+    return probe.measurement_from_arguments(
+        probe.parse_args(
+            [
+                "--output-dir",
+                str(tmp_path / "receipt"),
+                "--tool-schema-file",
+                str(schema_path),
+            ]
+        )
+    )
+
+
+def test_measured_schema_must_request_strict_tools(tmp_path: Path) -> None:
+    probe = _probe()
+    permissive = _builder_shaped_schema()
+    permissive_function = permissive["function"]
+    assert isinstance(permissive_function, dict)
+    permissive_function.pop("strict")
+
+    with pytest.raises(ValidationError):
+        _measure_schema_file(probe, tmp_path, permissive)
+
+
+@pytest.mark.parametrize(
+    "parameters",
+    [
+        pytest.param({"type": "object", "properties": "not-a-schema"}, id="malformed"),
+        pytest.param(
+            {
+                "type": "object",
+                "properties": {"a": {"type": "string"}, "b": {"type": "string"}},
+                "required": ["a"],
+                "additionalProperties": False,
+            },
+            id="incomplete-required",
+        ),
+        pytest.param(
+            {
+                "type": "object",
+                "properties": {"a": {"type": "string"}},
+                "required": ["a"],
+            },
+            id="open-object",
+        ),
+        pytest.param(
+            {
+                "type": "object",
+                "properties": {"a": {"type": "array", "uniqueItems": True}},
+                "required": ["a"],
+                "additionalProperties": False,
+            },
+            id="unsupported-keyword",
+        ),
+        pytest.param({"type": "string"}, id="non-object-root"),
+    ],
+)
+def test_a_schema_outside_the_strict_subset_never_reaches_the_provider(
+    tmp_path: Path,
+    parameters: dict[str, object],
+) -> None:
+    # Otherwise a rejected request would be read as provider incapability.
+    probe = _probe()
+    schema = _builder_shaped_schema()
+    function = schema["function"]
+    assert isinstance(function, dict)
+    function["parameters"] = parameters
+
+    with pytest.raises(ValidationError):
+        _measure_schema_file(probe, tmp_path, schema)
+
+
+def test_a_measurement_input_larger_than_its_receipt_is_refused(
+    tmp_path: Path,
+) -> None:
+    probe = _probe()
+    prompt_path = tmp_path / "prompt.txt"
+    prompt_path.write_text("a" * (probe._MAX_MEASUREMENT_INPUT_BYTES + 1))
+
+    with pytest.raises(ValueError, match="exceeds"):
+        probe.measurement_from_arguments(
+            probe.parse_args(
+                [
+                    "--output-dir",
+                    str(tmp_path / "receipt"),
+                    "--prompt-file",
+                    str(prompt_path),
+                ]
+            )
+        )
+
+
+def test_a_measurement_input_that_is_not_a_regular_file_is_refused(
+    tmp_path: Path,
+) -> None:
+    # A FIFO must fail promptly instead of blocking the probe on a reader.
+    probe = _probe()
+    fifo_path = tmp_path / "prompt.fifo"
+    os.mkfifo(fifo_path)
+
+    with pytest.raises(ValueError, match="not a regular file"):
+        probe.read_bounded_file(fifo_path, limit=probe._MAX_MEASUREMENT_INPUT_BYTES)
+
+
+def test_receipt_verification_reads_no_more_than_its_ceiling(tmp_path: Path) -> None:
+    probe = _probe()
+    receipt_path = tmp_path / "probe.json"
+    receipt_path.write_bytes(b"{" + b"0" * probe._MAX_RECEIPT_BYTES)
+    receipt_path.chmod(0o600)
+
+    with pytest.raises(probe.ReceiptVerificationError, match="exceeds"):
+        probe.verify_receipt(receipt_path)
+
+
+def test_an_empty_argument_object_still_satisfies_a_schema_that_allows_it() -> None:
+    probe = _probe()
+    empty_schema: dict[str, object] = {
+        "type": "function",
+        "function": {
+            "name": "propose_flow",
+            "strict": True,
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "required": [],
+                "additionalProperties": False,
+            },
+        },
+    }
+    measurement = probe.ProbeMeasurement(
+        tool_schema=empty_schema,
+        prompt="Mät tomt objekt.",
+        max_output_tokens=256,
+    )
+
+    evidence = probe.evaluate_response(_response({}), measurement)
+
+    assert evidence.checks.all_pass is True
+    assert evidence.arguments == {}
