@@ -36,6 +36,7 @@ from eneo.flows.ai_builder.planning_state import (
     ExampleOutputConstraintEvidence,
     ExampleOutputSourceCoverage,
     FileRoleEvidence,
+    NamedResultEvidence,
     PlanningSignal,
     PlanningState,
     ResolvedSlot,
@@ -48,9 +49,9 @@ _VALID_ARCH_HASH = "a" * ARCHITECTURE_HASH_HEX_LENGTH
 
 
 class TestModuleConstants:
-    def test_builder_schema_version_is_eighteen(self) -> None:
-        # v18: confirmed runtime fields retain purpose and answer provenance.
-        assert BUILDER_SCHEMA_VERSION == 18
+    def test_builder_schema_version_is_nineteen(self) -> None:
+        # v19: named result evidence persists the user's declared JSON shape.
+        assert BUILDER_SCHEMA_VERSION == 19
 
     def test_payload_cap_is_512_kibibytes(self) -> None:
         assert PLANNING_STATE_PAYLOAD_CAP_BYTES == 512 * 1024
@@ -680,6 +681,64 @@ class TestResolvedSlotValidation:
                     "evidence": evidence,
                     "confidence": confidence,
                     "evidence_level": evidence_level,
+                }
+            )
+
+
+class TestNamedResultEvidenceValidation:
+    @pytest.mark.parametrize(
+        ("confidence", "expected"),
+        [("high", True), ("medium", True), ("low", False)],
+    )
+    def test_commit_grade_named_evidence_needs_supported_confidence(
+        self,
+        confidence: str,
+        expected: bool,
+    ) -> None:
+        # Admission already proved the name is explicit: it was cited
+        # literally in the current user-owned message. Confidence is the only
+        # remaining question.
+        evidence = NamedResultEvidence.model_validate(
+            {
+                "name": "bids",
+                "evidence": ["quote:user_message:user-1:bids[]"],
+                "confidence": confidence,
+                "declared_shape": "array",
+            }
+        )
+
+        assert evidence.is_commit_grade is expected
+
+    def test_declared_shape_round_trips_with_the_persisted_evidence(self) -> None:
+        evidence = NamedResultEvidence(
+            name="bids",
+            evidence=["quote:user_message:user-1:bids[]"],
+            confidence="high",
+            declared_shape="array",
+        )
+
+        restored = NamedResultEvidence.model_validate_json(evidence.model_dump_json())
+
+        assert restored == evidence
+        assert restored.declared_shape == "array"
+
+    def test_declared_shape_defaults_to_no_declaration(self) -> None:
+        evidence = NamedResultEvidence(
+            name="bids",
+            evidence=["quote:user_message:user-1:bids"],
+            confidence="high",
+        )
+
+        assert evidence.declared_shape is None
+
+    def test_declared_shape_rejects_a_shape_outside_the_contract(self) -> None:
+        with pytest.raises(ValidationError):
+            NamedResultEvidence.model_validate(
+                {
+                    "name": "bids",
+                    "evidence": ["quote:user_message:user-1:bids"],
+                    "confidence": "high",
+                    "declared_shape": "list",
                 }
             )
 

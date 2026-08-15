@@ -95,6 +95,7 @@ from eneo.flows.ai_builder.planning_state import (
     FileRole,
     FileRoleEvidence,
     MappedFileLimit,
+    NamedResultDeclaredShape,
     NamedResultEvidence,
     PlanningSignal,
     PlanningState,
@@ -796,25 +797,52 @@ def _merge_model_named_result_evidence(
         for item in state.named_result_evidence
         if fold_result_field_name(item.name) not in removed
     ]
-    existing = {fold_result_field_name(item.name) for item in retained}
-    provenance_by_name = {
-        fold_result_field_name(item.name): [
-            evidence.planning_reference()
-            for evidence in item.evidence[:NAMED_RESULT_EVIDENCE_MAX_CITATIONS]
-        ]
+    cited_by_fold = {
+        fold_result_field_name(item.name): item
         for item in classified_evidence.evidence_by_name
     }
-    additions = [
-        NamedResultEvidence(
+
+    def _recited(
+        name: str,
+        *,
+        prior_shape: NamedResultDeclaredShape | None,
+    ) -> NamedResultEvidence:
+        cited = cited_by_fold[fold_result_field_name(name)]
+        return NamedResultEvidence(
             name=name,
             confidence=classified_evidence.confidence,
-            evidence=provenance_by_name[fold_result_field_name(name)],
+            # A re-citation without notation is silence, not a retraction:
+            # writing `foo` again does not withdraw the `foo[]` the user
+            # already declared. Only a different literal marker replaces the
+            # shape, and only a removal clears the identity.
+            declared_shape=cited.declared_shape or prior_shape,
+            evidence=[
+                evidence.planning_reference()
+                for evidence in cited.evidence[:NAMED_RESULT_EVIDENCE_MAX_CITATIONS]
+            ],
         )
+
+    # Every valid re-citation replaces the identity it names: the newest
+    # citation owns the spelling, the confidence, and the provenance, and it
+    # keeps the position the identity already held.
+    recited_by_fold = {
+        fold_result_field_name(name): name for name in classified_evidence.names
+    }
+    named_results: list[NamedResultEvidence] = []
+    replaced: set[str] = set()
+    for item in retained:
+        folded = fold_result_field_name(item.name)
+        recited_name = recited_by_fold.get(folded)
+        if recited_name is None:
+            named_results.append(item)
+            continue
+        named_results.append(_recited(recited_name, prior_shape=item.declared_shape))
+        replaced.add(folded)
+    named_results.extend(
+        _recited(name, prior_shape=None)
         for name in classified_evidence.names
-        if fold_result_field_name(name) not in existing
-        and fold_result_field_name(name) not in removed
-    ]
-    named_results = [*retained, *additions]
+        if fold_result_field_name(name) not in replaced
+    )
     if len(named_results) > NAMED_RESULT_EVIDENCE_MAX_ITEMS:
         raise AIBuilderBadRequestException(
             "The named results exceed the Builder safety limit.",

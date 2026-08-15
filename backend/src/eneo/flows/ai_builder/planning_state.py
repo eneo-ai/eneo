@@ -56,7 +56,7 @@ from eneo.flows.flow_review_policy import FlowStepReviewMode
 from eneo.json_types import JsonObject
 
 PLANNER_CONTRACT_VERSION: int = 1
-BUILDER_SCHEMA_VERSION: int = 18
+BUILDER_SCHEMA_VERSION: int = 19
 # One state can retain two independently assigned 128-KiB schemas. The persisted
 # envelope leaves the other half for provenance, file roles, slots, and future
 # state growth without coupling the per-schema ceiling to the state ceiling.
@@ -711,6 +711,11 @@ NAMED_RESULT_EVIDENCE_MAX_CITATIONS = (
     NAMED_RESULT_PROVENANCE_MAX_ITEMS // NAMED_RESULT_EVIDENCE_MAX_ITEMS
 )
 
+# The JSON shape the user wrote next to the name ("bids[]", "case_metadata{}").
+# It is a literal declaration read out of the cited source, never a model claim,
+# and `None` means the user declared no shape.
+NamedResultDeclaredShape = Literal["array", "object"]
+
 
 class NamedResultEvidence(_PlanningModel):
     name: str = Field(min_length=1, max_length=240)
@@ -719,6 +724,7 @@ class NamedResultEvidence(_PlanningModel):
         max_length=NAMED_RESULT_EVIDENCE_MAX_CITATIONS,
     )
     confidence: SignalConfidence
+    declared_shape: NamedResultDeclaredShape | None = None
 
     @field_validator("name")
     @classmethod
@@ -726,6 +732,18 @@ class NamedResultEvidence(_PlanningModel):
         if not name.strip():
             raise ValueError("named result evidence name must be non-empty")
         return name
+
+    @property
+    def is_commit_grade(self) -> bool:
+        """Whether this name can drive irreversible planner decisions.
+
+        Explicitness is not a separate claim here, unlike `ResolvedSlot`:
+        admission already required the user to write the name literally in
+        the current user-owned message, so every persisted name is explicit
+        by construction. Confidence is the only remaining question.
+        """
+
+        return self.confidence in ("high", "medium")
 
 
 class PlanningState(_PlanningModel):

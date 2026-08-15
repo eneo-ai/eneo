@@ -24,6 +24,7 @@ from eneo.flows.ai_builder.planning_state import (
     ExampleOutputConstraintEvidence,
     ExampleOutputStyleCategory,
     FileRole,
+    NamedResultDeclaredShape,
     SlotEvidenceLevel,
 )
 from eneo.flows.flow_review_policy import FlowStepReviewMode
@@ -50,7 +51,11 @@ _FIELD_STRUCTURAL_BOUNDARIES = frozenset(
     {"$", "@", "#", "/", "\\", ":", "[", "]", "{", "}", "."}
 )
 UNKNOWN_SLOT_VALUE = "unknown"
-SLOT_CLASSIFICATION_SCHEMA_VERSION = 20
+SLOT_CLASSIFICATION_SCHEMA_VERSION = 21
+_DECLARED_SHAPE_BY_NOTATION: Mapping[str, NamedResultDeclaredShape] = {
+    "[]": "array",
+    "{}": "object",
+}
 CLASSIFICATION_EVIDENCE_MAX_ITEMS = 3
 CLASSIFICATION_EVIDENCE_MAX_LENGTH = 240
 CLASSIFICATION_REASON_MAX_LENGTH = 500
@@ -193,6 +198,7 @@ class ClassifiedCheckpointUpdate:
 class ClassifiedNamedResultEvidence:
     name: str
     evidence: tuple[ClassifiedEvidence, ...]
+    declared_shape: NamedResultDeclaredShape | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -682,32 +688,61 @@ def _cited_named_result_evidence(
     evidence: tuple[ClassifiedEvidence, ...],
     source_texts: Mapping[str, str],
 ) -> ClassifiedNamedResultEvidence | None:
-    cited_occurrences: list[
-        tuple[ClassifiedEvidence, frozenset[Literal["quoted", "unquoted"]]]
-    ] = []
+    cited_occurrences: list[tuple[ClassifiedEvidence, frozenset[_FieldOccurrence]]] = []
     for cited in evidence:
-        occurrence_kinds = _cited_field_occurrence_kinds(
+        occurrences = _cited_field_occurrences(
             source_text=source_texts[cited.source_id],
             quote=cited.quote,
             field_name=raw_name,
         )
-        if occurrence_kinds:
-            cited_occurrences.append((cited, occurrence_kinds))
-    occurrence_kinds = {kind for _, kinds in cited_occurrences for kind in kinds}
+        if occurrences:
+            cited_occurrences.append((cited, occurrences))
+    occurrences = {occurrence for _, found in cited_occurrences for occurrence in found}
+    occurrence_kinds = {occurrence.kind for occurrence in occurrences}
     if occurrence_kinds == {"quoted"}:
+        # A quoted mention is a literal key: its brackets are part of the name
+        # the user asked for, not a shape declaration.
         name = raw_name
+        declared_shape: NamedResultDeclaredShape | None = None
     elif occurrence_kinds == {"unquoted"}:
         phrase = raw_name
         while phrase.endswith(("[]", "{}")):
             phrase = phrase[:-2]
-        name = _normalize_unquoted_named_result_name(phrase)
+        normalized = _normalize_unquoted_named_result_name(phrase)
+        if normalized is None:
+            return None
+        name = normalized
+        # The shape is read from this name's own validated occurrences and
+        # nothing else, so every declared_shape is backed by a citation this
+        # name actually carries.
+        #
+        # RESIDUAL: that scope is the model's exact spelling, so a shape
+        # declared for the same field under a different spelling is invisible
+        # here. `case-id[]` in one sentence and `case id{}` in another fold to
+        # one identity, and a name classified as `case-id[]` sees only the
+        # array. Detecting it needs a per-name citation contract the model does
+        # not emit today; indexing the delta by fold was tried and dropped,
+        # because it attached a shape whose citation the name never carried.
+        # Left as a documented residual until measured evidence justifies the
+        # richer contract.
+        declared: set[NamedResultDeclaredShape] = {
+            shape
+            for occurrence in occurrences
+            if (shape := occurrence.declared_shape) is not None
+        }
+        if len(declared) > 1:
+            # This name's own citations declared two shapes. Picking either
+            # would invent a contract, and dropping the shape would commit the
+            # rest of the delta on evidence the server could not read. The
+            # delta is atomic: reject it and keep the prior state.
+            return None
+        declared_shape = next(iter(declared), None)
     else:
-        return None
-    if name is None:
         return None
     return ClassifiedNamedResultEvidence(
         name=name,
         evidence=tuple(cited for cited, _ in cited_occurrences),
+        declared_shape=declared_shape,
     )
 
 
@@ -730,44 +765,59 @@ def _normalize_unquoted_named_result_name(phrase: str) -> str | None:
     return field_name or None
 
 
-def _cited_field_occurrence_kinds(
+def _cited_field_occurrences(
     *,
     source_text: str,
     quote: str,
     field_name: str,
-) -> frozenset[Literal["quoted", "unquoted"]]:
+) -> frozenset[_FieldOccurrence]:
     """Validate quoted field occurrences against their complete source context."""
-    kinds: set[Literal["quoted", "unquoted"]] = set()
+    occurrences: set[_FieldOccurrence] = set()
     quote_start = 0
     while (quote_index := source_text.find(quote, quote_start)) >= 0:
         field_start = 0
         while (field_index := quote.find(field_name, field_start)) >= 0:
             absolute_start = quote_index + field_index
-            kind = _valid_field_occurrence_kind(
+            occurrence = _valid_field_occurrence(
                 source_text,
                 start_index=absolute_start,
                 end_index=absolute_start + len(field_name),
             )
-            if kind is not None:
-                kinds.add(kind)
+            if occurrence is not None:
+                occurrences.add(occurrence)
             field_start = field_index + 1
         quote_start = quote_index + 1
-    return frozenset(kinds)
+    return frozenset(occurrences)
 
 
-def _valid_field_occurrence_kind(
+@dataclass(frozen=True, slots=True)
+class _FieldOccurrence:
+    """One validated literal mention of a field name in its source."""
+
+    kind: Literal["quoted", "unquoted"]
+    declared_shape: NamedResultDeclaredShape | None
+
+
+def _valid_field_occurrence(
     text: str,
     *,
     start_index: int,
     end_index: int,
-) -> Literal["quoted", "unquoted"] | None:
+) -> _FieldOccurrence | None:
     before = text[start_index - 1] if start_index > 0 else None
     # A cited name may carry JSON shape notation in the source
     # ("applicant_channels[]"): the notation belongs to the mention, not
-    # its boundary. The model names the bare field; judge the boundary
-    # after the notation.
-    if text[end_index : end_index + 2] in ("[]", "{}"):
+    # its boundary. The model may name the bare field and leave the notation
+    # in the source, or repeat it in the name; either way the marker is the
+    # user's literal writing. Judge the boundary after it.
+    declared_shape = _DECLARED_SHAPE_BY_NOTATION.get(text[end_index : end_index + 2])
+    consumed_source_notation = declared_shape is not None
+    if consumed_source_notation:
         end_index += 2
+    elif end_index - 2 >= start_index:
+        declared_shape = _DECLARED_SHAPE_BY_NOTATION.get(
+            text[end_index - 2 : end_index]
+        )
     after = text[end_index] if end_index < len(text) else None
     before_is_quote = before is not None and _is_quotation_mark(before)
     after_is_quote = after is not None and _is_quotation_mark(after)
@@ -776,6 +826,12 @@ def _valid_field_occurrence_kind(
     if before_is_quote and after_is_quote:
         assert before is not None and after is not None
         if not _quotation_marks_form_pair(before, after):
+            return None
+        if consumed_source_notation:
+            # The closing quote was reached only by swallowing notation the
+            # classified name leaves out: the user's literal key is
+            # `"applicant_channels[]"`, and admitting it as
+            # `applicant_channels` would rename it.
             return None
         outside_before_index = _field_outer_boundary_index(
             text,
@@ -811,7 +867,7 @@ def _valid_field_occurrence_kind(
             )
         ):
             return None
-        return "quoted"
+        return _FieldOccurrence(kind="quoted", declared_shape=None)
     outside_before_index = _field_outer_boundary_index(
         text,
         start_index=start_index - 1,
@@ -848,7 +904,7 @@ def _valid_field_occurrence_kind(
         )
     ):
         return None
-    return "unquoted"
+    return _FieldOccurrence(kind="unquoted", declared_shape=declared_shape)
 
 
 def _nearest_non_whitespace_index(

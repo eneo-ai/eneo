@@ -16,6 +16,10 @@ from uuid import UUID
 
 from pytest import CaptureFixture, MonkeyPatch, mark, raises
 
+from eneo.flows.ai_builder.ai_builder_slot_classification_contract import (
+    SLOT_CLASSIFICATION_SCHEMA_VERSION,
+)
+
 _TEST_SESSION_ID = "00000000-0000-0000-0000-000000000001"
 
 
@@ -1031,7 +1035,7 @@ def _classifier_diagnostics() -> dict[str, object]:
         "classifier_runs": [
             {
                 "message_id": "assistant-1",
-                "schema_version": 20,
+                "schema_version": SLOT_CLASSIFICATION_SCHEMA_VERSION,
                 "outcome": "resolved",
                 "prompt_hash": "a" * 64,
                 "model": "openai/gpt-test",
@@ -1302,7 +1306,7 @@ def _complete_reanalysis_bundle(
             "classifier_runs": [
                 {
                     "message_id": "assistant-1",
-                    "schema_version": 20,
+                    "schema_version": SLOT_CLASSIFICATION_SCHEMA_VERSION,
                     "outcome": "resolved",
                     "prompt_hash": "d" * 64,
                     "model": "gpt-a",

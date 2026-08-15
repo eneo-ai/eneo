@@ -6848,6 +6848,7 @@ def test_non_json_named_result_evidence_cannot_change_public_plan_shape(
         "name": "case_summary",
         "evidence": ["quote:user_message:user-1:case summary"],
         "confidence": "high",
+        "declared_shape": None,
     }
     baseline_issues = evaluate_critic_invariants(
         build_conversation_critic_context(

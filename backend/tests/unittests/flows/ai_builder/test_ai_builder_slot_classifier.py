@@ -335,22 +335,47 @@ def test_parser_accepts_field_declaration_using_source_relative_citation_boundar
 
 
 @pytest.mark.parametrize(
-    ("quote", "classified_name", "expected_name"),
+    ("quote", "classified_name", "expected_name", "expected_shape"),
     [
         (
             "Return JSON with attachment_inventory[].",
             "attachment_inventory[]",
             "attachment_inventory",
+            "array",
         ),
+        # The notation is the user's literal declaration wherever it sits: the
+        # model may name the bare field and leave the marker in the source.
+        (
+            "Return JSON with attachment_inventory[].",
+            "attachment_inventory",
+            "attachment_inventory",
+            "array",
+        ),
+        (
+            "Return JSON with case_metadata{}.",
+            "case_metadata{}",
+            "case_metadata",
+            "object",
+        ),
+        (
+            "Return JSON with case_metadata{}.",
+            "case_metadata",
+            "case_metadata",
+            "object",
+        ),
+        # A quoted mention is a literal key. Its brackets belong to the name,
+        # so they never become a declared shape.
         (
             'Return JSON with the literal field "attachment_inventory[]".',
             "attachment_inventory[]",
             "attachment_inventory[]",
+            None,
         ),
         (
             "Return JSON with the literal field ”attachment_inventory[]”.",
             "attachment_inventory[]",
             "attachment_inventory[]",
+            None,
         ),
         # A sentence-final name is followed by a period and the next
         # sentence; that period is punctuation, not a dotted path, whatever
@@ -359,26 +384,39 @@ def test_parser_accepts_field_declaration_using_source_relative_citation_boundar
             "Utdata ska innehålla routing_issues[]. Bevara okända fält.",
             "routing_issues[]",
             "routing_issues",
+            "array",
         ),
         (
             "Utdata ska innehålla routing_issues. Bevara okända fält.",
             "routing_issues",
             "routing_issues",
+            None,
         ),
         (
             "Utdata ska innehålla routing_issues. 5 stycken per ärende.",
             "routing_issues",
             "routing_issues",
+            None,
         ),
         (
             "Utdata ska innehålla manual_review_items[]. beräkna inget mer.",
             "manual_review_items[]",
             "manual_review_items",
+            "array",
         ),
         (
             'Return JSON with the literal field "attachment_inventory". Keep the rest.',
             "attachment_inventory",
             "attachment_inventory",
+            None,
+        ),
+        # The period hugging a quoted name ends the sentence; the dotted-path
+        # reading needs an identifier hugging it on the other side too.
+        (
+            'Return "id". Next sentence.',
+            "id",
+            "id",
+            None,
         ),
     ],
 )
@@ -386,6 +424,7 @@ def test_parser_distinguishes_json_shape_notation_from_literal_field_punctuation
     quote: str,
     classified_name: str,
     expected_name: str,
+    expected_shape: str | None,
 ) -> None:
     result = parse_slot_classification_response(
         json.dumps(
@@ -416,6 +455,9 @@ def test_parser_distinguishes_json_shape_notation_from_literal_field_punctuation
     assert result is not None
     assert result.named_result_evidence is not None
     assert result.named_result_evidence.names == (expected_name,)
+    assert result.named_result_evidence.evidence_by_name[0].declared_shape == (
+        expected_shape
+    )
 
 
 _PROCUREMENT_PROMPT = (
@@ -481,6 +523,49 @@ def test_parser_admits_names_cited_across_several_sentences() -> None:
     assert list(result.named_result_evidence.names) == _PROCUREMENT_NAMES
 
 
+def test_parser_rejects_the_delta_when_one_name_is_cited_with_two_shapes() -> None:
+    # One name, two literal declarations. Picking either shape would invent a
+    # contract, so the atomic delta is rejected rather than committing its
+    # names on evidence the server could not read.
+    quotes = [
+        "Utdata ska innehålla bids[].",
+        "Fältet bids{} ska också finnas.",
+    ]
+    text = " ".join(quotes)
+
+    result = parse_slot_classification_response(
+        _named_result_response(["bids"], quotes),
+        allowed_slot_values={},
+        classification_input=_classification_input(text),
+    )
+
+    assert result is not None
+    assert result.named_result_evidence is None
+
+
+def test_parser_admits_distinct_names_declaring_different_shapes() -> None:
+    # Two shapes in one delta are a contradiction only when one name carries
+    # both.
+    quotes = [
+        "Utdata ska innehålla bids[].",
+        "Fältet requirements{} ska också finnas.",
+    ]
+    text = " ".join(quotes)
+
+    result = parse_slot_classification_response(
+        _named_result_response(["bids", "requirements"], quotes),
+        allowed_slot_values={},
+        classification_input=_classification_input(text),
+    )
+
+    assert result is not None
+    assert result.named_result_evidence is not None
+    assert result.named_result_evidence.names == ("bids", "requirements")
+    assert [
+        item.declared_shape for item in result.named_result_evidence.evidence_by_name
+    ] == ["array", "object"]
+
+
 def test_parser_rejects_delta_citing_more_quotes_than_the_contract_allows() -> None:
     quotes = [
         f"Fält nummer {index} heter falt_{index}."
@@ -514,6 +599,10 @@ def test_parser_rejects_delta_citing_more_quotes_than_the_contract_allows() -> N
         (["id"], "Return user[id] in the JSON output."),
         (["id"], 'Return [ "id", "status" ] in the JSON output.'),
         (["id"], 'Return "id" . child in the JSON output.'),
+        (["id"], 'Return "id".child in the JSON output.'),
+        # The literal key is `"id[]"`. Reaching the closing quote by
+        # swallowing the notation would admit a name the user never wrote.
+        (["id"], 'Return the literal field "id[]" in the JSON output.'),
         (["id"], "Return id[0] in the JSON output."),
         (["id"], "Return user:id in the JSON output."),
         (["id"], "Return id\N{COMBINING ACUTE ACCENT} in the JSON output."),

@@ -82,6 +82,7 @@ from eneo.flows.ai_builder.planning_state import (
     FileRole,
     FileRoleEvidence,
     MappedFileLimit,
+    NamedResultDeclaredShape,
     NamedResultEvidence,
     PlanningState,
     ResolvedSlot,
@@ -416,6 +417,7 @@ def _parse_named_result_delta(
     *,
     names: tuple[str, ...],
     removed_names: tuple[str, ...] = (),
+    confidence: SlotClassificationConfidence = "high",
     classification_input: SlotClassificationInput,
 ) -> SlotClassificationResult:
     parsed = parse_slot_classification_response(
@@ -429,7 +431,7 @@ def _parse_named_result_delta(
                     "operation": "update",
                     "names": list(names),
                     "removed_names": list(removed_names),
-                    "confidence": "high",
+                    "confidence": confidence,
                     "reason": "The user explicitly changed named results.",
                     "evidence": [
                         {
@@ -2621,8 +2623,12 @@ class TestModelSlotMerge:
         )
 
         initial_evidence = _model_evidence(
-            "JSON-resultatet ska innehålla case_id och status."
+            "JSON-resultatet ska innehålla case_id och status[]."
         )
+        declared_shapes: dict[str, NamedResultDeclaredShape | None] = {
+            "case_id": None,
+            "status": "array",
+        }
         merge_llm_resolved_slots(
             state,
             SlotClassificationResult(
@@ -2636,13 +2642,14 @@ class TestModelSlotMerge:
                         ClassifiedNamedResultEvidence(
                             name=name,
                             evidence=initial_evidence,
+                            declared_shape=declared_shapes[name],
                         )
                         for name in ("case_id", "status")
                     ),
                 )
             ),
             prompt_hash="a" * 64,
-            freeform_text="JSON-resultatet ska innehålla case_id och status.",
+            freeform_text="JSON-resultatet ska innehålla case_id och status[].",
         )
 
         assert state.output_schema_evidence is None
@@ -2650,9 +2657,10 @@ class TestModelSlotMerge:
             NamedResultEvidence(
                 name=name,
                 confidence="high",
+                declared_shape=declared_shapes[name],
                 evidence=[
                     "quote:user_message:test-source:JSON-resultatet ska innehålla "
-                    "case_id och status."
+                    "case_id och status[]."
                 ],
             )
             for name in ("case_id", "status")
@@ -2661,7 +2669,7 @@ class TestModelSlotMerge:
         source = SlotClassificationSource(
             source_id="user_message:test-source",
             kind="user_message",
-            text="JSON-resultatet ska innehålla case_id och status.",
+            text="JSON-resultatet ska innehålla case_id och status[].",
             message_id="test-source",
         )
         snapshot = (
@@ -3030,16 +3038,23 @@ class TestModelSlotMerge:
         )
         assert churn_replayed.named_result_evidence == state.named_result_evidence
 
-    def test_named_result_evidence_deduplicates_folded_name_collisions(self) -> None:
+    def test_recited_folded_identity_replaces_the_earlier_spelling_in_place(
+        self,
+    ) -> None:
         state = _state()
         state.named_result_evidence = [
             NamedResultEvidence(
                 name="case-id",
                 confidence="high",
                 evidence=["quote:user_message:user-1:case-id"],
-            )
+            ),
+            NamedResultEvidence(
+                name="status",
+                confidence="high",
+                evidence=["quote:user_message:user-1:status"],
+            ),
         ]
-        repeated_evidence = _model_evidence("Case ID")
+        corrected_evidence = _model_evidence("Case ID")
 
         merge_llm_resolved_slots(
             state,
@@ -3048,12 +3063,12 @@ class TestModelSlotMerge:
                     operation="update",
                     names=("Case ID",),
                     confidence="high",
-                    reason="The user repeated the same result name.",
-                    evidence=repeated_evidence,
+                    reason="The user corrected the spelling of one result name.",
+                    evidence=corrected_evidence,
                     evidence_by_name=(
                         ClassifiedNamedResultEvidence(
                             name="Case ID",
-                            evidence=repeated_evidence,
+                            evidence=corrected_evidence,
                         ),
                     ),
                 )
@@ -3062,7 +3077,179 @@ class TestModelSlotMerge:
             freeform_text="Case ID",
         )
 
-        assert state.named_result_obligations == ("case-id",)
+        # Identity is folded, wording is the author's: the newest citation
+        # owns the spelling, and it keeps the position the identity already
+        # held.
+        assert state.named_result_obligations == ("Case ID", "status")
+        assert state.named_result_evidence[0].evidence == [
+            "quote:user_message:test-source:Case ID"
+        ]
+
+    def test_recitation_declares_and_replaces_the_shape_in_place(self) -> None:
+        state = _state()
+        state.resolved_slots["terminal_output"] = _slot(
+            name="terminal_output",
+            value="structured_json",
+            source="structured_answer",
+        )
+
+        def _recite(text: str, *, confidence: SlotClassificationConfidence) -> None:
+            merge_llm_resolved_slots(
+                state,
+                _parse_named_result_delta(
+                    names=("bids",),
+                    confidence=confidence,
+                    classification_input=SlotClassificationInput(
+                        sources=(
+                            SlotClassificationSource(
+                                source_id="user_message:user-1",
+                                kind="user_message",
+                                text=text,
+                                message_id="user-1",
+                            ),
+                        ),
+                        current_user_message_id="user-1",
+                    ),
+                ),
+                prompt_hash="a" * 64,
+                freeform_text=text,
+            )
+
+        _recite("JSON-resultatet ska innehålla bids.", confidence="high")
+        assert state.named_result_evidence == [
+            NamedResultEvidence(
+                name="bids",
+                confidence="high",
+                declared_shape=None,
+                evidence=[
+                    "quote:user_message:user-1:JSON-resultatet ska innehålla bids."
+                ],
+            )
+        ]
+
+        _recite("Fältet bids[] ska vara en lista.", confidence="high")
+        assert state.named_result_evidence == [
+            NamedResultEvidence(
+                name="bids",
+                confidence="high",
+                declared_shape="array",
+                evidence=["quote:user_message:user-1:Fältet bids[] ska vara en lista."],
+            )
+        ]
+
+        # A re-citation carrying the same notation replaces provenance and
+        # confidence and leaves the shape as it was.
+        _recite("Behåll bids[] som förut.", confidence="medium")
+        assert state.named_result_evidence == [
+            NamedResultEvidence(
+                name="bids",
+                confidence="medium",
+                declared_shape="array",
+                evidence=["quote:user_message:user-1:Behåll bids[] som förut."],
+            )
+        ]
+
+        # An absent marker is silence, not a retraction: naming the field
+        # again without notation replaces provenance and confidence and keeps
+        # the shape the user already declared.
+        _recite("Skriv bara bids i resultatet.", confidence="high")
+        assert state.named_result_evidence == [
+            NamedResultEvidence(
+                name="bids",
+                confidence="high",
+                declared_shape="array",
+                evidence=["quote:user_message:user-1:Skriv bara bids i resultatet."],
+            )
+        ]
+
+        # A different literal marker is a new declaration, and it replaces.
+        _recite("Gör om bids{} till ett objekt.", confidence="high")
+        assert state.named_result_evidence == [
+            NamedResultEvidence(
+                name="bids",
+                confidence="high",
+                declared_shape="object",
+                evidence=["quote:user_message:user-1:Gör om bids{} till ett objekt."],
+            )
+        ]
+
+    def test_conflicting_shape_citations_leave_the_established_shape_untouched(
+        self,
+    ) -> None:
+        state = _state()
+        state.resolved_slots["terminal_output"] = _slot(
+            name="terminal_output",
+            value="structured_json",
+            source="structured_answer",
+        )
+        state.named_result_evidence = [
+            NamedResultEvidence(
+                name="bids",
+                confidence="high",
+                declared_shape="array",
+                evidence=["quote:user_message:user-0:Fältet bids[] är en lista."],
+            )
+        ]
+        established = [
+            item.model_copy(deep=True) for item in state.named_result_evidence
+        ]
+
+        quotes = [
+            "Utdata ska innehålla bids[].",
+            "Fältet bids{} ska också finnas.",
+        ]
+        text = " ".join(quotes)
+        conflicting = parse_slot_classification_response(
+            json.dumps(
+                {
+                    "slots": [],
+                    "file_roles": [],
+                    "checkpoint_updates": [],
+                    "form_intake": None,
+                    "named_result_evidence": {
+                        "operation": "update",
+                        "names": ["bids"],
+                        "removed_names": [],
+                        "confidence": "high",
+                        "reason": "The user described the same field twice.",
+                        "evidence": [
+                            {"source_id": "user_message:user-1", "quote": quote}
+                            for quote in quotes
+                        ],
+                    },
+                    "example_output_constraints": None,
+                    "schema_direction": None,
+                    "secondary_obligations": [],
+                    "assumptions": [],
+                    "contradictions": [],
+                }
+            ),
+            allowed_slot_values={},
+            classification_input=SlotClassificationInput(
+                sources=(
+                    SlotClassificationSource(
+                        source_id="user_message:user-1",
+                        kind="user_message",
+                        text=text,
+                        message_id="user-1",
+                    ),
+                ),
+                current_user_message_id="user-1",
+            ),
+        )
+        assert conflicting is not None
+        assert conflicting.named_result_evidence is None
+
+        merge_llm_resolved_slots(
+            state,
+            conflicting,
+            prompt_hash="d" * 64,
+            freeform_text=text,
+        )
+
+        # The delta is atomic: a shape the server cannot read rejects the whole
+        # change, and neither the shape nor its provenance moves.
+        assert state.named_result_evidence == established
 
     def test_cited_output_names_do_not_replace_declared_schema(self) -> None:
         state = _state()
