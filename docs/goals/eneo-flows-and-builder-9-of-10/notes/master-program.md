@@ -1,13 +1,20 @@
 # Eneo Flows + Flow AI Builder — Master Program (living document)
 
-Status: EXECUTION PHASE, program **v10.3** (v10.2 architecture retained;
-post-merge order adjudicated 2026-08-11 by the separate Fable runtime
-and Builder sessions, both green at 8). LANDED: CP0 evidence, CP8a–c,
+Status: EXECUTION PHASE, program **v10.9** (v10.2 architecture retained;
+repair-economics order adjudicated 2026-08-12 and the post-smoke hold
+and post-citation order adjudicated 2026-08-13, then the sealed ×3
+conformance order adjudicated 2026-08-14 by max-effort Fable
+source-and-receipt review). LANDED:
+CP0 evidence, CP8a–c,
 CP6, the unsupported JSON-to-text removal, CP-D3, L1a, L1c, and the
 develop-to-Flows integration at `b9c0aa238`, FLOW-AUTH, and
 CP-ADMIT-0, CP1, CP2 terminal ownership consolidation, full CP-ADMIT,
 FLOW-RETENTION, the CP2b capture seam, Runtime L2, immutable deployment
-identity, and Runtime L3 health. All three user
+identity, Runtime L3 health, and on 2026-08-15 the integration of the measured
+Builder lineage (CT-STRUCTURAL, CT-CITATION, AUDIO-ARCH, FIELD-COLLIDE,
+MEASURE-BUDGET) into `refactor/flows-clean`, CP4, the critic disposition
+receipt, the QUESTION-EVAL v3 evaluator, the purpose-question issuance fix
+and the two named-result admission corrections. All three user
 decisions stand (TRAJECTORY / SPLIT /
 BALANCED).
 
@@ -19,10 +26,81 @@ STATE, a dual-ownership ledger with load-bearing statuses, five new
 slices, an evidence-ranked order, and a god-module doctrine under which
 no standalone split slice exists.
 
-v10.3 does not redesign that end state. It records what landed, closes
+v10.3 did not redesign that end state. It recorded what landed, closed
 two verified pre-production defects before the next ownership transfer,
-moves the already-chosen BALANCED question behavior before the tranche
-that measures it, and makes public-contract and launch work explicit.
+moved the already-chosen BALANCED question behavior before the tranche
+that measures it, and made public-contract and launch work explicit.
+
+v10.4 keeps the end state and changes the next execution tranche. The
+diagnostic 158×3 receipt showed flat accepted-plan availability but a material
+first-pass-to-repair shift on unchanged case contracts. Captures then proved
+that several dominant repairs come from disagreement between the declared
+proposal schema, typed admission, prompt projections and server postconditions.
+The program therefore closes measurement truth and those deterministic contract
+contradictions before spending the next sealed 158×3 checkpoint. It does not
+weaken validation, restore silent normalization, tune cases or add another
+repair loop.
+
+v10.5 records the first broad smoke after that tranche and stops the full
+checkpoint. Structural strictness nearly removed parse failures, but it made a
+per-step citation choice mandatory without exposing the server-owned output
+mechanics that determine whether the choice is legal. Validation then converted
+that hidden decision into paid model repairs. The next slice makes citation
+feasibility a compile-time responsibility, adds self-attributing validation
+telemetry and proves the repair family on a predeclared cohort before another
+broad run.
+
+v10.6 closes that citation-ownership defect after a clean targeted ×3 and broad
+×1 restored first-pass economics. It does not treat symmetric N=1 conformance
+movement as a product signal. The next checkpoint is measurement capacity,
+followed by FIELD-COLLIDE's committed ×3 gate and one full 158×3 stability run.
+CP4 becomes offline attribution over already captured proposals and final
+Flows; it still informs CP5 before implementation.
+
+v10.7 records the complete sealed 158×3 ownership checkpoint. Plan economics
+are now strong and stable, while deterministic conformance clusters—not repair
+mechanics—are the binding constraint. The next work is offline: finish the
+prompt-anchored named-result attribution, complete only source-justified case
+contracts, re-evaluate the same 474 observations and then let CP5 address the
+remaining product-owned result-contract failures. Broad question-policy work,
+field aliases, cross-lineage rescoring and another generic cleanup tranche are
+explicitly out.
+
+v10.8 corrects one evaluator boundary before product work: cited
+medium-confidence classifier evidence is commit-grade only when it is explicit,
+matching `PlanningState.ResolvedSlot.is_commit_grade`. The original sealed
+receipt remains immutable; an exploratory semantics-v3 re-score is reported
+beside it. This removes false stale-question failures, exposes a smaller real
+preferred-question ordering family, and leaves CP4's corpus-wide named-result
+audit as the highest-ROI next slice. It does not change Builder product logic,
+case contracts, prompts or the release verdict.
+
+v10.9 (2026-08-15) records the day the two development lines became one
+branch again and what that made measurable. The measured lineage merged at
+`5c0f1c12a` with three integration corrections: native strict tools are keyed
+on the provider route instead of a per-database completion-model row id (the
+measured behaviour was otherwise not portable), the forced-retry parse branch
+keeps its typed failure code, and the AI Builder integration proofs that had
+been silently broken on both lines script the current product. Live raw
+classifier captures then answered CP5's open question: the model emits the
+full field lists with high confidence; the server discarded them. Two
+admission corrections (`9d4ed9cb5`, `bc694a727`) — a sentence-final period
+read as a dotted path, and a per-name provenance bound borrowed as the whole
+delta's citation cap — let named-result obligations reach planning at all
+(22/22 identifier-bearing corpus cases admit, was 2/22). CP4 landed as a
+corpus-wide, prompt-verbatim completion (`cd2f2401f`, 75 alternatives / 37
+cases; the same sealed 474 observations move 205→226 of 468 with no product
+change; residual: 51 leaf groups + 10 schema cases are product-owned, 2 are
+type collapse, 4 are design decisions). The purpose question is asked before
+a guessed purpose settles it (`709f0a448`, one commit-grade boundary for the
+ask gate, the priority boost and the result contract). The unreachable
+JSON-input critic copy is deleted and scoped revisions judge critics on
+committed state (`eeb8371e8`, registry 30 = 13 + 17). The v3 evaluator is
+committed (`97cf6f3fc`). The next sealed 158×1 smoke and 158×3 run from this
+lineage; the named-result completion design gate has approved the admission
+corrections and still owes the finalized provider-schema projection contract
+(per-name obligated-field map versus top-level placement); the selected-step
+edit-path defects found in review are their own slice).
 
 This file owns execution and is the SOLE execution-order owner;
 `cp0-matrix-freeze.md` owns evidence and the gate inventory.
@@ -38,7 +116,7 @@ over the FINAL FROZEN CORPUS (3 repetitions, margin 5, rescored-case
 discipline) is the instrument. Population is always derived from the
 frozen manifest, never restated as a prose constant.
 
-## Where we are (2026-08-11; product-code baseline `b9c0aa238` — this
+## Where we are (2026-08-14; evidence baseline `ddb3ccd84` — this
 ## document evolves past it, see git log for the doc HEAD)
 
 - Three checkpoints: deaths 50→30→27; architecture kills 13→10→2;
@@ -119,6 +197,113 @@ frozen manifest, never restated as a prose constant.
   families remain assigned to CP3/CP5/CP7, and accepted-plan p95 latency was
   48.922 seconds against the frozen 48-second limit. The ownership-tranche x3
   remains the first broad stability checkpoint.
+- The later isolated 158×3 Luna run completed all 474 slots but remains a
+  diagnostic receipt because three heavy six-file observations were acquisition
+  failures. Across 128 cases whose case-contract hashes were unchanged from the
+  older 155×3 lineage, accepted plans stayed exactly 300/333 (90.09%), while
+  first-pass plans fell from 241/333 (72.37%) to 202/333 (60.66%), repaired
+  plans rose from 59/333 (17.72%) to 98/333 (29.43%), and accepted-plan p95
+  latency rose from 41.58 to 51.58 seconds. Initial parse failures rose 30→67,
+  explaining 37 of the 39 additional repaired observations. This is directional
+  cross-lineage evidence, not a formal A/B verdict, but changed case contracts
+  do not explain the repair movement.
+- Rejected-proposal capture covers all 102 active-schema parse attempts and all
+  15 quality failures in that diagnostic run. The sealed offline
+  counterfactual replay joined those 102 attempts uniquely to 69 observations,
+  normalized each captured argument object with the retired create normalizer,
+  revalidated it against the exact current create schema and then ran typed
+  intent admission. Fifty-eight attempts became admissible; 41 still failed
+  schema validation and three passed schema validation but failed typed intent
+  admission. At unique-observation grain, 36 observations were admitted-only,
+  29 rejected-only and four mixed; the other 405 observations had no target
+  attempt. This is causality evidence for contract drift, not authority to
+  restore silent normalization: CT must make the one provider wire truthful and
+  delete the normalization family. Source review found three deterministic
+  contract contradictions: the provider wire and typed structured-field
+  admission disagree; the pure-audio prompt says the opposite of its committed
+  assembly archetype; and confirmed runtime-input identities are not projected
+  into the source-output namespace they must not duplicate. These are assigned
+  to the pre-checkpoint slices below. Family counts may overlap by observation
+  and must never be summed as projected repair gains.
+- The clean `36ec81f67` broad 158×1 smoke is a diagnostic hold, not a release or
+  stability verdict. Against the valid historical 158×1, accepted plans moved
+  129/141→127/141, first-pass 102/141→88/141, repaired plans 27/141→39/141,
+  Builder errors 6/141→3/141, unintended stalls 4→8, evaluated conformance
+  76/152→63/154, median accepted latency 26.120→31.552 seconds and p95
+  48.922→76.684 seconds. The strongest directional population, 131 identical
+  case contracts, moved from 87→70 first-pass and 23→36 repaired; one truthful
+  execution failure came from a stale runtime queue and does not explain the
+  product movement. Source plus runtime evidence joined approximately 46
+  compiled-create validation failures across 40 sessions to one contradiction:
+  `citations_requested=true` was compiled for steps whose server-derived output
+  is not citation-capable. All 28 identical-contract cases that moved from
+  first-pass to repaired were in that family, while none of the 54 stable
+  first-pass cases were. Parse failures fell 12→1, so strict structural truth is
+  retained; the semantic ownership defect must be corrected before another
+  broad spend.
+- The clean `08f0cfc7a6d2` citation-ownership candidate passed its predeclared
+  40-case ×3 mechanism gate: 118/120 accepted, 113/120 first pass, five repaired,
+  zero Builder errors, zero `flow_step_invalid`, and accepted-plan p95 42.827
+  seconds. Its broad 158×1 then moved the 157 scoreable matched cases from
+  127/140 to 134/141 accepted, 88/140 to 130/141 first pass, 39/140 to 4/141
+  repaired, 43 to seven repair attempts, three to zero Builder errors, and
+  accepted-plan p95 from 76.684 to 38.905 seconds. Conformance moved
+  symmetrically: eight cases improved, eight regressed and 139 were unchanged;
+  this is N=1 direction, not stability evidence. Both comparable broad receipts
+  remain acquisition-incomplete because the same six-file runtime case reached
+  the Space API-key limit. The targeted manifest/summary SHA-256 values are
+  `8b8207a764aa299558cd5aabe13e1e3d899143db8088330de1a9e79524e9c687` /
+  `4c40c6d4ac397a006744bf69c3e3d56048d4566cefb1d80d357a50a8cabd2f86`;
+  the broad values are
+  `769e778a9ff1eaa4b831364e235f0a6759615f345d1e9d8aef6525b6709c27a6` /
+  `eaa297a517f167c2b2a00c01e083f2ffe7be2f2ac696b8e3c48a516f4db01d68`.
+- The clean `ddb3ccd84f98` ownership checkpoint completed all 158 cases ×3:
+  474/474 integrity-verified observations, zero replacements and zero
+  acquisition, execution, identity or invalid-evidence failures. Of 423
+  plan-eligible observations, 396 were accepted (93.62%), 384 first pass
+  (90.78%), 12 repaired (2.84%) and six ended in Builder errors (1.42%).
+  Accepted-plan p95 was 33.825 seconds; the three repetition acceptance rates
+  were 93.62%, 92.91% and 94.33%. Conformance passed 205/468 evaluated
+  observations (43.80%), but this scalar is continuity reporting rather than a
+  single fix target. Offline attribution found stable 3/3 failures in 42/61
+  leaf-field cases, 13/16 source-reference cases, 12/14 output-schema cases,
+  10/14 first-file-role cases and all nine review-policy-target cases. Only two
+  of 16 first-question-relevance cases failed 3/3, so broad question-policy work
+  is not justified. All six terminal errors map to existing critic families and
+  no `citation_mode_unsupported`, old form-field collision or new runtime/source
+  collision code occurred. This is ownership/stability evidence, not the N=5
+  release verdict. The sealed `suite-summary.json` SHA-256 is
+  `ccbd59e5966ead92f909e5a9a0c765d27e8fb74f21c932721a1b17419f6968fe`.
+  Question-relevance semantics v3 was then applied offline to those same sealed
+  bundles after the original receipt was integrity-verified by its untouched
+  ddb3 harness. First-question checks moved 28 fail→pass, 10 pass→fail and 111
+  stayed pass; at evaluated-observation grain that is 27 fail→pass and nine
+  pass→fail, moving exploratory conformance to 223/468 (47.65%) while preserving
+  all six `not_evaluated` observations. The ten remaining failures ask an
+  allowed question while a preferred slot is still unresolved; they are a
+  bounded product/case-order attribution family, not authority for a broad
+  question-policy rewrite. This v3 arithmetic is exploratory evaluator evidence,
+  not a replacement sealed receipt or product-improvement claim.
+- 2026-08-15: the measured lineage and the editor line are one branch again
+  (`5c0f1c12a`); every slice since is on `refactor/flows-clean`. Live raw
+  classifier captures on Luna showed the model emitting complete field lists
+  for the `advanced_explicit_*` prompts while the server admitted none: a
+  sentence-final period was read as a dotted path (`9d4ed9cb5`) and the delta
+  citation cap was a per-name provenance bound of two while the prompt asked
+  for up to a hundred quotes (`bc694a727`). After both, all three captured
+  cases persist their obligations and two moved from stable fail to
+  conformance pass, each with one repair because the presence critic is still
+  a repair owner — the cost CP5's projection removes. CP4's completed
+  corpus-wide sweep (`cd2f2401f`) moves the same sealed 474 observations from
+  205 to 226 of 468 with no product change; the residual is product-owned
+  (51 leaf groups, 10 schema cases), plus two type-collapse cases and four
+  design decisions. The ten stable preferred-question failures were one weak
+  ask gate (`709f0a448`, predicted 139→149 of 149 first-question passes with
+  no movement in the 387 commit-grade observations). The critic registry is
+  30 (`eeb8371e8`) and the v3 evaluator is committed (`97cf6f3fc`). The AI
+  Builder integration proofs that had been silently failing on both lines
+  script the current product again; the classifier never fits an 8000-token
+  fixture model, so those tests give the space a real planner model.
 
 ## THE ARCHITECTURE VERDICT (peer pass 31, max effort — adopted)
 
@@ -191,8 +376,9 @@ ARTIFACT re-checked per slice, not a permanent grep gate.
 | D8 | Runtime-metadata request re-derived | LAYERED — one confirmed field/purpose record and one final-topology placement owner | CP3 |
 | D9 | Edit terminal type: two derivations, opposite precedence | TRUE | CP-EDIT |
 | D10 | `CreateCompileContext` built 4–5× with different args | LAYERED — one prepared materialization | CP3 prerequisite (`ProposalPrepared.compile_context`) |
-| D11 | `confirmed_form_field_incompatible` implemented twice | HAZARD | split-when-touched |
+| D11 | `confirmed_form_field_incompatible` has divergent identity and failure owners | ATTRIBUTED HAZARD — all captured source-shadow failures are exact-name collisions | FIELD-COLLIDE; become LAYERED in that slice |
 | D12 | Rate-limit vocabulary | HAZARD | ruling below; binds L2 |
+| D13 | Send-turn context and policy relayed as optional kwargs with divergent fallbacks | HAZARD — router→service→planner is the only production chain, but service/planner can repeat preflight and planner can drop tenant budget settings | CP3 follow-up when that owner is next touched: pass one prepared context, require policies/limits and delete duplicate fallback/replay paths; no standalone cleanup slice |
 
 ## Done ledger (checkmarks; update when a slice lands + gates)
 
@@ -300,7 +486,7 @@ ARTIFACT re-checked per slice, not a permanent grep gate.
       receipt. No task, table, migration, public liveness endpoint, or monitoring
       subsystem was added.
 
-## The Ranked Program (v10.3 — execution phase; slice bodies carry
+## The Ranked Program (v10.6 — execution phase; slice bodies carry
 ## their originating iteration tags)
 
 ### Gate inventory — owned by `cp0-matrix-freeze.md` §3
@@ -535,25 +721,146 @@ any threshold.
     fields shape the result, 2 interpret input and none currently exercise
     whole-flow placement. The full final-manifest x3 checkpoint is rerun from a
     clean source only after that instrument correction passes its review gate.
-- [ ] CP4 JSON partial-emission diagnosis: why OSE captures some
-    user-named fields and misses others (4 JSON cases). Diagnosis
-    first; bounded fix gated on attributed mechanism.
+- [x] MEASURE-TRUTH Builder outcome and repair attribution: land the
+    deterministic attachment-order and typed-terminal-outcome instrument
+    corrections, version the existing outcome-classification semantics, then
+    produce one offline causality receipt over all captured parse attempts.
+    Classify malformed JSON, raw schema rejection and typed admission separately
+    and compute family movement by `(session, observation slot, attempt ordinal)`
+    sets; never add family counts when observations overlap. Add bounded internal
+    failure codes and paths at existing telemetry/capture seams, not a public
+    error taxonomy. Core source/build/model/prompt/case/attachment identity stays
+    fail-closed; a typed terminal product error is scoreable but never
+    replacement-eligible without an existing provider disposition. The offline
+    causality arithmetic is complete (102 attempts / 69 observations; 58
+    counterfactually admitted, 44 still rejected). The deterministic
+    attachment/typed-terminal instrument is complete: one ordered attachment
+    query owns preflight and acceptance, typed terminal product errors remain
+    scoreable but replacement-ineligible, valid earlier model evidence survives
+    a final typed error, and classifier evidence is bound to the exact measured
+    session at live acquisition and offline receipt verification. Observation
+    input identity semantics are versioned at v3. The final focused measurement
+    suite passed 225 tests; exact Ruff/format and diff checks passed; the resumed
+    skeptical quality gate returned green at score 8 with no P0-P3 findings.
+
+Measured tranche status (2026-08-14): CT, AUDIO-ARCH and FIELD-COLLIDE are
+integrated in the clean `36ec81f67` measurement lineage. The pinned-Luna
+strict-tools probe passed. AUDIO-ARCH passed its tracked 3×3 live gate with 9/9
+first-pass and conformance pass, and zero repairs. FIELD-COLLIDE remains
+provisionally retained. Its exact nine-case cohort was recovered from the sealed
+pre-candidate 0bf4 receipt using the pre-candidate collision-failure selection
+rule: all 27 observations stayed accepted, first pass moved 6→26, repairs 21→1,
+the 17 observed collision codes fell to zero, and all confirmed fields remained
+present and bound. Conformance moved 8/27→6/27, so FIELD remains open rather than
+claiming its flat-or-better quality guard. CT's structural work is retained, but
+its semantic gate is open because the broad smoke exposed the citation
+ownership defect below.
+
+- [x] CT-STRUCTURAL Proposal wire truth: the pinned-Luna strict-tools probe
+    passed; one prepared CREATE schema now owns budgeting, initial and repair
+    calls and raw validation. The route forces one tool, disables parallel tool
+    calls and has no permissive JSON fallback. Typed admission matches the
+    recursively closed wire, post-fold sibling uniqueness is enforced, dead
+    create normalization is deleted, and the public audio ceiling uses runtime
+    admission truth. The 158×1 smoke reduced exact-contract parse failures
+    12→1, so do not revert these structural gains.
+- [x] CT-CITATION Citation feasibility ownership: CREATE assembly/lowering now
+    resolves model-valid citation choices from server-owned output capability,
+    reusing `is_citation_capable_step`. The duplicate document-report downgrade
+    path and dead required-property default are deleted; one typed diagnostic
+    family reaches repair evidence, while final Flow validation remains the hard
+    persistence/public postcondition. The 40×3 gate had zero citation-family
+    validation failures and the broad matched smoke recovered 36 repaired plans
+    to first pass without one acceptance loss. Receipt hashes are recorded in
+    the evidence section above. Do not add prompt advice, a forced-false
+    tombstone, another schema/compiler, silent intent loss or another repair
+    layer.
+- [x] MEASURE-BUDGET Sealed-suite request-capacity ownership (checkpoint
+    blocker): before the first case, the harness computes and records a
+    conservative worst-case request demand, including fixture uploads, Flow
+    execution, polling and the six-file sentinel. It verifies that a dedicated
+    measurement key for the isolated Space has a known quota and remaining
+    budget sufficient for the complete suite, and fails closed otherwise. Seal
+    only non-secret key/rate-policy identity and the demand/capacity result. Do
+    not bypass production limits, clear rate-limit state, split the frozen
+    corpus or score partial evidence. This closes the instrument gap that left
+    the earlier 158×3 and both comparable broad 158×1 receipts acquisition-
+    incomplete. After it lands, recover the exact six-file slot for both broad
+    source identities through the existing replacement path. Landed with the
+    2026-08-15 integration (`5c0f1c12a`; the two capacity operations are in
+    the generated client). Follow-up owned by the harness: the worst-case
+    demand constants have a one-sided proof — count real requests through
+    apply and execute and assert equality before N=5.
+- [x] AUDIO-ARCH Pure-transcription projection: reuse one committed-archetype
+    predicate and project it into both the create prompt and CP3-owned prepared
+    schema. A pure transcription proposal has one plain-text semantic step and
+    no output fields; audio-to-report stays unchanged. Assembly keeps the check
+    as an unreachable postcondition. The three named cases must reach 9/9 first
+    pass, the wider audio cohort must not regress, and the assembly failure code
+    must not fire. Do not add another architecture derivation or per-archetype
+    schema module. The live gate passed: 9/9 first-pass and conformance pass,
+    zero repairs or replacements; the broader exact-contract audio cohort moved
+    from five first-pass plus four repaired to nine first-pass plus zero
+    repaired, with availability and errors flat.
+- [ ] FIELD-COLLIDE Confirmed runtime-input namespace closure (absorbs D11):
+    project exact confirmed runtime-input identities and purposes into the one
+    prepared proposal contract and require a distinct identity for a
+    source-extracted comparison value. Consolidate effective input type and the
+    create shadow postcondition under exact folded-name identity; delete the
+    token-subset, label, prefix and context-token heuristic family. A residual
+    provider-authored collision is repairable only because the reserved
+    namespace is now observable. A genuinely server-injected collision is
+    resolved by its injection owner and never consumes a model retry. D8's
+    assembly placement owner is unchanged. The nine-case ×3 cohort must have
+    zero normal-path collision repairs, preserve and place every confirmed
+    field, and keep acceptance/conformance flat or better.
+- [x] OFFLINE-ATTR Sealed ×3 ownership attribution: the complete 474-observation
+    receipt is split by `(case, check, repetition)` into stable and mixed
+    families; leaf failures are joined to terminal fields,
+    `intermediate_only_matches` and raw cited named-result evidence; question
+    failures retain their reason; terminal error and validation subcodes are
+    enumerated. The result is the v10.7 stability arithmetic above. It does not
+    resolve semantic equivalence by exact-name matching: 27 missing groups are
+    exact extracted-but-dropped evidence, 40 are intermediate-only and 410 lack
+    an exact classifier-name match, a bucket that deliberately combines true
+    extraction loss with prompt-backed wording absent from case alternatives.
+- [x] QUESTION-EVAL Commit-grade evaluator alignment: one evaluator predicate
+    now mirrors the product's typed model-evidence boundary and is shared by
+    first-question relevance and forbidden-classifier-slot checks. Semantics is
+    versioned at v3; comparison refuses v2/v3 identity drift. A report-level
+    behavior test proves cited medium/inferred evidence leaves the preferred
+    question unresolved, while cited high or medium/explicit evidence remains
+    commit-grade. The same sealed 474-observation exploratory re-score is
+    recorded above. Keep the ten remaining preferred-order failures for bounded
+    source attribution; do not tune the corpus or add another question policy.
+- [x] CP4 Named-result attribution and corpus-contract audit (completed 2026-08-15, `cd2f2401f`; the same sealed 474 observations move 205→226 of 468 under version-8 contracts; residual and the seven unlinked prompt-verbatim candidates feed CP5): retain the original
+    four-JSON accepted-proposal→final-Flow join, then audit all 158 case prompts
+    rather than only failing observations. Under the evaluator's existing NFKD
+    identity, an emitted prompt-verbatim field missing from the expected group
+    is a source-justified case-contract completion; an expected prompt-verbatim
+    result absent from the terminal contract is a product defect; neither being
+    prompt-verbatim is a CP5 naming/design decision. Every case amendment carries
+    its prompt quote, versions the case SHA and leaves `_field_name_matches`
+    unchanged. Re-evaluate the same sealed 474 observations under the versioned
+    contracts and report old/new values side by side before product changes
+    claim conformance credit. No alias table, fuzzy matcher, output-selected case
+    tuning or cross-generation rescoring harness. CP4 still precedes any bounded
+    fix and informs CP5's design gate.
 - [ ] CP5 Named-result completion, redesigned (AMENDED, iteration 33):
     named evidence owns PRESENCE, never design. Verified blockers the
     design gate must resolve BEFORE code: the current invariant
     accepts an obligated name at ANY depth
-    (`ai_builder_critic_invariants.py:854` via
+    (`ai_builder_critic_invariants.py:850` via
     `schema_property_names_at_any_depth`), so naive top-level
-    `required` keys would silently choose nesting; and the proposal
-    tool schema is built independently at TWO sites — token budgeting
-    (`ai_builder_planner_request_preparation.py:463`) and submission
-    (`ai_builder_proposal_submission.py:171`) — with obligations
-    reaching neither. Design gate decides: top-level placement as a
+    `required` keys would silently choose nesting. CP3 now builds one prepared
+    proposal schema used for token budgeting, initial and repair calls, and raw
+    validation; obligations still reach neither that schema nor non-JSON
+    terminal proposal guidance. Design gate decides: top-level placement as a
     canonical product rule OR a bounded per-name design map with a
     defined compiler projection; then EXTEND the CP3-owned schema
-    materializer (no second materialization site); then one
-    provider strict-tool
-    probe with a nested obligated field. No recursive schema DSL.
+    materializer (no second materialization site), using CT's sealed provider
+    strict-tools receipt and a nested obligated-field proof. No recursive
+    schema DSL.
     NO ESCAPE HATCH (iteration 34): if the provider cannot express
     the contract, the design gate picks one of two closed outcomes —
     declared top-level placement as the canonical product rule, or
@@ -562,14 +869,24 @@ any threshold.
     explicitly. The critic may
     survive only as a compiler POSTCONDITION (defect detector), never
     as a normal repair owner on a supported archetype.
-    A manual audio-to-structured-report-to-PDF run added supporting, non-golden
-    evidence for this design gate: its canonical JSON contract duplicated the
-    same concern as `risks_and_concerns` and `risks`, which then repeated content
-    downstream. CP5 must resolve that through general field identity/equivalence
-    ownership, not a case-specific alias. Repeated prose plus full JSON-schema
-    guidance, inferred role/owner grounding and audio cardinality remain inputs
-    to the post-CP5 attribution loop; this single run does not authorize a
-    prompt heuristic or topology rewrite.
+    The design target is declared-grain satisfaction rather than any-depth
+    presence: each obligation binds exactly once to a post-fold field identity.
+    Do not satisfy or merge obligations through phrase aliases. Exact declared
+    schemas remain authoritative, and the model remains free to design fields
+    that are not obligations. Offline CP4 attribution must establish whether a
+    missing field was lost at design or emission before this contract is
+    implemented.
+    Two manual audio-to-structured-report-to-PDF runs add corroborating,
+    non-golden evidence for this design gate: both reproduced semantic overlap
+    between risk fields, followed by repeated downstream content. CP5 must
+    resolve that through general field identity/equivalence ownership, not a
+    case-specific alias. The runs used different model and application inputs,
+    so their token totals are not comparable; token efficiency remains a
+    post-strict attribution question. The published-audio-limit mismatch is
+    owned by CT; repeated prose plus full JSON-schema guidance is a post-strict
+    deletion candidate. Inferred role/owner grounding and singular-versus-batch
+    audio UX remain inputs to the post-CP5 attribution loop; these runs do not
+    authorize a prompt heuristic or topology rewrite.
 - [x] CP6 Authoring rejects unindexed array paths — LANDED
     `269bc55ee`.
     (RELEASE-CRITICAL, direction FROZEN in v9.1 — "parity" alone could
@@ -637,7 +954,10 @@ any threshold.
     `ai_builder_plan_quality_critic.py:85` (committed slot first)
     disagree and feed two different guards. The smaller
     `aggregation_intent` wiring defect lands earlier and is not cargo
-    for this redesign.
+    for this redesign. Also confirm whether flow-level inline-citation
+    capability is a domain invariant: CREATE derives the terminal-step bit,
+    while the inspected final guard is per-step. Do not change EDIT citation
+    behavior unless source attribution proves the asymmetry is reachable.
 - [ ] CP-D6 Commit-drift bypass — RECEIPT-GATED. One behavior test at
     the decision+persistence exit interface reproducing architecture
     drift WITH a selected question. VERIFIED: a `_phase_priority`
@@ -657,7 +977,7 @@ any threshold.
     the tuple reject explicitly, add the product behavior test, drop
     the supported matrix row, AND write the matrix-state revision that
     CP8b's row 14 reads (receipt revision must match it).
-- [ ] Critic disposition table (RECEIPT TASK; must close before
+- [x] Critic disposition table (completed 2026-08-15: receipt v2 anchored at the integrated branch — 1 delete / 7 postcondition / 23 genuine guard, every deletion test mutation-verified, the two non-terminal document rows closed by isolated tests, the delete row executed in `eeb8371e8`, registry 30 = 13 + 17; RECEIPT TASK; had to close before
     CP4/CP5): all 31
     invariant IDs with classification, canonical fact owner,
     normal-path action, destination (delete / postcondition / genuine
@@ -717,10 +1037,24 @@ any threshold.
     final manifest's cases are conformance-unstable across repetitions.
     SPLIT covered `audio_transcription` with pre-registered cases and
     removed `json_to_text_summary`; silence is not a fallback.
-- [ ] Ownership-tranche gate: exploratory final-frozen-manifest ×3
-    checkpoint after CP1–CP3 and CP9b land. The release gate is a
-    separate N=5 release
-    evaluation (CP0 established that repetitions supply instability
+- [x] Ownership-tranche gate: exploratory final-frozen-manifest ×3
+    checkpoint after MEASURE-TRUTH, MEASURE-BUDGET, CT-CITATION, AUDIO-ARCH
+    and FIELD-COLLIDE's landed candidate and provenance join (its conformance
+    guard stays open) close over
+    the landed CP1–CP3 and CP9b ownership transfers. Its receipt includes
+    repairs and provider calls per accepted plan, token and accepted-latency
+    p95, and family movement at unique-observation and unique-case grain. A
+    first-pass gain with lower acceptance or higher terminal errors is a failed
+    checkpoint. Conformance is reported under frozen arithmetic here rather
+    than used as a release gate; its required deliverable is a per-case
+    three-repetition stability classification for leaf/schema, source-reference,
+    file-role, review-policy, first-question and stall families. A formal
+    adverse direction blocks a quality-improvement claim and requires
+    attribution, not benchmark tuning. The release gate is a
+    separate N=5 release evaluation. The `ddb3ccd84f98` receipt completed
+    474/474 slots with the plan economics and stable-family map recorded above;
+    it closes this ownership checkpoint but does not certify release. CP0
+    established that repetitions supply instability
     DETECTION, not certification power), repeated after every material
     post-gate change.
 - [ ] Post-CP5 re-attribution loop: rerun attribution and continue
@@ -728,7 +1062,7 @@ any threshold.
     named slices are a starting set, not assumed sufficient. The live
     registry owner is `ai_builder_critic_invariants.CRITIC_INVARIANTS`.
 
-### Execution order (v10.3 — the ONE canonical order)
+### Execution order (v10.9 — the ONE canonical order)
 
 1. **Foundation complete:** CP8b → CP8c → CP6 → JSON-to-text removal
    → CP-D3 → current develop integration. Frozen arithmetic did not
@@ -751,30 +1085,78 @@ any threshold.
 8. **CP3 D8 complete** — one structured field-details owner and one
    final-topology assembly placement owner replaced the provider/heuristic
    paths; no second schema, classifier snapshot or compile-context owner.
-9. **Ownership-tranche checkpoint next** — exploratory
-    final-frozen-manifest ×3 after CP1–CP3 and CP9b.
-10. **Critic disposition receipt**, then **CP4 → CP5**, **CP-EDIT**,
+9. **MEASURE-TRUTH complete** — deterministic attachment/outcome evidence,
+   terminal-error identity and parse-subfamily causality are sealed.
+10. **CT-STRUCTURAL, CT-CITATION and AUDIO-ARCH complete; FIELD-COLLIDE
+    provisionally retained** — structural parse failures fell 12→1, citation
+    repairs fell to zero, pure transcription reached 9/9 first pass and the
+    complete ×3 had zero citation or collision repair codes. FIELD stays open
+    until its exact predeclared membership proves field preservation/placement.
+11. **Ownership-tranche checkpoint, OFFLINE-ATTR and QUESTION-EVAL complete** — the clean
+    474-observation receipt owns the stable/mixed family map, leaf evidence
+    buckets, question reasons and terminal codes above. Evaluator semantics v3
+    corrects the commit-grade boundary without rewriting the sealed receipt.
+12. **Lineage integration, CP4, critic disposition, question issuance and
+    named-result admission complete (2026-08-15).** The measured lineage is one branch again;
+    CP4 is a corpus-wide, prompt-verbatim completion evaluated on the same
+    sealed 474 observations; the critic registry is 30 = 13 + 17; the purpose
+    question is asked before a guessed purpose settles it (the one question
+    trace that convicted the product); named-result obligations reach planning
+    (a sentence-final period is no longer read as a dotted path; a delta may
+    cite every sentence that names results). FIELD's provenance join is
+    complete but its conformance guard remains open.
+13. **158×1 smoke on the integrated lineage, then sealed 158×3** against the
+    `ddb3ccd84f98` guardrails, with the CP4 contracts and v3 evaluator making
+    the conformance scalar non-comparable to the old receipt except through the
+    offline same-474 map already recorded (205→226). Report repairs and provider
+    calls per accepted plan separately: obligations now reach the critic that
+    still acts as a repair owner, so a repair rise here is the cost the obligated-field projection removes.
+14. **CP5 design gate, then its slices in order**: the named-result shape
+    evidence lifecycle (literal `[]`/`{}` notation persisted and updated),
+    the obligated-field projection into the one prepared schema (a bounded
+    per-name map with a single staged validator, or top-level placement as a
+    permanent rule if that validator cannot stay single-owner), non-JSON
+    outcome binding through the existing placement owners, and nested
+    template placeholder evidence — each with a predeclared ×3 cohort. Alongside: the selected-step revision defects
+    found in review (mixed intent silently dropped by the deterministic path,
+    DOCX artifact revision compiles to an unsupported pass-through mode,
+    negation-blind token gate) as one bounded edit-path slice; **CP-EDIT**,
     **CP-D6**, **CP7**; the post-CP5 re-attribution loop runs alongside.
-11. **Public contract lane:** after FLOW-AUTH, the retention bound and
+15. **MEASURE-BUDGET is landed; before N=5** the harness must still prove its
+    worst-case demand constants by counting real requests (the current proof is
+    one-sided) and seal capacity for all 790 observations.
+16. **Public contract lane:** after FLOW-AUTH, the retention bound and
     current-source Flow docs/OpenAPI accuracy slices may proceed in
     sequence, parallel to Builder ownership work. The Builder SDK,
-    pagination and showcase-doc slice starts only after step 9 and
+    pagination and showcase-doc slice starts only after step 11 and
     must land before showcase/release.
-12. **Runtime lane**, parallel throughout in its own Fable/peer
-    session: **L2 → L1b → L3 complete; L5 next**. L1b and L3 sequence
-    because they share the deployment compose; L5 is terminal evidence.
-13. **Release evaluation:** final-frozen-manifest N=5 only at the
+17. **Runtime lane**, parallel throughout in its own Fable/peer
+    session: **L2 → L1b → L3 complete; L5 in progress** (design decided
+    2026-08-15: arithmetic proof plus a repaired `DB_POOL_DEBUG` seam, not a
+    pool-event recorder; the webhook overlap contract landed at `29a5b1a6d`).
+    The runtime audit's confirmed P1s — a concurrent publish silently undone
+    by `PATCH /flows/{id}`, abandoned runtime uploads never reclaimed in
+    production, one failing tenant aborting the maintenance sweep — are the
+    lane's next slices; the tenant-admin classification-3 raw-export bypass
+    is escalated to the user.
+18. **Release evaluation:** final-frozen-manifest N=5 only at the
     release gate, repeated after every material post-gate product
     change. The full-corpus run is not an instrument-progress check.
-14. Post-program: **PKG**, per `docs/flows/package-layout.md`.
+19. Post-program: **PKG**, per `docs/flows/package-layout.md`.
 
 Receipt tasks: D5 reachability and D7 occurrence may run in the
-analysis lane. The critic disposition table is not "any time"; it must
-close before CP4 or CP5 within step 10.
+analysis lane. The critic disposition table closed in step 12, before CP5.
 
 Maintainability rulings bind every slice: ownership transfers delete
 their old path, tests die with their owners, no splits for their own
 sake.
+
+D13 follows the same ruling: when CP3's turn-context owner is next touched,
+pass one `PreparedMessageContext` through router→service→planner, require the
+already-resolved policies, limits and preflight state, and delete the service/
+planner `None` fallbacks and duplicate replay branches. Do not create a
+standalone god-module split or preserve production optionality for test
+convenience.
 
 ### Public contract and documentation stream (pre-showcase)
 
@@ -978,8 +1360,11 @@ user opts object storage in) or explicitly descoped by the user.
   non-model-repairable code must (a) depend only on server/external
   state or denote a compiler defect, (b) never consume a model retry,
   and (c) fail BEFORE provider use whenever its inputs are already
-  server-known. "The list may only shrink" is REJECTED: new genuine
-  external or user-decision failures may legitimately appear.
+  server-known. In addition, (d) a failure whose deciding inputs the model
+  cannot observe through its declared proposal surface must not consume a model
+  retry: project the necessary inputs into the canonical contract or resolve the
+  contradiction in its server owner. "The list may only shrink" is REJECTED:
+  new genuine external or user-decision failures may legitimately appear.
 - PROVIDER-ERROR VOCABULARY (D12): the canonical typed disposition
   lives in the MODEL-PROVIDER domain; the Builder and the Flow runtime
   each map it into their own public contracts. L2 must not create a
@@ -1079,13 +1464,16 @@ not inspect mutable candidate results:
 - Runtime: L2, L1b and L3 are complete. L5 consumes the typed provider
   failures, immutable image set and health contracts under load.
 
-Dependencies that stay hard (v10.3): FLOW-AUTH before Flow public
+Dependencies that stay hard (v10.7): FLOW-AUTH before Flow public
 contract work; CP-ADMIT-0 before the next Builder ownership transfer;
 CP2 step 1 before CP2 step 2; CP2 and CP1 before full CP-ADMIT, and its
 per-code dependency table before that design gate closes; CP2b before
-CP3 and CP5; CP9b before CP3 and the ownership checkpoint; the
-critic disposition receipt before CP4 or CP5; CP4 attribution before a
-CP4 fix. CP8b/CP8c and the JSON-to-text matrix-state revision are
+CP3 and CP5; CP9b before CP3; MEASURE-TRUTH before CT's causal gates;
+the strict-tools receipt before CT freezes its provider wire; MEASURE-BUDGET
+before N=5 release acquisition; FIELD-COLLIDE's exact predeclared membership
+join before FIELD closure; the critic disposition receipt before CP4 or CP5;
+CP4's corpus-wide attribution and case-contract release before a
+CP4 fix or CP5 implementation. CP8b/CP8c and the JSON-to-text matrix-state revision are
 completed historical prerequisites, not active blockers. The
 orchestrator verifies every diff and owns all git.
 
@@ -1102,6 +1490,63 @@ named mechanism and never certifies the full product. Run the final-frozen
 manifest ×3 at the ownership-tranche gate, then N=5 at the release gate
 (detection power, not certification power), repeated after every material
 post-gate change.
+
+Every sealed ×N analysis emits the `(case, check, repetition)` stable/mixed map
+before a product or evaluator slice is selected. Stable case-grain conformance
+over accepted observations is the quality north star; flaky conformance and
+availability are reported separately. The aggregate evaluated-pass percentage
+remains visible for continuity but never ranks a slice by itself. Against the
+`ddb3ccd84f98` ownership checkpoint, a material follow-up must keep broad
+acceptance at least 93.62%, first pass at least 90.78%, repairs at most 2.84%,
+Builder errors at most 1.42% and accepted p95 at most 33.825 seconds, subject to
+the frozen comparator's variance rules. A guard breach is a rollback/attribution
+event, not an acceptable trade for higher conformance.
+
+Before a sealed suite that executes generated Flows, preflight the dedicated
+measurement tenant's runtime capacity and API request budget and record both in
+the suite manifest. The request preflight records a conservative whole-suite
+demand, configured ceiling, observed remaining capacity and non-secret
+rate-policy/key identity; it refuses launch unless remaining capacity covers
+the complete acquisition, including the heaviest runtime sentinel. Stale queued
+or running work that already consumes the tenant's concurrency is an environment
+failure: stop and recover it through the runtime lifecycle owner before
+acquisition. Never count it as a Builder product failure, clear unrelated live
+work implicitly, bypass production limits or split the frozen corpus to fit a
+quota.
+
+`--sealed-targeted-suite` seals the selected run's identity; it does not prove
+cohort provenance or cross-run comparability. For CT and FIELD-COLLIDE, recover
+the original sealed observation-to-case join, or predeclare a new tracked
+cohort from pre-candidate evidence and take its baseline with the same harness
+before evaluating the candidate. Never infer membership from candidate
+outcomes.
+
+From v10.4, every repair-reduction receipt also reports bounded internal
+failure subfamilies, repair attempts and provider calls per accepted plan,
+token and accepted-latency p95, and family movement by unique observation and
+unique case. Capture families may overlap and are never summed as projected
+gains. A targeted slice is green only when its attributed family falls to zero
+or a predeclared residual, acceptance and conformance are flat or better, no new
+family replaces it, and terminal errors do not rise. Cross-lineage receipts
+with different source, harness, case or outcome-semantics identities remain
+directional evidence, never a formal A/B claim.
+
+Builder proposal-contract gates follow the cross-contract proof in the
+[Testing Standard](../../../engineering/testing-standard.md#model-authored-contracts-cross-the-compile-boundary).
+Any server-known contradiction is resolved by its compile or assembly owner
+before a model repair can be charged.
+
+First-question relevance does not authorize product work from an N=1 movement.
+Require the same case to fail in at least two of three repetitions and join the
+failure to captured discovery/question evidence before changing its canonical
+owner. For this checkpoint, explicitly forbid prompt-phrase patches, evaluator
+or outcome-selected case tuning, field-name alias tables, new repair loops, a second schema or
+compiler, scoring the six-file case from partial evidence, benchmark-only
+rate-limit bypasses, summed overlapping family gains, and formal A/B claims from
+the contract-changed citation cohort. A case contract may change only through a
+corpus-wide, prompt-quote-backed rule applied to passing and failing cases alike;
+version the case SHA, keep the evaluator identity matcher unchanged and show the
+same captured observations before and after the contract release.
 
 All comparable Builder receipts use completion-model UUID
 `90824b05-9913-4210-968f-9294eb017d31`, verified in the live model catalog as
@@ -1131,16 +1576,11 @@ interpretation and the fixed 45-minute spacing rule by user decision on
   pyright hook must inspect the candidate tree. If it OOMs (exit 247),
   run pyright manually on the exact changed files and use
   `SKIP=pyright` only with that evidence recorded.
-- Peer review: Claude reviews every stable pre-commit candidate in the
-  resumable `flow-122-strategy` session; continue its recorded
-  iteration sequence and require green at 8 or higher. Fable is for a
-  named architecture decision, not routine commit review. The
-  orchestrator verifies each finding in current source, reruns decisive
-  tests, and owns all git.
-- Validation: `cd backend && uv run pytest tests/unittests/flows/ -q`
-  (current baseline: 6541 passed, 10 skipped, 1 xfailed); ruff
-  check/format + pyright
-  (`--pythonpath .venv/bin/python`) on exact changed paths only.
+- Peer review and validation: follow the canonical
+  [AI Review Workflow Standard](../../../engineering/ai-review-workflow.md)
+  and the active task's acceptance checks. Record exact commands, results,
+  reviewer disposition and candidate identity in its validation receipt;
+  never treat an old session name or prose test count as the current gate.
 - Measurement: harness + protocol in `conformance-program-plan.md`.
   Every live run uses a clean tracked source at the exact candidate SHA;
   never borrow `/workspace` from another branch checkout. Restart the

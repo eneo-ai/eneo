@@ -148,6 +148,11 @@ Flow and Flow AI Builder are pre-production product-critical surfaces.
   [Runtime Reliability Standard](runtime-reliability-standard.md); the packet states
   persisted owner, transaction boundary, retry/crash/ambiguous-outcome behavior,
   effects, terminalization, and retention consequences that apply.
+- Builder proposal-contract packets enumerate newly required model-facing
+  properties and the request-visible facts that make each choice decidable.
+  They include the provider-payload-to-final-validator behavior proof required
+  by the [Testing Standard](testing-standard.md); structural schema validity
+  alone does not prove semantic legality after compilation.
 - Builder behavior changes include fresh-session API or live-harness evidence
   when deterministic tests cannot prove the user-visible behavior.
 - Compatibility for unreleased behavior requires persisted-data evidence, an

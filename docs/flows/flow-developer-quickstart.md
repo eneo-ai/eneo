@@ -309,6 +309,13 @@ Important builder rules:
   session unrecoverable. Genuine ambiguity is resolved by one server-owned typed
   question. Attachment-only evidence cannot assign direction, and an unassigned
   schema must not change the requested terminal output.
+- Every required model-authored property must be decidable from facts included
+  in the same model request. When legality depends on server-owned mechanics,
+  such as the compiled output mode or capability, keep that decision in the
+  compiler or assembly owner. Either project the necessary typed fact to the
+  model or resolve the mechanic on the server; never make the model guess a
+  hidden fact and pay a repair call when validation rejects the guess. A strict,
+  all-required provider schema does not transfer semantic ownership.
 - Builder attachment text is admitted against the selected model's context
   window after reserving output, safety, and active-conversation tokens. The
   remaining capacity is shared fairly across readable files; there are no
@@ -350,6 +357,7 @@ of adding a parallel path.
 | Builder turn decision | `ai_builder_turn_controller` plus action policy |
 | Builder operating limits and prompt reserves | `flow_ai_builder_budget_settings` plus `ai_builder_settings` |
 | Builder attachment inspection and model-aware admission | `ai_builder_attachment_context` |
+| Builder proposal wire contract | `ProposalPrepared.proposal_tool_schema` built by `ai_builder_proposal_intent` |
 | Builder create compilation | `ai_builder_create_compiler` and `ai_builder_assembly` |
 | Flow package layout rules | [package-layout.md](./package-layout.md) |
 
@@ -361,6 +369,8 @@ of adding a parallel path.
 - Prefer explicit `input_bindings` and source refs over implicit string
   concatenation.
 - Keep model evidence quoted and confidence-scored when Builder infers intent.
+- For capability-dependent Builder options, use the cross-contract proof in the
+  [Testing Standard](../engineering/testing-standard.md#model-authored-contracts-cross-the-compile-boundary).
 - Delete dead compatibility paths only with evidence that persisted data and
   tests no longer need them.
 - Keep tests behavior-focused: API contract, run lifecycle, step input/output,

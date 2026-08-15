@@ -16,6 +16,23 @@ Prefer:
 Runtime changes use the applicable failure and recovery proofs in the
 [Runtime Reliability Standard](runtime-reliability-standard.md).
 
+## Model-authored contracts cross the compile boundary
+
+When a model or provider emits a typed proposal that is later compiled or
+lowered, schema validation is only the first proof. Every required
+model-facing property must be decidable from facts present in the same
+request. A property whose legality depends on hidden server state belongs in
+the server owner unless the request projects that state explicitly. When
+legality depends on server-owned mechanics, the cross-boundary proof must
+include at least one model-valid choice that the server must resolve.
+
+Test representative payloads through the complete contract path: provider
+schema, typed admission, compilation or lowering, and the final domain
+validator. For capability-dependent options, cover the legal and illegal
+combinations and prove that server-owned mechanics do not create a normal-path
+model repair. A schema-only test or a mock of the compiler cannot prove this
+behavior.
+
 ## Test doubles carry the contract they stand in for
 
 A double that stands in for a typed model must carry every field production
