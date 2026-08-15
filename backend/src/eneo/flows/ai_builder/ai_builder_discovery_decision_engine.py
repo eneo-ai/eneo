@@ -245,9 +245,10 @@ def _dynamic_issue_priority_offset(
 ) -> int:
     if (
         issue.issue_id == "post_processing_goal"
-        and profile.resolved_slot("post_processing_goal") is None
+        and profile.planning_state.commit_grade_slot_value("post_processing_goal")
+        is None
         and profile.output_intent.terminal_output is None
-        and profile.resolved_slot("terminal_output") is None
+        and profile.planning_state.commit_grade_slot_value("terminal_output") is None
         and not profile.edit_mode
     ):
         return -15

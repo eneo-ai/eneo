@@ -190,3 +190,52 @@ def test_prompt_block_omits_output_fields_without_required_roles() -> None:
     block = render_result_contract_prompt_block(contract)
     assert block is not None
     assert "required_output_fields:" not in block
+
+
+def test_result_contract_ignores_purpose_below_commit_grade() -> None:
+    # A medium-confidence inferred purpose is below commit grade and still an
+    # open question, so the delivered flow's required sections and policies
+    # must not be shaped by an answer the user was never asked for.
+    planning_state = PlanningState.empty()
+    planning_state.resolved_slots["post_processing_goal"] = ResolvedSlot(
+        name="post_processing_goal",
+        value="action_followup",
+        source="model",
+        confidence="medium",
+        evidence=["quote:user_message:test-source:hantera dem mer systematiskt"],
+        evidence_level="inferred",
+    )
+
+    assert derive_result_contract(planning_state) is None
+
+
+def test_result_contract_ignores_terminal_output_below_commit_grade() -> None:
+    # The same grade governs the terminal output: policies that shape the
+    # delivered result must not come from a format the planner is not allowed
+    # to commit on.
+    planning_state = PlanningState.empty()
+    planning_state.resolved_slots["terminal_output"] = ResolvedSlot(
+        name="terminal_output",
+        value="docx_document",
+        source="model",
+        confidence="medium",
+        evidence=["quote:user_message:test-source:en rapport"],
+        evidence_level="inferred",
+    )
+    planning_state.resolved_slots["post_processing_goal"] = ResolvedSlot(
+        name="post_processing_goal",
+        value="summarize_or_overview",
+        source="structured_answer",
+        confidence="high",
+        evidence=["question_answer:post_processing_goal"],
+    )
+
+    contract = derive_result_contract(planning_state)
+
+    assert contract is not None
+    assert contract.terminal_output is None
+    assert contract.post_processing_goal == "summarize_or_overview"
+    assert (
+        "Prepare the complete semantic content before the final document-rendering step."
+        not in contract.result_policies
+    )

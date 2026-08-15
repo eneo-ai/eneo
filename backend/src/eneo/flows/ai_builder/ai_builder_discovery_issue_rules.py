@@ -242,7 +242,15 @@ def post_processing_goal_is_vague(
 ) -> bool:
     if _family_inactive(profile, "post_processing_goal"):
         return False
-    if profile.resolved_slot("post_processing_goal") is not None:
+    # Ask on the same grade the answer is used on. A purpose resolved below
+    # commit grade is a guess: architecture derivation and the result
+    # contract already refuse to read it, so leaving the question unasked
+    # spends the turn on a downstream slot like terminal_output while the
+    # purpose the whole flow is shaped around stays unknown.
+    committed_purpose = profile.planning_state.commit_grade_slot_value(
+        "post_processing_goal"
+    )
+    if committed_purpose is not None:
         return False
     if needs_pdf_generation_mode_choice(profile):
         return False
@@ -250,32 +258,15 @@ def post_processing_goal_is_vague(
         return False
 
     if slot_classification_result is not None:
-        classified_goal = next(
-            (
-                slot
-                for slot in slot_classification_result.slots
-                if slot.slot_name == "post_processing_goal"
-            ),
-            None,
-        )
-        if classified_goal is not None:
-            # The classifier contract returns `unknown` with low confidence
-            # for ordinary semantic ambiguity — that is exactly the
-            # unresolved case the purpose question exists for, not only
-            # explicit user uncertainty. A classification without cited
-            # user-owned evidence is equally below commit grade: assuming
-            # it spends the question budget on downstream slots like
-            # terminal_output while the purpose is still guesswork.
-            return (
-                classified_goal.value == UNKNOWN_SLOT_VALUE
-                or classified_goal.confidence == "low"
-                or not classified_goal.evidence
-            )
-        return any(
-            slot.slot_name != "post_processing_goal"
-            and slot.value != UNKNOWN_SLOT_VALUE
-            for slot in slot_classification_result.slots
-        )
+        classified_slots = slot_classification_result.slots
+        if any(slot.slot_name == "post_processing_goal" for slot in classified_slots):
+            # The classifier did try to place the purpose and the commit-grade
+            # gate above still found it unsettled, so what it placed is a
+            # guess and the question is still owed.
+            return True
+        # Without a purpose classification, only a turn the classifier could
+        # read at all is worth spending the purpose question on.
+        return any(slot.value != UNKNOWN_SLOT_VALUE for slot in classified_slots)
 
     return _post_processing_goal_classifier_outage_requires_question(profile)
 

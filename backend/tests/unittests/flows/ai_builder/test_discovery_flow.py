@@ -16,6 +16,9 @@ from eneo.completion_models.domain.model_kwargs_capabilities import (
 from eneo.completion_models.infrastructure.completion_service import (
     ResolvedCompletionModelRoute,
 )
+from eneo.flows.ai_builder.ai_builder_action_policy import (
+    build_planner_action_policy,
+)
 from eneo.flows.ai_builder.ai_builder_architecture_commit import (
     finalize_architecture_commit,
 )
@@ -27,6 +30,12 @@ from eneo.flows.ai_builder.ai_builder_discovery import (
     build_discovery_block_message,
     build_discovery_followup_text,
     build_registry_question_followup,
+)
+from eneo.flows.ai_builder.ai_builder_discovery_issue_rules import (
+    post_processing_goal_is_vague,
+)
+from eneo.flows.ai_builder.ai_builder_discovery_profile_builder import (
+    build_discovery_profile,
 )
 from eneo.flows.ai_builder.ai_builder_discovery_runtime import (
     build_runtime_discovery_context,
@@ -65,9 +74,11 @@ from eneo.flows.ai_builder.ai_builder_session_turn import (
 )
 from eneo.flows.ai_builder.ai_builder_signal_confidence import ScoredSignal
 from eneo.flows.ai_builder.ai_builder_slot_classification_contract import (
+    UNKNOWN_SLOT_VALUE,
     ClassifiedEvidence,
     ClassifiedSlot,
     SlotClassificationAttempt,
+    SlotClassificationEvidenceLevel,
     SlotClassificationResult,
 )
 from eneo.flows.ai_builder.ai_builder_tool_names import (
@@ -84,6 +95,7 @@ from eneo.flows.ai_builder.planning_state import (
 )
 from eneo.flows.ai_builder.planning_state_builder import (
     build_planning_state_from_conversation,
+    merge_llm_resolved_slots,
 )
 from eneo.flows.domain.flow import Flow, FlowStep
 
@@ -107,6 +119,67 @@ def _planning_state_with_post_processing_goal(value: str) -> PlanningState:
         evidence_level="inferred",
     )
     return state
+
+
+def _open_interview_conversation(prompt: str) -> list[ConversationMessage]:
+    return [
+        ConversationMessage(
+            message_id="test-source",
+            role="user",
+            content=prompt,
+            metadata={"ui_language": "sv"},
+        )
+    ]
+
+
+def _classified_open_interview(
+    prompt: str,
+    *,
+    goal_confidence: SlotConfidence,
+    goal_evidence_level: SlotClassificationEvidenceLevel,
+    terminal_output: tuple[str, SlotConfidence] | None = None,
+) -> tuple[PlanningState, SlotClassificationResult]:
+    """Planning state as the turn builds it: classify, then merge, then ask."""
+
+    slots = [
+        ClassifiedSlot(
+            slot_name="primary_runtime_input",
+            value="text",
+            confidence="high",
+            reason="The runtime input is explicit.",
+            evidence=_classifier_evidence(prompt),
+            evidence_level="explicit",
+        ),
+        ClassifiedSlot(
+            slot_name="post_processing_goal",
+            value="structure_key_information",
+            confidence=goal_confidence,
+            reason="The requested outcome for the material.",
+            evidence=_classifier_evidence(prompt),
+            evidence_level=goal_evidence_level,
+        ),
+    ]
+    if terminal_output is not None:
+        terminal_value, terminal_confidence = terminal_output
+        slots.append(
+            ClassifiedSlot(
+                slot_name="terminal_output",
+                value=terminal_value,
+                confidence=terminal_confidence,
+                reason="The final result is implied by the request.",
+                evidence=_classifier_evidence(prompt),
+                evidence_level="inferred",
+            )
+        )
+    classification = SlotClassificationResult(slots=tuple(slots))
+    state = PlanningState.empty()
+    merge_llm_resolved_slots(
+        state,
+        classification,
+        prompt_hash="test-prompt-hash",
+        freeform_text=prompt,
+    )
+    return state, classification
 
 
 def _battle_case_prompt(case_id: str) -> str:
@@ -1868,62 +1941,151 @@ class TestExtendedClarificationHints:
         assert analysis.next_issue.suggestion is not None
         assert analysis.next_issue.suggestion.question_id == "post_processing_goal"
 
-    def test_unevidenced_goal_classification_asks_purpose_before_terminal(
-        self,
-    ) -> None:
-        # E2 (4 diagnostic engineering defects, e.g.
-        # interview_open_volunteer_interest): a goal classified with medium
-        # confidence but NO cited evidence is below commit grade — assuming
-        # it and spending the question on terminal_output picks the wrong
-        # question. Purpose is asked first; a quoted classification keeps
-        # the assumption path.
-        case_id = "interview_open_volunteer_interest"
-        prompt = _battle_case_prompt(case_id)
-        conversation = [
-            ConversationMessage(
-                message_id="test-source",
-                role="user",
-                content=prompt,
-                metadata={"ui_language": "sv"},
-            )
-        ]
-        planning_state = PlanningState.empty()
-        planning_state.resolved_slots["primary_runtime_input"] = ResolvedSlot(
-            name="primary_runtime_input",
-            value="text",
-            source="model",
-            confidence="high",
-            evidence=[f"quote:user_message:test-source:{prompt}"],
-            evidence_level="explicit",
+    def test_guessed_purpose_is_asked_before_terminal_output(self) -> None:
+        # A medium-confidence inferred purpose is below commit grade, so the
+        # architecture layer and the result contract refuse to read it.
+        # Discovery must ask for it rather than spend the turn on an output
+        # format for a purpose nobody has confirmed.
+        prompt = _battle_case_prompt("interview_open_accessibility_reports")
+        conversation = _open_interview_conversation(prompt)
+        state, classification = _classified_open_interview(
+            prompt,
+            goal_confidence="medium",
+            goal_evidence_level="inferred",
         )
 
-        def analyze(evidence: tuple[ClassifiedEvidence, ...]):
-            return analyze_discovery(
-                conversation,
-                planning_state=planning_state,
-                slot_classification_result=SlotClassificationResult(
-                    slots=(
-                        ClassifiedSlot(
-                            slot_name="post_processing_goal",
-                            value="action_followup",
-                            confidence="medium",
-                            reason="Implied by the request.",
-                            evidence=evidence,
-                            evidence_level="inferred",
-                        ),
-                    )
+        assert state.commit_grade_slot_value("primary_runtime_input") == "text"
+        assert state.commit_grade_slot_value("post_processing_goal") is None
+
+        profile = build_discovery_profile(conversation, planning_state=state)
+        assert (
+            post_processing_goal_is_vague(
+                profile,
+                slot_classification_result=classification,
+            )
+            is True
+        )
+
+        analysis = analyze_discovery(
+            conversation,
+            planning_state=state,
+            slot_classification_result=classification,
+        )
+        policy = build_planner_action_policy(
+            session_state=state,
+            selected_discovery_question_ids=analysis.selected_question_ids,
+        )
+
+        assert policy.allowed_ask_question_targets[0] == "post_processing_goal"
+
+    def test_committed_purpose_keeps_terminal_output_first(self) -> None:
+        prompt = _battle_case_prompt("interview_open_accessibility_reports")
+        conversation = _open_interview_conversation(prompt)
+        state, classification = _classified_open_interview(
+            prompt,
+            goal_confidence="high",
+            goal_evidence_level="explicit",
+        )
+
+        assert (
+            state.commit_grade_slot_value("post_processing_goal")
+            == "structure_key_information"
+        )
+
+        profile = build_discovery_profile(conversation, planning_state=state)
+        assert (
+            post_processing_goal_is_vague(
+                profile,
+                slot_classification_result=classification,
+            )
+            is False
+        )
+
+        analysis = analyze_discovery(
+            conversation,
+            planning_state=state,
+            slot_classification_result=classification,
+        )
+        policy = build_planner_action_policy(
+            session_state=state,
+            selected_discovery_question_ids=analysis.selected_question_ids,
+        )
+
+        assert policy.allowed_ask_question_targets[0] == "terminal_output"
+
+    def test_guessed_terminal_output_does_not_close_the_output_question(self) -> None:
+        # A guessed terminal output is not an answer either: it must not
+        # displace the purpose question, and the output question it guessed
+        # at stays open.
+        prompt = _battle_case_prompt("interview_open_accessibility_reports")
+        conversation = _open_interview_conversation(prompt)
+        state, classification = _classified_open_interview(
+            prompt,
+            goal_confidence="medium",
+            goal_evidence_level="inferred",
+            terminal_output=("structured_text", "medium"),
+        )
+
+        assert state.resolved_slots["terminal_output"].value == "structured_text"
+        assert state.commit_grade_slot_value("terminal_output") is None
+
+        analysis = analyze_discovery(
+            conversation,
+            planning_state=state,
+            slot_classification_result=classification,
+        )
+        policy = build_planner_action_policy(
+            session_state=state,
+            selected_discovery_question_ids=analysis.selected_question_ids,
+        )
+
+        assert policy.allowed_ask_question_targets[0] == "post_processing_goal"
+        assert "terminal_output" in policy.allowed_ask_question_targets
+
+    def test_classification_without_readable_slots_does_not_ask_purpose(self) -> None:
+        # The classifier read the turn but placed nothing: every slot came
+        # back unknown and none of them was the purpose. That is too early to
+        # spend the purpose question on, so discovery stays quiet about it.
+        prompt = _battle_case_prompt("interview_open_accessibility_reports")
+        conversation = _open_interview_conversation(prompt)
+        classification = SlotClassificationResult(
+            slots=(
+                ClassifiedSlot(
+                    slot_name="primary_runtime_input",
+                    value=UNKNOWN_SLOT_VALUE,
+                    confidence="high",
+                    reason="user_explicit_uncertain",
+                    evidence=_classifier_evidence(prompt),
+                    evidence_level="explicit",
                 ),
             )
-
-        unevidenced = analyze(())
-        assert unevidenced.next_issue is not None
-        assert unevidenced.next_issue.issue_id == "post_processing_goal"
-
-        quoted = analyze(_classifier_evidence(prompt))
-        assert (
-            quoted.next_issue is None
-            or quoted.next_issue.issue_id != "post_processing_goal"
         )
+        state = PlanningState.empty()
+        merge_llm_resolved_slots(
+            state,
+            classification,
+            prompt_hash="test-prompt-hash",
+            freeform_text=prompt,
+        )
+
+        assert state.resolved_slots == {}
+
+        profile = build_discovery_profile(conversation, planning_state=state)
+        assert (
+            post_processing_goal_is_vague(
+                profile,
+                slot_classification_result=classification,
+            )
+            is False
+        )
+
+        analysis = analyze_discovery(
+            conversation,
+            planning_state=state,
+            slot_classification_result=classification,
+        )
+
+        assert "post_processing_goal" not in analysis.selected_question_ids
 
     def test_interview_input_cohort_keeps_input_first(self) -> None:
         case_id = "interview_input_building_supplement"

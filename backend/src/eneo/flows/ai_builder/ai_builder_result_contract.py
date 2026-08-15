@@ -245,8 +245,13 @@ _OBLIGATION_POLICIES: dict[ResultObligation, tuple[str, ...]] = {
 
 
 def derive_result_contract(planning_state: PlanningState) -> ResultContract | None:
-    terminal_output = _slot_value(planning_state, "terminal_output")
-    post_processing_goal = _slot_value(planning_state, "post_processing_goal")
+    # Commit grade, like every other consumer of these slots: the sections and
+    # policies below shape the delivered flow, so a value the planner is not
+    # allowed to commit on must not silently shape the result either.
+    terminal_output = planning_state.commit_grade_slot_value("terminal_output")
+    post_processing_goal = planning_state.commit_grade_slot_value(
+        "post_processing_goal"
+    )
     secondary_obligations = _secondary_obligations(planning_state)
 
     required_sections = _GOAL_REQUIRED_SECTIONS.get(post_processing_goal or "", ())
@@ -365,11 +370,6 @@ def render_result_contract_prompt_block(contract: ResultContract | None) -> str 
         lines.extend(f"  - {policy}" for policy in contract.result_policies)
 
     return "\n".join(lines)
-
-
-def _slot_value(planning_state: PlanningState, slot_name: str) -> str | None:
-    slot = planning_state.resolved_slots.get(slot_name)
-    return slot.value if slot is not None else None
 
 
 def _secondary_obligations(
