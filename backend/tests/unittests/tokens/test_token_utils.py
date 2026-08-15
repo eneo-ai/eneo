@@ -1,11 +1,13 @@
 import base64
 import io
+import json
 from unittest.mock import patch
 
 import litellm
 from PIL import Image
 
 from eneo.tokens.token_utils import (
+    _MAX_TOOL_SCHEMA_EXPANSION_CHARS,
     TokenCountSource,
     _tool_reserve_payload,
     count_image_tokens_from_blob,
@@ -302,24 +304,52 @@ def test_tool_reserve_keeps_a_reference_and_its_target_when_keys_collide():
     assert payload.text.count("SIBLING-TEXT") == 20
 
 
-def test_tool_reserve_expands_definitions_hoisted_above_the_parameter_object():
-    # Providers resolve a tool's pointers against its parameter object, but a
-    # schema that hoists `$defs` above it still gets priced expanded, so an
-    # unresolved pointer here would under-reserve.
-    definition = {"type": "string", "enum": ["ALPHA-KEY", "BETA-KEY"]}
+def test_a_reference_this_counter_cannot_resolve_is_refused():
+    # Pointers are read against the parameter object, as the strict-schema
+    # owner and the provider do. Anything else local — a hoisted `$defs`, a
+    # `#/definitions/` pointer, a name that is simply absent — would otherwise
+    # be charged once instead of once per use, which is the whole defect.
+    for pointer in ("#/$defs/missing", "#/definitions/shared"):
+        tools = [
+            {
+                "type": "function",
+                "$defs": {"shared": {"type": "string", "enum": ["ALPHA-KEY"]}},
+                "function": {
+                    "name": "propose_flow",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {"first": {"$ref": pointer}},
+                        "required": ["first"],
+                        "additionalProperties": False,
+                    },
+                },
+            }
+        ]
+
+        measured = measure_tool_tokens(tools, "openai/gpt-4o")
+
+        assert measured.source is TokenCountSource.FALLBACK_ESTIMATE
+        assert measured.tokens > 1_000_000_000
+
+
+def test_tool_reserve_counts_the_pointer_as_well_as_the_definition():
+    # A pointer is bytes on the wire too, and a long definition name repeated
+    # across properties is most of the payload. Replacing the pointer with its
+    # target priced a 220,000-character schema at a tenth of its size.
+    name = "n" * 2_000
     tools = [
         {
             "type": "function",
-            "$defs": {"shared": definition},
             "function": {
                 "name": "propose_flow",
                 "parameters": {
                     "type": "object",
+                    "$defs": {name: {"type": "string"}},
                     "properties": {
-                        "first": {"$ref": "#/$defs/shared"},
-                        "second": {"$ref": "#/$defs/shared"},
+                        f"property_{index}": {"$ref": f"#/$defs/{name}"}
+                        for index in range(10)
                     },
-                    "required": ["first", "second"],
+                    "required": [f"property_{index}" for index in range(10)],
                     "additionalProperties": False,
                 },
             },
@@ -329,8 +359,108 @@ def test_tool_reserve_expands_definitions_hoisted_above_the_parameter_object():
     payload = _tool_reserve_payload(tools)
 
     assert payload.bounded
-    # The definition plus both use sites.
-    assert payload.text.count("ALPHA-KEY") == 3
+    assert len(payload.text) >= len(
+        json.dumps(tools, ensure_ascii=False, separators=(",", ":"))
+    )
+
+
+def test_a_percent_encoded_definition_name_costs_what_its_literal_does():
+    # The pointer is a URI fragment holding a JSON Pointer. Reading it without
+    # percent-decoding left the reference unexpanded and the definition charged
+    # once rather than once per use.
+    definition = {"type": "string", "enum": ["A" * 2_000]}
+
+    def tools_referencing(pointer: str) -> list[dict]:
+        return [
+            {
+                "type": "function",
+                "function": {
+                    "name": "propose_flow",
+                    "parameters": {
+                        "type": "object",
+                        "$defs": {"space name": definition},
+                        "properties": {
+                            f"property_{index}": {"$ref": pointer}
+                            for index in range(10)
+                        },
+                        "required": [f"property_{index}" for index in range(10)],
+                        "additionalProperties": False,
+                    },
+                },
+            }
+        ]
+
+    literal = count_tool_tokens(
+        tools_referencing("#/$defs/space name"), "openai/gpt-4o"
+    )
+    encoded = count_tool_tokens(
+        tools_referencing("#/$defs/space%20name"), "openai/gpt-4o"
+    )
+
+    assert encoded >= literal
+
+
+def test_a_reference_chain_too_deep_to_follow_is_refused():
+    # A chain deep enough to exhaust the interpreter's stack must answer with a
+    # refusal rather than raise out of a token count.
+    depth = 1_100
+    definitions: dict[str, object] = {"level_0": {"type": "string"}}
+    for level in range(1, depth):
+        definitions[f"level_{level}"] = {"$ref": f"#/$defs/level_{level - 1}"}
+    tools = [
+        {
+            "type": "function",
+            "function": {
+                "name": "propose_flow",
+                "parameters": {
+                    "type": "object",
+                    "$defs": definitions,
+                    "properties": {"root": {"$ref": f"#/$defs/level_{depth - 1}"}},
+                    "required": ["root"],
+                    "additionalProperties": False,
+                },
+            },
+        }
+    ]
+
+    measured = measure_tool_tokens(tools, "openai/gpt-4o")
+
+    assert measured.source is TokenCountSource.FALLBACK_ESTIMATE
+    assert measured.tokens > 1_000_000_000
+
+
+def test_the_expansion_ceiling_admits_what_fits_under_it():
+    # The ceiling is a stated size, so a schema that expands to about half of
+    # it must still be measured; only crossing it refuses.
+    definition = {"type": "string", "description": "x" * 100_000}
+
+    def tools_with(references: int) -> list[dict]:
+        properties = {
+            f"property_{index}": {"$ref": "#/$defs/shared"}
+            for index in range(references)
+        }
+        return [
+            {
+                "type": "function",
+                "function": {
+                    "name": "propose_flow",
+                    "parameters": {
+                        "type": "object",
+                        "$defs": {"shared": definition},
+                        "properties": properties,
+                        "required": sorted(properties),
+                        "additionalProperties": False,
+                    },
+                },
+            }
+        ]
+
+    under = _tool_reserve_payload(tools_with(20))
+    over = _tool_reserve_payload(tools_with(100))
+
+    assert under.bounded
+    assert len(under.text) > _MAX_TOOL_SCHEMA_EXPANSION_CHARS // 4
+    assert not over.bounded
 
 
 def test_a_completed_reference_does_not_condemn_a_large_plain_catalogue():

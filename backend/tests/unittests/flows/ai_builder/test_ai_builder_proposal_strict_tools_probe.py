@@ -1443,13 +1443,14 @@ def test_a_measurement_input_larger_than_its_receipt_is_refused(
 def test_the_largest_permitted_measurement_still_fits_one_receipt() -> None:
     # The receipt seals the schema, the prompt and the returned arguments, so
     # the input bounds are only honest if their worst case fits inside it. Each
-    # input is grown to just under its own bound rather than to a fraction of
-    # it, and the prompt is non-ASCII because escaping is what expands it.
+    # input is grown to just under its own bound, and both are filled with
+    # control characters: admission counts raw bytes while the receipt is
+    # measured after serialization, and a NUL is one byte in and six out.
     probe = _probe()
 
     def schema_of(width: int, filler: int) -> dict[str, object]:
         properties = {
-            f"property_{index}": {"type": "string", "description": "\u00e5" * filler}
+            f"property_{index}": {"type": "string", "description": "\u0000" * filler}
             for index in range(width)
         }
         return {
@@ -1479,8 +1480,11 @@ def test_the_largest_permitted_measurement_still_fits_one_receipt() -> None:
         < probe._MAX_MEASUREMENT_SCHEMA_BYTES // 100
     )
 
-    prompt = "\u00e5" * (probe._MAX_MEASUREMENT_PROMPT_BYTES // 2)
+    prompt = "\u0000" * probe._MAX_MEASUREMENT_PROMPT_BYTES
     assert len(prompt.encode()) == probe._MAX_MEASUREMENT_PROMPT_BYTES
+    # Serialization is what the receipt bound applies to, and it is six times
+    # the size admission measured.
+    assert len(json.dumps(prompt).encode()) > 6 * len(prompt.encode()) - 2
     measurement = probe.ProbeMeasurement(
         model_id=_MEASURED_MODEL_ID,
         tool_schema=schema,
