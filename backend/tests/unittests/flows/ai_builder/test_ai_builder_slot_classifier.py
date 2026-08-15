@@ -351,6 +351,34 @@ def test_parser_accepts_field_declaration_using_source_relative_citation_boundar
             "attachment_inventory[]",
             "attachment_inventory[]",
         ),
+        # A sentence-final name is followed by a period and the next
+        # sentence; that period is punctuation, not a dotted path, whatever
+        # character starts the next sentence.
+        (
+            "Utdata ska innehålla routing_issues[]. Bevara okända fält.",
+            "routing_issues[]",
+            "routing_issues",
+        ),
+        (
+            "Utdata ska innehålla routing_issues. Bevara okända fält.",
+            "routing_issues",
+            "routing_issues",
+        ),
+        (
+            "Utdata ska innehålla routing_issues. 5 stycken per ärende.",
+            "routing_issues",
+            "routing_issues",
+        ),
+        (
+            "Utdata ska innehålla manual_review_items[]. beräkna inget mer.",
+            "manual_review_items[]",
+            "manual_review_items",
+        ),
+        (
+            'Return JSON with the literal field "attachment_inventory". Keep the rest.',
+            "attachment_inventory",
+            "attachment_inventory",
+        ),
     ],
 )
 def test_parser_distinguishes_json_shape_notation_from_literal_field_punctuation(

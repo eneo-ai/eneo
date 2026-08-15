@@ -797,6 +797,7 @@ def _valid_field_occurrence_kind(
                 side="after",
                 text=text,
                 index=(outside_after_index if outside_after_index is not None else 0),
+                adjacent_to_name=outside_after_index == end_index + 1,
             )
         ):
             return None
@@ -833,6 +834,7 @@ def _valid_field_occurrence_kind(
             index=(
                 outside_after_index if outside_after_index is not None else end_index
             ),
+            adjacent_to_name=outside_after_index == end_index,
         )
     ):
         return None
@@ -880,6 +882,7 @@ def _field_boundary_is_ambiguous(
     text: str = "",
     index: int = 0,
     allow_declaration_colon: bool = False,
+    adjacent_to_name: bool = False,
 ) -> bool:
     if value is None:
         return False
@@ -893,6 +896,13 @@ def _field_boundary_is_ambiguous(
         return False
     if side == "before":
         return True
+    if adjacent_to_name:
+        # A period hugging the name is a dotted path only when the child
+        # segment hugs it too ("user.id"). "routing_issues[]. Bevara" ends a
+        # sentence, whatever character starts the next one.
+        return index + 1 < len(text) and _is_identifier_continuation(text[index + 1])
+    # A period separated from the name by whitespace ('"id" . child') is a
+    # spaced path when an identifier follows it.
     next_index = _nearest_non_whitespace_index(
         text,
         start_index=index + 1,
