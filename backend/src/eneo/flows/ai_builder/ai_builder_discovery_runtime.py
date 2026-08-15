@@ -763,9 +763,12 @@ async def build_runtime_discovery_context(
             direction=classified_direction,
         )
         schema_direction_pending = False
-    # The classifier can name the terminal output and the template role in the
-    # same turn, so template evidence is only complete now — before defaults
-    # fill the mode the attachment already settles.
+    # Attachment evidence can settle the docx mode only once the terminal output
+    # is known, and classification can name the terminal output, the template
+    # role, or both in this same turn. Re-read both attachment rules here —
+    # before defaults fill a mode the attachment already answers — so the first
+    # turn reaches the conclusion a later turn already reaches.
+    apply_attachment_structural_evidence_to_planning_state(state, attachment_context)
     resolve_docx_mode_from_template_evidence(state)
     apply_policy_defaults_from_resolved_slots(state, freeform_text=text)
     return _complete_runtime_discovery_context(

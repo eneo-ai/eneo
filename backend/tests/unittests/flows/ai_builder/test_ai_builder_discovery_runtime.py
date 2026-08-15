@@ -1102,10 +1102,25 @@ async def test_runtime_planning_state_uses_structural_template_for_docx_mode() -
     assert "docx_output_mode" not in analysis.selected_question_ids
 
 
-_TEMPLATE_QUOTE = "yttrandet skrivs alltid i tjänsteskrivelsemallen som jag bifogar"
+# The measured prompt, verbatim. Its conflict sentence keeps the deterministic
+# pass from settling `terminal_output`, so only classification resolves it —
+# which is exactly the same-turn seam these tests exist for. Shortening the
+# prompt lets the first pass resolve the terminal and the tests stop testing
+# anything.
+_TEMPLATE_QUOTE = (
+    "yttrandet skrivs alltid i kommunens tjänsteskrivelsemall som jag bifogar"
+)
 _TEMPLATE_PROMPT = (
-    f"Stadsbyggnadskontoret svarar på remisser och {_TEMPLATE_QUOTE}. "
-    "Leverera den ifyllda mallen som DOCX."
+    "Stadsbyggnadskontoret i Sundsvall svarar på remisser från Trafikverket och "
+    f"Länsstyrelsen Västernorrland, och {_TEMPLATE_QUOTE}. Vid körning laddar "
+    "handläggaren upp remissen, tidigare yttranden i samma fråga och de tekniska "
+    "underlag som finns. Underlagen är primärmaterial och ska aldrig bli "
+    "formulärfält; det jag fyller i är diarienummer, handläggare, förvaltning, "
+    "nämnd och beslutsdatum. Flödet ska hålla isär vad varje handling faktiskt "
+    "säger och därefter skriva ärendet, bakgrund, bedömning, konsekvenser och "
+    "förslag till beslut var för sig. Säger handlingarna emot varandra ska det "
+    "synas i texten i stället för att jämkas ihop. Leverera den ifyllda mallen "
+    "som DOCX."
 )
 
 
@@ -1218,6 +1233,160 @@ async def test_same_turn_explicit_template_settles_docx_mode() -> None:
     assert slot.evidence_level == "explicit"
     analysis = analyze_discovery(conversation, planning_state=state)
     assert "docx_output_mode" not in analysis.selected_question_ids
+
+
+@pytest.mark.asyncio
+async def test_same_turn_placeholder_template_settles_docx_mode() -> None:
+    # The live shape of the measured cases: placeholders make the attachment a
+    # heuristic template role, which classification cannot replace, so only the
+    # structural rule can settle the mode — and it must settle it on the turn
+    # that names the DOCX terminal, not one turn later.
+    file_id = uuid4()
+    litellm_client = AsyncMock()
+    litellm_client.acompletion.return_value = _template_classifier_response(
+        file_ids=(),
+        evidence_level="explicit",
+    )
+    conversation = [
+        ConversationMessage(
+            message_id="user-1",
+            role="user",
+            content=_TEMPLATE_PROMPT,
+            metadata={"ui_language": "sv"},
+        )
+    ]
+
+    context = await build_runtime_discovery_context(
+        conversation,
+        litellm_client=litellm_client,
+        completion_model_route=_route(),
+        tenant_id=uuid4(),
+        max_input_tokens=100_000,
+        max_output_tokens=2_000,
+        ui_language="sv",
+        attachment_context=AIBuilderAttachmentContext(
+            context=None,
+            evidence=(
+                AIBuilderAttachmentEvidence(
+                    file_id=file_id,
+                    filename="tjansteskrivelse-mall.docx",
+                    file_type=FileType.DOCUMENT,
+                    mimetype=(
+                        "application/vnd.openxmlformats-officedocument."
+                        "wordprocessingml.document"
+                    ),
+                    has_readable_text=True,
+                    excerpt="Diarienummer: {{ diarienummer }}",
+                    coverage="fully_seen",
+                    inferred_role="template",
+                    role_confidence="medium",
+                    role_evidence=("content:template_placeholder:diarienummer",),
+                ),
+            ),
+            included_file_ids=[file_id],
+            total_chars=0,
+            truncated=False,
+        ),
+    )
+    state = context.planning_state
+
+    slot = state.resolved_slots["docx_output_mode"]
+    assert slot.value == "template_fill_docx"
+    assert slot.source == "attachment_structure"
+    analysis = analyze_discovery(conversation, planning_state=state)
+    assert "docx_output_mode" not in analysis.selected_question_ids
+
+
+@pytest.mark.asyncio
+async def test_classified_second_template_withdraws_structural_docx_mode() -> None:
+    placeholder_file_id = uuid4()
+    second_file_id = uuid4()
+    quote = "den andra mallen bifogar jag också"
+    litellm_client = AsyncMock()
+    litellm_client.acompletion.return_value = _make_response(
+        json.dumps(
+            {
+                "slots": [],
+                "file_roles": [
+                    {
+                        "file_id": str(second_file_id),
+                        "role": "template",
+                        "confidence": "high",
+                        "reason": "The user attaches a second mall to fill.",
+                        "evidence": [_cited(quote)],
+                        "evidence_level": "explicit",
+                    }
+                ],
+            }
+        )
+    )
+    # Short enough that the deterministic pass settles the DOCX terminal, so the
+    # structural rule commits fill before classification runs.
+    conversation = [
+        ConversationMessage(
+            message_id="user-1",
+            role="user",
+            content=(
+                f"Jag vill fylla vår mall och få en Word-fil i slutet, och {quote}."
+            ),
+            metadata={"ui_language": "sv"},
+        )
+    ]
+
+    context = await build_runtime_discovery_context(
+        conversation,
+        litellm_client=litellm_client,
+        completion_model_route=_route(),
+        tenant_id=uuid4(),
+        max_input_tokens=100_000,
+        max_output_tokens=2_000,
+        ui_language="sv",
+        attachment_context=AIBuilderAttachmentContext(
+            context=None,
+            evidence=(
+                AIBuilderAttachmentEvidence(
+                    file_id=placeholder_file_id,
+                    filename="mall-med-platshallare.docx",
+                    file_type=FileType.DOCUMENT,
+                    mimetype=(
+                        "application/vnd.openxmlformats-officedocument."
+                        "wordprocessingml.document"
+                    ),
+                    has_readable_text=True,
+                    excerpt="Diarienummer: {{ diarienummer }}",
+                    coverage="fully_seen",
+                    inferred_role="template",
+                    role_confidence="medium",
+                    role_evidence=("content:template_placeholder:diarienummer",),
+                ),
+                AIBuilderAttachmentEvidence(
+                    file_id=second_file_id,
+                    filename="andra-mallen.docx",
+                    file_type=FileType.DOCUMENT,
+                    mimetype=(
+                        "application/vnd.openxmlformats-officedocument."
+                        "wordprocessingml.document"
+                    ),
+                    has_readable_text=True,
+                    excerpt="Beslut\nMotivering\nVillkor",
+                    coverage="fully_seen",
+                    inferred_role="context_only",
+                    role_confidence="low",
+                    role_evidence=("fallback:unclassified_file",),
+                ),
+            ),
+            included_file_ids=[placeholder_file_id, second_file_id],
+            total_chars=0,
+            truncated=False,
+        ),
+    )
+    state = context.planning_state
+
+    assert sum(role.role == "template" for role in state.file_roles) == 2
+    docx_mode = state.resolved_slots.get("docx_output_mode")
+    assert docx_mode is None or docx_mode.value != "template_fill_docx"
+    analysis = analyze_discovery(conversation, planning_state=state)
+    assert "docx_output_mode" in analysis.selected_question_ids
 
 
 @pytest.mark.asyncio
