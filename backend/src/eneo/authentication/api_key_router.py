@@ -63,10 +63,21 @@ from eneo.database.tables.settings_table import Settings
 from eneo.main.config import get_settings
 from eneo.main.container.container import Container
 from eneo.roles.permissions import Permission
-from eneo.server.dependencies.container import get_container
+from eneo.server.dependencies.container import (
+    get_container,
+    get_container_for_explicit_transaction,
+)
 from eneo.users.user import UserInDB
 
 router = APIRouter(tags=["API Keys"])
+
+# Issuing or re-dating a key hands the caller something it is expected to use on
+# its very next request. The default container commits at dependency teardown —
+# after the response has been sent — so that next request can race the commit and
+# be rejected. These endpoints own their transaction and commit before replying.
+ContainerWithUserExplicitTransactionDep = Annotated[
+    Container, Depends(get_container_for_explicit_transaction(with_user=True))
+]
 
 _API_KEY_EXAMPLE = {
     "id": "3cbf5fde-7288-4f03-bf06-f71c14f76854",
@@ -905,7 +916,7 @@ async def get_api_key_usage(
 )
 async def create_api_key(
     payload: Annotated[ApiKeyCreateRequest, Body(examples=[_CREATE_API_KEY_EXAMPLE])],
-    container: Annotated[Container, Depends(get_container(with_user=True))],
+    container: ContainerWithUserExplicitTransactionDep,
     _session_guard: None = Depends(require_session_auth),
     _perm_guard: None = Depends(require_permission(Permission.API_KEYS)),
     # Defense-in-depth: require_session_auth rejects API-key callers first, so
@@ -915,13 +926,14 @@ async def create_api_key(
     _api_key_guard: None = Depends(require_api_key_permission(ApiKeyPermission.ADMIN)),
     _user_for_creation: None = Depends(require_user_for_creation),
 ) -> ApiKeyCreatedResponse:
-    lifecycle = container.api_key_lifecycle_service()
-    try:
-        return await lifecycle.create_key(
-            request=payload,
-        )
-    except ApiKeyValidationError as exc:
-        raise_api_key_http_error(exc)
+    async with cast(AsyncSession, container.session()).begin():
+        lifecycle = container.api_key_lifecycle_service()
+        try:
+            return await lifecycle.create_key(
+                request=payload,
+            )
+        except ApiKeyValidationError as exc:
+            raise_api_key_http_error(exc)
 
 
 @router.get(
@@ -1099,18 +1111,19 @@ async def update_api_key(
             ],
         ),
     ],
-    container: Annotated[Container, Depends(get_container(with_user=True))],
+    container: ContainerWithUserExplicitTransactionDep,
     _session_guard: None = Depends(require_session_auth),
     _guard: None = Depends(require_api_key_permission(ApiKeyPermission.ADMIN)),
 ) -> ApiKeyV2:
-    lifecycle: ApiKeyLifecycleService = container.api_key_lifecycle_service()
-    try:
-        return await lifecycle.update_key(
-            key_id=id,
-            request=payload,
-        )
-    except ApiKeyValidationError as exc:
-        raise_api_key_http_error(exc)
+    async with cast(AsyncSession, container.session()).begin():
+        lifecycle: ApiKeyLifecycleService = container.api_key_lifecycle_service()
+        try:
+            return await lifecycle.update_key(
+                key_id=id,
+                request=payload,
+            )
+        except ApiKeyValidationError as exc:
+            raise_api_key_http_error(exc)
 
 
 @router.delete(
@@ -1129,17 +1142,18 @@ async def update_api_key(
 )
 async def revoke_api_key_deprecated(
     id: UUID,
-    container: Annotated[Container, Depends(get_container(with_user=True))],
+    container: ContainerWithUserExplicitTransactionDep,
     _session_guard: None = Depends(require_session_auth),
     _guard: None = Depends(require_api_key_permission(ApiKeyPermission.ADMIN)),
 ) -> Response:
-    lifecycle: ApiKeyLifecycleService = container.api_key_lifecycle_service()
-    try:
-        await lifecycle.revoke_key(
-            key_id=id,
-        )
-    except ApiKeyValidationError as exc:
-        raise_api_key_http_error(exc)
+    async with cast(AsyncSession, container.session()).begin():
+        lifecycle: ApiKeyLifecycleService = container.api_key_lifecycle_service()
+        try:
+            await lifecycle.revoke_key(
+                key_id=id,
+            )
+        except ApiKeyValidationError as exc:
+            raise_api_key_http_error(exc)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
@@ -1161,7 +1175,7 @@ async def revoke_api_key_deprecated(
 )
 async def revoke_api_key(
     id: UUID,
-    container: Annotated[Container, Depends(get_container(with_user=True))],
+    container: ContainerWithUserExplicitTransactionDep,
     _session_guard: None = Depends(require_session_auth),
     _guard: None = Depends(require_api_key_permission(ApiKeyPermission.ADMIN)),
     payload: Annotated[
@@ -1169,14 +1183,15 @@ async def revoke_api_key(
         Body(examples=[_STATE_CHANGE_EXAMPLE]),
     ] = None,
 ) -> ApiKeyV2:
-    lifecycle: ApiKeyLifecycleService = container.api_key_lifecycle_service()
-    try:
-        return await lifecycle.revoke_key(
-            key_id=id,
-            request=payload,
-        )
-    except ApiKeyValidationError as exc:
-        raise_api_key_http_error(exc)
+    async with cast(AsyncSession, container.session()).begin():
+        lifecycle: ApiKeyLifecycleService = container.api_key_lifecycle_service()
+        try:
+            return await lifecycle.revoke_key(
+                key_id=id,
+                request=payload,
+            )
+        except ApiKeyValidationError as exc:
+            raise_api_key_http_error(exc)
 
 
 @router.post(
@@ -1195,19 +1210,20 @@ async def revoke_api_key(
 )
 async def rotate_api_key(
     id: UUID,
-    container: Annotated[Container, Depends(get_container(with_user=True))],
+    container: ContainerWithUserExplicitTransactionDep,
     _session_guard: None = Depends(require_session_auth),
     _guard: None = Depends(require_api_key_permission(ApiKeyPermission.ADMIN)),
     payload: Annotated[ApiKeyRotateRequest | None, Body()] = None,
 ) -> ApiKeyCreatedResponse:
-    lifecycle: ApiKeyLifecycleService = container.api_key_lifecycle_service()
-    try:
-        return await lifecycle.rotate_key(
-            key_id=id,
-            request=payload,
-        )
-    except ApiKeyValidationError as exc:
-        raise_api_key_http_error(exc)
+    async with cast(AsyncSession, container.session()).begin():
+        lifecycle: ApiKeyLifecycleService = container.api_key_lifecycle_service()
+        try:
+            return await lifecycle.rotate_key(
+                key_id=id,
+                request=payload,
+            )
+        except ApiKeyValidationError as exc:
+            raise_api_key_http_error(exc)
 
 
 @router.post(
@@ -1233,18 +1249,19 @@ async def extend_api_key_expiration(
         ApiKeyExtendRequest,
         Body(examples=[{"expires_at": "2030-01-01T00:00:00Z"}]),
     ],
-    container: Annotated[Container, Depends(get_container(with_user=True))],
+    container: ContainerWithUserExplicitTransactionDep,
     _session_guard: None = Depends(require_session_auth),
     _guard: None = Depends(require_api_key_permission(ApiKeyPermission.ADMIN)),
 ) -> ApiKeyV2:
-    lifecycle: ApiKeyLifecycleService = container.api_key_lifecycle_service()
-    try:
-        return await lifecycle.extend_expiration(
-            key_id=id,
-            request=payload,
-        )
-    except ApiKeyValidationError as exc:
-        raise_api_key_http_error(exc)
+    async with cast(AsyncSession, container.session()).begin():
+        lifecycle: ApiKeyLifecycleService = container.api_key_lifecycle_service()
+        try:
+            return await lifecycle.extend_expiration(
+                key_id=id,
+                request=payload,
+            )
+        except ApiKeyValidationError as exc:
+            raise_api_key_http_error(exc)
 
 
 @router.post(
@@ -1265,17 +1282,18 @@ async def extend_api_key_expiration(
 )
 async def purge_api_key(
     id: UUID,
-    container: Annotated[Container, Depends(get_container(with_user=True))],
+    container: ContainerWithUserExplicitTransactionDep,
     _session_guard: None = Depends(require_session_auth),
     _guard: None = Depends(require_api_key_permission(ApiKeyPermission.ADMIN)),
 ) -> Response:
-    lifecycle: ApiKeyLifecycleService = container.api_key_lifecycle_service()
-    try:
-        await lifecycle.purge_key(
-            key_id=id,
-        )
-    except ApiKeyValidationError as exc:
-        raise_api_key_http_error(exc)
+    async with cast(AsyncSession, container.session()).begin():
+        lifecycle: ApiKeyLifecycleService = container.api_key_lifecycle_service()
+        try:
+            await lifecycle.purge_key(
+                key_id=id,
+            )
+        except ApiKeyValidationError as exc:
+            raise_api_key_http_error(exc)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
@@ -1299,7 +1317,7 @@ async def purge_api_key(
 )
 async def suspend_api_key(
     id: UUID,
-    container: Annotated[Container, Depends(get_container(with_user=True))],
+    container: ContainerWithUserExplicitTransactionDep,
     _session_guard: None = Depends(require_session_auth),
     _guard: None = Depends(require_api_key_permission(ApiKeyPermission.ADMIN)),
     payload: Annotated[
@@ -1307,14 +1325,15 @@ async def suspend_api_key(
         Body(examples=[_STATE_CHANGE_EXAMPLE]),
     ] = None,
 ) -> ApiKeyV2:
-    lifecycle: ApiKeyLifecycleService = container.api_key_lifecycle_service()
-    try:
-        return await lifecycle.suspend_key(
-            key_id=id,
-            request=payload,
-        )
-    except ApiKeyValidationError as exc:
-        raise_api_key_http_error(exc)
+    async with cast(AsyncSession, container.session()).begin():
+        lifecycle: ApiKeyLifecycleService = container.api_key_lifecycle_service()
+        try:
+            return await lifecycle.suspend_key(
+                key_id=id,
+                request=payload,
+            )
+        except ApiKeyValidationError as exc:
+            raise_api_key_http_error(exc)
 
 
 @router.post(
@@ -1333,14 +1352,15 @@ async def suspend_api_key(
 )
 async def reactivate_api_key(
     id: UUID,
-    container: Annotated[Container, Depends(get_container(with_user=True))],
+    container: ContainerWithUserExplicitTransactionDep,
     _session_guard: None = Depends(require_session_auth),
     _guard: None = Depends(require_api_key_permission(ApiKeyPermission.ADMIN)),
 ) -> ApiKeyV2:
-    lifecycle: ApiKeyLifecycleService = container.api_key_lifecycle_service()
-    try:
-        return await lifecycle.reactivate_key(
-            key_id=id,
-        )
-    except ApiKeyValidationError as exc:
-        raise_api_key_http_error(exc)
+    async with cast(AsyncSession, container.session()).begin():
+        lifecycle: ApiKeyLifecycleService = container.api_key_lifecycle_service()
+        try:
+            return await lifecycle.reactivate_key(
+                key_id=id,
+            )
+        except ApiKeyValidationError as exc:
+            raise_api_key_http_error(exc)
