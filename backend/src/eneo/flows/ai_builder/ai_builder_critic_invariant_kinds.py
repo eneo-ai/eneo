@@ -27,7 +27,6 @@ CRITIC_INVARIANT_KINDS: Mapping[str, CriticInvariantKind] = {
     "final_text_step_must_reference_relevant_structured_outputs": "semantic",
     "form_fields_declared_must_be_referenced": "semantic",
     "generated_docx_rejects_template_fill": "architecture",
-    "json_input_rejects_all_previous_steps_source": "architecture",
     "mixed_audio_doc_rejects_file_degradation": "architecture",
     "mixed_audio_doc_rejects_pseudo_transcription": "architecture",
     "mixed_audio_doc_requires_real_transcription_step": "architecture",

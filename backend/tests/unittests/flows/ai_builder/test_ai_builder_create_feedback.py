@@ -166,7 +166,7 @@ def test_format_create_critic_feedback_rejects_architecture_issue() -> None:
         format_create_critic_feedback(
             (
                 CriticIssue(
-                    id="json_input_rejects_all_previous_steps_source",
+                    id="pdf_terminal_output_alignment",
                     kind="architecture",
                     remediation="Fix mechanics.",
                 ),

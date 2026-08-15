@@ -217,6 +217,7 @@ class AIBuilderPlanner:
                         request_id=request_id,
                         usage_tracker=usage_tracker,
                         compile_context=proposal_request.compile_context,
+                        planning_state=proposal_request.planning_state,
                         assistant_metadata=assistant_metadata,
                         flow=flow,
                     ),

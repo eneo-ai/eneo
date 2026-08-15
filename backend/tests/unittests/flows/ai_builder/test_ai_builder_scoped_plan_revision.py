@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
@@ -18,6 +20,7 @@ from eneo.flows.ai_builder.ai_builder_domain_models import (
     ConversationMessage,
     TargetKind,
 )
+from eneo.flows.ai_builder.ai_builder_event_models import AIBuilderPlanEvent
 from eneo.flows.ai_builder.ai_builder_events import encode_ai_builder_stream_event
 from eneo.flows.ai_builder.ai_builder_plan_edit_context import (
     AIBuilderPlanEditContext,
@@ -38,6 +41,7 @@ from eneo.flows.ai_builder.ai_builder_scoped_plan_revision import (
     process_scoped_step_revision_if_requested,
     run_scoped_plan_revision_attempt,
 )
+from eneo.flows.ai_builder.planning_state import PlanningState, ResolvedSlot
 from eneo.flows.flow_authoring_spec import (
     AssistantSpec,
     FlowDraftSpecCore,
@@ -72,6 +76,20 @@ def _make_finalizer() -> CompiledProposalFinalizer:
     )
 
 
+@asynccontextmanager
+async def _noop_savepoint() -> AsyncIterator[None]:
+    yield
+
+
+def _make_persisting_repo() -> AsyncMock:
+    """Repo double an accepted proposal can actually be stored through."""
+    repo = AsyncMock()
+    repo.savepoint = _noop_savepoint
+    repo.create_plan = AsyncMock(return_value=SimpleNamespace(id=uuid4()))
+    repo.commit_turn = AsyncMock(return_value=1)
+    return repo
+
+
 def _make_request(**overrides: object) -> ScopedPlanRevisionRequest:
     defaults = {
         "turn": _make_turn(),
@@ -89,6 +107,7 @@ def _make_request(**overrides: object) -> ScopedPlanRevisionRequest:
             target_kind=TargetKind.CREATE,
         ),
         "compile_context": None,
+        "planning_state": PlanningState.empty(),
         "assistant_metadata": None,
         "flow": None,
     }
@@ -324,6 +343,112 @@ async def test_scoped_revision_finalizes_terminal_pdf_revision(message: str) -> 
     assert request.assistant_content == "Jag har uppdaterat det valda steget."
     assert request.compiled.content.spec.steps[0].output_type == OutputType.PDF
     assert len(request.tool_call_id) <= PROVIDER_TOOL_CALL_ID_MAX_LENGTH
+
+
+@pytest.mark.asyncio
+async def test_scoped_revision_critic_reads_committed_docx_mode_not_conversation_text() -> (
+    None
+):
+    """The scoped revision finalizes against the committed planning state.
+
+    The message *rejects* a Word template, which agrees with the committed
+    `docx_output_mode=generated_docx` slot but which the negation-blind text
+    heuristic reads as `template_fill_docx`. The plan has no `template_fill`
+    step, so evaluating the critic on the keyword reading would hard-fail this
+    revision with `architecture_critic_invariant_failed` instead of applying
+    the model change.
+
+    The compile context carries the committed DOCX terminal, as production
+    always does. The wording therefore has to stay clear of the output-artifact
+    detector, which runs before the model revision and would otherwise answer a
+    non-terminal selected step with a "select the final step" notice.
+    """
+    catalog = build_ai_builder_resource_catalog(
+        available_models=[
+            _model_resource("model-old", "gpt-4o mini"),
+            _model_resource("model-nano", "gpt-5.4-nano"),
+        ],
+        available_kbs=[],
+    )
+    prior_spec = FlowDraftSpecCore(
+        flow_name="Mötesflöde",
+        steps=[
+            StepSpec(
+                plan_step_ref="step_a",
+                name="Extrahera agenda",
+                assistant_spec=AssistantSpec(
+                    instructions="Extrahera agenda.",
+                    model_ref="model.gpt-4o-mini",
+                ),
+                input_source=InputSource.FLOW_INPUT,
+                input_type=InputType.TEXT,
+                output_mode=OutputMode.PASS_THROUGH,
+                output_type=OutputType.TEXT,
+            ),
+            StepSpec(
+                plan_step_ref="step_f",
+                name="Skriv protokoll",
+                assistant_spec=AssistantSpec(instructions="Skriv protokollet."),
+                input_source=InputSource.PREVIOUS_STEP,
+                input_type=InputType.TEXT,
+                output_mode=OutputMode.RENDER_VERBATIM,
+                output_type=OutputType.DOCX,
+            ),
+        ],
+    )
+    prior_plan = _builder_plan(prior_spec)
+    planning_state = PlanningState.empty()
+    for slot_name, value in (
+        ("terminal_output", "docx_document"),
+        ("docx_output_mode", "generated_docx"),
+    ):
+        planning_state.resolved_slots[slot_name] = ResolvedSlot(
+            name=slot_name,
+            value=value,
+            source="structured_answer",
+            confidence="high",
+            evidence=[f"question_answer:{slot_name}"],
+        )
+
+    result = await run_scoped_plan_revision_attempt(
+        request=_make_request(
+            conversation=[
+                ConversationMessage(
+                    role="user",
+                    content="modell gpt 5.4 nano; använd ingen word-mall",
+                )
+            ],
+            prior_spec_for_revision=prior_plan.spec,
+            plan_edit_context=AIBuilderPlanEditContext(
+                scope="step",
+                plan_id=prior_plan.id,
+                target_plan_step_ref="step_a",
+                target_step_name="Extrahera agenda",
+                target_step_number=1,
+            ),
+            resource_catalog=catalog,
+            available_model_refs=catalog.model_refs,
+            compile_context=CreateCompileContext(
+                final_output_type=OutputType.DOCX,
+                final_output_mode=OutputMode.RENDER_VERBATIM,
+            ),
+            planning_state=planning_state,
+            request_id="req-committed-docx-mode",
+        ),
+        finalizer=CompiledProposalFinalizer(
+            repo=_make_persisting_repo(),
+            quality_retry_warning_codes=frozenset(),
+        ),
+    )
+
+    assert result is not None
+    plan_event = result.events[0]
+    assert isinstance(plan_event, AIBuilderPlanEvent)
+    stored_steps = plan_event.data.proposal.spec.steps
+    assert stored_steps[0].assistant_spec.model_ref == "model.gpt-5-4-nano"
+    assert stored_steps[-1].output_type == OutputType.DOCX
+    assert stored_steps[-1].output_mode == OutputMode.RENDER_VERBATIM
+    assert all(step.output_mode != OutputMode.TEMPLATE_FILL for step in stored_steps)
 
 
 @pytest.mark.asyncio

@@ -1084,7 +1084,6 @@ _CREATE_GATED_ARCHITECTURE_INVARIANT_IDS = (
     "docx_terminal_output_alignment",
     "standalone_audio_requires_transcription_step",
     "multi_document_compare_requires_all_previous_steps",
-    "json_input_rejects_all_previous_steps_source",
 )
 
 
@@ -1135,26 +1134,6 @@ def _create_gated_architecture_context(
                         "Jämför dokument",
                         "Jämför dokumenten.",
                         input_source=InputSource.PREVIOUS_STEP,
-                    ),
-                ],
-            )
-        case "json_input_rejects_all_previous_steps_source":
-            spec = FlowDraftSpecCore(
-                flow_name="Sammanställning",
-                steps=[
-                    _step(
-                        "step_a",
-                        "Hämta struktur",
-                        "Läs struktur.",
-                        input_type=InputType.DOCUMENT,
-                        output_type=OutputType.JSON,
-                    ),
-                    _step(
-                        "step_b",
-                        "Sammanfatta",
-                        "Sammanfatta tidigare JSON.",
-                        input_source=InputSource.ALL_PREVIOUS_STEPS,
-                        input_type=InputType.JSON,
                     ),
                 ],
             )
@@ -2949,6 +2928,161 @@ def test_flags_non_terminal_docx_conversion_for_output_only_edit() -> None:
     assert "template_fill" in feedback
 
 
+def test_document_conversion_invariant_fires_without_template_fill() -> None:
+    """An output-only edit that converts an intermediate step to DOCX is
+    rejected even when no step uses `template_fill`, so the sibling
+    template-fill invariant cannot account for the rejection."""
+    from uuid import uuid4
+
+    from eneo.flows.domain.flow import FlowStep
+
+    flow = _edit_flow()
+    flow.steps.append(
+        FlowStep(
+            assistant_id=uuid4(),
+            step_order=2,
+            user_description="Existing PDF report",
+            input_source="previous_step",
+            input_type="text",
+            output_mode="pass_through",
+            output_type="pdf",
+        )
+    )
+    planning_state = PlanningState.empty()
+    planning_state.resolved_slots["terminal_output"] = ResolvedSlot(
+        name="terminal_output",
+        value="docx_document",
+        source="structured_answer",
+        confidence="high",
+        evidence=["question_answer:terminal_output"],
+    )
+    spec = FlowDraftSpecCore(
+        flow_name="Existing flow",
+        steps=[
+            _step(
+                "step_a",
+                "Existing analysis",
+                "Keep the analysis.",
+                output_type=OutputType.DOCX,
+            ),
+            _step(
+                "step_b",
+                "Existing report",
+                "Change the final report to DOCX.",
+                input_source=InputSource.PREVIOUS_STEP,
+                output_type=OutputType.DOCX,
+            ),
+        ],
+    )
+    context = build_conversation_critic_context(
+        [],
+        spec,
+        flow=flow,
+        planning_state=planning_state,
+    )
+
+    issues = evaluate_critic_invariants(context)
+
+    assert [
+        (issue.id, issue.kind)
+        for issue in issues
+        if issue.id.startswith("non_terminal_step_")
+    ] == [("non_terminal_step_document_conversion_forbidden", "architecture")]
+
+
+def test_template_fill_invariant_fires_without_document_conversion() -> None:
+    """An output-only edit that gives an already-DOCX intermediate step
+    `template_fill` is rejected on its own, so the sibling document-conversion
+    invariant cannot account for the rejection."""
+    from uuid import uuid4
+
+    from eneo.flows.domain.flow import Flow, FlowStep
+
+    flow = Flow(
+        id=uuid4(),
+        tenant_id=uuid4(),
+        space_id=uuid4(),
+        name="Existing flow",
+        steps=[
+            FlowStep(
+                assistant_id=uuid4(),
+                step_order=1,
+                user_description="Existing analysis",
+                input_source="flow_input",
+                input_type="text",
+                output_mode="pass_through",
+                output_type="text",
+            ),
+            FlowStep(
+                assistant_id=uuid4(),
+                step_order=2,
+                user_description="Existing DOCX draft",
+                input_source="previous_step",
+                input_type="text",
+                output_mode="pass_through",
+                output_type="docx",
+            ),
+            FlowStep(
+                assistant_id=uuid4(),
+                step_order=3,
+                user_description="Existing PDF report",
+                input_source="previous_step",
+                input_type="text",
+                output_mode="pass_through",
+                output_type="pdf",
+            ),
+        ],
+    )
+    planning_state = PlanningState.empty()
+    planning_state.resolved_slots["terminal_output"] = ResolvedSlot(
+        name="terminal_output",
+        value="docx_document",
+        source="structured_answer",
+        confidence="high",
+        evidence=["question_answer:terminal_output"],
+    )
+    spec = FlowDraftSpecCore(
+        flow_name="Existing flow",
+        steps=[
+            _step(
+                "step_a",
+                "Existing analysis",
+                "Keep the analysis.",
+                output_type=OutputType.TEXT,
+            ),
+            _step(
+                "step_b",
+                "Existing DOCX draft",
+                "Keep the draft.",
+                input_source=InputSource.PREVIOUS_STEP,
+                output_type=OutputType.DOCX,
+                output_mode=OutputMode.TEMPLATE_FILL,
+            ),
+            _step(
+                "step_c",
+                "Existing report",
+                "Change the final report to DOCX.",
+                input_source=InputSource.PREVIOUS_STEP,
+                output_type=OutputType.DOCX,
+            ),
+        ],
+    )
+    context = build_conversation_critic_context(
+        [],
+        spec,
+        flow=flow,
+        planning_state=planning_state,
+    )
+
+    issues = evaluate_critic_invariants(context)
+
+    assert [
+        (issue.id, issue.kind)
+        for issue in issues
+        if issue.id.startswith("non_terminal_step_")
+    ] == [("non_terminal_step_template_fill_forbidden", "architecture")]
+
+
 class TestCriticInvariantLoop:
     """The critic delegates to a CRITIC_INVARIANTS registry whose entries
     carry their own evidence (callable) and remediation (Swedish prose),
@@ -3051,172 +3185,6 @@ class TestCriticInvariantLoop:
         spec = FlowDraftSpecCore(
             flow_name="Rapport",
             steps=[_step("step_a", "Skriv", "Skriv.", output_type=OutputType.TEXT)],
-        )
-        context = CriticContext(
-            spec=spec,
-            flow=_edit_flow(),
-            answer_signals={},
-            text="",
-            requirements_text="",
-            signal_text="",
-            planner_patterns=PlannerPatternSignals(),
-            output_intent=OutputIntentResolution(terminal_output=None),
-            mixed_audio_doc_input=False,
-            requested_output_sections=RequestedOutputSections.empty(),
-        )
-
-        assert render_critic_issues(context) == []
-
-
-class TestJsonInputRejectsAllPreviousStepsSourceInvariant:
-    """When any step declares `input_type=json` with
-    `input_source=all_previous_steps` in edit context, the critic must surface
-    a remediation before the validator catches it. The concatenation the runtime
-    performs on `all_previous_steps` produces plain text, which is not valid
-    JSON, so this combination cannot run under any circumstance.
-    """
-
-    def test_render_critic_issues_fires_on_json_all_previous_steps_combo(
-        self,
-    ) -> None:
-        from eneo.flows.ai_builder.ai_builder_critic_invariants import (
-            CriticContext,
-            render_critic_issues,
-        )
-        from eneo.flows.ai_builder.ai_builder_framework_policy import (
-            OutputIntentResolution,
-        )
-        from eneo.flows.ai_builder.ai_builder_planner_pattern_signals import (
-            PlannerPatternSignals,
-        )
-
-        spec = FlowDraftSpecCore(
-            flow_name="Sammanställning",
-            steps=[
-                _step(
-                    "step_a",
-                    "Hämta struktur",
-                    "Läs struktur.",
-                    input_type=InputType.DOCUMENT,
-                    output_type=OutputType.JSON,
-                ),
-                _step(
-                    "step_b",
-                    "Sammanfatta",
-                    "Sammanfatta tidigare JSON.",
-                    input_source=InputSource.ALL_PREVIOUS_STEPS,
-                    input_type=InputType.JSON,
-                    output_type=OutputType.TEXT,
-                ),
-            ],
-        )
-        context = CriticContext(
-            spec=spec,
-            flow=_edit_flow(),
-            answer_signals={},
-            text="",
-            requirements_text="",
-            signal_text="",
-            planner_patterns=PlannerPatternSignals(),
-            output_intent=OutputIntentResolution(terminal_output=None),
-            mixed_audio_doc_input=False,
-            requested_output_sections=RequestedOutputSections.empty(),
-        )
-
-        issues = render_critic_issues(context)
-
-        assert any("all_previous_steps" in issue for issue in issues)
-        assert any("json" in issue.casefold() for issue in issues)
-
-    def test_render_critic_issues_silent_when_json_step_uses_previous_step(
-        self,
-    ) -> None:
-        """`input_type=json` with `input_source=previous_step` is the sanctioned
-        alternative and must not trigger the invariant."""
-        from eneo.flows.ai_builder.ai_builder_critic_invariants import (
-            CriticContext,
-            render_critic_issues,
-        )
-        from eneo.flows.ai_builder.ai_builder_framework_policy import (
-            OutputIntentResolution,
-        )
-        from eneo.flows.ai_builder.ai_builder_planner_pattern_signals import (
-            PlannerPatternSignals,
-        )
-
-        spec = FlowDraftSpecCore(
-            flow_name="Sammanställning",
-            steps=[
-                _step(
-                    "step_a",
-                    "Strukturera",
-                    "Producera JSON.",
-                    input_type=InputType.DOCUMENT,
-                    output_type=OutputType.JSON,
-                ),
-                _step(
-                    "step_b",
-                    "Sammanfatta",
-                    "Sammanfatta JSON.",
-                    input_source=InputSource.PREVIOUS_STEP,
-                    input_type=InputType.JSON,
-                    output_type=OutputType.TEXT,
-                ),
-            ],
-        )
-        context = CriticContext(
-            spec=spec,
-            flow=_edit_flow(),
-            answer_signals={},
-            text="",
-            requirements_text="",
-            signal_text="",
-            planner_patterns=PlannerPatternSignals(),
-            output_intent=OutputIntentResolution(terminal_output=None),
-            mixed_audio_doc_input=False,
-            requested_output_sections=RequestedOutputSections.empty(),
-        )
-
-        assert render_critic_issues(context) == []
-
-    def test_render_critic_issues_silent_when_text_step_uses_all_previous_steps(
-        self,
-    ) -> None:
-        """`input_type=text` with `input_source=all_previous_steps` is legal
-        when prior steps are also text — concatenation is the only available
-        composition. The targeted-underlag invariant in
-        `TestPreferTargetedUnderlagInvariant` only fires when prior steps
-        emit structured JSON the final step could reference instead."""
-        from eneo.flows.ai_builder.ai_builder_critic_invariants import (
-            CriticContext,
-            render_critic_issues,
-        )
-        from eneo.flows.ai_builder.ai_builder_framework_policy import (
-            OutputIntentResolution,
-        )
-        from eneo.flows.ai_builder.ai_builder_planner_pattern_signals import (
-            PlannerPatternSignals,
-        )
-
-        spec = FlowDraftSpecCore(
-            flow_name="Sammanställning",
-            steps=[
-                _step(
-                    "step_a",
-                    "Analysera",
-                    "Analysera dokument.",
-                    input_type=InputType.DOCUMENT,
-                    output_type=OutputType.TEXT,
-                ),
-                _step(
-                    "step_b",
-                    "Sammanfatta",
-                    "Sammanfatta alla tidigare steg.",
-                    input_source=InputSource.ALL_PREVIOUS_STEPS,
-                    input_type=InputType.TEXT,
-                    output_type=OutputType.TEXT,
-                ),
-            ],
         )
         context = CriticContext(
             spec=spec,
@@ -5375,7 +5343,6 @@ class TestCriticInvariantRegistry:
             "field_reuse_requires_input_bindings",
             "multi_document_compare_requires_all_previous_steps",
             "simple_text_transform_must_remain_single_step",
-            "json_input_rejects_all_previous_steps_source",
             "document_renderer_must_immediately_follow_body_writer",
             "terminal_renderer_must_not_consume_review_only_step",
             "requested_output_sections_require_section_writers",

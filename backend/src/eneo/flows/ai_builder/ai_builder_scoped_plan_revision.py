@@ -62,6 +62,7 @@ if TYPE_CHECKING:
     from eneo.flows.ai_builder.ai_builder_create_compile_context import (
         CreateCompileContext,
     )
+    from eneo.flows.ai_builder.planning_state import PlanningState
     from eneo.flows.domain.flow import Flow
 
 logger = get_logger(__name__)
@@ -80,6 +81,7 @@ class ScopedPlanRevisionRequest:
     request_id: str
     usage_tracker: ProposalTurnTelemetry | None
     compile_context: "CreateCompileContext | None"
+    planning_state: "PlanningState"
     assistant_metadata: dict[str, object] | None = None
     flow: "Flow | None" = None
 
@@ -155,7 +157,7 @@ async def run_scoped_plan_revision_attempt(
             flow=request.flow,
             request_id=request.request_id,
             usage_tracker=request.usage_tracker,
-            planning_state=None,
+            planning_state=request.planning_state,
             compile_context=request.compile_context,
         )
     )

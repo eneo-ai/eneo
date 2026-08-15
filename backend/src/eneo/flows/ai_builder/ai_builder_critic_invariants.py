@@ -1111,40 +1111,6 @@ _SIMPLE_TEXT_TRANSFORM_MUST_REMAIN_SINGLE_STEP = CriticInvariant(
 )
 
 
-# ── JSON input rejects all_previous_steps source ────────────────────────
-
-
-def _json_input_rejects_all_previous_steps_source_evidence(
-    context: CriticContext,
-) -> bool:
-    if _is_create_context(context):
-        return False
-    return any(
-        step.input_type == InputType.JSON
-        and step.input_source == InputSource.ALL_PREVIOUS_STEPS
-        for step in context.spec.steps
-    )
-
-
-_JSON_INPUT_REJECTS_ALL_PREVIOUS_STEPS_SOURCE = CriticInvariant(
-    id="json_input_rejects_all_previous_steps_source",
-    description=(
-        "A step declaring `input_type=json` cannot read from "
-        "`input_source=all_previous_steps` because the runtime concatenates "
-        "prior step output as text, which is not valid JSON."
-    ),
-    evidence=_json_input_rejects_all_previous_steps_source_evidence,
-    remediation=(
-        'Ett steg har `input_type="json"` tillsammans med `input_source="all_previous_steps"`, '
-        "vilket inte kan köras eftersom sammanslagen text från tidigare steg inte är giltig JSON. "
-        'Välj en av: (a) sätt `input_source="previous_step"` och hänvisa till specifika fält '
-        "via `uses_previous_fields` när steget ska läsa strukturerad JSON från det omedelbart "
-        'föregående steget; eller (b) sätt `input_type="text"` när steget ska sammanfatta '
-        "eller syntetisera textinnehållet från alla tidigare steg."
-    ),
-)
-
-
 def _last_compositional_step_index(spec: FlowDraftSpecCore) -> int | None:
     """Index of the last step that composes content.
 
@@ -1831,7 +1797,6 @@ CRITIC_INVARIANTS: tuple[CriticInvariant, ...] = (
     _FIELD_REUSE_REQUIRES_INPUT_BINDINGS,
     _MULTI_DOCUMENT_COMPARE_REQUIRES_EXPLICIT_FAN_IN,
     _SIMPLE_TEXT_TRANSFORM_MUST_REMAIN_SINGLE_STEP,
-    _JSON_INPUT_REJECTS_ALL_PREVIOUS_STEPS_SOURCE,
     _DOCUMENT_RENDERER_MUST_IMMEDIATELY_FOLLOW_BODY_WRITER,
     _TERMINAL_RENDERER_MUST_NOT_CONSUME_REVIEW_ONLY_STEP,
     _REQUESTED_OUTPUT_SECTIONS_REQUIRE_SECTION_WRITERS,
