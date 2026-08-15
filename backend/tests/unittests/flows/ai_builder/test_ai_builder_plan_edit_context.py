@@ -24,6 +24,7 @@ from eneo.flows.ai_builder.ai_builder_plan_edit_context import (
     ResolvedAIBuilderEditContext,
     ScopedStepNotice,
     ScopedStepSpecRevision,
+    _validate_target_step_model,
     build_plan_revision_prompt_block,
     resolve_plan_edit_context,
     resolve_scoped_step_revision_if_requested,
@@ -1125,6 +1126,114 @@ def test_step_scoped_edit_rejects_a_model_change_on_the_selected_step(
     assert feedback is not None
     assert "step_b" in feedback
     assert "model picker" in feedback
+
+
+def test_step_scoped_model_check_is_correct_when_the_step_order_also_drifted() -> None:
+    # Both guards are live on one proposal: a step was inserted AND the selected
+    # step's model changed. The model check pairs the target with itself by ref,
+    # so it is right either way; the structural complaint is the one the user
+    # needs, and it comes first.
+    prior = _edit_spec(
+        [
+            _edit_step(
+                "step_a",
+                "Analyze input",
+                output_type=OutputType.JSON,
+                model_ref="model.gpt-4o-mini",
+            ),
+            _edit_step(
+                "step_b",
+                "Create final result",
+                output_type=OutputType.TEXT,
+                model_ref="model.gpt-4o-mini",
+            ),
+        ]
+    )
+    proposed = _edit_spec(
+        [
+            prior.steps[0],
+            _edit_step(
+                "step_b",
+                "Create final result",
+                output_type=OutputType.TEXT,
+                model_ref="model.gpt-5-4",
+            ),
+            _edit_step(
+                "step_c",
+                "Summarize",
+                output_type=OutputType.TEXT,
+                model_ref="model.gpt-4o-mini",
+            ),
+        ]
+    )
+
+    feedback = validate_scoped_plan_revision(
+        context=_step_context(target_plan_step_ref="step_b"),
+        prior_spec=prior,
+        proposed_spec=proposed,
+    )
+
+    assert feedback is not None
+    assert "must not add, remove, or reorder steps" in feedback
+
+    assert (
+        _validate_target_step_model(
+            prior_target=prior.steps[1],
+            proposed_target=proposed.steps[1],
+            target_ref="step_b",
+        )
+        is not None
+    )
+
+
+def test_step_scoped_model_check_does_not_accuse_a_step_after_an_insertion() -> None:
+    # Steps on different models, a step inserted at the front, and no model
+    # changed anywhere. Pairing by position would compare step_b against step_a
+    # and invent a model change; pairing by target ref cannot.
+    prior = _edit_spec(
+        [
+            _edit_step(
+                "step_a",
+                "Analyze input",
+                output_type=OutputType.JSON,
+                model_ref="model.gpt-4o-mini",
+            ),
+            _edit_step(
+                "step_b",
+                "Create final result",
+                output_type=OutputType.TEXT,
+                model_ref="model.gpt-5-4",
+            ),
+        ]
+    )
+    proposed = _edit_spec(
+        [
+            _edit_step(
+                "step_new",
+                "Collect sources",
+                output_type=OutputType.JSON,
+                model_ref="model.gpt-4o-mini",
+            ),
+            *prior.steps,
+        ]
+    )
+
+    assert (
+        _validate_target_step_model(
+            prior_target=prior.steps[1],
+            proposed_target=proposed.steps[2],
+            target_ref="step_b",
+        )
+        is None
+    )
+
+    feedback = validate_scoped_plan_revision(
+        context=_step_context(target_plan_step_ref="step_b"),
+        prior_spec=prior,
+        proposed_spec=proposed,
+    )
+    assert feedback is not None
+    assert "model picker" not in feedback
 
 
 def test_whole_plan_outline_revision_is_not_model_guarded_yet() -> None:

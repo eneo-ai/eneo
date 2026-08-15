@@ -412,11 +412,10 @@ def validate_scoped_plan_revision(
     )
     if preservation_feedback is not None:
         return preservation_feedback
-    # Runs last at this scope: the preservation check has already proved the
-    # step sequence is unchanged, so the carried-step match is exact here.
-    return _validate_carried_step_models(
-        prior_spec=prior_spec,
-        proposed_spec=proposed_spec,
+    return _validate_target_step_model(
+        prior_target=prior_target,
+        proposed_target=proposed_target,
+        target_ref=target_ref,
     )
 
 
@@ -584,29 +583,30 @@ def _word_tokens(text: str) -> set[str]:
     return set(_WORD_PATTERN.findall(text.casefold()))
 
 
-def _validate_carried_step_models(
+def _validate_target_step_model(
     *,
-    prior_spec: FlowDraftSpecCore,
-    proposed_spec: FlowDraftSpecCore,
+    prior_target: StepSpec,
+    proposed_target: StepSpec,
+    target_ref: str,
 ) -> str | None:
-    """Reject a model change on a step this step-scoped edit carries over.
+    """Reject a model change on the step the user selected.
 
-    Only valid once the step sequence is proven unchanged, which
-    `_validate_non_target_preservation` does first; the steps then pair by
-    position exactly.
+    Both sides are the same step, each located by the ref the edit context
+    names, so this compares one identity against itself. It is therefore
+    correct whatever the proposal did to step order, and does not depend on
+    another check having run first. Unrelated steps keep their models through
+    `_validate_non_target_preservation`, which also compares them by ref.
     """
 
-    for prior_step, proposed_step in zip(prior_spec.steps, proposed_spec.steps):
-        prior_model_ref = prior_step.assistant_spec.model_ref
-        if proposed_step.assistant_spec.model_ref == prior_model_ref:
-            continue
-        return (
-            f"Step-scoped plan edits must keep step `{prior_step.plan_step_ref}` "
-            f"on its current model `{prior_model_ref}`. The model is chosen in "
-            "the step's model picker, never by an edit; apply the rest of the "
-            "requested change and say that in plan_rationale."
-        )
-    return None
+    prior_model_ref = prior_target.assistant_spec.model_ref
+    if proposed_target.assistant_spec.model_ref == prior_model_ref:
+        return None
+    return (
+        f"Step-scoped plan edits must keep step `{target_ref}` on its current "
+        f"model `{prior_model_ref}`. The model is chosen in the step's model "
+        "picker, never by an edit; apply the rest of the requested change and "
+        "say that in plan_rationale."
+    )
 
 
 def _validate_non_target_preservation(
