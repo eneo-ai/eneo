@@ -146,8 +146,9 @@ sessions and a later confirmation turn does not repair it (the classifier
 contract asks for current evidence; the model cited the earlier turn, so the
 guard rejected the delta by design and no recovery path exists); and the base
 create schema undercounts by ~2,544 tokens against a 2,000-token reserve — so
-token truth, a stable confirmation owner and a typed recovery path precede
-widening the schema. Finally, the one hard-coded model
+token truth and a stable confirmation owner precede widening the schema,
+while recovery of names the classifier never emitted is decided after D1
+from evidence. Finally, the one hard-coded model
 route introduced with the strict-tools measurement is replaced by a typed,
 fail-closed completion-model capability, and product routing or feature
 selection on literal catalog identities is now a standing ruling (protocol
@@ -398,7 +399,8 @@ frozen manifest, never restated as a prose constant.
   (the model writes the short semantic name and self-references the root),
   while a closed `$defs` enum binds 9/9 at +4,420 provider tokens; the
   marginal cost 9→16 is 615 provider tokens against 642 charged and 0→16 is
-  1,380 against 1,443, so cap 16 stands; the base create schema costs ~2,823
+  1,380 against 1,443 — the width-16 probe passed (the design gate later
+  froze the projection cap at 12); the base create schema costs ~2,823
   provider tokens while charging 279 (offset ≈2,544, above the 2,000-token
   reserve; `count_tool_tokens` also ignores `$defs`). Three fresh captures of
   the nested public-record case: admission is lossless (emitted == admitted,
@@ -1006,27 +1008,44 @@ ownership defect below.
     classifier contract asks for current evidence and the model cited the
     earlier turn — but the first-turn omission it would have repaired is
     general (a parent lost 1/3 in one case, a whole five-child block lost 1/3
-    in another, admission lossless, no later recovery), so recovery happens
-    through ONE server-gated event (CP5-RECOVER, mechanism gate-owned, own
-    acceptance proof, before D1). CP5-RECOVER changes persisted named-result
-    state only; CONFIRM-STABILITY alone owns the disclosed summary and its
-    requirements version — the single confirmation identity — and that
-    disclosure includes every named-result obligation with its shape, so a
-    recovery automatically invalidates a prior confirmation; CONFIRM-STABILITY
-    therefore precedes it. CONFIRM-STABILITY also owns pre-confirmation
-    projection admission (cap, literal keys, unsupported grain) through one
-    typed projector; D1 is then the provider-schema materialization of that
-    already-admitted projection. The slice bodies below are the tracked
-    contracts. The presence critic becomes a compiler
-    postcondition when D1 lands; the ×3 cohort is predeclared from the sealed
-    `eeb8371e8` observations that hit it (ledger rows owned by CP5-D1; the two
-    MIXED rows are measured but not claimed), and the slice is green when the
-    presence family is zero, acceptance and conformance are flat or better on
-    the 32 stable leaf cases, and no new family replaces it. D1 does not start
-    before TOKEN-TRUTH has sealed conservative accounting for the base, 9-key,
-    16-key and legal worst-case schemas at both budget consumers and
-    CONFIRM-STABILITY / CP5-RECOVER have their proofs: widening the schema on
-    an undercounted budget with no recovery path is the wrong order.
+    in another, admission lossless, no later recovery). Recovery of what the
+    classifier never emitted is NOT a D1 prerequisite (design gate pass 9,
+    green): the presence critic never protected unemitted names either, so D1
+    guarantees every ADMITTED obligation, an omitted name is simply not an
+    obligation, the compiled contract for such a case is recorded as a
+    conformance FAILURE (never claimed as success), and whether a separately
+    gated recovery lifecycle is worth its cost is decided from the post-D1
+    broad measurement (omission frequent and stable, or not). Three owners:
+    CONFIRM-STABILITY owns informed confirmation (own gate, lands before D1),
+    D1 owns deterministic projection of admitted obligations, a future
+    recovery slice would own classifier omission. Projection admission (cap,
+    every projected stored name that cannot compile unchanged — quoted or
+    not — refused as `NAMED_RESULT_KEY_UNSUPPORTED`, unsupported grain) stays
+    in the one action-policy owner that already runs before confirmation;
+    the cap is its own constant `NAMED_RESULT_PROJECTION_MAX_ITEMS = 12`
+    (observed corpus maximum 9; never aliased to the classifier citation
+    bound). D1 is the provider-schema materialization of that admitted
+    projection with the compact self-excluding container index plus one
+    typed `ordered_keys` carrier beside the prepared schema through
+    submission into admission (no generic projection framework); the prose
+    obligation prompt and the presence critic are deleted only after D1's
+    acceptance gate passes. D1 entry gates: (1) STRICT-CAP seals the exact
+    width-9 and width-12 candidate schemas with the production prompt and a
+    sufficient output cap; (2) TOKEN-TRUTH reserves correctly at both budget
+    consumers for base, 9/12 and the longest legal names; (3) matched ×3
+    runs at widths 9 and 12 produce the expected parent tree with the
+    self-excluding index, else ONE measured fallback is frozen before coding;
+    (4) CONFIRM-STABILITY landed green. D1 acceptance: raw schema →
+    admission → compiler → final validator yields the repository-declared
+    graph with zero normal-path repair on a complete admitted set; 12
+    accepted / 13 refused before confirmation; declared-schema and edit paths
+    unchanged; permuting returned `result_keys` member order preserves the
+    graph; in the ×3 cohort (ledger rows owned by CP5-D1; the two MIXED rows
+    measured, not claimed) every observation with complete emitted evidence
+    matches its expected schema and incomplete-emission observations are
+    recorded as conformance failures — never D1 successes or regressions;
+    presence family zero, acceptance and conformance flat or better on the
+    32 stable leaf cases, no new family.
 - [ ] STRICT-CAP Native strict-tool-schema capability (user directive
     2026-08-15): strict tool schemas are a transport/model feature like
     `supports_tool_calling`, so the owner is a typed completion-model
@@ -1128,40 +1147,22 @@ ownership defect below.
     and the count is consumed at two sites (attachment fitting and `fit()`).
     Owner: the shared `count_tool_tokens` (`token_utils.py`) and its two
     existing consumers — no second estimator. Sealed with the probe receipts
-    once the probe change lands: base, realistic 9-key and 16-key, AND the
-    legal worst case derived from the typed caps (16 obligations × maximum
+    once the probe change lands: base, realistic 9-key and 12-key, AND the
+    legal worst case derived from the typed cap (12 obligations × maximum
     name length, whichever container form D1 adopts), verified conservative
     at BOTH consumers; no product-prompt change.
-- [ ] CP5-RECOVER Named-result recovery (before D1; after
-    CONFIRM-STABILITY): obligations the first turn omitted (measured 1/3 —
-    a parent in one case, a whole child block in another; admission
-    lossless; the confirmation turn re-emitted them but the current-evidence
-    guard rightly rejected a stale-cited delta) must reach planning through
-    ONE server-gated event, never through a stale-citation fallback on
-    ordinary turns. The design gate chooses the mechanism with the fewest new
-    concepts that satisfies the guards below: either a targeted full-snapshot
-    named-result pass at the confirmation event that `replace`s the persisted
-    snapshot (shapes re-derived from citations; no tombstones), or an
-    explicit additive `recover` transition (active fold → no-op, absent fold
-    → append with citation-derived name and shape, bounded tombstones that
-    survive cache/replay/compaction, server-derived recovery-allowed flag).
-    Guards either way: existing identities stay byte-for-byte unchanged, a
-    recovered parent keeps its declared shape, ordinary turns keep the
-    `update` / `clear` current-evidence rules, nothing mutates an active
-    identity from stale evidence, and a recovery changes persisted state only
-    and thereby forces re-confirmation through CONFIRM-STABILITY's
-    projection. Acceptance: behaviour tests for current re-add, clear,
-    clear-then-recover, cache, replay and compaction, plus the exact turn
-    trace: the
-    user confirms requirements v1; a recovery learned on that turn changes the
-    persisted obligation set, so the Builder emits a complete v2 summary
-    (every recovered name with its declared shape disclosed) and NO plan; the
-    user confirms v2; the plan is created. Bounded at two user confirmation
-    turns; a recovery that does not change the disclosed set produces no new
-    version. Targeted cohort — the two captured omission cases (public-record
-    parent, meeting-action child block) ×3 must reach the repository-declared
-    obligation set within that trace with zero normal-path repairs; when the
-    first turn already emits the full set, one confirmation suffices.
+- [ ] RECOVERY (deferred, evidence-decided): whether classifier omission of
+    a declared obligation at first emission (measured 1/3 on two nested
+    cases; admission lossless; the confirmation turn re-emitted the names but
+    the current-evidence guard rightly rejected a stale-cited delta) merits a
+    separately gated recovery lifecycle is decided from the post-D1 broad
+    measurement. Not a D1 prerequisite; no tombstones, recover operations,
+    unions or name-length refusals exist in the active plan. If it is taken
+    up, its gate must define the total wire/parser contract (empty, `null`,
+    invalid citations, removals, cache and prompt-hash identity), the lanes
+    it may run in, the carrier through the chained decision path, and the
+    fail-closed confirmation behaviour, and it changes persisted named-result
+    state only — CONFIRM-STABILITY's disclosure invalidates confirmation.
 - [ ] FLOW-QUALITY Produced-flow quality checkpoint — bounded, reporting-only
     (user direction 2026-08-15: the Builder is the de-facto way Flows are
     created, edited and maintained, so the produced Flow must be excellent on
@@ -1443,21 +1444,20 @@ ownership defect below.
     must seal a capability, not a constant; the probe's `--tool-schema-file`
     lands with it. Proof: typed contract tests + sealed capability probe.
     (b) **TOKEN-TRUTH** — sealed schema-token probe from clean source for
-    base, realistic 9/16 and the legal worst case from the typed caps,
+    base, realistic 9/12 and the longest legal names under the typed cap,
     conservative at both budget consumers, including container behaviour.
     Proof: probe receipts. Must precede D1 only.
-    (c) **CONFIRM-STABILITY** (sole owner of the disclosed summary and the
-    requirements version as the single confirmation identity; raw-state
-    fingerprint retired; pre-confirmation projection admission through the
-    one typed projector) then **CP5-RECOVER** (persisted named-result state
-    only, gate-owned mechanism; recovery invalidates confirmation through
-    that owner); local behaviour tests first, then their targeted `eeb8371e8`
-    cohorts ×3. May run before or alongside (b).
-    (d) **CP5-D1** provider-schema materialization of the already-admitted
-    projection, with the container-binding decision (removes the 24
-    presence-critic failures by construction and can claim at most the 22
-    D1-only observations; the critic becomes a postcondition). Cohort ×3
-    predeclared from the ledger rows.
+    (c) **CONFIRM-STABILITY** — own design gate; sole owner of the disclosed
+    summary and the requirements version as the single confirmation identity;
+    raw-state fingerprint retired after the disclosure is complete; local
+    behaviour tests first, then its targeted `eeb8371e8` cohort ×3. May run
+    before or alongside (b); lands before D1.
+    (d) **CP5-D1** provider-schema materialization of the admitted projection
+    with the compact self-excluding container index (entry gates 1–4 and the
+    acceptance list in the CP5 body; removes the 24 presence-critic failures
+    by construction and can claim at most the 22 D1-only observations; the
+    critic becomes a postcondition). Cohort ×3 predeclared from the ledger
+    rows; recovery of unemitted names is decided later from evidence.
     (e) **TEMPLATE-MODE** (6 stable stalls; reuse the resolver at the merge
     point). Cohort ×3.
     (f) **SECTION-WRITERS** (stop promoting example headings; downgrade or
