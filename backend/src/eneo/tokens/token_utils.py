@@ -219,7 +219,6 @@ _MAX_TOOL_SCHEMA_EXPANSION_CHARS = 4 * 1024 * 1024
 # would raise out of a counter rather than answer it.
 _MAX_TOOL_SCHEMA_REFERENCE_DEPTH = 64
 _LOCAL_POINTER_PREFIX = "#/"
-_DEFINITIONS_POINTER_PREFIX = "#/$defs/"
 
 # What an unbounded schema reserves. This is a refusal, not a measurement: no
 # context window admits it, so every budget that subtracts it declines the
@@ -261,25 +260,32 @@ class _ExpansionBudget:
         self.incomplete = True
 
 
-def _definition_name(pointer: str) -> str:
-    """Decode a `#/$defs/<name>` pointer the way a schema validator reads it.
+def _definition_name(pointer: str) -> str | None:
+    """Read a `#/$defs/<name>` pointer the way a schema validator reads it.
 
     The pointer is a URI fragment holding a JSON Pointer, so percent-encoding
-    is undone first and JSON Pointer escapes second. Skipping the first step
-    left `#/$defs/space%20name` unresolved, and an unresolved reference is a
-    definition charged once instead of once per use.
+    is undone first, the result is split into tokens, and only then are the
+    JSON Pointer escapes decoded — per token, because a decoded `~1` is part of
+    a name and never a separator. Skipping the first step left
+    `#/$defs/space%20name` unresolved; skipping the split read `#/$defs/a/b` as
+    a definition literally named `a/b`, which is a different schema.
+
+    Returns None for every pointer outside this one supported shape, including
+    a deeper path into a definition, a whole-document `#`, an anchor, and an
+    external reference. The caller refuses those rather than pricing them.
     """
-    return (
-        unquote(pointer[len(_DEFINITIONS_POINTER_PREFIX) :])
-        .replace("~1", "/")
-        .replace("~0", "~")
-    )
+    if not pointer.startswith(_LOCAL_POINTER_PREFIX):
+        return None
+    tokens = unquote(pointer[len(_LOCAL_POINTER_PREFIX) :]).split("/")
+    if len(tokens) != 2 or tokens[0] != "$defs":
+        return None
+    return tokens[1].replace("~1", "/").replace("~0", "~")
 
 
-def _resolve_definition(pointer: str, definitions: object) -> object | None:
+def _resolve_definition(name: str, definitions: object) -> object | None:
     if not isinstance(definitions, dict):
         return None
-    return cast("dict[str, Any]", definitions).get(_definition_name(pointer))
+    return cast("dict[str, Any]", definitions).get(name)
 
 
 def _expand_schema_references(
@@ -302,10 +308,14 @@ def _expand_schema_references(
     bytes on the wire and the definition they stand for are counted, and a key
     on the reference can never collide with one on the target.
 
-    Anything this cannot account for — an unresolvable local pointer, a chain
-    past the depth ceiling, a target past the character ceiling — marks the
-    payload incomplete rather than quietly costing less.
+    Anything this cannot account for — a reference outside the one supported
+    pointer shape, a chain past the depth ceiling, a target past the character
+    ceiling — marks the payload incomplete rather than quietly costing less,
+    and the walk stops there: the answer is already a refusal, so serializing
+    the rest of a catalog would be work spent on a number nobody will read.
     """
+    if budget.incomplete:
+        return node
     if isinstance(node, list):
         return [
             _expand_schema_references(
@@ -353,14 +363,11 @@ def _expanded_reference(
         # A cycle: the definition is already being counted further up, and
         # `$defs` keeps its own copy, so the pointer alone is the honest cost.
         return pointer
-    if not pointer.startswith(_DEFINITIONS_POINTER_PREFIX):
-        if pointer.startswith(_LOCAL_POINTER_PREFIX):
-            budget.cannot_account_for_a_reference()
-        return pointer
-    if depth >= _MAX_TOOL_SCHEMA_REFERENCE_DEPTH:
+    name = _definition_name(pointer)
+    if name is None or depth >= _MAX_TOOL_SCHEMA_REFERENCE_DEPTH:
         budget.cannot_account_for_a_reference()
         return pointer
-    target = _resolve_definition(pointer, definitions)
+    target = _resolve_definition(name, definitions)
     if target is None or not budget.spend(len(_serialized(target))):
         if target is None:
             budget.cannot_account_for_a_reference()
@@ -391,6 +398,8 @@ def _tool_reserve_payload(tools: list[dict[str, Any]]) -> _ToolReservePayload:
                 if isinstance(function, dict)
                 else None
             )
+            if budget.incomplete:
+                break
             expanded.append(
                 _expand_schema_references(
                     tool,
@@ -404,11 +413,13 @@ def _tool_reserve_payload(tools: list[dict[str, Any]]) -> _ToolReservePayload:
                     depth=0,
                 )
             )
+        if budget.incomplete:
+            return _ToolReservePayload(text="", bounded=False)
         text = _serialized(expanded)
     except (RecursionError, ValueError, TypeError):
         # A schema this counter cannot even walk is one it must not price.
         return _ToolReservePayload(text="", bounded=False)
-    return _ToolReservePayload(text=text, bounded=not budget.incomplete)
+    return _ToolReservePayload(text=text, bounded=True)
 
 
 def _fallback_tool_reserve_tokens(tools: list[dict[str, Any]]) -> int:

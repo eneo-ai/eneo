@@ -1,6 +1,7 @@
 import base64
 import io
 import json
+import time
 from unittest.mock import patch
 
 import litellm
@@ -302,6 +303,85 @@ def test_tool_reserve_keeps_a_reference_and_its_target_when_keys_collide():
     # Once in `$defs` and once written out at the use site, beside the sibling.
     assert payload.text.count("TARGET-TEXT") == 40
     assert payload.text.count("SIBLING-TEXT") == 20
+
+
+def test_only_a_direct_definition_reference_is_priced():
+    # The pointer grammar this counter supports is exactly `#/$defs/<name>`.
+    # Reading `#/$defs/a/b` as a definition literally named "a/b" resolved a
+    # different schema than a validator would, and `#`, an anchor or an
+    # external document cannot be resolved here at all. Each must refuse.
+    nested = {"type": "string", "description": "B" * 5_000}
+    for pointer in (
+        "#/$defs/outer/inner",
+        "#",
+        "#anchor",
+        "https://example.invalid/shared.json#/$defs/shared",
+    ):
+        tools = [
+            {
+                "type": "function",
+                "function": {
+                    "name": "propose_flow",
+                    "parameters": {
+                        "type": "object",
+                        "$defs": {
+                            "outer": {"inner": nested},
+                            "outer/inner": {"type": "string"},
+                        },
+                        "properties": {"value": {"$ref": pointer}},
+                        "required": ["value"],
+                        "additionalProperties": False,
+                    },
+                },
+            }
+        ]
+
+        measured = measure_tool_tokens(tools, "openai/gpt-4o")
+
+        assert measured.source is TokenCountSource.FALLBACK_ESTIMATE
+        assert measured.tokens > 1_000_000_000
+
+
+def test_a_refused_schema_stops_the_walk_instead_of_serializing_the_rest():
+    # Once the answer is a refusal there is nothing left to measure, and a
+    # catalogue may be tens of megabytes. Work must not scale with what
+    # follows the reference that already failed.
+    definition = {"type": "string", "description": "C" * 200_000}
+
+    def elapsed_for(references: int) -> float:
+        properties = {
+            f"property_{index}": {"$ref": "#/$defs/shared"}
+            for index in range(references)
+        }
+        tools = [
+            {
+                "type": "function",
+                "function": {
+                    "name": "propose_flow",
+                    "parameters": {
+                        "type": "object",
+                        "$defs": {"shared": definition, "unsupported": definition},
+                        "properties": {
+                            "first": {"$ref": "#"},
+                            **properties,
+                        },
+                        "required": ["first", *sorted(properties)],
+                        "additionalProperties": False,
+                    },
+                },
+            }
+        ]
+        started = time.perf_counter()
+        payload = _tool_reserve_payload(tools)
+        assert not payload.bounded
+        return time.perf_counter() - started
+
+    few = elapsed_for(10)
+    many = elapsed_for(900)
+
+    # Ninety times the references must not cost anything like ninety times the
+    # work once the refusal is already decided.
+    assert many < max(few * 10, 0.5)
 
 
 def test_a_reference_this_counter_cannot_resolve_is_refused():
