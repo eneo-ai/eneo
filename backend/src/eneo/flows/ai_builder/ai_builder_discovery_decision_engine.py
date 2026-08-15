@@ -112,11 +112,9 @@ def apply_discovery_decision_engine(
     )
     max_questions = compute_question_budget(profile.text)
     spent_user_questions = _answered_user_requirement_question_count(conversation)
-    # Only server-derived assumptions. The classifier's own prose was
-    # regenerated every turn over unchanged evidence, and it reached the
-    # requirements summary verbatim, so it moved the confirmation identity
-    # without any fact having changed.
-    assumptions: list[str] = []
+    assumptions: list[str] = list(
+        slot_classification_result.assumptions if slot_classification_result else ()
+    )
     selected: list[DiscoveryIssue] = []
     selected_question_ids: list[str] = []
     family_used: set[str] = set()

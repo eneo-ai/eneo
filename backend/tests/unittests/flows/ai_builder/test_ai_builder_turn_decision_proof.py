@@ -14,9 +14,6 @@ from eneo.flows.ai_builder.ai_builder_architecture_commit import (
 from eneo.flows.ai_builder.ai_builder_architecture_derivation import (
     derive_architecture_commit_draft,
 )
-from eneo.flows.ai_builder.ai_builder_requirements_disclosure import (
-    build_requirements_disclosure,
-)
 from eneo.flows.ai_builder.ai_builder_slot_classification_contract import (
     UNKNOWN_SLOT_VALUE,
     ClassifiedSlot,
@@ -264,13 +261,23 @@ def _cases() -> tuple[TurnDecisionCase, ...]:
 def test_turn_controller_returns_canonical_server_decisions(
     case: TurnDecisionCase,
 ) -> None:
-    disclosure = build_requirements_disclosure(case.state, ui_language="en")
+    confirmed_attachment_evidence_fingerprint: str | None = None
+    if case.requirements_confirmed:
+        unconfirmed = resolve_turn_control(
+            session_state=case.state,
+            selected_discovery_question_ids=case.selected_questions,
+            confirmed_attachment_evidence_fingerprint=None,
+            ui_language="en",
+        ).decision
+        if isinstance(unconfirmed, ConfirmRequirements):
+            confirmed_attachment_evidence_fingerprint = (
+                unconfirmed.attachment_evidence_fingerprint
+            )
     turn_control = resolve_turn_control(
         session_state=case.state,
         selected_discovery_question_ids=case.selected_questions,
-        requirements_disclosure=disclosure,
-        confirmed_requirements_version=(
-            disclosure.requirements_version if case.requirements_confirmed else None
+        confirmed_attachment_evidence_fingerprint=(
+            confirmed_attachment_evidence_fingerprint
         ),
         ui_language="en",
     )

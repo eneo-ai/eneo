@@ -5982,17 +5982,17 @@ async def test_server_requirements_confirmation_with_lost_lease_rolls_back(
                     turn=stale_turn,
                     decision=ConfirmRequirements(
                         payload=RequirementsSummaryPayload(
-                            requirements_version="a" * 64,
                             summary="Bygg ett textflöde.",
                             key_decisions=[],
                             input_description="Användaren skriver text.",
                             output_description="Flödet svarar med text.",
                         ),
+                        attachment_evidence_fingerprint="a" * 64,
                     ),
                     conversation=[],
                     new_messages_start=0,
                     flow=None,
-                    confirmed_requirements_version=None,
+                    confirmed_attachment_evidence_fingerprint=None,
                     ui_language="sv",
                     telemetry=ServerDecisionTelemetry(
                         request_id="req-requirements-lost-lease",
@@ -6081,7 +6081,7 @@ async def test_server_question_with_lost_lease_rolls_back(
                     conversation=[],
                     new_messages_start=0,
                     flow=None,
-                    confirmed_requirements_version=None,
+                    confirmed_attachment_evidence_fingerprint=None,
                     ui_language="sv",
                     telemetry=ServerDecisionTelemetry(
                         request_id="req-question-lost-lease",
@@ -6818,9 +6818,7 @@ async def _progress_builder_session_to_plan(
             None,
         )
         if requirements_event is not None:
-            # Confirming carries no message of its own; text beside a
-            # confirmation is a change request the server reads as one.
-            message = ""
+            message = "Ja, det stämmer. Bygg planen."
             question_answer = {
                 "requirements_confirmed": True,
                 "requirements_version": requirements_event["data"][

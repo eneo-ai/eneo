@@ -309,7 +309,7 @@ describe("FlowAIBuilderDriver", () => {
     expect(driver.isLatestRequirementsSummary(newSummary)).toBe(true);
   });
 
-  it("confirms a hydrated summary by naming its version, with no message of its own", async () => {
+  it("confirms a hydrated requirements summary whose version is stored on metadata", async () => {
     const { driver, stream } = makeDriver({
       streamImpl: vi.fn(async (_path, init, handlers) => {
         expect(init.requestBody["application/json"].question_answer).toEqual({
@@ -317,9 +317,6 @@ describe("FlowAIBuilderDriver", () => {
           requirements_confirmed: true,
           requirements_version: "req-persisted"
         });
-        // Text beside a confirmation is a change request the server reads as
-        // one, so confirming sends none.
-        expect(init.requestBody["application/json"].message).toBe("");
         completeStream(handlers);
       })
     });
@@ -353,7 +350,6 @@ describe("FlowAIBuilderDriver", () => {
     });
     expect(driver.state.messages[1]).toMatchObject({
       role: "user",
-      content: "",
       metadata: {
         requirements_confirmed: true,
         requirements_version: "req-persisted"

@@ -4326,6 +4326,7 @@
   "ai_builder_requirements_change_message_empty": "I want to revise the requirements.",
   "ai_builder_requirements_collapse": "Hide details",
   "ai_builder_requirements_confirm": "Continue to plan",
+  "ai_builder_requirements_confirm_message": "Yes, that's correct. Build the plan.",
   "ai_builder_requirements_decisions": "Decisions from your answers",
   "ai_builder_requirements_editing_hint": "Describe what you want to change in the requirements",
   "ai_builder_requirements_expand": "Show details",

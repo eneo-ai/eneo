@@ -24,14 +24,18 @@ from eneo.flows.ai_builder.ai_builder_error_contract import (
 from eneo.flows.ai_builder.ai_builder_event_models import (
     AIBuilderStatus,
     AIBuilderStreamEvent,
+    RequirementsSummaryPayload,
 )
 from eneo.flows.ai_builder.ai_builder_events import (
     build_requirements_summary_event,
     build_status_event,
 )
+from eneo.flows.ai_builder.ai_builder_framework_policy import (
+    normalize_requirements_summary_for_flow,
+)
 from eneo.flows.ai_builder.ai_builder_proposal_telemetry import ProposalTurnTelemetry
-from eneo.flows.ai_builder.ai_builder_requirements_disclosure import (
-    build_requirements_disclosure,
+from eneo.flows.ai_builder.ai_builder_requirements_state import (
+    build_requirements_version,
 )
 from eneo.flows.ai_builder.ai_builder_session_turn import SessionSendTurn
 from eneo.flows.ai_builder.ai_builder_telemetry import (
@@ -83,7 +87,7 @@ class ServerDecisionDispatchRequest:
     conversation: list[ConversationMessage]
     new_messages_start: int
     flow: "Flow | None"
-    confirmed_requirements_version: str | None
+    confirmed_attachment_evidence_fingerprint: str | None
     ui_language: str | None
     telemetry: ServerDecisionTelemetry
     planning_state: PlanningState
@@ -235,18 +239,14 @@ async def _dispatch_architecture_commit(
         tenant_id=chained_turn.tenant_id,
     )
     session_state = persisted_state or PlanningState.empty()
-    # The chained confirmation reads the same disclosure the direct path would
-    # have produced from this exact persisted state.
     turn_control = resolve_turn_control(
         session_state=session_state,
         selected_discovery_question_ids=(),
-        requirements_disclosure=build_requirements_disclosure(
-            session_state,
-            ui_language=request.ui_language,
-            discovery_assumptions=request.discovery_assumptions,
+        confirmed_attachment_evidence_fingerprint=(
+            request.confirmed_attachment_evidence_fingerprint
         ),
-        confirmed_requirements_version=request.confirmed_requirements_version,
         ui_language=request.ui_language,
+        discovery_assumptions=request.discovery_assumptions,
     )
     if isinstance(turn_control.decision, ConfirmRequirements) or (
         isinstance(turn_control.decision, AskCanonicalQuestion)
@@ -260,7 +260,9 @@ async def _dispatch_architecture_commit(
                 conversation=request.conversation,
                 new_messages_start=len(request.conversation),
                 flow=request.flow,
-                confirmed_requirements_version=request.confirmed_requirements_version,
+                confirmed_attachment_evidence_fingerprint=(
+                    request.confirmed_attachment_evidence_fingerprint
+                ),
                 ui_language=request.ui_language,
                 telemetry=request.telemetry,
                 planning_state=session_state,
@@ -290,10 +292,12 @@ async def _dispatch_requirements_confirmation(
     request: ServerDecisionDispatchRequest,
     decision: ConfirmRequirements,
 ) -> ServerDecisionDispatchResult:
-    # The decision already carries the complete, versioned disclosure. Nothing
-    # here may rewrite it: persisting or emitting a different object than the
-    # one that was hashed is how confirmation grew a second truth.
-    requirements_payload = decision.payload
+    requirements_payload = build_requirements_summary_payload(
+        decision.payload,
+        conversation=request.conversation,
+        flow=request.flow,
+        ui_language=request.ui_language,
+    )
     request.conversation.append(
         ConversationMessage(
             role="assistant",
@@ -306,7 +310,12 @@ async def _dispatch_requirements_confirmation(
                     architecture_commit_populated=False,
                     tool_call_count=0,
                 ),
-                base_metadata=requirements_summary_to_metadata(requirements_payload),
+                base_metadata=requirements_summary_to_metadata(
+                    requirements_payload,
+                    attachment_evidence_fingerprint=(
+                        decision.attachment_evidence_fingerprint
+                    ),
+                ),
             ),
         )
     )
@@ -320,6 +329,28 @@ async def _dispatch_requirements_confirmation(
         action_kind="confirm_requirements",
         events=(build_requirements_summary_event(requirements_payload),),
         new_planning_state_version=new_version,
+    )
+
+
+def build_requirements_summary_payload(
+    payload: RequirementsSummaryPayload,
+    *,
+    conversation: list[ConversationMessage],
+    flow: "Flow | None",
+    ui_language: str | None,
+) -> RequirementsSummaryPayload:
+    normalized = normalize_requirements_summary_for_flow(
+        payload.model_dump(),
+        conversation=conversation,
+        flow=flow,
+        language=ui_language,
+    )
+    requirements_payload = RequirementsSummaryPayload.model_validate(normalized)
+    return requirements_payload.model_copy(
+        update={
+            "requirements_version": build_requirements_version(requirements_payload)
+        },
+        deep=True,
     )
 
 
@@ -345,5 +376,6 @@ __all__ = [
     "ServerDecisionDispatchResult",
     "ServerDecisionProposalContinuation",
     "ServerDecisionTelemetry",
+    "build_requirements_summary_payload",
     "dispatch_server_decision",
 ]

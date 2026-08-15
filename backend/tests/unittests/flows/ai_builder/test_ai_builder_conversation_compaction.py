@@ -868,7 +868,7 @@ def test_compaction_keeps_latest_requirements_summary_even_if_old() -> None:
             tool_call_id="call-requirements",
             metadata={
                 "requirements_summary": {"summary": "x"},
-                "requirements_version": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                "requirements_version": "req-v1",
             },
         ),
     )
@@ -877,10 +877,7 @@ def test_compaction_keeps_latest_requirements_summary_even_if_old() -> None:
         _msg(
             "user",
             content="confirmed",
-            metadata={
-                "requirements_confirmed": True,
-                "requirements_version": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-            },
+            metadata={"requirements_confirmed": True, "requirements_version": "req-v1"},
         ),
     )
 
@@ -1249,7 +1246,7 @@ def test_compaction_preserves_latest_user_request_before_requirements_confirmati
                 tool_call_id="call_requirements",
                 metadata={
                     "requirements_summary": {"summary": "Byt slutformat till DOCX."},
-                    "requirements_version": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                    "requirements_version": "req-v1",
                 },
             ),
             _msg(
@@ -1257,7 +1254,7 @@ def test_compaction_preserves_latest_user_request_before_requirements_confirmati
                 content="Ja, det stämmer. Bygg planen.",
                 metadata={
                     "requirements_confirmed": True,
-                    "requirements_version": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                    "requirements_version": "req-v1",
                 },
             ),
         ]
@@ -1318,7 +1315,7 @@ def test_compaction_skips_structured_answer_echo_when_preserving_latest_user_req
                 tool_call_id="call_requirements",
                 metadata={
                     "requirements_summary": {"summary": "Byt slutformat till DOCX."},
-                    "requirements_version": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                    "requirements_version": "req-v1",
                 },
             ),
             _msg(
@@ -1326,7 +1323,7 @@ def test_compaction_skips_structured_answer_echo_when_preserving_latest_user_req
                 content="Ja, det stämmer. Bygg planen.",
                 metadata={
                     "requirements_confirmed": True,
-                    "requirements_version": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                    "requirements_version": "req-v1",
                 },
             ),
         ]

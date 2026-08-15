@@ -106,6 +106,7 @@ from eneo.flows.ai_builder.ai_builder_telemetry import (
 )
 from eneo.flows.ai_builder.ai_builder_tool_names import (
     ASK_STRUCTURED_QUESTION_TOOL_NAME,
+    CONFIRM_REQUIREMENTS_TOOL_NAME,
 )
 from eneo.flows.ai_builder.planning_state import PlanningState
 from eneo.flows.flow_access_policy import (
@@ -541,7 +542,11 @@ def _to_public_assistant_message(
         content=message.content,
         timestamp=message.timestamp,
         question=_structured_question_from_assistant_message(message),
-        requirements_summary=_requirements_summary_for_assistant_message(message),
+        requirements_summary=_requirements_summary_for_assistant_message(
+            conversation,
+            index,
+            message,
+        ),
     )
 
 
@@ -562,9 +567,29 @@ def _structured_question_from_assistant_message(
 
 
 def _requirements_summary_for_assistant_message(
+    conversation: list[ConversationMessage],
+    index: int,
     message: ConversationMessage,
 ) -> RequirementsSummaryPayload | None:
-    return requirements_summary_from_metadata(message.metadata)
+    parsed = requirements_summary_from_metadata(message.metadata)
+    requirements_summary = parsed.requirements_summary if parsed is not None else None
+    requirements_tool_call_ids = {
+        tool_call.id
+        for tool_call in tool_calls_from_message(message)
+        if tool_call.name == CONFIRM_REQUIREMENTS_TOOL_NAME and tool_call.id
+    }
+    if not requirements_tool_call_ids:
+        return requirements_summary
+
+    for tool_message in conversation[index + 1 :]:
+        if tool_message.role != "tool":
+            break
+        if tool_message.tool_call_id not in requirements_tool_call_ids:
+            continue
+        parsed_tool_summary = requirements_summary_from_metadata(tool_message.metadata)
+        if parsed_tool_summary is not None:
+            requirements_summary = parsed_tool_summary.requirements_summary
+    return requirements_summary
 
 
 def _to_session_response(

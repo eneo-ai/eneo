@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 from collections.abc import AsyncGenerator
 from dataclasses import replace
@@ -91,11 +92,9 @@ from eneo.flows.ai_builder.ai_builder_proposal_tool_contracts import (
     ProposalMessageGroup,
     flatten_proposal_message_groups,
 )
-from eneo.flows.ai_builder.ai_builder_requirements_disclosure import (
-    build_requirements_disclosure,
-)
 from eneo.flows.ai_builder.ai_builder_requirements_state import (
     RequirementsState,
+    build_requirements_version,
 )
 from eneo.flows.ai_builder.ai_builder_resource_catalog import (
     AIBuilderAvailableKnowledgeBaseResource,
@@ -126,7 +125,6 @@ from eneo.flows.ai_builder.ai_builder_session_turn import (
     SessionTurnPreparationBaseline,
 )
 from eneo.flows.ai_builder.ai_builder_settings import AIBuilderBudgetPolicy
-from eneo.flows.ai_builder.ai_builder_tool_names import PROPOSE_FLOW_TOOL_NAME
 from eneo.flows.ai_builder.ai_builder_tools import (
     ProposalToolSchema,
     build_propose_flow_tool_schema,
@@ -144,13 +142,9 @@ from eneo.flows.ai_builder.ai_builder_user_question_metadata import (
     prepare_user_question_metadata,
 )
 from eneo.flows.ai_builder.planning_state import (
-    NAMED_RESULT_EVIDENCE_MAX_ITEMS,
     ArchitectureCommit,
-    AttachmentCoverage,
     ConfirmedRuntimeMetadataField,
     FileRoleEvidence,
-    MappedFileLimit,
-    NamedResultEvidence,
     PlanningSignal,
     PlanningState,
     PlanningStatePayloadTooLargeError,
@@ -355,7 +349,6 @@ async def _prepare_planner_request_for_test(
     plan_edit_context: object = None,
     prior_plan_for_revision: BuilderPlan | None = None,
     persisted_planning_state: PlanningState | None = None,
-    mapped_execution_policy: FlowMappedExecutionPolicy | None = None,
     before_provider_call: AsyncMock | None = None,
     prepared_attachment_context: AIBuilderAttachmentContext | None = None,
     prepared_schema_candidates: tuple[DeclaredSchemaCandidate, ...] | None = None,
@@ -372,9 +365,7 @@ async def _prepare_planner_request_for_test(
             attachment_files=attachment_files or [],
             max_input_tokens=max_input_tokens,
             max_output_tokens=max_output_tokens,
-            mapped_execution_policy=(
-                mapped_execution_policy or FlowMappedExecutionPolicy()
-            ),
+            mapped_execution_policy=FlowMappedExecutionPolicy(),
             budget_policy=budget_policy
             or AIBuilderBudgetPolicy(
                 conversation_safety_buffer_tokens=128,
@@ -416,11 +407,12 @@ def _requirements_state_unconfirmed() -> RequirementsState:
 
 
 def _requirements_state_confirmed(
-    version: str = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    version: str = "requirements-v1",
 ) -> RequirementsState:
     return RequirementsState(
         latest_summary=_requirements_summary(version),
         latest_version=version,
+        latest_attachment_evidence_fingerprint=hashlib.sha256(b"[]").hexdigest(),
         confirmed_version=version,
     )
 
@@ -431,23 +423,21 @@ def _requirements_state_confirmed_for(
     ui_language: str | None = "en",
     discovery_assumptions: tuple[str, ...] = (),
 ) -> RequirementsState:
-    disclosure = build_requirements_disclosure(
-        state,
-        ui_language=ui_language,
-        discovery_assumptions=discovery_assumptions,
-    )
     decision = resolve_turn_control(
         session_state=state,
         selected_discovery_question_ids=(),
-        requirements_disclosure=disclosure,
-        confirmed_requirements_version=None,
+        confirmed_attachment_evidence_fingerprint=None,
         ui_language=ui_language,
+        discovery_assumptions=discovery_assumptions,
     ).decision
     assert isinstance(decision, ConfirmRequirements)
-    version = decision.payload.requirements_version
+    version = build_requirements_version(decision.payload)
     return RequirementsState(
         latest_summary=decision.payload,
         latest_version=version,
+        latest_attachment_evidence_fingerprint=(
+            decision.attachment_evidence_fingerprint
+        ),
         confirmed_version=version,
     )
 
@@ -982,7 +972,7 @@ def test_prepare_user_question_metadata_preserves_requirements_confirmation_and_
         question_answer={
             "kind": "requirements_confirmation",
             "requirements_confirmed": True,
-            "requirements_version": "d" * 64,
+            "requirements_version": "req-v2",
             "ui_language": "en",
         },
     )
@@ -990,7 +980,7 @@ def test_prepare_user_question_metadata_preserves_requirements_confirmation_and_
     assert result.is_requirements_confirmation is True
     assert result.metadata == {
         "requirements_confirmed": True,
-        "requirements_version": "d" * 64,
+        "requirements_version": "req-v2",
         "ui_language": "en",
     }
 
@@ -1030,7 +1020,6 @@ async def test_requirements_confirmation_reuses_latest_saved_step_scope(
         question_answer={
             "kind": "requirements_confirmation",
             "requirements_confirmed": True,
-            "requirements_version": "e" * 64,
         },
         completion_model_route=_route(),
         flow=cast(Any, SimpleNamespace(id=uuid4())),
@@ -1581,15 +1570,17 @@ async def test_prepare_planner_request_requires_fresh_confirmation_after_attachm
     prior_confirmation = resolve_turn_control(
         session_state=state,
         selected_discovery_question_ids=(),
-        requirements_disclosure=build_requirements_disclosure(state, ui_language="en"),
-        confirmed_requirements_version=None,
+        confirmed_attachment_evidence_fingerprint=None,
         ui_language="en",
     ).decision
     assert isinstance(prior_confirmation, ConfirmRequirements)
-    confirmed_version = prior_confirmation.payload.requirements_version
+    confirmed_version = build_requirements_version(prior_confirmation.payload)
     requirements_state = RequirementsState(
         latest_summary=prior_confirmation.payload,
         latest_version=confirmed_version,
+        latest_attachment_evidence_fingerprint=(
+            prior_confirmation.attachment_evidence_fingerprint
+        ),
         confirmed_version=confirmed_version,
     )
     state.file_roles[11] = state.file_roles[11].model_copy(
@@ -1634,14 +1625,9 @@ async def test_prepare_planner_request_requires_fresh_confirmation_after_attachm
 
     assert isinstance(prepared, ServerOutputPrepared)
     assert isinstance(prepared.server_decision, ConfirmRequirements)
-    attachment_assumptions = [
-        assumption
-        for assumption in prepared.server_decision.payload.assumptions
-        if assumption.startswith("Attachment evidence — ")
-    ]
-    assert len(attachment_assumptions) == 12
     assert any(
-        "Reference material" in assumption for assumption in attachment_assumptions
+        "2 additional attachments are omitted" in assumption
+        for assumption in prepared.server_decision.payload.assumptions
     )
     build_proposal_prompt.assert_not_called()
     provider_callback.assert_not_awaited()
@@ -1892,7 +1878,6 @@ async def test_prepare_planner_request_passes_attachment_context_into_proposal_p
     state = _document_architecture_state()
     requirements_state = _requirements_state_confirmed_for(state)
     requirements = RequirementsSummaryPayload(
-        requirements_version="0" * 64,
         summary="Build from this file.",
         key_decisions=[],
         input_description="Attachment",
@@ -1991,7 +1976,6 @@ async def test_prepare_planner_request_uses_proposal_task_after_confirmation() -
     ]
     requirements_state = _requirements_state_confirmed_for(state)
     requirements = RequirementsSummaryPayload(
-        requirements_version="0" * 64,
         summary="Build a report flow.",
         key_decisions=[
             KeyDecisionPayload(topic="Input", decision="Uploaded documents")
@@ -2412,7 +2396,6 @@ async def test_prepare_planner_request_logs_prompt_metrics() -> None:
     state = _document_architecture_state()
     requirements_state = _requirements_state_confirmed_for(state)
     requirements = RequirementsSummaryPayload(
-        requirements_version="0" * 64,
         summary="Build a report flow.",
         key_decisions=[],
         input_description="Documents",
@@ -3583,437 +3566,3 @@ async def test_send_message_replays_the_exact_committed_error_without_provider_w
     ]
     planner.repo.accept_session_turn.assert_not_awaited()
     planner.litellm_client.assert_not_awaited()
-
-
-def _confirmation_conversation(
-    disclosure: RequirementsSummaryPayload,
-    *,
-    message: str = "",
-) -> list[ConversationMessage]:
-    """The disclosure the user saw, followed by the turn that confirms it."""
-
-    return [
-        ConversationMessage(role="user", content="Build a document report flow"),
-        ConversationMessage(
-            role="assistant",
-            content=disclosure.summary,
-            metadata={
-                "requirements_summary": disclosure.model_dump(mode="json"),
-                "requirements_version": disclosure.requirements_version,
-            },
-        ),
-        ConversationMessage(
-            role="user",
-            content=message,
-            metadata={
-                "requirements_confirmed": True,
-                "requirements_version": disclosure.requirements_version,
-            },
-        ),
-    ]
-
-
-def _text_attachment_role(file: File, coverage: AttachmentCoverage) -> FileRoleEvidence:
-    return FileRoleEvidence(
-        file_id=file.id,
-        filename=file.name,
-        file_type=FileType.TEXT,
-        mimetype="text/plain",
-        has_readable_text=True,
-        coverage=coverage,
-        role="reference_material",
-        source="model",
-        confidence="high",
-        evidence=["quote:user_message:user-1:bilagan"],
-        evidence_level="explicit",
-    )
-
-
-@pytest.mark.asyncio
-async def test_confirmation_acknowledgment_makes_no_understanding_call() -> None:
-    """Acknowledging a disclosure is not new evidence, so nothing is re-read.
-
-    The Builder used to rebuild planning state and re-run the classifier on the
-    confirmation turn itself. Re-interpreting the same attachments moved the
-    summary, so the confirmation could never match and the session re-confirmed
-    until the interaction limit.
-    """
-
-    planner = _make_planner()
-    state = _document_architecture_state()
-    conversation = _confirmation_conversation(
-        build_requirements_disclosure(state, ui_language="en")
-    )
-
-    with patch(
-        "eneo.flows.ai_builder.ai_builder_planner_request_preparation."
-        "build_discovery_runtime_result",
-        new_callable=AsyncMock,
-    ) as build_runtime:
-        prepared = await _prepare_planner_request_for_test(
-            planner,
-            conversation=conversation,
-            completion_model_route=_route(),
-            persisted_planning_state=state,
-        )
-
-    build_runtime.assert_not_awaited()
-    assert isinstance(prepared, ProposalPrepared)
-
-
-@pytest.mark.asyncio
-async def test_text_beside_a_confirmation_is_read_as_a_change() -> None:
-    """ "Ja, men skriv den i en informell ton" is a change, never a silent yes.
-
-    The classifier is deliberately left returning unchanged state here, which
-    is the case that used to slip through: reading the request as evidence is
-    not enough on its own, because an unchanged disclosure still matches the
-    old confirmation and would go straight to a plan. A confirmation carrying a
-    message does not confirm, so the user gets the disclosure back to attest to.
-    """
-
-    planner = _make_planner()
-    state = _document_architecture_state()
-    conversation = _confirmation_conversation(
-        build_requirements_disclosure(state, ui_language="en"),
-        message="Ja, men skriv den i en informell ton.",
-    )
-
-    with patch(
-        "eneo.flows.ai_builder.ai_builder_planner_request_preparation."
-        "build_discovery_runtime_result",
-        new_callable=AsyncMock,
-        return_value=_runtime_result(DiscoveryAnalysis(issues=()), state),
-    ) as build_runtime:
-        prepared = await _prepare_planner_request_for_test(
-            planner,
-            conversation=conversation,
-            completion_model_route=_route(),
-            persisted_planning_state=state,
-        )
-
-    build_runtime.assert_awaited_once()
-    assert isinstance(prepared, ServerOutputPrepared)
-    assert isinstance(prepared.server_decision, ConfirmRequirements)
-
-
-@pytest.mark.asyncio
-async def test_a_new_attachment_beside_a_confirmation_earns_a_new_disclosure() -> None:
-    """Confirm-and-change is a change: it re-derives instead of inheriting."""
-
-    planner = _make_planner()
-    state = _document_architecture_state()
-    conversation = _confirmation_conversation(
-        build_requirements_disclosure(state, ui_language="en")
-    )
-
-    with patch(
-        "eneo.flows.ai_builder.ai_builder_planner_request_preparation."
-        "build_discovery_runtime_result",
-        new_callable=AsyncMock,
-        return_value=_runtime_result(DiscoveryAnalysis(issues=()), state),
-    ) as build_runtime:
-        await _prepare_planner_request_for_test(
-            planner,
-            conversation=conversation,
-            completion_model_route=_route(),
-            persisted_planning_state=state,
-            attachment_files=[_make_file()],
-        )
-
-    build_runtime.assert_awaited_once()
-
-
-@pytest.mark.asyncio
-async def test_detaching_a_disclosed_file_earns_a_new_disclosure() -> None:
-    """Removing evidence changes the plan as much as adding it.
-
-    Only the ordinary rebuild reconciles file roles against current session
-    membership, so an acknowledgment may never reuse state that still carries
-    a detached attachment.
-    """
-
-    planner = _make_planner()
-    state = _document_architecture_state()
-    state.file_roles = [_text_attachment_role(_make_file(), "fully_seen")]
-    conversation = _confirmation_conversation(
-        build_requirements_disclosure(state, ui_language="en")
-    )
-
-    with patch(
-        "eneo.flows.ai_builder.ai_builder_planner_request_preparation."
-        "build_discovery_runtime_result",
-        new_callable=AsyncMock,
-        return_value=_runtime_result(DiscoveryAnalysis(issues=()), state),
-    ) as build_runtime:
-        await _prepare_planner_request_for_test(
-            planner,
-            conversation=conversation,
-            completion_model_route=_route(),
-            persisted_planning_state=state,
-            attachment_files=[],
-        )
-
-    build_runtime.assert_awaited_once()
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize(
-    ("persisted_coverage", "rereads_evidence"),
-    [
-        pytest.param("fully_seen", False, id="coverage unchanged"),
-        pytest.param("excerpt_truncated", True, id="coverage changed"),
-    ],
-)
-async def test_a_confirmation_reuses_state_only_while_coverage_still_matches(
-    persisted_coverage: AttachmentCoverage,
-    rereads_evidence: bool,
-) -> None:
-    """How much of a file the planner saw is disclosed, so it is confirmed.
-
-    The same file id can be read differently by a different model or budget.
-    The fast path reuses the persisted roles wholesale, so it may only run
-    while the coverage it disclosed is still the coverage this turn produces.
-    """
-
-    planner = _make_planner()
-    attachment = _make_file()
-    state = _document_architecture_state()
-    state.file_roles = [_text_attachment_role(attachment, persisted_coverage)]
-    conversation = _confirmation_conversation(
-        build_requirements_disclosure(state, ui_language="en")
-    )
-
-    with patch(
-        "eneo.flows.ai_builder.ai_builder_planner_request_preparation."
-        "build_discovery_runtime_result",
-        new_callable=AsyncMock,
-        return_value=_runtime_result(DiscoveryAnalysis(issues=()), state),
-    ) as build_runtime:
-        await _prepare_planner_request_for_test(
-            planner,
-            conversation=conversation,
-            completion_model_route=_route(),
-            persisted_planning_state=state,
-            attachment_files=[attachment],
-        )
-
-    assert build_runtime.await_count == (1 if rereads_evidence else 0)
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize(
-    ("call_ceiling", "rereads_evidence"),
-    [
-        pytest.param(10, False, id="policy unchanged"),
-        pytest.param(6, True, id="policy lowered"),
-    ],
-)
-async def test_a_confirmation_reuses_state_only_under_the_disclosed_policy(
-    call_ceiling: int,
-    rereads_evidence: bool,
-) -> None:
-    """The accepted mapped limit compiles into `runtime_max_files`.
-
-    An organization can lower the mapped-execution ceiling between the
-    disclosure and the confirmation. Reusing the old accepted value would
-    compile a limit the current policy no longer permits.
-    """
-
-    planner = _make_planner()
-    state = _document_architecture_state()
-    state.mapped_file_limit = MappedFileLimit(
-        proposed_value=9,
-        accepted_value=9,
-        provenance="policy_default",
-    )
-    conversation = _confirmation_conversation(
-        build_requirements_disclosure(state, ui_language="en")
-    )
-
-    with patch(
-        "eneo.flows.ai_builder.ai_builder_planner_request_preparation."
-        "build_discovery_runtime_result",
-        new_callable=AsyncMock,
-        return_value=_runtime_result(DiscoveryAnalysis(issues=()), state),
-    ) as build_runtime:
-        await _prepare_planner_request_for_test(
-            planner,
-            conversation=conversation,
-            completion_model_route=_route(),
-            persisted_planning_state=state,
-            mapped_execution_policy=FlowMappedExecutionPolicy(
-                max_provider_calls_per_mapped_step=call_ceiling
-            ),
-        )
-
-    assert build_runtime.await_count == (1 if rereads_evidence else 0)
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize(
-    ("max_input_tokens", "replays_every_assumption"),
-    [
-        pytest.param(200_000, True, id="the model can carry the whole disclosure"),
-        pytest.param(9_000, False, id="the model cannot"),
-    ],
-)
-async def test_a_confirmed_disclosure_is_replayed_within_the_model_budget(
-    max_input_tokens: int,
-    replays_every_assumption: bool,
-) -> None:
-    """The disclosure is bounded by evidence; the prompt is bounded by the model.
-
-    A confirmed disclosure lists every assumption the user attested to, and a
-    template alone can contribute thousands. Replaying it whole would let a
-    confirmable session become one that cannot produce a proposal at all, so
-    the same budget that fits attachment text decides how much is replayed.
-    """
-
-    planner = _make_planner()
-    state = _document_architecture_state()
-    assumptions = tuple(
-        f"Antagande {index}: {'redovisa varje beslut i en egen tabellrad. ' * 6}"
-        for index in range(40)
-    )
-    disclosure = build_requirements_disclosure(
-        state,
-        ui_language="en",
-        discovery_assumptions=assumptions,
-    )
-    conversation = _confirmation_conversation(disclosure)
-
-    with patch(
-        "eneo.flows.ai_builder.ai_builder_planner_request_preparation."
-        "build_discovery_runtime_result",
-        new_callable=AsyncMock,
-        return_value=_runtime_result(
-            _discovery_analysis(assumptions=assumptions), state
-        ),
-    ):
-        prepared = await _prepare_planner_request_for_test(
-            planner,
-            conversation=conversation,
-            completion_model_route=_route(),
-            persisted_planning_state=state,
-            attachment_files=[_make_file()],
-            max_input_tokens=max_input_tokens,
-        )
-
-    assert isinstance(prepared, ProposalPrepared)
-    system_prompt = prepared.message_groups[0].messages[0]["content"]
-    assert isinstance(system_prompt, str)
-    assert ("Antagande 39" in system_prompt) is replays_every_assumption
-    assert "Antagande 0:" in system_prompt
-    budget = prepared.request_budget
-    assert budget is not None
-    assert (
-        count_message_tokens(
-            [{"role": "system", "content": system_prompt}],
-            _route().litellm_model,
-        )
-        <= budget.context_window_tokens
-        - budget.output_reserve_tokens
-        - budget.safety_buffer_tokens
-    )
-
-
-@pytest.mark.asyncio
-async def test_a_disclosure_too_large_for_the_model_is_not_replayed_at_all() -> None:
-    """A confirmable session must still be able to produce a proposal.
-
-    The bounded parts of a disclosure are bounded by evidence, not by the
-    model: a hundred named results outgrow a small context window on their own,
-    and no amount of assumption trimming shrinks them. The replay is dropped
-    whole rather than handed on over budget; `PlanningState` still carries every
-    typed fact into the prompt and into compilation.
-    """
-
-    planner = _make_planner()
-    state = _document_architecture_state()
-    state.named_result_evidence = [
-        NamedResultEvidence(
-            name=f"sokt_insats_med_ett_ganska_langt_namn_{index:03d}",
-            confidence="high",
-            evidence=["quote:user_message:user-1:sökta insatser"],
-        )
-        for index in range(NAMED_RESULT_EVIDENCE_MAX_ITEMS)
-    ]
-    disclosure = build_requirements_disclosure(state, ui_language="en")
-    conversation = _confirmation_conversation(disclosure)
-
-    prepared = await _prepare_planner_request_for_test(
-        planner,
-        conversation=conversation,
-        completion_model_route=_route(),
-        persisted_planning_state=state,
-    )
-
-    assert isinstance(prepared, ProposalPrepared)
-    system_prompt = prepared.message_groups[0].messages[0]["content"]
-    assert isinstance(system_prompt, str)
-    assert "sokt_insats_med_ett_ganska_langt_namn_000" not in system_prompt
-    budget = prepared.request_budget
-    assert budget is not None
-    assert (
-        count_message_tokens(
-            [{"role": "system", "content": system_prompt}],
-            _route().litellm_model,
-        )
-        <= budget.context_window_tokens
-        - budget.output_reserve_tokens
-        - budget.safety_buffer_tokens
-    )
-
-
-@pytest.mark.asyncio
-async def test_text_beside_a_confirmation_after_a_plan_is_read_as_a_change() -> None:
-    """A confirmation stays valid across revision turns; the fast path does not.
-
-    Once a plan exists, an ordinary revision message deliberately keeps the
-    requirements confirmed. A revision that also carries confirmation metadata
-    must therefore still be read as a revision: reusing the persisted state
-    would compile the previous output contract while the user asked for a
-    different one.
-    """
-
-    planner = _make_planner()
-    state = _document_architecture_state()
-    disclosure = build_requirements_disclosure(state, ui_language="en")
-    conversation = [
-        *_confirmation_conversation(disclosure),
-        ConversationMessage(
-            role="assistant",
-            content="Here is the draft.",
-            tool_calls=[
-                {
-                    "id": "call_plan",
-                    "name": PROPOSE_FLOW_TOOL_NAME,
-                    "arguments": {"flow_name": "Report flow"},
-                }
-            ],
-        ),
-        ConversationMessage(
-            role="user",
-            content="Ändra utdata till JSON.",
-            metadata={
-                "requirements_confirmed": True,
-                "requirements_version": disclosure.requirements_version,
-            },
-        ),
-    ]
-
-    with patch(
-        "eneo.flows.ai_builder.ai_builder_planner_request_preparation."
-        "build_discovery_runtime_result",
-        new_callable=AsyncMock,
-        return_value=_runtime_result(DiscoveryAnalysis(issues=()), state),
-    ) as build_runtime:
-        await _prepare_planner_request_for_test(
-            planner,
-            conversation=conversation,
-            completion_model_route=_route(),
-            persisted_planning_state=state,
-        )
-
-    build_runtime.assert_awaited_once()

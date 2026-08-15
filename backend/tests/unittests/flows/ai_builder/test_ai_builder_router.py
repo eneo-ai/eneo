@@ -912,17 +912,31 @@ class TestGetSessionEndpoint:
                             "allow_custom": False,
                         },
                     },
+                    {
+                        "id": "tool-summary",
+                        "name": "confirm_requirements",
+                        "arguments": {},
+                    },
                 ],
+                metadata={"planner_telemetry": {"internal": "not public"}},
+            ),
+            ConversationMessage(
+                message_id="tool-1",
+                role="tool",
+                tool_call_id="tool-summary",
                 metadata={
-                    "planner_telemetry": {"internal": "not public"},
                     "requirements_summary": {
                         "summary": "Bygg ett PDF-flöde.",
                         "key_decisions": [{"topic": "Slutformat", "decision": "PDF"}],
                         "input_description": "Uppladdade filer",
                         "output_description": "PDF",
-                        "requirements_version": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                        "requirements_version": "req-1",
                     },
-                    "requirements_version": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                    "requirements_version": "req-1",
+                    "attachment_evidence_fingerprint": (
+                        "4f53cda18c2baa0c0354bb5f9a3ecbe5"
+                        "ed12ab4d8e11ba873c2f11161202b945"
+                    ),
                 },
             ),
             ConversationMessage(
@@ -1272,7 +1286,7 @@ class TestGetSessionEndpoint:
                 content="Done.",
                 metadata={
                     "planner_telemetry": {
-                        "request_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                        "request_id": "req-1",
                         "model": "openai/gpt-4",
                         "finish_reason": "stop",
                         "prompt_tokens": 10,
@@ -1289,7 +1303,7 @@ class TestGetSessionEndpoint:
                         "total_tokens_total": 14,
                         "tool_call_count_total": 0,
                         "auxiliary_llm_call_count": 0,
-                        "last_request_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                        "last_request_id": "req-1",
                         "last_model": "openai/gpt-4",
                         "last_finish_reason": "stop",
                     },

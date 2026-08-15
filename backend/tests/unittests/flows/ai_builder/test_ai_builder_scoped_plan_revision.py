@@ -86,9 +86,9 @@ def _make_request(**overrides: object) -> ScopedPlanRevisionRequest:
         "resource_catalog": None,
         "plan_edit_context": None,
         "prior_spec_for_revision": None,
-        "request_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "request_id": "req-1",
         "usage_tracker": ProposalTurnTelemetry(
-            request_id="bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            request_id="req-1",
             model="openai/gpt-5.4",
             target_kind=TargetKind.CREATE,
         ),

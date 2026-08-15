@@ -45,7 +45,6 @@ from eneo.flows.ai_builder.planning_state import (
 
 def _requirements(**overrides: object) -> RequirementsSummaryPayload:
     payload = {
-        "requirements_version": "0" * 64,
         "summary": "Test",
         "key_decisions": [],
         "input_description": "Test",
@@ -382,7 +381,7 @@ def test_plan_proposal_prompt_renders_output_schema_evidence_compactly() -> None
     assert "additionalProperties" not in prompt
 
 
-def test_plan_proposal_prompt_carries_named_fields_with_their_declared_shape() -> None:
+def test_plan_proposal_prompt_preserves_named_fields_without_inventing_types() -> None:
     state = _state_with_slot("terminal_output", "structured_json")
     state.named_result_evidence = [
         NamedResultEvidence(
@@ -404,7 +403,7 @@ def test_plan_proposal_prompt_carries_named_fields_with_their_declared_shape() -
 
     assert "Named result obligations:" in prompt
     assert "user-named result keys: case_id, status" in prompt
-    assert "honouring any shape the user declared beside it" in prompt
+    assert "Types, nesting, requiredness" in prompt
 
 
 def test_plan_proposal_prompt_includes_complete_bounded_named_result() -> None:
@@ -878,7 +877,7 @@ def test_plan_proposal_prompt_does_not_render_requirements_version() -> None:
     prompt = build_plan_proposal_system_prompt(
         planning_state=PlanningState.empty(),
         confirmed_requirements=_requirements(
-            requirements_version="d0" * 32,
+            requirements_version="do-not-render",
             summary="Sammanfatta kunddialogen.",
             key_decisions=[{"topic": "Indata", "decision": "Ljudfil vid körning."}],
         ),
@@ -888,7 +887,7 @@ def test_plan_proposal_prompt_does_not_render_requirements_version() -> None:
         resource_catalog=_empty_catalog(),
     )
 
-    assert "d0" * 32 not in prompt
+    assert "do-not-render" not in prompt
     assert "- Indata: Ljudfil vid körning." in prompt
 
 

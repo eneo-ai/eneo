@@ -418,9 +418,7 @@ const questionEventDataSchema = z.object({
 }) satisfies z.ZodType<AIBuilderQuestionEventData>;
 
 const requirementsSummaryEventDataSchema = z.object({
-  // A summary the client cannot name is a summary the user cannot confirm,
-  // and the confirmation request carries this exact version back.
-  requirements_version: z.string().regex(/^[0-9a-f]{64}$/),
+  requirements_version: nullableStringSchema,
   summary: z.string(),
   key_decisions: z.array(
     z.object({

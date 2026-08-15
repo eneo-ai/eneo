@@ -80,9 +80,7 @@ DEFAULT_CASES_FILE = Path(__file__).with_name("ai_builder_api_battle_cases.json"
 FIXTURE_DIR = Path(__file__).with_name("fixtures") / "ai_builder_battle"
 FIXTURE_MANIFEST_FILE = FIXTURE_DIR / "manifest.json"
 SUPPORTED_FIXTURE_MANIFEST_VERSION = 1
-# Confirming is a content-free structured action: text beside a confirmation is
-# a change request the Builder reads as one, so the harness sends none.
-CONFIRM_MESSAGE = ""
+DEFAULT_CONFIRM_MESSAGE = "Ja, det stämmer. Bygg planen."
 MAX_INTERACTIONS_PER_CASE = 6
 # Both the runtime poll loop and the request-demand arithmetic read this. A
 # literal in either place lets the planner agree with a stale formula.
@@ -849,6 +847,11 @@ def _parse_args() -> argparse.Namespace:
         help="Do not send the structured requirements-confirmation turn automatically.",
     )
     parser.set_defaults(auto_confirm_requirements=True)
+    parser.add_argument(
+        "--confirm-message",
+        default=DEFAULT_CONFIRM_MESSAGE,
+        help="Message text for the automatic requirements-confirmation turn.",
+    )
     parser.add_argument(
         "--timeout-seconds",
         type=int,
@@ -1896,6 +1899,7 @@ def _acquire_observations_with_case_isolation(
 
 
 def _suite_run_context(args: argparse.Namespace) -> JsonObject:
+    confirm_message = getattr(args, "confirm_message", DEFAULT_CONFIRM_MESSAGE)
     return {
         "ui_language": getattr(args, "ui_language", "sv"),
         "auto_confirm_requirements": getattr(
@@ -1904,7 +1908,7 @@ def _suite_run_context(args: argparse.Namespace) -> JsonObject:
             True,
         ),
         "confirm_message_sha256": hashlib.sha256(
-            CONFIRM_MESSAGE.encode("utf-8")
+            str(confirm_message).encode("utf-8")
         ).hexdigest(),
         "repetitions": args.repetitions,
         # Concurrency is recorded and gated, not merely reported: parallel
@@ -2571,11 +2575,11 @@ def _run_replacement_batch(
     run_context = cast(Mapping[str, object], raw_run_context)
     expected_confirmation_hash = run_context.get("confirm_message_sha256")
     actual_confirmation_hash = hashlib.sha256(
-        CONFIRM_MESSAGE.encode("utf-8")
+        str(args.confirm_message).encode("utf-8")
     ).hexdigest()
     if expected_confirmation_hash != actual_confirmation_hash:
         raise ValueError(
-            "the base receipt was measured under a different confirmation turn."
+            "--confirm-message does not match the base receipt's run context."
         )
     max_concurrency = run_context.get("max_concurrency")
     if (
@@ -3314,7 +3318,7 @@ def _run_case(
                     _send_and_fetch(
                         config=config,
                         session_id=session_id,
-                        message=CONFIRM_MESSAGE,
+                        message=args.confirm_message,
                         model_id=args.model_id,
                         file_ids=(),
                         ui_language=args.ui_language,

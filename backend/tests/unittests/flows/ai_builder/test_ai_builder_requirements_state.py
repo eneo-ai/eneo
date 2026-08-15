@@ -1,10 +1,12 @@
 """Reconstruction contract for requirements-state from conversation metadata.
 
-Server dispatch persists the disclosure it emitted as
-`metadata.requirements_summary` on the assistant message it writes inside the
-commit_turn savepoint. `resolve_requirements_state` reads that shape back so
-later turns can re-render the confirmed requirements into the system prompt
-and gate plan creation on the user's confirmation of one exact version.
+The planner's structured-JSON transport emits a `confirm_requirements`
+action whose payload carries the full `RequirementsSummaryPayload`
+shape. The builder persists that shape as `metadata.requirements_summary`
+on the assistant message it writes inside the commit_turn savepoint.
+`resolve_requirements_state` must recognize that shape so subsequent
+turns can re-render the confirmed requirements into the system prompt
+and gate later flows on user confirmation.
 """
 
 from __future__ import annotations
@@ -13,7 +15,6 @@ from eneo.flows.ai_builder.ai_builder_domain_models import (
     ConversationMessage,
 )
 from eneo.flows.ai_builder.ai_builder_event_models import (
-    RequirementsDisclosureContent,
     RequirementsSummaryPayload,
 )
 from eneo.flows.ai_builder.ai_builder_requirements_state import (
@@ -25,19 +26,11 @@ from eneo.flows.ai_builder.ai_builder_requirements_state import (
 )
 from eneo.flows.ai_builder.ai_builder_tool_names import PROPOSE_FLOW_TOOL_NAME
 
-
-def _disclosure(content: dict[str, object]) -> RequirementsSummaryPayload:
-    """Stamp a disclosure with the version that hashes its content."""
-
-    validated = RequirementsDisclosureContent.model_validate(content)
-    return RequirementsSummaryPayload(
-        **validated.model_dump(),
-        requirements_version=build_requirements_version(validated),
-    )
+_ATTACHMENT_EVIDENCE_FINGERPRINT = "f" * 64
 
 
 def _summary_payload() -> RequirementsSummaryPayload:
-    return _disclosure(
+    return RequirementsSummaryPayload.model_validate(
         {
             "summary": "A flow that extracts data from PDFs into structured JSON.",
             "key_decisions": [
@@ -55,7 +48,7 @@ def _summary_payload() -> RequirementsSummaryPayload:
 class TestResolveRequirementsStateFromAssistantMetadata:
     def test_assistant_metadata_shape_populates_latest_summary(self) -> None:
         payload = _summary_payload()
-        version = payload.requirements_version
+        version = build_requirements_version(payload)
         conversation = [
             ConversationMessage(role="user", content="Build a PDF extractor"),
             ConversationMessage(
@@ -64,6 +57,9 @@ class TestResolveRequirementsStateFromAssistantMetadata:
                 metadata={
                     "requirements_summary": payload.model_dump(mode="json"),
                     "requirements_version": version,
+                    "attachment_evidence_fingerprint": (
+                        _ATTACHMENT_EVIDENCE_FINGERPRINT
+                    ),
                 },
             ),
         ]
@@ -73,11 +69,15 @@ class TestResolveRequirementsStateFromAssistantMetadata:
         assert state.latest_summary is not None
         assert state.latest_summary.summary == payload.summary
         assert state.latest_version == version
+        assert (
+            state.latest_attachment_evidence_fingerprint
+            == _ATTACHMENT_EVIDENCE_FINGERPRINT
+        )
         assert state.confirmed is False  # no user confirmation yet
 
     def test_user_confirmation_completes_the_confirmed_contract(self) -> None:
         payload = _summary_payload()
-        version = payload.requirements_version
+        version = build_requirements_version(payload)
         conversation = [
             ConversationMessage(role="user", content="Build a PDF extractor"),
             ConversationMessage(
@@ -86,11 +86,14 @@ class TestResolveRequirementsStateFromAssistantMetadata:
                 metadata={
                     "requirements_summary": payload.model_dump(mode="json"),
                     "requirements_version": version,
+                    "attachment_evidence_fingerprint": (
+                        _ATTACHMENT_EVIDENCE_FINGERPRINT
+                    ),
                 },
             ),
             ConversationMessage(
                 role="user",
-                content="",
+                content="Yes, proceed with the plan",
                 metadata={
                     "requirements_confirmed": True,
                     "requirements_version": version,
@@ -104,11 +107,45 @@ class TestResolveRequirementsStateFromAssistantMetadata:
         assert state.latest_version == version
         assert state.confirmed_version == version
         assert state.confirmed is True
-        assert state.confirmed_requirements_version == version
+        assert (
+            state.confirmed_attachment_evidence_fingerprint
+            == _ATTACHMENT_EVIDENCE_FINGERPRINT
+        )
+
+    def test_legacy_user_confirmation_without_version_confirms_latest_summary(
+        self,
+    ) -> None:
+        payload = _summary_payload()
+        version = build_requirements_version(payload)
+        conversation = [
+            ConversationMessage(role="user", content="Build a PDF extractor"),
+            ConversationMessage(
+                role="assistant",
+                content="Here is the summary I have so far.",
+                metadata={
+                    "requirements_summary": payload.model_dump(mode="json"),
+                    "requirements_version": version,
+                    "attachment_evidence_fingerprint": (
+                        _ATTACHMENT_EVIDENCE_FINGERPRINT
+                    ),
+                },
+            ),
+            ConversationMessage(
+                role="user",
+                content="Yes, proceed with the plan",
+                metadata={"requirements_confirmed": True},
+            ),
+        ]
+
+        state = resolve_requirements_state(conversation)
+
+        assert state.latest_version == version
+        assert state.confirmed_version == version
+        assert state.confirmed is True
 
     def test_version_drift_on_user_confirmation_blocks_confirmed_flag(self) -> None:
         payload = _summary_payload()
-        version = payload.requirements_version
+        version = build_requirements_version(payload)
         conversation = [
             ConversationMessage(
                 role="assistant",
@@ -116,14 +153,17 @@ class TestResolveRequirementsStateFromAssistantMetadata:
                 metadata={
                     "requirements_summary": payload.model_dump(mode="json"),
                     "requirements_version": version,
+                    "attachment_evidence_fingerprint": (
+                        _ATTACHMENT_EVIDENCE_FINGERPRINT
+                    ),
                 },
             ),
             ConversationMessage(
                 role="user",
-                content="",
+                content="Confirmed",
                 metadata={
                     "requirements_confirmed": True,
-                    "requirements_version": "57a1e" + "0" * 59,
+                    "requirements_version": "stale-hash",
                 },
             ),
         ]
@@ -135,7 +175,7 @@ class TestResolveRequirementsStateFromAssistantMetadata:
 
     def test_plan_tool_call_preserves_confirmation_for_revision_requests(self) -> None:
         payload = _summary_payload()
-        version = payload.requirements_version
+        version = build_requirements_version(payload)
         conversation = [
             ConversationMessage(
                 role="assistant",
@@ -143,11 +183,14 @@ class TestResolveRequirementsStateFromAssistantMetadata:
                 metadata={
                     "requirements_summary": payload.model_dump(mode="json"),
                     "requirements_version": version,
+                    "attachment_evidence_fingerprint": (
+                        _ATTACHMENT_EVIDENCE_FINGERPRINT
+                    ),
                 },
             ),
             ConversationMessage(
                 role="user",
-                content="",
+                content="Confirmed",
                 metadata={
                     "requirements_confirmed": True,
                     "requirements_version": version,
@@ -181,7 +224,7 @@ class TestRenderConfirmedRequirementsBlocks:
     def test_confirmed_requirements_prompt_omits_default_review_boilerplate(
         self,
     ) -> None:
-        payload = _disclosure(
+        payload = RequirementsSummaryPayload.model_validate(
             {
                 "summary": (
                     "Jag har tillräckligt med information för att ta fram ett "
@@ -204,7 +247,7 @@ class TestRenderConfirmedRequirementsBlocks:
                 ],
             }
         )
-        version = payload.requirements_version
+        version = build_requirements_version(payload)
         conversation = [
             ConversationMessage(
                 role="assistant",
@@ -212,11 +255,14 @@ class TestRenderConfirmedRequirementsBlocks:
                 metadata={
                     "requirements_summary": payload.model_dump(mode="json"),
                     "requirements_version": version,
+                    "attachment_evidence_fingerprint": (
+                        _ATTACHMENT_EVIDENCE_FINGERPRINT
+                    ),
                 },
             ),
             ConversationMessage(
                 role="user",
-                content="",
+                content="Bekräfta",
                 metadata={
                     "requirements_confirmed": True,
                     "requirements_version": version,
@@ -238,7 +284,7 @@ class TestRenderConfirmedRequirementsBlocks:
     def test_confirmed_requirements_proposal_block_uses_user_relevant_fields_only(
         self,
     ) -> None:
-        payload = _disclosure(
+        payload = RequirementsSummaryPayload.model_validate(
             {
                 "summary": "Skapa ett mötesprotokoll.",
                 "key_decisions": [
@@ -251,6 +297,7 @@ class TestRenderConfirmedRequirementsBlocks:
                     "Inga extra fält.",
                 ],
                 "manual_setup_notes": ["Koppla transkriberingsmodellen."],
+                "requirements_version": "do-not-render",
             }
         )
 
@@ -267,7 +314,7 @@ class TestRenderConfirmedRequirementsBlocks:
             )
         )
         assert "behöver granskas" not in prompt_block
-        assert payload.requirements_version not in prompt_block
+        assert "do-not-render" not in prompt_block
         assert "Koppla transkriberingsmodellen" not in prompt_block
 
     def test_confirmed_requirements_proposal_block_returns_none_marker(
@@ -278,7 +325,7 @@ class TestRenderConfirmedRequirementsBlocks:
     def test_confirmed_requirements_proposal_block_returns_none_marker_for_boilerplate(
         self,
     ) -> None:
-        payload = _disclosure(
+        payload = RequirementsSummaryPayload.model_validate(
             {
                 "summary": (
                     "Jag har tillräckligt med information för att ta fram ett "

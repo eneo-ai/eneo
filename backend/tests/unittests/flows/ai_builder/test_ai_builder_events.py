@@ -119,7 +119,7 @@ def test_question_event_serializes_typed_payload_without_none_options() -> None:
 
 def test_requirements_summary_event_serializes_typed_payload() -> None:
     payload = RequirementsSummaryPayload(
-        requirements_version="a1" * 32,
+        requirements_version="requirements-v1",
         summary="Create a meeting report from audio.",
         key_decisions=[KeyDecisionPayload(topic="Input", decision="Meeting audio")],
         input_description="One audio file per run.",
@@ -130,7 +130,7 @@ def test_requirements_summary_event_serializes_typed_payload() -> None:
 
     assert event["event"] == "requirements_summary"
     assert json.loads(event["data"]) == {
-        "requirements_version": "a1" * 32,
+        "requirements_version": "requirements-v1",
         "summary": "Create a meeting report from audio.",
         "key_decisions": [{"topic": "Input", "decision": "Meeting audio"}],
         "input_description": "One audio file per run.",

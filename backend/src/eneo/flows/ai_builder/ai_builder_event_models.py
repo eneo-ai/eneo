@@ -72,15 +72,8 @@ def _empty_resolved_requirements() -> list[ResolvedRequirementPayload]:
     return []
 
 
-class RequirementsDisclosureContent(BaseModel):
-    """What the user is shown, before an identity is stamped on it.
-
-    The requirements version hashes this content, so the version cannot be one
-    of its own fields. Only the disclosure builder handles the unversioned
-    form; everything the Builder emits or persists is a
-    `RequirementsSummaryPayload`.
-    """
-
+class RequirementsSummaryPayload(BaseModel):
+    requirements_version: str | None = None
     summary: str
     key_decisions: list[KeyDecisionPayload]
     input_description: str
@@ -123,14 +116,6 @@ class RequirementsDisclosureContent(BaseModel):
             seen.add(requirement.requirement_id)
             unique.append(requirement)
         return unique
-
-
-class RequirementsSummaryPayload(RequirementsDisclosureContent):
-    """A disclosure the user can confirm, named by the hash of its content."""
-
-    # Required, because a summary the client cannot name is a summary the user
-    # cannot confirm: the confirmation request carries this exact version back.
-    requirements_version: str = Field(pattern=r"^[0-9a-f]{64}$")
 
 
 class AIBuilderPlanEventData(BaseModel):

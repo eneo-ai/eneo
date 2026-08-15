@@ -274,7 +274,7 @@ class TestEditScopePolicy:
                 content="Ja, det stämmer. Bygg planen.",
                 metadata={
                     "requirements_confirmed": True,
-                    "requirements_version": "c" * 64,
+                    "requirements_version": "v1",
                     "ui_language": "sv",
                 },
             ),
@@ -344,7 +344,7 @@ class TestEditScopePolicy:
                 content="Ja, det stämmer. Bygg planen.",
                 metadata={
                     "requirements_confirmed": True,
-                    "requirements_version": "c" * 64,
+                    "requirements_version": "v1",
                     "ui_language": "sv",
                 },
             ),

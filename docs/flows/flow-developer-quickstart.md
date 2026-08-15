@@ -298,11 +298,6 @@ Important builder rules:
   budget is exhausted.
 - High-confidence assumptions must be visible in the requirements summary so
   the user can reject them.
-- A requirements summary names itself with the version that hashes its content,
-  and confirming is a content-free structured action that carries that exact
-  version back. A confirmation accompanied by a message is an ordinary turn:
-  the message is read as evidence and the user confirms the summary it
-  produces, so a requested change is never silently dropped.
 - Attachments are first-class evidence through typed file roles, neutral schema
   candidates, and output-only template-placeholder evidence. Avoid semantic
   filename or phrase-list heuristics.

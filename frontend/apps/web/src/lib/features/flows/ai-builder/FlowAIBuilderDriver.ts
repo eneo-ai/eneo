@@ -1116,16 +1116,15 @@ export class FlowAIBuilderDriver {
     const latestSummary = this.#getLatestRequirementsSummary();
     if (!latestSummary) return;
 
-    // Confirming carries no message of its own: text beside a confirmation is
-    // a change request, and the server reads it as one. The summary card shows
-    // that the disclosure was confirmed, so nothing is lost from the transcript.
     await this.sendMessage(
-      "",
-      {
-        kind: "requirements_confirmation",
-        requirements_confirmed: true,
-        requirements_version: latestSummary.requirements_version
-      },
+      m.ai_builder_requirements_confirm_message(),
+      latestSummary.requirements_version
+        ? {
+            kind: "requirements_confirmation",
+            requirements_confirmed: true,
+            requirements_version: latestSummary.requirements_version
+          }
+        : { kind: "requirements_confirmation", requirements_confirmed: true },
       undefined,
       editContext
     );
@@ -1156,6 +1155,8 @@ export class FlowAIBuilderDriver {
 
   isRequirementsSummaryConfirmed(summary: RequirementsSummary): boolean {
     const version = summary.requirements_version;
+    if (!version) return false;
+
     let confirmed = false;
     let seenSummary = false;
     for (const message of this.#state.messages) {
@@ -1187,6 +1188,9 @@ export class FlowAIBuilderDriver {
     const latestSummary = this.#getLatestRequirementsSummary();
     if (!latestSummary) {
       return false;
+    }
+    if (!latestSummary.requirements_version || !summary.requirements_version) {
+      return latestSummary === summary;
     }
     return latestSummary.requirements_version === summary.requirements_version;
   }
