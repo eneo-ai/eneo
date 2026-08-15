@@ -88,6 +88,7 @@ from eneo.flows.infrastructure.flow_run_rerun_repo import (
     FlowRunRerunRepository,
 )
 from eneo.flows.published_definition import FLOW_DEFINITION_SCHEMA_VERSION
+from eneo.flows.runtime import executor as executor_module
 from eneo.flows.runtime.document_rendering.limits import DocumentRenderLimits
 from eneo.flows.runtime.executor import (
     FlowRunExecutor,
@@ -1334,6 +1335,68 @@ async def test_execute_cancels_when_flow_deleted_before_step_execution(user):
         executor.flow_run_terminalizer.terminalize_run.await_args.kwargs["source"]
         == FlowRunLifecycleSource.FLOW_DELETED
     )
+
+
+@pytest.mark.asyncio
+async def test_cancel_probe_reads_through_its_own_session(user, monkeypatch):
+    """The cancel probe must not ride the executor's long-lived session.
+
+    It is polled while a provider call is in flight. On the executor's session a
+    failed statement leaves the transaction unusable, so every later probe would
+    fail with it — retrying would repeat the failure rather than recover from it
+    — and even successful probes would hold that connection checked out for the
+    length of the call.
+    """
+    executor, _, flow_run_repo, _ = _build_executor(user)
+    run = _run(status=FlowRunStatus.QUEUED, user=user)
+    cancelled_run = run.model_copy(update={"status": FlowRunStatus.CANCELLED})
+
+    # The executor's own repository is unusable, as it would be after a failed
+    # statement on its transaction.
+    flow_run_repo.get = AsyncMock(
+        side_effect=AssertionError("the probe used the executor's session")
+    )
+
+    fresh_repo = MagicMock()
+    fresh_repo.get = AsyncMock(return_value=cancelled_run)
+
+    class _Transaction:
+        async def __aenter__(self):
+            return None
+
+        async def __aexit__(self, *_args):
+            return False
+
+    class _Session:
+        def begin(self):
+            return _Transaction()
+
+    fresh_session = _Session()
+
+    class _FreshSession:
+        async def __aenter__(self):
+            return fresh_session
+
+        async def __aexit__(self, *_args):
+            return False
+
+    repository_factory = MagicMock(return_value=fresh_repo)
+    monkeypatch.setattr(
+        executor_module.sessionmanager, "session", lambda: _FreshSession()
+    )
+    monkeypatch.setattr(executor_module, "FlowRunRepository", repository_factory)
+
+    assert (
+        await executor._run_is_cancelled(
+            run_id=run.id,
+            flow_id=run.flow_id,
+            tenant_id=user.tenant_id,
+        )
+        is True
+    )
+    # Identity, not merely "not the executor's repo": reading through the
+    # executor's own session would otherwise still pass.
+    repository_factory.assert_called_once_with(session=fresh_session)
 
 
 @pytest.mark.parametrize(

@@ -1525,6 +1525,101 @@ async def test_complete_step_execution_cancels_llm_request_when_run_is_cancelled
 
 
 @pytest.mark.asyncio
+async def test_cancellation_survives_a_failing_cancel_probe():
+    """A blip on the cancel probe must not disarm cancellation for the step.
+
+    This poll is the only thing that stops an in-flight provider call when a user
+    cancels, and a provider call can run for minutes. Ending the watch on the
+    first failed probe meant a cancel was honoured only once the call finished on
+    its own, with the provider spend already incurred.
+    """
+    run = _run()
+    state = _state()
+    step = _step(output_type="text")
+    cancelled = asyncio.Event()
+
+    async def blocked_response(**_kwargs: object) -> object:
+        try:
+            await asyncio.sleep(60)
+        except asyncio.CancelledError:
+            cancelled.set()
+            raise
+        return SimpleNamespace(total_token_count=4, completion="too late")
+
+    assistant = MagicMock()
+    assistant.completion_model_kwargs = MagicMock(name="model_kwargs")
+    assistant.get_response = AsyncMock(side_effect=blocked_response)
+    prepared = PreparedStepExecution(
+        assistant=assistant,
+        step_input=StepInputValue(
+            text="hello",
+            source_text="hello",
+            input_source="flow_input",
+        ),
+        effective_prompt="Prompt",
+        input_payload_for_result={
+            "text": "hello",
+            "source_text": "hello",
+            "input_source": "flow_input",
+        },
+        contract_validation=None,
+        diagnostics=[],
+        llm_files=[],
+    )
+
+    probes = 0
+    # More failures than the removed five-failure budget allowed: a database
+    # disruption lasting several polls must not end the watch, because the only
+    # bound that matters is the step's own deadline.
+    failures_before_recovery = 12
+
+    async def flaky_run_cancelled(**_kwargs: object) -> bool:
+        nonlocal probes
+        probes += 1
+        if probes <= failures_before_recovery:
+            raise RuntimeError("transient cancel probe failure")
+        return True
+
+    watch_logger = MagicMock()
+    deps = StepExecutionRuntimeDeps(
+        variable_resolver=FlowVariableResolver(),
+        completion_service=object(),
+        load_assistant=AsyncMock(),
+        resolve_step_input=AsyncMock(),
+        retrieve_rag_chunks=AsyncMock(
+            return_value=([], {"status": "skipped_no_service"}, [])
+        ),
+        process_typed_output=AsyncMock(return_value=_typed_output_result()),
+        apply_output_cap=AsyncMock(return_value=("too late", [])),
+        llm_request_timeout_seconds=10,
+        run_cancelled=flaky_run_cancelled,
+        run_cancel_poll_interval_seconds=0.001,
+        logger=watch_logger,
+    )
+
+    with pytest.raises(FlowStepCancelledError):
+        await complete_step_execution(
+            step=step,
+            run=run,
+            state=state,
+            prepared=prepared,
+            deps=deps,
+        )
+
+    assert probes > failures_before_recovery
+    assert cancelled.is_set()
+    # An outage leaves a trail without one line per poll: only the first of the
+    # twelve failures is logged.
+    cancel_watch_warnings = [
+        call
+        for call in watch_logger.warning.call_args_list
+        if "cancel_watch_failed" in call.args[0]
+    ]
+    assert len(cancel_watch_warnings) == 1
+    assert cancel_watch_warnings[0].args[-1] == 1
+
+
+@pytest.mark.asyncio
 async def test_complete_step_execution_returns_when_cancelled_llm_suppresses_cancel():
     run = _run()
     state = _state()

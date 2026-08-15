@@ -89,6 +89,10 @@ def _string_key_dict(value: object) -> dict[str, Any]:
 
 
 logger = logging.getLogger(__name__)
+
+# Log the first failed cancel probe and then every Nth, so a database outage
+# leaves a trail without one line per tick for the rest of a long provider call.
+_CANCEL_WATCH_FAILURE_LOG_INTERVAL = 15
 LLM_TASK_CANCELLATION_GRACE_SECONDS: Final[float] = 2.0
 RAG_RETRIEVAL_QUERY_CHAR_LIMIT: Final[int] = 2048
 
@@ -596,6 +600,14 @@ async def call_assistant_with_timeout(
         if deps.run_cancelled is None:
             return False
         poll_interval = max(0.05, deps.run_cancel_poll_interval_seconds)
+        # A provider call can run for minutes, and this poll is the only thing
+        # that stops it when a user cancels. One failed probe — a reset
+        # connection, a busy pool — used to end the watch for the rest of the
+        # step, so the cancel was honoured only after the call finished on its
+        # own. Keep polling for as long as the call is in flight: that is
+        # already bounded by the step's own deadline, and giving up early is the
+        # defect. Only the logging is rate-limited.
+        consecutive_failures = 0
         while not llm_task.done():
             await asyncio.sleep(poll_interval)
             try:
@@ -605,14 +617,21 @@ async def call_assistant_with_timeout(
                     tenant_id=run.tenant_id,
                 )
             except Exception:
-                if deps.logger is not None:
+                consecutive_failures += 1
+                if deps.logger is not None and (
+                    consecutive_failures == 1
+                    or consecutive_failures % _CANCEL_WATCH_FAILURE_LOG_INTERVAL == 0
+                ):
                     deps.logger.warning(
-                        "flow_executor.cancel_watch_failed run_id=%s step_order=%d",
+                        "flow_executor.cancel_watch_failed run_id=%s step_order=%d "
+                        "consecutive_failures=%d",
                         run.id,
                         step.step_order,
+                        consecutive_failures,
                         exc_info=True,
                     )
-                return False
+                continue
+            consecutive_failures = 0
             if cancelled:
                 return True
         return False

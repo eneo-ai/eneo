@@ -18,6 +18,7 @@ from eneo.completion_models.domain.provider_call_observer import (
 )
 from eneo.completion_models.infrastructure.completion_service import CompletionService
 from eneo.completion_models.infrastructure.context_builder import count_tokens
+from eneo.database.database import sessionmanager
 from eneo.files.file_content_loader import FileContentLoader
 from eneo.files.file_models import FileType
 from eneo.files.file_repo import FileRepository
@@ -1654,11 +1655,21 @@ class FlowRunExecutor:
         flow_id: UUID,
         tenant_id: UUID,
     ) -> bool:
-        run = await self.flow_run_repo.get(
-            run_id=run_id,
-            flow_id=flow_id,
-            tenant_id=tenant_id,
-        )
+        """Read the run's cancellation state in its own short transaction.
+
+        This is polled while a provider call is in flight, so it must not run on
+        the executor's session: a failed statement there leaves the transaction
+        unusable and every later probe would fail with it, and even successful
+        probes would hold that connection checked out for the length of the
+        call. Isolated short transactions are the same shape the provider-call
+        recorder uses for the same reason.
+        """
+        async with sessionmanager.session() as session, session.begin():
+            run = await FlowRunRepository(session=session).get(
+                run_id=run_id,
+                flow_id=flow_id,
+                tenant_id=tenant_id,
+            )
         return run.status == FlowRunStatus.CANCELLED
 
     async def _handle_multiple_active_rerun_operations(
