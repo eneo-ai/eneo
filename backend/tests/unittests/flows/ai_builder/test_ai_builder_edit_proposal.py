@@ -984,13 +984,20 @@ async def test_ordered_submission_reports_unknown_resource_refs() -> None:
     result = await _process(
         flow=flow,
         arguments={
-            "plan_rationale": "Change model.",
+            "plan_rationale": "Add a drafting step on a model.",
             "steps": [
                 {
                     "kind": "modify",
                     "existing_step_ref": "existing_step_1",
-                    "assistant_spec": {"model_ref": "model.missing"},
-                }
+                },
+                {
+                    "kind": "add",
+                    "step": {
+                        "name": "Write report",
+                        "instructions": "Write a concise report.",
+                        "model_ref": "model.missing",
+                    },
+                },
             ],
         },
         resource_catalog=build_ai_builder_resource_catalog(

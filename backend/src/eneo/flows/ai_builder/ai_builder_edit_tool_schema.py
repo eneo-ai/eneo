@@ -18,8 +18,8 @@ from eneo.flows.ai_builder.ai_builder_resource_catalog import (
     AIBuilderResourceCatalog,
 )
 from eneo.flows.ai_builder.ai_builder_step_tool_schema_fragments import (
+    build_knowledge_refs_property_schema,
     build_previous_field_refs_schema,
-    build_resource_ref_property_schemas,
     build_review_mode_schema,
 )
 from eneo.flows.domain.flow import FlowStep
@@ -43,7 +43,6 @@ def build_edit_flow_tool_schema(
     )
     modify_step_schema = _build_modify_step_schema(
         valid_refs=valid_refs,
-        model_refs=model_refs,
         kb_refs=kb_refs,
     )
 
@@ -139,7 +138,6 @@ def build_edit_flow_tool_schema(
 def _build_modify_step_schema(
     *,
     valid_refs: list[str],
-    model_refs: list[str] | None,
     kb_refs: list[str] | None,
 ) -> dict[str, Any]:
     return {
@@ -154,10 +152,7 @@ def _build_modify_step_schema(
                 "description": f"Server alias for the existing step. Valid refs: {valid_refs}.",
             },
             "name": {"type": ["string", "null"]},
-            "assistant_spec": _build_assistant_spec_schema(
-                model_refs,
-                kb_refs,
-            ),
+            "assistant_spec": _build_assistant_spec_schema(kb_refs),
             "input_source": {
                 "type": ["string", "null"],
                 "enum": [*builder_input_source_values(), None],
@@ -209,11 +204,9 @@ def _build_form_field_spec_schema() -> dict[str, Any]:
     }
 
 
-def _build_assistant_spec_schema(
-    model_refs: list[str] | None,
-    kb_refs: list[str] | None,
-) -> dict[str, Any]:
-    schema: dict[str, Any] = {
+def _build_assistant_spec_schema(kb_refs: list[str] | None) -> dict[str, Any]:
+    # No model_ref: an existing step's model changes only in the model picker.
+    return {
         "type": "object",
         "additionalProperties": False,
         "properties": {
@@ -221,11 +214,6 @@ def _build_assistant_spec_schema(
                 "type": "string",
                 "description": "What this step's assistant should do.",
             },
-            **build_resource_ref_property_schemas(
-                model_refs=model_refs,
-                kb_refs=kb_refs,
-            ),
+            **build_knowledge_refs_property_schema(kb_refs=kb_refs),
         },
     }
-
-    return schema

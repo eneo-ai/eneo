@@ -108,27 +108,29 @@ def test_edit_overlay_omitted_assistant_fields_preserve_snapshot() -> None:
     assert assistant.knowledge_refs == ["kb-a"]
 
 
-def test_edit_overlay_explicit_model_clear_is_not_omission() -> None:
-    preserved = compile_ordered_edit_proposal(
-        base_spec=_base_spec(),
-        proposal=_edit_proposal(
-            steps=[ModifyExistingStep(existing_step_ref="existing_step_1")],
-        ),
-    )
-    cleared = compile_ordered_edit_proposal(
-        base_spec=_base_spec(),
-        proposal=_edit_proposal(
-            steps=[
-                ModifyExistingStep(
-                    existing_step_ref="existing_step_1",
-                    assistant_spec=AssistantSpecPatch(model_ref=None),
-                )
-            ],
-        ),
-    )
+def test_assistant_spec_patch_cannot_carry_a_model_ref() -> None:
+    with pytest.raises(ValidationError, match="model_ref"):
+        AssistantSpecPatch.model_validate({"model_ref": "model-b"})
 
-    assert preserved.steps[0].assistant_spec.model_ref == "model-a"
-    assert cleared.steps[0].assistant_spec.model_ref is None
+
+def test_edit_overlay_preserves_the_existing_step_model() -> None:
+    for step in [
+        ModifyExistingStep(existing_step_ref="existing_step_1"),
+        ModifyExistingStep(
+            existing_step_ref="existing_step_1",
+            assistant_spec=AssistantSpecPatch(instructions="New prompt"),
+        ),
+        ModifyExistingStep(
+            existing_step_ref="existing_step_1",
+            assistant_spec=AssistantSpecPatch(knowledge_refs=[]),
+        ),
+    ]:
+        result = compile_ordered_edit_proposal(
+            base_spec=_base_spec(),
+            proposal=_edit_proposal(steps=[step]),
+        )
+
+        assert result.steps[0].assistant_spec.model_ref == "model-a"
 
 
 def test_edit_overlay_explicit_resource_detach() -> None:

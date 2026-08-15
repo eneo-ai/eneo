@@ -76,11 +76,15 @@ def build_previous_output_refs_schema() -> dict[str, Any]:
     }
 
 
-def build_resource_ref_property_schemas(
+def build_model_ref_property_schema(
     *,
     model_refs: list[str] | None,
-    kb_refs: list[str] | None,
 ) -> dict[str, Any]:
+    """Model slot property for a step this proposal creates.
+
+    An existing step's model belongs to the step's model picker, so the
+    modify-step schema deliberately offers no such property.
+    """
     model_ref_schema: dict[str, Any] = {
         "type": ["string", "null"],
         "description": (
@@ -88,21 +92,24 @@ def build_resource_ref_property_schemas(
             "the space default model apply."
         ),
     }
+    if model_refs is not None:
+        model_ref_schema["enum"] = [*model_refs, None]
+    return {"model_ref": model_ref_schema}
+
+
+def build_knowledge_refs_property_schema(
+    *,
+    kb_refs: list[str] | None,
+) -> dict[str, Any]:
     knowledge_refs_schema: dict[str, Any] = {
         "type": "array",
         "items": {"type": "string"},
         "uniqueItems": True,
         "description": ("Portable knowledge slot refs this step needs."),
     }
-    if model_refs is not None:
-        model_ref_schema["enum"] = [*model_refs, None]
     if kb_refs is not None:
         knowledge_refs_schema["items"]["enum"] = kb_refs
-
-    return {
-        "model_ref": model_ref_schema,
-        "knowledge_refs": knowledge_refs_schema,
-    }
+    return {"knowledge_refs": knowledge_refs_schema}
 
 
 def _structured_field_schema(*, depth: int) -> dict[str, Any]:

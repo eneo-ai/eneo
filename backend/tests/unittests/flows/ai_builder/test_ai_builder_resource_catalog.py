@@ -571,25 +571,6 @@ def test_assistant_snapshot_rejects_unavailable_local_resource() -> None:
     assert "Sensitive policy name" not in str(exc_info.value)
 
 
-def test_catalog_prefers_longest_overlapping_model_alias_mention() -> None:
-    catalog = build_ai_builder_resource_catalog(
-        available_models=[
-            _model_resource("model-base", "gpt-5.4"),
-            _model_resource("model-nano", "gpt-5.4-nano"),
-        ],
-        available_kbs=[],
-    )
-
-    assert catalog.refs_mentioned_in_text(
-        kind="model",
-        text="Ändra modell till gpt 5.4 nano.",
-    ) == frozenset({"model.gpt-5-4-nano"})
-    assert catalog.refs_mentioned_in_text(
-        kind="model",
-        text="Jämför gpt 5.4 och gpt 5.4 nano.",
-    ) == frozenset({"model.gpt-5-4", "model.gpt-5-4-nano"})
-
-
 def test_resource_reference_material_keeps_description_at_clamp_boundary() -> None:
     description = "x" * RESOURCE_DESCRIPTION_MAX_CHARS
     catalog = build_ai_builder_resource_catalog(

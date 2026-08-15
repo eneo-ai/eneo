@@ -32,10 +32,6 @@ from eneo.flows.ai_builder.ai_builder_proposal_telemetry import ProposalTurnTele
 from eneo.flows.ai_builder.ai_builder_proposal_tool_contracts import (
     ToolProcessingResult,
 )
-from eneo.flows.ai_builder.ai_builder_resource_catalog import (
-    AIBuilderAvailableModelResource,
-    build_ai_builder_resource_catalog,
-)
 from eneo.flows.ai_builder.ai_builder_scoped_plan_revision import (
     ScopedPlanRevisionRequest,
     process_scoped_step_revision_if_requested,
@@ -57,16 +53,6 @@ from tests.unittests.flows.ai_builder.proposal_turn_builders import (
     _make_turn,
     _plan_stream_event,
 )
-
-
-def _model_resource(local_id: str, name: str) -> AIBuilderAvailableModelResource:
-    return {
-        "id": local_id,
-        "ref": local_id,
-        "name": name,
-        "display_name": name,
-        "provider": "test",
-    }
 
 
 def _make_finalizer() -> CompiledProposalFinalizer:
@@ -193,13 +179,6 @@ async def test_scoped_revision_contains_typed_compiler_defect() -> None:
 async def test_scoped_revision_uses_bounded_server_tool_call_id() -> None:
     prior_spec = _make_flow_spec(model_ref="model.gpt-4o-mini", knowledge_refs=[])
     prior_plan = _builder_plan(prior_spec)
-    catalog = build_ai_builder_resource_catalog(
-        available_models=[
-            _model_resource("model-old", "gpt-4o mini"),
-            _model_resource("model-nano", "gpt-5.4-nano"),
-        ],
-        available_kbs=[],
-    )
     plan_event = _plan_stream_event()
     finalize = AsyncMock(return_value=ToolProcessingResult(events=(plan_event,)))
 
@@ -211,7 +190,7 @@ async def test_scoped_revision_uses_bounded_server_tool_call_id() -> None:
                 conversation=[
                     ConversationMessage(
                         role="user",
-                        content="byt modell till gpt 5.4 nano",
+                        content="kan du ändra så att jag får en pdf fil istället?",
                     )
                 ],
                 prior_spec_for_revision=prior_plan.spec,
@@ -220,8 +199,7 @@ async def test_scoped_revision_uses_bounded_server_tool_call_id() -> None:
                     plan_id=prior_plan.id,
                     target_plan_step_ref="step_a",
                 ),
-                resource_catalog=catalog,
-                available_model_refs=catalog.model_refs,
+                compile_context=CreateCompileContext(final_output_type=OutputType.PDF),
                 request_id="00000000-0000-0000-0000-000000000000",
             ),
             finalizer=_make_finalizer(),
@@ -231,7 +209,7 @@ async def test_scoped_revision_uses_bounded_server_tool_call_id() -> None:
     assert result.events == (plan_event,)
     request = finalize.await_args.args[0]
     assert request.tool_call_id != (
-        "server_scoped_model_revision:00000000-0000-0000-0000-000000000000"
+        "server_scoped_step_revision:00000000-0000-0000-0000-000000000000"
     )
     assert "scoped_step_revision" in request.tool_call_id
     assert len(request.tool_call_id) <= PROVIDER_TOOL_CALL_ID_MAX_LENGTH
@@ -239,31 +217,37 @@ async def test_scoped_revision_uses_bounded_server_tool_call_id() -> None:
 
 @pytest.mark.asyncio
 async def test_scoped_revision_rejects_unknown_flow_input_key() -> None:
-    prior_spec = _make_flow_spec(model_ref="model.gpt-4o-mini", knowledge_refs=[])
-    prior_step = prior_spec.steps[0]
-    prior_spec = prior_spec.model_copy(
-        update={
-            "steps": [
-                prior_step.model_copy(
-                    update={
-                        "assistant_spec": prior_step.assistant_spec.model_copy(
-                            update={
-                                "instructions": "Use {{ flow_input.case_identifier }}."
-                            }
-                        )
-                    }
-                )
-            ]
-        }
+    prior_spec = FlowDraftSpecCore(
+        flow_name="Mötesflöde",
+        steps=[
+            StepSpec(
+                plan_step_ref="step_a",
+                name="Extrahera agenda",
+                assistant_spec=AssistantSpec(
+                    instructions="Use {{ flow_input.case_identifier }}.",
+                    model_ref="model.gpt-4o-mini",
+                ),
+                input_source=InputSource.FLOW_INPUT,
+                input_type=InputType.TEXT,
+                output_mode=OutputMode.PASS_THROUGH,
+                output_type=OutputType.JSON,
+                output_contract={
+                    "type": "object",
+                    "properties": {"agenda": {"type": "array"}},
+                },
+            ),
+            StepSpec(
+                plan_step_ref="step_f",
+                name="Skriv protokoll",
+                assistant_spec=AssistantSpec(instructions="Skriv protokollet."),
+                input_source=InputSource.PREVIOUS_STEP,
+                input_type=InputType.JSON,
+                output_mode=OutputMode.PASS_THROUGH,
+                output_type=OutputType.TEXT,
+            ),
+        ],
     )
     prior_plan = _builder_plan(prior_spec)
-    catalog = build_ai_builder_resource_catalog(
-        available_models=[
-            _model_resource("model-old", "gpt-4o mini"),
-            _model_resource("model-nano", "gpt-5.4-nano"),
-        ],
-        available_kbs=[],
-    )
     repo = AsyncMock()
     repo.savepoint = MagicMock(
         side_effect=AssertionError("invalid scoped revision reached persistence")
@@ -274,17 +258,16 @@ async def test_scoped_revision_rejects_unknown_flow_input_key() -> None:
             conversation=[
                 ConversationMessage(
                     role="user",
-                    content="byt modell till gpt 5.4 nano",
+                    content="kan du ändra så att jag får en pdf fil istället?",
                 )
             ],
             prior_spec_for_revision=prior_plan.spec,
             plan_edit_context=AIBuilderPlanEditContext(
                 scope="step",
                 plan_id=prior_plan.id,
-                target_plan_step_ref="step_a",
+                target_plan_step_ref="step_f",
             ),
-            resource_catalog=catalog,
-            available_model_refs=catalog.model_refs,
+            compile_context=CreateCompileContext(final_output_type=OutputType.PDF),
             request_id="req-invalid-flow-input",
         ),
         finalizer=CompiledProposalFinalizer(
@@ -356,20 +339,11 @@ async def test_scoped_revision_critic_reads_committed_docx_mode_not_conversation
     heuristic reads as `template_fill_docx`. The plan has no `template_fill`
     step, so evaluating the critic on the keyword reading would hard-fail this
     revision with `architecture_critic_invariant_failed` instead of applying
-    the model change.
+    the output-artifact change.
 
     The compile context carries the committed DOCX terminal, as production
-    always does. The wording therefore has to stay clear of the output-artifact
-    detector, which runs before the model revision and would otherwise answer a
-    non-terminal selected step with a "select the final step" notice.
+    always does.
     """
-    catalog = build_ai_builder_resource_catalog(
-        available_models=[
-            _model_resource("model-old", "gpt-4o mini"),
-            _model_resource("model-nano", "gpt-5.4-nano"),
-        ],
-        available_kbs=[],
-    )
     prior_spec = FlowDraftSpecCore(
         flow_name="Mötesflöde",
         steps=[
@@ -383,16 +357,20 @@ async def test_scoped_revision_critic_reads_committed_docx_mode_not_conversation
                 input_source=InputSource.FLOW_INPUT,
                 input_type=InputType.TEXT,
                 output_mode=OutputMode.PASS_THROUGH,
-                output_type=OutputType.TEXT,
+                output_type=OutputType.JSON,
+                output_contract={
+                    "type": "object",
+                    "properties": {"agenda": {"type": "array"}},
+                },
             ),
             StepSpec(
                 plan_step_ref="step_f",
                 name="Skriv protokoll",
                 assistant_spec=AssistantSpec(instructions="Skriv protokollet."),
                 input_source=InputSource.PREVIOUS_STEP,
-                input_type=InputType.TEXT,
-                output_mode=OutputMode.RENDER_VERBATIM,
-                output_type=OutputType.DOCX,
+                input_type=InputType.JSON,
+                output_mode=OutputMode.PASS_THROUGH,
+                output_type=OutputType.TEXT,
             ),
         ],
     )
@@ -415,19 +393,20 @@ async def test_scoped_revision_critic_reads_committed_docx_mode_not_conversation
             conversation=[
                 ConversationMessage(
                     role="user",
-                    content="modell gpt 5.4 nano; använd ingen word-mall",
+                    content=(
+                        "ändra slutresultatet till en word-fil, "
+                        "men använd ingen word-mall"
+                    ),
                 )
             ],
             prior_spec_for_revision=prior_plan.spec,
             plan_edit_context=AIBuilderPlanEditContext(
                 scope="step",
                 plan_id=prior_plan.id,
-                target_plan_step_ref="step_a",
-                target_step_name="Extrahera agenda",
-                target_step_number=1,
+                target_plan_step_ref="step_f",
+                target_step_name="Skriv protokoll",
+                target_step_number=2,
             ),
-            resource_catalog=catalog,
-            available_model_refs=catalog.model_refs,
             compile_context=CreateCompileContext(
                 final_output_type=OutputType.DOCX,
                 final_output_mode=OutputMode.RENDER_VERBATIM,
@@ -445,9 +424,10 @@ async def test_scoped_revision_critic_reads_committed_docx_mode_not_conversation
     plan_event = result.events[0]
     assert isinstance(plan_event, AIBuilderPlanEvent)
     stored_steps = plan_event.data.proposal.spec.steps
-    assert stored_steps[0].assistant_spec.model_ref == "model.gpt-5-4-nano"
+    assert stored_steps[0].model_dump(mode="json") == prior_spec.steps[0].model_dump(
+        mode="json"
+    )
     assert stored_steps[-1].output_type == OutputType.DOCX
-    assert stored_steps[-1].output_mode == OutputMode.RENDER_VERBATIM
     assert all(step.output_mode != OutputMode.TEMPLATE_FILL for step in stored_steps)
 
 
@@ -460,13 +440,6 @@ async def test_scoped_revision_returns_error_for_finalization_feedback_only() ->
             feedback="quality warning", failure_kind="quality"
         )
     )
-    catalog = build_ai_builder_resource_catalog(
-        available_models=[
-            _model_resource("model-old", "gpt-4o mini"),
-            _model_resource("model-nano", "gpt-5.4-nano"),
-        ],
-        available_kbs=[],
-    )
 
     with patch.object(
         CompiledProposalFinalizer, "finalize_compiled_proposal", new=finalize
@@ -476,7 +449,7 @@ async def test_scoped_revision_returns_error_for_finalization_feedback_only() ->
                 conversation=[
                     ConversationMessage(
                         role="user",
-                        content="byt modell från gpt-4o mini till gpt 5.4 nano",
+                        content="kan du ändra så att jag får en pdf fil istället?",
                     )
                 ],
                 prior_spec_for_revision=prior_plan.spec,
@@ -485,8 +458,7 @@ async def test_scoped_revision_returns_error_for_finalization_feedback_only() ->
                     plan_id=prior_plan.id,
                     target_plan_step_ref="step_a",
                 ),
-                resource_catalog=catalog,
-                available_model_refs=catalog.model_refs,
+                compile_context=CreateCompileContext(final_output_type=OutputType.PDF),
                 request_id="req-scoped-finalization-feedback",
             ),
             finalizer=_make_finalizer(),
@@ -503,17 +475,7 @@ async def test_scoped_revision_returns_error_for_finalization_feedback_only() ->
 
 
 @pytest.mark.asyncio
-async def test_scoped_outline_revision_explains_model_change_on_transcription_step() -> (
-    None
-):
-    catalog = build_ai_builder_resource_catalog(
-        available_models=[
-            _model_resource("model-old", "gpt-4o mini"),
-            _model_resource("model-base", "gpt-5.4"),
-            _model_resource("model-nano", "gpt-5.4-nano"),
-        ],
-        available_kbs=[],
-    )
+async def test_scoped_outline_revision_leaves_model_requests_to_the_edit_path() -> None:
     prior_spec = FlowDraftSpecCore(
         flow_name="Mötesflöde",
         steps=[
@@ -546,80 +508,12 @@ async def test_scoped_outline_revision_explains_model_change_on_transcription_st
         conversation=[
             ConversationMessage(
                 role="user",
-                content="ändra modell till gpt 5.4 nano",
-            )
-        ],
-        available_model_refs=catalog.model_refs,
-        available_kb_refs=None,
-        resource_catalog=catalog,
-        plan_edit_context=AIBuilderPlanEditContext(
-            scope="step",
-            plan_id=prior_plan.id,
-            target_plan_step_ref="step_a",
-            target_step_name="Transkribera mötesljud",
-            target_step_number=1,
-        ),
-        prior_spec_for_revision=prior_plan.spec,
-        terminal_output_type=OutputType.TEXT,
-    )
-
-    assert result is not None
-    assert result.compiled_proposal is None
-    assert result.feedback is None
-    assert result.user_message is not None
-    assert "transkriberar ljud" in result.user_message
-    assert "model.gpt-5-4-nano" not in result.user_message
-
-
-@pytest.mark.asyncio
-async def test_scoped_outline_revision_changes_model_on_selected_ai_step() -> None:
-    catalog = build_ai_builder_resource_catalog(
-        available_models=[
-            _model_resource("model-old", "gpt-4o mini"),
-            _model_resource("model-nano", "gpt-5.4-nano"),
-        ],
-        available_kbs=[],
-    )
-    old_model_ref = "model.gpt-4o-mini"
-    new_model_ref = "model.gpt-5-4-nano"
-    prior_spec = FlowDraftSpecCore(
-        flow_name="Mötesflöde",
-        steps=[
-            StepSpec(
-                plan_step_ref="step_a",
-                name="Transkribera mötesljud",
-                assistant_spec=AssistantSpec(instructions="Transkribera ljudet."),
-                input_source=InputSource.FLOW_INPUT,
-                input_type=InputType.AUDIO,
-                output_mode=OutputMode.TRANSCRIBE_ONLY,
-                output_type=OutputType.TEXT,
-            ),
-            StepSpec(
-                plan_step_ref="step_b",
-                name="Analysera mötet",
-                assistant_spec=AssistantSpec(
-                    instructions="Analysera transkriptionen.",
-                    model_ref=old_model_ref,
-                ),
-                input_source=InputSource.PREVIOUS_STEP,
-                input_type=InputType.TEXT,
-                output_mode=OutputMode.PASS_THROUGH,
-                output_type=OutputType.TEXT,
-            ),
-        ],
-    )
-    prior_plan = _builder_plan(prior_spec)
-
-    result = process_scoped_step_revision_if_requested(
-        conversation=[
-            ConversationMessage(
-                role="user",
                 content="byt modell från gpt-4o mini till gpt 5.4 nano",
             )
         ],
-        available_model_refs=catalog.model_refs,
+        available_model_refs=None,
         available_kb_refs=None,
-        resource_catalog=catalog,
+        resource_catalog=None,
         plan_edit_context=AIBuilderPlanEditContext(
             scope="step",
             plan_id=prior_plan.id,
@@ -631,19 +525,9 @@ async def test_scoped_outline_revision_changes_model_on_selected_ai_step() -> No
         terminal_output_type=OutputType.TEXT,
     )
 
-    assert result is not None
-    assert result.compiled_proposal is not None
-    assert result.feedback is None
-    assert (
-        result.compiled_proposal.content.plan_rationale
-        == "Bytte modell på det valda steget."
-    )
-    assert result.compiled_proposal.content.assumptions == []
-    revised_steps = result.compiled_proposal.content.spec.steps
-    assert revised_steps[0].model_dump(mode="json") == prior_spec.steps[0].model_dump(
-        mode="json"
-    )
-    assert revised_steps[1].assistant_spec.model_ref == new_model_ref
+    # No deterministic revision and no keyword refusal: the model is immutable
+    # in the edit contract, so the normal edit path answers the user.
+    assert result is None
 
 
 @pytest.mark.asyncio

@@ -32,10 +32,6 @@ from eneo.flows.ai_builder.ai_builder_plan_edit_context import (
 from eneo.flows.ai_builder.ai_builder_proposal_policy import (
     terminal_output_type_for_edit_conversation,
 )
-from eneo.flows.ai_builder.ai_builder_resource_catalog import (
-    AIBuilderAvailableModelResource,
-    build_ai_builder_resource_catalog,
-)
 from eneo.flows.ai_builder.ai_builder_slot_classification_contract import (
     ClassifiedEvidence,
     ClassifiedSlot,
@@ -55,26 +51,6 @@ from eneo.flows.flow_authoring_spec import (
     OutputType,
     StepSpec,
 )
-
-
-def _model_resource(local_id: str, name: str) -> AIBuilderAvailableModelResource:
-    return {
-        "id": local_id,
-        "ref": local_id,
-        "name": name,
-        "display_name": name,
-        "provider": "test",
-    }
-
-
-def _catalog():
-    return build_ai_builder_resource_catalog(
-        available_models=[
-            _model_resource("model-old", "gpt-4o mini"),
-            _model_resource("model-nano", "gpt-5.4-nano"),
-        ],
-        available_kbs=[],
-    )
 
 
 def _terminal_output_slot_metadata(value: str = "pdf_document") -> dict[str, object]:
@@ -332,182 +308,53 @@ async def test_plan_step_scope_derives_canonical_target_identity() -> None:
     assert resolved.target_step_number == 2
 
 
-def test_scoped_model_revision_ignores_whole_plan_scope() -> None:
+@pytest.mark.parametrize(
+    "text",
+    [
+        "byt modell till gpt 5.4 nano",
+        "Change model to gpt 5.5",
+        "Byt till claude",
+        "Ändra instruktionen så att modellen alltid anger källor",
+        "Modellera om upplägget lite",
+    ],
+)
+def test_model_wording_never_produces_a_deterministic_scoped_revision(
+    text: str,
+) -> None:
+    # No keyword family owns model intent here. Immutability is enforced by the
+    # modify contract and by validate_scoped_plan_revision, not by this resolver.
+    result = resolve_scoped_step_revision_if_requested(
+        context=_step_context(),
+        prior_spec=_spec(model_ref="model.gpt-4o-mini"),
+        latest_user_text=text,
+        ui_language="sv",
+    )
+
+    assert result is None
+
+
+def test_scoped_revision_ignores_whole_plan_scope() -> None:
     result = resolve_scoped_step_revision_if_requested(
         context=AIBuilderPlanEditContext(scope="whole_plan", plan_id=uuid4()),
         prior_spec=_spec(),
-        latest_user_text="ändra modell till gpt 5.4 nano",
-        resource_catalog=_catalog(),
+        latest_user_text="kan du ändra så att jag får en pdf fil istället?",
+        ui_language="sv",
+        requested_terminal_output_type=OutputType.PDF,
     )
 
     assert result is None
 
 
-def test_scoped_model_revision_ignores_model_word_without_model_name() -> None:
+def test_scoped_revision_ignores_blank_latest_user_text() -> None:
     result = resolve_scoped_step_revision_if_requested(
         context=_step_context(),
         prior_spec=_spec(),
-        latest_user_text="Modellera om upplägget lite.",
-        resource_catalog=_catalog(),
+        latest_user_text="",
+        ui_language="sv",
+        requested_terminal_output_type=OutputType.PDF,
     )
 
     assert result is None
-
-
-def test_scoped_model_revision_ignores_current_model_only() -> None:
-    result = resolve_scoped_step_revision_if_requested(
-        context=_step_context(),
-        prior_spec=_spec(model_ref="model.gpt-5-4-nano"),
-        latest_user_text="behåll modell gpt 5.4 nano",
-        resource_catalog=_catalog(),
-    )
-
-    assert result is None
-
-
-def test_scoped_model_revision_ignores_blank_latest_user_text() -> None:
-    result = resolve_scoped_step_revision_if_requested(
-        context=_step_context(),
-        prior_spec=_spec(model_ref="model.gpt-4o-mini"),
-        latest_user_text=" ",
-        resource_catalog=_catalog(),
-    )
-
-    assert result is None
-
-
-def test_scoped_model_revision_ignores_ambiguous_models_without_current_model() -> None:
-    result = resolve_scoped_step_revision_if_requested(
-        context=_step_context(),
-        prior_spec=_spec(),
-        latest_user_text="byt modell från gpt-4o mini till gpt 5.4 nano",
-        resource_catalog=_catalog(),
-    )
-
-    assert result is None
-
-
-def test_scoped_model_revision_uses_existing_step_ref() -> None:
-    result = resolve_scoped_step_revision_if_requested(
-        context=_step_context(
-            target_plan_step_ref=None,
-            target_existing_step_ref="existing_step_1",
-        ),
-        prior_spec=_spec(
-            model_ref="model.gpt-4o-mini",
-            existing_step_ref="existing_step_1",
-        ),
-        latest_user_text="byt modell från gpt-4o mini till gpt 5.4 nano",
-        resource_catalog=_catalog(),
-    )
-
-    assert isinstance(result, ScopedStepSpecRevision)
-    assert result.spec.steps[0].assistant_spec.model_ref == "model.gpt-5-4-nano"
-
-
-def test_scoped_model_revision_transcribe_only_notice_for_unknown_model_text() -> None:
-    result = resolve_scoped_step_revision_if_requested(
-        context=_step_context(),
-        prior_spec=_spec(output_mode=OutputMode.TRANSCRIBE_ONLY),
-        latest_user_text="Ändra modell till gpt 5.5",
-        resource_catalog=_catalog(),
-    )
-
-    assert isinstance(result, ScopedStepNotice)
-    assert "transkriberingsmodell" in result.message
-
-
-def test_scoped_model_revision_transcribe_only_notice_for_model_family_without_model_word() -> (
-    None
-):
-    result = resolve_scoped_step_revision_if_requested(
-        context=_step_context(),
-        prior_spec=_spec(output_mode=OutputMode.TRANSCRIBE_ONLY),
-        latest_user_text="Byt till gpt 5.4 nano",
-        resource_catalog=_catalog(),
-    )
-
-    assert isinstance(result, ScopedStepNotice)
-    assert "transkriberingsmodell" in result.message
-
-
-def test_scoped_model_revision_pass_through_without_model_word_does_not_short_circuit() -> (
-    None
-):
-    result = resolve_scoped_step_revision_if_requested(
-        context=_step_context(),
-        prior_spec=_spec(model_ref="model.gpt-4o-mini"),
-        latest_user_text="Byt till gpt 5.4 nano",
-        resource_catalog=_catalog(),
-    )
-
-    assert result is None
-
-
-def test_scoped_model_revision_completion_step_unknown_model_returns_notice() -> None:
-    result = resolve_scoped_step_revision_if_requested(
-        context=_step_context(),
-        prior_spec=_spec(model_ref="model.gpt-4o-mini"),
-        latest_user_text="Ändra modell till gpt 5.5",
-        resource_catalog=_catalog(),
-    )
-
-    assert isinstance(result, ScopedStepNotice)
-    assert "hittar inte den modellen" in result.message
-    assert "modellväljaren" in result.message
-
-
-def test_scoped_model_revision_completion_step_unknown_model_uses_english_notice() -> (
-    None
-):
-    result = resolve_scoped_step_revision_if_requested(
-        context=_step_context(),
-        prior_spec=_spec(model_ref="model.gpt-4o-mini"),
-        latest_user_text="Change model to gpt 5.5",
-        resource_catalog=_catalog(),
-    )
-
-    assert isinstance(result, ScopedStepNotice)
-    assert "cannot find that model" in result.message
-    assert "model picker" in result.message
-
-
-def test_scoped_model_revision_completion_step_does_not_hijack_prompt_edit_with_model_family_word() -> (
-    None
-):
-    result = resolve_scoped_step_revision_if_requested(
-        context=_step_context(),
-        prior_spec=_spec(model_ref="model.gpt-4o-mini"),
-        latest_user_text="Byt till gpt kod för den här funktionen",
-        resource_catalog=_catalog(),
-    )
-
-    assert result is None
-
-
-def test_scoped_model_revision_transcribe_only_ignores_prompt_edit_with_model_family_word() -> (
-    None
-):
-    result = resolve_scoped_step_revision_if_requested(
-        context=_step_context(),
-        prior_spec=_spec(output_mode=OutputMode.TRANSCRIBE_ONLY),
-        latest_user_text="Change the GPT prompt slightly",
-        resource_catalog=_catalog(),
-    )
-
-    assert result is None
-
-
-def test_scoped_model_revision_transcribe_only_tokenizes_exact_words() -> None:
-    for text in ["Modellera om upplägget lite", "Använd en kort lista", "gptproof"]:
-        result = resolve_scoped_step_revision_if_requested(
-            context=_step_context(),
-            prior_spec=_spec(output_mode=OutputMode.TRANSCRIBE_ONLY),
-            latest_user_text=text,
-            resource_catalog=_catalog(),
-        )
-
-        assert result is None
 
 
 @pytest.mark.parametrize(
@@ -532,12 +379,11 @@ def test_scoped_step_revision_changes_terminal_output_artifact(
         context=_step_context(target_plan_step_ref="step_b"),
         prior_spec=prior,
         latest_user_text=message,
-        resource_catalog=None,
+        ui_language=None,
         requested_terminal_output_type=output_type,
     )
 
     assert isinstance(result, ScopedStepSpecRevision)
-    assert result.kind == "output_artifact"
     assert result.spec.steps[0].model_dump(mode="json") == prior.steps[0].model_dump(
         mode="json"
     )
@@ -571,13 +417,12 @@ def test_scoped_step_revision_changes_terminal_output_for_pdf_file_wording() -> 
         context=context,
         prior_spec=prior,
         latest_user_text="utdatat ska vara pdf fil",
-        resource_catalog=None,
+        ui_language=None,
         requested_terminal_output_type=output_type,
     )
 
     assert output_type == OutputType.PDF
     assert isinstance(result, ScopedStepSpecRevision)
-    assert result.kind == "output_artifact"
     assert result.spec.steps[1].output_type == OutputType.PDF
 
 
@@ -649,7 +494,7 @@ def test_scoped_step_revision_uses_slot_classification_for_pdf_output_edit() -> 
         context=context,
         prior_spec=prior,
         latest_user_text="ändra output filen till pdf",
-        resource_catalog=None,
+        ui_language=None,
         requested_terminal_output_type=terminal_output_type_for_edit_conversation(
             conversation,
             plan_edit_context=context,
@@ -658,7 +503,6 @@ def test_scoped_step_revision_uses_slot_classification_for_pdf_output_edit() -> 
     )
 
     assert isinstance(result, ScopedStepSpecRevision)
-    assert result.kind == "output_artifact"
     assert result.spec.steps[1].output_type == OutputType.PDF
 
 
@@ -692,7 +536,7 @@ def test_scoped_step_revision_does_not_patch_input_file_mentions(
         context=context,
         prior_spec=prior,
         latest_user_text=message,
-        resource_catalog=None,
+        ui_language=None,
         requested_terminal_output_type=terminal_output_type_for_edit_conversation(
             conversation,
             plan_edit_context=context,
@@ -715,7 +559,7 @@ def test_scoped_step_revision_keeps_matching_terminal_output_as_noop() -> None:
         context=_step_context(target_plan_step_ref="step_b"),
         prior_spec=prior,
         latest_user_text="kan du ändra så att jag får en pdf fil istället?",
-        resource_catalog=None,
+        ui_language=None,
         requested_terminal_output_type=OutputType.PDF,
     )
 
@@ -743,7 +587,7 @@ def test_scoped_step_revision_warns_when_output_artifact_target_is_not_terminal(
         context=_step_context(target_plan_step_ref="step_a"),
         prior_spec=prior,
         latest_user_text=message,
-        resource_catalog=None,
+        ui_language=None,
         requested_terminal_output_type=OutputType.PDF,
     )
 
@@ -1214,6 +1058,107 @@ def test_revision_prompt_names_the_target_step_and_prior_refs() -> None:
     assert "step_b (Create final result)" in prompt
     assert "step_a: Analyze input" in prompt
     assert "step_b: Create final result" in prompt
+    # The revision guidance is where the picker-only rule is explained, for both
+    # proposed-plan and saved-Flow revisions.
+    assert "modellväljare/model picker" in prompt
+
+
+def _model_revision_specs(
+    *,
+    proposed_model_ref: str | None,
+    proposed_instructions: str | None = None,
+) -> tuple[FlowDraftSpecCore, FlowDraftSpecCore]:
+    prior = _edit_spec(
+        [
+            _edit_step(
+                "step_a",
+                "Analyze input",
+                output_type=OutputType.JSON,
+                model_ref="model.gpt-4o-mini",
+            ),
+            _edit_step(
+                "step_b",
+                "Create final result",
+                output_type=OutputType.TEXT,
+                model_ref="model.gpt-4o-mini",
+            ),
+        ]
+    )
+    proposed = _edit_spec(
+        [
+            prior.steps[0],
+            _edit_step(
+                "step_b",
+                "Create final result",
+                output_type=OutputType.TEXT,
+                model_ref=proposed_model_ref,
+                instructions=proposed_instructions,
+            ),
+        ]
+    )
+    return prior, proposed
+
+
+@pytest.mark.parametrize(
+    "proposed_model_ref, proposed_instructions",
+    [
+        ("model.gpt-5-4", None),
+        ("model.gpt-5-4", "Create final result with sources."),
+        (None, None),
+    ],
+)
+def test_step_scoped_edit_rejects_a_model_change_on_the_selected_step(
+    proposed_model_ref: str | None,
+    proposed_instructions: str | None,
+) -> None:
+    prior, proposed = _model_revision_specs(
+        proposed_model_ref=proposed_model_ref,
+        proposed_instructions=proposed_instructions,
+    )
+
+    feedback = validate_scoped_plan_revision(
+        context=_step_context(target_plan_step_ref="step_b"),
+        prior_spec=prior,
+        proposed_spec=proposed,
+    )
+
+    assert feedback is not None
+    assert "step_b" in feedback
+    assert "model picker" in feedback
+
+
+def test_whole_plan_outline_revision_is_not_model_guarded_yet() -> None:
+    # Recorded residual, not an endorsement: an outline step has no stable
+    # identity across a restructuring, so a whole-plan revision cannot tell a
+    # reorder apart from a model change. Guarding it needs stable carried-step
+    # identity (follow-up). A saved Flow does not rely on this: its modify
+    # contract carries no model_ref at all.
+    prior, proposed = _model_revision_specs(proposed_model_ref="model.gpt-5-4")
+
+    assert (
+        validate_scoped_plan_revision(
+            context=_step_context(scope="whole_plan"),
+            prior_spec=prior,
+            proposed_spec=proposed,
+        )
+        is None
+    )
+
+
+def test_step_scoped_edit_accepts_an_instruction_change_that_keeps_the_model() -> None:
+    prior, proposed = _model_revision_specs(
+        proposed_model_ref="model.gpt-4o-mini",
+        proposed_instructions="Create final result with sources.",
+    )
+
+    assert (
+        validate_scoped_plan_revision(
+            context=_step_context(target_plan_step_ref="step_b"),
+            prior_spec=prior,
+            proposed_spec=proposed,
+        )
+        is None
+    )
 
 
 def _edit_spec(
@@ -1236,14 +1181,16 @@ def _edit_step(
     input_type: InputType = InputType.TEXT,
     output_type: OutputType,
     existing_step_ref: str | None = None,
+    model_ref: str | None = None,
+    instructions: str | None = None,
 ) -> StepSpec:
     return StepSpec(
         plan_step_ref=ref,
         existing_step_ref=existing_step_ref,
         name=name,
         assistant_spec=AssistantSpec(
-            instructions=f"{name}.",
-            model_ref=None,
+            instructions=instructions or f"{name}.",
+            model_ref=model_ref,
             knowledge_refs=[],
         ),
         input_source=InputSource.PREVIOUS_STEP

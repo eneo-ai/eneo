@@ -34,9 +34,10 @@ from eneo.flows.ai_builder.ai_builder_runtime_input_requirements import (
 )
 from eneo.flows.ai_builder.ai_builder_step_tool_schema_fragments import (
     build_create_structured_field_schema,
+    build_knowledge_refs_property_schema,
+    build_model_ref_property_schema,
     build_previous_field_refs_schema,
     build_previous_output_refs_schema,
-    build_resource_ref_property_schemas,
     build_review_mode_schema,
     build_structured_field_schema,
 )
@@ -190,10 +191,16 @@ CreateSemanticStepIntent = Annotated[
 
 
 class AssistantSpecPatch(BaseModel):
+    """Assistant fields an edit may change on an existing step.
+
+    A saved step's model is not one of them: the step's model picker is the
+    only place a model changes, so chat cannot silently move work onto a model
+    with a different security classification.
+    """
+
     model_config = ConfigDict(extra="forbid")
 
     instructions: str | None = None
-    model_ref: str | None = None
     knowledge_refs: list[str] = Field(default_factory=list)
 
 
@@ -513,10 +520,8 @@ def build_semantic_step_schema(
                 if include_previous_refs
                 else {}
             ),
-            **build_resource_ref_property_schemas(
-                model_refs=model_refs,
-                kb_refs=kb_refs,
-            ),
+            **build_model_ref_property_schema(model_refs=model_refs),
+            **build_knowledge_refs_property_schema(kb_refs=kb_refs),
             "citations_requested": {"type": "boolean", "default": False},
             **(
                 {"review_mode": build_review_mode_schema()}

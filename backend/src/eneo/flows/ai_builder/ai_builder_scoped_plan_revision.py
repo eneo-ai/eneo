@@ -179,7 +179,7 @@ def process_scoped_step_revision_if_requested(
         context=plan_edit_context,
         prior_spec=prior_spec_for_revision,
         latest_user_text=_latest_user_text(conversation),
-        resource_catalog=resource_catalog,
+        ui_language=resolve_ui_language(conversation),
         requested_terminal_output_type=terminal_output_type,
     )
     if scoped_revision is None:
@@ -199,7 +199,7 @@ def process_scoped_step_revision_if_requested(
     if prepared.failure_feedback is not None:
         if prepared.validation is not None and prepared.validation.errors:
             logger.info(
-                "Prepared scoped model revision spec validation failed: %s",
+                "Prepared scoped step revision spec validation failed: %s",
                 [error.message for error in prepared.validation.errors],
             )
         return ToolProcessingResult(
@@ -228,10 +228,7 @@ def process_scoped_step_revision_if_requested(
             content=FlowBuilderProposalContent(
                 spec=prepared.spec,
                 plan_rationale=plan_rationale
-                or _scoped_step_revision_rationale(
-                    conversation,
-                    revision_kind=scoped_revision.kind,
-                ),
+                or _scoped_step_revision_rationale(conversation),
             ),
             validation=prepared.validation,
             resource_bindings=(
@@ -304,16 +301,10 @@ def _latest_user_text(conversation: list[ConversationMessage]) -> str | None:
 
 def _scoped_step_revision_rationale(
     conversation: list[ConversationMessage],
-    *,
-    revision_kind: str,
 ) -> str:
-    if revision_kind == "output_artifact":
-        if _scoped_step_revision_uses_swedish(conversation):
-            return "Ändrade filformatet på det valda slutsteget."
-        return "Updated the selected final step output file format."
     if _scoped_step_revision_uses_swedish(conversation):
-        return "Bytte modell på det valda steget."
-    return "Updated the selected step model."
+        return "Ändrade filformatet på det valda slutsteget."
+    return "Updated the selected final step output file format."
 
 
 def _scoped_step_revision_uses_swedish(
@@ -323,4 +314,4 @@ def _scoped_step_revision_uses_swedish(
     if ui_language is not None:
         return ui_language == "sv"
     latest = (_latest_user_text(conversation) or "").casefold()
-    return any(token in latest for token in ("modell", "ändra", "fil", "istället"))
+    return any(token in latest for token in ("ändra", "fil", "istället"))

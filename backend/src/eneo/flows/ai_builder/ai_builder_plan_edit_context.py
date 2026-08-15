@@ -26,9 +26,6 @@ from eneo.flows.step_lineage import existing_step_ref_for_order
 if TYPE_CHECKING:
     from eneo.flows.ai_builder.ai_builder_proposal_intent import OrderedEditProposal
     from eneo.flows.ai_builder.ai_builder_repo import AIBuilderRepository
-    from eneo.flows.ai_builder.ai_builder_resource_catalog import (
-        AIBuilderResourceCatalog,
-    )
     from eneo.flows.domain.flow import Flow
 
 PlanEditScope = Literal["whole_plan", "step"]
@@ -37,7 +34,6 @@ PlanEditScope = Literal["whole_plan", "step"]
 @dataclass(frozen=True, slots=True)
 class ScopedStepSpecRevision:
     spec: FlowDraftSpecCore
-    kind: Literal["model", "output_artifact"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -324,6 +320,9 @@ def build_plan_revision_prompt_block(
             else ["- Current source: saved Flow draft."]
         ),
         "- Treat the user's latest message as a revision request for this flow.",
+        "- A step's model is chosen in the step's modellväljare/model picker and is "
+        "never part of this revision; when the user asks for another model, say that "
+        "in plan_rationale instead of changing the step's model.",
     ]
 
     if context.scope == "whole_plan":
@@ -372,9 +371,14 @@ def validate_scoped_plan_revision(
     """Return repair feedback when a step-scoped plan edit drifts.
 
     Step edits are intentionally narrower than whole-plan edits. The selected
-    step may change freely, while runtime inputs and every unrelated step are
-    preserved. Broader rewrites should use whole-plan editing so the user can
-    review the wider intent explicitly.
+    step may change freely except for its model, while runtime inputs and every
+    unrelated step are preserved. Broader rewrites should use whole-plan editing
+    so the user can review the wider intent explicitly.
+
+    Whole-plan revisions of an outline draft are not guarded here: an outline
+    step has no stable identity across a restructuring, so a reorder cannot be
+    told apart from a model change. Saved-Flow steps do not need the guard —
+    their modify contract has no `model_ref` at all.
     """
 
     if context is None or context.scope != "step" or prior_spec is None:
@@ -408,7 +412,12 @@ def validate_scoped_plan_revision(
     )
     if preservation_feedback is not None:
         return preservation_feedback
-    return None
+    # Runs last at this scope: the preservation check has already proved the
+    # step sequence is unchanged, so the carried-step match is exact here.
+    return _validate_carried_step_models(
+        prior_spec=prior_spec,
+        proposed_spec=proposed_spec,
+    )
 
 
 def resolve_scoped_step_revision_if_requested(
@@ -416,7 +425,7 @@ def resolve_scoped_step_revision_if_requested(
     context: ScopedEditContext | None,
     prior_spec: FlowDraftSpecCore | None,
     latest_user_text: str | None,
-    resource_catalog: "AIBuilderResourceCatalog | None",
+    ui_language: Literal["sv", "en"] | None,
     requested_terminal_output_type: OutputType | None = None,
 ) -> ScopedStepRevision | None:
     """Handle selected-step edits that are safer as deterministic patches.
@@ -443,67 +452,10 @@ def resolve_scoped_step_revision_if_requested(
         prior_spec=prior_spec,
         target=target,
         latest_user_text=latest_user_text,
+        ui_language=ui_language,
         requested_terminal_output_type=requested_terminal_output_type,
     )
-    if output_revision is not None:
-        return output_revision
-
-    if target.output_mode == OutputMode.TRANSCRIBE_ONLY:
-        if _looks_like_transcribe_only_model_revision_request(latest_user_text):
-            return ScopedStepNotice(
-                message=_transcription_step_model_revision_message(latest_user_text)
-            )
-        return None
-
-    if resource_catalog is None or not _looks_like_model_revision_request(
-        latest_user_text
-    ):
-        return None
-
-    mentioned_model_refs = resource_catalog.refs_mentioned_in_text(
-        kind="model",
-        text=latest_user_text,
-    )
-
-    if len(mentioned_model_refs) == 1:
-        if not _looks_like_catalog_model_revision_request(latest_user_text):
-            return None
-        model_ref = next(iter(mentioned_model_refs))
-    else:
-        if not mentioned_model_refs:
-            if not _looks_like_catalog_model_revision_request(latest_user_text):
-                return None
-            return ScopedStepNotice(
-                message=_unknown_step_model_revision_message(latest_user_text)
-            )
-        if not _looks_like_catalog_model_revision_request(latest_user_text):
-            return None
-        current_model_ref = target.assistant_spec.model_ref
-        if current_model_ref is None:
-            return None
-        candidate_refs = mentioned_model_refs - {current_model_ref}
-        if len(candidate_refs) != 1:
-            return None
-        model_ref = next(iter(candidate_refs))
-
-    if target.assistant_spec.model_ref == model_ref:
-        return None
-
-    updated_target = target.model_copy(
-        update={
-            "assistant_spec": target.assistant_spec.model_copy(
-                update={"model_ref": model_ref}
-            )
-        }
-    )
-    revised_spec = prior_spec.model_copy(
-        update={
-            "steps": [
-                updated_target if step is target else step for step in prior_spec.steps
-            ]
-        }
-    )
-    return ScopedStepSpecRevision(spec=revised_spec, kind="model")
+    return output_revision
 
 
 _DOCUMENT_OUTPUT_TYPES = frozenset({OutputType.PDF, OutputType.DOCX})
@@ -514,6 +466,7 @@ def _resolve_scoped_output_artifact_revision(
     prior_spec: FlowDraftSpecCore,
     target: StepSpec,
     latest_user_text: str,
+    ui_language: Literal["sv", "en"] | None,
     requested_terminal_output_type: OutputType | None,
 ) -> ScopedStepRevision | None:
     output_type = requested_terminal_output_type
@@ -528,7 +481,9 @@ def _resolve_scoped_output_artifact_revision(
         return None
     if target is not prior_spec.steps[-1]:
         return ScopedStepNotice(
-            message=_non_terminal_output_artifact_revision_message(latest_user_text)
+            message=_non_terminal_output_artifact_revision_message(
+                ui_language=ui_language
+            )
         )
     if target.output_type == output_type:
         return None
@@ -548,7 +503,7 @@ def _resolve_scoped_output_artifact_revision(
             ]
         }
     )
-    return ScopedStepSpecRevision(spec=revised_spec, kind="output_artifact")
+    return ScopedStepSpecRevision(spec=revised_spec)
 
 
 def _looks_like_output_artifact_revision_request(
@@ -569,60 +524,20 @@ def _looks_like_output_artifact_revision_request(
     return False
 
 
-def _non_terminal_output_artifact_revision_message(text: str) -> str:
-    tokens = _word_tokens(text)
-    if tokens & _SWEDISH_OUTPUT_ARTIFACT_HINT_WORDS:
+def _non_terminal_output_artifact_revision_message(
+    *, ui_language: Literal["sv", "en"] | None
+) -> str:
+    if ui_language == "en":
         return (
-            "Det markerade steget är inte slutsteget. Välj slutsteget om du "
-            "vill ändra filformatet för slutresultatet."
+            "The selected step is not the final step. Select the final step to "
+            "change the final output file format."
         )
     return (
-        "The selected step is not the final step. Select the final step to "
-        "change the final output file format."
+        "Det markerade steget är inte slutsteget. Välj slutsteget om du "
+        "vill ändra filformatet för slutresultatet."
     )
 
 
-def _looks_like_catalog_model_revision_request(text: str) -> bool:
-    # The catalog-bounded model-name check is the real guard; this only avoids
-    # treating ordinary mentions of a model name as selected-step edit commands.
-    return bool(_MODEL_WORDS & _word_tokens(text))
-
-
-def _looks_like_model_revision_request(text: str) -> bool:
-    tokens = _word_tokens(text)
-    if _MODEL_WORDS & tokens:
-        return True
-    return bool(
-        (_MODEL_ACTION_WORDS & tokens)
-        and (_MODEL_TARGET_PREPOSITION_WORDS & tokens)
-        and (_MODEL_FAMILY_WORDS & tokens)
-    )
-
-
-_MODEL_WORDS = frozenset({"model", "modell"})
-_MODEL_ACTION_WORDS = frozenset(
-    {
-        "byt",
-        "byta",
-        "ändra",
-        "andra",
-        "switch",
-        "change",
-        "use",
-        "använd",
-        "anvanda",
-        "kör",
-        "kor",
-    }
-)
-_MODEL_FAMILY_WORDS = frozenset({"gpt", "claude", "gemini", "llama", "mistral"})
-_MODEL_TARGET_PREPOSITION_WORDS = frozenset({"till", "to"})
-_SWEDISH_MODEL_REVISION_HINT_WORDS = (
-    _MODEL_ACTION_WORDS - {"switch", "change", "use"}
-) | {"modell", "till"}
-_SWEDISH_OUTPUT_ARTIFACT_HINT_WORDS = frozenset(
-    {"ändra", "andra", "fil", "istället", "istallet", "får", "far"}
-)
 _OUTPUT_ARTIFACT_CHANGE_WORDS = frozenset(
     {
         "ändra",
@@ -665,40 +580,33 @@ _OUTPUT_ARTIFACT_HINT_WORDS = _OUTPUT_ARTIFACT_CHANGE_WORDS | frozenset(
 _WORD_PATTERN = re.compile(r"\w+", re.UNICODE)
 
 
-def _looks_like_transcribe_only_model_revision_request(text: str) -> bool:
-    return _looks_like_model_revision_request(text)
-
-
 def _word_tokens(text: str) -> set[str]:
     return set(_WORD_PATTERN.findall(text.casefold()))
 
 
-def _transcription_step_model_revision_message(text: str) -> str:
-    tokens = _word_tokens(text)
-    if tokens & _SWEDISH_MODEL_REVISION_HINT_WORDS:
-        return (
-            "Det markerade steget transkriberar ljud och använder flödets "
-            "transkriberingsmodell, inte en chattmodell som GPT. Välj ett "
-            "analys- eller skrivsteg om du vill byta LLM-modell."
-        )
-    return (
-        "The selected step transcribes audio and uses the flow transcription "
-        "model, not a chat model such as GPT. Select an analysis or writing "
-        "step if you want to change the LLM model."
-    )
+def _validate_carried_step_models(
+    *,
+    prior_spec: FlowDraftSpecCore,
+    proposed_spec: FlowDraftSpecCore,
+) -> str | None:
+    """Reject a model change on a step this step-scoped edit carries over.
 
+    Only valid once the step sequence is proven unchanged, which
+    `_validate_non_target_preservation` does first; the steps then pair by
+    position exactly.
+    """
 
-def _unknown_step_model_revision_message(text: str) -> str:
-    tokens = _word_tokens(text)
-    if tokens & _SWEDISH_MODEL_REVISION_HINT_WORDS:
+    for prior_step, proposed_step in zip(prior_spec.steps, proposed_spec.steps):
+        prior_model_ref = prior_step.assistant_spec.model_ref
+        if proposed_step.assistant_spec.model_ref == prior_model_ref:
+            continue
         return (
-            "Jag hittar inte den modellen i det här utrymmet. Välj en "
-            "tillgänglig modell i modellväljaren eller skriv exakt modellnamn."
+            f"Step-scoped plan edits must keep step `{prior_step.plan_step_ref}` "
+            f"on its current model `{prior_model_ref}`. The model is chosen in "
+            "the step's model picker, never by an edit; apply the rest of the "
+            "requested change and say that in plan_rationale."
         )
-    return (
-        "I cannot find that model in this space. Select an available model in "
-        "the model picker or type the exact model name."
-    )
+    return None
 
 
 def _validate_non_target_preservation(

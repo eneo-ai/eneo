@@ -371,17 +371,13 @@ def merge_assistant_spec_patch(
             raise ValueError("Assistant instructions cannot be cleared.")
         instructions = patch.instructions.strip()
 
-    model_ref = existing.model_ref
-    if "model_ref" in patched_fields:
-        model_ref = patch.model_ref
-
     knowledge_refs = existing.knowledge_refs
     if "knowledge_refs" in patched_fields:
         knowledge_refs = patch.knowledge_refs
 
     return AssistantSpec(
         instructions=instructions,
-        model_ref=model_ref,
+        model_ref=existing.model_ref,
         knowledge_refs=knowledge_refs,
     )
 

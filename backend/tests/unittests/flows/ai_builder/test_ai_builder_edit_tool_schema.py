@@ -6,6 +6,7 @@ from uuid import uuid4
 
 import jsonschema
 import pytest
+from pydantic import ValidationError
 
 from eneo.flows.ai_builder.ai_builder_edit_tool_schema import (
     build_edit_flow_tool_schema,
@@ -17,6 +18,7 @@ from eneo.flows.ai_builder.ai_builder_flow_schema_values import (
     document_delivery_mode_values,
 )
 from eneo.flows.ai_builder.ai_builder_proposal_intent import (
+    AddStep,
     OrderedEditProposal,
     SemanticStepIntent,
 )
@@ -126,12 +128,12 @@ class TestBuildEditFlowToolSchema:
         )
         parameters = schema["function"]["parameters"]
         arguments = {
-            "plan_rationale": "Use the configured model for this step.",
+            "plan_rationale": "Sharpen the instructions for this step.",
             "steps": [
                 {
                     "kind": "modify",
                     "existing_step_ref": "existing_step_1",
-                    "assistant_spec": {"model_ref": None},
+                    "assistant_spec": {"instructions": "Compare the evidence."},
                 }
             ],
         }
@@ -143,6 +145,61 @@ class TestBuildEditFlowToolSchema:
         assistant_schema = _modify_step_schema(schema)["properties"]["assistant_spec"]
         assert assistant_schema["additionalProperties"] is False
         assert "required" not in assistant_schema
+
+    def test_modify_step_cannot_carry_a_model_ref_but_added_steps_can(self) -> None:
+        catalog = _catalog_with_models(
+            [
+                {
+                    "id": "model_a",
+                    "ref": "model_a",
+                    "name": "model_a",
+                    "display_name": "model_a",
+                    "provider": "test",
+                },
+            ]
+        )
+        schema = build_edit_flow_tool_schema(
+            [_make_step(1)],
+            resource_catalog=catalog,
+            tool_name=PROPOSE_FLOW_TOOL_NAME,
+        )
+        parameters = schema["function"]["parameters"]
+
+        assistant_schema = _modify_step_schema(schema)["properties"]["assistant_spec"]
+        assert "model_ref" not in assistant_schema["properties"]
+
+        modify_with_model = {
+            "plan_rationale": "Switch this step to another model.",
+            "steps": [
+                {
+                    "kind": "modify",
+                    "existing_step_ref": "existing_step_1",
+                    "assistant_spec": {"model_ref": "model.model-a"},
+                }
+            ],
+        }
+        with pytest.raises(jsonschema.ValidationError):
+            jsonschema.validate(modify_with_model, parameters)
+        with pytest.raises(ValidationError, match="model_ref"):
+            OrderedEditProposal.model_validate(modify_with_model)
+
+        added_with_model = {
+            "plan_rationale": "Add a drafting step on an available model.",
+            "steps": [
+                {
+                    "kind": "add",
+                    "step": {
+                        "name": "Draft",
+                        "instructions": "Write the draft.",
+                        "model_ref": "model.model-a",
+                    },
+                }
+            ],
+        }
+        jsonschema.validate(added_with_model, parameters)
+        added = OrderedEditProposal.model_validate(added_with_model).steps[0]
+        assert isinstance(added, AddStep)
+        assert added.step.model_ref == "model.model-a"
 
     @pytest.mark.parametrize(
         "arguments",
