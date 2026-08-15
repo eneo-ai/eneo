@@ -189,32 +189,38 @@ def _fallback_message_tokens(
     return total
 
 
+def _serialized(value: object) -> str:
+    return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
+
+
 def _utf8_upper_bound_tokens(text: str) -> int:
     """Tokens `text` cannot exceed.
 
-    Every token of a byte-pair encoding covers at least one UTF-8 byte, so the
-    byte length bounds the count for any model and any script. It needs no
-    tokenizer, which is what makes it usable when tokenizing has failed, and it
-    stays an upper bound where a character heuristic does not: `len // 4`
-    under-counts CJK, emoji, and punctuation-dense identifiers several-fold.
+    Every token of the byte-pair encodings behind the supported providers
+    covers at least one UTF-8 byte, so the byte length bounds the count for any
+    script. It needs no tokenizer, which is what makes it usable when
+    tokenizing has failed, and it stays an upper bound where a character
+    heuristic does not: `len // 4` under-counts CJK, emoji, and
+    punctuation-dense identifiers several-fold.
     """
     return len(text.encode())
 
 
 # A provider prices a tool from its expanded schema, so a `$defs` entry reached
-# through `$ref` costs its whole definition at every use site. Expansion is
-# bounded by the nodes it may produce, because a schema whose definitions
-# reference each other can unfold exponentially, and tool schemas arrive from
-# MCP servers under limits far larger than any context window
-# (`mcp_server.py` permits a 1 MiB definition).
-_MAX_TOOL_SCHEMA_EXPANDED_NODES = 500_000
-_LOCAL_SCHEMA_POINTER_PREFIX = "#/"
+# through `$ref` costs its whole definition at every use site. Only the material
+# a reference introduces is bounded: the catalog a caller passed in already has
+# its own limits, while expansion is what multiplies it, and a definition can be
+# large as well as often-referenced (`mcp_server.py` permits a 1 MiB
+# definition). Charging characters rather than nodes is what makes the ceiling a
+# memory bound instead of a shape bound.
+_MAX_TOOL_SCHEMA_EXPANSION_CHARS = 4 * 1024 * 1024
+_DEFINITIONS_POINTER_PREFIX = "#/$defs/"
 
 # What an unbounded schema reserves. This is a refusal, not a measurement: no
 # context window admits it, so every budget that subtracts it declines the
 # request whether or not the caller inspects `TokenCount.source`. Deriving the
 # number from the partial expansion instead would let many small references
-# exhaust the bound while still reporting a cost a caller would accept.
+# exhaust the ceiling while still reporting a cost a caller would accept.
 _UNBOUNDED_TOOL_SCHEMA_TOKENS = 1 << 40
 
 
@@ -222,130 +228,136 @@ _UNBOUNDED_TOOL_SCHEMA_TOKENS = 1 << 40
 class _ToolReservePayload:
     """The serialized tool schemas a reserve is measured from.
 
-    `bounded` is false when expansion stopped early, and then `text` is a
-    fragment that must never be priced as if it were the whole schema.
+    `bounded` is false when a reference stopped being written out part way, and
+    then `text` is missing cost that must never be priced as if it were whole.
     """
 
     text: str
     bounded: bool
 
 
-class _NodeBudget:
-    """Bounds the nodes one expansion may materialize.
-
-    Running out only makes a payload untrustworthy if a reference was written
-    out along the way. Without one the traversal is a copy, so the untouched
-    remainder is already exactly what the provider receives, and a large but
-    plain catalog is measured rather than refused.
-    """
+class _ExpansionBudget:
+    """Bounds the characters reference expansion may introduce."""
 
     def __init__(self, limit: int) -> None:
         self._remaining = limit
-        self.substitutions = 0
         self.exhausted = False
 
-    def spend(self) -> bool:
-        if self._remaining <= 0:
+    def spend(self, characters: int) -> bool:
+        if self._remaining < characters:
             self.exhausted = True
             return False
-        self._remaining -= 1
+        self._remaining -= characters
         return True
 
-    @property
-    def truncated_an_expansion(self) -> bool:
-        return self.exhausted and self.substitutions > 0
 
+def _resolve_definition(pointer: str, roots: tuple[object, ...]) -> object | None:
+    """Resolve a `#/$defs/<name>` pointer against the documents it may name.
 
-def _resolve_local_pointer(pointer: str, root: object) -> object | None:
-    node = root
-    for raw_step in pointer[len(_LOCAL_SCHEMA_POINTER_PREFIX) :].split("/"):
-        step = raw_step.replace("~1", "/").replace("~0", "~")
-        if not isinstance(node, dict):
-            return None
-        typed = cast("dict[str, Any]", node)
-        if step not in typed:
-            return None
-        node = typed[step]
-    return node
+    Providers read a tool's pointers against its parameter object, which is the
+    document they validate arguments with. A schema that hoists `$defs` above
+    that object still has to be priced, so the tool itself is tried next rather
+    than leaving the reference unexpanded and under-reserved.
+    """
+    name = pointer[len(_DEFINITIONS_POINTER_PREFIX) :].replace("~1", "/")
+    name = name.replace("~0", "~")
+    for root in roots:
+        if not isinstance(root, dict):
+            continue
+        definitions = cast("dict[str, Any]", root).get("$defs")
+        if isinstance(definitions, dict):
+            target = cast("dict[str, Any]", definitions).get(name)
+            if target is not None:
+                return target
+    return None
 
 
 def _expand_schema_references(
     node: object,
     *,
-    root: object,
+    roots: tuple[object, ...],
     active: frozenset[str],
-    budget: _NodeBudget,
+    budget: _ExpansionBudget,
+    inside_reference: bool,
 ) -> object:
-    """Write every local `$ref` out where it is used, keeping `$defs` in place.
+    """Write every `$defs` reference out where it is used, keeping `$defs` too.
 
     A reference already being expanded on this path is left exactly as written,
     so a recursive schema terminates. `$defs` is kept rather than dropped for
     the same reason: the provider is sent those bytes too, and a definition an
     unresolved reference still points at must keep costing something.
+
+    The result is an accounting representation, not a schema. A resolved target
+    is stored under the reference's own key so that a `description` on the
+    reference and a `description` on its target both survive; merging them into
+    one object silently dropped whichever lost the collision.
     """
-    if not budget.spend():
+    if inside_reference and isinstance(node, str) and not budget.spend(len(node)):
         return node
     if isinstance(node, list):
         return [
-            _expand_schema_references(item, root=root, active=active, budget=budget)
+            _expand_schema_references(
+                item,
+                roots=roots,
+                active=active,
+                budget=budget,
+                inside_reference=inside_reference,
+            )
             for item in cast("list[Any]", node)
         ]
     if not isinstance(node, dict):
         return node
     typed = cast("dict[str, Any]", node)
-    pointer = typed.get("$ref")
-    expanded_reference: dict[str, Any] = {}
-    if (
-        isinstance(pointer, str)
-        and pointer.startswith(_LOCAL_SCHEMA_POINTER_PREFIX)
-        and pointer not in active
-    ):
-        target = _resolve_local_pointer(pointer, root)
-        if isinstance(target, dict):
-            budget.substitutions += 1
-            expanded_reference = cast(
-                "dict[str, Any]",
-                _expand_schema_references(
-                    cast("dict[str, Any]", target),
-                    root=root,
-                    active=active | {pointer},
+    expanded: dict[str, Any] = {}
+    for key, value in typed.items():
+        if (
+            key == "$ref"
+            and isinstance(value, str)
+            and value.startswith(_DEFINITIONS_POINTER_PREFIX)
+            and value not in active
+        ):
+            target = _resolve_definition(value, roots)
+            if target is not None and budget.spend(len(_serialized(target))):
+                expanded[key] = _expand_schema_references(
+                    target,
+                    roots=roots,
+                    active=active | {value},
                     budget=budget,
-                ),
-            )
-    siblings = {
-        key: _expand_schema_references(value, root=root, active=active, budget=budget)
-        for key, value in typed.items()
-        if key != "$ref" or not expanded_reference
-    }
-    return {**expanded_reference, **siblings}
+                    inside_reference=True,
+                )
+                continue
+        expanded[key] = _expand_schema_references(
+            value,
+            roots=roots,
+            active=active,
+            budget=budget,
+            inside_reference=inside_reference,
+        )
+    return expanded
 
 
 def _tool_reserve_payload(tools: list[dict[str, Any]]) -> _ToolReservePayload:
-    budget = _NodeBudget(_MAX_TOOL_SCHEMA_EXPANDED_NODES)
+    budget = _ExpansionBudget(_MAX_TOOL_SCHEMA_EXPANSION_CHARS)
     expanded: list[object] = []
     for tool in tools:
         function = tool.get("function")
-        # Local pointers in a tool schema are written against its parameter
-        # object, which is the document the provider validates arguments with.
         parameters = (
             cast("dict[str, Any]", function).get("parameters")
             if isinstance(function, dict)
             else None
         )
-        root: dict[str, Any] = (
-            cast("dict[str, Any]", parameters) if isinstance(parameters, dict) else tool
-        )
         expanded.append(
             _expand_schema_references(
                 tool,
-                root=root,
+                roots=(parameters, tool),
                 active=frozenset(),
                 budget=budget,
+                inside_reference=False,
             )
         )
     return _ToolReservePayload(
-        text=json.dumps(expanded, ensure_ascii=False, separators=(",", ":")),
-        bounded=not budget.truncated_an_expansion,
+        text=_serialized(expanded),
+        bounded=not budget.exhausted,
     )
 
 
@@ -358,8 +370,13 @@ def _fallback_tool_reserve_tokens(tools: list[dict[str, Any]]) -> int:
 
 
 def _fallback_tool_tokens(tools: list[dict[str, Any]]) -> int:
-    """Estimate tool schemas when tokenizing failed, for reporting only."""
-    return len(_tool_reserve_payload(tools).text) // 4
+    """Estimate tool schemas when tokenizing failed, for reporting only.
+
+    Deliberately measures the tools as the caller wrote them. Pricing the
+    expanded form here would inflate the usage a provider is reported to have
+    charged whenever it omits its own count.
+    """
+    return len(_serialized(tools)) // 4
 
 
 def _measure_messages_with_litellm(

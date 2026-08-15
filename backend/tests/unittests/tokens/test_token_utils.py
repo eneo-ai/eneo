@@ -7,6 +7,7 @@ from PIL import Image
 
 from eneo.tokens.token_utils import (
     TokenCountSource,
+    _tool_reserve_payload,
     count_image_tokens_from_blob,
     count_message_tokens,
     count_tokens,
@@ -234,6 +235,151 @@ def test_tool_reserve_terminates_on_cyclic_references_and_still_charges_them():
         assert measured.tokens > count_tool_tokens(_TOOLS, "openai/gpt-4o")
 
 
+def test_tool_reserve_declines_a_definition_reused_into_a_huge_payload():
+    # Counting nodes bounded the shape and not the size: a large definition
+    # reached through many references materialized hundreds of megabytes while
+    # staying far under any node ceiling. MCP permits a 1 MiB definition.
+    definition = {"type": "string", "description": "x" * 100_000}
+    tools = [
+        {
+            "type": "function",
+            "function": {
+                "name": "propose_flow",
+                "parameters": {
+                    "type": "object",
+                    "$defs": {"shared": definition},
+                    "properties": {
+                        f"property_{index}": {"$ref": "#/$defs/shared"}
+                        for index in range(100)
+                    },
+                    "required": [f"property_{index}" for index in range(100)],
+                    "additionalProperties": False,
+                },
+            },
+        }
+    ]
+
+    measured = measure_tool_tokens(tools, "openai/gpt-4o")
+
+    assert measured.source is TokenCountSource.FALLBACK_ESTIMATE
+    assert measured.tokens > 1_000_000_000
+
+
+def test_tool_reserve_keeps_a_reference_and_its_target_when_keys_collide():
+    # Merging the target into the reference's own object let a sibling key
+    # overwrite the target's value, so the definition's cost vanished from the
+    # use site exactly where it was supposed to be counted.
+    tools = [
+        {
+            "type": "function",
+            "function": {
+                "name": "propose_flow",
+                "parameters": {
+                    "type": "object",
+                    "$defs": {
+                        "shared": {
+                            "type": "string",
+                            "description": "TARGET-TEXT " * 20,
+                        }
+                    },
+                    "properties": {
+                        "value": {
+                            "$ref": "#/$defs/shared",
+                            "description": "SIBLING-TEXT " * 20,
+                        }
+                    },
+                    "required": ["value"],
+                    "additionalProperties": False,
+                },
+            },
+        }
+    ]
+
+    payload = _tool_reserve_payload(tools)
+
+    # Once in `$defs` and once written out at the use site, beside the sibling.
+    assert payload.text.count("TARGET-TEXT") == 40
+    assert payload.text.count("SIBLING-TEXT") == 20
+
+
+def test_tool_reserve_expands_definitions_hoisted_above_the_parameter_object():
+    # Providers resolve a tool's pointers against its parameter object, but a
+    # schema that hoists `$defs` above it still gets priced expanded, so an
+    # unresolved pointer here would under-reserve.
+    definition = {"type": "string", "enum": ["ALPHA-KEY", "BETA-KEY"]}
+    tools = [
+        {
+            "type": "function",
+            "$defs": {"shared": definition},
+            "function": {
+                "name": "propose_flow",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "first": {"$ref": "#/$defs/shared"},
+                        "second": {"$ref": "#/$defs/shared"},
+                    },
+                    "required": ["first", "second"],
+                    "additionalProperties": False,
+                },
+            },
+        }
+    ]
+
+    payload = _tool_reserve_payload(tools)
+
+    assert payload.bounded
+    # The definition plus both use sites.
+    assert payload.text.count("ALPHA-KEY") == 3
+
+
+def test_a_completed_reference_does_not_condemn_a_large_plain_catalogue():
+    # Only material a reference introduces is bounded. A catalogue that merely
+    # follows one small resolved reference is ordinary input, not amplification.
+    referencing = _referencing_tool({"type": "string", "enum": ["alpha"]})
+    catalogue = referencing + [
+        {
+            "type": "function",
+            "function": {
+                "name": f"tool_{index}",
+                "description": "d" * 400,
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        f"query_{inner}": {"type": "string", "description": "e" * 80}
+                        for inner in range(60)
+                    },
+                    "required": [f"query_{inner}" for inner in range(60)],
+                    "additionalProperties": False,
+                },
+            },
+        }
+        for index in range(256)
+    ]
+
+    measured = measure_tool_tokens(catalogue, "openai/gpt-4o")
+
+    assert measured.source is TokenCountSource.LITELLM
+    assert measured.tokens < 1_000_000
+
+
+def test_the_reporting_fallback_prices_the_tools_as_written():
+    # Reporting stands in for what the provider says it charged. Pricing the
+    # expanded form here would inflate the usage recorded against a tenant
+    # whenever a response omits its own count.
+    tools = _referencing_tool({"type": "string", "description": "r" * 2_000})
+
+    with patch(
+        "eneo.tokens.token_utils.litellm.token_counter",
+        side_effect=RuntimeError("boom"),
+    ):
+        report = measure_provider_input_tokens([], tools, "openai/gpt-4o")
+        reserve = measure_tool_tokens(tools, "openai/gpt-4o")
+
+    assert report.source is TokenCountSource.FALLBACK_ESTIMATE
+    assert report.tokens < reserve.tokens
+
+
 def test_tool_reserve_declines_a_schema_whose_expansion_cannot_be_bounded():
     # Definitions that reference each other unfold exponentially. The reserve
     # must not answer with a number any budget would accept.
@@ -269,34 +415,6 @@ def test_tool_reserve_declines_a_schema_whose_expansion_cannot_be_bounded():
     # Larger than any context window, so every budget subtracting it refuses,
     # whether or not the caller inspects the source.
     assert measured.tokens > 1_000_000_000
-
-
-def test_a_large_plain_catalogue_is_measured_rather_than_refused():
-    # Running out of expansion budget only makes a payload untrustworthy when a
-    # reference was written out. Without one the traversal is a copy, so a big
-    # but plain tool catalogue must still get a real number.
-    catalogue = [
-        {
-            "type": "function",
-            "function": {
-                "name": f"tool_{index}",
-                "description": "Search the knowledge base.",
-                "parameters": {
-                    "type": "object",
-                    "properties": {"query": {"type": "string"}},
-                    "required": ["query"],
-                    "additionalProperties": False,
-                },
-            },
-        }
-        for index in range(8)
-    ]
-
-    with patch("eneo.tokens.token_utils._MAX_TOOL_SCHEMA_EXPANDED_NODES", 4):
-        measured = measure_tool_tokens(catalogue, "openai/gpt-4o")
-
-    assert measured.source is TokenCountSource.LITELLM
-    assert measured.tokens == count_tool_tokens(catalogue, "openai/gpt-4o")
 
 
 def test_tool_reserve_fallback_stays_an_upper_bound_for_dense_scripts():

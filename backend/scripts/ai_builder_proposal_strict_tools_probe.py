@@ -354,7 +354,6 @@ class ProbeCallOutcome(_SealedModel):
 
 class CapabilityProtocol(_SealedModel):
     version: Literal["strict-tool-provider-capability.v3"]
-    measured_model_id: Annotated[str, StringConstraints(min_length=1, max_length=128)]
     one_provider_call: Literal[True]
     provider_retry_limit: Literal[0]
     mutates_product_or_session: Literal[False]
@@ -665,15 +664,20 @@ def _capability_request_value(measurement: ProbeMeasurement) -> dict[str, object
     }
 
 
-def _runtime_preflight_passes(identity: RuntimeIdentity) -> bool:
-    """Whether the resolved model is one the Builder would send strict tools on.
+def _runtime_preflight_passes(
+    identity: RuntimeIdentity, measured_model_id: str
+) -> bool:
+    """Whether the runtime resolved the measured model and would send it strict.
 
     The route, provider and model name are sealed rather than asserted: they
     are properties of whichever model the caller named, and a runner that
-    demanded particular values could only ever measure one deployment.
+    demanded particular values could only ever measure one deployment. The
+    model identity itself is checked against the sealed request, so a receipt
+    cannot claim one model and evidence another.
     """
     return (
-        identity.requested_model_id == identity.resolved_model_id
+        identity.requested_model_id == measured_model_id
+        and identity.resolved_model_id == measured_model_id
         and identity.enabled
         and not identity.deprecated
         and not identity.migrated
@@ -685,6 +689,7 @@ def _runtime_preflight_passes(identity: RuntimeIdentity) -> bool:
 
 def _decide_verdict(
     *,
+    measured_model_id: str,
     source_before: SourceIdentity,
     source_after: SourceIdentity,
     runtime_before: RuntimeIdentity,
@@ -696,9 +701,9 @@ def _decide_verdict(
         reasons.append("source_not_clean")
     if source_before != source_after:
         reasons.append("source_identity_not_stable")
-    if not _runtime_preflight_passes(runtime_before) or not _runtime_preflight_passes(
-        runtime_after
-    ):
+    if not _runtime_preflight_passes(
+        runtime_before, measured_model_id
+    ) or not _runtime_preflight_passes(runtime_after, measured_model_id):
         reasons.append("runtime_preflight_failed")
     if runtime_before != runtime_after:
         reasons.append("runtime_identity_not_stable")
@@ -712,6 +717,11 @@ def _decide_verdict(
         if outcome.response.finish_reason == "length":
             return "inconclusive", ("provider_completion_truncated",)
         if outcome.response.checks.all_pass:
+            prompt_tokens = outcome.response.usage.prompt_tokens
+            if prompt_tokens is None or prompt_tokens <= 0:
+                # A receipt whose whole purpose is to price a schema cannot
+                # pass without the price.
+                return "inconclusive", ("provider_prompt_tokens_missing",)
             return "pass", ("strict_request_accepted_with_conformant_response",)
         return "inconclusive", ("provider_response_nonconformant",)
     failure = outcome.failure
@@ -740,6 +750,7 @@ def build_receipt(
 ) -> CapabilityReceipt:
     measured = measurement
     verdict, reason_codes = _decide_verdict(
+        measured_model_id=measured.model_id,
         source_before=source_before,
         source_after=source_after,
         runtime_before=runtime_before,
@@ -750,7 +761,6 @@ def build_receipt(
         schema_version=RECEIPT_SCHEMA_VERSION,
         protocol=CapabilityProtocol(
             version=PROTOCOL_VERSION,
-            measured_model_id=measured.model_id,
             one_provider_call=True,
             provider_retry_limit=_PROVIDER_RETRY_LIMIT,
             mutates_product_or_session=False,
@@ -816,6 +826,7 @@ def verify_receipt(path: Path) -> VerifiedReceipt:
     if receipt.receipt_sha256 != expected_hash:
         raise ReceiptVerificationError("receipt hash does not match")
     verdict, reasons = _decide_verdict(
+        measured_model_id=receipt.request.model_id,
         source_before=receipt.source_before,
         source_after=receipt.source_after,
         runtime_before=receipt.runtime_before,
@@ -1164,7 +1175,7 @@ async def run_live_probe(
     outcome = ProbeCallOutcome(call_count=0, request=None, response=None, failure=None)
     if source_before.source_clean:
         runtime_before, route = await runtime_resolver(tenant_id, measured.model_id)
-        if _runtime_preflight_passes(runtime_before):
+        if _runtime_preflight_passes(runtime_before, measured.model_id):
             outcome = await run_probe_call(
                 route=route,
                 provider_completion=provider_completion,

@@ -4,6 +4,7 @@ import importlib.util
 import json
 import os
 import sys
+from dataclasses import replace
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
 from typing import cast
@@ -97,8 +98,8 @@ def test_probe_measures_only_a_route_the_builder_would_send_strict_on() -> None:
     capable = _runtime(probe, route=_route())
     incapable = _runtime(probe, route=_route(supports_strict_tool_schema=False))
 
-    assert probe._runtime_preflight_passes(capable)
-    assert not probe._runtime_preflight_passes(incapable)
+    assert probe._runtime_preflight_passes(capable, _MEASURED_MODEL_ID)
+    assert not probe._runtime_preflight_passes(incapable, _MEASURED_MODEL_ID)
 
 
 def _response(
@@ -1131,11 +1132,70 @@ def test_the_receipt_seals_the_model_and_what_the_provider_charged() -> None:
         measurement=_measurement(probe),
     )
 
-    assert receipt.protocol.measured_model_id == _MEASURED_MODEL_ID
     assert receipt.request.model_id == _MEASURED_MODEL_ID
+    assert receipt.verdict == "pass"
     assert receipt.outcome.response is not None
     assert receipt.outcome.response.usage.prompt_tokens == 12
     assert receipt.outcome.response.usage.completion_tokens == 8
+
+
+def test_a_receipt_whose_evidence_is_another_model_cannot_pass() -> None:
+    # The measured model is stated in four places. Without a cross-check a
+    # receipt could claim one model and carry another model's evidence.
+    probe = _probe()
+    other_model = probe.RuntimeIdentity(
+        **{
+            **_runtime(probe).model_dump(),
+            "requested_model_id": "a-different-model",
+            "resolved_model_id": "a-different-model",
+        }
+    )
+
+    receipt = probe.build_receipt(
+        source_before=_source(probe),
+        source_after=_source(probe),
+        runtime_before=other_model,
+        runtime_after=other_model,
+        outcome=_passing_outcome(probe),
+        measurement=_measurement(probe),
+    )
+
+    assert receipt.verdict == "inconclusive"
+    assert "runtime_preflight_failed" in receipt.reason_codes
+
+
+def test_a_conformant_response_without_a_provider_count_cannot_pass() -> None:
+    # This receipt exists to price a schema against what the provider charged.
+    # A pass sealing no charge would prove nothing about the reserve.
+    probe = _probe()
+    response = _response(VALID_ARGUMENTS)
+    evidence = probe.evaluate_response(
+        replace(response, usage=None), _measurement(probe)
+    )
+    assert evidence.checks.all_pass is True
+    assert evidence.usage.prompt_tokens is None
+
+    safe_kwargs = _empty_effective_identity(probe)
+    receipt = probe.build_receipt(
+        source_before=_source(probe),
+        source_after=_source(probe),
+        runtime_before=_runtime(probe),
+        runtime_after=_runtime(probe),
+        outcome=probe.ProbeCallOutcome(
+            call_count=1,
+            request=probe.RequestObservation(
+                controls_valid=True,
+                effective_request=safe_kwargs,
+                expected_prepared_request_sha256=(safe_kwargs.effective_values_sha256),
+            ),
+            response=evidence,
+            failure=None,
+        ),
+        measurement=_measurement(probe),
+    )
+
+    assert receipt.verdict == "inconclusive"
+    assert receipt.reason_codes == ("provider_prompt_tokens_missing",)
 
 
 def _builder_shaped_schema() -> dict[str, object]:
@@ -1382,39 +1442,62 @@ def test_a_measurement_input_larger_than_its_receipt_is_refused(
 
 def test_the_largest_permitted_measurement_still_fits_one_receipt() -> None:
     # The receipt seals the schema, the prompt and the returned arguments, so
-    # the input bounds are only honest if their worst case fits inside it.
+    # the input bounds are only honest if their worst case fits inside it. Each
+    # input is grown to just under its own bound rather than to a fraction of
+    # it, and the prompt is non-ASCII because escaping is what expands it.
     probe = _probe()
-    filler = {
-        f"property_{index}": {"type": "string", "description": "\u00e5" * 64}
-        for index in range(80)
-    }
-    schema: dict[str, object] = {
-        "type": "function",
-        "function": {
-            "name": "propose_flow",
-            "strict": True,
-            "parameters": {
-                "type": "object",
-                "properties": filler,
-                "required": sorted(filler),
-                "additionalProperties": False,
+
+    def schema_of(width: int, filler: int) -> dict[str, object]:
+        properties = {
+            f"property_{index}": {"type": "string", "description": "\u00e5" * filler}
+            for index in range(width)
+        }
+        return {
+            "type": "function",
+            "function": {
+                "name": "propose_flow",
+                "strict": True,
+                "parameters": {
+                    "type": "object",
+                    "properties": properties,
+                    "required": sorted(properties),
+                    "additionalProperties": False,
+                },
             },
-        },
-    }
+        }
+
+    width, filler = 120, 8
+    while (
+        len(json.dumps(schema_of(width, filler + 1)).encode())
+        <= probe._MAX_MEASUREMENT_SCHEMA_BYTES
+    ):
+        filler += 1
+    schema = schema_of(width, filler)
+    sealed_schema_bytes = len(json.dumps(schema).encode())
     assert (
-        probe._MAX_MEASUREMENT_SCHEMA_BYTES
-        >= len(json.dumps(schema).encode())
-        > probe._MAX_MEASUREMENT_SCHEMA_BYTES // 2
+        probe._MAX_MEASUREMENT_SCHEMA_BYTES - sealed_schema_bytes
+        < probe._MAX_MEASUREMENT_SCHEMA_BYTES // 100
     )
+
+    prompt = "\u00e5" * (probe._MAX_MEASUREMENT_PROMPT_BYTES // 2)
+    assert len(prompt.encode()) == probe._MAX_MEASUREMENT_PROMPT_BYTES
     measurement = probe.ProbeMeasurement(
         model_id=_MEASURED_MODEL_ID,
         tool_schema=schema,
-        prompt="\u00e5" * (probe._MAX_MEASUREMENT_PROMPT_BYTES // 2),
+        prompt=prompt,
         max_output_tokens=probe._MAX_OUTPUT_TOKEN_CEILING,
     )
+
+    value_length = probe._MAX_ARGUMENT_BYTES // width - 24
     arguments = {
-        name: "v" * (probe._MAX_ARGUMENT_BYTES // len(filler) - 24) for name in filler
-    }
+        name: "v" * value_length
+        for name in sorted(schema_of(width, 1)["function"]["parameters"]["properties"])
+    }  # type: ignore[index]
+    assert (
+        len(json.dumps(arguments, ensure_ascii=False).encode())
+        <= probe._MAX_ARGUMENT_BYTES
+    )
+
     receipt = probe.build_receipt(
         source_before=_source(probe),
         source_after=_source(probe),
@@ -1435,6 +1518,8 @@ def test_the_largest_permitted_measurement_still_fits_one_receipt() -> None:
         measurement=measurement,
     )
 
+    assert receipt.outcome.response is not None
+    assert receipt.outcome.response.arguments == arguments
     assert len(receipt.model_dump_json().encode()) <= probe._MAX_RECEIPT_BYTES
 
 
