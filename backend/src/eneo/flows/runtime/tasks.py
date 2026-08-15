@@ -714,6 +714,36 @@ def _execute_flow_run_task(
         return {"status": "failed", "reason": "task_failure"}
 
 
+class FlowTenantSweepPartialFailure(RuntimeError):
+    """A maintenance sweep visited every tenant but could not serve them all."""
+
+
+def _log_tenant_sweep_failure(*, task_name: str, tenant_id: UUID) -> None:
+    logger.exception(
+        "Flow maintenance sweep skipped a tenant after a failure",
+        extra={"task_name": task_name, "tenant_id": str(tenant_id)},
+    )
+
+
+def _fail_task_if_tenants_were_skipped(
+    *, task_name: str, skipped_tenant_ids: list[UUID]
+) -> None:
+    """Fail the task after visiting every tenant, rather than at the first one.
+
+    Aborting mid-sweep starved every tenant listed after the failing one, and
+    tenants arrive oldest-first, so that starvation was deterministic and
+    permanent. Visiting the rest first and only then failing keeps the task
+    failure an operator already watches, without the starvation. The same
+    per-tenant isolation is applied to the tenant sweep in
+    `eneo.worker.usage_stats_tasks.recalculate_all_tenants_usage_stats`.
+    """
+    if not skipped_tenant_ids:
+        return
+    raise FlowTenantSweepPartialFailure(
+        f"{task_name} skipped {len(skipped_tenant_ids)} tenant(s) after failures"
+    )
+
+
 async def _reconcile_stale_running_runs_all_tenants(
     *, limit: int = 100
 ) -> dict[str, int | str]:
@@ -723,6 +753,7 @@ async def _reconcile_stale_running_runs_all_tenants(
         )
     )
     reconciled = 0
+    skipped_tenant_ids: list[UUID] = []
     async with sessionmanager.session() as session:
         enable_autobegin_for_flow_task_session(session)
         container = Container(session=providers.Object(session))
@@ -733,33 +764,42 @@ async def _reconcile_stale_running_runs_all_tenants(
         async with session.begin():
             tenants = await tenant_repo.get_all_tenants()
         for tenant in tenants:
-            async with session.begin():
-                stale_runs = await run_repo.list_stale_running_runs(
-                    tenant_id=tenant.id,
-                    stale_before=stale_before,
-                    limit=limit,
-                )
-            for run in stale_runs:
+            try:
                 async with session.begin():
-                    result = await terminalizer.terminalize_stale_running_run(
-                        run_id=run.id,
-                        tenant_id=run.tenant_id,
+                    stale_runs = await run_repo.list_stale_running_runs(
+                        tenant_id=tenant.id,
                         stale_before=stale_before,
-                        error=FlowRunError.from_source(
-                            FlowRunLifecycleSource.STALE_RUNNING_RECONCILER,
-                            code=FlowApiErrorCode.RUN_WORKER_STALLED,
-                            message=(
-                                "flow_worker_stalled: Flow run exceeded the execution timeout and was reconciled as failed."
-                            ),
-                        ),
+                        limit=limit,
                     )
-                    if result.did_transition:
-                        await provider_call_repo.mark_started_calls_outcome_unknown_for_run(
+                for run in stale_runs:
+                    async with session.begin():
+                        result = await terminalizer.terminalize_stale_running_run(
                             run_id=run.id,
                             tenant_id=run.tenant_id,
-                            reason=ProviderCallUnknownReason.STALE_STARTED,
+                            stale_before=stale_before,
+                            error=FlowRunError.from_source(
+                                FlowRunLifecycleSource.STALE_RUNNING_RECONCILER,
+                                code=FlowApiErrorCode.RUN_WORKER_STALLED,
+                                message=(
+                                    "flow_worker_stalled: Flow run exceeded the execution timeout and was reconciled as failed."
+                                ),
+                            ),
                         )
-                        reconciled += 1
+                        if result.did_transition:
+                            await provider_call_repo.mark_started_calls_outcome_unknown_for_run(
+                                run_id=run.id,
+                                tenant_id=run.tenant_id,
+                                reason=ProviderCallUnknownReason.STALE_STARTED,
+                            )
+                            reconciled += 1
+            except Exception:
+                skipped_tenant_ids.append(tenant.id)
+                _log_tenant_sweep_failure(
+                    task_name="flows.reconcile_running", tenant_id=tenant.id
+                )
+    _fail_task_if_tenants_were_skipped(
+        task_name="flows.reconcile_running", skipped_tenant_ids=skipped_tenant_ids
+    )
     return {"status": "ok", "reconciled": reconciled}
 
 
@@ -767,6 +807,7 @@ async def _reconcile_expired_review_checkpoints_all_tenants(
     *, limit: int = 100
 ) -> dict[str, int | str]:
     reconciled = 0
+    skipped_tenant_ids: list[UUID] = []
     async with sessionmanager.session() as session:
         enable_autobegin_for_flow_task_session(session)
         container = Container(session=providers.Object(session))
@@ -774,15 +815,27 @@ async def _reconcile_expired_review_checkpoints_all_tenants(
         async with session.begin():
             tenants = await tenant_repo.get_all_tenants()
         for tenant in tenants:
-            for _ in range(limit):
-                async with session.begin():
-                    reconciler = container.flow_review_expiry_reconciler()
-                    did_reconcile = await reconciler.reconcile_next_expired_checkpoint(
-                        tenant_id=tenant.id,
-                    )
-                if did_reconcile == 0:
-                    break
-                reconciled += did_reconcile
+            try:
+                for _ in range(limit):
+                    async with session.begin():
+                        reconciler = container.flow_review_expiry_reconciler()
+                        did_reconcile = (
+                            await reconciler.reconcile_next_expired_checkpoint(
+                                tenant_id=tenant.id,
+                            )
+                        )
+                    if did_reconcile == 0:
+                        break
+                    reconciled += did_reconcile
+            except Exception:
+                skipped_tenant_ids.append(tenant.id)
+                _log_tenant_sweep_failure(
+                    task_name="flows.reconcile_review_expiry", tenant_id=tenant.id
+                )
+    _fail_task_if_tenants_were_skipped(
+        task_name="flows.reconcile_review_expiry",
+        skipped_tenant_ids=skipped_tenant_ids,
+    )
     return {"status": "ok", "reconciled": reconciled}
 
 
@@ -793,6 +846,7 @@ async def _redispatch_stale_queued_runs_all_tenants(
 
     due_at = datetime.now(timezone.utc)
     redispatched = 0
+    skipped_tenant_ids: list[UUID] = []
     async with sessionmanager.session() as session:
         enable_autobegin_for_flow_task_session(session)
         container = Container(session=providers.Object(session))
@@ -801,20 +855,30 @@ async def _redispatch_stale_queued_runs_all_tenants(
         async with session.begin():
             tenants = await tenant_repo.get_all_tenants()
         for tenant in tenants:
-            async with session.begin():
-                due_runs = await run_repo.list_dispatchable_queued_runs(
-                    tenant_id=tenant.id,
-                    due_at=due_at,
-                    limit=limit,
+            try:
+                async with session.begin():
+                    due_runs = await run_repo.list_dispatchable_queued_runs(
+                        tenant_id=tenant.id,
+                        due_at=due_at,
+                        limit=limit,
+                    )
+                for run in due_runs:
+                    result = await dispatch_flow_run_recoverably_after_commit(
+                        run_id=run.id,
+                        tenant_id=run.tenant_id,
+                        expected_revision=run.revision,
+                    )
+                    if isinstance(result, FlowRunDispatchAccepted):
+                        redispatched += 1
+            except Exception:
+                skipped_tenant_ids.append(tenant.id)
+                _log_tenant_sweep_failure(
+                    task_name="flows.redispatch_stale_queued", tenant_id=tenant.id
                 )
-            for run in due_runs:
-                result = await dispatch_flow_run_recoverably_after_commit(
-                    run_id=run.id,
-                    tenant_id=run.tenant_id,
-                    expected_revision=run.revision,
-                )
-                if isinstance(result, FlowRunDispatchAccepted):
-                    redispatched += 1
+    _fail_task_if_tenants_were_skipped(
+        task_name="flows.redispatch_stale_queued",
+        skipped_tenant_ids=skipped_tenant_ids,
+    )
     return {"status": "ok", "redispatched": redispatched}
 
 

@@ -9,7 +9,7 @@ from collections import deque
 from collections.abc import Coroutine
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 
@@ -1439,6 +1439,81 @@ def test_reconcile_stale_running_task_processes_all_tenants(monkeypatch):
     }
 
 
+def test_reconcile_stale_running_task_isolates_a_failing_tenant(monkeypatch):
+    """A failing tenant must not starve the tenants listed after it.
+
+    Tenants arrive oldest-first, so aborting at the first failure starved every
+    tenant created after it on every scheduled tick — and recovery is what was
+    being starved. The task still fails, so the operator signal survives; it just
+    fails after visiting everyone.
+    """
+    tasks_module = importlib.import_module("eneo.flows.runtime.tasks")
+    failing_tenant = SimpleNamespace(id=uuid4())
+    later_tenant = SimpleNamespace(id=uuid4())
+    later_run = SimpleNamespace(id=uuid4(), tenant_id=later_tenant.id)
+    repo = MagicMock()
+    provider_call_repo = MagicMock()
+    provider_call_repo.mark_started_calls_outcome_unknown_for_run = AsyncMock(
+        return_value=1
+    )
+    tenant_repo = MagicMock()
+    tenant_repo.get_all_tenants = AsyncMock(return_value=[failing_tenant, later_tenant])
+
+    async def list_stale_running_runs(*, tenant_id, **_kwargs):
+        if tenant_id == failing_tenant.id:
+            raise RuntimeError("tenant sweep exploded")
+        return [later_run]
+
+    repo.list_stale_running_runs = AsyncMock(side_effect=list_stale_running_runs)
+    terminalizer = MagicMock()
+    terminalizer.terminalize_stale_running_run = AsyncMock(
+        return_value=SimpleNamespace(did_transition=True)
+    )
+
+    class _Container:
+        def __init__(self, session=None):
+            pass
+
+        def flow_run_repo(self):
+            return repo
+
+        def flow_provider_call_repo(self):
+            return provider_call_repo
+
+        def flow_run_terminalizer(self):
+            return terminalizer
+
+        def tenant_repo(self):
+            return tenant_repo
+
+    fake_session = _fake_flow_task_session()
+
+    class _SessionContext:
+        async def __aenter__(self):
+            return fake_session
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+    monkeypatch.setattr(tasks_module, "Container", _Container)
+    monkeypatch.setattr(
+        tasks_module.sessionmanager, "session", lambda: _SessionContext()
+    )
+    monkeypatch.setattr(
+        tasks_module,
+        "get_settings",
+        lambda: SimpleNamespace(flow_task_timeout_seconds=540),
+    )
+
+    with pytest.raises(tasks_module.FlowTenantSweepPartialFailure):
+        asyncio.run(tasks_module._reconcile_stale_running_runs_all_tenants())
+
+    # The later tenant was still served before the task reported the failure.
+    assert terminalizer.terminalize_stale_running_run.await_args.kwargs["run_id"] == (
+        later_run.id
+    )
+
+
 def test_reconcile_stale_running_task_skips_already_reconciled_runs(monkeypatch):
     tasks_module = importlib.import_module("eneo.flows.runtime.tasks")
     tenant = SimpleNamespace(id=uuid4())
@@ -1547,6 +1622,109 @@ def test_reconcile_review_expiry_task_processes_all_tenants(monkeypatch):
         call.kwargs["tenant_id"]
         for call in reconciler.reconcile_next_expired_checkpoint.await_args_list
     } == {tenant_one.id, tenant_two.id}
+
+
+def test_reconcile_review_expiry_task_isolates_a_failing_tenant(monkeypatch):
+    """The review-expiry sweep has its own containment; prove it independently."""
+    tasks_module = importlib.import_module("eneo.flows.runtime.tasks")
+    failing_tenant = SimpleNamespace(id=uuid4())
+    later_tenant = SimpleNamespace(id=uuid4())
+    tenant_repo = MagicMock()
+    tenant_repo.get_all_tenants = AsyncMock(return_value=[failing_tenant, later_tenant])
+    reconciler = MagicMock()
+    served_tenant_ids: list[UUID] = []
+
+    async def reconcile_next_expired_checkpoint(*, tenant_id):
+        if tenant_id == failing_tenant.id:
+            raise RuntimeError("review expiry sweep exploded")
+        served_tenant_ids.append(tenant_id)
+        return 0
+
+    reconciler.reconcile_next_expired_checkpoint = AsyncMock(
+        side_effect=reconcile_next_expired_checkpoint
+    )
+
+    class _Container:
+        def __init__(self, session=None):
+            self._tenant_repo = tenant_repo
+
+        def tenant_repo(self):
+            return self._tenant_repo
+
+        def flow_review_expiry_reconciler(self):
+            return reconciler
+
+    class _SessionContext:
+        async def __aenter__(self):
+            return _fake_flow_task_session()
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+    monkeypatch.setattr(tasks_module, "Container", _Container)
+    monkeypatch.setattr(
+        tasks_module.sessionmanager, "session", lambda: _SessionContext()
+    )
+
+    with pytest.raises(tasks_module.FlowTenantSweepPartialFailure):
+        asyncio.run(tasks_module._reconcile_expired_review_checkpoints_all_tenants())
+
+    assert served_tenant_ids == [later_tenant.id]
+
+
+def test_redispatch_stale_queued_task_isolates_a_failing_tenant(monkeypatch):
+    """The redispatch sweep has its own containment; prove it independently."""
+    tasks_module = importlib.import_module("eneo.flows.runtime.tasks")
+    failing_tenant = SimpleNamespace(id=uuid4())
+    later_tenant = SimpleNamespace(id=uuid4())
+    later_run = SimpleNamespace(id=uuid4(), tenant_id=later_tenant.id, revision=1)
+    tenant_repo = MagicMock()
+    tenant_repo.get_all_tenants = AsyncMock(return_value=[failing_tenant, later_tenant])
+    repo = MagicMock()
+
+    async def list_dispatchable_queued_runs(*, tenant_id, **_kwargs):
+        if tenant_id == failing_tenant.id:
+            raise RuntimeError("redispatch sweep exploded")
+        return [later_run]
+
+    repo.list_dispatchable_queued_runs = AsyncMock(
+        side_effect=list_dispatchable_queued_runs
+    )
+    dispatched_run_ids: list[UUID] = []
+
+    async def dispatch(*, run_id, **_kwargs):
+        dispatched_run_ids.append(run_id)
+        return SimpleNamespace()
+
+    class _Container:
+        def __init__(self, session=None):
+            self._tenant_repo = tenant_repo
+
+        def tenant_repo(self):
+            return self._tenant_repo
+
+        def flow_run_repo(self):
+            return repo
+
+    class _SessionContext:
+        async def __aenter__(self):
+            return _fake_flow_task_session()
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+    monkeypatch.setattr(tasks_module, "Container", _Container)
+    monkeypatch.setattr(
+        tasks_module.sessionmanager, "session", lambda: _SessionContext()
+    )
+    monkeypatch.setattr(
+        tasks_module, "dispatch_flow_run_recoverably_after_commit", dispatch
+    )
+
+    with pytest.raises(tasks_module.FlowTenantSweepPartialFailure):
+        asyncio.run(tasks_module._redispatch_stale_queued_runs_all_tenants())
+
+    assert dispatched_run_ids == [later_run.id]
 
 
 def test_redispatch_stale_queued_task_processes_all_tenants(monkeypatch):
