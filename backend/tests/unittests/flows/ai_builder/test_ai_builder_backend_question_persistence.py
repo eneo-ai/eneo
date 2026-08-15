@@ -164,12 +164,18 @@ async def test_persist_backend_question_merges_assistant_and_question_metadata()
         conversation=conversation,
         new_messages_start=1,
         question=_backend_question(),
-        assistant_metadata={"planner_telemetry": {"request_id": "req-1"}},
+        assistant_metadata={
+            "planner_telemetry": {
+                "request_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+            }
+        },
     )
 
     assistant_msg = conversation[1]
     assert assistant_msg.metadata is not None
-    assert assistant_msg.metadata["planner_telemetry"] == {"request_id": "req-1"}
+    assert assistant_msg.metadata["planner_telemetry"] == {
+        "request_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    }
     assert assistant_msg.metadata["question_id"] == "runtime_metadata_fields"
 
 

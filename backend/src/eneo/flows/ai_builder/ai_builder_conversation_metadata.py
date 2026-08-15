@@ -98,7 +98,6 @@ QUESTION_RESPONSE_METADATA_KEY = "question_response"
 REQUIREMENTS_CONFIRMED_METADATA_KEY = "requirements_confirmed"
 REQUIREMENTS_SUMMARY_METADATA_KEY = "requirements_summary"
 REQUIREMENTS_VERSION_METADATA_KEY = "requirements_version"
-ATTACHMENT_EVIDENCE_FINGERPRINT_METADATA_KEY = "attachment_evidence_fingerprint"
 UI_LANGUAGE_METADATA_KEY = "ui_language"
 FILE_IDS_METADATA_KEY = "file_ids"
 EDIT_CONTEXT_METADATA_KEY = "edit_context"
@@ -603,6 +602,7 @@ class SlotClassificationMetadata(BaseModel):
         if self.outcome != "resolved" and any(
             (
                 self.slots,
+                self.assumptions,
                 self.file_roles,
                 self.checkpoint_updates,
                 self.secondary_obligations,
@@ -610,7 +610,6 @@ class SlotClassificationMetadata(BaseModel):
                 self.named_result_evidence is not None,
                 self.example_output_constraints is not None,
                 self.schema_direction is not None,
-                self.assumptions,
                 self.contradictions,
             )
         ):
@@ -906,8 +905,9 @@ class SlotClassificationMetadata(BaseModel):
                 "named_result_evidence": named_result_evidence,
                 "example_output_constraints": example_output_constraints,
                 "schema_direction": schema_direction,
-                # Free-form model notes are diagnostics, not rebuild facts. Compaction
-                # keeps only its typed, consumer-visible degradation marker here.
+                # Free-form model notes are diagnostics, not rebuild facts, and
+                # never reach the requirements disclosure. Compaction keeps only
+                # its typed, consumer-visible degradation marker here.
                 "assumptions": [],
                 "contradictions": contradictions,
             }
@@ -1027,10 +1027,9 @@ class RequirementsConfirmationMetadata(BaseModel):
 
     kind: Literal["requirements_confirmation"] = "requirements_confirmation"
     requirements_confirmed: Literal[True] = True
-    requirements_version: str | None = Field(
-        default=None,
-        max_length=_MAX_REQUIREMENTS_VERSION_LENGTH,
-    )
+    # A confirmation names the exact disclosure it attests to. Without the
+    # version there is no way to tell which summary the user actually saw.
+    requirements_version: str = Field(pattern=r"^[0-9a-f]{64}$")
     ui_language: str | None = Field(
         default=None,
         max_length=_MAX_UI_LANGUAGE_LENGTH,
@@ -1047,14 +1046,6 @@ AIBuilderQuestionAnswerInput: TypeAlias = (
     | RequirementsConfirmationMetadata
     | Mapping[str, Any]
 )
-
-
-class RequirementsSummaryMetadata(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    requirements_summary: RequirementsSummaryPayload
-    requirements_version: str | None = None
-    attachment_evidence_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
 
 
 class PersistedAssistantToolCall(BaseModel):
@@ -1587,53 +1578,30 @@ def metadata_with_slot_classification(
 
 def requirements_summary_to_metadata(
     payload: RequirementsSummaryPayload,
-    *,
-    attachment_evidence_fingerprint: str,
 ) -> FlowPersistedJsonObject:
-    version = payload.requirements_version
-    if not isinstance(version, str) or not version:
-        raise ValueError("requirements_summary metadata requires requirements_version")
-    RequirementsSummaryMetadata.model_validate(
-        {
-            "requirements_summary": payload,
-            "requirements_version": version,
-            "attachment_evidence_fingerprint": attachment_evidence_fingerprint,
-        }
-    )
     return {
         REQUIREMENTS_SUMMARY_METADATA_KEY: payload.model_dump(
             mode="json", exclude_none=True
         ),
-        REQUIREMENTS_VERSION_METADATA_KEY: version,
-        ATTACHMENT_EVIDENCE_FINGERPRINT_METADATA_KEY: attachment_evidence_fingerprint,
+        # A top-level index so conversation compaction can find the version
+        # without parsing the whole disclosure. The payload owns the value.
+        REQUIREMENTS_VERSION_METADATA_KEY: payload.requirements_version,
     }
 
 
 def requirements_summary_from_metadata(
     metadata: object,
-) -> RequirementsSummaryMetadata | None:
+) -> RequirementsSummaryPayload | None:
+    """The persisted disclosure, which carries its own version."""
+
     metadata_map = _metadata_mapping(metadata)
     if metadata_map is None:
         return None
     summary = _mapping_value(metadata_map.get(REQUIREMENTS_SUMMARY_METADATA_KEY))
-    version = metadata_map.get(REQUIREMENTS_VERSION_METADATA_KEY)
     if summary is None:
         return None
     try:
-        summary_payload = RequirementsSummaryPayload.model_validate(summary)
-        return RequirementsSummaryMetadata.model_validate(
-            {
-                "requirements_summary": summary_payload,
-                "requirements_version": (
-                    version
-                    if isinstance(version, str)
-                    else summary_payload.requirements_version
-                ),
-                "attachment_evidence_fingerprint": metadata_map.get(
-                    ATTACHMENT_EVIDENCE_FINGERPRINT_METADATA_KEY
-                ),
-            }
-        )
+        return RequirementsSummaryPayload.model_validate(summary)
     except ValidationError as error:
         _warn_invalid_persisted_metadata(REQUIREMENTS_SUMMARY_METADATA_KEY, error)
         return None

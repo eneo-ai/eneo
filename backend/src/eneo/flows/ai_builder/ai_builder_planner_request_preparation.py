@@ -41,6 +41,9 @@ from eneo.flows.ai_builder.ai_builder_error_contract import (
     AIBuilderBadRequestException,
     AIBuilderErrorCode,
 )
+from eneo.flows.ai_builder.ai_builder_event_models import (
+    RequirementsSummaryPayload,
+)
 from eneo.flows.ai_builder.ai_builder_flow_context import build_flow_context
 from eneo.flows.ai_builder.ai_builder_form_fields import (
     extract_form_fields_from_metadata,
@@ -72,8 +75,12 @@ from eneo.flows.ai_builder.ai_builder_proposal_tool_contracts import (
     flatten_proposal_message_groups,
     group_proposal_messages,
 )
+from eneo.flows.ai_builder.ai_builder_requirements_disclosure import (
+    build_requirements_disclosure,
+)
 from eneo.flows.ai_builder.ai_builder_requirements_state import (
     RequirementsState,
+    content_free_confirmation,
     latest_confirmed_requirements,
     resolve_requirements_state,
 )
@@ -104,7 +111,10 @@ from eneo.flows.ai_builder.ai_builder_turn_controller import (
 from eneo.flows.ai_builder.planning_state import PlanningState
 from eneo.flows.application.flow_authoring_snapshot import current_flow_authoring_spec
 from eneo.flows.assistant_authoring_snapshot import AssistantAuthoringSnapshots
-from eneo.flows.domain.mapped_execution_policy import FlowMappedExecutionPolicy
+from eneo.flows.domain.mapped_execution_policy import (
+    FlowMappedExecutionPolicy,
+    max_mapped_items_per_step,
+)
 from eneo.flows.flow_authoring_spec import FlowDraftSpecCore
 from eneo.main.logging import get_logger
 from eneo.observability.failure_events import stable_hash
@@ -220,29 +230,55 @@ async def prepare_planner_request(
             conversation=request.conversation,
             attachment_context=attachment_context_result,
         )
-    discovery_runtime = await build_discovery_runtime_result(
-        request.conversation,
-        flow=request.flow,
-        litellm_client=request.litellm_client,
-        completion_model_route=request.completion_model_route,
-        ui_language=ui_language,
-        tenant_id=request.tenant_id,
+    # Eligibility is decided against the attachment context this turn actually
+    # built, so a coverage change under an unchanged file id cannot pass.
+    acknowledged_disclosure = _acknowledged_disclosure(
+        request,
+        requirements_state,
         attachment_context=attachment_context_result,
-        usage_tracker=request.usage_tracker,
-        before_provider_call=request.before_provider_call,
-        mapped_execution_policy=request.mapped_execution_policy,
-        prepared_schema_candidates=schema_candidates,
-        persisted_planning_state=request.persisted_planning_state,
-        attached_file_ids={file.id for file in request.attachment_files},
-        max_input_tokens=request.max_input_tokens,
-        max_output_tokens=request.max_output_tokens,
-        safety_buffer_tokens=request.budget_policy.conversation_safety_buffer_tokens,
-        minimum_conversation_tokens=(
-            request.budget_policy.minimum_conversation_budget_tokens
-        ),
     )
-    discovery_analysis = discovery_runtime.discovery_analysis
-    rebuilt_planning_state = discovery_runtime.planning_state
+    if acknowledged_disclosure is not None:
+        # Nothing new was said, so nothing is re-read: the turn resolves from
+        # the very state whose disclosure the user just confirmed.
+        assert request.persisted_planning_state is not None
+        discovery_analysis = DiscoveryAnalysis(issues=())
+        rebuilt_planning_state = request.persisted_planning_state
+        schema_direction_pending = False
+        control_schema_candidates: tuple[DeclaredSchemaCandidate, ...] = ()
+        slot_classification_metadata = None
+        requirements_disclosure = acknowledged_disclosure
+    else:
+        discovery_runtime = await build_discovery_runtime_result(
+            request.conversation,
+            flow=request.flow,
+            litellm_client=request.litellm_client,
+            completion_model_route=request.completion_model_route,
+            ui_language=ui_language,
+            tenant_id=request.tenant_id,
+            attachment_context=attachment_context_result,
+            usage_tracker=request.usage_tracker,
+            before_provider_call=request.before_provider_call,
+            mapped_execution_policy=request.mapped_execution_policy,
+            prepared_schema_candidates=schema_candidates,
+            persisted_planning_state=request.persisted_planning_state,
+            attached_file_ids={file.id for file in request.attachment_files},
+            max_input_tokens=request.max_input_tokens,
+            max_output_tokens=request.max_output_tokens,
+            safety_buffer_tokens=request.budget_policy.conversation_safety_buffer_tokens,
+            minimum_conversation_tokens=(
+                request.budget_policy.minimum_conversation_budget_tokens
+            ),
+        )
+        discovery_analysis = discovery_runtime.discovery_analysis
+        rebuilt_planning_state = discovery_runtime.planning_state
+        schema_direction_pending = discovery_runtime.schema_direction_pending
+        control_schema_candidates = discovery_runtime.schema_candidates
+        slot_classification_metadata = discovery_runtime.slot_classification_metadata
+        requirements_disclosure = build_requirements_disclosure(
+            rebuilt_planning_state,
+            ui_language=ui_language,
+            discovery_assumptions=discovery_analysis.assumptions,
+        )
 
     flow_context = _build_flow_context_if_needed(
         conversation=request.conversation,
@@ -259,7 +295,7 @@ async def prepare_planner_request(
         available_kbs=request.available_kbs,
         prior_bindings=prior_resource_bindings,
     )
-    if discovery_runtime.schema_direction_pending:
+    if schema_direction_pending:
         rebuilt_planning_state.replace_schema_resolution(
             input_evidence=None,
             output_evidence=None,
@@ -268,14 +304,14 @@ async def prepare_planner_request(
     turn_control = resolve_turn_control(
         session_state=rebuilt_planning_state,
         selected_discovery_question_ids=discovery_analysis.selected_question_ids,
-        confirmed_attachment_evidence_fingerprint=(
-            requirements_state.confirmed_attachment_evidence_fingerprint
+        requirements_disclosure=requirements_disclosure,
+        confirmed_requirements_version=(
+            requirements_state.confirmed_requirements_version
         ),
         ui_language=ui_language,
-        discovery_assumptions=discovery_analysis.assumptions,
         attachment_context=attachment_context_result,
-        schema_candidates=discovery_runtime.schema_candidates,
-        schema_direction_pending=discovery_runtime.schema_direction_pending,
+        schema_candidates=control_schema_candidates,
+        schema_direction_pending=schema_direction_pending,
         requirements_confirmation_required=(
             request.plan_edit_context is None
             or request.plan_edit_context.scope != "step"
@@ -285,9 +321,7 @@ async def prepare_planner_request(
         return ServerOutputPrepared(
             requirements_state=requirements_state,
             ui_language=ui_language,
-            slot_classification_metadata=(
-                discovery_runtime.slot_classification_metadata
-            ),
+            slot_classification_metadata=slot_classification_metadata,
             discovery_analysis=discovery_analysis,
             server_decision=turn_control.decision,
             planning_state=rebuilt_planning_state,
@@ -300,7 +334,7 @@ async def prepare_planner_request(
     return build_proposal_prepared(
         requirements_state=requirements_state,
         ui_language=ui_language,
-        slot_classification_metadata=discovery_runtime.slot_classification_metadata,
+        slot_classification_metadata=slot_classification_metadata,
         conversation=request.conversation,
         planning_state=rebuilt_planning_state,
         attachment_context=attachment_context_result,
@@ -317,6 +351,94 @@ async def prepare_planner_request(
         budget_policy=request.budget_policy,
         attachment_file_count=len(request.attachment_files),
         current_turn_start=request.current_turn_start,
+    )
+
+
+def _acknowledged_disclosure(
+    request: PlannerRequestPreparationInput,
+    requirements_state: RequirementsState,
+    *,
+    attachment_context: AIBuilderAttachmentContext | None,
+) -> RequirementsSummaryPayload | None:
+    """The exact disclosure this turn merely acknowledges, when it does.
+
+    Confirming is a structured action, not a chat turn. Reading an
+    acknowledgment back as fresh semantic evidence is what made the server
+    re-interpret unchanged attachments and re-issue a summary the user had
+    already confirmed, until the interaction limit.
+
+    The fast path reuses the persisted state that produced the confirmed
+    disclosure, so it may only run while that state still describes this turn.
+    Anything that could genuinely be new evidence — a missing or stale version,
+    changed attachments or changed server policy — falls through to the
+    ordinary path and earns a new disclosure. `resolve_requirements_state`
+    owns what counts as a confirmation at all, including that it carries no
+    message of its own.
+    """
+
+    persisted = request.persisted_planning_state
+    if persisted is None:
+        return None
+    if requirements_state.confirmed_requirements_version is None:
+        return None
+    if not _turn_is_the_acknowledgment(request.conversation):
+        return None
+    if not _persisted_attachments_are_current(
+        persisted,
+        attachment_files=request.attachment_files,
+        attachment_context=attachment_context,
+    ):
+        return None
+    # The accepted mapped limit compiles into `runtime_max_files`, so a policy
+    # the organization changed since the disclosure is a different plan.
+    if persisted.mapped_file_limit.proposed_value != max_mapped_items_per_step(
+        request.mapped_execution_policy
+    ):
+        return None
+    return requirements_state.latest_summary
+
+
+def _turn_is_the_acknowledgment(conversation: list[ConversationMessage]) -> bool:
+    """Whether this turn is the acknowledgment itself.
+
+    A confirmation stays valid across later revision turns, so a still-valid
+    confirmation does not make every later turn an acknowledgment. Only the
+    turn that carries a confirmation — and only a confirmation, by the same
+    content-free rule that decides validity — may skip re-reading the evidence.
+    """
+
+    latest = conversation[-1] if conversation else None
+    return (
+        latest is not None
+        and latest.role == "user"
+        and content_free_confirmation(latest) is not None
+    )
+
+
+def _persisted_attachments_are_current(
+    persisted: PlanningState,
+    *,
+    attachment_files: list[File],
+    attachment_context: AIBuilderAttachmentContext | None,
+) -> bool:
+    # Exact membership, not containment: detaching a disclosed file changes the
+    # plan just as much as attaching a new one, and only the ordinary rebuild
+    # reconciles roles against current session membership.
+    if {role.file_id for role in persisted.file_roles} != {
+        file.id for file in attachment_files
+    }:
+        return False
+    # The same file can be read differently by a different model or budget, and
+    # how much of it the planner saw is disclosed evidence.
+    current_coverage = {
+        item.file_id: item.coverage
+        for item in (
+            attachment_context.evidence if attachment_context is not None else ()
+        )
+    }
+    return all(
+        role.coverage == current_coverage.get(role.file_id)
+        for role in persisted.file_roles
     )
 
 
@@ -423,10 +545,13 @@ def build_proposal_prepared(
             },
         )
 
-    def build_proposal_prompt(attachment_text: str | None) -> str:
+    def build_proposal_prompt(
+        attachment_text: str | None,
+        replayed_requirements: RequirementsSummaryPayload | None,
+    ) -> str:
         return build_plan_proposal_system_prompt(
             planning_state=planning_state,
-            confirmed_requirements=confirmed_requirements,
+            confirmed_requirements=replayed_requirements,
             attachment_context=attachment_text,
             flow_context=flow_context,
             is_edit_mode=is_edit_mode,
@@ -441,21 +566,52 @@ def build_proposal_prepared(
             ),
         )
 
-    fitted_attachment_context = _fit_proposal_attachment_context(
-        attachment_context=attachment_context,
-        build_proposal_prompt=build_proposal_prompt,
+    system_prompt_token_limit = _proposal_system_prompt_token_limit(
         proposal_tool_schema=proposal_tool_schema,
         litellm_model=litellm_model,
         max_input_tokens=max_input_tokens,
         max_output_tokens=max_output_tokens,
         budget_policy=budget_policy,
     )
+
+    def prompt_fits(
+        attachment_text: str | None,
+        replayed_requirements: RequirementsSummaryPayload | None,
+    ) -> bool:
+        return (
+            count_message_tokens(
+                [
+                    {
+                        "role": "system",
+                        "content": build_proposal_prompt(
+                            attachment_text, replayed_requirements
+                        ),
+                    }
+                ],
+                litellm_model,
+            )
+            <= system_prompt_token_limit
+        )
+
+    replayed_requirements = _fit_replayed_requirements(
+        confirmed_requirements,
+        fits=lambda requirements: prompt_fits(None, requirements),
+    )
+    fitted_attachment_context = (
+        fit_ai_builder_attachment_context(
+            attachment_context,
+            fits_context=lambda context: prompt_fits(context, replayed_requirements),
+        )
+        if attachment_context is not None
+        else None
+    )
     proposal_system_prompt = build_proposal_prompt(
         (
             fitted_attachment_context.context
             if fitted_attachment_context is not None
             else None
-        )
+        ),
+        replayed_requirements,
     )
     prepared_prompt = _prepare_prompt_messages(
         conversation=conversation,
@@ -480,6 +636,11 @@ def build_proposal_prepared(
             "trimmed_message_count": prepared_prompt.trimmed_message_count,
             "attachment_file_count": attachment_file_count,
             "confirmed_requirements_present": confirmed_requirements is not None,
+            "replayed_requirement_assumptions": (
+                len(replayed_requirements.assumptions)
+                if replayed_requirements is not None
+                else 0
+            ),
         },
     )
 
@@ -530,20 +691,17 @@ def _prior_spec_for_revision(
     )
 
 
-def _fit_proposal_attachment_context(
+def _proposal_system_prompt_token_limit(
     *,
-    attachment_context: AIBuilderAttachmentContext | None,
-    build_proposal_prompt: Callable[[str | None], str],
     proposal_tool_schema: ProposalToolSchema,
     litellm_model: str,
     max_input_tokens: int,
     max_output_tokens: int,
     budget_policy: AIBuilderBudgetPolicy,
-) -> AIBuilderAttachmentContext | None:
-    if attachment_context is None:
-        return None
+) -> int:
+    """What the model can actually carry as a system prompt this turn."""
 
-    system_prompt_token_limit = max(
+    return max(
         0,
         max_input_tokens
         - max_output_tokens
@@ -554,20 +712,49 @@ def _fit_proposal_attachment_context(
         ),
     )
 
-    def fits_context(context: str | None) -> bool:
-        prompt = build_proposal_prompt(context)
-        return (
-            count_message_tokens(
-                [{"role": "system", "content": prompt}],
-                litellm_model,
-            )
-            <= system_prompt_token_limit
+
+def _fit_replayed_requirements(
+    confirmed_requirements: RequirementsSummaryPayload | None,
+    *,
+    fits: Callable[[RequirementsSummaryPayload | None], bool],
+) -> RequirementsSummaryPayload | None:
+    """Bound the replayed disclosure against the model, not a fixed count.
+
+    The disclosure is as long as the evidence the user must see — a template
+    can contribute thousands of placeholders — while the proposal prompt is
+    bounded by the model. The same budget that fits attachment text decides
+    how many confirmed assumptions are replayed; the confirmed decisions and
+    descriptions always stay, and `PlanningState` still carries every typed
+    fact into compilation.
+    """
+
+    if confirmed_requirements is None or fits(confirmed_requirements):
+        return confirmed_requirements
+
+    def with_assumptions(count: int) -> RequirementsSummaryPayload:
+        return confirmed_requirements.model_copy(
+            update={"assumptions": confirmed_requirements.assumptions[:count]},
+            deep=True,
         )
 
-    return fit_ai_builder_attachment_context(
-        attachment_context,
-        fits_context=fits_context,
-    )
+    lower = 0
+    upper = len(confirmed_requirements.assumptions)
+    while lower < upper:
+        middle = (lower + upper + 1) // 2
+        if fits(with_assumptions(middle)):
+            lower = middle
+        else:
+            upper = middle - 1
+    if lower:
+        return with_assumptions(lower)
+
+    # The bounded parts of the disclosure are bounded by evidence, not by the
+    # model: a hundred named results can outgrow the prompt on their own. What
+    # this function returns must fit, so the replay is dropped entirely rather
+    # than handed on over budget. `PlanningState` still carries every typed
+    # fact into the prompt and into compilation.
+    without_assumptions = with_assumptions(0)
+    return without_assumptions if fits(without_assumptions) else None
 
 
 def validate_preprovider_schema_gate(

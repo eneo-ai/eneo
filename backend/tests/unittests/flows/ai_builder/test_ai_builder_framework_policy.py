@@ -19,7 +19,6 @@ from eneo.flows.ai_builder.ai_builder_framework_policy import (
     mentions_runtime_metadata,
     needs_structured_extraction,
     normalize_question_answer,
-    normalize_requirements_summary_for_flow,
     normalize_structured_question_payload,
     resolve_docx_output_mode,
     resolve_explicit_output_choice,
@@ -31,9 +30,6 @@ from eneo.flows.ai_builder.ai_builder_framework_policy import (
 )
 from eneo.flows.ai_builder.ai_builder_input_architecture_policy import (
     resolve_input_intent,
-)
-from eneo.flows.ai_builder.ai_builder_requirements_state import (
-    build_requirements_version,
 )
 from eneo.flows.ai_builder.planning_state_builder import (
     build_planning_state_from_conversation,
@@ -1341,84 +1337,6 @@ def test_extract_answer_signals_does_not_treat_edit_summary_as_user_answer() -> 
     assert signals == {}
 
 
-def test_requirements_summary_normalization_keeps_existing_audio_input() -> None:
-    normalized = normalize_requirements_summary_for_flow(
-        {
-            "summary": "Flödet ska ta emot dokument och leverera DOCX.",
-            "key_decisions": [
-                {"topic": "Indata", "decision": "Dokument vid körning."},
-                {"topic": "Output", "decision": "DOCX."},
-            ],
-            "input_description": "Primär indata vid körning: Dokument.",
-            "output_description": "Huvudsakligt slutresultat: DOCX-dokument.",
-            "assumptions": [],
-            "manual_setup_notes": [],
-        },
-        conversation=[
-            {
-                "role": "user",
-                "content": (
-                    "Granska detta befintliga Flow för transkribering till DOCX "
-                    "och förbättra det utan att ändra den avsedda produkten."
-                ),
-            }
-        ],
-        flow=_make_audio_docx_flow(),
-        language="sv",
-    )
-
-    assert normalized["input_description"] == "Primär indata vid körning: ljud."
-    assert normalized["key_decisions"][0] == {
-        "topic": "Indata",
-        "decision": "Behåll befintlig körningsindata: ljud.",
-    }
-
-
-def test_requirements_summary_normalization_preserves_explicit_input_change() -> None:
-    requirements_data = {
-        "summary": "Flödet ska ta emot dokument och leverera DOCX.",
-        "key_decisions": [{"topic": "Indata", "decision": "Dokument vid körning."}],
-        "input_description": "Primär indata vid körning: Dokument.",
-        "output_description": "Huvudsakligt slutresultat: DOCX-dokument.",
-        "assumptions": [],
-        "manual_setup_notes": [],
-    }
-
-    normalized = normalize_requirements_summary_for_flow(
-        requirements_data,
-        conversation=[
-            {
-                "role": "user",
-                "content": "Ändra indata så att användaren laddar upp dokument.",
-            }
-        ],
-        flow=_make_audio_docx_flow(),
-        language="sv",
-    )
-
-    assert normalized == requirements_data
-
-
-def test_requirements_summary_normalization_preserves_create_mode_summary() -> None:
-    requirements_data = {
-        "summary": "Flödet ska ta emot dokument och leverera DOCX.",
-        "key_decisions": [{"topic": "Indata", "decision": "Dokument vid körning."}],
-        "input_description": "Primär indata vid körning: Dokument.",
-        "output_description": "Huvudsakligt slutresultat: DOCX-dokument.",
-        "assumptions": [],
-        "manual_setup_notes": [],
-    }
-
-    normalized = normalize_requirements_summary_for_flow(
-        requirements_data,
-        conversation=[],
-        flow=None,
-        language="sv",
-    )
-
-    assert normalized == requirements_data
-
-
 def test_planning_state_uses_existing_audio_input_when_edit_summary_drifts() -> None:
     state = build_planning_state_from_conversation(
         [
@@ -1452,10 +1370,6 @@ def test_planning_state_uses_existing_audio_input_when_edit_summary_drifts() -> 
                             }
                         ],
                     },
-                    "attachment_evidence_fingerprint": (
-                        "4f53cda18c2baa0c0354bb5f9a3ecbe5"
-                        "ed12ab4d8e11ba873c2f11161202b945"
-                    ),
                 },
             ),
         ],
@@ -1470,6 +1384,7 @@ def test_planning_state_uses_existing_audio_input_when_edit_summary_drifts() -> 
 def test_planning_state_uses_requirements_summary_without_flow_default() -> None:
     payload = RequirementsSummaryPayload.model_validate(
         {
+            "requirements_version": "0" * 64,
             "summary": "Skapa en DOCX-rapport.",
             "key_decisions": [{"topic": "Output", "decision": "DOCX-dokument."}],
             "input_description": "Primär indata vid körning: text.",
@@ -1486,7 +1401,7 @@ def test_planning_state_uses_requirements_summary_without_flow_default() -> None
             ],
         }
     )
-    version = build_requirements_version(payload)
+    version = payload.requirements_version
     state = build_planning_state_from_conversation(
         [
             ConversationMessage(
@@ -1495,15 +1410,11 @@ def test_planning_state_uses_requirements_summary_without_flow_default() -> None
                 metadata={
                     "requirements_summary": payload.model_dump(mode="json"),
                     "requirements_version": version,
-                    "attachment_evidence_fingerprint": (
-                        "4f53cda18c2baa0c0354bb5f9a3ecbe5"
-                        "ed12ab4d8e11ba873c2f11161202b945"
-                    ),
                 },
             ),
             ConversationMessage(
                 role="user",
-                content="Confirmed.",
+                content="",
                 metadata={
                     "requirements_confirmed": True,
                     "requirements_version": version,

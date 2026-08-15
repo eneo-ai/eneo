@@ -39,9 +39,6 @@ from eneo.flows.ai_builder.ai_builder_event_models import (
     RequirementsSummaryPayload,
     ResolvedRequirementPayload,
 )
-from eneo.flows.ai_builder.ai_builder_requirements_state import (
-    build_requirements_version,
-)
 from eneo.flows.ai_builder.ai_builder_schema_evidence import (
     build_schema_evidence,
     derive_freeform_schema_candidates,
@@ -118,6 +115,7 @@ def _state(
 
 def test_rebuild_restores_typed_requirements_without_reading_display_copy() -> None:
     payload = RequirementsSummaryPayload(
+        requirements_version="0" * 64,
         summary="Checkpoint ready.",
         key_decisions=[],
         input_description="Input confirmed.",
@@ -141,7 +139,7 @@ def test_rebuild_restores_typed_requirements_without_reading_display_copy() -> N
             ),
         ],
     )
-    version = build_requirements_version(payload)
+    version = payload.requirements_version
 
     state = build_planning_state_from_conversation(
         [
@@ -151,12 +149,11 @@ def test_rebuild_restores_typed_requirements_without_reading_display_copy() -> N
                 metadata={
                     "requirements_summary": payload.model_dump(mode="json"),
                     "requirements_version": version,
-                    "attachment_evidence_fingerprint": "f" * 64,
                 },
             ),
             ConversationMessage(
                 role="user",
-                content="Confirmed.",
+                content="",
                 metadata={
                     "requirements_confirmed": True,
                     "requirements_version": version,
@@ -231,6 +228,7 @@ def test_rebuild_uses_latest_confirmed_runtime_metadata_field_set() -> None:
 
 def test_rebuild_does_not_admit_unconfirmed_requirements_projection() -> None:
     payload = RequirementsSummaryPayload(
+        requirements_version="0" * 64,
         summary="Checkpoint ready.",
         key_decisions=[],
         input_description="Input pending confirmation.",
@@ -246,7 +244,7 @@ def test_rebuild_does_not_admit_unconfirmed_requirements_projection() -> None:
             ),
         ],
     )
-    version = build_requirements_version(payload)
+    version = payload.requirements_version
 
     state = build_planning_state_from_conversation(
         [
@@ -256,7 +254,6 @@ def test_rebuild_does_not_admit_unconfirmed_requirements_projection() -> None:
                 metadata={
                     "requirements_summary": payload.model_dump(mode="json"),
                     "requirements_version": version,
-                    "attachment_evidence_fingerprint": "f" * 64,
                 },
             )
         ]

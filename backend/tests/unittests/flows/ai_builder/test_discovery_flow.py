@@ -46,6 +46,7 @@ from eneo.flows.ai_builder.ai_builder_domain_models import (
     TargetKind,
 )
 from eneo.flows.ai_builder.ai_builder_event_models import (
+    KeyDecisionPayload,
     RequirementsSummaryPayload,
 )
 from eneo.flows.ai_builder.ai_builder_events import encode_ai_builder_stream_event
@@ -55,7 +56,6 @@ from eneo.flows.ai_builder.ai_builder_planner_request_preparation import (
 )
 from eneo.flows.ai_builder.ai_builder_proposal_telemetry import ProposalTurnTelemetry
 from eneo.flows.ai_builder.ai_builder_requirements_state import (
-    build_requirements_version,
     resolve_requirements_state,
 )
 from eneo.flows.ai_builder.ai_builder_server_decision_dispatch import (
@@ -80,9 +80,6 @@ from eneo.flows.ai_builder.ai_builder_slot_classification_contract import (
     SlotClassificationAttempt,
     SlotClassificationEvidenceLevel,
     SlotClassificationResult,
-)
-from eneo.flows.ai_builder.ai_builder_tool_names import (
-    CONFIRM_REQUIREMENTS_TOOL_NAME,
 )
 from eneo.flows.ai_builder.ai_builder_turn_controller import AskCanonicalQuestion
 from eneo.flows.ai_builder.planning_state import (
@@ -509,6 +506,22 @@ class TestLowConfidenceDiscoveryGate:
 
 
 class TestRequirementsConfirmation:
+    """One disclosure, one version, one confirmation that names it."""
+
+    def _disclosure_metadata(self) -> dict[str, object]:
+        payload = RequirementsSummaryPayload(
+            requirements_version="c0ffee" + "0" * 58,
+            summary="A flow.",
+            key_decisions=[KeyDecisionPayload(topic="Input", decision="PDF")],
+            input_description="PDF upload",
+            output_description="DOCX report",
+            manual_setup_notes=[],
+        )
+        return {
+            "requirements_summary": payload.model_dump(mode="json"),
+            "requirements_version": payload.requirements_version,
+        }
+
     def test_returns_false_for_empty_conversation(self) -> None:
         assert resolve_requirements_state([]).confirmed is False
 
@@ -535,103 +548,30 @@ class TestRequirementsConfirmation:
         assert resolve_requirements_state(conversation).confirmed is False
 
     def test_returns_true_after_requirements_confirmed(self) -> None:
-        requirements_version = build_requirements_version(
-            RequirementsSummaryPayload(
-                summary="A flow.",
-                key_decisions=[{"topic": "Input", "decision": "PDF"}],
-                input_description="PDF upload",
-                output_description="DOCX report",
-                manual_setup_notes=[],
-            )
-        )
+        metadata = self._disclosure_metadata()
         conversation = [
             ConversationMessage(
                 role="assistant",
-                content=None,
-                tool_calls=[
-                    {
-                        "id": "call_1",
-                        "name": CONFIRM_REQUIREMENTS_TOOL_NAME,
-                        "arguments": {
-                            "summary": "A flow.",
-                            "key_decisions": [{"topic": "Input", "decision": "PDF"}],
-                            "input_description": "PDF upload",
-                            "output_description": "DOCX report",
-                        },
-                    }
-                ],
-            ),
-            ConversationMessage(
-                role="tool",
-                content="Requirements presented to user. Awaiting confirmation.",
-                tool_call_id="call_1",
-                metadata={
-                    "requirements_summary": {
-                        "summary": "A flow.",
-                        "key_decisions": [{"topic": "Input", "decision": "PDF"}],
-                        "input_description": "PDF upload",
-                        "output_description": "DOCX report",
-                        "manual_setup_notes": [],
-                    },
-                    "requirements_version": requirements_version,
-                    "attachment_evidence_fingerprint": (
-                        "4f53cda18c2baa0c0354bb5f9a3ecbe5"
-                        "ed12ab4d8e11ba873c2f11161202b945"
-                    ),
-                },
+                content="Requirements presented to user.",
+                metadata=metadata,
             ),
             ConversationMessage(
                 role="user",
-                content="Ja, det stämmer.",
+                content="",
                 metadata={
                     "requirements_confirmed": True,
-                    "requirements_version": requirements_version,
+                    "requirements_version": metadata["requirements_version"],
                 },
             ),
         ]
         assert resolve_requirements_state(conversation).confirmed is True
 
     def test_returns_false_with_requirements_but_no_user_confirmation(self) -> None:
-        requirements_version = build_requirements_version(
-            RequirementsSummaryPayload(
-                summary="A flow.",
-                key_decisions=[{"topic": "Input", "decision": "PDF"}],
-                input_description="PDF upload",
-                output_description="DOCX report",
-                manual_setup_notes=[],
-            )
-        )
         conversation = [
             ConversationMessage(
                 role="assistant",
-                content=None,
-                tool_calls=[
-                    {
-                        "id": "call_1",
-                        "name": CONFIRM_REQUIREMENTS_TOOL_NAME,
-                        "arguments": {
-                            "summary": "A flow.",
-                            "key_decisions": [{"topic": "Input", "decision": "PDF"}],
-                            "input_description": "PDF upload",
-                            "output_description": "DOCX report",
-                        },
-                    }
-                ],
-            ),
-            ConversationMessage(
-                role="tool",
-                content="Requirements presented to user. Awaiting confirmation.",
-                tool_call_id="call_1",
-                metadata={
-                    "requirements_summary": {
-                        "summary": "A flow.",
-                        "key_decisions": [{"topic": "Input", "decision": "PDF"}],
-                        "input_description": "PDF upload",
-                        "output_description": "DOCX report",
-                        "manual_setup_notes": [],
-                    },
-                    "requirements_version": requirements_version,
-                },
+                content="Requirements presented to user.",
+                metadata=self._disclosure_metadata(),
             ),
         ]
         assert resolve_requirements_state(conversation).confirmed is False
@@ -639,92 +579,24 @@ class TestRequirementsConfirmation:
     def test_returns_false_when_user_changes_requirements_after_confirmation(
         self,
     ) -> None:
-        requirements_version = build_requirements_version(
-            RequirementsSummaryPayload(
-                summary="A flow.",
-                key_decisions=[{"topic": "Input", "decision": "PDF"}],
-                input_description="PDF upload",
-                output_description="DOCX report",
-                manual_setup_notes=[],
-            )
-        )
+        metadata = self._disclosure_metadata()
         conversation = [
             ConversationMessage(
                 role="assistant",
-                content=None,
-                tool_calls=[
-                    {
-                        "id": "call_1",
-                        "name": CONFIRM_REQUIREMENTS_TOOL_NAME,
-                        "arguments": {"summary": "A flow."},
-                    }
-                ],
-            ),
-            ConversationMessage(
-                role="tool",
-                content="Requirements presented to user. Awaiting confirmation.",
-                tool_call_id="call_1",
-                metadata={
-                    "requirements_summary": {
-                        "summary": "A flow.",
-                        "key_decisions": [{"topic": "Input", "decision": "PDF"}],
-                        "input_description": "PDF upload",
-                        "output_description": "DOCX report",
-                        "manual_setup_notes": [],
-                    },
-                    "requirements_version": requirements_version,
-                },
+                content="Requirements presented to user.",
+                metadata=metadata,
             ),
             ConversationMessage(
                 role="user",
-                content="Ja, det stämmer.",
+                content="",
                 metadata={
                     "requirements_confirmed": True,
-                    "requirements_version": requirements_version,
+                    "requirements_version": metadata["requirements_version"],
                 },
             ),
             ConversationMessage(
                 role="user",
                 content="Jag vill ändra till en PDF i taget.",
-            ),
-        ]
-        assert resolve_requirements_state(conversation).confirmed is False
-
-    def test_returns_false_when_stored_requirements_version_does_not_match_summary(
-        self,
-    ) -> None:
-        valid_version = build_requirements_version(
-            RequirementsSummaryPayload(
-                summary="A flow.",
-                key_decisions=[{"topic": "Input", "decision": "PDF"}],
-                input_description="PDF upload",
-                output_description="DOCX report",
-                manual_setup_notes=[],
-            )
-        )
-        conversation = [
-            ConversationMessage(
-                role="tool",
-                content="Requirements presented to user. Awaiting confirmation.",
-                tool_call_id="call_1",
-                metadata={
-                    "requirements_summary": {
-                        "summary": "A flow.",
-                        "key_decisions": [{"topic": "Input", "decision": "PDF"}],
-                        "input_description": "PDF upload",
-                        "output_description": "DOCX report",
-                        "manual_setup_notes": [],
-                    },
-                    "requirements_version": "mismatch",
-                },
-            ),
-            ConversationMessage(
-                role="user",
-                content="Ja, det stämmer.",
-                metadata={
-                    "requirements_confirmed": True,
-                    "requirements_version": valid_version,
-                },
             ),
         ]
         assert resolve_requirements_state(conversation).confirmed is False
@@ -3401,7 +3273,7 @@ class TestPlannerDiscoveryQuestionDispatch:
                 conversation=conversation,
                 new_messages_start=0,
                 flow=None,
-                confirmed_attachment_evidence_fingerprint=None,
+                confirmed_requirements_version=None,
                 ui_language="en",
                 telemetry=ServerDecisionTelemetry(
                     request_id="req-test",

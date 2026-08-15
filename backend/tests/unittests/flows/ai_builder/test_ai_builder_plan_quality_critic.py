@@ -29,9 +29,6 @@ from eneo.flows.ai_builder.ai_builder_plan_quality_critic import (
     build_conversation_critic_context,
     build_quality_feedback_from_critic_context,
 )
-from eneo.flows.ai_builder.ai_builder_requirements_state import (
-    build_requirements_version,
-)
 from eneo.flows.ai_builder.ai_builder_schema_evidence import build_schema_evidence
 from eneo.flows.ai_builder.planning_state import (
     BUILDER_SCHEMA_VERSION,
@@ -194,6 +191,7 @@ def _requirements(**overrides: object) -> RequirementsSummaryPayload:
         "output_description": "Huvudsakligt slutresultat behöver granskas.",
         "assumptions": ["Inga extra fält."],
         "manual_setup_notes": ["Koppla transkriberingsmodellen."],
+        "requirements_version": "0" * 64,
     }
     payload.update(overrides)
     return RequirementsSummaryPayload.model_validate(payload)
@@ -1048,8 +1046,8 @@ def test_edit_context_keeps_edit_only_architecture_invariant(
 
 
 def test_critic_context_renders_typed_confirmed_requirements_signal() -> None:
-    payload = _requirements(requirements_version="do-not-render")
-    version = build_requirements_version(payload)
+    payload = _requirements(requirements_version="d0" * 32)
+    version = payload.requirements_version
     context = build_conversation_critic_context(
         [
             {
@@ -1058,10 +1056,6 @@ def test_critic_context_renders_typed_confirmed_requirements_signal() -> None:
                 "metadata": {
                     "requirements_summary": payload.model_dump(mode="json"),
                     "requirements_version": version,
-                    "attachment_evidence_fingerprint": (
-                        "4f53cda18c2baa0c0354bb5f9a3ecbe5"
-                        "ed12ab4d8e11ba873c2f11161202b945"
-                    ),
                 },
             },
             {
@@ -1097,7 +1091,7 @@ def test_critic_context_renders_typed_confirmed_requirements_signal() -> None:
             "Koppla transkriberingsmodellen.",
         )
     )
-    assert "do-not-render" not in context.requirements_text
+    assert "d0" * 32 not in context.requirements_text
 
 
 def test_critic_context_omits_requirements_signal_without_summary() -> None:

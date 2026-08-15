@@ -27219,11 +27219,14 @@ export interface components {
        */
       requirements_confirmed?: true;
       /** Requirements Version */
-      requirements_version?: string | null;
+      requirements_version: string;
       /** Ui Language */
       ui_language?: string | null;
     };
-    /** RequirementsSummaryPayload */
+    /**
+     * RequirementsSummaryPayload
+     * @description A disclosure the user can confirm, named by the hash of its content.
+     */
     RequirementsSummaryPayload: {
       /** Assumptions */
       assumptions?: string[];
@@ -27236,7 +27239,7 @@ export interface components {
       /** Output Description */
       output_description: string;
       /** Requirements Version */
-      requirements_version?: string | null;
+      requirements_version: string;
       /** Resolved Requirements */
       resolved_requirements?: components["schemas"]["ResolvedRequirementPayload"][];
       /** Summary */

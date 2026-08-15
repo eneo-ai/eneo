@@ -5,9 +5,8 @@ import json
 from dataclasses import dataclass
 from typing import Iterable
 
-from pydantic import ValidationError
-
 from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
+    RequirementsConfirmationMetadata,
     requirements_confirmation_from_metadata,
     requirements_summary_from_metadata,
     tool_calls_from_message,
@@ -16,10 +15,10 @@ from eneo.flows.ai_builder.ai_builder_domain_models import (
     ConversationMessage,
 )
 from eneo.flows.ai_builder.ai_builder_event_models import (
+    RequirementsDisclosureContent,
     RequirementsSummaryPayload,
 )
 from eneo.flows.ai_builder.ai_builder_tool_names import (
-    CONFIRM_REQUIREMENTS_TOOL_NAME,
     PROPOSE_FLOW_TOOL_NAME,
 )
 
@@ -74,7 +73,6 @@ _BOILERPLATE_REQUIREMENT_TEXTS = frozenset(
 class RequirementsState:
     latest_summary: RequirementsSummaryPayload | None = None
     latest_version: str | None = None
-    latest_attachment_evidence_fingerprint: str | None = None
     confirmed_version: str | None = None
 
     @property
@@ -82,21 +80,47 @@ class RequirementsState:
         return (
             self.latest_summary is not None
             and self.latest_version is not None
-            and self.latest_attachment_evidence_fingerprint is not None
             and self.confirmed_version == self.latest_version
         )
 
     @property
-    def confirmed_attachment_evidence_fingerprint(self) -> str | None:
-        return self.latest_attachment_evidence_fingerprint if self.confirmed else None
+    def confirmed_requirements_version(self) -> str | None:
+        """The version the user attested to, when it is still the latest one."""
+
+        return self.latest_version if self.confirmed else None
 
 
-def build_requirements_version(payload: RequirementsSummaryPayload) -> str:
-    canonical_payload = payload.model_copy(
-        update={"requirements_version": None}, deep=True
-    )
+def content_free_confirmation(
+    message: ConversationMessage,
+) -> RequirementsConfirmationMetadata | None:
+    """The confirmation this message carries, when it only confirms.
+
+    Confirming is a content-free structured action. "Yes, but make it informal"
+    is a change request wearing a confirmation, and honouring it would build a
+    plan from a disclosure that never described what the user just asked for,
+    so text beside a confirmation makes the message an ordinary one.
+    """
+
+    content = message.content if isinstance(message.content, str) else ""
+    if content.strip():
+        return None
+    return requirements_confirmation_from_metadata(message.metadata)
+
+
+def build_requirements_version(content: RequirementsDisclosureContent) -> str:
+    """Hash the disclosure record the user is shown, unclipped.
+
+    Identity is taken from the typed record, not from the prose: display
+    clips long evidence values so a summary stays readable, and two different
+    values that clip to the same 80 characters must still be two different
+    disclosures.
+    """
+
     serialized = json.dumps(
-        canonical_payload.model_dump(mode="json"),
+        content.model_dump(
+            mode="json",
+            include=set(RequirementsDisclosureContent.model_fields),
+        ),
         sort_keys=True,
         separators=(",", ":"),
         ensure_ascii=False,
@@ -129,40 +153,19 @@ def resolve_requirements_state(
 ) -> RequirementsState:
     latest_summary: RequirementsSummaryPayload | None = None
     latest_version: str | None = None
-    latest_attachment_evidence_fingerprint: str | None = None
     latest_summary_index: int | None = None
 
     for index, message in enumerate(conversation):
-        if message.role == "assistant":
-            for tool_call in tool_calls_from_message(message):
-                if tool_call.name != CONFIRM_REQUIREMENTS_TOOL_NAME:
-                    continue
-                arguments = tool_call.arguments
-                try:
-                    payload = RequirementsSummaryPayload.model_validate(arguments)
-                except ValidationError:
-                    continue
-                latest_summary = payload
-                latest_version = build_requirements_version(payload)
-                latest_attachment_evidence_fingerprint = None
-                latest_summary_index = index
-
         if message.role not in ("tool", "assistant"):
             continue
-        summary_metadata = requirements_summary_from_metadata(message.metadata)
-        if summary_metadata is None:
+        persisted_summary = requirements_summary_from_metadata(message.metadata)
+        if persisted_summary is None:
             continue
-        latest_summary = summary_metadata.requirements_summary
-        latest_attachment_evidence_fingerprint = (
-            summary_metadata.attachment_evidence_fingerprint
-        )
-        computed_version = build_requirements_version(latest_summary)
-        if (
-            summary_metadata.requirements_version is not None
-            and summary_metadata.requirements_version != computed_version
-        ):
-            continue
-        latest_version = computed_version
+        # The stored version names the disclosure the user was shown. It is
+        # not recomputed here: the version hashes the unclipped disclosure
+        # record, and the persisted payload carries only the clipped prose.
+        latest_summary = persisted_summary
+        latest_version = persisted_summary.requirements_version
         latest_summary_index = index
 
     if latest_summary is None or latest_version is None or latest_summary_index is None:
@@ -176,13 +179,15 @@ def resolve_requirements_state(
                 has_plan_after_confirmation = True
             continue
 
-        confirmation = requirements_confirmation_from_metadata(message.metadata)
+        confirmation = content_free_confirmation(message)
         if confirmation is not None:
-            confirmed_metadata_version = confirmation.requirements_version
-            if confirmed_metadata_version in (None, latest_version):
-                confirmed_version = latest_version
-                continue
-            confirmed_version = None
+            # A confirmation names exactly one disclosure. Anything else is a
+            # confirmation of something the user never saw.
+            confirmed_version = (
+                latest_version
+                if confirmation.requirements_version == latest_version
+                else None
+            )
             continue
 
         # After a plan was proposed, preserve requirements unless the user
@@ -190,8 +195,7 @@ def resolve_requirements_state(
         # "change requirements", "börja om", "start over").
         if has_plan_after_confirmation and confirmed_version is not None:
             content = message.content if isinstance(message.content, str) else ""
-            lowered = content.casefold()
-            if not _is_requirements_invalidation(lowered):
+            if not _is_requirements_invalidation(content.casefold()):
                 continue  # Keep requirements confirmed for revision requests
 
         confirmed_version = None
@@ -199,7 +203,6 @@ def resolve_requirements_state(
     return RequirementsState(
         latest_summary=latest_summary,
         latest_version=latest_version,
-        latest_attachment_evidence_fingerprint=(latest_attachment_evidence_fingerprint),
         confirmed_version=confirmed_version,
     )
 

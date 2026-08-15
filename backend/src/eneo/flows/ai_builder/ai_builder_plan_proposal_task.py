@@ -45,6 +45,7 @@ from eneo.flows.ai_builder.ai_builder_template_attachment_contract import (
 from eneo.flows.ai_builder.ai_builder_tool_names import PROPOSE_FLOW_TOOL_NAME
 from eneo.flows.ai_builder.planning_state import (
     FileRoleEvidence,
+    NamedResultEvidence,
     PlanningState,
     ResolvedSlot,
 )
@@ -363,15 +364,27 @@ def _named_result_obligations_block(planning_state: PlanningState) -> str | None
         or not obligations
     ):
         return None
-    names = ", ".join(render_ai_builder_evidence_value(name) for name in obligations)
+    # The user's declared shape is persisted evidence and it is disclosed at
+    # confirmation, so the planner is told the same thing the user attested to.
+    names = ", ".join(
+        _named_result_prompt_text(obligation)
+        for obligation in planning_state.named_result_evidence
+    )
     return "\n".join(
         [
             f"- user-named result keys: {names}",
-            "- Preserve every name as a key somewhere in the outcome contract. "
-            "Types, nesting, requiredness, and validation constraints remain "
-            "unspecified.",
+            "- Preserve every name as a key somewhere in the outcome contract, "
+            "honouring any shape the user declared beside it. Requiredness and "
+            "validation constraints remain unspecified.",
         ]
     )
+
+
+def _named_result_prompt_text(obligation: NamedResultEvidence) -> str:
+    name = render_ai_builder_evidence_value(obligation.name)
+    if obligation.declared_shape is None:
+        return name
+    return f"{name} ({obligation.declared_shape})"
 
 
 def _input_schema_evidence_block(planning_state: PlanningState) -> str | None:
