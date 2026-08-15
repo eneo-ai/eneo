@@ -7,11 +7,11 @@ from uuid import UUID, uuid4
 import pytest
 import sqlalchemy as sa
 from dependency_injector import providers
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from eneo.database.database import sessionmanager
 from eneo.database.tables.flow_tables import FlowRuns, Flows, FlowVersions
 from eneo.database.tables.spaces_table import Spaces
-from eneo.flows.application.flow_run_service import CreateRunResult
 from eneo.flows.domain.flow import Flow, FlowStep
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_api_exceptions import FlowBadRequestException
@@ -114,7 +114,7 @@ async def _create_published_flow_with_two_versions(
 async def _wait_for_postgres_lock(
     *,
     backend_pid: int,
-    run_task: asyncio.Task[CreateRunResult],
+    run_task: asyncio.Task[object],
     timeout_seconds: float = 5,
 ) -> None:
     deadline = monotonic() + timeout_seconds
@@ -125,19 +125,15 @@ async def _wait_for_postgres_lock(
         while monotonic() < deadline:
             if run_task.done():
                 if run_task.cancelled():
-                    pytest.fail(
-                        "Run creation was cancelled before waiting on the lock."
-                    )
+                    pytest.fail("The task was cancelled before waiting on the lock.")
                 failure = run_task.exception()
                 if failure is not None:
                     pytest.fail(
-                        "Run creation failed before waiting on the Flow lock: "
-                        f"{failure}"
+                        f"The task failed before waiting on the Flow lock: {failure}"
                     )
-                result = run_task.result()
                 pytest.fail(
-                    "Run creation completed before waiting on the Flow lock: "
-                    f"run_id={result.run.id}"
+                    "The task completed without ever waiting on the Flow lock: "
+                    f"{run_task.result()!r}"
                 )
             wait_event_type = await observer_session.scalar(
                 sa.text(
@@ -148,7 +144,7 @@ async def _wait_for_postgres_lock(
             if wait_event_type == "Lock":
                 return
             await asyncio.sleep(0.01)
-    pytest.fail("Run creation did not wait on the locked Flow publication pointer.")
+    pytest.fail("The task did not wait on the locked Flow publication pointer.")
 
 
 @pytest.mark.asyncio
@@ -425,3 +421,115 @@ async def test_flow_edit_rejects_publication_committed_after_its_read(
 
     assert published_version == 1
     assert name == "Flow edit publish race flow"
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_concurrent_publish_reports_a_conflict_rather_than_a_server_error(
+    db_container,
+    admin_user,
+    test_tenant,
+    object_content_runtime_ready,
+    monkeypatch,
+) -> None:
+    """The losing publisher gets the typed conflict, not an integrity error.
+
+    Both publishers used to read the same latest version, compute the same next
+    one and insert it, so the loser collided on the version primary key and the
+    request died as an opaque 500 — never reaching the revision check that
+    exists to report exactly this conflict.
+
+    The winner is held inside its transaction just after it takes the
+    publication lock, so the loser meets that lock rather than a lucky
+    interleaving. Serialized, the loser then reads the version the winner
+    actually created and fails the revision check instead.
+    """
+    async with db_container() as setup_container:
+        flow_id = await _create_unpublished_flow(
+            container=setup_container,
+            admin_user=admin_user,
+        )
+        await setup_container.session().commit()
+
+    winner_holds_lock = asyncio.Event()
+    release_winner = asyncio.Event()
+    original_get_latest = FlowVersionRepository.get_latest
+    paused_once = False
+
+    async def _pause_the_first_publisher(self, **kwargs):
+        nonlocal paused_once
+        latest = await original_get_latest(self, **kwargs)
+        if not paused_once:
+            paused_once = True
+            winner_holds_lock.set()
+            await asyncio.wait_for(release_winner.wait(), timeout=15)
+        return latest
+
+    monkeypatch.setattr(FlowVersionRepository, "get_latest", _pause_the_first_publisher)
+
+    async def _publish(session: AsyncSession) -> Exception | None:
+        container = Container(
+            session=providers.Object(session),
+            user=providers.Object(admin_user),
+            tenant=providers.Object(test_tenant),
+        )
+        try:
+            await container.flow_service().publish_flow(flow_id=flow_id)
+            await session.commit()
+            return None
+        except Exception as exc:
+            if session.in_transaction():
+                await session.rollback()
+            return exc
+
+    async with (
+        sessionmanager.session() as winner_session,
+        sessionmanager.session() as loser_session,
+    ):
+        await winner_session.begin()
+        await loser_session.begin()
+        loser_pid = await loser_session.scalar(sa.text("SELECT pg_backend_pid()"))
+        assert isinstance(loser_pid, int)
+
+        winner_task = asyncio.create_task(_publish(winner_session))
+        await asyncio.wait_for(winner_holds_lock.wait(), timeout=15)
+        loser_task = asyncio.create_task(_publish(loser_session))
+        try:
+            # The loser must be seen waiting on the winner's row lock. Without
+            # the lock it never waits, and this fails here rather than on a
+            # timing allowance.
+            await _wait_for_postgres_lock(
+                backend_pid=loser_pid,
+                run_task=loser_task,
+            )
+        finally:
+            release_winner.set()
+        outcomes = await asyncio.wait_for(
+            asyncio.gather(winner_task, loser_task), timeout=30
+        )
+
+    winners = [outcome for outcome in outcomes if outcome is None]
+    losers = [outcome for outcome in outcomes if outcome is not None]
+    assert len(winners) == 1, outcomes
+    assert len(losers) == 1, outcomes
+    loser = losers[0]
+    assert isinstance(loser, BadRequestException), repr(loser)
+    assert loser.code == "stale_revision"
+
+    async with (
+        sessionmanager.session() as verification_session,
+        verification_session.begin(),
+    ):
+        published_version = await verification_session.scalar(
+            sa.select(Flows.published_version).where(Flows.id == flow_id)
+        )
+        version_count = await verification_session.scalar(
+            sa.select(sa.func.count()).select_from(
+                sa.select(FlowVersions.version)
+                .where(FlowVersions.flow_id == flow_id)
+                .subquery()
+            )
+        )
+
+    assert published_version == 1
+    assert version_count == 1

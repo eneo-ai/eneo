@@ -412,17 +412,29 @@ class FlowService:
         )
         self._reject_unprotected_stored_secrets(flow.steps)
 
-        latest = await self.flow_version_repo.get_latest(
-            flow_id=flow_id,
-            tenant_id=self.user.tenant_id,
-        )
-        next_version = 1 if latest is None else latest.version + 1
-
         flow_with_normalized_metadata = flow.model_copy(
             update={"metadata_json": normalized_metadata},
             deep=True,
         )
         definition = await self._build_definition(flow_with_normalized_metadata)
+
+        # Allocating the next version is the part two publishers cannot do at
+        # once: both would read the same latest, compute the same next, and the
+        # loser would collide on the version uniqueness constraint — an opaque
+        # 500 instead of the conflict the revision check below reports. The lock
+        # is taken here, after the flow was read, so the loser still holds the
+        # revision it saw and fails that check; and it is taken this late so it
+        # does not also block new runs, which take the same Flow lock, for the
+        # whole of validation and definition building.
+        await self.flow_repo.lock_publication_pointer(
+            flow_id=flow_id,
+            tenant_id=self.user.tenant_id,
+        )
+        latest = await self.flow_version_repo.get_latest(
+            flow_id=flow_id,
+            tenant_id=self.user.tenant_id,
+        )
+        next_version = 1 if latest is None else latest.version + 1
         self._validate_published_definition_snapshot(
             definition,
             flow_id=flow_id,
