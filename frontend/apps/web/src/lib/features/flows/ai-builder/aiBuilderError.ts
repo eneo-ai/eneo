@@ -201,18 +201,6 @@ export function parseAIBuilderError({
   return parseApplyPayload(payload, fallbackMessage);
 }
 
-export function buildClientAIBuilderError(
-  message: string,
-  options: {
-    code?: string;
-    category?: AIBuilderErrorCategory;
-    details?: AIBuilderErrorDetails;
-  } = {}
-): AIBuilderError {
-  const { code = "unknown", category = "internal", details = {} } = options;
-  return clientError({ code, category, message, details });
-}
-
 export function buildUnpublishedApplyFailureError({
   flowId,
   originalError

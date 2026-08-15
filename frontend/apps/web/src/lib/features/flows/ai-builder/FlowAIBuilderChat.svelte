@@ -19,7 +19,7 @@
 
   interface Props {
     targetKind?: "create" | "edit";
-    /** The plan pane owns the failure banner (E1) — one event, one banner. */
+    /** Prevents the chat from duplicating an error already shown in the plan pane. */
     suppressStreamError?: boolean;
   }
 
@@ -152,10 +152,9 @@
     return m.ai_builder_edit_context_step({ step: scope.stepNumber, name: scope.stepName });
   });
 
-  // --- Plan-review left pane (handoff §2, §3.1) -----------------------------
   // Once a plan exists the raw transcript folds into the structured task pane;
   // the chat spine returns whenever a structured question needs an answer
-  // ("Ändra dina val" reopens S3) so question cards stay interactive.
+  // so question cards stay interactive.
   const latestRequirements = $derived.by(() => {
     for (let cursor = service.messages.length - 1; cursor >= 0; cursor -= 1) {
       const summary = service.messages[cursor]?.requirementsSummary;
@@ -407,8 +406,7 @@
       </p>
     </div>
   {:else}
-    <!-- Focusable scroll owner (handoff §1.3): keyboard users can reach and
-         arrow-scroll the pane content without a pointer. -->
+    <!-- Keyboard users can focus and arrow-scroll the pane without a pointer. -->
     <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
     <div
       bind:this={scrollContainer}

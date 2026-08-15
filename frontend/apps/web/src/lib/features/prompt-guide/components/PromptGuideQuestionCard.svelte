@@ -5,8 +5,6 @@
 -->
 
 <!--
-  Claude-Code-style multi-choice question card.
-
   Rendered in place of the raw ` ```eneo-question ` fenced block once
   `extractStructuredQuestion` confirms a complete envelope. Always offers a
   sibling "Other (write your own)" free-text field — placed as a SIBLING of
@@ -14,10 +12,8 @@
   clean and keyboard navigation matches user expectation.
 
   For single-select questions the radio and the "Other" field are mutually
-  exclusive (typing in Other deselects the radio, picking a radio clears
-  Other) — that matches Claude Code's `AskUserQuestion`. For multi-select
-  they coexist and the submitted answer concatenates picked labels with the
-  "Other" text.
+  exclusive. For multi-select they coexist and the submitted answer combines
+  the selected labels with the free-text answer.
 -->
 
 <script lang="ts">

@@ -349,18 +349,6 @@ export function getSummarySourceText(
   }
 }
 
-export function getSummaryNextChannelText(
-  activeStep: FlowStep | null,
-  summaryModel: { downstreamKind?: string } | null
-): string {
-  if (activeStep?.output_mode === "transcribe_only") {
-    return m.flow_step_summary_next_channel_transcript();
-  }
-  return summaryModel?.downstreamKind === "text_and_structured"
-    ? m.flow_step_summary_next_channel_text_and_structured()
-    : m.flow_step_summary_next_channel_text();
-}
-
 // ---------------------------------------------------------------------------
 // Validation issue message
 // ---------------------------------------------------------------------------

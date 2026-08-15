@@ -215,7 +215,6 @@ export class FlowStepAssistantState {
     void this.#flowEditor.flushAssistantSaves().catch(() => {});
   }
 
-  /** Check if legacy template should be auto-cleared */
   get autoClearedLegacyTemplateByStepId() {
     return this.#autoClearedLegacyTemplateByStepId;
   }

@@ -563,8 +563,7 @@ describe("FlowAIBuilder shell layout", () => {
     expect(planTab.getAttribute("aria-pressed")).toBe("true");
     expect(taskTab.getAttribute("aria-pressed")).toBe("false");
 
-    // Both panes stay in the DOM regardless of the active view, so pane-local
-    // state survives switching (handoff §6: mode/tab switches lose no state).
+    // Both panes stay mounted so pane-local state survives switching.
     expect(document.getElementById("ai-builder-task-pane")).toBeTruthy();
     expect(document.getElementById("ai-builder-plan-pane")).toBeTruthy();
 
@@ -732,7 +731,7 @@ describe("FlowAIBuilder plan-review left pane", () => {
     await fireEvent.keyDown(textbox, { key: "Enter", ctrlKey: true });
     await waitFor(() => expect(transport.stream).toHaveBeenCalledOnce());
 
-    // Composer text is never discarded on a failure edge (§4).
+    // Failed submissions must preserve the user's draft.
     await waitFor(() => expect(textbox.value).toBe("Får inte försvinna"));
     const stored = JSON.parse(localStorage.getItem("eneo:ai-builder:draft:plan-session") ?? "{}");
     expect(stored.text).toBe("Får inte försvinna");
@@ -1182,7 +1181,7 @@ describe("FlowAIBuilder generation wait state", () => {
 });
 
 describe("FlowAIBuilder error presentation", () => {
-  it("keeps the plan pane, shows E1 once and suppresses the chat banner", async () => {
+  it("keeps the plan pane and shows one generation-failure banner", async () => {
     const draft = {
       session_id: "gen-session",
       space_id: "space-1",
@@ -1246,8 +1245,8 @@ describe("FlowAIBuilder error presentation", () => {
     await fireEvent.input(textbox, { target: { value: "Bygg ett flöde" } });
     await fireEvent.keyDown(textbox, { key: "Enter" });
 
-    // E1 owns the failure: pane stays, banner renders once, and the chat's
-    // destructive alert (which would carry the raw error message) is gone.
+    // The plan pane owns this failure, so the chat cannot duplicate the alert
+    // or expose the raw provider error.
     expect(await screen.findByText(m.ai_builder_generation_failed_title())).toBeTruthy();
     expect(screen.getAllByText(m.ai_builder_generation_failed_title())).toHaveLength(1);
     expect(screen.getByRole("button", { name: m.ai_builder_show_conversation() })).toBeTruthy();

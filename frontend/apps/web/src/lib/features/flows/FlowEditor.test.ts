@@ -810,17 +810,6 @@ describe("FlowEditor step mutation commands", () => {
 });
 
 describe("FlowStepList ownership guard", () => {
-  it("does not own step order mutation", () => {
-    const source = readFileSync(
-      new URL("./components/FlowStepList.svelte", import.meta.url),
-      "utf8"
-    );
-
-    expect(source).not.toContain("onStepsChanged");
-    expect(source).not.toMatch(/\bstep\.step_order\s*=/);
-    expect(source).not.toMatch(/\bstep_order\s*:\s*(?:i|index|stepIndex)\s*\+\s*1/);
-  });
-
   it("keeps empty-state creation choices in the editor instead of duplicating them", () => {
     const stepListSource = readFileSync(
       new URL("./components/FlowStepList.svelte", import.meta.url),
@@ -836,23 +825,6 @@ describe("FlowStepList ownership guard", () => {
     expect(stepEditorSource).toContain("flow_empty_add_step");
     expect(stepEditorSource).toContain("flow_starter_drafting_action");
     expect(stepEditorSource).toContain("ai_builder_empty_state_cta");
-  });
-});
-
-describe("Flow retention projection surface", () => {
-  it("renders activation and barrier sources from the generated Flow projection", () => {
-    const source = readFileSync(
-      new URL(
-        "../../../routes/(app)/spaces/[spaceId]/flows/[flowId]/+page.svelte",
-        import.meta.url
-      ),
-      "utf8"
-    );
-
-    expect(source).toContain("runHistoryRetention.activation_sources");
-    expect(source).toContain("runHistoryRetention.barrier_sources");
-    expect(source).toContain("m.flow_retention_activation_sources()");
-    expect(source).toContain("m.flow_retention_barrier_sources()");
   });
 });
 

@@ -38,8 +38,7 @@
 </script>
 
 <nav class="phase-bar" aria-label={m.ai_builder_progress_aria()}>
-  <!-- Text form for narrow containers (handoff §1.1): the full bar degrades to
-       "Steg N av 3 — …" below the split threshold. Only one form is ever in
+  <!-- Narrow containers use "Steg N av 3 — …". Only one form is ever in
        the accessibility tree; the other is display:none. -->
   <p class="phase-compact" aria-current="step">
     {m.ai_builder_phase_step_of({

@@ -32,9 +32,7 @@
     editContext?: AIBuilderEditContext | null;
     editContextLabel?: string | null;
     oncleareditcontext?: () => void;
-    /** RefinementComposer mode (handoff §2): visible label, char budget,
-     *  Ctrl/Cmd+Enter submit, "updates the plan" hint. On while a proposed
-     *  plan is under review. */
+    /** Enables the plan-refinement label, character budget, and Ctrl/Cmd+Enter submit. */
     refinement?: boolean;
     /** First plan generation in flight: the textarea stays editable as a
      *  saved draft; submit remains gated until the turn completes. */
@@ -88,7 +86,7 @@
   const charCount = $derived(Array.from(inputValue).length);
   const overLimit = $derived(charCount > messageCharLimit);
 
-  // --- Draft lifecycle (handoff §2) ------------------------------------------
+  // --- Draft lifecycle -------------------------------------------------------
   // Explicit keyed state machine:
   //   session changed  → replace the composer with the incoming session's draft
   //   send delivered   → clear the current draft
@@ -239,7 +237,7 @@
     }
     if (!activeDraftSessionId) return;
     // Optimistic clear for chat feel; anything but a confirmed delivery puts
-    // the draft back — composer text is never discarded on a failure edge (§4).
+    // the draft back, so failed submissions never discard the user's text.
     // The submission is owned by the session that sent it: a late outcome can
     // only mutate that session's record, never whichever session is showing.
     const submitted: PendingSubmission = {
@@ -300,7 +298,7 @@
 
   function autosizeTextarea() {
     if (!textareaEl) return;
-    // Refinement composer grows to a lower cap so the plan stays visible (§2).
+    // Keep the refinement composer shorter so the plan remains visible.
     const cap = refinement ? 220 : 300;
     textareaEl.style.height = "auto";
     textareaEl.style.height = Math.min(textareaEl.scrollHeight, cap) + "px";
@@ -330,7 +328,7 @@
     fileInputEl.value = "";
   }
 
-  /** Friendly chip label — prefers extension-based mapping over raw mime subtype. */
+  /** Prefer familiar extension names over raw MIME subtypes. */
   function fileTypeLabel(mimetype: string, name?: string): string {
     const ext = name?.split(".").pop()?.toLowerCase() ?? "";
     const byExt: Record<string, string> = {
@@ -363,7 +361,6 @@
     return byMime[mimetype] ?? formatFileType(mimetype).toLowerCase();
   }
 
-  /** Quiet byte formatter — short "B" suffix matches Linear/Vercel density. */
   function compactBytes(bytes: number): string {
     return formatBytes(bytes).replace(/\bBytes\b/, "B");
   }
@@ -371,8 +368,7 @@
 
 <div class="relative mx-auto w-full max-w-[71ch]">
   {#if refinement}
-    <!-- Visible label ≥1040 container; the textarea's aria-label carries the
-         same name below that width (handoff §3.3). -->
+    <!-- The textarea keeps the same accessible name when the visible label is hidden. -->
     <Label
       for="ai-builder-composer-input"
       class="text-primary mb-1.5 hidden text-[0.8125rem] font-semibold @[1040px]/builder:flex"
@@ -883,7 +879,6 @@
     cursor: not-allowed;
   }
 
-  /* Refinement composer rests lower (56px) so the plan keeps the space (§2). */
   .composer-textarea-refine {
     min-height: 3.5rem;
     max-height: 13.75rem;

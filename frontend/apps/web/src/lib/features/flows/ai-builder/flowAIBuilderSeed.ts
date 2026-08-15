@@ -8,8 +8,7 @@ import { browser } from "$app/environment";
 
 // The create dialog hands the user's task description to the AI builder route
 // via sessionStorage. The seed is space-scoped and consumed exactly once: a
-// present seed makes the AI builder start a fresh session instead of resuming
-// a recoverable draft, so the handoff stays deterministic.
+// present seed starts a fresh session so the prompt cannot attach to an older draft.
 const SEED_KEY_PREFIX = "eneo:flows:ai-builder-seed:";
 
 function seedKey(spaceId: string): string {

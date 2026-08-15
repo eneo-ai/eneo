@@ -1,12 +1,4 @@
 <script lang="ts">
-  /**
-   * BoundedLog (handoff §2): a height-bounded conversation record.
-   * - `role="log"` scroll region, keyboard-reachable, latest message anchored.
-   * - Renders a window of the newest messages; "Visa äldre (n)" loads back.
-   * - "NYTT" divider marks messages that arrived while the log was collapsed
-   *   (`newSinceIndex` is owned by the parent, which knows open/closed state).
-   * - No autoscroll while the user has scrolled up.
-   */
   import { m } from "$lib/paraglide/messages";
   import { Button } from "$lib/components/ui/button/index.js";
   import type { ChatMessage } from "./protocol";
@@ -95,7 +87,6 @@
 
 <style>
   .bounded-log {
-    /* Bounded height (handoff §2): the log never dominates the pane. */
     max-height: min(40cqh, 280px);
   }
 

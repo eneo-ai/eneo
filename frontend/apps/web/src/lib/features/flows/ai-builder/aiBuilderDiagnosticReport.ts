@@ -5,8 +5,7 @@ import type {
   AIBuilderErrorDetailValue,
   AIBuilderSession,
   AIBuilderTelemetrySummary,
-  ProposedPlan,
-  StepSpec
+  ProposedPlan
 } from "./protocol";
 
 export enum AIBuilderIssueKind {
@@ -62,11 +61,6 @@ export interface AIBuilderDiagnosticReportPlan {
   plan_id: string;
   status?: ProposedPlan["status"] | null;
 }
-
-export type AIBuilderDiagnosticReportStepSource = Pick<
-  StepSpec,
-  "plan_step_ref" | "name" | "input_type" | "output_type"
->;
 
 export interface AIBuilderDiagnosticReportStep {
   plan_step_ref: string;
@@ -181,19 +175,6 @@ export function buildAIBuilderDiagnosticReportPlan(
   return {
     plan_id: plan.plan_id,
     status: plan.status ?? null
-  };
-}
-
-export function buildAIBuilderDiagnosticReportStep(
-  step: AIBuilderDiagnosticReportStepSource,
-  stepNumber?: number | null
-): AIBuilderDiagnosticReportStep {
-  return {
-    plan_step_ref: step.plan_step_ref,
-    step_name: step.name,
-    step_number: stepNumber ?? null,
-    input_type: step.input_type,
-    output_type: step.output_type
   };
 }
 

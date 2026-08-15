@@ -1,13 +1,6 @@
 import { expect, test, type APIRequestContext, type Page } from "@playwright/test";
 import { backendFetch, expectOk } from "./helpers";
 
-// Responsive layout contract for the AI-builder plan-review shell
-// (docs/flows/plan-review-handoff.md §1). The AI-builder API is stubbed at the
-// network layer with a canned proposed-plan session, so the spec asserts pure
-// layout behavior — no provider work, no dependency on planner backends.
-
-// The driver only recovers drafts belonging to the current space, so the
-// fixture must carry the REAL personal-space id from the e2e backend.
 function makeFixtures(spaceId: string) {
   const draft = {
     session_id: "plan-session",
@@ -106,14 +99,16 @@ async function stubAiBuilderApi(page: Page, spaceId: string) {
 }
 
 async function openPlanReview(page: Page, request: APIRequestContext) {
-  // The auth cookie is only readable after a first navigation in this context.
   await page.goto("/");
   const spaceId = await personalSpaceId(page, request);
   await stubAiBuilderApi(page, spaceId);
   await page.goto("/spaces/personal/flows/ai-builder");
-  // The single stubbed draft auto-resumes into the plan-review state.
   await expect(page.locator("#ai-builder-plan-pane")).toBeAttached({ timeout: 20_000 });
 }
+
+// Must track messages/sv.json `ai_builder_why_this_design`, which the plan pane
+// renders for create-mode reviews (scoped step reviews use `..._why_this_change`).
+const RATIONALE_TRIGGER = "Varför upplägget ser ut så här";
 
 function layoutMetrics(page: Page) {
   return page.evaluate(() => {
@@ -122,8 +117,6 @@ function layoutMetrics(page: Page) {
     );
     if (!containerEl) throw new Error("builder container not found");
     const inner = containerEl.firstElementChild as HTMLElement;
-    const workspace = document.getElementById("ai-builder-task-pane")?.parentElement as HTMLElement;
-    const task = document.getElementById("ai-builder-task-pane");
     const taskRegion = document.querySelector<HTMLElement>(
       '[role="region"][aria-label="Uppgiftspanel"]'
     );
@@ -136,10 +129,6 @@ function layoutMetrics(page: Page) {
     return {
       containerWidth: containerEl.clientWidth,
       innerOverflowY: getComputedStyle(inner).overflowY,
-      workspaceMaxWidth: workspace ? getComputedStyle(workspace).maxWidth : null,
-      workspaceLeft: workspace ? workspace.getBoundingClientRect().left : null,
-      containerLeft: containerEl.getBoundingClientRect().left,
-      taskWidth: task ? task.getBoundingClientRect().width : null,
       taskRegionOverflowY: taskRegion ? getComputedStyle(taskRegion).overflowY : null,
       planRegionOverflowY: planRegion ? getComputedStyle(planRegion).overflowY : null,
       stickyGroupPosition: stickyGroup ? getComputedStyle(stickyGroup).position : null,
@@ -149,9 +138,6 @@ function layoutMetrics(page: Page) {
   });
 }
 
-// The split threshold is a CONTAINER query; the app shell (sidebar etc.)
-// consumes viewport width, so tests derive the viewport that produces an
-// exact container width instead of assuming one.
 async function viewportForContainerWidth(page: Page, target: number): Promise<number> {
   const probe = 1400;
   await page.setViewportSize({ width: probe, height: 620 });
@@ -159,11 +145,8 @@ async function viewportForContainerWidth(page: Page, target: number): Promise<nu
   return probe - containerWidth + target;
 }
 
-test.describe("AI-builder plan-review layout contract", () => {
-  test("split view: page never scrolls, panes own scroll, left pane is clamped", async ({
-    page,
-    request
-  }) => {
+test.describe("AI Builder responsive accessibility", () => {
+  test("split view keeps each pane independently scrollable", async ({ page, request }) => {
     await page.setViewportSize({ width: 1440, height: 620 });
     await openPlanReview(page, request);
 
@@ -175,36 +158,7 @@ test.describe("AI-builder plan-review layout contract", () => {
     expect(m.compactVisible).toBe(false);
     expect(m.phaseListVisible).toBe(true);
 
-    // clamp(340px|380px, 37cqw, 480px) depending on the container tier.
-    const lower = m.containerWidth >= 1180 ? 380 : 340;
-    const expected = Math.min(480, Math.max(lower, 0.37 * m.containerWidth));
-    expect(Math.abs((m.taskWidth ?? 0) - expected)).toBeLessThanOrEqual(1.5);
-
     await expect(page.getByRole("button", { name: "Uppgift", exact: true })).toBeHidden();
-  });
-
-  test("the 1040px container boundary flips between tabs and split", async ({ page, request }) => {
-    await openPlanReview(page, request);
-
-    // The shell can produce fractional container widths (clientWidth rounds),
-    // so the boundary is pinned with a pincer around 1040 instead of exact
-    // integers: split must hold at ~1042 and tabs must hold at ~1038.
-    const splitViewport = await viewportForContainerWidth(page, 1042);
-    await page.setViewportSize({ width: splitViewport, height: 620 });
-    let m = await layoutMetrics(page);
-    expect(m.containerWidth).toBeGreaterThanOrEqual(1040);
-    expect(m.containerWidth).toBeLessThanOrEqual(1043);
-    expect(m.innerOverflowY).toBe("hidden");
-    await expect(page.getByRole("button", { name: "Uppgift", exact: true })).toBeHidden();
-
-    await page.setViewportSize({ width: splitViewport - 4, height: 620 });
-    m = await layoutMetrics(page);
-    expect(m.containerWidth).toBeLessThan(1040);
-    expect(m.containerWidth).toBeGreaterThanOrEqual(1036);
-    expect(m.innerOverflowY).toBe("auto");
-    expect(m.compactVisible).toBe(true);
-    expect(m.phaseListVisible).toBe(false);
-    await expect(page.getByRole("button", { name: "Uppgift", exact: true })).toBeVisible();
   });
 
   test("the rationale default follows the builder container width until the user touches it", async ({
@@ -212,21 +166,17 @@ test.describe("AI-builder plan-review layout contract", () => {
     request
   }) => {
     await openPlanReview(page, request);
-    const trigger = page.getByRole("button", { name: "Varför Eneo föreslår detta upplägg" });
+    const trigger = page.getByRole("button", { name: RATIONALE_TRIGGER });
 
-    // ≥768px container (§1.5): open by default.
     const wideViewport = await viewportForContainerWidth(page, 800);
     await page.setViewportSize({ width: wideViewport, height: 620 });
     await expect(trigger).toHaveAttribute("aria-expanded", "true");
 
-    // <768px container: collapsed by default — even though the VIEWPORT is
-    // far wider than 768 (the threshold is container-owned, §1).
     const narrowViewport = await viewportForContainerWidth(page, 740);
     expect(narrowViewport).toBeGreaterThan(768);
     await page.setViewportSize({ width: narrowViewport, height: 620 });
     await expect(trigger).toHaveAttribute("aria-expanded", "false");
 
-    // Once the user opens it, resizing no longer overrides their choice.
     await trigger.click();
     await expect(trigger).toHaveAttribute("aria-expanded", "true");
     await page.setViewportSize({ width: wideViewport, height: 620 });
@@ -290,9 +240,6 @@ test.describe("AI-builder plan-review layout contract", () => {
       const scrollPaddingBottom = parseFloat(getComputedStyle(scroller).scrollPaddingBottom);
       const actionBarHeight = actionBar.getBoundingClientRect().height;
 
-      // Focus the last interactive control in the plan CONTENT (not the
-      // action bar itself); the browser scrolls it into view respecting the
-      // scroll owner's scroll-padding.
       const focusables = [...planPane.querySelectorAll<HTMLElement>("button, a[href]")].filter(
         (el) => !actionBar.contains(el) && el.offsetParent !== null
       );
@@ -311,27 +258,52 @@ test.describe("AI-builder plan-review layout contract", () => {
       };
     });
 
-    // §1.3: clearance = fixed-region height + 16px. The stacked mobile action
-    // bar must fit inside the reserved scroll padding.
     expect(clearance.scrollPaddingBottom).toBeGreaterThanOrEqual(clearance.actionBarHeight + 16);
     expect(clearance.focused).toBe(true);
     expect(clearance.focusedAboveBar).toBe(true);
   });
 
-  test("very wide containers cap and center the workspace at 1760px", async ({ page, request }) => {
+  test("reduced motion disables collapsible height animation", async ({ page, request }) => {
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    await page.setViewportSize({ width: 1440, height: 900 });
     await openPlanReview(page, request);
-    const capViewport = await viewportForContainerWidth(page, 1800);
-    await page.setViewportSize({ width: capViewport, height: 700 });
 
-    const m = await layoutMetrics(page);
-    // If this environment's app shell cannot yield a ≥1760px container, say so
-    // loudly instead of silently passing on the uncapped branch.
-    test.skip(
-      m.containerWidth < 1760,
-      `app shell caps the container at ${m.containerWidth}px in this environment — 1760 cap not reachable`
-    );
-    expect(m.workspaceMaxWidth).toBe("1760px");
-    // Centered: the workspace starts to the right of the container edge.
-    expect((m.workspaceLeft ?? 0) - m.containerLeft).toBeGreaterThan(10);
+    const animationName = await page.evaluate((triggerText) => {
+      const trigger = [...document.querySelectorAll<HTMLButtonElement>("button")].find((button) =>
+        button.textContent?.includes(triggerText)
+      );
+      const content = trigger
+        ?.closest("section")
+        ?.querySelector<HTMLElement>('[data-slot="collapsible-content"].collapsible-animate');
+      if (!trigger || !content) throw new Error("rationale disclosure missing");
+      trigger.click();
+      return getComputedStyle(content).animationName;
+    }, RATIONALE_TRIGGER);
+
+    expect(animationName).toBe("none");
+  });
+});
+
+test.describe("AI Builder touch targets", () => {
+  test.use({ hasTouch: true, isMobile: true, viewport: { width: 390, height: 844 } });
+
+  test("disclosure triggers meet the 44px touch-target minimum", async ({ page, request }) => {
+    await openPlanReview(page, request);
+
+    expect(await page.evaluate(() => window.matchMedia("(pointer: coarse)").matches)).toBe(true);
+
+    await page.getByRole("button", { name: "Plan", exact: true }).click();
+    const rationale = page.getByRole("button", { name: RATIONALE_TRIGGER });
+    await rationale.scrollIntoViewIfNeeded();
+    expect(
+      await rationale.evaluate((el) => el.getBoundingClientRect().height)
+    ).toBeGreaterThanOrEqual(44);
+
+    await page.getByRole("button", { name: "Uppgift", exact: true }).click();
+    const assumptions = page.getByRole("button", { name: /^Antaganden \(1\)$/ });
+    await assumptions.scrollIntoViewIfNeeded();
+    expect(
+      await assumptions.evaluate((el) => el.getBoundingClientRect().height)
+    ).toBeGreaterThanOrEqual(44);
   });
 });

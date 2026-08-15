@@ -37,7 +37,7 @@
   interface Props {
     onapplied?: (detail: { flow_id: string; focusStepIndex: number | null }) => void;
     onsuggestchange?: (intent: AIBuilderSuggestChangeIntent) => void;
-    /** A generation attempt failed with no plan to show — render E1 (§4). */
+    /** A generation attempt failed before a plan became available. */
     showGenerationFailure?: boolean;
     /** Narrow layouts: bring the conversation (task pane) back into view. */
     onshowconversation?: () => void;
@@ -55,8 +55,8 @@
   const activeStepScope = $derived(service.activeStepScope);
   let assumptionsOpen = $state(false);
   let executionProfileOpen = $state(false);
-  // Rationale default: the BUILDER CONTAINER's width (≥768px open, §1.5)
-  // decides the initial state until the user changes it — never the viewport.
+  // Use the builder container, not the viewport, for the initial state because
+  // the collapsible app sidebar changes the space available to this pane.
   let rationaleOpen = $state(false);
   let rationaleTouched = false;
   let paneRoot = $state<HTMLElement | undefined>();
@@ -201,8 +201,7 @@
   let isApplying = $state(false);
   let isUnpublishingAndApplying = $state(false);
 
-  // E1 retry goes through the durable-turn recovery contract: an unknown
-  // provider outcome must keep its explicit cost acknowledgement.
+  // An unknown provider outcome must keep its explicit cost acknowledgement.
   const turnRecoveryState = $derived(service.turnRecoveryState);
   async function handleGenerationRetry() {
     if (turnRecoveryState === "failed_before_provider") {
@@ -223,11 +222,8 @@
       : null
   );
 
-  // "Uppdaterad nyss" receipt (§5): a NEW plan arriving after the first one
-  // IN THE SAME SESSION marks the header until the next generation starts.
-  // The footer's sr-only live span announces the same event exactly once
-  // (§3.4). Session-qualified so a resumed session's first plan never reads
-  // as an update.
+  // Only a replacement plan in the same session counts as an update. This
+  // prevents a resumed session's first loaded plan from appearing newly changed.
   let lastPlanOwner: { sessionId: string; planKey: string } | null = null;
   let justUpdated = $state(false);
   $effect(() => {
@@ -401,8 +397,7 @@
         ]
       : indexedSteps}
 
-    <!-- Scroll owner in split view (handoff §1.3); natural flow in the narrow
-         layouts, where the active pane owns the page scroll. -->
+    <!-- Keyboard-focusable scroll region in split view; narrow layouts use the page scroller. -->
     <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
     <div
       role="region"
@@ -555,8 +550,6 @@
           <!-- Plan heading band -->
           <header class="flex flex-col gap-2 px-5 pt-5 pb-4 md:px-6">
             <div class="flex flex-wrap items-center gap-2">
-              <!-- Sentence-case badge + trust meta (§5): "AI-utkast · N steg ·
-                   Ingenting är skapat ännu"; compact wording on mobile. -->
               <Badge
                 variant="outline"
                 class="bg-accent-default/8 border-accent-default/25 text-accent-stronger h-5 px-1.5 text-xs font-semibold"
@@ -964,8 +957,6 @@
                 <FlowAIBuilderCanvas {spec} isStreaming={service.isStreaming} />
               </Tabs.Content>
               <Tabs.Content value="details">
-                <!-- A list, not cards (§2 StepList): the diagram view's ol/li
-                     twin, one li per step. -->
                 <ol class="m-0 flex list-none flex-col p-0">
                   {#each detailSteps as { step, index } (`${plan.plan_id}:${step.plan_step_ref}`)}
                     <li>
@@ -1130,12 +1121,9 @@
     {/if}
 
     {#if isGeneralApplyError && isCreateMode}
-      <!-- Atomic creation failure (handoff 3c). The banner only EXPLAINS; the
-           sticky footer owns the single retry action. The "nothing was saved"
-           claim renders only when the driver confirmed it authoritatively; an
-           unknown outcome gets distinct copy that makes no persistence claims
-           (retrying is safe either way — the endpoint replays an applied
-           plan). -->
+      <!-- Keep the retry in the action bar. Claim that nothing was saved only
+           for a confirmed failure; an unknown outcome uses neutral copy because
+           the idempotent endpoint may replay an already-created flow. -->
       <Alert.Root
         class="border-warning-default/40 bg-warning-dimmer shrink-0 rounded-none border-x-0 border-b-0"
         role="status"
@@ -1188,9 +1176,7 @@
       </Alert.Root>
     {/if}
 
-    <!-- Action bar: opaque, 1px top border, no blur (handoff §1.4). Bottom of
-         the plan pane in split view; pinned full-width to the viewport bottom
-         while the page scrolls in the narrow layouts. -->
+    <!-- Pinned to the page bottom in narrow layouts and contained by the plan pane in split view. -->
     <div
       class="border-default bg-primary sticky bottom-0 z-10 shrink-0 border-t pb-[env(safe-area-inset-bottom)] @[1040px]/builder:static"
     >
@@ -1208,14 +1194,12 @@
               : m.ai_builder_nothing_created_yet()}
           </p>
         {/if}
-        <!-- One event = one announcement (§3.4): the refinement receipt is
-             announced here; the visible "Uppdaterad nyss" lives in the header. -->
+        <!-- Announce each plan update once; the visible receipt lives in the header. -->
         <span class="sr-only" role="status" aria-live="polite">
           {justUpdated ? m.ai_builder_plan_updated_announce() : ""}
         </span>
 
-        <!-- "Föreslå planändring" is gone from the action bar (§5 glossary):
-             the refinement composer IS that path. -->
+        <!-- Plan refinements belong in the composer, so the action bar has no duplicate path. -->
         {#if !service.applyResult}
           <Button
             variant="ghost"
@@ -1233,8 +1217,7 @@
         {/if}
 
         {#if isCreateMode}
-          <!-- One creation action (handoff §4): approve+create is a single
-               atomic backend call; there is no separate apply step. -->
+          <!-- Approval and creation are one atomic backend operation. -->
           {#if !service.applyResult && (service.canApprove || service.canApply || service.isCreating || createFailed)}
             <Button
               variant="default"
@@ -1305,8 +1288,7 @@
       </div>
     </div>
   {:else if showGenerationFailure}
-    <!-- E1: generation failed with no plan to show (§4, artboard 1i).
-         Neutral surface + warning icon, role=status — no focus steal. -->
+    <!-- Report the failure without moving keyboard focus when no plan is available. -->
     <div class="flex flex-1 flex-col overflow-y-auto">
       <div class="mx-auto w-full max-w-[800px] px-4 py-6 md:px-6 @[1400px]/builder:max-w-[840px]">
         <div
@@ -1374,9 +1356,7 @@
       </div>
     </div>
   {:else if service.statusMessage || service.isStreaming}
-    <!-- Wait state (§5, artboard 1h): expectation copy plus ONLY the phase
-         lines the backend actually distinguishes — no simulated progress
-         (binding condition §7.2). -->
+    <!-- Show only phases reported by the backend; do not simulate progress. -->
     <div class="flex flex-1 flex-col items-center justify-center px-4 text-center">
       <div class="progress-ring mb-4 size-10 rounded-full border-[3px]"></div>
       <p class="text-primary text-sm font-medium" role="status" aria-live="polite">
@@ -1419,7 +1399,6 @@
 <style lang="postcss">
   @reference "@eneo/ui/styles";
 
-  /* The plan fades in over 200 ms (handoff S5->S6); nothing slides. */
   .plan-card-enter {
     animation: plan-card-enter 200ms ease-out;
   }

@@ -423,7 +423,7 @@ describe("FlowAIBuilderPlanPane", () => {
     expect(screen.queryByText(m.ai_builder_nothing_created_yet())).toBeNull();
   });
 
-  it("renders the §5 plan header meta and 'Så fungerar flödet' as the steps section", () => {
+  it("renders plan metadata and 'Så fungerar flödet' as the steps section", () => {
     render(FlowAIBuilderPlanPaneHarness, {
       currentSpace: makeSpace({ transcriptionModels: [] }),
       state: makeApprovedCreatePlanState({ step: {} })
@@ -434,8 +434,7 @@ describe("FlowAIBuilderPlanPane", () => {
     expect(
       screen.getByRole("heading", { name: m.ai_builder_how_flow_works(), level: 3 })
     ).toBeTruthy();
-    // The action bar no longer offers "Föreslå planändring" — the refinement
-    // composer is that path (§5 glossary).
+    // The composer is the single path for proposing a plan change.
     expect(screen.queryByRole("button", { name: m.ai_builder_plan_suggest_change() })).toBeNull();
   });
 
@@ -587,8 +586,8 @@ describe("FlowAIBuilderPlanPane", () => {
   });
 
   it("keeps an expanded step expanded across Diagram↔Detaljer switches", async () => {
-    // §2: both views keep state — bits-ui keeps inactive tab content mounted
-    // with the hidden attribute; this pins that contract against regressions.
+    // bits-ui keeps inactive tab content mounted with the hidden attribute, so
+    // switching views must not reset disclosure state.
     render(FlowAIBuilderPlanPaneHarness, {
       currentSpace: makeSpace({ transcriptionModels: [] }),
       state: makeApprovedCreatePlanState({ step: {} })
@@ -609,7 +608,7 @@ describe("FlowAIBuilderPlanPane", () => {
     await waitFor(() => expect(stepTrigger().getAttribute("aria-expanded")).toBe("true"));
   });
 
-  it("renders the §5 wait-state copy with only backend-real phase lines", () => {
+  it("renders wait-state copy with only backend-reported phase lines", () => {
     render(FlowAIBuilderPlanPaneHarness, {
       currentSpace: makeSpace({ transcriptionModels: [] }),
       state: {
@@ -619,14 +618,13 @@ describe("FlowAIBuilderPlanPane", () => {
       }
     });
 
-    // The status line maps 1:1 to a REAL backend phase (§7.2 — no simulated
-    // progress), and the §5 expectation copy frames the wait.
+    // The UI must not imply progress beyond the phase reported by the backend.
     expect(screen.getByText(m.ai_builder_generating())).toBeTruthy();
     expect(screen.getByText(m.ai_builder_wait_expectation())).toBeTruthy();
     expect(screen.getByText(m.ai_builder_wait_footer_note())).toBeTruthy();
   });
 
-  it("E1 with an unknown provider outcome offers ONLY the cost-acknowledging retry", async () => {
+  it("offers only the cost-acknowledging retry for an unknown provider outcome", async () => {
     const acknowledge = vi.fn();
     render(FlowAIBuilderPlanPaneHarness, {
       currentSpace: makeSpace({ transcriptionModels: [] }),
@@ -679,7 +677,7 @@ describe("FlowAIBuilderPlanPane", () => {
     await waitFor(() => expect(screen.queryByText(m.ai_builder_plan_updated_receipt())).toBeNull());
   });
 
-  it("renders the E1 generation-failure banner with the recovery contract intact", () => {
+  it("renders the generation-failure banner with the recovery action", () => {
     const recoverable = makeRecoverableSession();
     render(FlowAIBuilderPlanPaneHarness, {
       currentSpace: makeSpace({ transcriptionModels: [] }),

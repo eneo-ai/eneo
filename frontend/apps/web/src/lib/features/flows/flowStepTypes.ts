@@ -243,18 +243,6 @@ export function getSelectableInputTypeOptions(params: {
   return options;
 }
 
-export function getPreferredInputType(params: {
-  inputSource: InputSource;
-  previousOutputType?: OutputType;
-  isAdvancedMode: boolean;
-}): InputType {
-  const [firstOption] = getSelectableInputTypeOptions({
-    ...params,
-    currentInputType: undefined
-  }).filter((option) => !option.disabled);
-  return firstOption?.value ?? "text";
-}
-
 export function getFlowStepValidationIssues(steps: FlowStepLike[]): FlowStepValidationIssue[] {
   if (steps.length === 0) return [];
 

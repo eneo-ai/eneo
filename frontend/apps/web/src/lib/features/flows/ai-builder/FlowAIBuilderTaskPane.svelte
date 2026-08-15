@@ -1,11 +1,4 @@
 <script lang="ts">
-  /**
-   * Structured left pane for the plan-review state (handoff §2, §3.1):
-   * task summary with expander, Syfte/Indata/Resultat definition grid,
-   * decisions from the clarification answers, one Collapsible each for
-   * assumptions and the conversation (BoundedLog). Pure props — the chat
-   * shell owns all service state.
-   */
   import { untrack } from "svelte";
   import { m } from "$lib/paraglide/messages";
   import { getLocale } from "$lib/paraglide/runtime";
@@ -58,8 +51,7 @@
   // drift as soon as an empty assistant envelope precedes a new message.
   const logMessages = $derived(messages.filter((message) => message.content.trim().length > 0));
 
-  // "NYTT" bookkeeping: messages arriving while the conversation section is
-  // closed are marked with a divider the next time it opens (§2 BoundedLog).
+  // Messages arriving while the conversation is closed get a divider when it reopens.
   // Messages present at mount were the visible transcript — already seen.
   // svelte-ignore state_referenced_locally
   let seenCount = $state(logMessages.length);
@@ -228,8 +220,7 @@
   @reference "@eneo/ui/styles";
 
   .task-pane {
-    /* Own container so the definition grid can stack on the PANE's width —
-       the builder container only knows the full workspace width (§2). */
+    /* The definition grid responds to this pane, not the full workspace. */
     container-type: inline-size;
     container-name: taskpane;
   }
@@ -241,7 +232,7 @@
     overflow: hidden;
   }
 
-  /* Short viewports get one less summary line before the fold (§1.5). */
+  /* Preserve more room below the task summary on short viewports. */
   @media (max-height: 639.98px) {
     .task-clamp {
       -webkit-line-clamp: 2;

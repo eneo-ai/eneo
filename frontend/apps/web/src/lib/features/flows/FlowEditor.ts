@@ -72,7 +72,6 @@ function createFlowEditor(data: FlowEditorInitData) {
     resource: data.flow,
     defaults: {},
     updateResource: async (resource, changes) => {
-      // Strip temp IDs before sending to API
       const cleanChanges = { ...changes } as Record<string, unknown>;
       if (cleanChanges.steps && Array.isArray(cleanChanges.steps)) {
         cleanChanges.steps = (cleanChanges.steps as FlowStep[]).map(stripTemporaryStepId);
@@ -82,7 +81,6 @@ function createFlowEditor(data: FlowEditorInitData) {
         update: cleanChanges
       })) as Flow;
 
-      // Reconcile temp IDs with real IDs after save
       const currentActiveId = get(activeStepId);
       if (currentActiveId?.startsWith?.("_temp_")) {
         const currentSteps = get(editor.state.update).steps ?? [];
@@ -126,7 +124,6 @@ function createFlowEditor(data: FlowEditorInitData) {
     manageAttachements: false
   });
 
-  // Additional flow-specific stores
   const activeStepId = writable<string | null>(null);
   const validationErrors = writable<Map<string, string[]>>(new Map());
   const saveStatus = writable<"saved" | "saving" | "unsaved">("saved");
@@ -135,7 +132,6 @@ function createFlowEditor(data: FlowEditorInitData) {
   // land on the AI work section; blank steps land on "what".
   const newStepOpenIntent = writable<{ order: number } | null>(null);
 
-  // Derived: is the flow published?
   const isPublished = derived(editor.state.resource, ($resource) => {
     return $resource.published_version != null;
   });
@@ -328,7 +324,6 @@ function createFlowEditor(data: FlowEditorInitData) {
     await flushAssistantSaves();
   }
 
-  // Unified save status combining flow + assistant saves
   const unifiedSaveStatus = derived([saveStatus, assistantSaveStatus], ([$flow, $assistant]) => {
     return getUnifiedFlowSaveStatus($flow, $assistant);
   });
@@ -450,7 +445,6 @@ function createFlowEditor(data: FlowEditorInitData) {
     setWizardMetadata({ transcription_enabled: enabled });
   }
 
-  // Debounced auto-save (500ms)
   let autoSaveTimer: ReturnType<typeof setTimeout> | null = null;
 
   function clearAutoSaveTimer() {
@@ -461,7 +455,6 @@ function createFlowEditor(data: FlowEditorInitData) {
   }
 
   function scheduleAutoSave() {
-    // CRITICAL: never auto-save when published
     if (get(isPublished)) return;
 
     const { hasUnsavedChanges } = get(editor.state.currentChanges);
@@ -477,10 +470,10 @@ function createFlowEditor(data: FlowEditorInitData) {
     if (get(saveStatus) !== "unsaved") saveStatus.set("unsaved");
     clearAutoSaveTimer();
     autoSaveTimer = setTimeout(async () => {
-      // Double-check published state before saving
+      // Publication can happen during the debounce window.
       if (get(isPublished)) return;
 
-      // Don't save if any step has empty assistant_id (still being created)
+      // Saving before assistant creation finishes would persist an invalid step.
       const steps = get(editor.state.update).steps ?? [];
       if (steps.some((s: FlowStep) => !s.assistant_id || s.assistant_id === "")) return;
 
@@ -494,7 +487,6 @@ function createFlowEditor(data: FlowEditorInitData) {
     }, 500);
   }
 
-  // Subscribe to update changes to trigger auto-save
   const unsubscribe = editor.state.currentChanges.subscribe(($changes) => {
     if ($changes.hasUnsavedChanges && !get(isPublished)) {
       scheduleAutoSave();
@@ -533,7 +525,6 @@ function createFlowEditor(data: FlowEditorInitData) {
       outputType: seed?.output_type
     });
 
-    // Instant UI update
     editor.state.update.update((u) => ({
       ...u,
       steps: [...(u.steps ?? []), newStep as FlowStep]
@@ -541,13 +532,11 @@ function createFlowEditor(data: FlowEditorInitData) {
     newStepOpenIntent.set({ order: stepCount + 1 });
     activeStepId.set(tempId);
 
-    // Background: create hidden assistant
     try {
       const assistant = await data.eneo.flows.assistants.create({
         id: getFlowId(),
         name: stepName
       });
-      // Wire the real assistant_id
       editor.state.update.update((u) => ({
         ...u,
         steps: (u.steps ?? []).map((s: FlowStep) =>
@@ -563,7 +552,6 @@ function createFlowEditor(data: FlowEditorInitData) {
         void saveAssistant(assistant.id, { prompt: { text: seed.prompt } });
       }
     } catch {
-      // Remove the step if assistant creation fails
       editor.state.update.update((u) => ({
         ...u,
         steps: (u.steps ?? []).filter((s: FlowStep) => s.id !== tempId)
@@ -575,7 +563,6 @@ function createFlowEditor(data: FlowEditorInitData) {
     return tempId;
   }
 
-  /** Insert step after a given step order */
   async function insertStepAfter(afterOrder: number): Promise<void> {
     const $update = get(editor.state.update);
     const currentSteps = [...($update.steps ?? [])];
@@ -593,7 +580,6 @@ function createFlowEditor(data: FlowEditorInitData) {
       prevStepOutputType: (prevStep as FlowStep)?.output_type
     });
 
-    // Renumber subsequent steps
     const updatedSteps = currentSteps.map((s: FlowStep) => {
       if (s.step_order > afterOrder) {
         return { ...s, step_order: s.step_order + 1 };
@@ -601,7 +587,6 @@ function createFlowEditor(data: FlowEditorInitData) {
       return s;
     });
 
-    // Insert at correct position
     const insertIndex = updatedSteps.findIndex((s: FlowStep) => s.step_order > afterOrder);
     if (insertIndex >= 0) {
       updatedSteps.splice(insertIndex, 0, newStep as FlowStep);
@@ -612,7 +597,6 @@ function createFlowEditor(data: FlowEditorInitData) {
     editor.state.update.update((u) => ({ ...u, steps: updatedSteps }));
     activeStepId.set(tempId);
 
-    // Background: create hidden assistant
     try {
       const assistant = await data.eneo.flows.assistants.create({
         id: getFlowId(),
@@ -626,7 +610,6 @@ function createFlowEditor(data: FlowEditorInitData) {
       }));
       assistantSaveManager.primeCache(assistant.id, assistant);
     } catch {
-      // Remove the step and re-renumber
       editor.state.update.update((u) => {
         const filtered = (u.steps ?? []).filter((s: FlowStep) => s.id !== tempId);
         filtered.forEach((s: FlowStep, i: number) => {

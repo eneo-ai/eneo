@@ -36,8 +36,8 @@
   let pendingSavedFlowStepScope = $state<AIBuilderSavedFlowStepScope | null>(null);
   let showReplaceEditSessionDialog = $state(false);
 
-  // A generation attempt was visible in the plan pane; if it fails with no
-  // plan to show, the pane stays and owns the failure banner (E1, §4).
+  // Once generation is visible in the plan pane, that pane keeps ownership of
+  // any failure so the same error cannot flash in both panes.
   let hadGenerationStatus = $state(false);
   $effect(() => {
     if (!service.hasSession) {
@@ -317,21 +317,11 @@
     />
   </div>
 {:else}
-  <!--
-    Layout contract (docs/flows/plan-review-handoff.md §1). All thresholds are
-    container queries on this element ("builder") — the app shell has a
-    collapsible sidebar, so viewport breakpoints would lie about available width.
-    - ≥1040px container: split view. Page never scrolls; each pane owns its scroll.
-    - <1040px: Uppgift/Plan switcher; the active pane owns the page scroll.
-    - ≥1760px: workspace capped and centered; header content aligns to the same cap.
-  -->
+  <!-- Container queries reflect the workspace left by the collapsible app sidebar. -->
   <!-- The container element itself cannot respond to its own query, so the
        size-dependent scroll behavior lives on the inner wrapper below. -->
   <div class="bg-primary @container/builder flex min-h-0 w-full flex-1 flex-col">
-    <!-- Narrow-layout page scroll owner. Scroll padding keeps focused controls
-         clear of the sticky header group (top) and the sticky composer or
-         action bar (bottom) when the browser scrolls them into view (§1.3).
-         Clearance values live in the builder-page-scroll style block. -->
+    <!-- Scroll padding keeps focused controls clear of the sticky header and footer. -->
     <div
       class="builder-page-scroll flex min-h-0 w-full flex-1 flex-col overflow-y-auto break-words hyphens-auto @[1040px]/builder:overflow-hidden"
     >
@@ -386,9 +376,7 @@
         </div>
       {/if}
 
-      <!-- Phase bar + pane switcher: stuck below the page header while the
-           page scrolls in the narrow layouts (§1.4); static in split view,
-           where the page never scrolls. -->
+      <!-- The phase bar and pane switcher stay reachable while narrow layouts scroll. -->
       <div class="bg-primary sticky top-0 z-20 w-full shrink-0 @[1040px]/builder:static">
         {#if service.messages.length > 0 || canStartOver || canViewDrafts}
           <div class="border-border-default w-full shrink-0 border-b">
@@ -536,9 +524,8 @@
 <style lang="postcss">
   @reference "@eneo/ui/styles";
 
-  /* Sticky-region clearance contract for the narrow layouts (§1.3): scroll
-     padding = fixed-region height + 16px margin, so focus-triggered scrolling
-     never lands under the sticky header group or the sticky footer regions.
+  /* Narrow-layout scroll padding equals the fixed-region height plus margin,
+     so focus-triggered scrolling never lands under the sticky regions.
      Header: phase bar + pane switcher (~90px). Footer: composer at rest or the
      horizontal action bar (~160px). Below the sm viewport breakpoint the
      action-bar buttons stack vertically (status + two secondaries + primary),

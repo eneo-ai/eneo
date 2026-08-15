@@ -42,12 +42,6 @@ export function getBlockingTemplateReadinessItems(
   );
 }
 
-export function hasBlockingTemplateReadiness(
-  readinessItems: FlowRunContractTemplateReadiness[]
-): boolean {
-  return getBlockingTemplateReadinessItems(readinessItems).length > 0;
-}
-
 export function buildStepInputsPayload(
   filesByStepId: Record<string, FileLike[]>
 ): FlowRunStepInputs | undefined {

@@ -1,5 +1,5 @@
 /**
- * Per-session refinement-composer draft record (handoff §2): text plus
+ * Per-session refinement-composer draft: text plus
  * references to completed-but-unsent uploads. Persisted in localStorage so a
  * draft survives pane/mode switches, failed sends and reloads. Queued or
  * in-flight binary uploads are NOT persisted — only completed server files
