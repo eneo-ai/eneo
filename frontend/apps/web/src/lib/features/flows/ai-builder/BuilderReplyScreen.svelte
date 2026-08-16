@@ -28,7 +28,7 @@
 
 <div class="flex justify-center px-7 pt-6 pb-10 max-sm:px-3 max-sm:pt-4">
   <div class="w-full max-w-[41.25rem]">
-    <div class="border-default bg-primary rounded-xl border p-[1.125rem]">
+    <div class="border-default bg-primary rounded-xl border p-[1.125rem] max-sm:p-4">
       {#if waiting}
         <p class="text-secondary text-[0.8125rem]" role="status" aria-live="polite">
           {m.ai_builder_reply_reading()}

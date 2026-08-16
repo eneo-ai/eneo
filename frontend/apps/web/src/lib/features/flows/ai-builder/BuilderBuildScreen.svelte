@@ -58,7 +58,7 @@
       </div>
     {/if}
     <div class="border-default bg-primary overflow-hidden rounded-xl border">
-      <div class="px-5 pt-[1.125rem] pb-4">
+      <div class="px-5 pt-[1.125rem] pb-4 max-sm:px-4">
         <h2 class="text-primary text-[1.0625rem] font-bold tracking-[-0.015em]">
           {m.ai_builder_build_title()}
         </h2>
@@ -74,7 +74,10 @@
           </p>
         {/if}
       </div>
-      <div class="border-dimmer flex flex-col gap-2 border-t px-5 pt-4 pb-5" aria-hidden="true">
+      <div
+        class="border-dimmer flex flex-col gap-2 border-t px-5 pt-4 pb-5 max-sm:px-4"
+        aria-hidden="true"
+      >
         {#each Array.from({ length: Math.max(1, Math.min(stepCount, 12)) }) as _, i (i)}
           <div
             class="border-dimmer bg-secondary flex min-h-[3.625rem] items-center gap-3 rounded-[10px] border px-3 py-3"
@@ -97,7 +100,7 @@
           </div>
         {/each}
       </div>
-      <div class="border-default bg-secondary border-t px-5 py-3">
+      <div class="border-default bg-secondary border-t px-5 py-3 max-sm:px-4">
         <p class="text-secondary text-[0.8125rem]">{m.ai_builder_build_footer()}</p>
       </div>
     </div>

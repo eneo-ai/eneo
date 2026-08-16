@@ -38,15 +38,19 @@
   const why = $derived(questionMessage.content.trim() || null);
 </script>
 
-<div class="flex justify-center px-7 pt-6 pb-10 max-sm:px-3 max-sm:pt-4">
-  <div class="w-full max-w-[41.25rem]">
+<div class="flex justify-center px-7 pt-6 pb-10 max-sm:px-3 max-sm:pt-4 max-sm:pb-0">
+  <div class="flex w-full max-w-[41.25rem] flex-col">
     {#if answered.length > 0}
-      <div class="mb-4 flex flex-wrap items-center gap-2">
-        <span class="text-secondary text-xs">{m.ai_builder_question_answers_label()}</span>
+      <!-- On a phone the answered chips stay on one line and scroll sideways;
+           wrapping them would push the question itself below the fold. -->
+      <div
+        class="mb-4 flex flex-wrap items-center gap-2 max-sm:-mx-3 max-sm:flex-nowrap max-sm:overflow-x-auto max-sm:px-3 max-sm:pb-1"
+      >
+        <span class="text-secondary shrink-0 text-xs">{m.ai_builder_question_answers_label()}</span>
         {#each answered as item (item.questionId)}
           <button
             type="button"
-            class="border-default bg-primary hover:bg-secondary inline-flex h-[1.875rem] max-w-full items-center gap-1.5 rounded-full border px-2.5 text-[0.8125rem]"
+            class="border-default bg-primary hover:bg-secondary inline-flex h-[1.875rem] max-w-full shrink-0 items-center gap-1.5 rounded-full border px-2.5 text-[0.8125rem] max-sm:h-[44px] max-sm:max-w-[70vw] max-sm:px-3.5"
             class:opacity-60={editingQuestionId === item.questionId}
             title={item.question}
             onclick={() => onedit(item.questionId)}
@@ -74,11 +78,15 @@
       </p>
     {/if}
 
-    {#key question.question_id}
-      <FlowAIBuilderQuestion {question} {questionNumber} {why} {disabled} {onanswer} />
-    {/key}
+    <!-- The card comes last on a phone so its pinned action bar ends flush with
+         the bottom of the screen; the reassurance moves above it. -->
+    <div class="max-sm:order-last">
+      {#key question.question_id}
+        <FlowAIBuilderQuestion {question} {questionNumber} {why} {disabled} {onanswer} />
+      {/key}
+    </div>
 
-    <p class="text-secondary mt-3.5 px-0.5 text-[0.8125rem] text-pretty">
+    <p class="text-secondary mt-3.5 px-0.5 text-[0.8125rem] text-pretty max-sm:mt-0 max-sm:mb-3.5">
       {m.ai_builder_question_footnote()}
     </p>
   </div>

@@ -72,7 +72,7 @@
           <Button
             variant="outline"
             size="sm"
-            class="rounded-full font-normal"
+            class="rounded-full font-normal max-sm:h-[44px]"
             onclick={() => inputRef?.focus({ prefill: example.text() })}
           >
             {example.label()}
@@ -89,7 +89,7 @@
             {m.ai_builder_task_drafts_link({ count: String(otherDraftCount) })}
           </Button>
         {/if}
-        <span class="text-secondary ml-auto">
+        <span class="text-secondary ml-auto max-sm:ml-0">
           {m.ai_builder_task_manual_question()}
           <Button variant="link" class="h-auto p-0 text-xs font-semibold" href={flowsHref}>
             {m.ai_builder_task_manual_link()}

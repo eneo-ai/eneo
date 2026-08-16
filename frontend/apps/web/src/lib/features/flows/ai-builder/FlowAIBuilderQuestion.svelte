@@ -436,7 +436,7 @@
     <div class="actions-row">
       <Button
         variant="default"
-        class="ml-auto"
+        class="ml-auto max-sm:ml-0 max-sm:h-[44px] max-sm:w-full max-sm:text-sm"
         onclick={handleConfirm}
         disabled={!canConfirm || disabled}
       >
@@ -648,6 +648,41 @@
   .actions-row {
     @apply flex flex-wrap items-center gap-2.5 border-t px-[1.125rem] py-3;
     border-color: var(--border-dimmer);
+  }
+
+  /* Phone width: the option list is longer than the screen, so the confirm
+     action leaves the card and becomes a bar pinned to the bottom of the
+     builder. Confirming must never require scrolling past every option. */
+  @media (max-width: 39.9375rem) {
+    .question-panel:not(.answered) {
+      overflow: visible;
+    }
+
+    .actions-row {
+      position: sticky;
+      bottom: 0;
+      z-index: 5;
+      flex-direction: column-reverse;
+      flex-wrap: nowrap;
+      align-items: stretch;
+      gap: 0.5rem;
+      padding: 0.6875rem 0.875rem calc(0.6875rem + env(safe-area-inset-bottom));
+      border-bottom-right-radius: 0.75rem;
+      border-bottom-left-radius: 0.75rem;
+      border-color: var(--border-default);
+      background: var(--background-primary);
+      box-shadow: 0 -0.5rem 1rem -0.75rem var(--shadow-stronger);
+    }
+
+    /* One field per line: two columns leave no room for a label at 375 px. */
+    .field-row {
+      grid-template-columns: minmax(0, 1fr);
+    }
+
+    .field-options,
+    .field-purpose {
+      grid-column: auto;
+    }
   }
 
   @keyframes questionReveal {

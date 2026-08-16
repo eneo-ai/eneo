@@ -29,9 +29,12 @@
 </script>
 
 <Sheet.Root bind:open>
+  <!-- The width and height overrides beat the sheet primitive's own
+       `data-[side=right]` rules: on a phone the transcript takes the whole
+       screen, and 100dvh keeps the composer above the browser chrome. -->
   <Sheet.Content
     side="right"
-    class="bg-primary flex w-full max-w-full flex-col gap-0 p-0 sm:max-w-[26rem]"
+    class="bg-primary flex !h-[100dvh] !w-full max-w-full flex-col gap-0 p-0 sm:!max-w-[26rem]"
     aria-label={m.ai_builder_conversation_aria()}
   >
     <Sheet.Header class="border-default gap-0.5 border-b px-4 py-3.5 pr-12">
@@ -43,7 +46,9 @@
       </Sheet.Description>
     </Sheet.Header>
     <FlowAIBuilderChat bind:this={chatRef} {showComposer} {oneditanswer} />
-    <Sheet.Footer class="border-default border-t px-4 py-3 sm:flex-col">
+    <Sheet.Footer
+      class="border-default border-t px-4 py-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] sm:flex-col"
+    >
       <p class="text-secondary text-xs text-pretty">{m.ai_builder_conversation_footnote()}</p>
     </Sheet.Footer>
   </Sheet.Content>

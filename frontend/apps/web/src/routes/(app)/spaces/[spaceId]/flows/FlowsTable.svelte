@@ -137,6 +137,47 @@
   }
 </script>
 
+<!-- Rendered in the actions column on a wide list and under the name once that
+     column is dropped, so a narrow row keeps every action it had. -->
+{#snippet rowActions(row: FlowListRow)}
+  <div class="flex items-center gap-1.5">
+    {#if row.kind === "ai_draft"}
+      <Button
+        variant="outline"
+        size="sm"
+        class="max-sm:h-[44px] max-sm:px-4"
+        href={resolve(`/spaces/${$currentSpace.routeId}/flows/ai-builder?session=${row.id}`)}
+      >
+        {m.flow_list_resume_draft()}
+      </Button>
+      <DropdownMenu.Root>
+        <DropdownMenu.Trigger>
+          {#snippet child({ props })}
+            <Button
+              {...props}
+              size="icon-sm"
+              variant="ghost"
+              class="text-muted hover:text-primary max-sm:size-[44px]"
+              aria-label={m.actions()}
+              title={m.actions()}
+            >
+              <IconEllipsis />
+            </Button>
+          {/snippet}
+        </DropdownMenu.Trigger>
+        <DropdownMenu.Content align="end" class="min-w-[10rem]">
+          <DropdownMenu.Item variant="destructive" onclick={() => (draftPendingDiscard = row)}>
+            <IconTrash class="size-4" />
+            {m.ai_builder_discard_draft()}
+          </DropdownMenu.Item>
+        </DropdownMenu.Content>
+      </DropdownMenu.Root>
+    {:else}
+      <FlowActions flow={row.flow} />
+    {/if}
+  </div>
+{/snippet}
+
 <div class="@container/list flex flex-col gap-3">
   {#if !isEmpty}
     <div class="flex flex-wrap items-center gap-2">
@@ -145,7 +186,7 @@
         bind:value={query}
         aria-label={m.flow_list_search_aria()}
         placeholder={m.flow_list_search_placeholder()}
-        class="bg-primary h-[2.125rem] w-full max-w-[15rem] text-sm"
+        class="bg-primary h-[2.125rem] w-full max-w-[15rem] text-sm max-sm:h-[44px]"
       />
       <div
         class="flex flex-wrap items-center gap-1.5"
@@ -156,7 +197,7 @@
           <Button
             variant="outline"
             size="sm"
-            class="rounded-full font-medium {filter === option.value
+            class="rounded-full font-medium max-sm:h-[44px] max-sm:px-4 {filter === option.value
               ? 'border-stronger bg-tertiary text-primary'
               : 'text-secondary'}"
             aria-pressed={filter === option.value}
@@ -166,7 +207,7 @@
           </Button>
         {/each}
       </div>
-      <p class="text-secondary ml-auto text-xs" aria-live="polite">
+      <p class="text-secondary ml-auto text-xs max-sm:ml-0 max-sm:w-full" aria-live="polite">
         {m.flow_list_count({ count: String(visibleRows.length) })}
       </p>
     </div>
@@ -215,7 +256,9 @@
                 <span aria-hidden="true" class="text-[0.5625rem]">▼</span>
               </span>
             </Table.Head>
-            <Table.Head class="border-default h-10 w-[7.5rem] border-b px-4 text-right">
+            <Table.Head
+              class="border-default hidden h-10 w-[7.5rem] border-b px-4 text-right @[52rem]/list:table-cell"
+            >
               <span class="sr-only">{m.actions()}</span>
             </Table.Head>
           </Table.Row>
@@ -260,11 +303,17 @@
                     </span>
                   {/if}
                   <span class="mt-0.5 flex flex-wrap items-center gap-2 @[52rem]/list:hidden">
-                    <Badge class="border-transparent {statusClass(row)}">{statusLabel(row)}</Badge>
+                    <Badge
+                      class="max-w-full border-transparent {statusClass(row)}"
+                      title={statusLabel(row)}
+                    >
+                      <span class="truncate">{statusLabel(row)}</span>
+                    </Badge>
                     <span class="text-secondary text-xs" title={updatedTitle(row)}>
                       {updatedLabel(row)}
                     </span>
                   </span>
+                  <div class="mt-2 flex @[52rem]/list:hidden">{@render rowActions(row)}</div>
                 </div>
               </Table.Cell>
               <Table.Cell
@@ -288,47 +337,10 @@
               >
                 {updatedLabel(row)}
               </Table.Cell>
-              <Table.Cell class="border-dimmer border-b px-3 py-2 text-right align-middle">
-                <div class="flex items-center justify-end gap-1.5">
-                  {#if row.kind === "ai_draft"}
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      href={resolve(
-                        `/spaces/${$currentSpace.routeId}/flows/ai-builder?session=${row.id}`
-                      )}
-                    >
-                      {m.flow_list_resume_draft()}
-                    </Button>
-                    <DropdownMenu.Root>
-                      <DropdownMenu.Trigger>
-                        {#snippet child({ props })}
-                          <Button
-                            {...props}
-                            size="icon-sm"
-                            variant="ghost"
-                            class="text-muted hover:text-primary"
-                            aria-label={m.actions()}
-                            title={m.actions()}
-                          >
-                            <IconEllipsis />
-                          </Button>
-                        {/snippet}
-                      </DropdownMenu.Trigger>
-                      <DropdownMenu.Content align="end" class="min-w-[10rem]">
-                        <DropdownMenu.Item
-                          variant="destructive"
-                          onclick={() => (draftPendingDiscard = row)}
-                        >
-                          <IconTrash class="size-4" />
-                          {m.ai_builder_discard_draft()}
-                        </DropdownMenu.Item>
-                      </DropdownMenu.Content>
-                    </DropdownMenu.Root>
-                  {:else}
-                    <FlowActions flow={row.flow} />
-                  {/if}
-                </div>
+              <Table.Cell
+                class="border-dimmer hidden border-b px-3 py-2 text-right align-middle @[52rem]/list:table-cell"
+              >
+                <div class="flex justify-end">{@render rowActions(row)}</div>
               </Table.Cell>
             </Table.Row>
           {/each}

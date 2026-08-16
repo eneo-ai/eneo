@@ -134,6 +134,7 @@
           id="flow-name-input"
           bind:value={newFlowName}
           placeholder={m.flow_create_name_placeholder()}
+          class="max-sm:h-[44px]"
           required
         />
         <p class="text-secondary text-xs">{m.flow_create_path_manual_hint()}</p>
@@ -149,14 +150,19 @@
       class="border-dimmer mx-0 mt-4 mb-0 flex-row flex-wrap items-center gap-2.5 border-t bg-transparent px-6 py-3.5 sm:justify-start"
     >
       <span class="text-secondary text-sm">{m.flow_create_dialog_footnote()}</span>
-      <div class="ml-auto flex items-center gap-2">
+      <div class="ml-auto flex items-center gap-2 max-sm:ml-0 max-sm:w-full max-sm:justify-end">
         {#if path === "manual" && canUseAIBuilder}
-          <Button variant="ghost" onclick={() => (path = "choose")}>{m.go_back()}</Button>
+          <Button variant="ghost" class="max-sm:h-[44px]" onclick={() => (path = "choose")}>
+            {m.go_back()}
+          </Button>
         {/if}
-        <Button variant="outline" onclick={() => (open = false)}>{m.cancel()}</Button>
+        <Button variant="outline" class="max-sm:h-[44px]" onclick={() => (open = false)}>
+          {m.cancel()}
+        </Button>
         {#if path === "manual"}
           <Button
             variant="default"
+            class="max-sm:h-[44px]"
             disabled={!newFlowName.trim() || isCreating}
             onclick={createManually}
           >
