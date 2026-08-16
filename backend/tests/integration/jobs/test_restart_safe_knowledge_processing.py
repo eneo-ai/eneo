@@ -17,6 +17,7 @@ from eneo.database.database import sessionmanager
 from eneo.database.tables.job_table import Jobs
 from eneo.embedding_models.infrastructure.datastore import Datastore
 from eneo.files.chunk_embedding_list import ChunkEmbeddingList
+from eneo.files.transcriber import TranscribedAudio
 from eneo.info_blobs.info_blob import InfoBlobInDB
 from eneo.jobs.job_models import JobFailureCode, Task
 from eneo.jobs.job_repo import JobRepository
@@ -289,19 +290,23 @@ async def test_transcription_releases_its_session_before_remote_work(
             self.preparation_had_session = True
             return object()
 
-        async def _remote_transcription(self) -> str:
+        async def _remote_transcription(self) -> TranscribedAudio:
             try:
                 await container.session().execute(sa.select(1))
             except RuntimeError:
                 self.session_released = True
             async with sessionmanager.session() as session, session.begin():
                 assert await session.scalar(sa.select(1)) == 1
-            return "replacement transcript"
+            return TranscribedAudio(
+                text="replacement transcript", duration_seconds=12.0
+            )
 
-        async def transcribe_from_filepath(self, **_kwargs: object) -> str:
+        async def transcribe_from_filepath(self, **_kwargs: object) -> TranscribedAudio:
             return await self._remote_transcription()
 
-        async def transcribe_prepared_from_filepath(self, **_kwargs: object) -> str:
+        async def transcribe_prepared_from_filepath(
+            self, **_kwargs: object
+        ) -> TranscribedAudio:
             return await self._remote_transcription()
 
     transcriber = ScopeObservingTranscriber()

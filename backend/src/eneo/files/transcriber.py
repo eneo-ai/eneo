@@ -2,6 +2,7 @@
 
 import contextlib
 import tempfile
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Optional
 
@@ -29,6 +30,21 @@ if TYPE_CHECKING:
 logger = get_logger(__name__)
 
 
+@dataclass(frozen=True, slots=True)
+class TranscribedAudio:
+    """A completed transcription and the length of the audio it read.
+
+    ``duration_seconds`` is the decoded length of the source this call
+    transcribed. It describes one successful logical transcription, not
+    provider-request accounting: the adapter may chunk and retry underneath.
+    It is ``None`` only when the text came from the File's stored transcription
+    and no audio was decoded.
+    """
+
+    text: str
+    duration_seconds: float | None
+
+
 class Transcriber:
     def __init__(
         self,
@@ -52,7 +68,7 @@ class Transcriber:
         *,
         language: str | None = None,
         persist_cache_to_file: bool = True,
-    ) -> str:
+    ) -> TranscribedAudio:
         mimetype: str = file.mimetype or ""
         if file.blob is None or not AudioMimeTypes.has_value(mimetype):
             raise ValueError("File needs to be an audio file")
@@ -61,7 +77,7 @@ class Transcriber:
         # Cached transcription is only safe when language is auto-detected and
         # the caller has chosen the File's shared transcription reference.
         if file_cache_enabled and file.transcription:
-            return file.transcription
+            return TranscribedAudio(text=file.transcription, duration_seconds=None)
 
         temp_file_path: Path | None = None
         try:
@@ -76,7 +92,13 @@ class Transcriber:
             )
 
             if file_cache_enabled:
-                result = await self.file_service.save_transcription(file.id, result)
+                stored_text = await self.file_service.save_transcription(
+                    file.id, result.text
+                )
+                result = TranscribedAudio(
+                    text=stored_text,
+                    duration_seconds=result.duration_seconds,
+                )
         finally:
             if temp_file_path is not None:
                 with contextlib.suppress(FileNotFoundError):
@@ -160,7 +182,7 @@ class Transcriber:
         filepath: Path,
         transcription_model: "TranscriptionModel",
         language: str | None = None,
-    ):
+    ) -> TranscribedAudio:
         adapter = await self.prepare_transcription(transcription_model)
         return await self.transcribe_prepared_from_filepath(
             filepath=filepath,
@@ -180,6 +202,10 @@ class Transcriber:
         filepath: Path,
         adapter: LiteLLMTranscriptionAdapter,
         language: str | None = None,
-    ) -> str:
+    ) -> TranscribedAudio:
         async with audio.to_wav(str(filepath)) as wav_file:
-            return await adapter.get_text_from_file(wav_file, language=language)
+            text = await adapter.get_text_from_file(wav_file, language=language)
+            return TranscribedAudio(
+                text=text,
+                duration_seconds=wav_file.duration,
+            )

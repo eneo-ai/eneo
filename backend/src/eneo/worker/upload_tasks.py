@@ -463,10 +463,12 @@ async def transcription_task(
                 prepared_transcription = await transcriber.prepare_transcription(
                     transcription_model
                 )
-            text = await transcriber.transcribe_prepared_from_filepath(
-                filepath=filepath,
-                adapter=prepared_transcription,
-            )
+            text = (
+                await transcriber.transcribe_prepared_from_filepath(
+                    filepath=filepath,
+                    adapter=prepared_transcription,
+                )
+            ).text
             if not text.strip():
                 raise NoExtractableTextError(params.filename)
 

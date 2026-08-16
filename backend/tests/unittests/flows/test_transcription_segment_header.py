@@ -7,6 +7,7 @@ from uuid import UUID, uuid4
 
 import pytest
 
+from eneo.files.transcriber import TranscribedAudio
 from eneo.flows.runtime.transcription import transcribe_audio_input
 
 
@@ -35,7 +36,13 @@ def _audio_file(name: str, file_id: UUID | None = None) -> SimpleNamespace:
 
 
 async def _transcribe(files: list[SimpleNamespace], blocks: list[str]):
-    transcriber = SimpleNamespace(transcribe=AsyncMock(side_effect=blocks))
+    transcriber = SimpleNamespace(
+        transcribe=AsyncMock(
+            side_effect=[
+                TranscribedAudio(text=block, duration_seconds=10.0) for block in blocks
+            ]
+        )
+    )
     model = SimpleNamespace(id=uuid4(), name="whisper-1", model_name="whisper-1")
     by_id = {file.id: file for file in files}
 

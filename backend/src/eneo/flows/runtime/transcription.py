@@ -115,10 +115,12 @@ if TYPE_CHECKING:
 class FlowTranscriptionResult:
     text: str
     file_ids: list[UUID]
+    model_id: UUID | None
     model_name: str
     language: str
     transcript_bytes: int
     estimated_tokens: int
+    audio_seconds: float | None
     elapsed_ms: int
     files_count: int
     used_cache: bool
@@ -129,9 +131,14 @@ class FlowTranscriptionResult:
         return {
             "transcript_bytes": self.transcript_bytes,
             "estimated_tokens": self.estimated_tokens,
+            # Decoded source length for this step's successful transcription.
+            # A transcription step consumes no tokens, so without this its
+            # runtime evidence says nothing about what it actually read.
+            "audio_seconds": self.audio_seconds,
             "elapsed_ms": self.elapsed_ms,
             "files_count": self.files_count,
             "model": self.model_name,
+            "model_id": str(self.model_id) if self.model_id is not None else None,
             "language": self.language,
             "used_cache": self.used_cache,
             "cached_files_count": self.cached_files_count,
@@ -236,6 +243,8 @@ async def transcribe_audio_input(
     provider_language = to_provider_language(language)
     text_blocks: list[str] = []
     block_segments: list[tuple[str, int, datetime] | None] = []
+    measured_seconds: list[float] = []
+    every_file_measured = True
 
     for file in files:
         # Reading a payload is part of this step's typed failure surface: it
@@ -253,7 +262,7 @@ async def transcribe_audio_input(
                     code=FlowApiErrorCode.TYPED_IO_FILE_NOT_FOUND.value,
                 ) from exc
             try:
-                block_text = await transcriber.transcribe(
+                transcribed = await transcriber.transcribe(
                     audio_file,
                     transcription_model,
                     language=provider_language,
@@ -272,6 +281,12 @@ async def transcribe_audio_input(
                 code=FlowApiErrorCode.TYPED_IO_TRANSCRIPTION_FAILED.value,
             ) from exc
 
+        if transcribed.duration_seconds is None:
+            every_file_measured = False
+        else:
+            measured_seconds.append(transcribed.duration_seconds)
+
+        block_text = transcribed.text
         if block_text.strip():
             text_blocks.append(block_text.strip())
             block_segments.append(
@@ -303,10 +318,12 @@ async def transcribe_audio_input(
     return FlowTranscriptionResult(
         text=combined,
         file_ids=[file.id for file in files],
+        model_id=getattr(transcription_model, "id", None),
         model_name=str(getattr(transcription_model, "name", "unknown")),
         language=language,
         transcript_bytes=transcript_bytes,
         estimated_tokens=estimated_tokens,
+        audio_seconds=round(sum(measured_seconds), 3) if every_file_measured else None,
         elapsed_ms=elapsed_ms,
         files_count=len(files),
         used_cache=False,

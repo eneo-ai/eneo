@@ -14,6 +14,7 @@ from eneo.audit.domain.outcome import Outcome
 from eneo.authentication.principal_types import PrincipalType
 from eneo.files.file_models import File, FileInfo, FileType
 from eneo.files.file_service import FileService
+from eneo.files.transcriber import TranscribedAudio
 from eneo.flows.domain.flow import FlowRun, FlowRunStatus
 from eneo.flows.flow_input_limits import resolve_flow_input_limits
 from eneo.flows.flow_run_input_envelope import (
@@ -33,6 +34,12 @@ from eneo.flows.runtime.transcription_runtime import (
     resolve_transcribe_and_attach_audio_input,
 )
 from eneo.main.exceptions import NotFoundException, TypedIOValidationException
+
+
+def _transcribed(text: str, *, duration_seconds: float = 30.0) -> TranscribedAudio:
+    """The transcriber's own result type, so the double cannot drift from it."""
+
+    return TranscribedAudio(text=text, duration_seconds=duration_seconds)
 
 
 def _audio_file(
@@ -264,7 +271,7 @@ async def test_audio_resolve_transcribes_in_request_order_and_persists_transcrip
         persist_cache_to_file,
     ):
         assert persist_cache_to_file is False
-        return f"tx:{file_obj.name}:{language or 'auto'}"
+        return _transcribed(f"tx:{file_obj.name}:{language or 'auto'}")
 
     transcriber.transcribe = AsyncMock(side_effect=_tx)
 
@@ -369,7 +376,7 @@ async def test_audio_resolve_passes_no_language_for_auto(user):
         return_value=_SpaceStub(models=[model], default_model=model)
     )
 
-    transcriber.transcribe = AsyncMock(return_value="ok")
+    transcriber.transcribe = AsyncMock(return_value=_transcribed("ok"))
 
     await executor._resolve_step_input(
         step=step,
@@ -425,7 +432,7 @@ async def test_audio_resolve_ignores_shared_file_transcription_cache(user):
         assert transcription_model is model
         assert language is None
         assert persist_cache_to_file is False
-        return "fresh flow transcript"
+        return _transcribed("fresh flow transcript")
 
     transcriber.transcribe = AsyncMock(side_effect=_tx)
 
@@ -478,7 +485,7 @@ async def test_audio_resolve_missing_wizard_model_fails_strictly(user):
     space_repo.get_space_by_assistant = AsyncMock(
         return_value=_SpaceStub(models=[model], default_model=model)
     )
-    transcriber.transcribe = AsyncMock(return_value="ok")
+    transcriber.transcribe = AsyncMock(return_value=_transcribed("ok"))
 
     with pytest.raises(TypedIOValidationException) as exc:
         await executor._resolve_step_input(
@@ -524,7 +531,7 @@ async def test_audio_resolve_selected_model_unavailable_fails_without_fallback(u
     space_repo.get_space_by_assistant = AsyncMock(
         return_value=_SpaceStub(models=[default_model], default_model=default_model)
     )
-    transcriber.transcribe = AsyncMock(return_value="ok")
+    transcriber.transcribe = AsyncMock(return_value=_transcribed("ok"))
 
     with pytest.raises(TypedIOValidationException) as exc:
         await executor._resolve_step_input(
@@ -567,7 +574,7 @@ async def test_audio_resolve_overflow_raises_specific_typed_error(user):
     space_repo.get_space_by_assistant = AsyncMock(
         return_value=_SpaceStub(models=[model], default_model=model)
     )
-    transcriber.transcribe = AsyncMock(return_value="x" * 200)
+    transcriber.transcribe = AsyncMock(return_value=_transcribed("x" * 200))
 
     with pytest.raises(TypedIOValidationException) as exc:
         await executor._resolve_step_input(
@@ -609,7 +616,7 @@ async def test_audio_resolve_near_cap_adds_warning_diagnostic(user):
     space_repo.get_space_by_assistant = AsyncMock(
         return_value=_SpaceStub(models=[model], default_model=model)
     )
-    transcriber.transcribe = AsyncMock(return_value="x" * 90)
+    transcriber.transcribe = AsyncMock(return_value=_transcribed("x" * 90))
 
     resolved = await executor._resolve_step_input(
         step=step,
@@ -666,8 +673,8 @@ async def test_audio_resolve_multifile_near_cap_keeps_request_order(user):
     ):
         assert persist_cache_to_file is False
         if file_obj.name == "b.wav":
-            return "b" * 40
-        return "a" * 43
+            return _transcribed("b" * 40, duration_seconds=12.5)
+        return _transcribed("a" * 43, duration_seconds=17.5)
 
     transcriber.transcribe = AsyncMock(side_effect=_tx)
 
@@ -690,6 +697,11 @@ async def test_audio_resolve_multifile_near_cap_keeps_request_order(user):
     # 40 + 2 separator + 43 = 85 bytes => exactly 85% of 100-byte cap.
     assert resolved.transcription_metadata is not None
     assert resolved.transcription_metadata["transcript_bytes"] == 85
+    # The step reports the decoded length of every file it transcribed, together
+    # with the model that read them, because it consumes no tokens to report.
+    assert resolved.transcription_metadata["audio_seconds"] == 30.0
+    assert resolved.transcription_metadata["model"] == "whisper-1"
+    assert resolved.transcription_metadata["model_id"] == str(model.id)
     assert resolved.text.startswith("b" * 40)
     assert resolved.text.endswith("a" * 43)
     assert any(
@@ -735,7 +747,7 @@ async def test_audio_step_reads_one_payload_at_a_time(user):
 
     async def _tx(file_obj, transcription_model, *, language=None, **_kwargs):
         events.append(f"transcribe {file_obj.name}")
-        return f"text for {file_obj.name}"
+        return _transcribed(f"text for {file_obj.name}")
 
     staged_names = {
         file.id: file.name for file in file_service.get_files_by_ids.return_value
@@ -912,7 +924,9 @@ async def test_audio_resolve_multifile_overflow_raises_typed_error(user):
     space_repo.get_space_by_assistant = AsyncMock(
         return_value=_SpaceStub(models=[model], default_model=model)
     )
-    transcriber.transcribe = AsyncMock(side_effect=["b" * 45, "a" * 45])
+    transcriber.transcribe = AsyncMock(
+        side_effect=[_transcribed("b" * 45), _transcribed("a" * 45)]
+    )
 
     with pytest.raises(TypedIOValidationException) as exc:
         await executor._resolve_step_input(
@@ -990,10 +1004,12 @@ async def test_resolve_transcribe_attach_updates_payload_context_and_audits(
     transcription_result = FlowTranscriptionResult(
         text="transcribed text",
         file_ids=[uuid4()],
+        model_id=uuid4(),
         model_name="kb-whisper-large",
         language="sv",
         transcript_bytes=16,
         estimated_tokens=4,
+        audio_seconds=95.5,
         elapsed_ms=1234,
         files_count=1,
         used_cache=False,
@@ -1062,10 +1078,12 @@ async def test_resolve_transcribe_attach_swallow_audit_errors(user, monkeypatch)
     transcription_result = FlowTranscriptionResult(
         text="transcribed text",
         file_ids=[uuid4()],
+        model_id=uuid4(),
         model_name="kb-whisper-large",
         language="sv",
         transcript_bytes=16,
         estimated_tokens=4,
+        audio_seconds=95.5,
         elapsed_ms=1234,
         files_count=1,
         used_cache=False,

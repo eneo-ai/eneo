@@ -306,10 +306,12 @@ class App:
             )
 
         transcriptions = [
-            await transcriber.transcribe(
-                file,
-                transcription_model,  # pyright: ignore[reportArgumentType]  # narrowed: audio_files guard above ensures non-None
-            )
+            (
+                await transcriber.transcribe(
+                    file,
+                    transcription_model,  # pyright: ignore[reportArgumentType]  # narrowed: audio_files guard above ensures non-None
+                )
+            ).text
             for file in audio_files
         ]
 
