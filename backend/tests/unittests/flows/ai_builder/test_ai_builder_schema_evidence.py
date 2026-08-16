@@ -1,10 +1,14 @@
 from __future__ import annotations
 
 import json
+import logging
+from collections.abc import Generator
+from contextlib import contextmanager
 from uuid import UUID
 
 import pytest
 
+from eneo.flows.ai_builder import ai_builder_schema_evidence as schema_evidence_module
 from eneo.flows.ai_builder.ai_builder_attachment_context import (
     AIBuilderAttachmentContext,
     AIBuilderAttachmentSchemaDiscovery,
@@ -339,9 +343,32 @@ def test_selection_requires_exact_current_candidate_set() -> None:
     assert drifted is None
 
 
-def test_stale_schema_direction_answer_records_discard_reason(
-    caplog: pytest.LogCaptureFixture,
-) -> None:
+@contextmanager
+def _captured_schema_evidence_logs() -> Generator[list[logging.LogRecord]]:
+    """Capture the module's records directly.
+
+    The application logger is parentless and owns its handler, so ``caplog``
+    (a root handler) never sees it.
+    """
+
+    records: list[logging.LogRecord] = []
+
+    class CaptureHandler(logging.Handler):
+        def emit(self, record: logging.LogRecord) -> None:
+            records.append(record)
+
+    handler = CaptureHandler()
+    old_level = schema_evidence_module.logger.level
+    schema_evidence_module.logger.setLevel(logging.INFO)
+    schema_evidence_module.logger.addHandler(handler)
+    try:
+        yield records
+    finally:
+        schema_evidence_module.logger.removeHandler(handler)
+        schema_evidence_module.logger.setLevel(old_level)
+
+
+def test_stale_schema_direction_answer_records_discard_reason() -> None:
     first = _candidate("decision", 1)
     second = _candidate("count", 2)
     conversation = _selection_conversation(
@@ -349,10 +376,7 @@ def test_stale_schema_direction_answer_records_discard_reason(
         selected_values=[f"output:{first.fingerprint}"],
     )
 
-    with caplog.at_level(
-        "INFO",
-        logger="eneo.flows.ai_builder.ai_builder_schema_evidence",
-    ):
+    with _captured_schema_evidence_logs() as records:
         selected = resolve_structured_schema_direction(
             conversation=conversation,
             candidates=(first, second),
@@ -361,8 +385,8 @@ def test_stale_schema_direction_answer_records_discard_reason(
     assert selected is None
     record = next(
         record
-        for record in caplog.records
-        if record.message == "AI Builder discarded schema-direction answer"
+        for record in records
+        if record.getMessage() == "AI Builder discarded schema-direction answer"
     )
     assert record.message_id == "user-2"
     assert record.discard_reason == "candidate_set_changed"

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import logging
 from collections.abc import Callable, Mapping
 from typing import Iterable, Literal, cast
 
@@ -32,6 +31,7 @@ from eneo.flows.ai_builder.ai_builder_schema_evidence import (
 from eneo.flows.ai_builder.ai_builder_tool_names import (
     ASK_STRUCTURED_QUESTION_TOOL_NAME,
 )
+from eneo.main.logging import get_logger
 
 # Versioned persistence limits for the BuilderSessions JSON aggregate. These are
 # deliberately independent of model context windows: provider request assembly
@@ -44,7 +44,7 @@ TAIL_SESSION_MESSAGES = 40
 MAX_SESSION_MESSAGE_BYTES = 256 * 1024
 MAX_SESSION_CONVERSATION_BYTES = 1024 * 1024
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 def compact_ai_builder_conversation(

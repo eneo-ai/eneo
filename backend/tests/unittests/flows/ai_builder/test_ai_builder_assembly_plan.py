@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Generator
+from contextlib import contextmanager
 from dataclasses import replace
 
 import pytest
 
+from eneo.flows.ai_builder.ai_builder_assembly import lower as lower_module
 from eneo.flows.ai_builder.ai_builder_assembly.fixed_steps import (
     fixed_audio_transcription_step,
     render_verbatim_step,
@@ -33,7 +36,30 @@ from eneo.flows.flow_authoring_spec import (
     OutputType,
 )
 
-_LOWER_LOGGER_NAME = "eneo.flows.ai_builder.ai_builder_assembly.lower"
+
+@contextmanager
+def _captured_lower_logs() -> Generator[list[logging.LogRecord]]:
+    """Capture the module's records directly.
+
+    The application logger is parentless and owns its handler, so ``caplog``
+    (a root handler) never sees it.
+    """
+
+    records: list[logging.LogRecord] = []
+
+    class CaptureHandler(logging.Handler):
+        def emit(self, record: logging.LogRecord) -> None:
+            records.append(record)
+
+    handler = CaptureHandler()
+    old_level = lower_module.logger.level
+    lower_module.logger.setLevel(logging.INFO)
+    lower_module.logger.addHandler(handler)
+    try:
+        yield records
+    finally:
+        lower_module.logger.removeHandler(handler)
+        lower_module.logger.setLevel(old_level)
 
 
 def _text_step(
@@ -218,8 +244,7 @@ def test_fixed_assembly_steps_use_english_when_requested() -> None:
     assert renderer.name == "Render PDF"
 
 
-def test_lowering_logs_terminal_output_fields_suppressed_by_schema(caplog) -> None:
-    caplog.set_level(logging.INFO, logger=_LOWER_LOGGER_NAME)
+def test_lowering_logs_terminal_output_fields_suppressed_by_schema() -> None:
     plan = FlowAssemblyPlan(
         flow_name="Report",
         flow_description="",
@@ -239,12 +264,13 @@ def test_lowering_logs_terminal_output_fields_suppressed_by_schema(caplog) -> No
         ui_language=None,
     )
 
-    lower_assembly_plan(plan)
+    with _captured_lower_logs() as records:
+        lower_assembly_plan(plan)
 
     record = next(
         item
-        for item in caplog.records
-        if item.message == "ai_builder_terminal_output_fields_suppressed_by_schema"
+        for item in records
+        if item.getMessage() == "ai_builder_terminal_output_fields_suppressed_by_schema"
     )
     assert record.step_index == 1
     assert record.step_name == "Write answer"

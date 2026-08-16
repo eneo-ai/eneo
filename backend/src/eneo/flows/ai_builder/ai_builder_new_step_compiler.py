@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import logging
 import string
 from collections.abc import Mapping, Sequence
 from typing import Any, Literal, cast
@@ -47,8 +46,9 @@ from eneo.flows.input_binding_contract_rules import (
     source_ref_bindings,
     validate_source_refs_binding,
 )
+from eneo.main.logging import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 _FILE_INPUT_TYPES = {InputType.AUDIO, InputType.DOCUMENT, InputType.FILE}
 
 

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import logging
 from collections.abc import Sequence
 from dataclasses import replace
 from typing import NoReturn, assert_never
@@ -56,8 +55,9 @@ from eneo.flows.flow_authoring_spec import (
     OutputMode,
     OutputType,
 )
+from eneo.main.logging import get_logger
 
-logger = logging.getLogger(__package__)
+logger = get_logger(__name__)
 
 
 def admit_document_report_semantic_shape(

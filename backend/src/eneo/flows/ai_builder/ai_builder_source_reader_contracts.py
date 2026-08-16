@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import logging
 from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any, cast
@@ -27,8 +26,9 @@ from eneo.flows.flow_authoring_spec import (
 )
 from eneo.flows.source_identity import RUNTIME_SOURCE_IDENTITY_FIELDS
 from eneo.json_types import JsonObject
+from eneo.main.logging import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 _SOURCE_CAPTURE_INPUT_TYPES = frozenset(
     {InputType.DOCUMENT, InputType.FILE, InputType.TEXT}

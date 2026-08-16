@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import logging
 import re
 from collections.abc import Sequence
 from dataclasses import dataclass, replace
@@ -81,8 +80,9 @@ from eneo.flows.flow_authoring_spec import (
     OutputType,
 )
 from eneo.json_types import JsonObject
+from eneo.main.logging import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 _DOCUMENT_OUTPUT_TYPES = frozenset({OutputType.PDF, OutputType.DOCX})
 _SOURCE_INPUT_TYPES = frozenset(

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import logging
 from copy import deepcopy
 from typing import Any, cast
 
@@ -62,8 +61,9 @@ from eneo.flows.flow_variable_definitions import (
     FLOW_INPUT_JSON_ALIAS,
 )
 from eneo.json_types import JsonObject
+from eneo.main.logging import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 def compile_create_intent_to_spec(

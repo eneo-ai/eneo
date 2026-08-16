@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import logging
 import re
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -30,6 +29,7 @@ from eneo.flows.output_processing import (
     validate_schema_syntax,
 )
 from eneo.json_types import JsonObject, JsonValue
+from eneo.main.logging import get_logger
 
 if TYPE_CHECKING:
     from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
@@ -53,7 +53,7 @@ _FENCED_JSON_BLOCK_RE = re.compile(
     re.IGNORECASE | re.DOTALL,
 )
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 SchemaLimitReason = Literal[
     "raw_bytes",

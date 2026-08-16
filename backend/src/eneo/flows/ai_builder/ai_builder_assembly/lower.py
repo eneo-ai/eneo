@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import logging
-
 from eneo.flows.ai_builder.ai_builder_assembly.document_report import (
     bind_document_report_compose_inputs,
 )
@@ -33,8 +31,9 @@ from eneo.flows.flow_authoring_spec import (
     StepSpec,
 )
 from eneo.flows.source_identity import without_runtime_source_identity_draft_fields
+from eneo.main.logging import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 def lower_assembly_plan(

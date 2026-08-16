@@ -157,16 +157,15 @@ class OTELJSONFormatter(logging.Formatter):
 ContextJSONFormatter = OTELJSONFormatter
 
 
-# Disable loggers from other packages if loglevel is INFO or above
-for _logger in logging.root.manager.loggerDict:
-    if get_loglevel() <= logging.DEBUG:
-        logging.getLogger(_logger).setLevel(logging.INFO)
-    else:
-        logging.getLogger(_logger).setLevel(logging.CRITICAL)
+# Third-party loggers are left at their own defaults and inherit the root
+# logger's level and handlers. Only namespaces with evidenced noise are
+# configured explicitly, by name, below. (An earlier import-time sweep set every
+# logger already registered to CRITICAL: partial and import-order dependent for
+# third parties, and it silenced the whole ``eneo`` tree for stdlib
+# ``logging.getLogger`` users.)
 
-# Always suppress SQLAlchemy loggers AFTER other logger configuration (too verbose for normal operation)
-# Must override the loop above which may set them to INFO/CRITICAL
-# Disable propagation to prevent logs from reaching root logger
+# SQLAlchemy is too verbose for normal operation: cap it at WARNING and keep it
+# off the root logger.
 sqlalchemy_loggers = [
     "sqlalchemy.engine",
     "sqlalchemy.pool",
