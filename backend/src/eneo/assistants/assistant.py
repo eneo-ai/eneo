@@ -42,16 +42,16 @@ if TYPE_CHECKING:
     )
     from eneo.assistants.references import ReferencesService
     from eneo.collections.domain.collection import Collection
-    from eneo.completion_models.domain.provider_call_observer import (
-        ProviderCallObserver,
-        ProviderCallReason,
-    )
     from eneo.completion_models.domain.skill_activation import SkillActivationRuntime
     from eneo.completion_models.infrastructure.web_search import WebSearchResult
     from eneo.integration.domain.entities.integration_knowledge import (
         IntegrationKnowledge,
     )
     from eneo.mcp_servers.domain.entities.mcp_server import MCPServer
+    from eneo.model_providers.domain.provider_call_observer import (
+        ProviderCallObserver,
+        ProviderCallReason,
+    )
     from eneo.templates.assistant_template.assistant_template import AssistantTemplate
     from eneo.websites.domain.website import Website
 

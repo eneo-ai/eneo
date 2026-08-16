@@ -4,7 +4,7 @@ from typing import Mapping, Sequence, cast
 
 import pytest
 
-from eneo.completion_models.domain.provider_call_observer import (
+from eneo.model_providers.domain.provider_call_observer import (
     ProviderCallObserverError,
     build_provider_call_request_facts,
 )

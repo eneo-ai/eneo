@@ -13,9 +13,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 logger = logging.getLogger(__name__)
 
 from eneo.audit.domain.outcome import Outcome
-from eneo.completion_models.domain.provider_call_observer import (
-    ProviderCallObserverError,
-)
 from eneo.completion_models.infrastructure.completion_service import CompletionService
 from eneo.completion_models.infrastructure.context_builder import count_tokens
 from eneo.database.database import sessionmanager
@@ -206,6 +203,10 @@ from eneo.main.exceptions import (
     ProviderCapabilityRejectedException,
     ProviderRejectedRequestException,
     TypedIOValidationException,
+)
+from eneo.model_providers.domain.provider_call_observer import (
+    ProviderCallObserver,
+    ProviderCallObserverError,
 )
 from eneo.settings.encryption_service import EncryptionService
 from eneo.spaces.space_repo import SpaceRepository
@@ -1330,6 +1331,16 @@ class FlowRunExecutor:
                 mapped_call=mapped_call,
                 resolved_input_edge_indexes=resolved_input_edge_indexes,
             ),
+            # Transcription runs while the step input is still being produced,
+            # so it has neither a mapped call nor a resolved input aggregate.
+            build_transcription_call_observer=lambda: FlowProviderCallRecorder(
+                run_id=run.id,
+                step_id=step.step_id,
+                attempt_no=attempt_no,
+                tenant_id=run.tenant_id,
+                mapped_call=None,
+                resolved_input_edge_indexes=(),
+            ),
         )
 
     async def _prepare_assistant_step(
@@ -2255,6 +2266,7 @@ class FlowRunExecutor:
         state: RunExecutionState | None = None,
         version_metadata: dict[str, Any] | None = None,
         requested_file_ids: Sequence[UUID] = (),
+        transcription_call_observer: "ProviderCallObserver | None" = None,
     ) -> StepInputValue:
         deps = StepInputResolutionDeps(
             variable_resolver=self.variable_resolver,
@@ -2269,6 +2281,7 @@ class FlowRunExecutor:
             max_audio_files=self.max_audio_files,
             max_inline_text_bytes=self.max_inline_text_bytes,
             logger=logger,
+            transcription_call_observer=transcription_call_observer,
         )
         return await resolve_step_input_runtime(
             step=step,

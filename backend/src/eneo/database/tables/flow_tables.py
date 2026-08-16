@@ -1,4 +1,5 @@
 from datetime import datetime
+from decimal import Decimal
 from enum import Enum
 from typing import Any, Optional
 from uuid import UUID, uuid4
@@ -32,6 +33,7 @@ from eneo.flow_packages.domain.flow_package_import_record import (
 )
 from eneo.flows.ai_builder.ai_builder_domain_models import PlanStatus, SessionStatus
 from eneo.flows.domain.provider_call import (
+    PROVIDER_CALL_KIND_VALUES,
     PROVIDER_CALL_REASON_VALUES,
     PROVIDER_CALL_REJECTION_REASON_VALUES,
     PROVIDER_CALL_REQUESTED_CAPABILITY_VALUES,
@@ -1265,13 +1267,18 @@ class FlowStepAttemptResolvedInputs(BaseCrossReference):
 
 
 class FlowProviderCalls(BasePublic):
-    """Stores one durable lifecycle row per Flow provider request. Writer: FlowProviderCallRepository. Purpose: preserve credential-free request identity, terminal outcome, token usage, and mapped source evidence outside attempt JSONB."""
+    """Stores one durable lifecycle row per Flow provider request. Writer: FlowProviderCallRepository. Purpose: preserve credential-free request identity, terminal outcome, token or audio usage, and mapped source evidence outside attempt JSONB."""
 
     flow_step_attempt_id: Mapped[UUID] = mapped_column(
         ForeignKey(FlowStepAttempts.id, ondelete="CASCADE"),
         nullable=False,
     )
+    # A completion call consumes resolved inputs, so it may only exist once that
+    # evidence is activated. A transcription call runs while the step input is
+    # still being produced, so it has no aggregate to point at.
+    resolved_inputs_attempt_id: Mapped[Optional[UUID]] = mapped_column()
     ordinal: Mapped[int] = mapped_column(nullable=False)
+    call_kind: Mapped[str] = mapped_column(sa.String(32), nullable=False)
     status: Mapped[str] = mapped_column(sa.String(32), nullable=False)
     request_schema_version: Mapped[int] = mapped_column(sa.SmallInteger, nullable=False)
     provider_request_hash: Mapped[str] = mapped_column(sa.String(64), nullable=False)
@@ -1293,6 +1300,7 @@ class FlowProviderCalls(BasePublic):
     provider_response_id: Mapped[Optional[str]] = mapped_column(sa.String(512))
     num_tokens_input: Mapped[Optional[int]] = mapped_column()
     num_tokens_output: Mapped[Optional[int]] = mapped_column()
+    audio_seconds: Mapped[Optional[Decimal]] = mapped_column(sa.Numeric(12, 3))
     input_source: Mapped[Optional[str]] = mapped_column(sa.String(32))
     output_source: Mapped[Optional[str]] = mapped_column(sa.String(32))
     outcome_reason: Mapped[Optional[str]] = mapped_column(sa.String(64))
@@ -1303,7 +1311,7 @@ class FlowProviderCalls(BasePublic):
 
     __table_args__ = (
         ForeignKeyConstraint(
-            ["flow_step_attempt_id"],
+            ["resolved_inputs_attempt_id"],
             ["flow_step_attempt_resolved_inputs.flow_step_attempt_id"],
             name="fk_flow_provider_calls_resolved_inputs",
         ),
@@ -1311,6 +1319,10 @@ class FlowProviderCalls(BasePublic):
             "flow_step_attempt_id",
             "ordinal",
             name="uq_flow_provider_calls_attempt_ordinal",
+        ),
+        CheckConstraint(
+            f"call_kind IN ({_check_values(PROVIDER_CALL_KIND_VALUES)})",
+            name="ck_flow_provider_calls_kind",
         ),
         CheckConstraint(
             "ordinal >= 1",
@@ -1382,17 +1394,38 @@ class FlowProviderCalls(BasePublic):
         ),
         CheckConstraint(
             "(input_source IS NULL AND num_tokens_input IS NULL) OR "
-            "(input_source = 'not_reported' AND num_tokens_input IS NULL) OR "
-            "(input_source IS NOT NULL AND input_source <> 'not_reported' "
+            "(input_source IN ('not_reported', 'not_applicable') "
+            "AND num_tokens_input IS NULL) OR "
+            "(input_source NOT IN ('not_reported', 'not_applicable') "
             "AND num_tokens_input IS NOT NULL)",
             name="ck_flow_provider_calls_input_usage_shape",
         ),
         CheckConstraint(
             "(output_source IS NULL AND num_tokens_output IS NULL) OR "
-            "(output_source = 'not_reported' AND num_tokens_output IS NULL) OR "
-            "(output_source IS NOT NULL AND output_source <> 'not_reported' "
+            "(output_source IN ('not_reported', 'not_applicable') "
+            "AND num_tokens_output IS NULL) OR "
+            "(output_source NOT IN ('not_reported', 'not_applicable') "
             "AND num_tokens_output IS NOT NULL)",
             name="ck_flow_provider_calls_output_usage_shape",
+        ),
+        CheckConstraint(
+            "(call_kind = 'completion' AND audio_seconds IS NULL "
+            "AND resolved_inputs_attempt_id = flow_step_attempt_id "
+            "AND input_source IS DISTINCT FROM 'not_applicable' "
+            "AND output_source IS DISTINCT FROM 'not_applicable') OR "
+            "(call_kind = 'transcription' AND audio_seconds IS NOT NULL "
+            "AND audio_seconds >= 0 "
+            "AND resolved_inputs_attempt_id IS NULL "
+            "AND cardinality(resolved_input_edge_indexes) = 0 "
+            "AND response_format = 'none' "
+            "AND cardinality(requested_capabilities) = 0 "
+            "AND call_reason = 'initial' "
+            "AND num_tokens_input IS NULL AND num_tokens_output IS NULL "
+            "AND input_source IS NOT DISTINCT FROM "
+            "  CASE WHEN status = 'completed' THEN 'not_applicable' END "
+            "AND output_source IS NOT DISTINCT FROM "
+            "  CASE WHEN status = 'completed' THEN 'not_applicable' END)",
+            name="ck_flow_provider_calls_kind_shape",
         ),
         CheckConstraint(
             "(status = 'started' AND finished_at IS NULL AND outcome_reason IS NULL "

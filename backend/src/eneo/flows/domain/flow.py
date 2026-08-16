@@ -426,6 +426,44 @@ class FlowRunTokenUsage(BaseModel):
         return self
 
 
+class FlowRunTranscriptionUsage(BaseModel):
+    """Audio a run sent to a transcription provider, across every attempt.
+
+    Rejected requests never left, so they contribute nothing. A request whose
+    outcome is unknown may still have been charged, so it is left out of the
+    total and marks it incomplete: the number is a lower bound, never a claim
+    about what was billed.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    audio_seconds: float = Field(ge=0)
+    completeness: Literal["complete", "incomplete"]
+
+    @classmethod
+    def from_counts(
+        cls,
+        *,
+        audio_seconds: float,
+        completeness: Literal["complete", "incomplete"],
+    ) -> Self:
+        return cls(audio_seconds=round(audio_seconds, 3), completeness=completeness)
+
+    @classmethod
+    def combine(cls, usages: Iterable["FlowRunTranscriptionUsage"]) -> Self | None:
+        items = tuple(usages)
+        if not items:
+            return None
+        return cls.from_counts(
+            audio_seconds=sum(item.audio_seconds for item in items),
+            completeness=(
+                "incomplete"
+                if any(item.completeness == "incomplete" for item in items)
+                else "complete"
+            ),
+        )
+
+
 @dataclass(frozen=True, slots=True)
 class FlowProviderCallTokenUsage:
     status: Literal["started", "completed", "rejected", "outcome_unknown"]

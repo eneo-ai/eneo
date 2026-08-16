@@ -13,6 +13,7 @@ from eneo.flows.domain.flow import (
     FlowRunRerunInvalidatedStep,
     FlowRunRerunOperation,
     FlowRunTokenUsage,
+    FlowRunTranscriptionUsage,
     FlowStepAttempt,
     FlowStepResult,
     FlowVersion,
@@ -140,6 +141,7 @@ class DebugRunSummaryProjection(BaseModel):
     duration_ms: int | None
     models_used: list[str]
     token_usage: FlowRunTokenUsage | None = None
+    transcription_usage: FlowRunTranscriptionUsage | None = None
     knowledge_evidence_view: RunViewPassageOmission | None = None
     omissions: list[RunViewEvidenceOmission] = Field(
         default_factory=_empty_run_view_evidence_omissions
@@ -156,6 +158,7 @@ def build_debug_export(
     rerun_operations: list[FlowRunRerunOperation] | None = None,
     rerun_invalidated_steps: list[FlowRunRerunInvalidatedStep] | None = None,
     token_usage: FlowRunTokenUsage | None = None,
+    transcription_usage: FlowRunTranscriptionUsage | None = None,
     knowledge_evidence_view: RunViewPassageOmission | None = None,
     omissions: Sequence[RunViewEvidenceOmission] = (),
 ) -> dict[str, Any]:
@@ -217,6 +220,7 @@ def build_debug_export(
         duration_ms=_calculate_duration_ms(run.created_at, run.updated_at),
         models_used=_collect_models_used(step_attempts or []),
         token_usage=token_usage,
+        transcription_usage=transcription_usage,
         knowledge_evidence_view=knowledge_evidence_view,
         omissions=list(omissions),
     )

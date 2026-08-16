@@ -28,12 +28,12 @@ from eneo.sessions.session import SessionInDB
 
 if TYPE_CHECKING:
     from eneo.collections.domain.collection import Collection
-    from eneo.completion_models.domain.provider_call_observer import (
-        ProviderCallObserver,
-        ProviderCallReason,
-    )
     from eneo.integration.domain.entities.integration_knowledge import (
         IntegrationKnowledge,
+    )
+    from eneo.model_providers.domain.provider_call_observer import (
+        ProviderCallObserver,
+        ProviderCallReason,
     )
     from eneo.websites.domain.website import Website
 

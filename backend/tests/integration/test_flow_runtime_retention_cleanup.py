@@ -2896,6 +2896,8 @@ async def test_debug_retention_deletes_attempt_provider_and_resolved_input_evide
     )
     provider_call = FlowProviderCalls(
         flow_step_attempt_id=fixture.step_attempt.id,
+        resolved_inputs_attempt_id=fixture.step_attempt.id,
+        call_kind="completion",
         ordinal=1,
         status="completed",
         request_schema_version=2,
@@ -2953,6 +2955,8 @@ async def test_debug_retention_deletes_attempt_provider_and_resolved_input_evide
     async_session.add(
         FlowProviderCalls(
             flow_step_attempt_id=fixture.step_attempt.id,
+            resolved_inputs_attempt_id=fixture.step_attempt.id,
+            call_kind="completion",
             ordinal=2,
             status="completed",
             request_schema_version=2,
@@ -2982,7 +2986,7 @@ async def test_debug_retention_deletes_attempt_provider_and_resolved_input_evide
 
     usage_before_purge = await FlowProviderCallRepository(
         async_session
-    ).list_token_usage_for_runs(
+    ).list_usage_for_runs(
         run_ids=[fixture.run.id],
         tenant_id=test_tenant.id,
     )
@@ -3045,13 +3049,13 @@ async def test_debug_retention_deletes_attempt_provider_and_resolved_input_evide
     assert attempt_counts.resolved_input_aggregate_count == 1
     assert attempt_counts.resolved_input_edge_count == resolved_input_edge_count
     assert attempt_counts.token_usage_state == "recorded"
-    assert attempt_counts.token_usage == usage_before_purge[fixture.run.id]
+    assert attempt_counts.token_usage == usage_before_purge[fixture.run.id].token_usage
     assert attempt_counts.token_usage.input_completeness == "incomplete"
     assert attempt_counts.token_usage.output_completeness == "incomplete"
 
     usage_after_purge = await FlowProviderCallRepository(
         async_session
-    ).list_token_usage_for_runs(
+    ).list_usage_for_runs(
         run_ids=[fixture.run.id],
         tenant_id=test_tenant.id,
     )

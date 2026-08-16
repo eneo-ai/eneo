@@ -52,8 +52,8 @@ from eneo.flows.domain.flow_step_attempt_input import (
     FlowStepAttemptInput,
 )
 from eneo.flows.domain.provider_call import (
+    CompletionProviderCallRequest,
     ProviderCallCompletion,
-    ProviderCallRequest,
 )
 from eneo.flows.enums import (
     FlowOutputType,
@@ -1097,7 +1097,7 @@ async def test_provider_call_evidence_endpoint_pages_relational_lifecycle_events
             step_id=attempt.step_id,
             attempt_no=attempt.attempt_no,
             tenant_id=admin_user.tenant_id,
-            request=ProviderCallRequest(
+            request=CompletionProviderCallRequest(
                 provider_request_hash="a" * 64,
                 requested_model="openai/gpt-4o-mini",
                 provider="openai",
@@ -1116,7 +1116,7 @@ async def test_provider_call_evidence_endpoint_pages_relational_lifecycle_events
             step_id=attempt.step_id,
             attempt_no=attempt.attempt_no,
             tenant_id=admin_user.tenant_id,
-            request=ProviderCallRequest(
+            request=CompletionProviderCallRequest(
                 provider_request_hash="b" * 64,
                 requested_model="openai/gpt-4o-mini",
                 provider="openai",

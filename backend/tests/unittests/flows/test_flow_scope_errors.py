@@ -60,7 +60,7 @@ from eneo.flows.api.flow_run_rerun_router import rerun_flow_run_step
 from eneo.flows.api.flow_run_steps_router import get_flow_graph
 from eneo.flows.application.flow_run_service import (
     FlowRunPageWithResultFilesAndTokenUsage,
-    FlowRunWithResultFilesAndTokenUsage,
+    FlowRunWithResultFilesAndUsage,
 )
 from eneo.flows.enums import (
     FlowOutputMode,
@@ -240,8 +240,8 @@ async def test_rerun_flow_run_step_permission_matrix_allows_service_key_principa
         created=False,
     )
     run_service = AsyncMock()
-    run_service.enrich_run_with_result_files_and_token_usage.return_value = (
-        FlowRunWithResultFilesAndTokenUsage(
+    run_service.enrich_run_with_result_files_and_usage.return_value = (
+        FlowRunWithResultFilesAndUsage(
             run=run,
             result_files=(),
             token_usage=None,
@@ -411,7 +411,7 @@ async def test_list_flow_runs_viewer_cannot_read_unpublished_flow(monkeypatch):
         )
 
     assert exc_info.value.code == "insufficient_space_permission"
-    run_service.list_runs_with_result_files_and_token_usage.assert_not_awaited()
+    run_service.list_runs_with_result_files_and_usage.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -519,13 +519,11 @@ async def test_flow_runtime_endpoints_reject_scope_mismatch(monkeypatch):
     flow_id = uuid4()
     run = _run(flow_id=flow_id, tenant_id=uuid4())
     run_service = AsyncMock()
-    run_service.list_runs_with_result_files_and_token_usage.return_value = (
-        SimpleNamespace(
-            items=(SimpleNamespace(run=run, result_files=(), token_usage=None),),
-            has_more=False,
-        )
+    run_service.list_runs_with_result_files_and_usage.return_value = SimpleNamespace(
+        items=(SimpleNamespace(run=run, result_files=(), token_usage=None),),
+        has_more=False,
     )
-    run_service.get_run_detail_with_result_files_and_token_usage.return_value = (
+    run_service.get_run_detail_with_result_files_and_usage.return_value = (
         SimpleNamespace(
             run=run,
             result_files=(),
@@ -576,8 +574,8 @@ async def test_flow_runtime_endpoints_reject_scope_mismatch(monkeypatch):
         get_exc,
         message="API key space scope does not match requested flow.",
     )
-    run_service.list_runs_with_result_files_and_token_usage.assert_not_awaited()
-    run_service.get_run_detail_with_result_files_and_token_usage.assert_not_awaited()
+    run_service.list_runs_with_result_files_and_usage.assert_not_awaited()
+    run_service.get_run_detail_with_result_files_and_usage.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -1144,10 +1142,10 @@ async def test_tenant_scoped_user_api_key_loads_space_membership_check(monkeypat
     _enable_space_access(container)
 
     run_service = AsyncMock()
-    run_service.list_runs_with_result_files_and_token_usage.return_value = (
+    run_service.list_runs_with_result_files_and_usage.return_value = (
         FlowRunPageWithResultFilesAndTokenUsage(
             items=(
-                FlowRunWithResultFilesAndTokenUsage(
+                FlowRunWithResultFilesAndUsage(
                     run=run,
                     result_files=(),
                     token_usage=None,
@@ -1245,10 +1243,10 @@ async def test_space_scoped_api_key_matching_space_succeeds(monkeypatch):
     _enable_space_access(container)
 
     run_service = AsyncMock()
-    run_service.list_runs_with_result_files_and_token_usage.return_value = (
+    run_service.list_runs_with_result_files_and_usage.return_value = (
         FlowRunPageWithResultFilesAndTokenUsage(
             items=(
-                FlowRunWithResultFilesAndTokenUsage(
+                FlowRunWithResultFilesAndUsage(
                     run=run,
                     result_files=(),
                     token_usage=None,
@@ -1322,4 +1320,4 @@ async def test_assistant_scoped_api_key_cannot_access_flow_runtime(monkeypatch):
     )
     container.flow_service.return_value.get_flow.assert_not_awaited()
     run_service = container.flow_run_service.return_value
-    run_service.list_runs_with_result_files_and_token_usage.assert_not_awaited()
+    run_service.list_runs_with_result_files_and_usage.assert_not_awaited()

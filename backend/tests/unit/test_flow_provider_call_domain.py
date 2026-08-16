@@ -4,7 +4,7 @@ import pytest
 from pydantic import ValidationError
 
 from eneo.flows.domain.provider_call import (
-    ProviderCallRequest,
+    CompletionProviderCallRequest,
     ProviderCallResponseFormat,
 )
 
@@ -20,7 +20,7 @@ def test_provider_call_request_rejects_non_canonical_capability_tuples(
     requested_capabilities: tuple[str, ...],
 ) -> None:
     with pytest.raises(ValidationError, match="sorted and unique"):
-        ProviderCallRequest.model_validate(
+        CompletionProviderCallRequest.model_validate(
             {
                 "provider_request_hash": "a" * 64,
                 "requested_capabilities": requested_capabilities,
@@ -43,7 +43,7 @@ def test_provider_call_request_rejects_inconsistent_structured_output_facts(
         ValidationError,
         match="Structured-output capability and response format must agree",
     ):
-        ProviderCallRequest(
+        CompletionProviderCallRequest(
             provider_request_hash="a" * 64,
             requested_model="openai/test-model",
             provider="openai",

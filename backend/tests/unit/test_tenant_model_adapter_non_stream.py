@@ -5,13 +5,13 @@ from uuid import uuid4
 import pytest
 from litellm.exceptions import BadRequestError
 
-from eneo.completion_models.domain.provider_call_observer import (
-    ProviderCallObserverError,
-)
 from eneo.completion_models.infrastructure.adapters.tenant_model_adapter import (
     TenantModelAdapter,
 )
 from eneo.main.exceptions import OpenAIException, ProviderCapabilityRejectedException
+from eneo.model_providers.domain.provider_call_observer import (
+    ProviderCallObserverError,
+)
 
 
 class _FakeMCPProxy:

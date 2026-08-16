@@ -269,6 +269,7 @@ async def test_audio_resolve_transcribes_in_request_order_and_persists_transcrip
         *,
         language=None,
         persist_cache_to_file,
+        observer=None,
     ):
         assert persist_cache_to_file is False
         return _transcribed(f"tx:{file_obj.name}:{language or 'auto'}")
@@ -427,6 +428,7 @@ async def test_audio_resolve_ignores_shared_file_transcription_cache(user):
         *,
         language=None,
         persist_cache_to_file,
+        observer=None,
     ):
         assert file_obj is file_1
         assert transcription_model is model
@@ -667,6 +669,7 @@ async def test_audio_resolve_multifile_near_cap_keeps_request_order(user):
         *,
         language=None,
         persist_cache_to_file,
+        observer=None,
     ):
         assert persist_cache_to_file is False
         if file_obj.name == "b.wav":

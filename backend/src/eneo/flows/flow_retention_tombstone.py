@@ -6,7 +6,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from eneo.flows.domain.flow import FlowRunTokenUsage
+from eneo.flows.domain.flow import FlowRunTokenUsage, FlowRunTranscriptionUsage
 
 FLOW_RETENTION_TOMBSTONE_SCHEMA_VERSION: Literal["flow-retention-tombstone.v1"] = (
     "flow-retention-tombstone.v1"
@@ -40,12 +40,22 @@ class RunDebugAttemptRetentionCounts(BaseModel):
     resolved_input_edge_count: int = Field(strict=True, ge=0)
     token_usage_state: Literal["recorded", "not_recorded", "unknown"] = "unknown"
     token_usage: FlowRunTokenUsage | None = None
+    transcription_usage_state: Literal["recorded", "not_recorded", "unknown"] = (
+        "unknown"
+    )
+    transcription_usage: FlowRunTranscriptionUsage | None = None
 
     @model_validator(mode="after")
-    def validate_token_usage_state(self) -> Self:
+    def validate_usage_state(self) -> Self:
         if (self.token_usage_state == "recorded") != (self.token_usage is not None):
             raise ValueError(
                 "Recorded token usage state must carry exactly one usage summary."
+            )
+        if (self.transcription_usage_state == "recorded") != (
+            self.transcription_usage is not None
+        ):
+            raise ValueError(
+                "Recorded transcription usage state must carry exactly one summary."
             )
         return self
 

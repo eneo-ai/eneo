@@ -260,7 +260,7 @@ async def rerun_flow_run_step(
         if result.created:
             dispatch_run = result.run
         elif result.run.status is FlowRunStatus.COMPLETED:
-            completed_run_view = await container.flow_run_service().enrich_run_with_result_files_and_token_usage(
+            completed_run_view = await container.flow_run_service().enrich_run_with_result_files_and_usage(
                 run=result.run,
             )
     if dispatch_run is not None:
@@ -279,6 +279,11 @@ async def rerun_flow_run_step(
         ),
         token_usage=(
             completed_run_view.token_usage if completed_run_view is not None else None
+        ),
+        transcription_usage=(
+            completed_run_view.transcription_usage
+            if completed_run_view is not None
+            else None
         ),
         final_output=(
             completed_run_view.final_output if completed_run_view is not None else None

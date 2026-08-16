@@ -22,6 +22,9 @@ if TYPE_CHECKING:
     from eneo.files.transcriber import Transcriber
     from eneo.flows.domain.flow import FlowRun
     from eneo.flows.infrastructure.flow_run_repo import FlowRunRepository
+    from eneo.model_providers.domain.provider_call_observer import (
+        ProviderCallObserver,
+    )
     from eneo.spaces.space_repo import SpaceRepository
 
 logger = logging.getLogger(__name__)
@@ -66,6 +69,7 @@ class AudioRuntimeDeps:
     actor: FlowRunActor
     # Reads one already-authorized audio file's bytes at transcription time.
     load_audio_payload: LoadAudioPayload
+    transcription_call_observer: "ProviderCallObserver | None" = None
 
 
 def apply_transcription_to_context(*, context: dict[str, Any], transcript: str) -> None:
@@ -172,6 +176,7 @@ async def resolve_transcribe_and_attach_audio_input(
         max_files=request.max_audio_files,
         max_inline_text_bytes=request.max_inline_text_bytes,
         load_audio_payload=deps.load_audio_payload,
+        transcription_call_observer=deps.transcription_call_observer,
     )
     metadata = transcription_result.to_metadata()
 

@@ -712,10 +712,11 @@ class FlowRunEvidenceService:
                 step_results=step_results,
                 **view_read_kwargs,
             )
-        token_usage_by_run_id = await self.provider_call_repo.list_token_usage_for_runs(
+        usage_by_run_id = await self.provider_call_repo.list_usage_for_runs(
             run_ids=[resolved_run.id],
             tenant_id=self.user.tenant_id,
         )
+        run_usage = usage_by_run_id.get(resolved_run.id)
         if is_view:
             step_result_usage = self._section_usage(section_usages, "step_results")
             self._record_view_omission(
@@ -740,7 +741,10 @@ class FlowRunEvidenceService:
             review_checkpoints=review_checkpoints,
             webhook_deliveries=webhook_deliveries,
             provider_calls=provider_calls,
-            token_usage=token_usage_by_run_id.get(resolved_run.id),
+            token_usage=run_usage.token_usage if run_usage is not None else None,
+            transcription_usage=(
+                run_usage.transcription_usage if run_usage is not None else None
+            ),
             runtime_input_file_metadata_by_step_result_id=(
                 runtime_input_file_metadata_by_step_result_id
             ),

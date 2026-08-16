@@ -137,6 +137,7 @@ def _provider_call_evidence() -> ProviderCallEvidence:
         step_order=1,
         attempt_no=1,
         ordinal=1,
+        call_kind="completion",
         status="completed",
         request_schema_version=2,
         provider_request_hash="a" * 64,

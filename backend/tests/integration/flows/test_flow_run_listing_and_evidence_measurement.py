@@ -60,8 +60,8 @@ from eneo.flows.domain.flow import (
     FlowStepResult,
 )
 from eneo.flows.domain.provider_call import (
+    CompletionProviderCallRequest,
     ProviderCallCompletion,
-    ProviderCallRequest,
 )
 from eneo.flows.enums import FlowStepAttemptStatus, FlowStepResultStatus
 from eneo.flows.flow_run_provenance import FlowResolvedInputEdges
@@ -349,7 +349,7 @@ async def _write_representative_evidence(
                 step_id=step_id,
                 attempt_no=attempt_no,
                 tenant_id=tenant_id,
-                request=ProviderCallRequest(
+                request=CompletionProviderCallRequest(
                     provider_request_hash=_digest(
                         f"provider-{step_order}-{attempt_no}"
                     ),
@@ -625,7 +625,7 @@ async def _measure_run_listing_page(
     bind = session.sync_session.bind
     assert bind is not None
     with _capture_queries(bind) as captured:
-        page = await run_service.list_runs_with_result_files_and_token_usage(
+        page = await run_service.list_runs_with_result_files_and_usage(
             flow_id=flow_id,
             limit=PAGE_LIMIT,
             offset=offset,

@@ -16,6 +16,7 @@ from eneo.flows.api.flow_models import (
     FlowRunStepPublic,
     FlowRunStepRerunResponse,
     FlowRunTokenUsagePublic,
+    FlowRunTranscriptionUsagePublic,
     FlowRunWebhookDeliveryPublic,
     FlowSparsePublic,
     FlowStepCreateRequest,
@@ -43,6 +44,7 @@ from eneo.flows.domain.flow import (
     FlowRunRerunOperation,
     FlowRunReviewCheckpoint,
     FlowRunTokenUsage,
+    FlowRunTranscriptionUsage,
     FlowSparse,
     FlowStep,
     FlowStepResult,
@@ -139,11 +141,17 @@ class FlowAssembler:
         *,
         result_files: Sequence[FlowRunStepResultFile] = (),
         token_usage: FlowRunTokenUsage | None = None,
+        transcription_usage: FlowRunTranscriptionUsage | None = None,
         final_output: FlowFinalOutputContractPublic | None = None,
     ) -> FlowRunPublic:
         public_token_usage = (
             FlowRunTokenUsagePublic.model_validate(token_usage)
             if token_usage is not None
+            else None
+        )
+        public_transcription_usage = (
+            FlowRunTranscriptionUsagePublic.model_validate(transcription_usage)
+            if transcription_usage is not None
             else None
         )
         return FlowRunPublic.model_validate(run).model_copy(
@@ -158,6 +166,7 @@ class FlowAssembler:
                 ),
                 "result_files": list(result_files),
                 "token_usage": public_token_usage,
+                "transcription_usage": public_transcription_usage,
             }
         )
 
@@ -167,6 +176,7 @@ class FlowAssembler:
         *,
         result_files: Sequence[FlowRunStepResultFile] = (),
         token_usage: FlowRunTokenUsage | None = None,
+        transcription_usage: FlowRunTranscriptionUsage | None = None,
         final_output: FlowFinalOutputContractPublic | None = None,
         webhook_deliveries: Sequence[FlowRunWebhookDeliveryRead] = (),
     ) -> FlowRunDetailPublic:
@@ -174,6 +184,7 @@ class FlowAssembler:
             run,
             result_files=result_files,
             token_usage=token_usage,
+            transcription_usage=transcription_usage,
             final_output=final_output,
         ).model_dump()
         return FlowRunDetailPublic.model_validate(
@@ -209,6 +220,7 @@ class FlowAssembler:
         invalidated_steps: Sequence[FlowRunRerunInvalidatedStep],
         result_files: Sequence[FlowRunStepResultFile] = (),
         token_usage: FlowRunTokenUsage | None = None,
+        transcription_usage: FlowRunTranscriptionUsage | None = None,
         final_output: FlowFinalOutputContractPublic | None = None,
     ) -> FlowRunStepRerunResponse:
         return FlowRunStepRerunResponse(
@@ -217,6 +229,7 @@ class FlowAssembler:
                 run,
                 result_files=result_files,
                 token_usage=token_usage,
+                transcription_usage=transcription_usage,
                 final_output=final_output,
             ),
             rerun_step_id=operation.rerun_step_id,

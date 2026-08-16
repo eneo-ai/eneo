@@ -44,7 +44,11 @@ from eneo.database.tables.spaces_table import Spaces
 from eneo.database.tables.tenant_table import Tenants
 from eneo.files.file_repo import primary_file_content_size_expression
 from eneo.flows.ai_builder.ai_builder_domain_models import SessionStatus
-from eneo.flows.domain.flow import FlowProviderCallTokenUsage, FlowRunTokenUsage
+from eneo.flows.domain.flow import (
+    FlowProviderCallTokenUsage,
+    FlowRunTokenUsage,
+    FlowRunTranscriptionUsage,
+)
 from eneo.flows.enums import TERMINAL_FLOW_RUN_STATUS_VALUES
 from eneo.flows.flow_retention_policy import resolve_flow_retention_policy
 from eneo.flows.flow_retention_tombstone import (
@@ -126,6 +130,25 @@ class FlowRuntimeCleanupCounts(TypedDict):
     flow_runs_skipped_undelivered_audit: int
     flow_runs_skipped_unresolved_webhook: int
     flow_runs_skipped_active_rerun: int
+
+
+def _transcription_usage_for_call(row: Any) -> FlowRunTranscriptionUsage | None:
+    """Summarise one purged transcription call before its row disappears.
+
+    A rejected request never reached the provider. A request whose outcome was
+    never learned may still have been charged, so it is left out of the total
+    and marks it incomplete rather than inflating it.
+    """
+    if row.status == "rejected":
+        return None
+    if row.status != "completed":
+        return FlowRunTranscriptionUsage.from_counts(
+            audio_seconds=0.0, completeness="incomplete"
+        )
+    return FlowRunTranscriptionUsage.from_counts(
+        audio_seconds=float(row.audio_seconds or 0),
+        completeness="complete",
+    )
 
 
 def _empty_flow_runtime_cleanup_counts() -> FlowRuntimeCleanupCounts:
@@ -2374,6 +2397,7 @@ class DataRetentionService:
 
         provider_call_counts: dict[UUID, int] = {}
         provider_call_usage: dict[UUID, FlowRunTokenUsage] = {}
+        provider_call_transcription_usage: dict[UUID, FlowRunTranscriptionUsage] = {}
         resolved_input_counts: dict[UUID, tuple[int, int]] = {}
         if attempt_ids:
             # Provider calls reference the resolved-input row; delete them first.
@@ -2382,9 +2406,11 @@ class DataRetentionService:
                 .where(FlowProviderCalls.flow_step_attempt_id.in_(attempt_ids))
                 .returning(
                     FlowProviderCalls.flow_step_attempt_id,
+                    FlowProviderCalls.call_kind,
                     FlowProviderCalls.status,
                     FlowProviderCalls.num_tokens_input,
                     FlowProviderCalls.num_tokens_output,
+                    FlowProviderCalls.audio_seconds,
                     FlowProviderCalls.input_source,
                     FlowProviderCalls.output_source,
                 )
@@ -2393,9 +2419,11 @@ class DataRetentionService:
             provider_call_rows = await self.session.stream(
                 sa.select(
                     deleted_provider_calls.c.flow_step_attempt_id,
+                    deleted_provider_calls.c.call_kind,
                     deleted_provider_calls.c.status,
                     deleted_provider_calls.c.num_tokens_input,
                     deleted_provider_calls.c.num_tokens_output,
+                    deleted_provider_calls.c.audio_seconds,
                     deleted_provider_calls.c.input_source,
                     deleted_provider_calls.c.output_source,
                 ).execution_options(yield_per=RETENTION_BATCH_SIZE)
@@ -2405,6 +2433,22 @@ class DataRetentionService:
                 provider_call_counts[attempt_id] = (
                     provider_call_counts.get(attempt_id, 0) + 1
                 )
+                if provider_call.call_kind == "transcription":
+                    call_audio_usage = _transcription_usage_for_call(provider_call)
+                    if call_audio_usage is not None:
+                        combined_audio_usage = FlowRunTranscriptionUsage.combine(
+                            usage
+                            for usage in (
+                                provider_call_transcription_usage.get(attempt_id),
+                                call_audio_usage,
+                            )
+                            if usage is not None
+                        )
+                        assert combined_audio_usage is not None
+                        provider_call_transcription_usage[attempt_id] = (
+                            combined_audio_usage
+                        )
+                    continue
                 call_usage = FlowRunTokenUsage.from_provider_calls(
                     (
                         FlowProviderCallTokenUsage(
@@ -2496,11 +2540,22 @@ class DataRetentionService:
                 else 0
             )
             new_token_usage = provider_call_usage.get(row.id)
+            new_transcription_usage = provider_call_transcription_usage.get(row.id)
             previous_token_usage = (
                 previous_counts.token_usage if previous_counts is not None else None
             )
             previous_token_usage_state = (
                 previous_counts.token_usage_state
+                if previous_counts is not None
+                else "not_recorded"
+            )
+            previous_transcription_usage = (
+                previous_counts.transcription_usage
+                if previous_counts is not None
+                else None
+            )
+            previous_transcription_usage_state = (
+                previous_counts.transcription_usage_state
                 if previous_counts is not None
                 else "not_recorded"
             )
@@ -2518,6 +2573,24 @@ class DataRetentionService:
                 )
                 token_usage_state = (
                     "recorded" if token_usage is not None else "not_recorded"
+                )
+            if (
+                previous_provider_call_count > 0
+                and previous_transcription_usage_state == "unknown"
+            ):
+                transcription_usage = None
+                transcription_usage_state = "unknown"
+            else:
+                transcription_usage = FlowRunTranscriptionUsage.combine(
+                    usage
+                    for usage in (
+                        previous_transcription_usage,
+                        new_transcription_usage,
+                    )
+                    if usage is not None
+                )
+                transcription_usage_state = (
+                    "recorded" if transcription_usage is not None else "not_recorded"
                 )
             marker = _build_attempt_retention_marker(
                 action=action,
@@ -2538,6 +2611,8 @@ class DataRetentionService:
                     ),
                     token_usage_state=token_usage_state,
                     token_usage=token_usage,
+                    transcription_usage_state=transcription_usage_state,
+                    transcription_usage=transcription_usage,
                 ),
             )
             attempt_result = await self.session.execute(

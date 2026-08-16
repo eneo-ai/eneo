@@ -72,6 +72,7 @@ import type {
   FlowRunStepInput,
   FlowRunStepInputs,
   FlowRunTokenUsage,
+  FlowRunTranscriptionUsage,
   FlowRuntimePolicy,
   FlowRuntimePolicyUpdate,
   FlowRuntimeUploadPolicy,
@@ -186,6 +187,7 @@ type PublicFlowLaunchAliasSmoke = {
   FlowRunStepInput: FlowRunStepInput;
   FlowRunStepInputs: FlowRunStepInputs;
   FlowRunTokenUsage: FlowRunTokenUsage;
+  FlowRunTranscriptionUsage: FlowRunTranscriptionUsage;
   FlowRuntimePolicy: FlowRuntimePolicy;
   FlowRuntimePolicyUpdate: FlowRuntimePolicyUpdate;
   FlowRuntimeUploadPolicy: FlowRuntimeUploadPolicy;
@@ -454,6 +456,10 @@ const validFlowRunTokenUsage: FlowRunTokenUsage = {
   num_tokens_total: 150,
   input_completeness: "complete",
   output_completeness: "complete"
+};
+const validFlowRunTranscriptionUsage: FlowRunTranscriptionUsage = {
+  audio_seconds: 345.5,
+  completeness: "incomplete"
 };
 const validFlowRunError: FlowRunError = {
   schema_version: 1,
@@ -961,6 +967,7 @@ void describeFlowRunResult(validArtifactResult);
 void describeFlowRunResult(validOutboundResult);
 void describeFlowRunInputRevision(validRerunOperation.input_revision);
 void validFlowRunTokenUsage;
+void validFlowRunTranscriptionUsage;
 void validFlowRunError;
 void validFlowRunRedispatchRequest;
 void validFlowRunRedispatchResult;

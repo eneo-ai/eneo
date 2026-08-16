@@ -10,10 +10,6 @@ from typing import Any, Awaitable, Final, Literal, Protocol, Sequence, cast
 from uuid import UUID
 
 from eneo.ai_models.completion_models.completion_model import Completion, ModelKwargs
-from eneo.completion_models.domain.provider_call_observer import (
-    ProviderCallObserver,
-    ProviderCallReason,
-)
 from eneo.completion_models.infrastructure.completion_service import CompletionService
 from eneo.completion_models.infrastructure.context_builder import (
     ContextWindowExceededError,
@@ -78,6 +74,10 @@ from eneo.info_blobs.info_blob import InfoBlobChunkInDBWithScore
 from eneo.main.exceptions import (
     ProviderCapabilityRejectedException,
     TypedIOValidationException,
+)
+from eneo.model_providers.domain.provider_call_observer import (
+    ProviderCallObserver,
+    ProviderCallReason,
 )
 
 
@@ -214,6 +214,7 @@ class ResolveStepInputFn(Protocol):
         state: RunExecutionState,
         version_metadata: dict[str, Any] | None,
         requested_file_ids: Sequence[UUID],
+        transcription_call_observer: ProviderCallObserver | None,
     ) -> Awaitable[StepInputValue]: ...
 
 
@@ -272,6 +273,10 @@ class BuildProviderCallObserverFn(Protocol):
     ) -> ProviderCallObserver: ...
 
 
+class BuildTranscriptionCallObserverFn(Protocol):
+    def __call__(self) -> ProviderCallObserver: ...
+
+
 class FlowStepCancelledError(Exception):
     pass
 
@@ -319,6 +324,7 @@ class StepExecutionRuntimeDeps:
     llm_task_cancellation_grace_seconds: float = LLM_TASK_CANCELLATION_GRACE_SECONDS
     rag_retrieval_timeout_seconds: float = 30
     build_provider_call_observer: BuildProviderCallObserverFn | None = None
+    build_transcription_call_observer: BuildTranscriptionCallObserverFn | None = None
     mapped_call_context: MappedProviderCallProvenance | None = None
 
 
@@ -1059,6 +1065,11 @@ async def prepare_step_execution(
                 state=state,
                 version_metadata=version_metadata,
                 requested_file_ids=requested_file_ids,
+                transcription_call_observer=(
+                    deps.build_transcription_call_observer()
+                    if deps.build_transcription_call_observer is not None
+                    else None
+                ),
             )
         except TypedIOValidationException as exc:
             raise attach_typed_failure_context(

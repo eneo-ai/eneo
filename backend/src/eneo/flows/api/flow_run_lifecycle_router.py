@@ -431,7 +431,7 @@ async def create_flow_run(
                 dispatch_run = run
             elif run.status is FlowRunStatus.COMPLETED:
                 completed_replay_view = (
-                    await run_service.enrich_run_with_result_files_and_token_usage(
+                    await run_service.enrich_run_with_result_files_and_usage(
                         run=run,
                     )
                 )
@@ -463,6 +463,7 @@ async def create_flow_run(
             completed_replay_view.run,
             result_files=completed_replay_view.result_files,
             token_usage=completed_replay_view.token_usage,
+            transcription_usage=completed_replay_view.transcription_usage,
             final_output=completed_replay_view.final_output,
         )
     return assembler.to_run_public(run)
@@ -536,7 +537,7 @@ async def list_flow_runs(
         allow_service_key_principals=True,
     )
     run_service = container.flow_run_service()
-    page = await run_service.list_runs_with_result_files_and_token_usage(
+    page = await run_service.list_runs_with_result_files_and_usage(
         flow_id=id,
         statuses=statuses,
         limit=limit,
@@ -550,6 +551,7 @@ async def list_flow_runs(
                 item.run,
                 result_files=item.result_files,
                 token_usage=item.token_usage,
+                transcription_usage=item.transcription_usage,
                 final_output=item.final_output,
             )
             for item in page.items
@@ -599,7 +601,7 @@ async def get_flow_run(
         allow_service_key_principals=True,
     )
     run_service = container.flow_run_service()
-    run_view = await run_service.get_run_detail_with_result_files_and_token_usage(
+    run_view = await run_service.get_run_detail_with_result_files_and_usage(
         run_id=run_id,
         flow_id=id,
     )
@@ -607,6 +609,7 @@ async def get_flow_run(
         run_view.run,
         result_files=run_view.result_files,
         token_usage=run_view.token_usage,
+        transcription_usage=run_view.transcription_usage,
         final_output=run_view.final_output,
         webhook_deliveries=run_view.webhook_deliveries,
     )
@@ -658,7 +661,7 @@ async def cancel_flow_run(
         run = await run_service.cancel_run(run_id=run_id, flow_id=id)
         if run.status is FlowRunStatus.COMPLETED:
             completed_run_view = (
-                await run_service.enrich_run_with_result_files_and_token_usage(
+                await run_service.enrich_run_with_result_files_and_usage(
                     run=run,
                 )
             )
@@ -667,6 +670,7 @@ async def cancel_flow_run(
             completed_run_view.run,
             result_files=completed_run_view.result_files,
             token_usage=completed_run_view.token_usage,
+            transcription_usage=completed_run_view.transcription_usage,
             final_output=completed_run_view.final_output,
         )
     return FlowAssembler().to_run_public(run)
@@ -805,7 +809,7 @@ async def redispatch_flow_run(
     run = dispatch_result.run
     redispatched_count = int(isinstance(dispatch_result, FlowRunDispatchAccepted))
     completed_run_view = (
-        await run_service.enrich_run_with_result_files_and_token_usage(run=run)
+        await run_service.enrich_run_with_result_files_and_usage(run=run)
         if run.status is FlowRunStatus.COMPLETED
         else None
     )
@@ -815,6 +819,7 @@ async def redispatch_flow_run(
             completed_run_view.run,
             result_files=completed_run_view.result_files,
             token_usage=completed_run_view.token_usage,
+            transcription_usage=completed_run_view.transcription_usage,
             final_output=completed_run_view.final_output,
         )
         if completed_run_view is not None

@@ -22,9 +22,6 @@ from eneo.authentication.auth_models import (
 )
 from eneo.authentication.principal_types import PrincipalType
 from eneo.completion_models.domain.model_kwargs_capabilities import SupportedModelKwargs
-from eneo.completion_models.domain.provider_call_observer import (
-    ProviderCallObserverError,
-)
 from eneo.files.file_models import FileType
 from eneo.files.file_service import FileService
 from eneo.flows.assistant_execution_snapshot import (
@@ -117,6 +114,9 @@ from eneo.main.exceptions import (
     ProviderCapabilityRejectedException,
     ProviderRejectedRequestException,
     TypedIOValidationException,
+)
+from eneo.model_providers.domain.provider_call_observer import (
+    ProviderCallObserverError,
 )
 from tests.fixtures import retrieved_info_blob_chunk
 

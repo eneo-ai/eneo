@@ -176,6 +176,8 @@ async def _add_provider_call(
     session.add(
         FlowProviderCalls(
             flow_step_attempt_id=attempt_id,
+            resolved_inputs_attempt_id=attempt_id,
+            call_kind="completion",
             ordinal=1,
             status="started",
             request_schema_version=2,
@@ -1014,6 +1016,8 @@ async def test_measurements_cover_every_variable_width_evidence_projection(
         session.add(
             FlowProviderCalls(
                 flow_step_attempt_id=attempt_id,
+                resolved_inputs_attempt_id=attempt_id,
+                call_kind="completion",
                 ordinal=1,
                 status="started",
                 request_schema_version=2,

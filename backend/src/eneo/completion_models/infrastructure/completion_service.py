@@ -24,10 +24,6 @@ from eneo.completion_models.domain.model_kwargs_capabilities import (
     ModelKwargCapability,
     SupportedModelKwargs,
 )
-from eneo.completion_models.domain.provider_call_observer import (
-    ProviderCallObserver,
-    ProviderCallReason,
-)
 from eneo.completion_models.domain.skill_activation import SkillActivationRuntime
 from eneo.completion_models.infrastructure.adapters.base_adapter import ProviderInput
 from eneo.completion_models.infrastructure.context_builder import ContextBuilder
@@ -48,6 +44,10 @@ from eneo.mcp_servers.infrastructure.proxy import (
     MCPProxySessionFactory,
 )
 from eneo.mcp_servers.infrastructure.tool_approval import get_approval_manager
+from eneo.model_providers.domain.provider_call_observer import (
+    ProviderCallObserver,
+    ProviderCallReason,
+)
 from eneo.sessions.session import SessionInDB
 from eneo.settings.encryption_service import EncryptionService
 from eneo.tokens.token_utils import log_token_count_drift

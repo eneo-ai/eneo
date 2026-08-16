@@ -333,6 +333,7 @@ FLOW_RUN_PUBLIC_EXAMPLE: dict[str, Any] = {
     "result": None,
     "result_files": [],
     "token_usage": None,
+    "transcription_usage": None,
     "error": None,
     "job_id": "00000000-0000-0000-0000-000000000401",
     "created_at": "2026-03-17T10:05:00Z",
@@ -948,6 +949,26 @@ class FlowRunTokenUsagePublic(BaseModel):
     )
 
 
+class FlowRunTranscriptionUsagePublic(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    audio_seconds: float = Field(
+        ge=0,
+        description=(
+            "Audio this run sent to a transcription provider, summed over every "
+            "completed request in every attempt. Rejected requests contribute "
+            "nothing. This is what was sent, not a price and not proof of billing."
+        ),
+    )
+    completeness: Literal["complete", "incomplete"] = Field(
+        description=(
+            "Whether every transcription request this run made reached a known "
+            "outcome. `incomplete` means the total is a lower bound: a request "
+            "may have been charged without Eneo learning its result."
+        ),
+    )
+
+
 class FlowRunPublic(BaseModel):
     model_config = ConfigDict(
         from_attributes=True, json_schema_extra={"example": FLOW_RUN_PUBLIC_EXAMPLE}
@@ -1078,6 +1099,14 @@ class FlowRunPublic(BaseModel):
             "including files the final result does not carry. Download one with "
             "`POST {api_prefix}/flows/{id}/runs/{run_id}/artifacts/{file_id}/signed-url/` "
             "using its `file_id`, and only when its `availability` is `available`."
+        ),
+    )
+    transcription_usage: FlowRunTranscriptionUsagePublic | None = Field(
+        default=None,
+        description=(
+            "Audio this run sent to a transcription provider, or null when it "
+            "made no transcription requests. Independent of `token_usage`: "
+            "transcription is not metered in tokens."
         ),
     )
     token_usage: FlowRunTokenUsagePublic | None = Field(
@@ -1787,6 +1816,7 @@ class FlowRunDebugRunSummary(BaseModel):
     duration_ms: int | None = None
     models_used: list[str] = Field(default_factory=list)
     token_usage: FlowRunTokenUsagePublic | None = None
+    transcription_usage: FlowRunTranscriptionUsagePublic | None = None
     knowledge_evidence_view: FlowRunDebugKnowledgeEvidenceView | None = Field(
         default=None,
         description=(
@@ -2262,7 +2292,7 @@ class FlowRunEvidenceExportResponse(BaseModel):
             "example": {
                 "schema_version": "flow-evidence-export.v16",
                 "generated_at": "2026-03-31T12:00:00Z",
-                "content_hash": "6a232dd68de214d44e0c6ea43f90a665f93c1d9370f16e9e41caa812641a5d29",
+                "content_hash": "d9cc3fcbe1b1225ec590d424475bda6694d16825a92231363bf90f9e7c11c182",
                 "manifest": {
                     "schema_version": "flow-evidence-export.v16",
                     "app_version": "DEV",
@@ -2274,7 +2304,7 @@ class FlowRunEvidenceExportResponse(BaseModel):
                     "flow_id": "f6f2d8fa-2d47-4d08-a7a9-2fef0b37c5ec",
                     "trace_id": "52907745-7678-40a8-9d1c-18af6b1a9fd8",
                     "flow_version": 3,
-                    "content_hash": "6a232dd68de214d44e0c6ea43f90a665f93c1d9370f16e9e41caa812641a5d29",
+                    "content_hash": "d9cc3fcbe1b1225ec590d424475bda6694d16825a92231363bf90f9e7c11c182",
                     "content_hash_input": "redacted",
                     "exported_at": "2026-03-31T12:00:00Z",
                     "actor": {

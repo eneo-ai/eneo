@@ -1,7 +1,10 @@
 # MIT License
 
+import asyncio
+import hashlib
 from pathlib import Path
 from typing import TYPE_CHECKING
+from uuid import UUID
 
 from tenacity import (
     retry,
@@ -13,6 +16,12 @@ from tenacity import (
 from eneo.files.audio import AudioFile
 from eneo.main.logging import get_logger
 from eneo.model_providers.domain.model_route import resolve_model_route
+from eneo.model_providers.domain.provider_call_observer import (
+    ProviderCallObserver,
+    ProviderCallObserverError,
+    TranscriptionCallResultFacts,
+    build_transcription_call_request_facts,
+)
 from eneo.model_providers.infrastructure import litellm_transport
 from eneo.model_providers.infrastructure.litellm_provider import (
     build_litellm_provider_kwargs,
@@ -79,7 +88,11 @@ class LiteLLMTranscriptionAdapter:
         return kwargs
 
     async def get_text_from_file(
-        self, audio_file: AudioFile, *, language: str | None = None
+        self,
+        audio_file: AudioFile,
+        *,
+        language: str | None = None,
+        observer: "ProviderCallObserver | None" = None,
     ) -> str:
         """
         Transcribe an audio file, splitting into 5-minute chunks with timestamps.
@@ -93,14 +106,20 @@ class LiteLLMTranscriptionAdapter:
             total_chunks = len(files)
 
             for i, path in enumerate(files):
-                block_text = await self._transcribe_chunk(path, language=language)
                 start_time = chunk_index * five_minutes
+                chunk_end = (
+                    total_duration_seconds
+                    if i == total_chunks - 1
+                    else (chunk_index + 1) * five_minutes
+                )
+                block_text = await self._transcribe_chunk(
+                    path,
+                    language=language,
+                    observer=observer,
+                    audio_seconds=max(float(chunk_end - start_time), 0.0),
+                )
 
-                # For the last chunk, calculate the correct end time based on total duration
-                if i == total_chunks - 1:
-                    end_time = total_duration_seconds
-                else:
-                    end_time = (chunk_index + 1) * five_minutes
+                end_time = chunk_end
 
                 start_time_formatted = f"{start_time // 60}:{start_time % 60:02d}"
                 end_time_formatted = f"{end_time // 60}:{end_time % 60:02d}"
@@ -119,15 +138,28 @@ class LiteLLMTranscriptionAdapter:
         wait=wait_random_exponential(min=1, max=20),
         stop=stop_after_attempt(3),
         retry=retry_if_not_exception_type(
+            # A failure to record what a request did must never send that request
+            # again: the provider already did the work and may already have
+            # charged for it.
             litellm_transport.NON_RETRYABLE_PROVIDER_ERRORS
+            + (ProviderCallObserverError,)
         ),
         reraise=True,
     )
     async def _transcribe_chunk(
-        self, file_path: Path, *, language: str | None = None
+        self,
+        file_path: Path,
+        *,
+        language: str | None = None,
+        observer: "ProviderCallObserver | None" = None,
+        audio_seconds: float = 0.0,
     ) -> str:
         """
         Transcribe a single audio chunk using LiteLLM.
+
+        Each network attempt is its own recorded request, so a retry after an
+        unknown outcome is visible rather than folded into the attempt it
+        replaced.
         """
         kwargs = self._prepare_kwargs()
 
@@ -148,6 +180,23 @@ class LiteLLMTranscriptionAdapter:
             f"[LiteLLM] {self.litellm_model}: Making transcription request for chunk"
         )
 
+        call_id: UUID | None = None
+        if observer is not None:
+            effective_language = kwargs.get("language")
+            call_id = await observer.started(
+                build_transcription_call_request_facts(
+                    requested_model=self.litellm_model,
+                    provider=self.provider_type,
+                    language=(
+                        effective_language
+                        if isinstance(effective_language, str)
+                        else None
+                    ),
+                    audio_digest=await asyncio.to_thread(_digest_file, file_path),
+                    audio_seconds=audio_seconds,
+                )
+            )
+
         try:
             with open(file_path, "rb") as audio_file:
                 response = await litellm_transport.atranscription(
@@ -155,15 +204,37 @@ class LiteLLMTranscriptionAdapter:
                     file=audio_file,
                     **kwargs,
                 )
-
-            logger.debug(f"[LiteLLM] {self.litellm_model}: Transcription successful")
-            return response.text  # type: ignore[return-value]
-
+        except asyncio.CancelledError:
+            if observer is not None and call_id is not None:
+                await observer.outcome_unknown(call_id, "request_cancelled")
+            raise
         except Exception as e:
             logger.exception(f"[LiteLLM] {self.litellm_model}: Unknown exception:")
+            if observer is not None and call_id is not None:
+                await observer.outcome_unknown(call_id, "provider_error")
             litellm_transport.raise_public_litellm_error(
                 e,
                 provider_type=self.provider_type,
                 is_unavailable=litellm_transport.is_provider_unavailable_error,
                 raise_unavailable=litellm_transport.raise_provider_unavailable,
             )
+            raise AssertionError("Provider error mapping unexpectedly returned.")
+
+        logger.debug(f"[LiteLLM] {self.litellm_model}: Transcription successful")
+        if observer is not None and call_id is not None:
+            await observer.completed(
+                call_id,
+                TranscriptionCallResultFacts(
+                    response_model=getattr(response, "model", None),
+                    provider_response_id=getattr(response, "id", None),
+                ),
+            )
+        return response.text  # type: ignore[return-value]
+
+
+def _digest_file(file_path: Path) -> str:
+    digest = hashlib.sha256()
+    with open(file_path, "rb") as handle:
+        for block in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(block)
+    return digest.hexdigest()

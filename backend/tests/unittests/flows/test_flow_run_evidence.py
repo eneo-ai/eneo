@@ -1764,6 +1764,7 @@ def test_evidence_export_redacted_preserves_retention_marker_fields() -> None:
         "resolved_input_aggregate_count": 0,
         "resolved_input_edge_count": 0,
         "token_usage_state": "unknown",
+        "transcription_usage_state": "unknown",
     }
     assert not any(
         path.startswith("bundle.step_attempts.0.provenance_json.tombstone")

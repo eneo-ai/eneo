@@ -18387,6 +18387,7 @@ export interface components {
       /** Steps Count */
       steps_count: number;
       token_usage?: components["schemas"]["FlowRunTokenUsagePublic"] | null;
+      transcription_usage?: components["schemas"]["FlowRunTranscriptionUsagePublic"] | null;
     };
     /** FlowRunDebugSecurity */
     FlowRunDebugSecurity: {
@@ -18573,6 +18574,8 @@ export interface components {
        * @description Correlation id shared by this run's audit and evidence records. Quote it in support requests.
        */
       trace_id: string;
+      /** @description Audio this run sent to a transcription provider, or null when it made no transcription requests. Independent of `token_usage`: transcription is not metered in tokens. */
+      transcription_usage?: components["schemas"]["FlowRunTranscriptionUsagePublic"] | null;
       /**
        * Updated At
        * Format: date-time
@@ -18859,6 +18862,7 @@ export interface components {
      *             {
      *               "attempt_id": "00000000-0000-0000-0000-000000000701",
      *               "attempt_no": 1,
+     *               "call_kind": "completion",
      *               "call_reason": "initial",
      *               "event_id": "00000000-0000-0000-0000-000000000801",
      *               "finished_at": "2026-07-26T12:00:01Z",
@@ -19035,7 +19039,7 @@ export interface components {
      *           }
      *         ]
      *       },
-     *       "content_hash": "6a232dd68de214d44e0c6ea43f90a665f93c1d9370f16e9e41caa812641a5d29",
+     *       "content_hash": "d9cc3fcbe1b1225ec590d424475bda6694d16825a92231363bf90f9e7c11c182",
      *       "generated_at": "2026-03-31T12:00:00Z",
      *       "manifest": {
      *         "actor": {
@@ -19071,7 +19075,7 @@ export interface components {
      *           "total_size_bytes": 14012,
      *           "tracking_state": "tracked"
      *         },
-     *         "content_hash": "6a232dd68de214d44e0c6ea43f90a665f93c1d9370f16e9e41caa812641a5d29",
+     *         "content_hash": "d9cc3fcbe1b1225ec590d424475bda6694d16825a92231363bf90f9e7c11c182",
      *         "content_hash_input": "redacted",
      *         "detail_mode": "redacted",
      *         "export_reason": "support_debug",
@@ -19583,6 +19587,7 @@ export interface components {
      *           {
      *             "attempt_id": "00000000-0000-0000-0000-000000000701",
      *             "attempt_no": 1,
+     *             "call_kind": "completion",
      *             "call_reason": "initial",
      *             "event_id": "00000000-0000-0000-0000-000000000801",
      *             "finished_at": "2026-07-26T12:00:01Z",
@@ -20057,6 +20062,8 @@ export interface components {
        * @description Correlation id shared by this run's audit and evidence records. Quote it in support requests.
        */
       trace_id: string;
+      /** @description Audio this run sent to a transcription provider, or null when it made no transcription requests. Independent of `token_usage`: transcription is not metered in tokens. */
+      transcription_usage?: components["schemas"]["FlowRunTranscriptionUsagePublic"] | null;
       /**
        * Updated At
        * Format: date-time
@@ -21457,6 +21464,20 @@ export interface components {
        * @enum {string}
        */
       output_completeness: "complete" | "incomplete";
+    };
+    /** FlowRunTranscriptionUsagePublic */
+    FlowRunTranscriptionUsagePublic: {
+      /**
+       * Audio Seconds
+       * @description Audio this run sent to a transcription provider, summed over every completed request in every attempt. Rejected requests contribute nothing. This is what was sent, not a price and not proof of billing.
+       */
+      audio_seconds: number;
+      /**
+       * Completeness
+       * @description Whether every transcription request this run made reached a known outcome. `incomplete` means the total is a lower bound: a request may have been charged without Eneo learning its result.
+       * @enum {string}
+       */
+      completeness: "complete" | "incomplete";
     };
     /**
      * FlowRunWebhookDeliveryPublic
@@ -27048,6 +27069,13 @@ export interface components {
       attempt_id: string;
       /** Attempt No */
       attempt_no: number;
+      /**
+       * Audio Seconds
+       * @description Decoded length of the audio this transcription request sent. Recorded when the request starts, so an attempt with an unknown outcome still reports what it may have been charged for. Null for completion calls.
+       */
+      audio_seconds?: number | null;
+      /** @description Which provider surface this request went to. A completion call is metered in tokens; a transcription call is metered in audio seconds. */
+      call_kind: components["schemas"]["ProviderCallKind"];
       call_reason: components["schemas"]["ProviderCallReason"];
       /**
        * Event Id
@@ -27160,6 +27188,7 @@ export interface components {
      *         {
      *           "attempt_id": "00000000-0000-0000-0000-000000000701",
      *           "attempt_no": 1,
+     *           "call_kind": "completion",
      *           "call_reason": "initial",
      *           "event_id": "00000000-0000-0000-0000-000000000801",
      *           "finished_at": "2026-07-26T12:00:01Z",
@@ -27208,6 +27237,11 @@ export interface components {
        */
       total_count_truncated?: boolean;
     };
+    /**
+     * ProviderCallKind
+     * @enum {string}
+     */
+    ProviderCallKind: "completion" | "transcription";
     /**
      * ProviderCallReason
      * @enum {string}

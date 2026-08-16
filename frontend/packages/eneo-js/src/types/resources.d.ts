@@ -273,6 +273,7 @@ export type AIBuilderSessionTelemetrySummary = components["schemas"]["SessionTel
 export type FlowRunResultFile = components["schemas"]["FlowRunStepResultFile"];
 export type FlowRunResult = NonNullable<components["schemas"]["FlowRunPublic"]["result"]>;
 export type FlowRunTokenUsage = components["schemas"]["FlowRunTokenUsagePublic"];
+export type FlowRunTranscriptionUsage = components["schemas"]["FlowRunTranscriptionUsagePublic"];
 export type FlowRunError = components["schemas"]["FlowRunError"];
 
 export type FlowRunOutputPayload = {

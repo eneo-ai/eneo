@@ -20,6 +20,7 @@
   import FlowRunResultFileButton from "./FlowRunResultFileButton.svelte";
   import FlowRunStatusBadge from "./FlowRunStatusBadge.svelte";
   import FlowRunTokenUsageBadge from "./FlowRunTokenUsageBadge.svelte";
+  import FlowRunTranscriptionUsageBadge from "./FlowRunTranscriptionUsageBadge.svelte";
   import { getLocale } from "$lib/paraglide/runtime";
   import { toast } from "$lib/components/toast";
   import { getFlowRunStatusLabel } from "./flowRunStatusLabel";
@@ -550,7 +551,12 @@
                     class="hidden px-4 py-3 align-middle lg:table-cell"
                     onclick={(e: MouseEvent) => e.stopPropagation()}
                   >
-                    <FlowRunTokenUsageBadge tokenUsage={run.token_usage} />
+                    <div class="flex items-center gap-1.5">
+                      <FlowRunTokenUsageBadge tokenUsage={run.token_usage} />
+                      <FlowRunTranscriptionUsageBadge
+                        transcriptionUsage={run.transcription_usage}
+                      />
+                    </div>
                   </Table.Cell>
                 {/if}
                 <!-- eslint-disable-next-line a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
@@ -684,6 +690,7 @@
                 <div class="flex shrink-0 items-center gap-1.5">
                   {#if showAdvancedControls}
                     <FlowRunTokenUsageBadge tokenUsage={run.token_usage} interactive={false} />
+                    <FlowRunTranscriptionUsageBadge transcriptionUsage={run.transcription_usage} />
                   {/if}
                   {#if run.status === "completed" || run.status === "failed"}
                     <p class="text-muted text-xs tabular-nums">

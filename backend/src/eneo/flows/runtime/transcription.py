@@ -18,6 +18,9 @@ from eneo.flows.transcription_config import (
     to_provider_language,
 )
 from eneo.main.exceptions import NotFoundException, TypedIOValidationException
+from eneo.model_providers.domain.provider_call_observer import (
+    ProviderCallObserverError,
+)
 
 # Reads one authorized audio file's bytes, immediately before transcription.
 LoadAudioPayload: TypeAlias = Callable[[UUID], Awaitable["File"]]
@@ -105,6 +108,9 @@ def _join_transcription_blocks(
 if TYPE_CHECKING:
     from eneo.files.file_models import File, FileInfo
     from eneo.files.transcriber import Transcriber
+    from eneo.model_providers.domain.provider_call_observer import (
+        ProviderCallObserver,
+    )
     from eneo.spaces.space_repo import SpaceRepository
     from eneo.transcription_models.domain.transcription_model import (
         TranscriptionModel,
@@ -204,6 +210,7 @@ async def transcribe_audio_input(
     max_files: int,
     max_inline_text_bytes: int,
     load_audio_payload: "LoadAudioPayload",
+    transcription_call_observer: "ProviderCallObserver | None" = None,
     near_limit_ratio: float = 0.85,
 ) -> FlowTranscriptionResult:
     """Transcribe each audio file in request order, one payload at a time.
@@ -263,10 +270,14 @@ async def transcribe_audio_input(
                     transcription_model,
                     language=provider_language,
                     persist_cache_to_file=False,
+                    observer=transcription_call_observer,
                 )
             finally:
                 del audio_file
-        except TypedIOValidationException:
+        except (TypedIOValidationException, ProviderCallObserverError):
+            # A failure to record what a request did is not a transcription
+            # fault, and the executor already reports it as the evidence gap it
+            # is. Flattening it here would hide which request went unrecorded.
             raise
         except Exception as exc:
             raise TypedIOValidationException(
@@ -338,6 +349,7 @@ async def resolve_and_transcribe_audio_for_step(
     max_files: int,
     max_inline_text_bytes: int,
     load_audio_payload: LoadAudioPayload,
+    transcription_call_observer: "ProviderCallObserver | None" = None,
 ) -> FlowTranscriptionResult:
     try:
         transcription_config = parse_transcription_config(version_metadata)
@@ -382,4 +394,5 @@ async def resolve_and_transcribe_audio_for_step(
         max_files=max_files,
         max_inline_text_bytes=max_inline_text_bytes,
         load_audio_payload=load_audio_payload,
+        transcription_call_observer=transcription_call_observer,
     )

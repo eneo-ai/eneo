@@ -21,6 +21,11 @@ from eneo.flows.flow_run_provenance import (
 )
 
 PROVIDER_REQUEST_HASH_PATTERN = r"^[0-9a-f]{64}$"
+TRANSCRIPTION_REQUEST_HASH_DESCRIPTION = (
+    "SHA-256 of Eneo's canonical transcription request intent at the provider "
+    "adapter boundary: requested model, provider, effective language, and a "
+    "digest of the audio sent. Retries of the same audio share this hash."
+)
 PROVIDER_REQUEST_HASH_DESCRIPTION = (
     "SHA-256 of Eneo's canonical non-streaming request intent at the provider "
     "adapter boundary: requested model, provider, ordered messages, and "
@@ -37,6 +42,7 @@ PROVIDER_CALL_EVIDENCE_PAGE_EXAMPLE: dict[str, JsonValue] = {
             "step_order": 1,
             "attempt_no": 1,
             "ordinal": 1,
+            "call_kind": "completion",
             "status": "completed",
             "request_schema_version": 2,
             "provider_request_hash": "a" * 64,
@@ -63,6 +69,11 @@ PROVIDER_CALL_EVIDENCE_PAGE_EXAMPLE: dict[str, JsonValue] = {
     "has_more": True,
     "next_after_event_id": "00000000-0000-0000-0000-000000000801",
 }
+
+
+class ProviderCallKind(str, Enum):
+    COMPLETION = "completion"
+    TRANSCRIPTION = "transcription"
 
 
 class ProviderCallStatus(str, Enum):
@@ -121,11 +132,12 @@ class ProviderCallUnknownReason(str, Enum):
     STALE_STARTED = "stale_started"
 
 
-class ProviderCallRequest(BaseModel):
-    """Credential-free identity facts for one outbound provider request."""
+class CompletionProviderCallRequest(BaseModel):
+    """Credential-free identity facts for one outbound completion request."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
+    call_kind: Literal[ProviderCallKind.COMPLETION] = ProviderCallKind.COMPLETION
     request_schema_version: Literal[2] = 2
     provider_request_hash: str = Field(
         pattern=PROVIDER_REQUEST_HASH_PATTERN,
@@ -139,7 +151,9 @@ class ProviderCallRequest(BaseModel):
     mapped_call: MappedProviderCallProvenance | None = None
 
     @model_validator(mode="after")
-    def validate_capabilities_match_response_format(self) -> "ProviderCallRequest":
+    def validate_capabilities_match_response_format(
+        self,
+    ) -> "CompletionProviderCallRequest":
         structured_output_requested = (
             ProviderCallRequestedCapability.STRUCTURED_OUTPUT
             in self.requested_capabilities
@@ -155,9 +169,37 @@ class ProviderCallRequest(BaseModel):
         return self
 
 
+class TranscriptionProviderCallRequest(BaseModel):
+    """Credential-free identity facts for one outbound transcription request.
+
+    ``audio_seconds`` is the decoded length of the audio this request sends. It
+    is known before the request leaves, so a request whose outcome is never
+    learned still says how much audio it may have been charged for.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    call_kind: Literal[ProviderCallKind.TRANSCRIPTION] = ProviderCallKind.TRANSCRIPTION
+    request_schema_version: Literal[2] = 2
+    provider_request_hash: str = Field(
+        pattern=PROVIDER_REQUEST_HASH_PATTERN,
+        description=TRANSCRIPTION_REQUEST_HASH_DESCRIPTION,
+    )
+    requested_model: str = Field(min_length=1, max_length=255)
+    provider: str | None = Field(default=None, min_length=1, max_length=128)
+    audio_seconds: float = Field(ge=0)
+
+
+ProviderCallRequest = Annotated[
+    CompletionProviderCallRequest | TranscriptionProviderCallRequest,
+    Field(discriminator="call_kind"),
+]
+
+
 class ProviderCallCompletion(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
+    call_kind: Literal[ProviderCallKind.COMPLETION] = ProviderCallKind.COMPLETION
     response_model: str | None = Field(default=None, max_length=255)
     provider_response_id: str | None = Field(default=None, max_length=512)
     num_tokens_input: int | None = Field(default=None, ge=0)
@@ -171,6 +213,10 @@ class ProviderCallCompletion(BaseModel):
             (self.num_tokens_input, self.input_source, "input"),
             (self.num_tokens_output, self.output_source, "output"),
         ):
+            if source == "not_applicable":
+                raise ValueError(
+                    f"A completion call always has an {dimension} token dimension."
+                )
             if (count is None) != (source == "not_reported"):
                 raise ValueError(
                     f"Provider call {dimension} count must be absent exactly "
@@ -179,12 +225,30 @@ class ProviderCallCompletion(BaseModel):
         return self
 
 
+class TranscriptionCallCompletion(BaseModel):
+    """Outcome of a transcription request. Transcription is not metered by tokens."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    call_kind: Literal[ProviderCallKind.TRANSCRIPTION] = ProviderCallKind.TRANSCRIPTION
+    response_model: str | None = Field(default=None, max_length=255)
+    provider_response_id: str | None = Field(default=None, max_length=512)
+
+
+ProviderCallReceiptValue = ProviderCallCompletion | TranscriptionCallCompletion
+ProviderCallReceipt = Annotated[
+    ProviderCallReceiptValue,
+    Field(discriminator="call_kind"),
+]
+
+
 class ProviderCall(BaseModel):
     model_config = ConfigDict(from_attributes=True, extra="forbid")
 
     id: UUID
     flow_step_attempt_id: UUID
     ordinal: int = Field(ge=1)
+    call_kind: ProviderCallKind
     status: ProviderCallStatus
     request_schema_version: Literal[2]
     provider_request_hash: str = Field(
@@ -205,6 +269,7 @@ class ProviderCall(BaseModel):
     provider_response_id: str | None
     num_tokens_input: int | None = Field(default=None, ge=0)
     num_tokens_output: int | None = Field(default=None, ge=0)
+    audio_seconds: float | None = Field(default=None, ge=0)
     input_source: TokenCountSource | None
     output_source: TokenCountSource | None
     outcome_reason: ProviderCallRejectionReason | ProviderCallUnknownReason | None
@@ -245,6 +310,12 @@ class ProviderCallEvidence(BaseModel):
     step_order: int = Field(ge=1)
     attempt_no: int = Field(ge=1)
     ordinal: int = Field(ge=1)
+    call_kind: ProviderCallKind = Field(
+        description=(
+            "Which provider surface this request went to. A completion call is "
+            "metered in tokens; a transcription call is metered in audio seconds."
+        )
+    )
     status: ProviderCallStatus
     request_schema_version: Literal[2]
     provider_request_hash: str = Field(
@@ -270,6 +341,15 @@ class ProviderCallEvidence(BaseModel):
     provider_response_id: str | None
     num_tokens_input: int | None = Field(default=None, ge=0)
     num_tokens_output: int | None = Field(default=None, ge=0)
+    audio_seconds: float | None = Field(
+        default=None,
+        ge=0,
+        description=(
+            "Decoded length of the audio this transcription request sent. Recorded "
+            "when the request starts, so an attempt with an unknown outcome still "
+            "reports what it may have been charged for. Null for completion calls."
+        ),
+    )
     input_source: TokenCountSource | None
     output_source: TokenCountSource | None
     outcome_reason: ProviderCallRejectionReason | ProviderCallUnknownReason | None = (
@@ -304,6 +384,7 @@ class ProviderCallEvidencePage(BaseModel):
         return self
 
 
+PROVIDER_CALL_KIND_VALUES = tuple(item.value for item in ProviderCallKind)
 PROVIDER_CALL_STATUS_VALUES = tuple(item.value for item in ProviderCallStatus)
 PROVIDER_CALL_RESPONSE_FORMAT_VALUES = tuple(
     item.value for item in ProviderCallResponseFormat

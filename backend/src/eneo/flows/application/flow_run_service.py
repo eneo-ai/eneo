@@ -22,6 +22,7 @@ from eneo.flows.domain.flow import (
     FlowRun,
     FlowRunStatus,
     FlowRunTokenUsage,
+    FlowRunTranscriptionUsage,
     FlowStepResult,
 )
 from eneo.flows.domain.flow_run_exceptions import (
@@ -64,6 +65,7 @@ from eneo.flows.flow_run_step_result_file import FlowRunStepResultFile
 from eneo.flows.flow_runtime_upload_repo import FlowRuntimeUploadRepository
 from eneo.flows.infrastructure.flow_provider_call_repo import (
     FlowProviderCallRepository,
+    FlowRunUsage,
 )
 from eneo.flows.infrastructure.flow_repo import FlowRepository
 from eneo.flows.infrastructure.flow_run_repo import (
@@ -120,22 +122,33 @@ class FlowRunVersionedView:
     step_results: Sequence[FlowStepResult]
 
 
+def _token_usage(usage: FlowRunUsage | None) -> FlowRunTokenUsage | None:
+    return usage.token_usage if usage is not None else None
+
+
+def _transcription_usage(
+    usage: FlowRunUsage | None,
+) -> FlowRunTranscriptionUsage | None:
+    return usage.transcription_usage if usage is not None else None
+
+
 @dataclass(frozen=True, slots=True)
-class FlowRunWithResultFilesAndTokenUsage:
+class FlowRunWithResultFilesAndUsage:
     run: FlowRun
     result_files: Sequence[FlowRunStepResultFile]
     token_usage: FlowRunTokenUsage | None
+    transcription_usage: FlowRunTranscriptionUsage | None = None
     final_output: FlowFinalOutputContractPublic | None = None
 
 
 @dataclass(frozen=True, slots=True)
-class FlowRunDetailView(FlowRunWithResultFilesAndTokenUsage):
+class FlowRunDetailView(FlowRunWithResultFilesAndUsage):
     webhook_deliveries: Sequence[FlowRunWebhookDeliveryRead] = ()
 
 
 @dataclass(frozen=True, slots=True)
 class FlowRunPageWithResultFilesAndTokenUsage:
-    items: Sequence[FlowRunWithResultFilesAndTokenUsage]
+    items: Sequence[FlowRunWithResultFilesAndUsage]
     has_more: bool
 
 
@@ -649,22 +662,22 @@ class FlowRunService:
             step_results=tuple(step_results),
         )
 
-    async def get_run_with_result_files_and_token_usage(
+    async def get_run_with_result_files_and_usage(
         self,
         *,
         flow_id: UUID,
         run_id: UUID,
-    ) -> FlowRunWithResultFilesAndTokenUsage:
+    ) -> FlowRunWithResultFilesAndUsage:
         run = await self.get_run(run_id=run_id, flow_id=flow_id)
-        return await self.enrich_run_with_result_files_and_token_usage(run=run)
+        return await self.enrich_run_with_result_files_and_usage(run=run)
 
-    async def get_run_detail_with_result_files_and_token_usage(
+    async def get_run_detail_with_result_files_and_usage(
         self,
         *,
         flow_id: UUID,
         run_id: UUID,
     ) -> FlowRunDetailView:
-        run_view = await self.get_run_with_result_files_and_token_usage(
+        run_view = await self.get_run_with_result_files_and_usage(
             flow_id=flow_id,
             run_id=run_id,
         )
@@ -682,15 +695,15 @@ class FlowRunService:
             webhook_deliveries=tuple(webhook_deliveries),
         )
 
-    async def enrich_run_with_result_files_and_token_usage(
+    async def enrich_run_with_result_files_and_usage(
         self,
         *,
         run: FlowRun,
-    ) -> FlowRunWithResultFilesAndTokenUsage:
-        views = await self._runs_with_result_files_and_token_usage(runs=(run,))
+    ) -> FlowRunWithResultFilesAndUsage:
+        views = await self._runs_with_result_files_and_usage(runs=(run,))
         return views[0]
 
-    async def list_runs_with_result_files_and_token_usage(
+    async def list_runs_with_result_files_and_usage(
         self,
         *,
         flow_id: UUID,
@@ -706,13 +719,13 @@ class FlowRunService:
         )
         page_runs = tuple(runs[:limit])
         return FlowRunPageWithResultFilesAndTokenUsage(
-            items=await self._runs_with_result_files_and_token_usage(runs=page_runs),
+            items=await self._runs_with_result_files_and_usage(runs=page_runs),
             has_more=len(runs) > limit,
         )
 
-    async def _runs_with_result_files_and_token_usage(
+    async def _runs_with_result_files_and_usage(
         self, *, runs: Sequence[FlowRun]
-    ) -> tuple[FlowRunWithResultFilesAndTokenUsage, ...]:
+    ) -> tuple[FlowRunWithResultFilesAndUsage, ...]:
         if not runs:
             return ()
         run_ids: list[UUID] = []
@@ -724,17 +737,18 @@ class FlowRunService:
             run_ids=run_ids,
             tenant_id=self.user.tenant_id,
         )
-        token_usage_by_run_id = await self.provider_call_repo.list_token_usage_for_runs(
+        usage_by_run_id = await self.provider_call_repo.list_usage_for_runs(
             run_ids=run_ids,
             tenant_id=self.user.tenant_id,
         )
         result_files_by_run_id = _result_files_by_run_id(result_files)
         final_output_by_version_ref = await self._final_outputs_for_runs(runs=runs)
         return tuple(
-            FlowRunWithResultFilesAndTokenUsage(
+            FlowRunWithResultFilesAndUsage(
                 run=run,
                 result_files=tuple(result_files_by_run_id.get(run.id, ())),
-                token_usage=token_usage_by_run_id.get(run.id),
+                token_usage=_token_usage(usage_by_run_id.get(run.id)),
+                transcription_usage=_transcription_usage(usage_by_run_id.get(run.id)),
                 final_output=final_output_by_version_ref.get(
                     (run.flow_id, run.flow_version)
                 ),

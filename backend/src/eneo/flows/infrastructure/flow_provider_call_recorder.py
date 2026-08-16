@@ -7,27 +7,20 @@ from uuid import UUID
 
 from sqlalchemy.exc import OperationalError
 
-from eneo.completion_models.domain.provider_call_observer import (
-    ProviderCallObserverError,
-    ProviderCallRequestFacts,
-    ProviderCallResultFacts,
-)
-from eneo.completion_models.domain.provider_call_observer import (
-    ProviderCallRejectionReason as ObservedRejectionReason,
-)
-from eneo.completion_models.domain.provider_call_observer import (
-    ProviderCallUnknownReason as ObservedUnknownReason,
-)
 from eneo.database.database import sessionmanager
 from eneo.flows.domain.provider_call import (
+    CompletionProviderCallRequest,
     ProviderCall,
     ProviderCallCompletion,
     ProviderCallReason,
+    ProviderCallReceiptValue,
     ProviderCallRejectionReason,
     ProviderCallRequest,
     ProviderCallRequestedCapability,
     ProviderCallResponseFormat,
     ProviderCallUnknownReason,
+    TranscriptionCallCompletion,
+    TranscriptionProviderCallRequest,
 )
 from eneo.flows.domain.provider_call_evidence_gap import ProviderCallEvidenceGap
 from eneo.flows.flow_run_provenance import (
@@ -36,6 +29,19 @@ from eneo.flows.flow_run_provenance import (
 )
 from eneo.flows.infrastructure.flow_provider_call_repo import (
     FlowProviderCallRepository,
+)
+from eneo.model_providers.domain.provider_call_observer import (
+    CompletionCallResultFacts,
+    ProviderCallObserverError,
+    ProviderCallRequestFacts,
+    ProviderCallResultFacts,
+    TranscriptionCallRequestFacts,
+)
+from eneo.model_providers.domain.provider_call_observer import (
+    ProviderCallRejectionReason as ObservedRejectionReason,
+)
+from eneo.model_providers.domain.provider_call_observer import (
+    ProviderCallUnknownReason as ObservedUnknownReason,
 )
 
 _PERSISTENCE_RETRY_DELAYS_SECONDS = (0.0, 0.05, 0.2)
@@ -82,6 +88,8 @@ class FlowProviderCallRecorder:
         self._started_evidence: dict[UUID, tuple[int, str]] = {}
 
     async def started(self, request: ProviderCallRequestFacts) -> UUID:
+        call_request = self._to_call_request(request)
+
         async def persist() -> ProviderCall:
             async with sessionmanager.session() as session, session.begin():
                 return await FlowProviderCallRepository(
@@ -91,21 +99,7 @@ class FlowProviderCallRecorder:
                     step_id=self.step_id,
                     attempt_no=self.attempt_no,
                     tenant_id=self.tenant_id,
-                    request=ProviderCallRequest(
-                        request_schema_version=request.request_schema_version,
-                        provider_request_hash=request.provider_request_hash,
-                        requested_model=request.requested_model,
-                        provider=request.provider,
-                        response_format=ProviderCallResponseFormat(
-                            request.response_format
-                        ),
-                        requested_capabilities=tuple(
-                            ProviderCallRequestedCapability(capability)
-                            for capability in request.requested_capabilities
-                        ),
-                        call_reason=_flow_call_reason(request.reason),
-                        mapped_call=self.mapped_call,
-                    ),
+                    request=call_request,
                     resolved_input_edge_indexes=self.resolved_input_edge_indexes,
                 )
 
@@ -125,23 +119,59 @@ class FlowProviderCallRecorder:
         )
         return started.id
 
+    def _to_call_request(
+        self, request: ProviderCallRequestFacts
+    ) -> ProviderCallRequest:
+        if isinstance(request, TranscriptionCallRequestFacts):
+            return TranscriptionProviderCallRequest(
+                request_schema_version=request.request_schema_version,
+                provider_request_hash=request.provider_request_hash,
+                requested_model=request.requested_model,
+                provider=request.provider,
+                audio_seconds=request.audio_seconds,
+            )
+        return CompletionProviderCallRequest(
+            request_schema_version=request.request_schema_version,
+            provider_request_hash=request.provider_request_hash,
+            requested_model=request.requested_model,
+            provider=request.provider,
+            response_format=ProviderCallResponseFormat(request.response_format),
+            requested_capabilities=tuple(
+                ProviderCallRequestedCapability(capability)
+                for capability in request.requested_capabilities
+            ),
+            call_reason=_flow_call_reason(request.reason),
+            mapped_call=self.mapped_call,
+        )
+
     async def completed(
         self,
         call_id: UUID,
         result: ProviderCallResultFacts,
     ) -> None:
-        receipt = ProviderCallCompletion(
-            response_model=result.response_model,
-            provider_response_id=result.provider_response_id,
-            num_tokens_input=result.num_tokens_input,
-            num_tokens_output=result.num_tokens_output,
-            input_source=(
-                "provider" if result.num_tokens_input is not None else "not_reported"
-            ),
-            output_source=(
-                "provider" if result.num_tokens_output is not None else "not_reported"
-            ),
-        )
+        receipt: ProviderCallReceiptValue
+        if isinstance(result, CompletionCallResultFacts):
+            receipt = ProviderCallCompletion(
+                response_model=result.response_model,
+                provider_response_id=result.provider_response_id,
+                num_tokens_input=result.num_tokens_input,
+                num_tokens_output=result.num_tokens_output,
+                input_source=(
+                    "provider"
+                    if result.num_tokens_input is not None
+                    else "not_reported"
+                ),
+                output_source=(
+                    "provider"
+                    if result.num_tokens_output is not None
+                    else "not_reported"
+                ),
+            )
+        else:
+            receipt = TranscriptionCallCompletion(
+                response_model=result.response_model,
+                provider_response_id=result.provider_response_id,
+            )
 
         async def persist() -> None:
             async with sessionmanager.session() as session, session.begin():
@@ -156,8 +186,16 @@ class FlowProviderCallRecorder:
                 call_id,
                 provider_response_id=result.provider_response_id,
                 outcome="completed",
-                num_tokens_input=result.num_tokens_input,
-                num_tokens_output=result.num_tokens_output,
+                num_tokens_input=(
+                    result.num_tokens_input
+                    if isinstance(result, CompletionCallResultFacts)
+                    else None
+                ),
+                num_tokens_output=(
+                    result.num_tokens_output
+                    if isinstance(result, CompletionCallResultFacts)
+                    else None
+                ),
             ),
         )
 

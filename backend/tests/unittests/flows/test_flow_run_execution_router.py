@@ -56,7 +56,7 @@ from eneo.flows.application.flow_run_service import (
     FlowRunDetailView,
     FlowRunPageWithResultFilesAndTokenUsage,
     FlowRunVersionedView,
-    FlowRunWithResultFilesAndTokenUsage,
+    FlowRunWithResultFilesAndUsage,
 )
 from eneo.flows.domain.flow import (
     FlowRunStatus,
@@ -514,8 +514,8 @@ async def test_resume_review_replay_projects_completed_run_result(monkeypatch):
         delivery=FlowOutputDelivery.PAYLOAD,
     )
     run_service = AsyncMock()
-    run_service.enrich_run_with_result_files_and_token_usage.return_value = (
-        FlowRunWithResultFilesAndTokenUsage(
+    run_service.enrich_run_with_result_files_and_usage.return_value = (
+        FlowRunWithResultFilesAndUsage(
             run=run,
             result_files=(),
             token_usage=None,
@@ -555,7 +555,7 @@ async def test_resume_review_replay_projects_completed_run_result(monkeypatch):
     assert response.run.result is not None
     assert response.run.result.kind == "inline_text"
     assert response.run.result.text == "Reviewed report"
-    run_service.enrich_run_with_result_files_and_token_usage.assert_awaited_once_with(
+    run_service.enrich_run_with_result_files_and_usage.assert_awaited_once_with(
         run=run,
     )
 
@@ -735,8 +735,8 @@ async def test_rerun_flow_run_step_replay_does_not_schedule_dispatch(monkeypatch
         status=FlowRunRerunOperationStatus.COMPLETED,
     )
     run_service = AsyncMock()
-    run_service.enrich_run_with_result_files_and_token_usage.return_value = (
-        FlowRunWithResultFilesAndTokenUsage(
+    run_service.enrich_run_with_result_files_and_usage.return_value = (
+        FlowRunWithResultFilesAndUsage(
             run=run,
             result_files=(),
             token_usage=None,
@@ -785,7 +785,7 @@ async def test_rerun_flow_run_step_replay_does_not_schedule_dispatch(monkeypatch
     assert response.run.result.text == "Rerun finished"
     assert background_tasks.tasks == []
     rerun_service.rerun_step.assert_awaited_once()
-    run_service.enrich_run_with_result_files_and_token_usage.assert_awaited_once_with(
+    run_service.enrich_run_with_result_files_and_usage.assert_awaited_once_with(
         run=run,
     )
     audit_kwargs = container.audit_service.return_value.log_async.await_args.kwargs
@@ -864,10 +864,10 @@ async def test_flow_run_endpoints_delegate_to_run_service(monkeypatch):
         updated_at=delivery_now,
     )
     run_service = AsyncMock()
-    run_service.list_runs_with_result_files_and_token_usage.return_value = (
+    run_service.list_runs_with_result_files_and_usage.return_value = (
         FlowRunPageWithResultFilesAndTokenUsage(
             items=(
-                FlowRunWithResultFilesAndTokenUsage(
+                FlowRunWithResultFilesAndUsage(
                     run=run,
                     result_files=(result_file,),
                     token_usage=None,
@@ -876,7 +876,7 @@ async def test_flow_run_endpoints_delegate_to_run_service(monkeypatch):
             has_more=False,
         )
     )
-    run_service.get_run_detail_with_result_files_and_token_usage.return_value = (
+    run_service.get_run_detail_with_result_files_and_usage.return_value = (
         FlowRunDetailView(
             run=run,
             result_files=(result_file,),
@@ -943,10 +943,10 @@ async def test_flow_run_endpoints_delegate_to_run_service(monkeypatch):
     assert step_response == []
     # get_flow is called once per endpoint (3 total) via enforce_flow_scope space check
     assert flow_service.get_flow.await_count == 3
-    run_service.list_runs_with_result_files_and_token_usage.assert_awaited_once_with(
+    run_service.list_runs_with_result_files_and_usage.assert_awaited_once_with(
         flow_id=flow_id, statuses=None, limit=20, offset=2
     )
-    run_service.get_run_detail_with_result_files_and_token_usage.assert_awaited_once_with(
+    run_service.get_run_detail_with_result_files_and_usage.assert_awaited_once_with(
         run_id=run.id, flow_id=flow_id
     )
     run_service.list_runs.assert_not_awaited()
@@ -985,7 +985,7 @@ async def test_list_flow_runs_raises_not_found_when_flow_missing_without_scope_f
         )
 
     run_service.list_runs.assert_not_awaited()
-    run_service.list_runs_with_result_files_and_token_usage.assert_not_awaited()
+    run_service.list_runs_with_result_files_and_usage.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -1114,8 +1114,8 @@ async def test_redispatch_flow_run_returns_zero_when_nothing_redispatched(
     )
     run_service = AsyncMock()
     run_service.get_run.return_value = run
-    run_service.enrich_run_with_result_files_and_token_usage.return_value = (
-        FlowRunWithResultFilesAndTokenUsage(
+    run_service.enrich_run_with_result_files_and_usage.return_value = (
+        FlowRunWithResultFilesAndUsage(
             run=run,
             result_files=(),
             token_usage=None,
@@ -1168,9 +1168,7 @@ async def test_redispatch_flow_run_returns_zero_when_nothing_redispatched(
         audit_metadata=AuditMetadata.standard(actor=user, target=run),
         expected_dispatch_exhausted_at=None,
     )
-    run_service.enrich_run_with_result_files_and_token_usage.assert_awaited_once_with(
-        run=run
-    )
+    run_service.enrich_run_with_result_files_and_usage.assert_awaited_once_with(run=run)
 
 
 @pytest.mark.asyncio

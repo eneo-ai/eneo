@@ -33,13 +33,6 @@ from eneo.ai_models.completion_models.completion_model import (
     ToolCallMetadata,
     function_definition_to_tool,
 )
-from eneo.completion_models.domain.provider_call_observer import (
-    ProviderCallObserver,
-    ProviderCallObserverError,
-    ProviderCallReason,
-    ProviderCallResultFacts,
-    build_provider_call_request_facts,
-)
 from eneo.completion_models.domain.skill_activation import (
     SKILL_ACTIVATION_TOOL_NAME,
     InvalidSkillToolCallError,
@@ -81,6 +74,13 @@ from eneo.main.exceptions import (
     ProviderRejectedRequestException,
 )
 from eneo.main.logging import get_logger
+from eneo.model_providers.domain.provider_call_observer import (
+    CompletionCallResultFacts,
+    ProviderCallObserver,
+    ProviderCallObserverError,
+    ProviderCallReason,
+    build_provider_call_request_facts,
+)
 from eneo.model_providers.infrastructure import litellm_transport
 from eneo.model_providers.infrastructure.litellm_provider import (
     build_litellm_provider_kwargs,
@@ -1369,7 +1369,7 @@ class TenantModelAdapter(CompletionModelAdapter):
             try:
                 await observer.completed(
                     call_id,
-                    ProviderCallResultFacts(
+                    CompletionCallResultFacts(
                         response_model=getattr(response, "model", None),
                         provider_response_id=extract_provider_response_id(response),
                         num_tokens_input=(

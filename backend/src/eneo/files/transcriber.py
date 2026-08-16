@@ -21,6 +21,9 @@ from eneo.transcription_models.infrastructure.adapters.litellm_transcription imp
 if TYPE_CHECKING:
     from eneo.database.database import AsyncSession
     from eneo.files.file_service import FileService
+    from eneo.model_providers.domain.provider_call_observer import (
+        ProviderCallObserver,
+    )
     from eneo.settings.encryption_service import EncryptionService
     from eneo.tenants.tenant import TenantInDB
     from eneo.transcription_models.domain.transcription_model import (
@@ -68,6 +71,7 @@ class Transcriber:
         *,
         language: str | None = None,
         persist_cache_to_file: bool = True,
+        observer: "ProviderCallObserver | None" = None,
     ) -> TranscribedAudio:
         mimetype: str = file.mimetype or ""
         if file.blob is None or not AudioMimeTypes.has_value(mimetype):
@@ -89,6 +93,7 @@ class Transcriber:
                 filepath=temp_file_path,
                 transcription_model=transcription_model,
                 language=language,
+                observer=observer,
             )
 
             if file_cache_enabled:
@@ -182,12 +187,14 @@ class Transcriber:
         filepath: Path,
         transcription_model: "TranscriptionModel",
         language: str | None = None,
+        observer: "ProviderCallObserver | None" = None,
     ) -> TranscribedAudio:
         adapter = await self.prepare_transcription(transcription_model)
         return await self.transcribe_prepared_from_filepath(
             filepath=filepath,
             adapter=adapter,
             language=language,
+            observer=observer,
         )
 
     async def prepare_transcription(
@@ -202,9 +209,12 @@ class Transcriber:
         filepath: Path,
         adapter: LiteLLMTranscriptionAdapter,
         language: str | None = None,
+        observer: "ProviderCallObserver | None" = None,
     ) -> TranscribedAudio:
         async with audio.to_wav(str(filepath)) as wav_file:
-            text = await adapter.get_text_from_file(wav_file, language=language)
+            text = await adapter.get_text_from_file(
+                wav_file, language=language, observer=observer
+            )
             return TranscribedAudio(
                 text=text,
                 duration_seconds=wav_file.duration,

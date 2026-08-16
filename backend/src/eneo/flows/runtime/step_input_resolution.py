@@ -74,6 +74,9 @@ from eneo.main.exceptions import (
 if TYPE_CHECKING:
     from eneo.files.file_models import File, FileInfo
     from eneo.files.file_service import FileService
+    from eneo.model_providers.domain.provider_call_observer import (
+        ProviderCallObserver,
+    )
 
 RUNTIME_INPUT_SOURCE_HEADER_TEMPLATE: Final = "[SOURCE {source_number}]"
 RUNTIME_INPUT_SOURCE_FILE_NAME_KEY: Final = "file_name"
@@ -97,6 +100,7 @@ class StepInputResolutionDeps:
     max_audio_files: int
     max_inline_text_bytes: int
     logger: Any
+    transcription_call_observer: "ProviderCallObserver | None" = None
 
 
 @dataclass(frozen=True)
@@ -214,6 +218,7 @@ async def resolve_step_input(
                 audit_service=deps.audit_service,
                 actor=deps.actor,
                 load_audio_payload=deps.file_service.get_file_content,
+                transcription_call_observer=deps.transcription_call_observer,
             )
             audio_resolution = await resolve_transcribe_and_attach_audio_input(
                 request=audio_request,

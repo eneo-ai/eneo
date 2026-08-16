@@ -22,10 +22,6 @@ from eneo.completion_models.domain.model_kwargs_capabilities import (
     ModelKwargCapability,
     SupportedModelKwargs,
 )
-from eneo.completion_models.domain.provider_call_observer import (
-    ProviderCallRequestFacts,
-    ProviderCallResultFacts,
-)
 from eneo.completion_models.infrastructure.completion_service import CompletionService
 from eneo.completion_models.infrastructure.context_builder import (
     ContextWindowExceededError,
@@ -79,6 +75,10 @@ from eneo.flows.variable_resolver import FlowVariableResolver
 from eneo.main.exceptions import (
     ProviderCapabilityRejectedException,
     TypedIOValidationException,
+)
+from eneo.model_providers.domain.provider_call_observer import (
+    CompletionCallRequestFacts,
+    CompletionCallResultFacts,
 )
 
 
@@ -955,7 +955,7 @@ async def test_completed_provider_call_is_observed_before_postprocessing_failure
     async def _observed_response(**kwargs):
         provider_observer = kwargs["provider_call_observer"]
         call_id = await provider_observer.started(
-            ProviderCallRequestFacts(
+            CompletionCallRequestFacts(
                 request_schema_version=2,
                 provider_request_hash="f" * 64,
                 requested_model="openai/gpt-test",
@@ -967,7 +967,7 @@ async def test_completed_provider_call_is_observed_before_postprocessing_failure
         )
         await provider_observer.completed(
             call_id,
-            ProviderCallResultFacts(
+            CompletionCallResultFacts(
                 response_model="gpt-test",
                 provider_response_id="observed-response",
                 num_tokens_input=7,

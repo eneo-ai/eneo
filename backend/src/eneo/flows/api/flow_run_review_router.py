@@ -804,7 +804,7 @@ async def resume_flow_run_review_checkpoint(
         if result.accepted:
             dispatch_run = result.run
         elif result.run.status is FlowRunStatus.COMPLETED:
-            completed_run_view = await container.flow_run_service().enrich_run_with_result_files_and_token_usage(
+            completed_run_view = await container.flow_run_service().enrich_run_with_result_files_and_usage(
                 run=result.run,
             )
         checkpoint = await _present_review_checkpoint(
@@ -824,6 +824,7 @@ async def resume_flow_run_review_checkpoint(
             completed_run_view.run,
             result_files=completed_run_view.result_files,
             token_usage=completed_run_view.token_usage,
+            transcription_usage=completed_run_view.transcription_usage,
             final_output=completed_run_view.final_output,
         )
         if completed_run_view is not None

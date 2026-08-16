@@ -179,7 +179,9 @@ async def test_transcribe_from_filepath_passes_language_to_adapter(
 
     # The decoded length reaches the caller with the text it paid for.
     assert result == TranscribedAudio(text="transcript", duration_seconds=42.0)
-    adapter.get_text_from_file.assert_awaited_once_with(wav_file, language=language)
+    adapter.get_text_from_file.assert_awaited_once_with(
+        wav_file, language=language, observer=None
+    )
 
 
 @pytest.mark.asyncio

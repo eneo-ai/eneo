@@ -35,7 +35,7 @@ _REQUEST_CONTROL_ALLOWLIST = frozenset(
 
 
 @dataclass(frozen=True, slots=True)
-class ProviderCallRequestFacts:
+class CompletionCallRequestFacts:
     request_schema_version: Literal[2]
     provider_request_hash: str
     requested_model: str
@@ -46,11 +46,39 @@ class ProviderCallRequestFacts:
 
 
 @dataclass(frozen=True, slots=True)
-class ProviderCallResultFacts:
+class TranscriptionCallRequestFacts:
+    """One transcription request and the audio it is about to send.
+
+    The length is known before the request leaves, so it is recorded when the
+    call starts. An attempt whose outcome is never learned therefore still says
+    how much audio it may have been charged for.
+    """
+
+    request_schema_version: Literal[2]
+    provider_request_hash: str
+    requested_model: str
+    provider: str | None
+    audio_seconds: float
+
+
+ProviderCallRequestFacts = CompletionCallRequestFacts | TranscriptionCallRequestFacts
+
+
+@dataclass(frozen=True, slots=True)
+class CompletionCallResultFacts:
     response_model: str | None
     provider_response_id: str | None
     num_tokens_input: int | None
     num_tokens_output: int | None
+
+
+@dataclass(frozen=True, slots=True)
+class TranscriptionCallResultFacts:
+    response_model: str | None
+    provider_response_id: str | None
+
+
+ProviderCallResultFacts = CompletionCallResultFacts | TranscriptionCallResultFacts
 
 
 class ProviderCallObserverError(RuntimeError):
@@ -73,6 +101,48 @@ class ProviderCallObserver(Protocol):
     ) -> None: ...
 
 
+def build_transcription_call_request_facts(
+    *,
+    requested_model: str,
+    provider: str | None,
+    language: str | None,
+    audio_digest: str,
+    audio_seconds: float,
+) -> TranscriptionCallRequestFacts:
+    """Identify one transcription request by what it sends, not where it came from.
+
+    A retry of the same audio under the same routing is the same request, so it
+    hashes the same. Two chunks of one recording differ because their bytes do.
+    """
+    if not requested_model or provider == "":
+        raise ProviderCallObserverError(
+            "Provider request evidence requires non-empty model identifiers."
+        )
+    if audio_seconds < 0:
+        raise ProviderCallObserverError(
+            "Provider request evidence requires a non-negative audio length."
+        )
+    serialized = json.dumps(
+        {
+            "request_schema_version": 2,
+            "requested_model": requested_model,
+            "provider": provider,
+            "language": language,
+            "audio_digest": audio_digest,
+        },
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return TranscriptionCallRequestFacts(
+        request_schema_version=2,
+        provider_request_hash=hashlib.sha256(serialized).hexdigest(),
+        requested_model=requested_model,
+        provider=provider,
+        audio_seconds=audio_seconds,
+    )
+
+
 def build_provider_call_request_facts(
     *,
     requested_model: str,
@@ -80,7 +150,7 @@ def build_provider_call_request_facts(
     messages: Sequence[Mapping[str, object]],
     request_kwargs: Mapping[str, object],
     reason: ProviderCallReason,
-) -> ProviderCallRequestFacts:
+) -> CompletionCallRequestFacts:
     if not requested_model or provider == "":
         raise ProviderCallObserverError(
             "Provider request evidence requires non-empty model identifiers."
@@ -114,7 +184,7 @@ def build_provider_call_request_facts(
         raise ProviderCallObserverError(
             "Provider request evidence could not be serialized safely."
         ) from exc
-    return ProviderCallRequestFacts(
+    return CompletionCallRequestFacts(
         request_schema_version=2,
         provider_request_hash=hashlib.sha256(serialized).hexdigest(),
         requested_model=requested_model,
