@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import logging
 from collections.abc import AsyncGenerator, Awaitable, Callable, Coroutine, Mapping
 from dataclasses import dataclass
 from types import SimpleNamespace
@@ -120,6 +119,7 @@ from eneo.main.exceptions import (
     NotFoundException,
     UnauthorizedException,
 )
+from eneo.main.logging import get_logger
 from eneo.server.dependencies.container import (
     get_container,
     get_container_for_explicit_transaction,
@@ -131,7 +131,7 @@ if TYPE_CHECKING:
     from eneo.spaces.space import Space
     from eneo.tenants.tenant_repo import TenantRepository
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 def _public_error_code_from_exception(

@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 import logging
+from collections.abc import Iterator
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
@@ -24,6 +26,7 @@ from eneo.completion_models.infrastructure.completion_service import (
     ResolvedCompletionModelRoute,
 )
 from eneo.files.file_models import FilePublic
+from eneo.flows.ai_builder import ai_builder_router as ai_builder_router_module
 from eneo.flows.ai_builder.ai_builder_api_models import (
     ApplyPlanRequest,
     ApplyResultResponse,
@@ -267,9 +270,38 @@ def test_ai_builder_route_class_translates_http_errors_to_public_contract() -> N
     }
 
 
-def test_ai_builder_route_class_logs_raw_public_exception_fallback(
-    caplog: pytest.LogCaptureFixture,
-) -> None:
+@contextmanager
+def _captured_router_logs() -> Iterator[list[logging.LogRecord]]:
+    """Capture what the router logs, under the server's own muting.
+
+    Application logging silences the `eneo` logger tree below CRITICAL, and the
+    application logger escapes that only because it owns its handler and has no
+    parent. Muting the package here is what makes this capture mean something:
+    a module that reaches for the stdlib logger emits nothing in the running
+    server, and without the muting it still passes every assertion made about
+    the call. The same absent parent is why `caplog` cannot be used — nothing
+    reaches the root handler.
+    """
+
+    records: list[logging.LogRecord] = []
+
+    class CaptureHandler(logging.Handler):
+        def emit(self, record: logging.LogRecord) -> None:
+            records.append(record)
+
+    handler = CaptureHandler()
+    package_logger = logging.getLogger("eneo.flows.ai_builder")
+    package_level = package_logger.level
+    package_logger.setLevel(logging.CRITICAL)
+    ai_builder_router_module.logger.addHandler(handler)
+    try:
+        yield records
+    finally:
+        ai_builder_router_module.logger.removeHandler(handler)
+        package_logger.setLevel(package_level)
+
+
+def test_ai_builder_route_class_logs_raw_public_exception_fallback() -> None:
     app = FastAPI()
     app.add_exception_handler(
         AIBuilderEnvelopedError, ai_builder_enveloped_error_handler
@@ -283,18 +315,15 @@ def test_ai_builder_route_class_logs_raw_public_exception_fallback(
     app.include_router(test_router)
     client = TestClient(app)
 
-    with caplog.at_level(
-        logging.ERROR,
-        logger="eneo.flows.ai_builder.ai_builder_router",
-    ):
+    with _captured_router_logs() as captured:
         response = client.get("/raw", headers={"x-request-id": "req-raw"})
 
     assert response.status_code == 400
     assert response.json()["code"] == "bad_request"
     records = [
         record
-        for record in caplog.records
-        if record.message == "AI Builder raw public exception reached adapter."
+        for record in captured
+        if record.getMessage() == "AI Builder raw public exception reached adapter."
     ]
     assert len(records) == 1
     assert records[0].request_id == "req-raw"
@@ -2318,14 +2347,29 @@ class TestSendMessageEndpoint:
         request = _make_request()
         request.headers = {"x-request-id": "req-stream-1"}
 
-        result = await send_message(
-            request=request,
-            session_id=session.id,
-            body=_send_message_request("Bygg ett flöde"),
-            container=container,
-        )
+        with _captured_router_logs() as captured:
+            result = await send_message(
+                request=request,
+                session_id=session.id,
+                body=_send_message_request("Bygg ett flöde"),
+                container=container,
+            )
+            events = await _read_sse_events(result)
 
-        events = await _read_sse_events(result)
+        # The client is told to try again and nothing else, so the server log is
+        # the only account of why the turn failed. Four measured confirmation
+        # failures left no trace at all because this record was unreachable.
+        failures = [
+            record
+            for record in captured
+            if record.getMessage() == "AI Builder event stream failed."
+        ]
+        assert len(failures) == 1
+        assert failures[0].levelno == logging.ERROR
+        assert failures[0].exc_info is not None
+        assert isinstance(failures[0].exc_info[1], RuntimeError)
+        assert failures[0].request_id == "req-stream-1"
+
         assert [event["event"] for event in events] == ["status", "error", "done"]
         error_payload = events[1]["data"]
         assert error_payload["schema_version"] == 2

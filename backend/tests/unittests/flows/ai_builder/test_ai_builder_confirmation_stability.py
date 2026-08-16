@@ -23,6 +23,10 @@ from eneo.flows.ai_builder.ai_builder_architecture_commit import (
 from eneo.flows.ai_builder.ai_builder_architecture_derivation import (
     derive_architecture_commit_draft,
 )
+from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
+    metadata_with_slot_classification,
+    slot_classification_metadata_from_attempt,
+)
 from eneo.flows.ai_builder.ai_builder_domain_models import ConversationMessage
 from eneo.flows.ai_builder.ai_builder_event_models import (
     RequirementsSummaryPayload,
@@ -34,7 +38,13 @@ from eneo.flows.ai_builder.ai_builder_requirements_state import (
     resolve_requirements_state,
 )
 from eneo.flows.ai_builder.ai_builder_slot_classification_contract import (
+    ClassifiedEvidence,
+    ClassifiedSlot,
+    SlotClassificationAttempt,
+    SlotClassificationConfidence,
+    SlotClassificationInput,
     SlotClassificationResult,
+    SlotClassificationSource,
 )
 from eneo.flows.ai_builder.ai_builder_turn_controller import (
     ConfirmRequirements,
@@ -56,6 +66,7 @@ from eneo.flows.ai_builder.planning_state import (
 )
 from eneo.flows.ai_builder.planning_state_builder import (
     apply_attested_requirements,
+    build_planning_state_from_conversation,
     merge_llm_resolved_slots,
 )
 
@@ -614,3 +625,165 @@ def test_values_that_join_alike_are_still_different_disclosures() -> None:
 
     assert first.assumptions == second.assumptions
     assert first.requirements_version != second.requirements_version
+
+
+def _classifier_metadata(*slots: ClassifiedSlot) -> dict[str, object]:
+    metadata = slot_classification_metadata_from_attempt(
+        SlotClassificationAttempt(
+            outcome="resolved",
+            result=SlotClassificationResult(slots=slots),
+        ),
+        prompt_hash="c" * 64,
+        classification_input=SlotClassificationInput(
+            sources=(
+                SlotClassificationSource(
+                    source_id="user_message:user-1",
+                    kind="user_message",
+                    text="\n".join(
+                        item.quote for slot in slots for item in slot.evidence
+                    ),
+                    message_id="user-1",
+                ),
+            )
+        ),
+        model="openai/gpt-test",
+        provider="openai",
+    )
+    assert metadata is not None
+    conversation_metadata = metadata_with_slot_classification(None, metadata)
+    assert conversation_metadata is not None
+    return conversation_metadata
+
+
+def _classified(
+    slot_name: str,
+    value: str,
+    confidence: SlotClassificationConfidence,
+    quote: str,
+) -> ClassifiedSlot:
+    return ClassifiedSlot(
+        slot_name=slot_name,
+        value=value,
+        confidence=confidence,
+        reason="Classifier evidence.",
+        evidence=(ClassifiedEvidence(source_id="user_message:user-1", quote=quote),),
+    )
+
+
+def _interview_conversation_before_disclosure() -> list[ConversationMessage]:
+    """A multi-question interview whose scope facts live only in the classifier.
+
+    The deterministic pass cannot see how many documents arrive at runtime:
+    only the persisted classifier metadata says so. That is what makes the
+    report disposition unresolvable until after the replay, which is the shape
+    every measured failure had.
+    """
+
+    return [
+        ConversationMessage(
+            message_id="user-1",
+            role="user",
+            content=(
+                "Vi sitter ofta med många anbud och mycket underlag och vill ha "
+                "en samlad överblick i en PDF."
+            ),
+            metadata=_classifier_metadata(
+                _classified(
+                    "document_material_scope",
+                    "multiple_documents_case",
+                    "high",
+                    "många anbud och mycket underlag",
+                ),
+                _classified(
+                    "report_disposition",
+                    "synthesized_overview",
+                    "medium",
+                    "en samlad överblick",
+                ),
+            ),
+        ),
+        ConversationMessage(
+            message_id="answer-input",
+            role="user",
+            content="Dokument",
+            metadata={
+                "question_answer": {
+                    "question_id": "primary_runtime_input",
+                    "selected_option_id": "documents",
+                }
+            },
+        ),
+        ConversationMessage(
+            message_id="answer-goal",
+            role="user",
+            content="Sammanfatta eller ge överblick",
+            metadata={
+                "question_answer": {
+                    "question_id": "post_processing_goal",
+                    "selected_option_id": "summarize_or_overview",
+                }
+            },
+        ),
+        ConversationMessage(
+            message_id="answer-output",
+            role="user",
+            content="PDF-dokument",
+            metadata={
+                "question_answer": {
+                    "question_id": "terminal_output",
+                    "selected_option_id": "pdf_document",
+                }
+            },
+        ),
+    ]
+
+
+def test_the_rebuild_pins_the_same_architecture_the_acknowledgment_committed() -> None:
+    """The commit the fast path pins must survive its own conversation rebuild.
+
+    The acknowledgment resolves from persisted state and regrades what the user
+    accepted; `commit_turn` then rebuilds the same session from its persisted
+    conversation and refuses to store an architecture that drifted. When only
+    the fast path applied the acceptance, the two disagreed about the report
+    disposition and every confirmation turn on a multi-question session failed
+    with an internal error instead of a plan.
+    """
+
+    conversation = _interview_conversation_before_disclosure()
+    disclosed = build_requirements_disclosure(
+        build_planning_state_from_conversation(conversation),
+        ui_language="sv",
+    )
+    conversation.append(
+        ConversationMessage(
+            message_id="disclosure",
+            role="assistant",
+            content=disclosed.summary,
+            metadata={
+                "requirements_summary": disclosed.model_dump(mode="json"),
+                "requirements_version": disclosed.requirements_version,
+            },
+        )
+    )
+    persisted = build_planning_state_from_conversation(conversation)
+    conversation.append(
+        ConversationMessage(
+            message_id="confirmation",
+            role="user",
+            content="",
+            metadata={
+                "requirements_confirmed": True,
+                "requirements_version": disclosed.requirements_version,
+            },
+        )
+    )
+
+    acknowledged = persisted.model_copy(deep=True)
+    apply_attested_requirements(acknowledged, disclosed)
+    pinned = derive_architecture_commit_draft(acknowledged)
+    assert pinned is not None
+    assert pinned.report_disposition == "synthesized_overview"
+
+    rebuilt = build_planning_state_from_conversation(conversation)
+
+    assert derive_architecture_commit_draft(rebuilt) == pinned

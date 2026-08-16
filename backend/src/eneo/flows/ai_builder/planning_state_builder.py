@@ -183,6 +183,17 @@ def build_planning_state_from_conversation(
     _reconcile_report_disposition_after_classifier_replay(state, conversation)
     resolve_docx_mode_from_template_evidence(state)
     _reconcile_dependent_slot_relevance(state)
+    # Acceptance is graded last, on the finished slot surface. The first pass
+    # can only attribute a slot it was able to resolve, and a slot whose
+    # relevance depends on classifier-owned facts is resolved above, after the
+    # replay. Grading acceptance before that left the accepted value below
+    # commit grade here while the acknowledgment turn — which starts from this
+    # same state, already replayed — graded it above, and `commit_turn` then
+    # refused the architecture the user had just confirmed.
+    apply_attested_requirements(
+        state,
+        resolve_requirements_state(conversation).attested_summary,
+    )
     return state
 
 
