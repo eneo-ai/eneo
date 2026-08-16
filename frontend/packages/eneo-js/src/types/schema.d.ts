@@ -9759,6 +9759,7 @@ export interface components {
       | "invalid_question_payload"
       | "invalid_session_transition"
       | "model_not_available"
+      | "named_result_key_unsupported"
       | "not_found"
       | "no_planner_model_available"
       | "schema_limit_exceeded"
