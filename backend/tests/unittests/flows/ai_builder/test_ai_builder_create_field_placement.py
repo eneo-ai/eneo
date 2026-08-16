@@ -260,7 +260,6 @@ def test_pure_transcription_has_no_legal_semantic_target() -> None:
                 final_output_type=OutputType.TEXT,
                 final_output_mode=OutputMode.TRANSCRIBE_ONLY,
                 pattern_ids=("audio_transcription",),
-                post_processing_goal="stop_after_primary_operation",
                 runtime_input_fields=(_runtime_field("audience", "interpret_input"),),
             ),
         )

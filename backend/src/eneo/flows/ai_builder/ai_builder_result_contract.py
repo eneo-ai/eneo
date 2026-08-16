@@ -75,6 +75,19 @@ class ResultContract:
     def required_output_field_roles(self) -> tuple[ResultOutputFieldRole, ...]:
         return tuple(field.role for field in self.required_output_fields)
 
+    @property
+    def stops_after_primary_operation(self) -> bool:
+        """Whether no semantic work follows the primary read or transcription.
+
+        A secondary obligation is downstream work the user asked for, so it
+        contradicts stopping even when the goal alone says otherwise.
+        """
+
+        return (
+            self.post_processing_goal == "stop_after_primary_operation"
+            and not self.secondary_obligations
+        )
+
 
 # Accepted names are matched as exact FOLDED equality (fold_result_field_name)
 # — never substring containment, which misreads names like "transaction_id"

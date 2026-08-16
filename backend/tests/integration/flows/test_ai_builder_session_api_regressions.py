@@ -8887,6 +8887,109 @@ async def test_ai_builder_api_audio_report_confirms_core_output_before_runtime_m
     ), assumptions
 
 
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_ai_builder_api_audio_text_post_processing_reaches_a_two_step_plan(
+    client,
+    bearer_token,
+    completion_model_factory,
+    db_container,
+):
+    """An audio flow delivering written text is planned, not refused.
+
+    The purpose separates it from a pure transcription, so the flow keeps the
+    fixed transcription step and adds the semantic step that writes the text.
+    """
+
+    space_id = await _create_space_with_planner_model(
+        client=client,
+        bearer_token=bearer_token,
+        db_container=db_container,
+        completion_model_factory=completion_model_factory,
+        space_name="AI Builder API audio text post processing",
+        planner_model_overrides={"max_input_tokens": 128_000},
+        planner_model_is_only_space_model=True,
+    )
+
+    outline_flow = _make_tool_call(
+        tool_call_id="call_plan_audio_text",
+        name=PROPOSE_FLOW_TOOL_NAME,
+        arguments=_semantic_create_proposal_arguments(
+            flow_name="Protokollsutkast från mötesljud",
+            flow_description=(
+                "Transkriberar mötesljud och skriver ett protokollsutkast."
+            ),
+            plan_rationale="Transkriptet är underlaget för protokollsutkastet.",
+            steps=[
+                _semantic_create_proposal_step(
+                    name="Skriv protokollsutkast",
+                    instructions=(
+                        "Läs transkriberingen och skriv ett protokollsutkast med "
+                        "beslut, åtgärder, ansvariga och öppna frågor."
+                    ),
+                ),
+            ],
+        ),
+    )
+
+    with (
+        patch(
+            "eneo.flows.ai_builder.ai_builder_service.litellm.acompletion",
+            new=AsyncMock(return_value=_make_llm_response(tool_calls=[outline_flow])),
+        ),
+        patch(
+            "eneo.completion_models.infrastructure.completion_service.CompletionService.resolve_model_route",
+            new=AsyncMock(return_value=_route(kwargs={"api_key": "sk-test"})),
+        ),
+    ):
+        session_id = await _create_ai_builder_session(
+            client=client,
+            bearer_token=bearer_token,
+            space_id=space_id,
+        )
+        events = await _progress_builder_session_to_plan(
+            client=client,
+            bearer_token=bearer_token,
+            session_id=session_id,
+            initial_message=(
+                "Ladda upp mötesljud, transkribera och skriv ett protokollsutkast "
+                "med beslut och åtgärder som löpande text."
+            ),
+            structured_answers={
+                "primary_runtime_input": "audio",
+                "terminal_output": "structured_text",
+                "post_processing_goal": "action_followup",
+                "runtime_metadata_fields": "no_extra_metadata",
+            },
+        )
+
+    assert not [event for event in events if event["event"] == "error"], (
+        _builder_event_outline(events)
+    )
+    plan_event = next((event for event in events if event["event"] == "plan"), None)
+    assert plan_event is not None, _builder_event_outline(events)
+
+    plan_id = cast(dict[str, object], plan_event["data"])["plan_id"]
+    plan_response = await client.get(
+        f"/api/v1/flows/ai-builder/plans/{plan_id}",
+        headers={"Authorization": f"Bearer {bearer_token}"},
+    )
+    assert plan_response.status_code == 200, plan_response.text
+    steps = cast(
+        list[dict[str, object]],
+        plan_response.json()["proposal"]["spec"]["steps"],
+    )
+
+    assert steps[0]["input_type"] == "audio", steps
+    assert steps[0]["output_mode"] == "transcribe_only", steps
+    # Everything after the transcript is model-owned semantic work ending in
+    # the text terminal, exactly as for a JSON or PDF terminal.
+    assert len(steps) > 1, steps
+    assert all(step["output_mode"] == "pass_through" for step in steps[1:]), steps
+    assert steps[1]["input_type"] == "text", steps
+    assert steps[-1]["output_type"] == "text", steps
+
+
 @pytest.mark.integration
 @pytest.mark.asyncio
 async def test_approve_and_create_commits_flow_at_final_response_body_boundary(

@@ -1247,7 +1247,11 @@ def test_confirmation_exposes_committed_checkpoint_intent(
     topic: str,
     decision_text: str,
 ) -> None:
-    state = _state(primary_runtime_input="audio", terminal_output="structured_text")
+    state = _state(
+        primary_runtime_input="audio",
+        terminal_output="structured_text",
+        post_processing_goal="stop_after_primary_operation",
+    )
     state.checkpoint_intents = [
         CheckpointIntent(
             producer_kind="transcript",
@@ -1277,7 +1281,11 @@ def test_confirmation_exposes_requested_checkpoint_clear(
     ui_language: str,
     decision_text: str,
 ) -> None:
-    state = _state(primary_runtime_input="audio", terminal_output="structured_text")
+    state = _state(
+        primary_runtime_input="audio",
+        terminal_output="structured_text",
+        post_processing_goal="stop_after_primary_operation",
+    )
     state.checkpoint_intents = [
         CheckpointIntent(
             producer_kind="transcript",
@@ -1297,7 +1305,11 @@ def test_confirmation_exposes_requested_checkpoint_clear(
 
 
 def test_checkpoint_intent_change_requires_fresh_confirmation() -> None:
-    state = _state(primary_runtime_input="audio", terminal_output="structured_text")
+    state = _state(
+        primary_runtime_input="audio",
+        terminal_output="structured_text",
+        post_processing_goal="stop_after_primary_operation",
+    )
     state.checkpoint_intents = [
         CheckpointIntent(
             producer_kind="transcript",

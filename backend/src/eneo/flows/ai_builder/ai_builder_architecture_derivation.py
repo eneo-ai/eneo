@@ -13,6 +13,7 @@ from eneo.flows.ai_builder.ai_builder_aggregation_intent import (
     report_disposition_is_relevant,
 )
 from eneo.flows.ai_builder.ai_builder_new_step_compiler import derive_output_mode
+from eneo.flows.ai_builder.ai_builder_result_contract import derive_result_contract
 from eneo.flows.ai_builder.pattern_registry import (
     EXTRACT_TEMPLATE_VARIABLES_STEP,
     FLOW_INPUT_AUDIO_TRANSCRIPTION,
@@ -66,6 +67,9 @@ _DOCX_TEMPLATE_PATTERN_CHAIN_STEPS = frozenset(
         PREPARE_TEMPLATE_CONTENT_STEP,
         TEMPLATE_FILL_DOCX_STEP,
     }
+)
+CORE_ARCHITECTURAL_SLOTS: frozenset[str] = frozenset(
+    {"primary_runtime_input", "terminal_output"}
 )
 _SUPPORTED_STRUCTURAL_PATTERN_IDS = frozenset(
     {
@@ -136,6 +140,23 @@ def derive_architecture_commit_draft(
         ),
         report_disposition=_report_disposition_from_state(state),
     )
+
+
+def architecture_required_slot_names(state: PlanningState) -> frozenset[str]:
+    """Slots a created flow's architecture must have before it can commit.
+
+    The purpose is architectural for exactly one shape: an audio flow whose
+    terminal output is text either delivers the transcript itself or a written
+    result derived from it, and those are different topologies. Everywhere
+    else the purpose shapes content, not structure.
+    """
+
+    if (
+        _input_type_from_state(state) is FlowInputType.AUDIO
+        and _output_type_from_state(state) is FlowOutputType.TEXT
+    ):
+        return CORE_ARCHITECTURAL_SLOTS | {"post_processing_goal"}
+    return CORE_ARCHITECTURAL_SLOTS
 
 
 def architecture_commit_hints_are_supported(
@@ -249,6 +270,17 @@ def _output_mode_from_state(
     input_type: FlowInputType,
     output_type: FlowOutputType,
 ) -> FlowOutputMode:
+    if input_type is FlowInputType.AUDIO and output_type is FlowOutputType.TEXT:
+        # `transcribe_only` is a step pathway, not a flow envelope: the
+        # capability manifest defines it as one AUDIO -> TEXT step. It is the
+        # flow's terminal mode only when the transcript itself is the result.
+        # Any further work is a model-owned semantic step writing the terminal
+        # text, exactly as for a JSON, PDF or DOCX terminal.
+        return (
+            FlowOutputMode.TRANSCRIBE_ONLY
+            if _flow_stops_after_transcription(state)
+            else FlowOutputMode.PASS_THROUGH
+        )
     docx_mode = state.commit_grade_slot_value("docx_output_mode")
     document_delivery_mode = (
         "template_fill"
@@ -262,6 +294,11 @@ def _output_mode_from_state(
             document_delivery_mode=document_delivery_mode,
         ).value
     )
+
+
+def _flow_stops_after_transcription(state: PlanningState) -> bool:
+    contract = derive_result_contract(state)
+    return contract is not None and contract.stops_after_primary_operation
 
 
 def _chosen_patterns_for_state(
@@ -308,7 +345,11 @@ def _primary_pattern_id(
         FlowOutputType.PDF,
     }:
         return "json_to_artifact_report"
-    if input_type is FlowInputType.AUDIO and output_type is FlowOutputType.TEXT:
+    if (
+        input_type is FlowInputType.AUDIO
+        and output_type is FlowOutputType.TEXT
+        and output_mode is FlowOutputMode.TRANSCRIBE_ONLY
+    ):
         return "audio_transcription"
     if input_type is FlowInputType.AUDIO:
         return "audio_to_artifact_report"
@@ -356,8 +397,10 @@ def _step_output_mode_value(
 
 
 __all__ = [
+    "CORE_ARCHITECTURAL_SLOTS",
     "architecture_commit_hints_are_supported",
     "architecture_hints_are_supported",
+    "architecture_required_slot_names",
     "derive_architecture_commit_draft",
     "flow_input_type_from_primary_runtime_input_value",
 ]

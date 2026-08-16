@@ -4,12 +4,14 @@ import pytest
 
 from eneo.flows.ai_builder import ai_builder_architecture_derivation
 from eneo.flows.ai_builder.ai_builder_architecture_derivation import (
+    architecture_required_slot_names,
     derive_architecture_commit_draft,
 )
 from eneo.flows.ai_builder.ai_builder_domain_models import (
     ConversationMessage,
 )
 from eneo.flows.ai_builder.planning_state import (
+    PlanningSignal,
     PlanningState,
     ResolvedSlot,
     SlotConfidence,
@@ -188,6 +190,108 @@ def test_derives_audio_to_pdf_architecture_without_document_scope() -> None:
     ]
     assert draft.chosen_patterns == ["audio_to_artifact_report"]
     assert draft.required_capabilities == ["input_audio", "output_mode_pass_through"]
+
+
+def test_derives_transcribe_only_architecture_when_the_flow_stops_at_the_transcript() -> (
+    None
+):
+    draft = derive_architecture_commit_draft(
+        _state_with_slots(
+            primary_runtime_input="audio",
+            terminal_output="structured_text",
+            post_processing_goal="stop_after_primary_operation",
+        )
+    )
+
+    assert draft is not None
+    assert [triple.model_dump() for triple in draft.tuples_chain] == [
+        {
+            "input_type": "audio",
+            "output_type": "text",
+            "output_mode": "transcribe_only",
+        }
+    ]
+    assert draft.chosen_patterns == ["audio_transcription"]
+
+
+@pytest.mark.parametrize(
+    "post_processing_goal",
+    ["action_followup", "summarize_or_overview", "structure_key_information"],
+)
+def test_derives_semantic_text_architecture_when_audio_needs_post_processing(
+    post_processing_goal: str,
+) -> None:
+    draft = derive_architecture_commit_draft(
+        _state_with_slots(
+            primary_runtime_input="audio",
+            terminal_output="structured_text",
+            post_processing_goal=post_processing_goal,
+        )
+    )
+
+    assert draft is not None
+    assert [triple.model_dump() for triple in draft.tuples_chain] == [
+        {
+            "input_type": "audio",
+            "output_type": "text",
+            "output_mode": "pass_through",
+        }
+    ]
+    # The same archetype as an audio flow ending in JSON or PDF: the fixed
+    # transcription step feeds model-owned semantic steps.
+    assert draft.chosen_patterns == ["audio_to_artifact_report"]
+
+
+def test_secondary_obligation_contradicts_stopping_at_the_transcript() -> None:
+    state = _state_with_slots(
+        primary_runtime_input="audio",
+        terminal_output="structured_text",
+        post_processing_goal="stop_after_primary_operation",
+    )
+    state.signals.append(
+        PlanningSignal(
+            question_id="result_obligation",
+            value="summary",
+            confidence="high",
+            source="model",
+        )
+    )
+
+    draft = derive_architecture_commit_draft(state)
+
+    assert draft is not None
+    assert draft.tuples_chain[0].output_mode is FlowAuthoringOutputMode.PASS_THROUGH
+    assert draft.chosen_patterns == ["audio_to_artifact_report"]
+
+
+def test_purpose_is_architecturally_required_for_an_audio_text_flow() -> None:
+    state = _state_with_slots(
+        primary_runtime_input="audio",
+        terminal_output="structured_text",
+    )
+
+    assert architecture_required_slot_names(state) == frozenset(
+        {"primary_runtime_input", "terminal_output", "post_processing_goal"}
+    )
+
+
+@pytest.mark.parametrize(
+    ("primary_runtime_input", "terminal_output"),
+    [("audio", "structured_json"), ("audio", "pdf_document"), ("documents", "text")],
+)
+def test_purpose_is_only_architectural_for_an_audio_text_flow(
+    primary_runtime_input: str,
+    terminal_output: str,
+) -> None:
+    state = _state_with_slots(
+        primary_runtime_input=primary_runtime_input,
+        terminal_output=terminal_output,
+    )
+
+    assert architecture_required_slot_names(state) == frozenset(
+        {"primary_runtime_input", "terminal_output"}
+    )
+    assert derive_architecture_commit_draft(state) is not None
 
 
 def test_derives_text_to_docx_architecture_with_non_empty_pattern() -> None:

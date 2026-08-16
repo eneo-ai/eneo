@@ -14,7 +14,6 @@ from eneo.flows.ai_builder.ai_builder_primary_input_fields import (
     is_primary_runtime_input_shadow_field,
 )
 from eneo.flows.ai_builder.ai_builder_result_contract import (
-    ResultObligation,
     ResultOutputFieldRole,
     derive_result_contract,
 )
@@ -53,8 +52,6 @@ class CreateCompileContext:
     runtime_max_files: int | None = None
     final_output_type: OutputType | None = None
     final_output_mode: OutputMode | None = None
-    post_processing_goal: str | None = None
-    secondary_obligations: tuple[ResultObligation, ...] = ()
     pattern_ids: tuple[str, ...] = ()
     pattern_chain_steps: tuple[str, ...] = ()
     ui_language: str | None = None
@@ -154,19 +151,17 @@ class CreateCompileContext:
         )
 
     @property
-    def is_audio_transcription_envelope(self) -> bool:
+    def is_pure_audio_transcription(self) -> bool:
+        """Whether the transcript itself is the result, with no semantic step.
+
+        The architecture derivation owns that decision; `transcribe_only` as
+        the flow's terminal mode is how it records it.
+        """
+
         return (
             self.runtime_input_type is InputType.AUDIO
             and self.final_output_type is OutputType.TEXT
             and self.final_output_mode is OutputMode.TRANSCRIBE_ONLY
-        )
-
-    @property
-    def is_pure_audio_transcription(self) -> bool:
-        return (
-            self.is_audio_transcription_envelope
-            and self.post_processing_goal == "stop_after_primary_operation"
-            and not self.secondary_obligations
         )
 
 
@@ -205,20 +200,11 @@ def create_compile_context_from_planning_state(
     architecture = planning_state.architecture_commit
     runtime_input_type = _runtime_input_type_from_architecture(architecture)
     final_output_type = _final_output_type_from_architecture(architecture)
-    result_contract = derive_result_contract(planning_state)
     return CreateCompileContext(
         runtime_input_type=runtime_input_type,
         runtime_max_files=planning_state.mapped_file_limit.accepted_value,
         final_output_type=final_output_type,
         final_output_mode=_final_output_mode_from_architecture(architecture),
-        post_processing_goal=(
-            result_contract.post_processing_goal
-            if result_contract is not None
-            else None
-        ),
-        secondary_obligations=(
-            result_contract.secondary_obligations if result_contract is not None else ()
-        ),
         pattern_ids=_pattern_ids_from_architecture(architecture),
         pattern_chain_steps=_pattern_chain_steps_from_architecture(architecture),
         ui_language=ui_language,

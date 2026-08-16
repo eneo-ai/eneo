@@ -43,7 +43,6 @@ from eneo.flows.ai_builder.ai_builder_proposal_intent import (
     parse_create_flow_intent_arguments,
 )
 from eneo.flows.ai_builder.ai_builder_result_contract import (
-    ResultObligation,
     ResultOutputFieldRole,
 )
 from eneo.flows.ai_builder.ai_builder_runtime_input_fields import (
@@ -2432,7 +2431,7 @@ def test_assembly_source_reader_contract_keeps_all_terminal_schema_leaves() -> N
                 runtime_input_type=InputType.AUDIO,
                 final_output_type=OutputType.TEXT,
                 final_output_mode=OutputMode.TRANSCRIBE_ONLY,
-                post_processing_goal="stop_after_primary_operation",
+                pattern_ids=("audio_transcription",),
             ),
             True,
         ),
@@ -2440,19 +2439,8 @@ def test_assembly_source_reader_contract_keeps_all_terminal_schema_leaves() -> N
             CreateCompileContext(
                 runtime_input_type=InputType.AUDIO,
                 final_output_type=OutputType.TEXT,
-                final_output_mode=OutputMode.TRANSCRIBE_ONLY,
-                pattern_ids=("audio_transcription",),
-                post_processing_goal="summarize_or_overview",
-            ),
-            False,
-        ),
-        (
-            CreateCompileContext(
-                runtime_input_type=InputType.AUDIO,
-                final_output_type=OutputType.TEXT,
-                final_output_mode=OutputMode.TRANSCRIBE_ONLY,
-                post_processing_goal="stop_after_primary_operation",
-                secondary_obligations=("summary",),
+                final_output_mode=OutputMode.PASS_THROUGH,
+                pattern_ids=("audio_to_artifact_report",),
             ),
             False,
         ),
@@ -2462,7 +2450,6 @@ def test_assembly_source_reader_contract_keeps_all_terminal_schema_leaves() -> N
                 final_output_type=OutputType.TEXT,
                 final_output_mode=OutputMode.TRANSCRIBE_ONLY,
                 pattern_ids=("audio_transcription",),
-                post_processing_goal="stop_after_primary_operation",
             ),
             False,
         ),
@@ -2471,7 +2458,6 @@ def test_assembly_source_reader_contract_keeps_all_terminal_schema_leaves() -> N
                 runtime_input_type=InputType.AUDIO,
                 final_output_type=OutputType.TEXT,
                 pattern_ids=("audio_transcription",),
-                post_processing_goal="stop_after_primary_operation",
             ),
             False,
         ),
@@ -2506,7 +2492,6 @@ def test_compiler_uses_assembly_path_for_pure_audio_transcription() -> None:
             final_output_type=OutputType.TEXT,
             final_output_mode=OutputMode.TRANSCRIBE_ONLY,
             pattern_ids=("audio_transcription",),
-            post_processing_goal="stop_after_primary_operation",
             runtime_max_files=1,
         ),
     )
@@ -2556,7 +2541,7 @@ def test_compiler_rejects_structured_shape_for_pure_audio_transcription() -> Non
                 runtime_input_type=InputType.AUDIO,
                 final_output_type=OutputType.TEXT,
                 final_output_mode=OutputMode.TRANSCRIBE_ONLY,
-                post_processing_goal="stop_after_primary_operation",
+                pattern_ids=("audio_transcription",),
             ),
         )
 
@@ -2565,46 +2550,47 @@ def test_compiler_rejects_structured_shape_for_pure_audio_transcription() -> Non
     )
 
 
-@pytest.mark.parametrize(
-    ("post_processing_goal", "secondary_obligations"),
-    [
-        ("summarize_or_overview", ()),
-        ("action_followup", ()),
-        ("stop_after_primary_operation", ("summary",)),
-    ],
-)
-def test_compiler_never_downgrades_audio_post_processing_to_transcript_only(
-    post_processing_goal: str,
-    secondary_obligations: tuple[ResultObligation, ...],
-) -> None:
+def test_compiler_writes_terminal_text_from_the_transcript_for_audio_post_processing() -> (
+    None
+):
     intent = parse_create_flow_intent_arguments(
         {
-            "flow_name": "Meeting result",
-            "plan_rationale": "Produce the requested result from meeting audio.",
+            "flow_name": "Mötesprotokoll",
+            "flow_description": "Transkribera mötesljud och skriv ett protokollsutkast.",
+            "plan_rationale": "Transkriptet är underlaget för protokollsutkastet.",
             "steps": [
                 {
-                    "name": "Process meeting audio",
-                    "instructions": "Produce the requested source-grounded result.",
+                    "name": "Skriv protokollsutkast",
+                    "instructions": (
+                        "Läs transkriptet och skriv ett protokollsutkast med "
+                        "beslut och åtgärder."
+                    ),
                 }
             ],
         }
     )
 
-    with pytest.raises(AIBuilderArchitectureError) as exc_info:
-        compile_create_intent_to_spec(
-            intent,
-            context=CreateCompileContext(
-                runtime_input_type=InputType.AUDIO,
-                final_output_type=OutputType.TEXT,
-                final_output_mode=OutputMode.TRANSCRIBE_ONLY,
-                post_processing_goal=post_processing_goal,
-                secondary_obligations=secondary_obligations,
-            ),
-        )
-
-    assert exc_info.value.log_context["failure_code"] == (
-        "assembly_unsupported_output_mode"
+    compiled = compile_create_intent_to_spec(
+        intent,
+        context=CreateCompileContext(
+            runtime_input_type=InputType.AUDIO,
+            final_output_type=OutputType.TEXT,
+            final_output_mode=OutputMode.PASS_THROUGH,
+            pattern_ids=("audio_to_artifact_report",),
+            runtime_max_files=1,
+        ),
     )
+
+    transcription, terminal = compiled.steps
+    assert transcription.input_source == InputSource.FLOW_INPUT
+    assert transcription.input_type == InputType.AUDIO
+    assert transcription.output_mode == OutputMode.TRANSCRIBE_ONLY
+    assert terminal.name == "Skriv protokollsutkast"
+    assert terminal.input_source == InputSource.PREVIOUS_STEP
+    assert terminal.input_type == InputType.TEXT
+    assert terminal.output_type == OutputType.TEXT
+    assert terminal.output_mode == OutputMode.PASS_THROUGH
+    assert validate_spec(compiled).valid
 
 
 def test_compiler_projects_typed_checkpoint_intents_onto_actual_producers() -> None:

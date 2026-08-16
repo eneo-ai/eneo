@@ -256,6 +256,16 @@ def _committed_state(*, primary_input: str) -> PlanningState:
             evidence=["question_answer:terminal_output"],
         ),
     }
+    if primary_input == "audio":
+        # An audio flow with a text terminal cannot commit an architecture
+        # until the purpose settles whether the transcript is the result.
+        state.resolved_slots["post_processing_goal"] = ResolvedSlot(
+            name="post_processing_goal",
+            value="stop_after_primary_operation",
+            source="structured_answer",
+            confidence="high",
+            evidence=["question_answer:post_processing_goal"],
+        )
     if primary_input == "documents":
         state.resolved_slots["document_material_scope"] = ResolvedSlot(
             name="document_material_scope",

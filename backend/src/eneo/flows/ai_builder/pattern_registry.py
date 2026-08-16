@@ -269,13 +269,18 @@ _POSITIVE_PATTERNS: tuple[Pattern, ...] = (
     ),
     _pattern(
         id="audio_transcription",
+        # The purpose separates this archetype from `audio_to_artifact_report`:
+        # both read audio, and only a settled "stop after the transcript" makes
+        # the transcription step the whole flow.
         required_architectural_slots=(
             "primary_runtime_input",
             "terminal_output",
+            "post_processing_goal",
         ),
         question_template_ids=(
             "primary_runtime_input",
             "terminal_output",
+            "post_processing_goal",
         ),
     ),
     _pattern(

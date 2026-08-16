@@ -14,7 +14,9 @@ from dataclasses import dataclass
 from typing import Literal
 
 from eneo.flows.ai_builder.ai_builder_architecture_derivation import (
+    CORE_ARCHITECTURAL_SLOTS,
     architecture_commit_hints_are_supported,
+    architecture_required_slot_names,
     derive_architecture_commit_draft,
 )
 from eneo.flows.ai_builder.ai_builder_canonicalization import canonical_question_id
@@ -44,10 +46,6 @@ from eneo.flows.ai_builder.ai_builder_template_attachment_contract import (
 )
 from eneo.flows.ai_builder.planning_state import ArchitectureCommitDraft, PlanningState
 from eneo.flows.enums import FlowAuthoringOutputMode
-
-_CORE_ARCHITECTURAL_SLOTS: frozenset[str] = frozenset(
-    {"primary_runtime_input", "terminal_output"}
-)
 
 # How many user-named result keys one create schema projects. Its own
 # constant on purpose: the classifier's per-delta citation bound is a
@@ -142,7 +140,10 @@ def build_planner_action_policy(
     """
 
     commit_grade_slot_names = _commit_grade_slot_names(session_state)
-    unresolved_core_slots = _compute_unresolved_core_slots(session_state)
+    unresolved_core_slots = _compute_unresolved_core_slots(
+        session_state,
+        is_edit_mode=is_edit_mode,
+    )
     derived_commit = derive_architecture_commit_draft(session_state)
     architecture_refusal_code = _architecture_refusal_code(
         session_state,
@@ -256,10 +257,23 @@ def _architecture_refusal_code(
 
 def _compute_unresolved_core_slots(
     planning_state: PlanningState,
+    *,
+    is_edit_mode: bool,
 ) -> frozenset[str]:
-    """Core slots that lack evidence strong enough to close discovery."""
+    """Architectural slots that lack evidence strong enough to close discovery.
 
-    return _CORE_ARCHITECTURAL_SLOTS - _commit_grade_slot_names(planning_state)
+    The create derivation owns which slots a new flow's architecture needs, so
+    a slot it cannot commit without becomes a question here instead of a later
+    failure. An edit inherits its topology from the existing flow, so only the
+    two universal slots gate it.
+    """
+
+    required = (
+        CORE_ARCHITECTURAL_SLOTS
+        if is_edit_mode
+        else architecture_required_slot_names(planning_state)
+    )
+    return required - _commit_grade_slot_names(planning_state)
 
 
 def _commit_grade_slot_names(planning_state: PlanningState) -> frozenset[str]:

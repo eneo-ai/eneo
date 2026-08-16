@@ -23,6 +23,12 @@ from eneo.completion_models.infrastructure.completion_service import (
     ResolvedCompletionModelRoute,
 )
 from eneo.files.file_models import File, FileType
+from eneo.flows.ai_builder.ai_builder_architecture_commit import (
+    finalize_architecture_commit,
+)
+from eneo.flows.ai_builder.ai_builder_architecture_derivation import (
+    derive_architecture_commit_draft,
+)
 from eneo.flows.ai_builder.ai_builder_attachment_context import (
     AIBuilderAttachmentContext,
     AIBuilderAttachmentContextPolicy,
@@ -632,29 +638,22 @@ def test_prepared_edit_schema_is_not_native_strict() -> None:
     assert "uniqueItems" in encoded
 
 
-def _audio_text_transcription_state(
+def _audio_text_architecture_state(
     *,
-    post_processing_goal: str | None,
+    post_processing_goal: str,
     secondary_obligation: str | None = None,
 ) -> PlanningState:
+    """An audio flow with a text terminal, committed the way production does."""
+
     state = PlanningState.empty()
-    state.architecture_commit = ArchitectureCommit(
-        tuples_chain=[
-            StepTriple(
-                input_type="audio",
-                output_type="text",
-                output_mode="transcribe_only",
-            )
-        ],
-        chosen_patterns=["audio_transcription"],
-        required_capabilities=["input_audio", "output_mode_transcribe_only"],
-        committed_at=datetime(2026, 8, 13, tzinfo=timezone.utc),
-        architecture_hash="c" * 64,
-    )
-    if post_processing_goal is not None:
-        state.resolved_slots["post_processing_goal"] = ResolvedSlot(
-            name="post_processing_goal",
-            value=post_processing_goal,
+    for name, value in (
+        ("primary_runtime_input", "audio"),
+        ("terminal_output", "structured_text"),
+        ("post_processing_goal", post_processing_goal),
+    ):
+        state.resolved_slots[name] = ResolvedSlot(
+            name=name,
+            value=value,
             source="structured_answer",
             confidence="high",
         )
@@ -667,11 +666,14 @@ def _audio_text_transcription_state(
                 source="model",
             )
         )
+    draft = derive_architecture_commit_draft(state)
+    assert draft is not None
+    state.architecture_commit = finalize_architecture_commit(draft)
     return state
 
 
 def test_create_preparation_projects_explicit_transcript_only_context() -> None:
-    state = _audio_text_transcription_state(
+    state = _audio_text_architecture_state(
         post_processing_goal="stop_after_primary_operation"
     )
 
@@ -692,32 +694,32 @@ def test_create_preparation_projects_explicit_transcript_only_context() -> None:
 @pytest.mark.parametrize(
     ("post_processing_goal", "secondary_obligation"),
     [
-        (None, None),
         ("summarize_or_overview", None),
         ("action_followup", None),
         ("stop_after_primary_operation", "summary"),
     ],
 )
-def test_audio_text_post_processing_fails_before_proposal(
-    post_processing_goal: str | None,
+def test_create_preparation_plans_semantic_steps_for_audio_text_post_processing(
+    post_processing_goal: str,
     secondary_obligation: str | None,
 ) -> None:
-    state = _audio_text_transcription_state(
+    state = _audio_text_architecture_state(
         post_processing_goal=post_processing_goal,
         secondary_obligation=secondary_obligation,
     )
 
-    with pytest.raises(AIBuilderBadRequestException) as exc_info:
-        _build_create_proposal_for_architecture(state)
+    prepared = _build_create_proposal_for_architecture(state)
 
-    assert exc_info.value.code is AIBuilderErrorCode.ARCHITECTURE_MATERIALIZATION_FAILED
-    assert exc_info.value.context == {
-        "reason": "audio_transcription_post_processing_unsupported",
-        "post_processing_goal": post_processing_goal,
-        "secondary_obligations": (
-            [secondary_obligation] if secondary_obligation is not None else []
-        ),
-    }
+    assert prepared.compile_context is not None
+    assert prepared.compile_context.is_pure_audio_transcription is False
+    # The generic create contract: the model owns the semantic steps that turn
+    # the transcript into the terminal text.
+    assert prepared.proposal_tool_schema == build_propose_flow_tool_schema(
+        resource_catalog=prepared.resource_catalog
+    )
+    prompt = prepared.llm_messages[0]["content"]
+    assert isinstance(prompt, str)
+    assert "exactly one semantic transcription step" not in prompt
 
 
 def test_create_preparation_keeps_audio_report_prompt_and_generic_schema() -> None:

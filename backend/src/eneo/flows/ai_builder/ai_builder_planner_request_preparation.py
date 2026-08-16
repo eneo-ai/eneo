@@ -514,21 +514,6 @@ def build_proposal_prepared(
         and compile_context is not None
         and compile_context.is_pure_audio_transcription
     )
-    if (
-        not is_edit_mode
-        and compile_context is not None
-        and compile_context.is_audio_transcription_envelope
-        and not is_pure_audio_transcription
-    ):
-        raise AIBuilderBadRequestException(
-            "Audio-to-text post-processing requires a downstream semantic step.",
-            code=AIBuilderErrorCode.ARCHITECTURE_MATERIALIZATION_FAILED,
-            context={
-                "reason": "audio_transcription_post_processing_unsupported",
-                "post_processing_goal": compile_context.post_processing_goal,
-                "secondary_obligations": list(compile_context.secondary_obligations),
-            },
-        )
     obligation_projection = named_result_projection(
         planning_state,
         is_edit_mode=is_edit_mode,

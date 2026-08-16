@@ -385,6 +385,10 @@ def test_policy_ignores_weak_comparison_for_non_document_input(
         "terminal_output",
         "structured_text",
     )
+    state.resolved_slots["post_processing_goal"] = _slot(
+        "post_processing_goal",
+        "summarize_or_overview",
+    )
     state.resolved_slots["comparison_scope"] = _slot(
         "comparison_scope",
         "same_run_compare",
@@ -414,6 +418,10 @@ def test_policy_ignores_weak_report_disposition_for_non_document_input(
         "terminal_output",
         "structured_text",
     )
+    state.resolved_slots["post_processing_goal"] = _slot(
+        "post_processing_goal",
+        "summarize_or_overview",
+    )
     state.resolved_slots["report_disposition"] = _slot(
         "report_disposition",
         "both",
@@ -426,6 +434,64 @@ def test_policy_ignores_weak_report_disposition_for_non_document_input(
         selected_discovery_question_ids=(),
     )
 
+    assert policy.allowed_action_kinds == ("commit_architecture",)
+    assert policy.allowed_ask_question_targets == ()
+
+
+def test_policy_asks_the_purpose_before_committing_an_audio_text_architecture() -> None:
+    state = PlanningState.empty()
+    state.resolved_slots["primary_runtime_input"] = _slot(
+        "primary_runtime_input",
+        "audio",
+    )
+    state.resolved_slots["terminal_output"] = _slot(
+        "terminal_output",
+        "structured_text",
+    )
+
+    unsettled = build_planner_action_policy(
+        session_state=state,
+        selected_discovery_question_ids=(),
+    )
+
+    # Delivering the transcript and writing a result from it are different
+    # topologies, so the purpose is asked rather than assumed or refused.
+    assert unsettled.allowed_action_kinds == ("ask_question",)
+    assert unsettled.allowed_ask_question_targets == ("post_processing_goal",)
+    assert unsettled.architecture_refusal_code is None
+
+    state.resolved_slots["post_processing_goal"] = _slot(
+        "post_processing_goal",
+        "action_followup",
+    )
+    settled = build_planner_action_policy(
+        session_state=state,
+        selected_discovery_question_ids=(),
+    )
+
+    assert settled.allowed_action_kinds == ("commit_architecture",)
+    assert settled.allowed_ask_question_targets == ()
+
+
+def test_policy_does_not_ask_the_purpose_when_editing_an_existing_flow() -> None:
+    state = PlanningState.empty()
+    state.resolved_slots["primary_runtime_input"] = _slot(
+        "primary_runtime_input",
+        "audio",
+    )
+    state.resolved_slots["terminal_output"] = _slot(
+        "terminal_output",
+        "structured_text",
+    )
+
+    policy = build_planner_action_policy(
+        session_state=state,
+        selected_discovery_question_ids=(),
+        is_edit_mode=True,
+    )
+
+    # An edit keeps the existing flow's topology, so the purpose is not the
+    # question that unblocks it.
     assert policy.allowed_action_kinds == ("commit_architecture",)
     assert policy.allowed_ask_question_targets == ()
 
@@ -559,6 +625,10 @@ def test_policy_requires_audio_for_a_transcript_checkpoint() -> None:
     audio_state.resolved_slots["primary_runtime_input"] = _slot(
         "primary_runtime_input",
         "audio",
+    )
+    audio_state.resolved_slots["post_processing_goal"] = _slot(
+        "post_processing_goal",
+        "action_followup",
     )
     audio_draft = derive_architecture_commit_draft(audio_state)
     assert audio_draft is not None
