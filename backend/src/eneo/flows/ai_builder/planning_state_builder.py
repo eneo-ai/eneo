@@ -785,6 +785,11 @@ def _merge_model_checkpoint_updates(
     for update in classification_result.checkpoint_updates:
         if update.confidence == "low" or not update.evidence:
             raise ValueError("checkpoint update requires supported cited evidence")
+        if update.evidence_level != "explicit":
+            # Inferred checkpoint changes are diagnostic only: they stay in the
+            # classification metadata and never reach planning state. Skipping
+            # one leaves the rest of the turn's reading standing.
+            continue
         if update.operation == "clear":
             if update.mode is not None:
                 raise ValueError("checkpoint clear must not carry a review mode")
@@ -796,6 +801,7 @@ def _merge_model_checkpoint_updates(
                 mode=None,
                 confidence=update.confidence,
                 evidence=[item.planning_reference() for item in update.evidence],
+                evidence_level=update.evidence_level,
             )
             continue
         if update.mode is None:
@@ -806,6 +812,7 @@ def _merge_model_checkpoint_updates(
             mode=update.mode,
             confidence=update.confidence,
             evidence=[item.planning_reference() for item in update.evidence],
+            evidence_level=update.evidence_level,
         )
     state.checkpoint_intents = sorted(
         intents_by_producer.values(),

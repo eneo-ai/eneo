@@ -671,46 +671,61 @@ def test_slot_classification_input_carries_each_answering_question_identity() ->
 
 
 @pytest.mark.asyncio
-async def test_runtime_fills_reserved_conversation_capacity() -> None:
+async def test_runtime_admits_the_largest_conversation_that_fits() -> None:
     long_text = ("alpha beta gamma delta " * 3_000)[:50_000]
-    litellm_client = AsyncMock()
-    litellm_client.acompletion.return_value = _make_response(json.dumps({}))
 
-    context = await build_runtime_discovery_context(
-        [
-            ConversationMessage(
-                message_id="user-1",
-                role="user",
-                content=long_text,
+    async def admitted_conversation(max_input_tokens: int) -> tuple[str, object]:
+        litellm_client = AsyncMock()
+        litellm_client.acompletion.return_value = _make_response(json.dumps({}))
+        context = await build_runtime_discovery_context(
+            [
+                ConversationMessage(
+                    message_id="user-1",
+                    role="user",
+                    content=long_text,
+                )
+            ],
+            litellm_client=litellm_client,
+            completion_model_route=_route(),
+            tenant_id=uuid4(),
+            max_input_tokens=max_input_tokens,
+            max_output_tokens=1_000,
+            safety_buffer_tokens=1_000,
+            minimum_conversation_tokens=4_000,
+        )
+        litellm_client.acompletion.assert_awaited_once()
+        provider_request = litellm_client.acompletion.await_args.kwargs
+        messages = provider_request["messages"]
+        user_prompt = messages[1]["content"]
+        admitted = user_prompt.split(
+            "Typed evidence sources in conversation chronology, followed by stable "
+            "file-id order:\n",
+            1,
+        )[1].split("\n\nCheckpoints this flow has now:", 1)[0]
+        admitted = admitted.split("\n", 1)[1]
+
+        def fits(prompt: str) -> bool:
+            return classifier.slot_classification_request_fits_model(
+                messages=[messages[0], {"role": "user", "content": prompt}],
+                response_format=provider_request["response_format"],
+                litellm_model="gpt-test",
+                max_input_tokens=max_input_tokens,
+                max_output_tokens=1_000,
+                safety_buffer_tokens=1_000,
             )
-        ],
-        litellm_client=litellm_client,
-        completion_model_route=_route(),
-        tenant_id=uuid4(),
-        max_input_tokens=16_000,
-        max_output_tokens=1_000,
-        safety_buffer_tokens=1_000,
-        minimum_conversation_tokens=4_000,
-    )
 
-    litellm_client.acompletion.assert_awaited_once()
-    provider_request = litellm_client.acompletion.await_args.kwargs
-    user_prompt = provider_request["messages"][1]["content"]
-    admitted_text = user_prompt.split(
-        "Typed evidence sources in conversation chronology, followed by stable "
-        "file-id order:\n",
-        1,
-    )[1].split("\n\nUnresolved slots and allowed values:", 1)[0]
-    admitted_text = admitted_text.split("\n", 1)[1]
-    assert 49_000 <= len(admitted_text) < len(long_text)
-    assert classifier.slot_classification_request_fits_model(
-        messages=provider_request["messages"],
-        response_format=provider_request["response_format"],
-        litellm_model="gpt-test",
-        max_input_tokens=16_000,
-        max_output_tokens=1_000,
-        safety_buffer_tokens=1_000,
-    )
+        # Maximal, not merely legal: what was sent fits, and the same request
+        # carrying one more character of the same conversation does not.
+        assert fits(user_prompt)
+        assert not fits(
+            user_prompt.replace(admitted, long_text[: len(admitted) + 1], 1)
+        )
+        return admitted, context
+
+    narrow, _ = await admitted_conversation(12_000)
+    wide, context = await admitted_conversation(16_000)
+
+    assert len(narrow) < len(wide) < len(long_text)
     assert context.slot_classification_metadata is not None
     assert [
         item.truncated for item in context.slot_classification_metadata.source_inventory
@@ -2232,6 +2247,7 @@ async def test_resolved_session_classifies_current_checkpoint_change(
     state = _resolved_state()
     state.checkpoint_intents = [
         CheckpointIntent(
+            evidence_level="explicit",
             producer_kind="report_text",
             operation="set",
             mode=FlowStepReviewMode.VIEW,
@@ -2250,6 +2266,7 @@ async def test_resolved_session_classifies_current_checkpoint_change(
         "confidence": "high",
         "reason": "The current user changed report review requirements.",
         "evidence": [_cited(prompt)],
+        "evidence_level": "explicit",
     }
     if expected_mode is not None:
         update["mode"] = expected_mode.value

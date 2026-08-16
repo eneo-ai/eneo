@@ -56,7 +56,7 @@ from eneo.flows.flow_review_policy import FlowStepReviewMode
 from eneo.json_types import JsonObject
 
 PLANNER_CONTRACT_VERSION: int = 1
-BUILDER_SCHEMA_VERSION: int = 19
+BUILDER_SCHEMA_VERSION: int = 20
 # One state can retain two independently assigned 128-KiB schemas. The persisted
 # envelope leaves the other half for provenance, file roles, slots, and future
 # state growth without coupling the per-schema ceiling to the state ceiling.
@@ -289,6 +289,14 @@ class CheckpointIntent(_PlanningModel):
     ``set`` requests a review with ``mode`` on the producer; ``clear`` is a
     typed tombstone for an explicitly requested removal. Absence of an intent
     means the user requested no change for that producer.
+
+    A checkpoint pauses the run until a person acts, so a caller driving the
+    Flow from an API waits until it expires. A citation proves only where words
+    came from, not what they asked for, and quoting the sentence that named a
+    step was enough to place a review nobody requested. ``evidence_level``
+    carries the classifier's own grade of its quote, and this model stores no
+    intent graded anything but ``explicit``, wherever state is built or loaded.
+    That checks the recorded grade, not the meaning of the quote.
     """
 
     producer_kind: CheckpointProducerKind
@@ -296,6 +304,7 @@ class CheckpointIntent(_PlanningModel):
     mode: FlowStepReviewMode | None
     confidence: SlotConfidence
     evidence: list[str] = Field(min_length=1, max_length=3)
+    evidence_level: SlotEvidenceLevel
 
     @model_validator(mode="after")
     def require_commit_grade_evidence(self) -> CheckpointIntent:
@@ -307,6 +316,10 @@ class CheckpointIntent(_PlanningModel):
             raise ValueError("checkpoint intent requires supported confidence")
         if any(not item.startswith("quote:") for item in self.evidence):
             raise ValueError("checkpoint intent requires cited classifier evidence")
+        if self.evidence_level != "explicit":
+            raise ValueError(
+                "checkpoint intent requires an explicitly stated checkpoint change"
+            )
         return self
 
 

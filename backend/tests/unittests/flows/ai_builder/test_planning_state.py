@@ -11,6 +11,7 @@ validation boundaries the rest of the builder depends on.
 
 from __future__ import annotations
 
+import json
 from datetime import datetime, timezone
 
 import pytest
@@ -49,9 +50,9 @@ _VALID_ARCH_HASH = "a" * ARCHITECTURE_HASH_HEX_LENGTH
 
 
 class TestModuleConstants:
-    def test_builder_schema_version_is_nineteen(self) -> None:
-        # v19: named result evidence persists the user's declared JSON shape.
-        assert BUILDER_SCHEMA_VERSION == 19
+    def test_builder_schema_version_is_twenty(self) -> None:
+        # v20: a checkpoint intent persists the evidence level that admitted it.
+        assert BUILDER_SCHEMA_VERSION == 20
 
     def test_payload_cap_is_512_kibibytes(self) -> None:
         assert PLANNING_STATE_PAYLOAD_CAP_BYTES == 512 * 1024
@@ -575,6 +576,7 @@ class TestFileRoleEvidenceValidation:
             mode="edit",
             confidence="high",
             evidence=["quote:user_message:user-1:edit the transcript before analysis"],
+            evidence_level="explicit",
         )
         state = PlanningState.empty()
         state.checkpoint_intents = [intent]
@@ -592,6 +594,7 @@ class TestFileRoleEvidenceValidation:
                 mode=None,
                 confidence="high",
                 evidence=["quote:user_message:user-1:edit the transcript"],
+                evidence_level="explicit",
             )
         with pytest.raises(ValidationError, match="must not carry a review mode"):
             CheckpointIntent(
@@ -600,7 +603,49 @@ class TestFileRoleEvidenceValidation:
                 mode="edit",
                 confidence="high",
                 evidence=["quote:user_message:user-1:remove the review"],
+                evidence_level="explicit",
             )
+
+    def test_checkpoint_intent_requires_evidence_that_states_the_change(self) -> None:
+        for operation, mode in (("set", "edit"), ("clear", None)):
+            with pytest.raises(
+                ValidationError, match="explicitly stated checkpoint change"
+            ):
+                CheckpointIntent(
+                    producer_kind="transcript",
+                    operation=operation,
+                    mode=mode,
+                    confidence="high",
+                    evidence=["quote:user_message:user-1:transcribe the audio"],
+                    evidence_level="inferred",
+                )
+
+    def test_persisted_checkpoint_intent_is_rechecked_on_load(self) -> None:
+        payload = json.loads(
+            PlanningState(
+                fcm_version=FCM_VERSION,
+                planner_contract_version=PLANNER_CONTRACT_VERSION,
+                builder_schema_version=BUILDER_SCHEMA_VERSION,
+                checkpoint_intents=[
+                    CheckpointIntent(
+                        producer_kind="transcript",
+                        operation="set",
+                        mode="edit",
+                        confidence="high",
+                        evidence=[
+                            "quote:user_message:user-1:let me edit the transcript first"
+                        ],
+                        evidence_level="explicit",
+                    )
+                ],
+            ).model_dump_json()
+        )
+        payload["checkpoint_intents"][0]["evidence_level"] = "inferred"
+
+        with pytest.raises(
+            ValidationError, match="explicitly stated checkpoint change"
+        ):
+            PlanningState.model_validate(payload)
 
     def test_checkpoint_clear_tombstone_round_trips(self) -> None:
         intent = CheckpointIntent(
@@ -609,6 +654,7 @@ class TestFileRoleEvidenceValidation:
             mode=None,
             confidence="high",
             evidence=["quote:user_message:user-1:remove the JSON approval"],
+            evidence_level="explicit",
         )
         state = PlanningState.empty()
         state.checkpoint_intents = [intent]
@@ -626,6 +672,7 @@ class TestFileRoleEvidenceValidation:
             mode="view",
             confidence="medium",
             evidence=["quote:user_message:user-1:approve the report"],
+            evidence_level="explicit",
         )
 
         with pytest.raises(

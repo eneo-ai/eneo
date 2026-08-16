@@ -263,6 +263,7 @@ async def test_complex_authoring_spec_submits_once_without_repairs() -> None:
     )
     planning_state.checkpoint_intents = [
         CheckpointIntent(
+            evidence_level="explicit",
             producer_kind="transcript",
             operation="set",
             mode=FlowStepReviewMode.EDIT,
@@ -270,6 +271,7 @@ async def test_complex_authoring_spec_submits_once_without_repairs() -> None:
             evidence=["quote:user_message:1:Correct the transcript."],
         ),
         CheckpointIntent(
+            evidence_level="explicit",
             producer_kind="report_text",
             operation="set",
             mode=FlowStepReviewMode.EDIT,

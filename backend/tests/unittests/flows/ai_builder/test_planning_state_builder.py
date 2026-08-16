@@ -2121,6 +2121,7 @@ class TestSlotClassificationMetadataReplay:
                 confidence="high",
                 reason="Typed checkpoint requirement.",
                 evidence=_model_evidence(quote),
+                evidence_level="explicit",
             )
 
         state = build_planning_state_from_conversation(
@@ -2523,10 +2524,86 @@ class TestModelSlotMerge:
                 ),
             )
 
+    def test_checkpoint_needs_evidence_that_states_the_review(self) -> None:
+        state = _state()
+
+        merge_llm_resolved_slots(
+            state,
+            SlotClassificationResult(
+                slots=(
+                    _classified(
+                        "primary_runtime_input",
+                        "audio",
+                        "high",
+                        evidence_level="explicit",
+                    ),
+                ),
+                checkpoint_updates=(
+                    ClassifiedCheckpointUpdate(
+                        operation="update",
+                        producer_kind="transcript",
+                        mode=FlowStepReviewMode.VIEW,
+                        confidence="high",
+                        reason="The transcription step produces a result.",
+                        evidence=_model_evidence("transcribe the audio"),
+                        evidence_level="inferred",
+                    ),
+                ),
+            ),
+            prompt_hash="a" * 64,
+            freeform_text="transcribe the audio",
+        )
+
+        assert state.checkpoint_intents == []
+        assert state.resolved_slots["primary_runtime_input"].value == "audio"
+
+    def test_checkpoint_removal_needs_evidence_that_states_the_removal(self) -> None:
+        state = _state()
+        requested = ClassifiedCheckpointUpdate(
+            operation="update",
+            producer_kind="report_text",
+            mode=FlowStepReviewMode.VIEW,
+            confidence="high",
+            reason="The user asked to approve the report.",
+            evidence=_model_evidence("I want to approve the report before delivery."),
+            evidence_level="explicit",
+        )
+        merge_llm_resolved_slots(
+            state,
+            SlotClassificationResult(checkpoint_updates=(requested,)),
+            prompt_hash="a" * 64,
+            freeform_text="I want to approve the report before delivery.",
+        )
+
+        merge_llm_resolved_slots(
+            state,
+            SlotClassificationResult(
+                checkpoint_updates=(
+                    ClassifiedCheckpointUpdate(
+                        operation="clear",
+                        producer_kind="report_text",
+                        mode=None,
+                        confidence="high",
+                        reason="The report is the final deliverable.",
+                        evidence=_model_evidence("send the report to the applicant"),
+                        evidence_level="inferred",
+                    ),
+                )
+            ),
+            prompt_hash="b" * 64,
+            freeform_text="send the report to the applicant",
+        )
+
+        assert [
+            (intent.producer_kind, intent.operation)
+            for intent in state.checkpoint_intents
+        ] == [("report_text", "set")]
+
     def test_duplicate_checkpoint_producer_is_rejected_at_merge_boundary(
         self,
     ) -> None:
         checkpoint = ClassifiedCheckpointUpdate(
+            evidence_level="explicit",
             operation="update",
             producer_kind="report_text",
             mode=FlowStepReviewMode.VIEW,

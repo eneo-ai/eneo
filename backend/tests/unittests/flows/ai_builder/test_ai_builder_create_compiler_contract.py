@@ -2626,6 +2626,7 @@ def test_compiler_projects_typed_checkpoint_intents_onto_actual_producers() -> N
     }
     state.checkpoint_intents = [
         CheckpointIntent(
+            evidence_level="explicit",
             producer_kind="transcript",
             operation="set",
             mode=FlowStepReviewMode.EDIT,
@@ -2633,6 +2634,7 @@ def test_compiler_projects_typed_checkpoint_intents_onto_actual_producers() -> N
             evidence=["quote:user_message:1:Edit the transcript."],
         ),
         CheckpointIntent(
+            evidence_level="explicit",
             producer_kind="structured_result",
             operation="set",
             mode=FlowStepReviewMode.VIEW,
@@ -2640,6 +2642,7 @@ def test_compiler_projects_typed_checkpoint_intents_onto_actual_producers() -> N
             evidence=["quote:user_message:1:Approve the extracted facts."],
         ),
         CheckpointIntent(
+            evidence_level="explicit",
             producer_kind="report_text",
             operation="set",
             mode=FlowStepReviewMode.EDIT,
@@ -2701,6 +2704,7 @@ def test_structured_checkpoint_lands_on_terminal_json_producer_only() -> None:
     }
     state.checkpoint_intents = [
         CheckpointIntent(
+            evidence_level="explicit",
             producer_kind="structured_result",
             operation="set",
             mode=FlowStepReviewMode.VIEW,
@@ -2770,6 +2774,7 @@ def test_transcript_checkpoint_without_transcription_step_is_a_contradiction() -
     }
     state.checkpoint_intents = [
         CheckpointIntent(
+            evidence_level="explicit",
             producer_kind="transcript",
             operation="set",
             mode=FlowStepReviewMode.EDIT,
@@ -2909,6 +2914,7 @@ def test_compiler_accepts_audio_artifact_with_runtime_form_field_overlay() -> No
     ]
     state.checkpoint_intents = [
         CheckpointIntent(
+            evidence_level="explicit",
             producer_kind="structured_result",
             operation="set",
             mode=FlowStepReviewMode.EDIT,
@@ -3494,6 +3500,7 @@ def test_compiler_accepts_docx_template_with_runtime_form_field_overlay() -> Non
     state.input_fields = [_confirmed_runtime_field("arendenummer", "ärendenummer")]
     state.checkpoint_intents = [
         CheckpointIntent(
+            evidence_level="explicit",
             producer_kind="report_text",
             operation="set",
             mode=FlowStepReviewMode.VIEW,

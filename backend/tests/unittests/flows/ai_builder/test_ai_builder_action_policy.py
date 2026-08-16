@@ -583,6 +583,7 @@ def test_policy_requires_audio_for_a_transcript_checkpoint() -> None:
     state = _state_with_architecture_commit()
     state.checkpoint_intents = [
         CheckpointIntent(
+            evidence_level="explicit",
             producer_kind="transcript",
             operation="set",
             mode=FlowStepReviewMode.EDIT,
@@ -604,6 +605,7 @@ def test_policy_requires_audio_for_a_transcript_checkpoint() -> None:
 
     state.checkpoint_intents = [
         CheckpointIntent(
+            evidence_level="explicit",
             producer_kind="transcript",
             operation="clear",
             mode=None,
@@ -635,6 +637,7 @@ def test_policy_requires_audio_for_a_transcript_checkpoint() -> None:
     audio_state.architecture_commit = finalize_architecture_commit(audio_draft)
     audio_state.checkpoint_intents = [
         CheckpointIntent(
+            evidence_level="explicit",
             producer_kind="transcript",
             operation="set",
             mode=FlowStepReviewMode.EDIT,

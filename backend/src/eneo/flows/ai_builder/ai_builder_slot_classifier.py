@@ -49,6 +49,7 @@ from eneo.flows.ai_builder.ai_builder_slot_classification_contract import (
 from eneo.flows.ai_builder.ai_builder_token_usage import (
     completion_token_usage_from_response,
 )
+from eneo.flows.ai_builder.planning_state import CheckpointProducerKind
 from eneo.main.logging import get_logger
 from eneo.tokens.token_utils import count_message_tokens, count_tokens
 
@@ -119,6 +120,7 @@ async def classify_slots(
     classification_input: SlotClassificationInput,
     allowed_slot_values: Mapping[str, Collection[str]],
     schema_candidates: tuple[DeclaredSchemaCandidate, ...] = (),
+    active_checkpoint_producers: tuple[CheckpointProducerKind, ...] = (),
     tenant_id: UUID,
     ui_language: str | None = None,
     bias: SlotClassificationBias | None = None,
@@ -150,6 +152,7 @@ async def classify_slots(
         classification_input=classification_input,
         allowed_slot_values=slot_values,
         schema_candidates=schema_candidates,
+        active_checkpoint_producers=active_checkpoint_producers,
         ui_language=ui_language,
         bias=bias,
     )
@@ -162,6 +165,7 @@ async def classify_slots(
         ui_language=ui_language,
         allowed_slot_values=slot_values,
         schema_candidates=schema_candidates,
+        active_checkpoint_producers=active_checkpoint_producers,
         litellm_model=litellm_model,
         provider=provider,
         supported_model_kwargs=completion_model_route.supported_model_kwargs,
@@ -300,6 +304,7 @@ def admit_slot_classification_input(
     attachment_context: AIBuilderAttachmentContext | None,
     allowed_slot_values: Mapping[str, Collection[str]],
     schema_candidates: tuple[DeclaredSchemaCandidate, ...],
+    active_checkpoint_producers: tuple[CheckpointProducerKind, ...],
     ui_language: str | None,
     bias: SlotClassificationBias | None,
     litellm_model: str,
@@ -326,6 +331,7 @@ def admit_slot_classification_input(
                 classification_input=candidate,
                 allowed_slot_values=normalized_values,
                 schema_candidates=schema_candidates,
+                active_checkpoint_producers=active_checkpoint_producers,
                 ui_language=ui_language,
                 bias=bias,
             ),
@@ -560,6 +566,7 @@ def slot_classification_prompt_hash(
     provider: str,
     supported_model_kwargs: SupportedModelKwargs,
     schema_candidates: tuple[DeclaredSchemaCandidate, ...] = (),
+    active_checkpoint_producers: tuple[CheckpointProducerKind, ...] = (),
     bias: SlotClassificationBias | None = None,
     max_input_tokens: int | None = None,
     max_output_tokens: int | None = None,
@@ -571,6 +578,7 @@ def slot_classification_prompt_hash(
             ui_language=ui_language,
             allowed_slot_values=allowed_slot_values,
             schema_candidates=schema_candidates,
+            active_checkpoint_producers=active_checkpoint_producers,
             litellm_model=litellm_model,
             provider=provider,
             effective_optional_kwargs_fingerprint=(
@@ -657,6 +665,7 @@ def _build_slot_classification_prompt(
     allowed_slot_values: Mapping[str, frozenset[str]],
     ui_language: str | None,
     schema_candidates: tuple[DeclaredSchemaCandidate, ...] = (),
+    active_checkpoint_producers: tuple[CheckpointProducerKind, ...] = (),
     bias: SlotClassificationBias | None = None,
 ) -> list[dict[str, str]]:
     dimension_lines = [
@@ -765,7 +774,10 @@ def _build_slot_classification_prompt(
         "when the current message makes no checkpoint change. Use operation update "
         "to add or change one checkpoint and include mode. Use operation clear only "
         "when the current message explicitly removes that producer's checkpoint; "
-        "omit mode or set it to null for clear. Every update and clear requires high "
+        "omit mode or set it to null for clear. The request lists the checkpoints "
+        "this flow has now: clear only producers on that list, and when the user "
+        "drops review without naming one, clear every producer on it. "
+        "Every update and clear requires high "
         "or medium confidence and exact cited evidence from the current user-owned "
         "message. Attachment-only evidence is insufficient. Use transcript for the "
         "audio transcription result, structured_result for machine-readable JSON, "
@@ -774,6 +786,10 @@ def _build_slot_classification_prompt(
         "must be able to replace the result before downstream work continues. Do not "
         "invent step names or classify an unsupported producer. Emit at most one "
         "checkpoint update for each producer_kind. "
+        "Set evidence_level to explicit only when the quoted words are about this "
+        "producer's result and ask for a person to see, approve, or change it "
+        "(update) or say that pause is no longer wanted (clear). A quote that only "
+        "names a step, a result, or a deliverable is inferred. "
         "For post_processing_goal, classify what the user wants done with the "
         "source material after the primary read/transcription/conversion. "
         "Use stop_after_primary_operation only for explicit transcript-only, "
@@ -833,6 +849,8 @@ def _build_slot_classification_prompt(
         "Typed evidence sources in conversation chronology, followed by stable "
         "file-id order:\n"
         f"{_render_slot_classification_sources(classification_input)}\n\n"
+        "Checkpoints this flow has now:\n"
+        f"{', '.join(active_checkpoint_producers) if active_checkpoint_producers else '(none)'}\n\n"
         "Unresolved slots and allowed values:\n"
         f"{chr(10).join(dimension_lines)}\n\n"
         "Current declared schema candidates (complete set):\n"
@@ -843,7 +861,7 @@ def _build_slot_classification_prompt(
         "{"
         '"slots": [{"slot_name": str, "value": str, "confidence": "high"|"medium"|"low", "reason": str, "evidence": [{"source_id": str, "quote": exact_quote_str}], "evidence_level": "explicit"|"inferred"}], '
         '"file_roles": [{"file_id": str, "role": str, "confidence": "high"|"medium"|"low", "reason": str, "evidence": [{"source_id": str, "quote": exact_quote_str}], "evidence_level": "explicit"|"inferred"}], '
-        '"checkpoint_updates": [{"operation": "update"|"clear", "producer_kind": "transcript"|"structured_result"|"report_text", "mode": "view"|"edit"|null, "confidence": "high"|"medium", "reason": str, "evidence": [{"source_id": str, "quote": exact_quote_str}]}], '
+        '"checkpoint_updates": [{"operation": "update"|"clear", "producer_kind": "transcript"|"structured_result"|"report_text", "mode": "view"|"edit"|null, "confidence": "high"|"medium", "reason": str, "evidence": [{"source_id": str, "quote": exact_quote_str}], "evidence_level": "explicit"|"inferred"}], '
         '"form_intake": {"needs_form_fields": bool, "sectioned_form_intake": bool, "confidence": "high"|"medium"|"low", "reason": str, "evidence": [{"source_id": str, "quote": exact_quote_str}], "evidence_level": "explicit"|"inferred"} | null, '
         '"named_result_evidence": {"operation": "update"|"clear", "names": [str], "removed_names": [str], "confidence": "high"|"medium"|"low", "reason": str, "evidence": [{"source_id": str, "quote": exact_quote_str}]} | null, '
         '"example_output_constraints": {"source_file_ids": [str], "headings": [str], "style_constraints": [{"category": "tone"|"detail_level"|"organization"|"formatting"|"audience", "description": str}], "confidence": "high"|"medium"|"low", "evidence": [{"source_id": str, "quote": exact_quote_str}]} | null, '
@@ -883,6 +901,7 @@ def _classification_cache_payload(
     ui_language: str | None,
     allowed_slot_values: Mapping[str, Collection[str]],
     schema_candidates: tuple[DeclaredSchemaCandidate, ...],
+    active_checkpoint_producers: tuple[CheckpointProducerKind, ...],
     litellm_model: str,
     provider: str,
     effective_optional_kwargs_fingerprint: str,
@@ -896,6 +915,7 @@ def _classification_cache_payload(
         classification_input=classification_input,
         allowed_slot_values=normalized_values,
         schema_candidates=schema_candidates,
+        active_checkpoint_producers=active_checkpoint_producers,
         ui_language=ui_language,
         bias=bias,
     )

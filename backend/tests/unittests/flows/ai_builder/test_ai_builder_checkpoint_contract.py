@@ -44,6 +44,7 @@ def _text_step(
 
 def _report_intent() -> CheckpointIntent:
     return CheckpointIntent(
+        evidence_level="explicit",
         producer_kind="report_text",
         operation="set",
         mode=FlowStepReviewMode.EDIT,
@@ -84,6 +85,7 @@ def test_report_checkpoint_targets_last_referenced_body_writer() -> None:
 
 def _clear_structured_intent() -> CheckpointIntent:
     return CheckpointIntent(
+        evidence_level="explicit",
         producer_kind="structured_result",
         operation="clear",
         mode=None,
@@ -94,6 +96,7 @@ def _clear_structured_intent() -> CheckpointIntent:
 
 def _set_structured_intent() -> CheckpointIntent:
     return CheckpointIntent(
+        evidence_level="explicit",
         producer_kind="structured_result",
         operation="set",
         mode=FlowStepReviewMode.EDIT,
@@ -241,6 +244,7 @@ def test_report_relocation_releases_the_baseline_body_writer() -> None:
     assert baseline.document_body_writer_step_refs == ("existing_step_1",)
 
     set_report_intent = CheckpointIntent(
+        evidence_level="explicit",
         producer_kind="report_text",
         operation="set",
         mode=FlowStepReviewMode.EDIT,

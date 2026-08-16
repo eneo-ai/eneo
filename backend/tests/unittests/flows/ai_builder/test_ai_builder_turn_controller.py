@@ -262,6 +262,7 @@ def test_transcript_checkpoint_refusal_has_actionable_localized_message() -> Non
     state.architecture_commit = _finalized_commit_for_state(state)
     state.checkpoint_intents = [
         CheckpointIntent(
+            evidence_level="explicit",
             producer_kind="transcript",
             operation="set",
             mode="edit",
@@ -1254,6 +1255,7 @@ def test_confirmation_exposes_committed_checkpoint_intent(
     )
     state.checkpoint_intents = [
         CheckpointIntent(
+            evidence_level="explicit",
             producer_kind="transcript",
             operation="set",
             mode="edit",
@@ -1288,6 +1290,7 @@ def test_confirmation_exposes_requested_checkpoint_clear(
     )
     state.checkpoint_intents = [
         CheckpointIntent(
+            evidence_level="explicit",
             producer_kind="transcript",
             operation="clear",
             mode=None,
@@ -1312,6 +1315,7 @@ def test_checkpoint_intent_change_requires_fresh_confirmation() -> None:
     )
     state.checkpoint_intents = [
         CheckpointIntent(
+            evidence_level="explicit",
             producer_kind="transcript",
             operation="set",
             mode="view",
@@ -1330,6 +1334,7 @@ def test_checkpoint_intent_change_requires_fresh_confirmation() -> None:
 
     state.checkpoint_intents = [
         CheckpointIntent(
+            evidence_level="explicit",
             producer_kind="transcript",
             operation="set",
             mode="edit",

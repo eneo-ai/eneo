@@ -55,6 +55,7 @@ from eneo.flows.ai_builder.ai_builder_slot_classifier import (
     classify_slots,
     slot_classification_prompt_hash,
 )
+from eneo.flows.ai_builder.planning_state import CheckpointProducerKind
 from eneo.model_providers.infrastructure.litellm_provider import (
     ResolvedLiteLLMProvider,
 )
@@ -2130,6 +2131,40 @@ async def test_classification_cache_separates_provider_execution_targets(
     assert first.result.cached is False
     assert second.result.cached is False
     assert litellm_client.acompletion.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_classification_cache_separates_active_checkpoint_producers() -> None:
+    # Which checkpoints exist changes what a removal means, so two states cannot
+    # share one reading however identical the conversation is.
+    litellm_client = AsyncMock()
+    text = f"remove the review {uuid4()}"
+    litellm_client.acompletion.return_value = _make_response(json.dumps({}))
+
+    async def classify(producers: tuple[CheckpointProducerKind, ...]):
+        return await classify_slots(
+            litellm_client=litellm_client,
+            completion_model_route=_route(model="gpt-test"),
+            classification_input=_classification_input(text),
+            allowed_slot_values={"terminal_output": {"pdf_document"}},
+            active_checkpoint_producers=producers,
+            tenant_id=uuid4(),
+        )
+
+    first = await classify(("transcript",))
+    second = await classify(("structured_result",))
+    repeat = await classify(("transcript",))
+
+    assert first.result is not None and first.result.cached is False
+    assert second.result is not None and second.result.cached is False
+    assert repeat.result is not None and repeat.result.cached is True
+    assert litellm_client.acompletion.await_count == 2
+    prompts = [
+        call.kwargs["messages"][1]["content"]
+        for call in litellm_client.acompletion.await_args_list
+    ]
+    assert "Checkpoints this flow has now:\ntranscript" in prompts[0]
+    assert "Checkpoints this flow has now:\nstructured_result" in prompts[1]
 
 
 @pytest.mark.asyncio

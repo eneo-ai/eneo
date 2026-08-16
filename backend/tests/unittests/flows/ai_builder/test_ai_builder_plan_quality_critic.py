@@ -59,6 +59,7 @@ def test_critic_requires_typed_checkpoint_on_the_actual_report_producer() -> Non
     planning_state = PlanningState.empty()
     planning_state.checkpoint_intents = [
         CheckpointIntent(
+            evidence_level="explicit",
             producer_kind="report_text",
             operation="set",
             mode=FlowStepReviewMode.EDIT,

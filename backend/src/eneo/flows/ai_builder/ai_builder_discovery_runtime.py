@@ -73,6 +73,7 @@ from eneo.flows.ai_builder.ai_builder_slot_classifier import (
 )
 from eneo.flows.ai_builder.planning_state import (
     NAMED_RESULT_PROVENANCE_MAX_ITEMS,
+    CheckpointProducerKind,
     PlanningState,
 )
 from eneo.flows.ai_builder.planning_state_builder import (
@@ -626,11 +627,19 @@ async def build_runtime_discovery_context(
         allowed_values,
         classification_input,
     )
+    # A removal names a producer, so the reading needs the checkpoints the flow
+    # actually has; without them "drop the review" can only guess.
+    active_checkpoint_producers: tuple[CheckpointProducerKind, ...] = tuple(
+        intent.producer_kind
+        for intent in state.checkpoint_intents
+        if intent.operation == "set"
+    )
     classification_input, request_fits = admit_slot_classification_input(
         classification_input=classification_input,
         attachment_context=attachment_context,
         allowed_slot_values=allowed_values,
         schema_candidates=(schema_candidates if schema_direction_pending else ()),
+        active_checkpoint_producers=active_checkpoint_producers,
         ui_language=ui_language,
         bias=bias,
         litellm_model=completion_model_route.litellm_model,
@@ -662,6 +671,7 @@ async def build_runtime_discovery_context(
         ui_language=ui_language,
         allowed_slot_values=allowed_values,
         schema_candidates=(schema_candidates if schema_direction_pending else ()),
+        active_checkpoint_producers=active_checkpoint_producers,
         litellm_model=completion_model_route.litellm_model,
         provider=provider,
         supported_model_kwargs=completion_model_route.supported_model_kwargs,
@@ -676,6 +686,7 @@ async def build_runtime_discovery_context(
         classification_input=classification_input,
         allowed_slot_values=allowed_values,
         schema_candidates=(schema_candidates if schema_direction_pending else ()),
+        active_checkpoint_producers=active_checkpoint_producers,
         tenant_id=tenant_id,
         ui_language=ui_language,
         bias=bias,

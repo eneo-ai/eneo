@@ -638,6 +638,7 @@ def test_slot_classification_round_trips_checkpoint_update_with_cited_source() -
     result = SlotClassificationResult(
         checkpoint_updates=(
             ClassifiedCheckpointUpdate(
+                evidence_level="explicit",
                 operation="update",
                 producer_kind="structured_result",
                 mode=FlowStepReviewMode.VIEW,
@@ -669,6 +670,7 @@ def test_slot_classification_round_trips_checkpoint_update_with_cited_source() -
 def test_slot_classification_rejects_duplicate_checkpoint_producer() -> None:
     quote = "Let a reviewer approve the report before delivery."
     checkpoint = ClassifiedCheckpointUpdate(
+        evidence_level="explicit",
         operation="update",
         producer_kind="report_text",
         mode=FlowStepReviewMode.VIEW,
@@ -708,6 +710,7 @@ def test_checkpoint_update_metadata_requires_user_owned_evidence() -> None:
                 result=SlotClassificationResult(
                     checkpoint_updates=(
                         ClassifiedCheckpointUpdate(
+                            evidence_level="explicit",
                             operation="update",
                             producer_kind="report_text",
                             mode=FlowStepReviewMode.VIEW,

@@ -839,6 +839,7 @@ class TestAIBuilderPlanLifecycle:
         planning_state = PlanningState.empty()
         planning_state.checkpoint_intents = [
             CheckpointIntent(
+                evidence_level="explicit",
                 producer_kind="report_text",
                 operation="set",
                 mode=FlowStepReviewMode.EDIT,
@@ -979,6 +980,7 @@ class TestAIBuilderPlanLifecycle:
         planning_state = PlanningState.empty()
         planning_state.checkpoint_intents = [
             CheckpointIntent(
+                evidence_level="explicit",
                 producer_kind="report_text",
                 operation="clear",
                 mode=None,
@@ -1440,6 +1442,7 @@ class TestAIBuilderPlanLifecycle:
         planning_state = PlanningState.empty()
         planning_state.checkpoint_intents = [
             CheckpointIntent(
+                evidence_level="explicit",
                 producer_kind="report_text",
                 operation="clear",
                 mode=None,

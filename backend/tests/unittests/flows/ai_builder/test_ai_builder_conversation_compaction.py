@@ -514,6 +514,7 @@ def test_compaction_retains_latest_checkpoint_update_for_rebuild() -> None:
             SlotClassificationResult(
                 checkpoint_updates=(
                     ClassifiedCheckpointUpdate(
+                        evidence_level="explicit",
                         operation="update",
                         producer_kind="report_text",
                         mode=FlowStepReviewMode.VIEW,
@@ -534,6 +535,7 @@ def test_compaction_retains_latest_checkpoint_update_for_rebuild() -> None:
             SlotClassificationResult(
                 checkpoint_updates=(
                     ClassifiedCheckpointUpdate(
+                        evidence_level="explicit",
                         operation="update",
                         producer_kind="report_text",
                         mode=FlowStepReviewMode.EDIT,
@@ -576,6 +578,7 @@ def test_compaction_retains_checkpoint_revocation_for_rebuild() -> None:
             SlotClassificationResult(
                 checkpoint_updates=(
                     ClassifiedCheckpointUpdate(
+                        evidence_level="explicit",
                         operation="update",
                         producer_kind="report_text",
                         mode=FlowStepReviewMode.VIEW,
@@ -596,6 +599,7 @@ def test_compaction_retains_checkpoint_revocation_for_rebuild() -> None:
             SlotClassificationResult(
                 checkpoint_updates=(
                     ClassifiedCheckpointUpdate(
+                        evidence_level="explicit",
                         operation="clear",
                         producer_kind="report_text",
                         mode=None,

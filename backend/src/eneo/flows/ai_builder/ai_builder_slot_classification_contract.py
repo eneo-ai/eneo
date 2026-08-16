@@ -51,7 +51,7 @@ _FIELD_STRUCTURAL_BOUNDARIES = frozenset(
     {"$", "@", "#", "/", "\\", ":", "[", "]", "{", "}", "."}
 )
 UNKNOWN_SLOT_VALUE = "unknown"
-SLOT_CLASSIFICATION_SCHEMA_VERSION = 21
+SLOT_CLASSIFICATION_SCHEMA_VERSION = 22
 _DECLARED_SHAPE_BY_NOTATION: Mapping[str, NamedResultDeclaredShape] = {
     "[]": "array",
     "{}": "object",
@@ -192,6 +192,7 @@ class ClassifiedCheckpointUpdate:
     confidence: SlotClassificationConfidence
     reason: str
     evidence: tuple[ClassifiedEvidence, ...]
+    evidence_level: SlotClassificationEvidenceLevel = "inferred"
 
 
 @dataclass(frozen=True, slots=True)
@@ -654,6 +655,12 @@ def _parse_checkpoint_updates(
                 confidence=cast(SlotClassificationConfidence, confidence),
                 reason=reason.strip(),
                 evidence=evidence,
+                evidence_level=_validated_evidence_level(
+                    payload.get("evidence_level", "inferred"),
+                    evidence,
+                    classification_input=classification_input,
+                    structured_question_id=None,
+                ),
             )
         )
     return tuple(updates)
@@ -1594,6 +1601,7 @@ def _classified_checkpoint_update_schema() -> dict[str, object]:
         },
         "reason": _classification_reason_schema(),
         "evidence": _classification_evidence_array_schema(),
+        "evidence_level": _classification_evidence_level_schema(),
     }
     return {
         "anyOf": [
@@ -1607,6 +1615,7 @@ def _classified_checkpoint_update_schema() -> dict[str, object]:
                     "confidence",
                     "reason",
                     "evidence",
+                    "evidence_level",
                 ],
                 "properties": {
                     "operation": {"type": "string", "enum": ["update"]},
@@ -1626,6 +1635,7 @@ def _classified_checkpoint_update_schema() -> dict[str, object]:
                     "confidence",
                     "reason",
                     "evidence",
+                    "evidence_level",
                 ],
                 "properties": {
                     "operation": {"type": "string", "enum": ["clear"]},

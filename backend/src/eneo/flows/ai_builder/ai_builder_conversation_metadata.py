@@ -243,6 +243,7 @@ class SlotClassificationCheckpointUpdateMetadata(BaseModel):
         min_length=1,
         max_length=CLASSIFICATION_EVIDENCE_MAX_ITEMS,
     )
+    evidence_level: SlotClassificationEvidenceLevel = "inferred"
 
     @model_validator(mode="after")
     def validate_update_contract(self) -> SlotClassificationCheckpointUpdateMetadata:
@@ -260,6 +261,7 @@ class SlotClassificationCheckpointUpdateMetadata(BaseModel):
             confidence=self.confidence,
             reason=self.reason,
             evidence=tuple(item.to_classified_evidence() for item in self.evidence),
+            evidence_level=self.evidence_level,
         )
 
 
@@ -1495,6 +1497,7 @@ def _slot_classification_checkpoint_update_payload(
             fallback="checkpoint update classification",
         ),
         "evidence": _slot_classification_evidence_payloads(update.evidence),
+        "evidence_level": update.evidence_level,
     }
 
 

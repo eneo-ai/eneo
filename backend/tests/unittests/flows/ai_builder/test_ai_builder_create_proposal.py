@@ -755,6 +755,7 @@ async def test_outline_audio_to_docx_returns_compiled_proposal() -> None:
     ]
     state.checkpoint_intents = [
         CheckpointIntent(
+            evidence_level="explicit",
             producer_kind="structured_result",
             operation="set",
             mode=FlowStepReviewMode.EDIT,
