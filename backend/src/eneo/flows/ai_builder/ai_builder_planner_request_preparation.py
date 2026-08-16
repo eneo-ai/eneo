@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, TypeAlias, cast
+from typing import TYPE_CHECKING, Any, TypeAlias
 from uuid import UUID
 
 from eneo.files.file_models import File
@@ -26,6 +26,9 @@ from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
 from eneo.flows.ai_builder.ai_builder_create_compile_context import (
     CreateCompileContext,
     create_compile_context_from_planning_state,
+)
+from eneo.flows.ai_builder.ai_builder_decline_outcome import (
+    build_decline_flow_change_tool_schema,
 )
 from eneo.flows.ai_builder.ai_builder_discovery_models import (
     DiscoveryAnalysis,
@@ -79,6 +82,7 @@ from eneo.flows.ai_builder.ai_builder_proposal_tool_contracts import (
     fit_proposal_message_groups,
     flatten_proposal_message_groups,
     group_proposal_messages,
+    proposal_turn_tool_schemas,
 )
 from eneo.flows.ai_builder.ai_builder_requirements_disclosure import (
     build_requirements_disclosure,
@@ -202,6 +206,7 @@ class ProposalPrepared(_PreparedBase):
     planning_state: PlanningState
     compile_context: CreateCompileContext | None
     proposal_tool_schema: ProposalToolSchema
+    decline_tool_schema: ProposalToolSchema | None = None
     obligation_projection: ProposalObligationProjection | None = None
     request_budget: ProposalRequestBudget | None = None
 
@@ -524,6 +529,13 @@ def build_proposal_prepared(
         ),
         obligation_projection=obligation_projection,
     )
+    # A first create turn has nothing to decline yet: the decline outcome only
+    # answers a request against a plan or Flow that already exists.
+    decline_tool_schema = (
+        build_decline_flow_change_tool_schema()
+        if is_edit_mode or plan_edit_context is not None
+        else None
+    )
     incompatible_field_names = (
         compile_context.incompatible_confirmed_form_field_names
         if compile_context is not None and not is_edit_mode
@@ -558,10 +570,13 @@ def build_proposal_prepared(
                 if compile_context is not None and not is_edit_mode
                 else ()
             ),
+            can_decline=decline_tool_schema is not None,
         )
 
     system_prompt_token_limit = _proposal_system_prompt_token_limit(
-        proposal_tool_schema=proposal_tool_schema,
+        turn_tool_schemas=proposal_turn_tool_schemas(
+            proposal_tool_schema, decline_tool_schema
+        ),
         litellm_model=litellm_model,
         max_input_tokens=max_input_tokens,
         max_output_tokens=max_output_tokens,
@@ -650,6 +665,7 @@ def build_proposal_prepared(
         planning_state=planning_state,
         compile_context=compile_context,
         proposal_tool_schema=proposal_tool_schema,
+        decline_tool_schema=decline_tool_schema,
         obligation_projection=obligation_projection,
         request_budget=ProposalRequestBudget(
             context_window_tokens=max_input_tokens,
@@ -688,7 +704,7 @@ def _prior_spec_for_revision(
 
 def _proposal_system_prompt_token_limit(
     *,
-    proposal_tool_schema: ProposalToolSchema,
+    turn_tool_schemas: list[dict[str, Any]],
     litellm_model: str,
     max_input_tokens: int,
     max_output_tokens: int,
@@ -702,9 +718,7 @@ def _proposal_system_prompt_token_limit(
         - max_output_tokens
         - budget_policy.conversation_safety_buffer_tokens
         - budget_policy.minimum_conversation_budget_tokens
-        - count_tool_tokens(
-            [cast(dict[str, Any], proposal_tool_schema)], litellm_model
-        ),
+        - count_tool_tokens(turn_tool_schemas, litellm_model),
     )
 
 

@@ -122,7 +122,10 @@ from eneo.flows.ai_builder.ai_builder_session_turn import (
     SessionTurnPreparationBaseline,
 )
 from eneo.flows.ai_builder.ai_builder_settings import AIBuilderBudgetPolicy
-from eneo.flows.ai_builder.ai_builder_tool_names import PROPOSE_FLOW_TOOL_NAME
+from eneo.flows.ai_builder.ai_builder_tool_names import (
+    DECLINE_FLOW_CHANGE_TOOL_NAME,
+    PROPOSE_FLOW_TOOL_NAME,
+)
 from eneo.flows.ai_builder.ai_builder_tools import (
     ProposalToolSchema,
     build_propose_flow_tool_schema,
@@ -3684,6 +3687,65 @@ async def test_confirmation_acknowledgment_makes_no_understanding_call() -> None
 
     build_runtime.assert_not_awaited()
     assert isinstance(prepared, ProposalPrepared)
+
+
+@pytest.mark.asyncio
+async def test_a_first_create_turn_is_offered_no_way_to_decline() -> None:
+    """Nothing exists to decline yet, so the turn keeps one forced tool."""
+
+    planner = _make_planner()
+    state = _document_architecture_state()
+    conversation = _confirmation_conversation(
+        build_requirements_disclosure(state, ui_language="en")
+    )
+
+    prepared = await _prepare_planner_request_for_test(
+        planner,
+        conversation=conversation,
+        completion_model_route=_route(),
+        persisted_planning_state=state,
+    )
+
+    assert isinstance(prepared, ProposalPrepared)
+    assert prepared.decline_tool_schema is None
+    system_prompt = prepared.message_groups[0].messages[0]["content"]
+    assert isinstance(system_prompt, str)
+    assert DECLINE_FLOW_CHANGE_TOOL_NAME not in system_prompt
+
+
+@pytest.mark.asyncio
+async def test_a_saved_flow_edit_turn_can_decline() -> None:
+    """An edit of an existing Flow may answer that it cannot make the change."""
+
+    planner = _make_planner()
+    state = _document_architecture_state()
+    conversation = _confirmation_conversation(
+        build_requirements_disclosure(state, ui_language="en")
+    )
+
+    prepared = await _prepare_planner_request_for_test(
+        planner,
+        conversation=conversation,
+        completion_model_route=_route(),
+        persisted_planning_state=state,
+        flow=cast(
+            Any,
+            SimpleNamespace(
+                id=uuid4(),
+                name="Beslutsunderlag",
+                description="",
+                steps=[],
+                metadata_json={},
+                draft_revision=1,
+            ),
+        ),
+    )
+
+    assert isinstance(prepared, ProposalPrepared)
+    assert prepared.decline_tool_schema is not None
+    system_prompt = prepared.message_groups[0].messages[0]["content"]
+    assert isinstance(system_prompt, str)
+    assert DECLINE_FLOW_CHANGE_TOOL_NAME in system_prompt
 
 
 @pytest.mark.asyncio

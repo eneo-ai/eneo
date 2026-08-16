@@ -92,12 +92,26 @@ class ForcedToolChoiceParam(TypedDict):
 
 MAX_PROPOSAL_PROVIDER_CALLS = 4
 
+ProposalToolChoiceParam: TypeAlias = ForcedToolChoiceParam | Literal["required"]
+
 
 def forced_tool_choice(tool_name: str) -> ForcedToolChoiceParam:
     return {
         "type": "function",
         "function": {"name": tool_name},
     }
+
+
+def proposal_turn_tool_schemas(
+    proposal_tool_schema: ProposalToolSchema,
+    decline_tool_schema: ProposalToolSchema | None,
+) -> list[dict[str, Any]]:
+    """Every tool one proposal turn offers, in prompt and budget order."""
+
+    schemas = [cast(dict[str, Any], proposal_tool_schema)]
+    if decline_tool_schema is not None:
+        schemas.append(cast(dict[str, Any], decline_tool_schema))
+    return schemas
 
 
 class ProposalCompletionFn(Protocol):
@@ -283,7 +297,7 @@ class ProposalCompletionRequest:
     target_kind: TargetKind
     max_output_tokens: int
     temperature: float
-    tool_choice: ForcedToolChoiceParam = field(
+    tool_choice: ProposalToolChoiceParam = field(
         default_factory=lambda: forced_tool_choice(PROPOSE_FLOW_TOOL_NAME)
     )
     counts_as_repair: bool = False
@@ -360,6 +374,7 @@ class ProposalTurnContext:
     proposal_call_budget: ProposalCallBudget = field(default_factory=ProposalCallBudget)
     proposal_request_budget: ProposalRequestBudget | None = None
     compile_context: "CreateCompileContext | None" = None
+    decline_tool_schema: ProposalToolSchema | None = None
 
     @property
     def session_id(self) -> UUID:
@@ -384,12 +399,18 @@ class ProposalTurnContext:
             message_groups=(
                 self.message_groups if message_groups is None else message_groups
             ),
-            tool_schemas=[cast(dict[str, Any], self.proposal_tool_schema)],
+            tool_schemas=proposal_turn_tool_schemas(
+                self.proposal_tool_schema, self.decline_tool_schema
+            ),
             route=self.route,
             target_kind=self.target_kind,
             max_output_tokens=self.max_output_tokens,
             temperature=temperature,
-            tool_choice=forced_tool_choice(PROPOSE_FLOW_TOOL_NAME),
+            tool_choice=(
+                "required"
+                if self.decline_tool_schema is not None
+                else forced_tool_choice(PROPOSE_FLOW_TOOL_NAME)
+            ),
             counts_as_repair=counts_as_repair,
             request_budget=self.proposal_request_budget,
             call_budget=self.proposal_call_budget,

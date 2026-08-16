@@ -13,10 +13,16 @@ from eneo.flows.ai_builder.ai_builder_architecture_errors import (
 )
 from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
     RuntimeToolCall,
+    make_provider_safe_server_tool_call_id,
 )
 from eneo.flows.ai_builder.ai_builder_create_proposal import (
     PROPOSE_FLOW_CREATE_FORCED_TOOL_PROMPT,
     process_create_intent_arguments,
+)
+from eneo.flows.ai_builder.ai_builder_decline_outcome import (
+    decline_message,
+    decline_reason_from_arguments,
+    persist_declined_flow_change,
 )
 from eneo.flows.ai_builder.ai_builder_domain_models import (
     ConversationMessage,
@@ -89,6 +95,9 @@ from eneo.flows.ai_builder.ai_builder_resource_catalog import (
     AIBuilderResourceCatalog,
 )
 from eneo.flows.ai_builder.ai_builder_session_turn import SessionSendTurn
+from eneo.flows.ai_builder.ai_builder_tool_names import (
+    DECLINE_FLOW_CHANGE_TOOL_NAME,
+)
 from eneo.flows.ai_builder.ai_builder_tool_parsing import (
     ToolArgumentParseError,
     parse_tool_call_arguments,
@@ -134,13 +143,18 @@ def _forced_submission_response(
         return None
 
     tool_call = tool_calls[0]
-    if tool_call.function.name != PROPOSE_FLOW_TOOL_NAME:
+    if tool_call.function.name not in _SUBMISSION_TOOL_NAMES:
         return None
 
     return ForcedSubmissionResponse(
         text_content=message.content,
         tool_call=tool_call,
     )
+
+
+_SUBMISSION_TOOL_NAMES = frozenset(
+    {PROPOSE_FLOW_TOOL_NAME, DECLINE_FLOW_CHANGE_TOOL_NAME}
+)
 
 
 class ProposalSubmissionOwner:
@@ -177,6 +191,10 @@ class ProposalSubmissionOwner:
         tool_call: RuntimeToolCall,
     ) -> AsyncGenerator[AIBuilderStreamEvent, None] | None:
         tool_name = tool_call.function.name
+        if tool_name == DECLINE_FLOW_CHANGE_TOOL_NAME:
+            return self._handle_decline_flow_change_tool_call(
+                ctx=ctx, tool_call=tool_call
+            )
         if tool_name != PROPOSE_FLOW_TOOL_NAME:
             return None
         return self._handle_propose_flow_tool_call(ctx=ctx, tool_call=tool_call)
@@ -185,7 +203,7 @@ class ProposalSubmissionOwner:
         self,
         tool_calls: Sequence[RuntimeToolCall],
     ) -> bool:
-        return any(call.function.name == PROPOSE_FLOW_TOOL_NAME for call in tool_calls)
+        return any(call.function.name in _SUBMISSION_TOOL_NAMES for call in tool_calls)
 
     async def run_active_submission_attempt(
         self,
@@ -199,6 +217,7 @@ class ProposalSubmissionOwner:
         available_kb_refs: set[str] | None,
         resource_catalog: AIBuilderResourceCatalog,
         proposal_tool_schema: ProposalToolSchema,
+        decline_tool_schema: ProposalToolSchema | None = None,
         max_output_tokens: int,
         proposal_temperature: float,
         request_id: str,
@@ -220,6 +239,7 @@ class ProposalSubmissionOwner:
             new_messages_start=new_messages_start,
             message_groups=message_groups,
             proposal_tool_schema=proposal_tool_schema,
+            decline_tool_schema=decline_tool_schema,
             route=completion_model_route,
             available_model_refs=available_model_refs,
             available_kb_refs=available_kb_refs,
@@ -601,6 +621,58 @@ class ProposalSubmissionOwner:
                 failure_codes=failure_codes,
             )
         ):
+            yield event
+
+    async def _handle_decline_flow_change_tool_call(
+        self,
+        *,
+        ctx: ProposalTurnContext,
+        tool_call: RuntimeToolCall,
+    ) -> AsyncGenerator[AIBuilderStreamEvent, None]:
+        """Answer a request this edit contract cannot carry out.
+
+        A declined turn is a completed turn: the model asked for it explicitly,
+        so there is nothing to repair and no plan to supersede.
+        """
+
+        try:
+            arguments = parse_tool_call_arguments(tool_call.function.arguments)
+        except ToolArgumentParseError:
+            arguments = {}
+        reason = decline_reason_from_arguments(arguments)
+        if reason is None or ctx.decline_tool_schema is None:
+            # The tool was not on offer, or the reason is outside the contract.
+            # Fall back to the ordinary missing-proposal handling.
+            return
+        record_proposal_first_attempt(
+            ctx.usage_tracker,
+            request_id=ctx.request_id,
+            tool_name=DECLINE_FLOW_CHANGE_TOOL_NAME,
+            success=True,
+        )
+        result = await persist_declined_flow_change(
+            repo=self.repo,
+            turn=ctx.turn,
+            conversation=ctx.conversation,
+            new_messages_start=ctx.new_messages_start,
+            reason=reason,
+            message=decline_message(
+                reason,
+                ui_language=(
+                    ctx.compile_context.ui_language
+                    if ctx.compile_context is not None
+                    else None
+                ),
+            ),
+            tool_call_id=make_provider_safe_server_tool_call_id(
+                kind="decline_flow_change",
+                stable_key=ctx.request_id,
+            ),
+            assistant_metadata=ctx.assistant_metadata,
+            planning_state=ctx.planning_state,
+            flow=ctx.flow,
+        )
+        for event in result.events:
             yield event
 
     async def _handle_propose_flow_tool_call(

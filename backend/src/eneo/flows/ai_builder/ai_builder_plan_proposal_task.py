@@ -42,7 +42,10 @@ from eneo.flows.ai_builder.ai_builder_schema_evidence import (
 from eneo.flows.ai_builder.ai_builder_template_attachment_contract import (
     MAX_TEMPLATE_PREPARATION_STAGES,
 )
-from eneo.flows.ai_builder.ai_builder_tool_names import PROPOSE_FLOW_TOOL_NAME
+from eneo.flows.ai_builder.ai_builder_tool_names import (
+    DECLINE_FLOW_CHANGE_TOOL_NAME,
+    PROPOSE_FLOW_TOOL_NAME,
+)
 from eneo.flows.ai_builder.planning_state import (
     FileRoleEvidence,
     PlanningState,
@@ -65,6 +68,7 @@ def build_plan_proposal_system_prompt(
     plan_revision_context: str | None = None,
     requested_output_sections: RequestedOutputSections | None = None,
     confirmed_runtime_inputs: tuple[ConfirmedRuntimeInputRequirement, ...] = (),
+    can_decline: bool = False,
 ) -> str:
     submission_tool = PROPOSE_FLOW_TOOL_NAME
     resource_material = build_ai_builder_resource_reference_material(
@@ -100,7 +104,14 @@ def build_plan_proposal_system_prompt(
         "You are drafting an Eneo Flow plan.",
         "",
         "The backend has already completed discovery and selected this turn's phase.",
-        f"Call exactly one `{submission_tool}` tool. Do not ask a question, do not confirm requirements, and do not return prose only.",
+        (
+            f"Call exactly one `{submission_tool}` tool, or one "
+            f"`{DECLINE_FLOW_CHANGE_TOOL_NAME}` tool when the request is only "
+            "for a listed decline reason. Do not ask a question, do not confirm "
+            "requirements, and do not return prose only."
+            if can_decline
+            else f"Call exactly one `{submission_tool}` tool. Do not ask a question, do not confirm requirements, and do not return prose only."
+        ),
         "",
         "Design rules:",
         "- Use a short human-readable `flow_name` with words and spaces; never copy internal pattern ids, capability ids, or snake_case tokens into the name.",
