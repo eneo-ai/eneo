@@ -23,6 +23,7 @@ from eneo.files.image import ImageMimeTypes
 from eneo.files.mime_support import (
     MimeSupport,
     canonicalize_mime,
+    canonicalize_sniffed_mime,
     classify_mime,
     is_supported,
     supported_audio_mimes,
@@ -61,6 +62,25 @@ class TestCanonicalize:
     )
     def test_collapses_container_aliases(self, raw: str, expected: str):
         assert canonicalize_mime(raw) == expected
+
+
+class TestCanonicalizeSniffed:
+    def test_resolves_the_sniffer_spelling_of_wav(self):
+        assert canonicalize_sniffed_mime("audio/x-wav") == "audio/wav"
+
+    def test_keeps_the_shared_container_aliases(self):
+        assert canonicalize_sniffed_mime("audio/mp3") == "audio/mpeg"
+        assert canonicalize_sniffed_mime("video/webm") == "audio/webm"
+
+    def test_a_sniffer_spelling_is_not_accepted_as_a_declared_type(self):
+        """Sniffer spellings must not widen what a client may declare.
+
+        Everything downstream of an accepted upload reads the stored media
+        type, so admitting a spelling clients are never told to send would
+        trade an early, clear rejection for a late failure during execution.
+        """
+        assert canonicalize_mime("audio/x-wav") == "audio/x-wav"
+        assert not is_supported("audio/x-wav")
 
 
 class TestClassifyMime:

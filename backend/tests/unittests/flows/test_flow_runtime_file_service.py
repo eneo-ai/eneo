@@ -936,6 +936,96 @@ async def test_upload_accepts_declared_audio_mp3_alias(monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
+async def test_upload_accepts_wav_that_libmagic_reports_as_x_wav(monkeypatch) -> None:
+    """A plain WAV must not be refused by the type it declares.
+
+    libmagic reports RIFF/WAVE as `audio/x-wav`, so before that spelling was
+    resolved this upload failed with `unsupported_media_type` — and the message
+    listed `audio/wav` among the allowed types. Patching libmagic rather than
+    the sniffer keeps the resolution itself under test.
+    """
+    flow_service = AsyncMock()
+    file_service = AsyncMock()
+    settings_service = AsyncMock()
+
+    flow = _flow(step=_step(step_order=1, input_type="audio"))
+    flow_service.get_flow.return_value = flow
+    settings_service.get_flow_input_limits_resolved.return_value = FlowInputLimits(
+        file_max_size_bytes=11_000_000,
+        audio_max_size_bytes=25_000_000,
+    )
+    file_service.save_file.return_value = AsyncMock()
+
+    service = _service(
+        flow_service=flow_service,
+        file_service=file_service,
+        settings_service=settings_service,
+        flow_version_repo=_version_repo(flow),
+    )
+    upload = UploadFile(
+        filename="meeting.wav",
+        file=BytesIO(b"RIFF....WAVEfmt "),
+        headers={"content-type": "audio/wav"},
+    )
+    monkeypatch.setattr(
+        "eneo.flows.flow_runtime_file_service.magic.from_buffer",
+        lambda _chunk, mime=True: "audio/x-wav",
+    )
+
+    await service.upload_runtime_file_for_step(
+        flow_id=flow.id, step_id=flow.steps[0].id, upload_file=upload
+    )
+
+    file_service.save_file.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_upload_rejects_the_sniffer_spelling_when_a_client_declares_it(
+    monkeypatch,
+) -> None:
+    """Resolving a sniffer spelling must not widen what a client may declare.
+
+    A stored `audio/x-wav` would be admitted here and then rejected during
+    execution, which is a worse failure than refusing it at the door.
+    """
+    flow_service = AsyncMock()
+    file_service = AsyncMock()
+    settings_service = AsyncMock()
+
+    flow = _flow(step=_step(step_order=1, input_type="audio"))
+    flow_service.get_flow.return_value = flow
+    settings_service.get_flow_input_limits_resolved.return_value = FlowInputLimits(
+        file_max_size_bytes=11_000_000,
+        audio_max_size_bytes=25_000_000,
+    )
+
+    service = _service(
+        flow_service=flow_service,
+        file_service=file_service,
+        settings_service=settings_service,
+        flow_version_repo=_version_repo(flow),
+    )
+    upload = UploadFile(
+        filename="meeting.wav",
+        file=BytesIO(b"RIFF....WAVEfmt "),
+        headers={"content-type": "audio/x-wav"},
+    )
+    monkeypatch.setattr(
+        "eneo.flows.flow_runtime_file_service.magic.from_buffer",
+        lambda _chunk, mime=True: "audio/x-wav",
+    )
+
+    with pytest.raises(FileNotSupportedException) as exc_info:
+        await service.upload_runtime_file_for_step(
+            flow_id=flow.id, step_id=flow.steps[0].id, upload_file=upload
+        )
+
+    assert exc_info.value.code == "unsupported_media_type"
+    assert exc_info.value.context["received_type"] == "audio/x-wav"
+    file_service.save_file.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_upload_rejects_flows_without_file_upload_input() -> None:
     flow_service = AsyncMock()
     file_service = AsyncMock()
