@@ -25,6 +25,7 @@ from eneo.flows.ai_builder.ai_builder_plan_edit_context import (
     _validate_target_step_model,
     build_plan_revision_prompt_block,
     resolve_plan_edit_context,
+    scoped_revision_out_of_reach_message,
     validate_scoped_plan_revision,
 )
 from eneo.flows.ai_builder.ai_builder_proposal_policy import (
@@ -374,14 +375,15 @@ def test_step_scoped_revision_rejects_unchanged_target_step() -> None:
         ]
     )
 
-    feedback = validate_scoped_plan_revision(
+    rejection = validate_scoped_plan_revision(
         target_kind=TargetKind.CREATE,
         context=context,
         prior_spec=prior,
         proposed_spec=proposed,
     )
 
-    assert feedback is not None
+    assert rejection is not None
+    feedback = rejection.feedback
     assert "step_b" in feedback
     assert "was unchanged" in feedback
 
@@ -432,14 +434,15 @@ def test_step_scoped_revision_rejects_helper_step_insertion() -> None:
         ]
     )
 
-    feedback = validate_scoped_plan_revision(
+    rejection = validate_scoped_plan_revision(
         target_kind=TargetKind.CREATE,
         context=context,
         prior_spec=prior,
         proposed_spec=proposed,
     )
 
-    assert feedback is not None
+    assert rejection is not None
+    feedback = rejection.feedback
     assert "must not add, remove, or reorder steps" in feedback
     assert "step_helper" in feedback
 
@@ -532,14 +535,15 @@ def test_step_scoped_revision_rejects_unrelated_step_rewrite() -> None:
         ]
     )
 
-    feedback = validate_scoped_plan_revision(
+    rejection = validate_scoped_plan_revision(
         target_kind=TargetKind.CREATE,
         context=context,
         prior_spec=prior,
         proposed_spec=proposed,
     )
 
-    assert feedback is not None
+    assert rejection is not None
+    feedback = rejection.feedback
     assert "unrelated steps" in feedback
     assert "step_a" in feedback
 
@@ -575,14 +579,15 @@ def test_step_scoped_revision_rejects_downstream_semantic_rewrite() -> None:
         ]
     )
 
-    feedback = validate_scoped_plan_revision(
+    rejection = validate_scoped_plan_revision(
         target_kind=TargetKind.CREATE,
         context=context,
         prior_spec=prior,
         proposed_spec=proposed,
     )
 
-    assert feedback is not None
+    assert rejection is not None
+    feedback = rejection.feedback
     assert "preserve unrelated steps" in feedback
     assert "step_c" in feedback
     assert "step_c" in feedback
@@ -609,14 +614,15 @@ def test_step_scoped_revision_rejects_existing_step_reorder() -> None:
         ]
     )
 
-    feedback = validate_scoped_plan_revision(
+    rejection = validate_scoped_plan_revision(
         target_kind=TargetKind.CREATE,
         context=context,
         prior_spec=prior,
         proposed_spec=proposed,
     )
 
-    assert feedback is not None
+    assert rejection is not None
+    feedback = rejection.feedback
     assert "must not add, remove, or reorder steps" in feedback
 
 
@@ -640,14 +646,15 @@ def test_step_scoped_revision_rejects_duplicate_step_refs() -> None:
         ]
     )
 
-    feedback = validate_scoped_plan_revision(
+    rejection = validate_scoped_plan_revision(
         target_kind=TargetKind.CREATE,
         context=context,
         prior_spec=prior,
         proposed_spec=proposed,
     )
 
-    assert feedback is not None
+    assert rejection is not None
+    feedback = rejection.feedback
     assert "Duplicate step refs" in feedback
     assert "step_a" in feedback
 
@@ -845,15 +852,84 @@ def test_step_scoped_revision_still_rejects_a_model_authored_extra_step() -> Non
         ]
     )
 
-    feedback = validate_scoped_plan_revision(
+    rejection = validate_scoped_plan_revision(
         target_kind=TargetKind.CREATE,
         context=context,
         prior_spec=prior,
         proposed_spec=proposed,
     )
 
-    assert feedback is not None
+    assert rejection is not None
+    feedback = rejection.feedback
     assert "must not add, remove, or reorder steps" in feedback
+
+
+def test_a_create_revision_cannot_be_asked_to_reproduce_unrelated_steps() -> None:
+    """The model never sees the other steps, so repeating the ask is waste.
+
+    A create-mode revision returns a whole plan, but the prompt and history
+    give it each other step's name and types only — never their compiled
+    content. A preservation failure there is out of the model's reach; the same
+    failure on a saved-Flow edit is ordinary drift it can correct.
+    """
+    context = AIBuilderPlanEditContext(
+        scope="step",
+        plan_id=UUID("00000000-0000-0000-0000-000000000001"),
+        target_plan_step_ref="step_b",
+    )
+    prior = _edit_spec(
+        [
+            _edit_step("step_a", "Analyze input", output_type=OutputType.JSON),
+            _edit_step("step_b", "Create final result", output_type=OutputType.TEXT),
+        ]
+    )
+    proposed = _edit_spec(
+        [
+            _edit_step(
+                "step_a",
+                "Analyze input",
+                output_type=OutputType.JSON,
+                instructions="Paraphrased by the model.",
+            ),
+            _edit_step(
+                "step_b",
+                "Create final result",
+                output_type=OutputType.TEXT,
+                instructions="Always name the decision date.",
+            ),
+        ]
+    )
+
+    created = validate_scoped_plan_revision(
+        target_kind=TargetKind.CREATE,
+        context=context,
+        prior_spec=prior,
+        proposed_spec=proposed,
+    )
+    edited = validate_scoped_plan_revision(
+        target_kind=TargetKind.EDIT,
+        context=context,
+        prior_spec=prior,
+        proposed_spec=proposed,
+    )
+
+    assert created is not None and edited is not None
+    assert "preserve unrelated steps" in created.feedback
+    assert created.model_can_fix is False
+    assert edited.model_can_fix is True
+
+
+@pytest.mark.parametrize(
+    ("ui_language", "expected"),
+    [
+        ("sv", "Redigera hela planen"),
+        ("en", "Edit the whole plan"),
+    ],
+)
+def test_the_user_is_told_which_scope_can_carry_the_change(
+    ui_language: str, expected: str
+) -> None:
+    assert expected in scoped_revision_out_of_reach_message(ui_language=ui_language)
 
 
 def test_a_saved_flow_renderer_is_judged_like_any_other_step() -> None:
@@ -896,14 +972,15 @@ def test_a_saved_flow_renderer_is_judged_like_any_other_step() -> None:
         ]
     )
 
-    feedback = validate_scoped_plan_revision(
+    rejection = validate_scoped_plan_revision(
         target_kind=TargetKind.EDIT,
         context=context,
         prior_spec=prior,
         proposed_spec=proposed,
     )
 
-    assert feedback is not None
+    assert rejection is not None
+    feedback = rejection.feedback
     assert "preserve unrelated steps" in feedback
 
 
@@ -932,14 +1009,15 @@ def test_an_ordinary_step_cannot_inherit_a_dropped_renderer_ref() -> None:
         ]
     )
 
-    feedback = validate_scoped_plan_revision(
+    rejection = validate_scoped_plan_revision(
         target_kind=TargetKind.CREATE,
         context=context,
         prior_spec=prior,
         proposed_spec=proposed,
     )
 
-    assert feedback is not None
+    assert rejection is not None
+    feedback = rejection.feedback
     assert "must not add, remove, or reorder steps" in feedback
 
 
@@ -964,14 +1042,15 @@ def test_step_scoped_revision_rejects_runtime_form_field_changes() -> None:
         ],
     )
 
-    feedback = validate_scoped_plan_revision(
+    rejection = validate_scoped_plan_revision(
         target_kind=TargetKind.CREATE,
         context=context,
         prior_spec=prior,
         proposed_spec=proposed,
     )
 
-    assert feedback is not None
+    assert rejection is not None
+    feedback = rejection.feedback
     assert "runtime form fields" in feedback
 
 
@@ -1174,14 +1253,15 @@ def test_step_scoped_edit_rejects_a_model_change_on_the_selected_step(
         proposed_instructions=proposed_instructions,
     )
 
-    feedback = validate_scoped_plan_revision(
+    rejection = validate_scoped_plan_revision(
         target_kind=TargetKind.CREATE,
         context=_step_context(target_plan_step_ref="step_b"),
         prior_spec=prior,
         proposed_spec=proposed,
     )
 
-    assert feedback is not None
+    assert rejection is not None
+    feedback = rejection.feedback
     assert "step_b" in feedback
     assert "model picker" in feedback
 
@@ -1225,14 +1305,15 @@ def test_step_scoped_model_check_is_correct_when_the_step_order_also_drifted() -
         ]
     )
 
-    feedback = validate_scoped_plan_revision(
+    rejection = validate_scoped_plan_revision(
         target_kind=TargetKind.CREATE,
         context=_step_context(target_plan_step_ref="step_b"),
         prior_spec=prior,
         proposed_spec=proposed,
     )
 
-    assert feedback is not None
+    assert rejection is not None
+    feedback = rejection.feedback
     assert "must not add, remove, or reorder steps" in feedback
 
     assert (
@@ -1286,13 +1367,14 @@ def test_step_scoped_model_check_does_not_accuse_a_step_after_an_insertion() -> 
         is None
     )
 
-    feedback = validate_scoped_plan_revision(
+    rejection = validate_scoped_plan_revision(
         target_kind=TargetKind.CREATE,
         context=_step_context(target_plan_step_ref="step_b"),
         prior_spec=prior,
         proposed_spec=proposed,
     )
-    assert feedback is not None
+    assert rejection is not None
+    feedback = rejection.feedback
     assert "model picker" not in feedback
 
 

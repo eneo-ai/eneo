@@ -23,6 +23,7 @@ from eneo.flows.ai_builder.ai_builder_domain_models import (
 )
 from eneo.flows.ai_builder.ai_builder_plan_edit_context import (
     ResolvedAIBuilderEditContext,
+    scoped_revision_out_of_reach_message,
     validate_scoped_plan_revision,
 )
 from eneo.flows.ai_builder.ai_builder_proposal_capture import (
@@ -212,13 +213,13 @@ async def _process_create_spec(
     spec = prepared.spec
     validation = prepared.validation
 
-    scoped_revision_feedback = validate_scoped_plan_revision(
+    scoped_rejection = validate_scoped_plan_revision(
         target_kind=TargetKind.CREATE,
         context=plan_edit_context,
         prior_spec=prior_spec_for_revision,
         proposed_spec=spec,
     )
-    if scoped_revision_feedback is not None:
+    if scoped_rejection is not None:
         target_step_ref = (
             (
                 plan_edit_context.target_plan_step_ref
@@ -228,12 +229,23 @@ async def _process_create_spec(
             else None
         )
         logger.info(
-            "ai_builder_scoped_plan_revision_rejected session_id=%s target_step_ref=%s",
+            "ai_builder_scoped_plan_revision_rejected session_id=%s "
+            "target_step_ref=%s model_can_fix=%s",
             turn.session_id,
             target_step_ref,
+            scoped_rejection.model_can_fix,
         )
+        if not scoped_rejection.model_can_fix:
+            # Repairs cannot reach this bar, so the user gets one answer with
+            # the editing scope that can carry the change instead of paying
+            # for three more provider calls that fail the same way.
+            return ToolProcessingResult(
+                user_message=scoped_revision_out_of_reach_message(
+                    ui_language=ui_language
+                )
+            )
         return ToolProcessingResult(
-            feedback=format_create_intent_quality_feedback(scoped_revision_feedback),
+            feedback=format_create_intent_quality_feedback(scoped_rejection.feedback),
             failure_kind="quality",
         )
 

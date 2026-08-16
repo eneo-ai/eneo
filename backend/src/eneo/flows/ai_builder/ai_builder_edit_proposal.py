@@ -247,13 +247,13 @@ async def process_edit_arguments(
         }
     )
 
-    scoped_revision_feedback = validate_scoped_plan_revision(
+    scoped_rejection = validate_scoped_plan_revision(
         target_kind=TargetKind.EDIT,
         context=plan_edit_context,
         prior_spec=prior_spec_for_revision,
         proposed_spec=compiled_spec,
     )
-    if scoped_revision_feedback is not None:
+    if scoped_rejection is not None:
         target_step_ref = (
             (
                 plan_edit_context.target_plan_step_ref
@@ -268,7 +268,7 @@ async def process_edit_arguments(
             target_step_ref,
         )
         return ToolProcessingResult(
-            feedback=scoped_revision_feedback,
+            feedback=scoped_rejection.feedback,
             failure_kind="quality",
         )
 
