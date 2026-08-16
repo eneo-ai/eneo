@@ -35,7 +35,6 @@ from eneo.flows.ai_builder.ai_builder_attachment_context import (
     AIBuilderAttachmentSchemaDiscovery,
     build_ai_builder_attachment_context,
 )
-from eneo.flows.ai_builder.ai_builder_create_compile_context import CreateCompileContext
 from eneo.flows.ai_builder.ai_builder_create_compiler import (
     compile_create_intent_to_spec,
 )
@@ -111,9 +110,6 @@ from eneo.flows.ai_builder.ai_builder_schema_evidence import (
     SCHEMA_MAX_JSON_BYTES,
     DeclaredSchemaCandidate,
 )
-from eneo.flows.ai_builder.ai_builder_scoped_plan_revision import (
-    ScopedPlanRevisionOutcome,
-)
 from eneo.flows.ai_builder.ai_builder_server_decision_dispatch import (
     ServerDecisionDispatchRequest,
     ServerDecisionDispatchResult,
@@ -165,7 +161,7 @@ from eneo.flows.ai_builder.planning_state_builder import (
 )
 from eneo.flows.domain.flow import FlowPersistedJsonObject
 from eneo.flows.domain.mapped_execution_policy import FlowMappedExecutionPolicy
-from eneo.flows.flow_authoring_spec import AssistantSpec, OutputType
+from eneo.flows.flow_authoring_spec import AssistantSpec
 from eneo.flows.flow_resource_bindings import (
     LocalResourceBinding,
     LocalResourceKind,
@@ -3391,10 +3387,6 @@ async def test_send_message_proposal_catalog_uses_prior_plan_bindings(
         fake_prepare,
     )
     monkeypatch.setattr(
-        "eneo.flows.ai_builder.ai_builder_planner.run_scoped_plan_revision_attempt",
-        AsyncMock(return_value=None),
-    )
-    monkeypatch.setattr(
         planner._proposal_submission,
         "run_active_submission_attempt",
         fake_propose_plan,
@@ -3427,106 +3419,6 @@ async def test_send_message_proposal_catalog_uses_prior_plan_bindings(
     assert resource_catalog.models[0].authoring_ref == "model.fast-model"
     assert resource_catalog.models[0].slot_ref.label == "Renamed model"
     assert events[-1] == {"event": "done", "data": ""}
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize(
-    ("mode", "expected_text", "expected_scoped_calls", "expected_submission_calls"),
-    [
-        ("scoped_hit", "scoped", 1, 0),
-        ("scoped_miss", "submission", 1, 1),
-        ("edit_flow", "submission", 0, 1),
-    ],
-)
-async def test_stream_proposal_events_dispatches_once_to_the_selected_owner(
-    monkeypatch: pytest.MonkeyPatch,
-    mode: str,
-    expected_text: str,
-    expected_scoped_calls: int,
-    expected_submission_calls: int,
-) -> None:
-    planner = _make_planner()
-    proposal_request = ProposalPrepared(
-        requirements_state=_requirements_state_confirmed(),
-        ui_language="sv",
-        message_groups=(
-            ProposalMessageGroup(
-                messages=({"role": "system", "content": "proposal"},),
-                kind="system",
-                protected=True,
-            ),
-        ),
-        system_prompt_hash="proposal-hash",
-        prior_spec_for_revision=None,
-        slot_classification_metadata=None,
-        plan_edit_context=None,
-        planning_state=PlanningState.empty(),
-        compile_context=CreateCompileContext(final_output_type=OutputType.TEXT),
-        proposal_tool_schema=_empty_proposal_tool_schema(),
-        resource_catalog=build_ai_builder_resource_catalog(
-            available_models=[],
-            available_kbs=[],
-            prior_bindings=(),
-        ),
-    )
-    scoped_result = (
-        ScopedPlanRevisionOutcome(events=(build_text_event("scoped"),))
-        if mode == "scoped_hit"
-        else None
-    )
-    scoped_attempt = AsyncMock(return_value=scoped_result)
-    submission_calls = 0
-
-    async def run_submission_attempt(
-        **_: object,
-    ) -> AsyncGenerator[AIBuilderStreamEvent, None]:
-        nonlocal submission_calls
-        submission_calls += 1
-        yield build_text_event("submission")
-
-    monkeypatch.setattr(
-        "eneo.flows.ai_builder.ai_builder_planner.run_scoped_plan_revision_attempt",
-        scoped_attempt,
-    )
-    monkeypatch.setattr(
-        planner._proposal_submission,
-        "run_active_submission_attempt",
-        run_submission_attempt,
-    )
-
-    events = [
-        event
-        async for event in planner._stream_proposal_events(
-            turn=cast(Any, SimpleNamespace()),
-            conversation=[],
-            new_messages_start=0,
-            proposal_request=proposal_request,
-            completion_model_route=_route(),
-            max_output_tokens=1024,
-            request_id="dispatch-owner-test",
-            usage_tracker=ProposalTurnTelemetry(
-                request_id="dispatch-owner-test",
-                model="openai/gpt-5.4",
-                target_kind=TargetKind.EDIT
-                if mode == "edit_flow"
-                else TargetKind.CREATE,
-            ),
-            flow=cast(Any, object()) if mode == "edit_flow" else None,
-            assistant_snapshots=None,
-            before_provider_call=AsyncMock(),
-        )
-    ]
-
-    assert events == [build_text_event(expected_text)]
-    assert scoped_attempt.await_count == expected_scoped_calls
-    if expected_scoped_calls:
-        assert scoped_attempt.await_args is not None
-        request = scoped_attempt.await_args.kwargs["request"]
-        assert request.compile_context is proposal_request.compile_context
-        assert request.compile_context is not None
-        assert request.compile_context.final_output_type is OutputType.TEXT
-    assert submission_calls == expected_submission_calls
-    planner.repo.complete_session_turn.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -3568,10 +3460,6 @@ async def test_stream_proposal_events_commits_planning_state_payload_too_large(
         )
         yield
 
-    monkeypatch.setattr(
-        "eneo.flows.ai_builder.ai_builder_planner.run_scoped_plan_revision_attempt",
-        AsyncMock(return_value=None),
-    )
     monkeypatch.setattr(
         planner._proposal_submission,
         "run_active_submission_attempt",

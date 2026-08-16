@@ -70,10 +70,6 @@ from eneo.flows.ai_builder.ai_builder_resource_catalog import (
     AIBuilderAvailableKnowledgeBaseResource,
     AIBuilderAvailableModelResource,
 )
-from eneo.flows.ai_builder.ai_builder_scoped_plan_revision import (
-    ScopedPlanRevisionRequest,
-    run_scoped_plan_revision_attempt,
-)
 from eneo.flows.ai_builder.ai_builder_send_lease import claim_ai_builder_send_turn
 from eneo.flows.ai_builder.ai_builder_server_decision_dispatch import (
     ServerDecisionDispatchRequest,
@@ -199,71 +195,45 @@ class AIBuilderPlanner:
         before_provider_call: Callable[[], Awaitable[None]],
     ) -> AsyncGenerator[AIBuilderStreamEvent, None]:
         try:
-            events: list[AIBuilderStreamEvent] | None = None
             assistant_metadata = build_assistant_message_metadata(conversation)
-            if flow is None:
-                scoped_revision_result = await run_scoped_plan_revision_attempt(
-                    request=ScopedPlanRevisionRequest(
-                        turn=turn,
-                        conversation=conversation,
-                        new_messages_start=new_messages_start,
-                        available_model_refs=proposal_request.resource_catalog.model_refs,
-                        available_kb_refs=(
-                            proposal_request.resource_catalog.knowledge_base_refs
-                        ),
-                        resource_catalog=proposal_request.resource_catalog,
-                        plan_edit_context=proposal_request.plan_edit_context,
-                        prior_spec_for_revision=proposal_request.prior_spec_for_revision,
-                        request_id=request_id,
-                        usage_tracker=usage_tracker,
-                        compile_context=proposal_request.compile_context,
-                        planning_state=proposal_request.planning_state,
-                        assistant_metadata=assistant_metadata,
-                        flow=flow,
+            events = [
+                event
+                async for event in self._proposal_submission.run_active_submission_attempt(
+                    turn=turn,
+                    conversation=conversation,
+                    new_messages_start=new_messages_start,
+                    message_groups=proposal_request.message_groups,
+                    completion_model_route=completion_model_route,
+                    available_model_refs=proposal_request.resource_catalog.model_refs,
+                    available_kb_refs=(
+                        proposal_request.resource_catalog.knowledge_base_refs
                     ),
-                    finalizer=self._compiled_proposal_finalizer,
+                    resource_catalog=proposal_request.resource_catalog,
+                    proposal_tool_schema=proposal_request.proposal_tool_schema,
+                    decline_tool_schema=proposal_request.decline_tool_schema,
+                    obligation_projection=proposal_request.obligation_projection,
+                    max_output_tokens=max_output_tokens,
+                    proposal_temperature=self.planner_temperature,
+                    request_id=request_id,
+                    usage_tracker=usage_tracker,
+                    flow=flow,
+                    assistant_snapshots=assistant_snapshots,
+                    assistant_metadata=assistant_metadata,
+                    planning_state=proposal_request.planning_state,
+                    compile_context=proposal_request.compile_context,
+                    plan_edit_context=proposal_request.plan_edit_context,
+                    prior_spec_for_revision=proposal_request.prior_spec_for_revision,
+                    before_provider_call=before_provider_call,
+                    proposal_request_budget=(
+                        replace(
+                            proposal_request.request_budget,
+                            request_id=request_id,
+                        )
+                        if proposal_request.request_budget is not None
+                        else None
+                    ),
                 )
-                if scoped_revision_result is not None:
-                    events = list(scoped_revision_result.events)
-
-            if events is None:
-                events = [
-                    event
-                    async for event in self._proposal_submission.run_active_submission_attempt(
-                        turn=turn,
-                        conversation=conversation,
-                        new_messages_start=new_messages_start,
-                        message_groups=proposal_request.message_groups,
-                        completion_model_route=completion_model_route,
-                        available_model_refs=proposal_request.resource_catalog.model_refs,
-                        available_kb_refs=(
-                            proposal_request.resource_catalog.knowledge_base_refs
-                        ),
-                        resource_catalog=proposal_request.resource_catalog,
-                        proposal_tool_schema=proposal_request.proposal_tool_schema,
-                        obligation_projection=proposal_request.obligation_projection,
-                        max_output_tokens=max_output_tokens,
-                        proposal_temperature=self.planner_temperature,
-                        request_id=request_id,
-                        usage_tracker=usage_tracker,
-                        flow=flow,
-                        assistant_snapshots=assistant_snapshots,
-                        assistant_metadata=assistant_metadata,
-                        planning_state=proposal_request.planning_state,
-                        compile_context=proposal_request.compile_context,
-                        plan_edit_context=proposal_request.plan_edit_context,
-                        prior_spec_for_revision=proposal_request.prior_spec_for_revision,
-                        before_provider_call=before_provider_call,
-                        proposal_request_budget=(
-                            replace(
-                                proposal_request.request_budget,
-                                request_id=request_id,
-                            )
-                            if proposal_request.request_budget is not None
-                            else None
-                        ),
-                    )
-                ]
+            ]
         except PlanningStatePayloadTooLargeError as error:
             yield await self._complete_planning_state_payload_too_large(
                 turn=turn,

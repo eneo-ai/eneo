@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Annotated, Literal, TypeAlias
 from uuid import UUID
@@ -18,7 +17,6 @@ from eneo.flows.ai_builder.ai_builder_error_contract import (
 from eneo.flows.flow_authoring_spec import (
     FlowDraftSpecCore,
     OutputMode,
-    OutputType,
     StepSpec,
 )
 from eneo.flows.step_lineage import existing_step_ref_for_order
@@ -29,19 +27,6 @@ if TYPE_CHECKING:
     from eneo.flows.domain.flow import Flow
 
 PlanEditScope = Literal["whole_plan", "step"]
-
-
-@dataclass(frozen=True, slots=True)
-class ScopedStepSpecRevision:
-    spec: FlowDraftSpecCore
-
-
-@dataclass(frozen=True, slots=True)
-class ScopedStepNotice:
-    message: str
-
-
-ScopedStepRevision = ScopedStepSpecRevision | ScopedStepNotice
 
 
 class AIBuilderPlanEditContext(BaseModel):
@@ -379,11 +364,23 @@ def validate_scoped_plan_revision(
     step has no stable identity across a restructuring, so a reorder cannot be
     told apart from a model change. Saved-Flow steps do not need the guard —
     their modify contract has no `model_ref` at all.
+
+    The terminal document renderer is exempt. It is the create compiler's own
+    materialization of the committed output architecture, so it appears,
+    disappears or retypes itself whenever that architecture changes — never
+    because the model drifted.
     """
 
     if context is None or context.scope != "step" or prior_spec is None:
         return None
 
+    prior_renderer = _terminal_document_renderer(prior_spec)
+    proposed_renderer = _terminal_document_renderer(proposed_spec)
+    server_owned_refs = {
+        _step_identity(step, context)
+        for step in (prior_renderer, proposed_renderer)
+        if step is not None
+    }
     prior_target = _find_target_step(prior_spec, context)
     proposed_target = _find_target_step(proposed_spec, context)
     target_ref = step_ref_for_context(context) or "unknown"
@@ -392,26 +389,37 @@ def validate_scoped_plan_revision(
             f"Scoped plan edit target `{target_ref}` was not found in the prior plan. "
             "Use the current plan step refs exactly."
         )
-    if proposed_target is None:
-        return (
-            f"Scoped plan edit target `{target_ref}` disappeared from the revised plan. "
-            "Keep the selected step ref and revise that step instead of replacing it with an unrelated step."
-        )
-    if _step_dump_for_context(proposed_target, context) == _step_dump_for_context(
-        prior_target, context
-    ):
-        return (
-            f"Scoped plan edit target `{target_ref}` was unchanged. "
-            "Apply the user's requested change to that selected step, not only to the plan title, description, or another step."
-        )
+
+    # The user can select the renderer itself. Every field it has is server
+    # owned, so this guard has nothing of the model's to judge on it.
+    target_is_server_owned = _step_identity(prior_target, context) in server_owned_refs
+    if not target_is_server_owned:
+        if proposed_target is None:
+            return (
+                f"Scoped plan edit target `{target_ref}` disappeared from the revised plan. "
+                "Keep the selected step ref and revise that step instead of replacing it with an unrelated step."
+            )
+        if _step_dump_for_context(proposed_target, context) == _step_dump_for_context(
+            prior_target, context
+        ) and not _server_owned_renderer_changed(
+            prior_renderer, proposed_renderer, context
+        ):
+            return (
+                f"Scoped plan edit target `{target_ref}` was unchanged. "
+                "Apply the user's requested change to that selected step, not only to the plan title, description, or another step."
+            )
+
     preservation_feedback = _validate_non_target_preservation(
         context=context,
         prior_spec=prior_spec,
         proposed_spec=proposed_spec,
         target_step_ref=_step_identity(prior_target, context),
+        server_owned_refs=server_owned_refs,
     )
     if preservation_feedback is not None:
         return preservation_feedback
+    if target_is_server_owned or proposed_target is None:
+        return None
     return _validate_target_step_model(
         prior_target=prior_target,
         proposed_target=proposed_target,
@@ -419,168 +427,30 @@ def validate_scoped_plan_revision(
     )
 
 
-def resolve_scoped_step_revision_if_requested(
-    *,
-    context: ScopedEditContext | None,
-    prior_spec: FlowDraftSpecCore | None,
-    latest_user_text: str | None,
-    ui_language: Literal["sv", "en"] | None,
-    requested_terminal_output_type: OutputType | None = None,
-) -> ScopedStepRevision | None:
-    """Handle selected-step edits that are safer as deterministic patches.
+def _terminal_document_renderer(spec: FlowDraftSpecCore) -> StepSpec | None:
+    """The artifact renderer the create compiler appends after the writers.
 
-    The create intent LLM cannot reliably edit backend-inserted steps such as the
-    audio transcription step or a terminal artifact change. When the selected
-    step and requested change are unambiguous, patch the prior plan directly
-    instead of asking repair to chase LLM drift on unrelated steps.
+    `RENDER_VERBATIM` is legal only for a text-to-PDF/DOCX step and no
+    authoring schema offers the mode, so a terminal step in it is always the
+    server's own renderer rather than a model-authored step.
     """
 
-    if (
-        context is None
-        or context.scope != "step"
-        or prior_spec is None
-        or not latest_user_text
-    ):
+    if not spec.steps:
         return None
-
-    target = _find_target_step(prior_spec, context)
-    if target is None:
-        return None
-
-    output_revision = _resolve_scoped_output_artifact_revision(
-        prior_spec=prior_spec,
-        target=target,
-        latest_user_text=latest_user_text,
-        ui_language=ui_language,
-        requested_terminal_output_type=requested_terminal_output_type,
-    )
-    return output_revision
+    terminal = spec.steps[-1]
+    return terminal if terminal.output_mode is OutputMode.RENDER_VERBATIM else None
 
 
-_DOCUMENT_OUTPUT_TYPES = frozenset({OutputType.PDF, OutputType.DOCX})
-
-
-def _resolve_scoped_output_artifact_revision(
-    *,
-    prior_spec: FlowDraftSpecCore,
-    target: StepSpec,
-    latest_user_text: str,
-    ui_language: Literal["sv", "en"] | None,
-    requested_terminal_output_type: OutputType | None,
-) -> ScopedStepRevision | None:
-    output_type = requested_terminal_output_type
-    if output_type is None or output_type not in _DOCUMENT_OUTPUT_TYPES:
-        return None
-    # Two gates: typed slot evidence picks the artifact type, while text tokens
-    # confirm this is an output-file edit rather than an incidental file mention.
-    if not _looks_like_output_artifact_revision_request(
-        latest_user_text,
-        output_type,
-    ):
-        return None
-    if target is not prior_spec.steps[-1]:
-        return ScopedStepNotice(
-            message=_non_terminal_output_artifact_revision_message(
-                ui_language=ui_language
-            )
-        )
-    if target.output_type == output_type:
-        return None
-
-    updated_target = target.model_copy(
-        update={
-            "output_type": output_type,
-            "output_mode": OutputMode.PASS_THROUGH,
-            "output_contract": None,
-            "output_config": None,
-        }
-    )
-    revised_spec = prior_spec.model_copy(
-        update={
-            "steps": [
-                updated_target if step == target else step for step in prior_spec.steps
-            ]
-        }
-    )
-    return ScopedStepSpecRevision(spec=revised_spec)
-
-
-def _looks_like_output_artifact_revision_request(
-    text: str,
-    requested_terminal_output_type: OutputType,
+def _server_owned_renderer_changed(
+    prior_renderer: StepSpec | None,
+    proposed_renderer: StepSpec | None,
+    context: ScopedEditContext,
 ) -> bool:
-    tokens = _word_tokens(text)
-    if requested_terminal_output_type == OutputType.PDF:
-        return "pdf" in tokens and bool(tokens & _OUTPUT_ARTIFACT_HINT_WORDS)
-    if requested_terminal_output_type == OutputType.DOCX:
-        if tokens & {"docx", "word"}:
-            return bool(tokens & _OUTPUT_ARTIFACT_HINT_WORDS)
-        # Generic "document" needs an action verb; input-document mentions
-        # must not patch the selected terminal step.
-        if tokens & {"dokument", "document"}:
-            return bool(tokens & _OUTPUT_ARTIFACT_CHANGE_WORDS)
-        return False
-    return False
-
-
-def _non_terminal_output_artifact_revision_message(
-    *, ui_language: Literal["sv", "en"] | None
-) -> str:
-    if ui_language == "en":
-        return (
-            "The selected step is not the final step. Select the final step to "
-            "change the final output file format."
-        )
-    return (
-        "Det markerade steget är inte slutsteget. Välj slutsteget om du "
-        "vill ändra filformatet för slutresultatet."
+    if prior_renderer is None or proposed_renderer is None:
+        return prior_renderer is not proposed_renderer
+    return _step_dump_for_context(prior_renderer, context) != _step_dump_for_context(
+        proposed_renderer, context
     )
-
-
-_OUTPUT_ARTIFACT_CHANGE_WORDS = frozenset(
-    {
-        "ändra",
-        "andra",
-        "byt",
-        "byta",
-        "change",
-        "switch",
-        "gör",
-        "gor",
-        "make",
-        "skapa",
-        "create",
-        "generate",
-        "generera",
-    }
-)
-_OUTPUT_ARTIFACT_HINT_WORDS = _OUTPUT_ARTIFACT_CHANGE_WORDS | frozenset(
-    {
-        "fil",
-        "filen",
-        "file",
-        "format",
-        "formatet",
-        "output",
-        "utdata",
-        "utdatat",
-        "resultat",
-        "slutresultat",
-        "slutresultatet",
-        "final",
-        "last",
-        "sista",
-        "rapport",
-        "report",
-        "dokument",
-        "document",
-    }
-)
-_WORD_PATTERN = re.compile(r"\w+", re.UNICODE)
-
-
-def _word_tokens(text: str) -> set[str]:
-    return set(_WORD_PATTERN.findall(text.casefold()))
 
 
 def _validate_target_step_model(
@@ -615,6 +485,7 @@ def _validate_non_target_preservation(
     prior_spec: FlowDraftSpecCore,
     proposed_spec: FlowDraftSpecCore,
     target_step_ref: str,
+    server_owned_refs: set[str],
 ) -> str | None:
     if _runtime_form_fields_dump(prior_spec) != _runtime_form_fields_dump(
         proposed_spec
@@ -625,8 +496,16 @@ def _validate_non_target_preservation(
             "inputs from the user."
         )
 
-    prior_refs = [_step_identity(step, context) for step in prior_spec.steps]
-    proposed_refs = [_step_identity(step, context) for step in proposed_spec.steps]
+    prior_refs = [
+        ref
+        for ref in (_step_identity(step, context) for step in prior_spec.steps)
+        if ref not in server_owned_refs
+    ]
+    proposed_refs = [
+        ref
+        for ref in (_step_identity(step, context) for step in proposed_spec.steps)
+        if ref not in server_owned_refs
+    ]
 
     duplicate_refs = _duplicate_refs(proposed_refs)
     if duplicate_refs:
@@ -649,7 +528,7 @@ def _validate_non_target_preservation(
         )
 
     for ref, prior_step in prior_steps.items():
-        if ref == target_step_ref:
+        if ref == target_step_ref or ref in server_owned_refs:
             continue
         proposed_step = proposed_steps.get(ref)
         if proposed_step is None:

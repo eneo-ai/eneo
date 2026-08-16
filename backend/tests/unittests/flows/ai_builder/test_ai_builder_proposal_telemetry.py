@@ -75,7 +75,6 @@ _FAILURE_KIND_SOURCE_FILES = (
     _REPO_ROOT / "backend/src/eneo/flows/ai_builder/ai_builder_edit_proposal.py",
     _REPO_ROOT
     / "backend/src/eneo/flows/ai_builder/ai_builder_proposal_finalization.py",
-    _REPO_ROOT / "backend/src/eneo/flows/ai_builder/ai_builder_scoped_plan_revision.py",
 )
 
 

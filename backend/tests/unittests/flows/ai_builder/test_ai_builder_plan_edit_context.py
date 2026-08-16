@@ -22,12 +22,9 @@ from eneo.flows.ai_builder.ai_builder_plan_edit_context import (
     AIBuilderPlanEditContext,
     AIBuilderSavedFlowStepEditContext,
     ResolvedAIBuilderEditContext,
-    ScopedStepNotice,
-    ScopedStepSpecRevision,
     _validate_target_step_model,
     build_plan_revision_prompt_block,
     resolve_plan_edit_context,
-    resolve_scoped_step_revision_if_requested,
     validate_scoped_plan_revision,
 )
 from eneo.flows.ai_builder.ai_builder_proposal_policy import (
@@ -310,124 +307,6 @@ async def test_plan_step_scope_derives_canonical_target_identity() -> None:
 
 
 @pytest.mark.parametrize(
-    "text",
-    [
-        "byt modell till gpt 5.4 nano",
-        "Change model to gpt 5.5",
-        "Byt till claude",
-        "Ändra instruktionen så att modellen alltid anger källor",
-        "Modellera om upplägget lite",
-    ],
-)
-def test_model_wording_never_produces_a_deterministic_scoped_revision(
-    text: str,
-) -> None:
-    # No keyword family owns model intent here. Immutability is enforced by the
-    # modify contract and by validate_scoped_plan_revision, not by this resolver.
-    result = resolve_scoped_step_revision_if_requested(
-        context=_step_context(),
-        prior_spec=_spec(model_ref="model.gpt-4o-mini"),
-        latest_user_text=text,
-        ui_language="sv",
-    )
-
-    assert result is None
-
-
-def test_scoped_revision_ignores_whole_plan_scope() -> None:
-    result = resolve_scoped_step_revision_if_requested(
-        context=AIBuilderPlanEditContext(scope="whole_plan", plan_id=uuid4()),
-        prior_spec=_spec(),
-        latest_user_text="kan du ändra så att jag får en pdf fil istället?",
-        ui_language="sv",
-        requested_terminal_output_type=OutputType.PDF,
-    )
-
-    assert result is None
-
-
-def test_scoped_revision_ignores_blank_latest_user_text() -> None:
-    result = resolve_scoped_step_revision_if_requested(
-        context=_step_context(),
-        prior_spec=_spec(),
-        latest_user_text="",
-        ui_language="sv",
-        requested_terminal_output_type=OutputType.PDF,
-    )
-
-    assert result is None
-
-
-@pytest.mark.parametrize(
-    ("message", "output_type"),
-    [
-        ("kan du ändra så att jag får en pdf fil istället?", OutputType.PDF),
-        ("Change the final file to docx", OutputType.DOCX),
-    ],
-)
-def test_scoped_step_revision_changes_terminal_output_artifact(
-    message: str,
-    output_type: OutputType,
-) -> None:
-    prior = _edit_spec(
-        [
-            _edit_step("step_a", "Analyze input", output_type=OutputType.JSON),
-            _edit_step("step_b", "Create final result", output_type=OutputType.TEXT),
-        ]
-    )
-
-    result = resolve_scoped_step_revision_if_requested(
-        context=_step_context(target_plan_step_ref="step_b"),
-        prior_spec=prior,
-        latest_user_text=message,
-        ui_language=None,
-        requested_terminal_output_type=output_type,
-    )
-
-    assert isinstance(result, ScopedStepSpecRevision)
-    assert result.spec.steps[0].model_dump(mode="json") == prior.steps[0].model_dump(
-        mode="json"
-    )
-    assert result.spec.steps[1].output_type == output_type
-    assert result.spec.steps[1].output_contract is None
-
-
-def test_scoped_step_revision_changes_terminal_output_for_pdf_file_wording() -> None:
-    context = _step_context(target_plan_step_ref="step_b")
-    prior = _edit_spec(
-        [
-            _edit_step("step_a", "Analyze input", output_type=OutputType.JSON),
-            _edit_step("step_b", "Create final result", output_type=OutputType.TEXT),
-        ]
-    )
-    conversation = [
-        ConversationMessage(
-            role="user",
-            content="Bygg ett flöde som skapar ett strukturerat textresultat.",
-        ),
-        ConversationMessage(role="assistant", content="Här är planen."),
-        ConversationMessage(role="user", content="utdatat ska vara pdf fil"),
-    ]
-    output_type = terminal_output_type_for_edit_conversation(
-        conversation,
-        plan_edit_context=context,
-        prior_spec=None,
-    )
-
-    result = resolve_scoped_step_revision_if_requested(
-        context=context,
-        prior_spec=prior,
-        latest_user_text="utdatat ska vara pdf fil",
-        ui_language=None,
-        requested_terminal_output_type=output_type,
-    )
-
-    assert output_type == OutputType.PDF
-    assert isinstance(result, ScopedStepSpecRevision)
-    assert result.spec.steps[1].output_type == OutputType.PDF
-
-
-@pytest.mark.parametrize(
     "wording",
     [
         "pdf fil",
@@ -473,127 +352,6 @@ def test_terminal_output_intent_uses_latest_slot_classification_for_plan_edit() 
         )
         == OutputType.PDF
     )
-
-
-def test_scoped_step_revision_uses_slot_classification_for_pdf_output_edit() -> None:
-    context = _step_context(target_plan_step_ref="step_b")
-    prior = _edit_spec(
-        [
-            _edit_step("step_a", "Analyze input", output_type=OutputType.JSON),
-            _edit_step("step_b", "Create final result", output_type=OutputType.TEXT),
-        ]
-    )
-    conversation = [
-        ConversationMessage(
-            role="user",
-            content="ändra output filen till pdf",
-            metadata=_terminal_output_slot_metadata(),
-        )
-    ]
-
-    result = resolve_scoped_step_revision_if_requested(
-        context=context,
-        prior_spec=prior,
-        latest_user_text="ändra output filen till pdf",
-        ui_language=None,
-        requested_terminal_output_type=terminal_output_type_for_edit_conversation(
-            conversation,
-            plan_edit_context=context,
-            prior_spec=None,
-        ),
-    )
-
-    assert isinstance(result, ScopedStepSpecRevision)
-    assert result.spec.steps[1].output_type == OutputType.PDF
-
-
-@pytest.mark.parametrize(
-    ("message", "terminal_output_value"),
-    [
-        ("flera pdf filer ska vara input", "pdf_document"),
-        ("flera docx filer ska vara input", "docx_document"),
-    ],
-)
-def test_scoped_step_revision_does_not_patch_input_file_mentions(
-    message: str,
-    terminal_output_value: str,
-) -> None:
-    context = _step_context(target_plan_step_ref="step_b")
-    prior = _edit_spec(
-        [
-            _edit_step("step_a", "Analyze input", output_type=OutputType.JSON),
-            _edit_step("step_b", "Create final result", output_type=OutputType.TEXT),
-        ]
-    )
-    conversation = [
-        ConversationMessage(
-            role="user",
-            content=message,
-            metadata=_terminal_output_slot_metadata(terminal_output_value),
-        )
-    ]
-
-    result = resolve_scoped_step_revision_if_requested(
-        context=context,
-        prior_spec=prior,
-        latest_user_text=message,
-        ui_language=None,
-        requested_terminal_output_type=terminal_output_type_for_edit_conversation(
-            conversation,
-            plan_edit_context=context,
-            prior_spec=None,
-        ),
-    )
-
-    assert result is None
-
-
-def test_scoped_step_revision_keeps_matching_terminal_output_as_noop() -> None:
-    prior = _edit_spec(
-        [
-            _edit_step("step_a", "Analyze input", output_type=OutputType.JSON),
-            _edit_step("step_b", "Create final result", output_type=OutputType.PDF),
-        ]
-    )
-
-    result = resolve_scoped_step_revision_if_requested(
-        context=_step_context(target_plan_step_ref="step_b"),
-        prior_spec=prior,
-        latest_user_text="kan du ändra så att jag får en pdf fil istället?",
-        ui_language=None,
-        requested_terminal_output_type=OutputType.PDF,
-    )
-
-    assert result is None
-
-
-@pytest.mark.parametrize(
-    "message",
-    [
-        "kan du ändra så att jag får en pdf fil istället?",
-        "utdatat ska vara pdf fil",
-    ],
-)
-def test_scoped_step_revision_warns_when_output_artifact_target_is_not_terminal(
-    message: str,
-) -> None:
-    prior = _edit_spec(
-        [
-            _edit_step("step_a", "Analyze input", output_type=OutputType.JSON),
-            _edit_step("step_b", "Create final result", output_type=OutputType.TEXT),
-        ]
-    )
-
-    result = resolve_scoped_step_revision_if_requested(
-        context=_step_context(target_plan_step_ref="step_a"),
-        prior_spec=prior,
-        latest_user_text=message,
-        ui_language=None,
-        requested_terminal_output_type=OutputType.PDF,
-    )
-
-    assert isinstance(result, ScopedStepNotice)
-    assert "slutsteget" in result.message
 
 
 def test_step_scoped_revision_rejects_unchanged_target_step() -> None:
@@ -909,6 +667,179 @@ def test_step_scoped_revision_allows_descriptive_plan_text_changes() -> None:
         )
         is None
     )
+
+
+def _renderer_step(ref: str, output_type: OutputType) -> StepSpec:
+    """The terminal document renderer the create compiler appends itself."""
+    return _edit_step(
+        ref, f"Rendera {output_type.value.upper()}", output_type=output_type
+    ).model_copy(update={"output_mode": OutputMode.RENDER_VERBATIM})
+
+
+def test_step_scoped_revision_accepts_the_compiler_appended_renderer() -> None:
+    """A committed document artifact arrives as an appended renderer step.
+
+    The user selected the terminal writing step and asked for a Word file. The
+    create compiler answers a committed DOCX terminal by appending its own
+    renderer, so the revision the model returns legitimately has one more step
+    than the plan it revises, and the selected step itself need not change.
+    """
+    context = AIBuilderPlanEditContext(
+        scope="step",
+        plan_id=UUID("00000000-0000-0000-0000-000000000001"),
+        target_plan_step_ref="step_b",
+    )
+    prior = _edit_spec(
+        [
+            _edit_step("step_a", "Analyze input", output_type=OutputType.JSON),
+            _edit_step("step_b", "Create final result", output_type=OutputType.TEXT),
+        ]
+    )
+    proposed = _edit_spec(
+        [
+            _edit_step("step_a", "Analyze input", output_type=OutputType.JSON),
+            _edit_step("step_b", "Create final result", output_type=OutputType.TEXT),
+            _renderer_step("step_c", OutputType.DOCX),
+        ]
+    )
+
+    assert (
+        validate_scoped_plan_revision(
+            context=context,
+            prior_spec=prior,
+            proposed_spec=proposed,
+        )
+        is None
+    )
+
+
+def test_step_scoped_revision_keeps_a_mixed_request_whole() -> None:
+    """Both halves of "change this step and make the result a Word file" land."""
+    context = AIBuilderPlanEditContext(
+        scope="step",
+        plan_id=UUID("00000000-0000-0000-0000-000000000001"),
+        target_plan_step_ref="step_b",
+    )
+    prior = _edit_spec(
+        [
+            _edit_step("step_a", "Analyze input", output_type=OutputType.JSON),
+            _edit_step("step_b", "Create final result", output_type=OutputType.TEXT),
+        ]
+    )
+    proposed = _edit_spec(
+        [
+            _edit_step("step_a", "Analyze input", output_type=OutputType.JSON),
+            _edit_step(
+                "step_b",
+                "Create final result",
+                output_type=OutputType.TEXT,
+                instructions="Always name the decision date.",
+            ),
+            _renderer_step("step_c", OutputType.DOCX),
+        ]
+    )
+
+    assert (
+        validate_scoped_plan_revision(
+            context=context,
+            prior_spec=prior,
+            proposed_spec=proposed,
+        )
+        is None
+    )
+
+
+def test_step_scoped_revision_accepts_a_renderer_the_architecture_dropped() -> None:
+    """Returning to a text result removes the renderer the compiler owned."""
+    context = AIBuilderPlanEditContext(
+        scope="step",
+        plan_id=UUID("00000000-0000-0000-0000-000000000001"),
+        target_plan_step_ref="step_b",
+    )
+    prior = _edit_spec(
+        [
+            _edit_step("step_b", "Create final result", output_type=OutputType.TEXT),
+            _renderer_step("step_c", OutputType.DOCX),
+        ]
+    )
+    proposed = _edit_spec(
+        [_edit_step("step_b", "Create final result", output_type=OutputType.TEXT)]
+    )
+
+    assert (
+        validate_scoped_plan_revision(
+            context=context,
+            prior_spec=prior,
+            proposed_spec=proposed,
+        )
+        is None
+    )
+
+
+def test_step_scoped_revision_accepts_a_renderer_that_changed_artifact() -> None:
+    """PDF instead of Word is a server-owned change to the same renderer."""
+    context = AIBuilderPlanEditContext(
+        scope="step",
+        plan_id=UUID("00000000-0000-0000-0000-000000000001"),
+        target_plan_step_ref="step_b",
+    )
+    prior = _edit_spec(
+        [
+            _edit_step("step_b", "Create final result", output_type=OutputType.TEXT),
+            _renderer_step("step_c", OutputType.DOCX),
+        ]
+    )
+    proposed = _edit_spec(
+        [
+            _edit_step("step_b", "Create final result", output_type=OutputType.TEXT),
+            _renderer_step("step_c", OutputType.PDF),
+        ]
+    )
+
+    assert (
+        validate_scoped_plan_revision(
+            context=context,
+            prior_spec=prior,
+            proposed_spec=proposed,
+        )
+        is None
+    )
+
+
+def test_step_scoped_revision_still_rejects_a_model_authored_extra_step() -> None:
+    """Only the server's renderer may appear; a helper step is still drift."""
+    context = AIBuilderPlanEditContext(
+        scope="step",
+        plan_id=UUID("00000000-0000-0000-0000-000000000001"),
+        target_plan_step_ref="step_b",
+    )
+    prior = _edit_spec(
+        [
+            _edit_step("step_a", "Analyze input", output_type=OutputType.JSON),
+            _edit_step("step_b", "Create final result", output_type=OutputType.TEXT),
+        ]
+    )
+    proposed = _edit_spec(
+        [
+            _edit_step("step_a", "Analyze input", output_type=OutputType.JSON),
+            _edit_step(
+                "step_b",
+                "Create final result",
+                output_type=OutputType.TEXT,
+                instructions="Always name the decision date.",
+            ),
+            _edit_step("step_c", "Prepare Word content", output_type=OutputType.TEXT),
+        ]
+    )
+
+    feedback = validate_scoped_plan_revision(
+        context=context,
+        prior_spec=prior,
+        proposed_spec=proposed,
+    )
+
+    assert feedback is not None
+    assert "must not add, remove, or reorder steps" in feedback
 
 
 def test_step_scoped_revision_rejects_runtime_form_field_changes() -> None:
