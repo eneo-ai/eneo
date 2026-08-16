@@ -8,7 +8,7 @@ and committed architecture state.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Collection
+from collections.abc import Callable, Collection, Mapping
 from dataclasses import dataclass
 from uuid import UUID
 
@@ -55,7 +55,9 @@ from eneo.flows.ai_builder.ai_builder_input_architecture_policy import (
     resolve_input_intent,
 )
 from eneo.flows.ai_builder.ai_builder_requirements_state import (
+    AttestedDisclosure,
     RequirementsState,
+    resolve_attested_disclosure,
     resolve_requirements_state,
 )
 from eneo.flows.ai_builder.ai_builder_result_contract import (
@@ -74,6 +76,7 @@ from eneo.flows.ai_builder.ai_builder_slot_classification_contract import (
     ClassifiedFileRole,
     ClassifiedFormIntake,
     ClassifiedNamedResultDelta,
+    ClassifiedSlot,
     SlotClassificationResult,
     planning_reference_cites_source,
 )
@@ -310,18 +313,28 @@ def _replay_slot_classification_metadata(
         flow=flow,
     )
     replayed = False
-    for message in conversation:
+    for index, message in enumerate(conversation):
         classification = slot_classification_from_metadata(message.metadata)
         if classification is None or classification.outcome != "resolved":
             continue
         prompt_hash = classification.prompt_hash
         assert prompt_hash is not None
+        classification_result = classification.to_result()
         merge_llm_resolved_slots(
             state,
-            classification.to_result(),
+            classification_result,
             prompt_hash=prompt_hash,
             freeform_text=freeform_text,
             model_blocked_slots=model_blocked_slots,
+            settled_by_acceptance=attested_slots_without_newer_evidence(
+                classification_result,
+                conversation=conversation,
+                cited_message_ids_by_source={
+                    source.source_id: source.message_id
+                    for source in classification.source_inventory
+                },
+                classified_at_index=index,
+            ),
         )
         _apply_replayed_named_result_evidence(
             state,
@@ -657,8 +670,14 @@ def merge_llm_resolved_slots(
     prompt_hash: str,
     freeform_text: str,
     model_blocked_slots: frozenset[str] = frozenset(),
+    settled_by_acceptance: frozenset[str] = frozenset(),
 ) -> None:
-    """Overlay model slots without displacing explicit user or flow evidence."""
+    """Overlay model slots without displacing explicit user or flow evidence.
+
+    `settled_by_acceptance` names slots this classification may not touch
+    because the user already accepted them and it cites nothing they have said
+    since; `attested_slots_without_newer_evidence` resolves it.
+    """
     if not prompt_hash.strip():
         raise ValueError("prompt_hash must be non-empty")
 
@@ -710,6 +729,8 @@ def merge_llm_resolved_slots(
 
     for classified_slot in classification_result.slots:
         if not _model_slot_is_persistable(classified_slot.slot_name):
+            continue
+        if classified_slot.slot_name in settled_by_acceptance:
             continue
         if classified_slot.slot_name in model_blocked_slots:
             _clear_nonprotected_model_slot(state, classified_slot.slot_name)
@@ -1812,6 +1833,71 @@ def attested_requirement_values(
         if requirement.requirement_id in KNOWN_REQUIREMENT_SLOT_NAMES
         and requirement.selected_value in legal_slot_values(requirement.requirement_id)
     }
+
+
+def attested_slots_without_newer_evidence(
+    classification_result: SlotClassificationResult,
+    *,
+    conversation: list[ConversationMessage],
+    cited_message_ids_by_source: Mapping[str, str | None],
+    classified_at_index: int,
+) -> frozenset[str]:
+    """Accepted slots this later classification cites nothing newer than for.
+
+    Accepting a disclosure makes its values the user's own answer, which is what
+    lets them drive the architecture. A later reading of the very sentences the
+    user already answered is therefore not the user changing their mind, however
+    confident it is: an open prompt that names two plausible results can be read
+    either way, and the reading the user accepted is the one that settled it.
+
+    Only a classification made *after* the acceptance can be that re-reading.
+    The earlier ones are how the accepted state is reconstructed at all, so
+    they are replayed untouched.
+
+    Freshness is chronology, not the current turn: the user says something new
+    once, and a turn whose classification failed must still be able to act on it
+    later. A citation is newer when the message it quotes comes after the
+    confirmation. A quoted message that compaction has since dropped cannot be
+    placed, so it counts as already-answered and the accepted value stands.
+    """
+
+    attested = resolve_attested_disclosure(conversation)
+    if attested is None or classified_at_index <= attested.confirmation_index:
+        return frozenset()
+    accepted = attested_requirement_values(attested.summary)
+    if not accepted:
+        return frozenset()
+    message_order = {
+        message.message_id: index for index, message in enumerate(conversation)
+    }
+    return frozenset(
+        slot.slot_name
+        for slot in classification_result.slots
+        if slot.slot_name in accepted
+        and not _cites_evidence_after(
+            slot,
+            attested=attested,
+            cited_message_ids_by_source=cited_message_ids_by_source,
+            message_order=message_order,
+        )
+    )
+
+
+def _cites_evidence_after(
+    slot: ClassifiedSlot,
+    *,
+    attested: AttestedDisclosure,
+    cited_message_ids_by_source: Mapping[str, str | None],
+    message_order: Mapping[str, int],
+) -> bool:
+    for item in slot.evidence:
+        message_id = cited_message_ids_by_source.get(item.source_id)
+        if message_id is None:
+            continue
+        position = message_order.get(message_id)
+        if position is not None and position > attested.confirmation_index:
+            return True
+    return False
 
 
 def apply_attested_requirements(

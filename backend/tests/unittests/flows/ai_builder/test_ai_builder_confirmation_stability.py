@@ -628,6 +628,10 @@ def test_values_that_join_alike_are_still_different_disclosures() -> None:
 
 
 def _classifier_metadata(*slots: ClassifiedSlot) -> dict[str, object]:
+    quotes_by_source: dict[str, list[str]] = {}
+    for slot in slots:
+        for item in slot.evidence:
+            quotes_by_source.setdefault(item.source_id, []).append(item.quote)
     metadata = slot_classification_metadata_from_attempt(
         SlotClassificationAttempt(
             outcome="resolved",
@@ -635,15 +639,14 @@ def _classifier_metadata(*slots: ClassifiedSlot) -> dict[str, object]:
         ),
         prompt_hash="c" * 64,
         classification_input=SlotClassificationInput(
-            sources=(
+            sources=tuple(
                 SlotClassificationSource(
-                    source_id="user_message:user-1",
+                    source_id=source_id,
                     kind="user_message",
-                    text="\n".join(
-                        item.quote for slot in slots for item in slot.evidence
-                    ),
-                    message_id="user-1",
-                ),
+                    text="\n".join(quotes),
+                    message_id=source_id.removeprefix("user_message:"),
+                )
+                for source_id, quotes in quotes_by_source.items()
             )
         ),
         model="openai/gpt-test",
@@ -660,13 +663,20 @@ def _classified(
     value: str,
     confidence: SlotClassificationConfidence,
     quote: str,
+    *,
+    cited_message_id: str = "user-1",
 ) -> ClassifiedSlot:
     return ClassifiedSlot(
         slot_name=slot_name,
         value=value,
         confidence=confidence,
         reason="Classifier evidence.",
-        evidence=(ClassifiedEvidence(source_id="user_message:user-1", quote=quote),),
+        evidence=(
+            ClassifiedEvidence(
+                source_id=f"user_message:{cited_message_id}",
+                quote=quote,
+            ),
+        ),
     )
 
 
@@ -787,3 +797,153 @@ def test_the_rebuild_pins_the_same_architecture_the_acknowledgment_committed() -
     rebuilt = build_planning_state_from_conversation(conversation)
 
     assert derive_architecture_commit_draft(rebuilt) == pinned
+
+
+def _accepted_audio_conversation() -> tuple[
+    list[ConversationMessage],
+    RequirementsSummaryPayload,
+]:
+    """One open prompt, its disclosure accepted, and the plan it produced.
+
+    The prompt names both a structured payload and a Word document, so the
+    terminal output is inferred rather than answered — which is the only kind
+    of value acceptance has to protect, and the kind an open prompt produces.
+    """
+
+    conversation = [
+        ConversationMessage(
+            message_id="user-1",
+            role="user",
+            content=(
+                "Ladda upp mötesljud, ta fram beslut och åtgärder, och ge "
+                "resultatet både som strukturerad JSON och som ett "
+                "protokollsutkast i Word-format."
+            ),
+            metadata=_classifier_metadata(
+                _classified("primary_runtime_input", "audio", "high", "mötesljud"),
+                _classified(
+                    "terminal_output",
+                    "docx_document",
+                    "high",
+                    "protokollsutkast i Word-format",
+                ),
+                _classified(
+                    "post_processing_goal",
+                    "action_followup",
+                    "high",
+                    "beslut och åtgärder",
+                ),
+            ),
+        ),
+    ]
+    disclosed = build_requirements_disclosure(
+        build_planning_state_from_conversation(conversation),
+        ui_language="sv",
+    )
+    conversation.extend(
+        [
+            ConversationMessage(
+                message_id="disclosure",
+                role="assistant",
+                content=disclosed.summary,
+                metadata={
+                    "requirements_summary": disclosed.model_dump(mode="json"),
+                    "requirements_version": disclosed.requirements_version,
+                },
+            ),
+            ConversationMessage(
+                message_id="confirmation",
+                role="user",
+                content="",
+                metadata={
+                    "requirements_confirmed": True,
+                    "requirements_version": disclosed.requirements_version,
+                },
+            ),
+            ConversationMessage(
+                message_id="plan",
+                role="assistant",
+                content="",
+                tool_calls=[{"id": "call-1", "name": "propose_flow", "arguments": {}}],
+            ),
+        ]
+    )
+    return conversation, disclosed
+
+
+def test_rereading_the_accepted_prompt_does_not_move_the_accepted_output() -> None:
+    """Acceptance is a fact about the user, not a grade a later reading beats.
+
+    The prompt asks for both a JSON payload and a Word document, so a fresh
+    reading of that same sentence can land on either. Once the user has
+    accepted the disclosure that named the document, re-reading the sentence
+    they already answered is not them changing their mind: it silently rebuilt
+    the flow around the other reading and then asked them to attest to a
+    substitution they never requested.
+    """
+
+    conversation, disclosed = _accepted_audio_conversation()
+    conversation.append(
+        ConversationMessage(
+            message_id="user-2",
+            role="user",
+            content="Lägg till mötesdatum i rubriken.",
+            metadata=_classifier_metadata(
+                _classified(
+                    "terminal_output",
+                    "structured_json",
+                    "high",
+                    "strukturerad JSON",
+                ),
+            ),
+        )
+    )
+
+    rebuilt = build_planning_state_from_conversation(conversation)
+
+    assert rebuilt.resolved_slots["terminal_output"].value == "docx_document"
+    draft = derive_architecture_commit_draft(rebuilt)
+    assert draft is not None
+    assert draft.tuples_chain[-1].output_type.value == "docx"
+    assert (
+        build_requirements_disclosure(rebuilt, ui_language="sv").requirements_version
+        == disclosed.requirements_version
+    )
+
+
+def test_what_the_user_says_after_accepting_still_changes_the_output() -> None:
+    """Protection is scoped to the evidence the user already answered.
+
+    A user who accepted a Word document and then asks for a JSON payload has
+    changed their mind, and the flow has to follow — with a new disclosure to
+    attest to, because the plan is no longer the one they accepted.
+    """
+
+    conversation, disclosed = _accepted_audio_conversation()
+    conversation.append(
+        ConversationMessage(
+            message_id="user-2",
+            role="user",
+            content="Vi vill ha strukturerad JSON som slutresultat i stället.",
+            metadata=_classifier_metadata(
+                _classified(
+                    "terminal_output",
+                    "structured_json",
+                    "high",
+                    "strukturerad JSON som slutresultat",
+                    cited_message_id="user-2",
+                ),
+            ),
+        )
+    )
+
+    rebuilt = build_planning_state_from_conversation(conversation)
+
+    assert rebuilt.resolved_slots["terminal_output"].value == "structured_json"
+    draft = derive_architecture_commit_draft(rebuilt)
+    assert draft is not None
+    assert draft.tuples_chain[-1].output_type.value == "json"
+    assert (
+        build_requirements_disclosure(rebuilt, ui_language="sv").requirements_version
+        != disclosed.requirements_version
+    )

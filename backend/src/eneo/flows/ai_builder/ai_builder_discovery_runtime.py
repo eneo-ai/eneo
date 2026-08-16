@@ -78,6 +78,7 @@ from eneo.flows.ai_builder.planning_state import (
 from eneo.flows.ai_builder.planning_state_builder import (
     apply_model_blocked_slots,
     apply_policy_defaults_from_resolved_slots,
+    attested_slots_without_newer_evidence,
     build_planning_state_from_conversation,
     carry_forward_persisted_planner_state,
     llm_resolvable_slot_values_for_state,
@@ -701,6 +702,17 @@ async def build_runtime_discovery_context(
 
     result = attempt.result
     assert result is not None
+    # This turn is newer than every persisted message, so acceptance protects
+    # only the slots this classification cites nothing new for.
+    cited_message_ids_by_source = {
+        source.source_id: source.message_id for source in classification_input.sources
+    }
+    settled_by_acceptance = attested_slots_without_newer_evidence(
+        result,
+        conversation=conversation,
+        cited_message_ids_by_source=cited_message_ids_by_source,
+        classified_at_index=len(conversation),
+    )
     candidate_state = state.model_copy(deep=True)
     merge_llm_resolved_slots(
         candidate_state,
@@ -708,6 +720,7 @@ async def build_runtime_discovery_context(
         prompt_hash=prompt_hash,
         freeform_text=text,
         model_blocked_slots=model_blocked_slots,
+        settled_by_acceptance=settled_by_acceptance,
     )
     if (
         not _named_result_classification_is_relevant(candidate_state)
@@ -749,6 +762,7 @@ async def build_runtime_discovery_context(
         prompt_hash=prompt_hash,
         freeform_text=text,
         model_blocked_slots=model_blocked_slots,
+        settled_by_acceptance=settled_by_acceptance,
     )
     classified_direction = admitted_result.schema_direction
     if (
