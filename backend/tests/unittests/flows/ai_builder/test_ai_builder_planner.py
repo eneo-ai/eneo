@@ -672,9 +672,15 @@ def _audio_text_architecture_state(
     return state
 
 
-def test_create_preparation_projects_explicit_transcript_only_context() -> None:
+@pytest.mark.parametrize("secondary_obligation", [None, "summary"])
+def test_create_preparation_projects_explicit_transcript_only_context(
+    secondary_obligation: str | None,
+) -> None:
+    # A retained obligation signal from earlier in the conversation must not
+    # turn the settled transcript-only answer into a multi-step flow.
     state = _audio_text_architecture_state(
-        post_processing_goal="stop_after_primary_operation"
+        post_processing_goal="stop_after_primary_operation",
+        secondary_obligation=secondary_obligation,
     )
 
     prepared = _build_create_proposal_for_architecture(state)
@@ -692,20 +698,14 @@ def test_create_preparation_projects_explicit_transcript_only_context() -> None:
 
 
 @pytest.mark.parametrize(
-    ("post_processing_goal", "secondary_obligation"),
-    [
-        ("summarize_or_overview", None),
-        ("action_followup", None),
-        ("stop_after_primary_operation", "summary"),
-    ],
+    "post_processing_goal",
+    ["summarize_or_overview", "action_followup", "structure_key_information"],
 )
 def test_create_preparation_plans_semantic_steps_for_audio_text_post_processing(
     post_processing_goal: str,
-    secondary_obligation: str | None,
 ) -> None:
     state = _audio_text_architecture_state(
         post_processing_goal=post_processing_goal,
-        secondary_obligation=secondary_obligation,
     )
 
     prepared = _build_create_proposal_for_architecture(state)

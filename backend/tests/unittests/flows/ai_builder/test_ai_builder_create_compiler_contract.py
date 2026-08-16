@@ -694,6 +694,31 @@ def test_compile_context_requires_only_summary_source_reader_obligation() -> Non
     ]
 
 
+def test_compile_context_drops_reader_fields_when_the_flow_stops_at_the_transcript() -> (
+    None
+):
+    state = PlanningState.empty()
+    state.signals.append(
+        PlanningSignal(
+            question_id="result_obligation",
+            value="summary",
+            confidence="high",
+            source="model",
+        )
+    )
+    state.resolved_slots["post_processing_goal"] = _slot(
+        "post_processing_goal",
+        "stop_after_primary_operation",
+    )
+
+    context = create_compile_context_from_planning_state(state)
+
+    # A stale obligation must not smuggle a reader field into a flow the user
+    # settled as transcript-only; assembly rejects that combination outright.
+    assert context is not None
+    assert context.source_reader_required_fields == ()
+
+
 def test_compile_context_does_not_turn_report_obligations_into_reader_fields() -> None:
     state = PlanningState.empty()
     state.resolved_slots["post_processing_goal"] = _slot(

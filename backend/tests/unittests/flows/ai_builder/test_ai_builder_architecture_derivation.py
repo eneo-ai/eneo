@@ -242,12 +242,12 @@ def test_derives_semantic_text_architecture_when_audio_needs_post_processing(
     assert draft.chosen_patterns == ["audio_to_artifact_report"]
 
 
-def test_secondary_obligation_contradicts_stopping_at_the_transcript() -> None:
+def test_settled_transcript_only_answer_outranks_an_earlier_summary_signal() -> None:
     state = _state_with_slots(
         primary_runtime_input="audio",
         terminal_output="structured_text",
-        post_processing_goal="stop_after_primary_operation",
     )
+    # The classifier read an early "also summarize" from the conversation.
     state.signals.append(
         PlanningSignal(
             question_id="result_obligation",
@@ -256,12 +256,17 @@ def test_secondary_obligation_contradicts_stopping_at_the_transcript() -> None:
             source="model",
         )
     )
+    # The user then answered the purpose question with "only the primary result".
+    state.resolved_slots["post_processing_goal"] = _slot(
+        "post_processing_goal",
+        "stop_after_primary_operation",
+    )
 
     draft = derive_architecture_commit_draft(state)
 
     assert draft is not None
-    assert draft.tuples_chain[0].output_mode is FlowAuthoringOutputMode.PASS_THROUGH
-    assert draft.chosen_patterns == ["audio_to_artifact_report"]
+    assert draft.tuples_chain[0].output_mode is FlowAuthoringOutputMode.TRANSCRIBE_ONLY
+    assert draft.chosen_patterns == ["audio_transcription"]
 
 
 def test_purpose_is_architecturally_required_for_an_audio_text_flow() -> None:

@@ -127,6 +127,22 @@ def test_compare_with_risks_preserves_comparison_primary_and_risk_obligation() -
     assert "Keep recommended actions separate" in rendered
 
 
+def test_settled_stop_after_primary_operation_drops_retained_obligations() -> None:
+    contract = derive_result_contract(
+        _state_with_signals(
+            _state_with_slots(post_processing_goal="stop_after_primary_operation"),
+            "summary",
+            "actions",
+        )
+    )
+
+    assert contract is not None
+    # Obligation signals are model-inferred, stored as high confidence and never
+    # retracted, so they must not outlive the user's "only the primary result".
+    assert contract.secondary_obligations == ()
+    assert contract.stops_after_primary_operation is True
+
+
 def test_result_contract_obligation_policies_are_deduped() -> None:
     contract = derive_result_contract(
         _state_with_signals(

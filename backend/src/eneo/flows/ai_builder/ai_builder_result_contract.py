@@ -79,14 +79,11 @@ class ResultContract:
     def stops_after_primary_operation(self) -> bool:
         """Whether no semantic work follows the primary read or transcription.
 
-        A secondary obligation is downstream work the user asked for, so it
-        contradicts stopping even when the goal alone says otherwise.
+        The goal alone answers this: `derive_result_contract` has already
+        resolved secondary obligations against it, so the two cannot disagree.
         """
 
-        return (
-            self.post_processing_goal == "stop_after_primary_operation"
-            and not self.secondary_obligations
-        )
+        return self.post_processing_goal == "stop_after_primary_operation"
 
 
 # Accepted names are matched as exact FOLDED equality (fold_result_field_name)
@@ -266,6 +263,12 @@ def derive_result_contract(planning_state: PlanningState) -> ResultContract | No
         "post_processing_goal"
     )
     secondary_obligations = _secondary_obligations(planning_state)
+    if post_processing_goal == "stop_after_primary_operation":
+        # A settled "only the primary result" is the whole contract. Obligation
+        # signals are model-inferred, always stored as high confidence and never
+        # retracted, so an earlier "also summarize" reading must not quietly
+        # reintroduce the downstream work the user just ruled out.
+        secondary_obligations = ()
 
     required_sections = _GOAL_REQUIRED_SECTIONS.get(post_processing_goal or "", ())
     required_output_fields = (

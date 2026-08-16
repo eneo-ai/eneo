@@ -9,7 +9,10 @@ Each `Pattern` captures:
 
 - `required_architectural_slots` — slot names from
   `ai_builder_slot_vocabulary.py` that this archetype's discovery
-  must resolve before the planner can commit to it.
+  must resolve before the planner can commit to it. This flat list is a
+  per-archetype floor, not the admission rule: a requirement that depends
+  on the resolved shape rather than the archetype is owned by
+  `architecture_required_slot_names` in the architecture derivation.
 - `question_template_ids` — forward-references the Question Catalog.
   Resolution is pinned by
   `test_every_question_template_id_resolves_in_catalog` in
