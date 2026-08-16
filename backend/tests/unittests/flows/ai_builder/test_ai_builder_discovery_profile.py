@@ -173,6 +173,54 @@ def test_build_flow_capability_profile_tracks_entry_points_and_step_capabilities
     )
 
 
+def test_existing_transcription_only_flow_settles_the_purpose_for_an_edit() -> None:
+    flow = _make_flow(
+        _make_flow_step(
+            step_order=1,
+            user_description="Transkribera ljudfil",
+            input_source="flow_input",
+            input_type="audio",
+            output_mode="transcribe_only",
+            output_type="text",
+            input_config={"runtime_input": {"enabled": True, "input_format": "audio"}},
+        ),
+    )
+
+    profile = build_flow_capability_profile(flow)
+
+    # The flow's own shape answers what happens after the transcript: nothing.
+    assert profile.stops_after_primary_operation is True
+    assert profile.to_signal_defaults()["post_processing_goal"] == {
+        "stop_after_primary_operation"
+    }
+
+
+def test_existing_flow_with_work_after_the_transcript_leaves_the_purpose_open() -> None:
+    flow = _make_flow(
+        _make_flow_step(
+            step_order=1,
+            user_description="Transkribera ljudfil",
+            input_source="flow_input",
+            input_type="audio",
+            output_mode="transcribe_only",
+            output_type="text",
+        ),
+        _make_flow_step(
+            step_order=2,
+            user_description="Sammanfatta transkriberingen",
+            input_source="previous_step",
+            input_type="text",
+            output_mode="pass_through",
+            output_type="text",
+        ),
+    )
+
+    profile = build_flow_capability_profile(flow)
+
+    assert profile.stops_after_primary_operation is False
+    assert "post_processing_goal" not in profile.to_signal_defaults()
+
+
 def test_build_discovery_profile_uses_settled_flow_state_to_keep_docx_edit_output_scoped() -> (
     None
 ):

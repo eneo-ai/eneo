@@ -530,7 +530,7 @@ async def _create_default_transcription_model(
     db_container,
     space_id: str,
     tenant_id: UUID,
-) -> None:
+) -> UUID:
     async with db_container() as container:
         session = container.session()
         provider = ModelProviders(
@@ -567,6 +567,7 @@ async def _create_default_transcription_model(
             )
         )
         await session.flush()
+        return model.id
 
 
 async def _send_builder_message(
@@ -8450,6 +8451,160 @@ async def test_ai_builder_api_edit_mode_transcription_insert_clears_stale_runtim
     assert updated.steps[1].input_source == "previous_step"
     assert updated.steps[1].input_type == "text"
     assert updated.steps[1].input_config is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_ai_builder_api_edit_mode_keeps_a_transcription_only_flow_at_one_step(
+    client,
+    bearer_token,
+    completion_model_factory,
+    db_container,
+):
+    """Editing a pure transcription flow must not invent work after the transcript.
+
+    The flow's own single transcribe-only step settles the purpose, so a
+    wording-only edit keeps the one-step shape instead of being read as an
+    unsettled purpose and rebuilt as a semantic flow.
+    """
+
+    space_id = await _create_space_with_planner_model(
+        client=client,
+        bearer_token=bearer_token,
+        db_container=db_container,
+        completion_model_factory=completion_model_factory,
+        space_name="AI Builder API edit transcription only",
+        planner_model_overrides={"max_input_tokens": 128_000},
+        planner_model_is_only_space_model=True,
+    )
+    async with db_container() as container:
+        tenant_id = container.user().tenant_id
+    transcription_model_id = await _create_default_transcription_model(
+        db_container=db_container,
+        space_id=space_id,
+        tenant_id=tenant_id,
+    )
+
+    async with db_container() as container:
+        flow_service = container.flow_service()
+
+        flow = await flow_service.create_flow(
+            space_id=UUID(space_id),
+            name="Ordagrann transkribering",
+            description="Transkriberar uppladdat ljud ordagrant.",
+            steps=[],
+            metadata_json={
+                "wizard": {
+                    "transcription_enabled": True,
+                    "transcription_model": {"id": str(transcription_model_id)},
+                    "transcription_language": "sv",
+                }
+            },
+        )
+        assistant, _ = await flow_service.create_flow_assistant(
+            flow_id=flow.id,
+            name="transcription",
+        )
+        flow = await flow_service.update_flow(
+            flow_id=flow.id,
+            steps=[
+                _make_flow_step(
+                    assistant_id=assistant.id,
+                    step_order=1,
+                    user_description="Transkribera mötesljudet",
+                    input_source="flow_input",
+                    input_type="audio",
+                    output_mode="transcribe_only",
+                    output_type="text",
+                    input_config={
+                        "runtime_input": {
+                            "enabled": True,
+                            "required": True,
+                            "input_format": "audio",
+                            "description": "Ladda upp ljudfiler som detta steg ska transkribera eller analysera.",
+                        }
+                    },
+                ),
+            ],
+        )
+        flow_id = flow.id
+        flow_revision = flow.draft_revision
+
+    edit_flow = _make_tool_call(
+        tool_call_id="call_edit_wording",
+        name=PROPOSE_FLOW_TOOL_NAME,
+        arguments={
+            "plan_rationale": "Förtydligar instruktionen för transkriberingssteget.",
+            "steps": [
+                {
+                    "kind": "modify",
+                    "existing_step_ref": "existing_step_1",
+                    "assistant_spec": {
+                        "instructions": (
+                            "Transkribera ljudet ordagrant och behåll talarnas "
+                            "egna formuleringar."
+                        )
+                    },
+                },
+            ],
+        },
+    )
+
+    with (
+        patch(
+            "eneo.flows.ai_builder.ai_builder_service.litellm.acompletion",
+            new=AsyncMock(return_value=_make_llm_response(tool_calls=[edit_flow])),
+        ),
+        patch(
+            "eneo.completion_models.infrastructure.completion_service.CompletionService.resolve_model_route",
+            new=AsyncMock(return_value=_route(kwargs={"api_key": "sk-test"})),
+        ),
+    ):
+        session_id = await _create_ai_builder_session(
+            client=client,
+            bearer_token=bearer_token,
+            space_id=space_id,
+            target_kind="edit",
+            flow_id=str(flow_id),
+        )
+        plan_events = await _progress_builder_session_to_plan(
+            client=client,
+            bearer_token=bearer_token,
+            session_id=session_id,
+            initial_message=(
+                "Förtydliga instruktionen så att transkriberingen blir ordagrann. "
+                "Ändra inget annat."
+            ),
+        )
+
+    assert any(event["event"] == "plan" for event in plan_events), (
+        _builder_event_outline(plan_events)
+    )
+    plan_id = await _get_latest_plan_id(
+        client=client,
+        bearer_token=bearer_token,
+        session_id=session_id,
+    )
+    approve_response = await client.post(
+        f"/api/v1/flows/ai-builder/plans/{plan_id}/approve",
+        headers={"Authorization": f"Bearer {bearer_token}"},
+    )
+    assert approve_response.status_code == 200, approve_response.text
+    apply_response = await client.post(
+        f"/api/v1/flows/ai-builder/plans/{plan_id}/apply",
+        json={"expected_revision": flow_revision},
+        headers={"Authorization": f"Bearer {bearer_token}"},
+    )
+    assert apply_response.status_code == 200, apply_response.text
+
+    async with db_container() as container:
+        flow_service = container.flow_service()
+        updated = await flow_service.get_flow(flow_id)
+
+    assert len(updated.steps) == 1
+    assert updated.steps[0].input_type == "audio"
+    assert updated.steps[0].output_mode == "transcribe_only"
+    assert updated.steps[0].output_type == "text"
 
 
 @pytest.mark.asyncio

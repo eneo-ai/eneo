@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from uuid import uuid4
+
 import pytest
 
 from eneo.flows.ai_builder import ai_builder_architecture_derivation
@@ -20,6 +22,7 @@ from eneo.flows.ai_builder.planning_state import (
 from eneo.flows.ai_builder.planning_state_builder import (
     build_planning_state_from_conversation,
 )
+from eneo.flows.domain.flow import Flow, FlowStep
 from eneo.flows.enums import FlowAuthoringOutputMode, FlowOutputMode
 
 
@@ -614,6 +617,102 @@ def test_document_comparison_scope_respects_commit_grade(
 
     assert draft is not None
     assert draft.aggregation_intent == expected
+
+
+def _audio_flow_step(
+    *,
+    step_order: int,
+    user_description: str,
+    input_source: str,
+    input_type: str,
+    output_mode: str,
+) -> FlowStep:
+    return FlowStep(
+        id=uuid4(),
+        flow_id=uuid4(),
+        tenant_id=uuid4(),
+        assistant_id=uuid4(),
+        step_order=step_order,
+        user_description=user_description,
+        input_source=input_source,
+        input_type=input_type,
+        output_mode=output_mode,
+        output_type="text",
+    )
+
+
+def _audio_flow(*steps: FlowStep) -> Flow:
+    return Flow(
+        id=uuid4(),
+        name="Ljudflöde",
+        description="Behandlar uppladdat mötesljud.",
+        tenant_id=uuid4(),
+        space_id=uuid4(),
+        steps=list(steps),
+    )
+
+
+def test_editing_a_transcription_only_flow_keeps_the_transcribe_only_architecture() -> (
+    None
+):
+    state = build_planning_state_from_conversation(
+        [
+            ConversationMessage(
+                role="user",
+                content="Förtydliga instruktionen. Ändra inget annat.",
+            )
+        ],
+        flow=_audio_flow(
+            _audio_flow_step(
+                step_order=1,
+                user_description="Transkribera mötesljudet",
+                input_source="flow_input",
+                input_type="audio",
+                output_mode="transcribe_only",
+            )
+        ),
+    )
+
+    draft = derive_architecture_commit_draft(state)
+
+    assert draft is not None
+    assert draft.tuples_chain[0].output_mode is FlowAuthoringOutputMode.TRANSCRIBE_ONLY
+    assert draft.chosen_patterns == ["audio_transcription"]
+
+
+def test_editing_an_audio_flow_with_downstream_work_keeps_the_semantic_architecture() -> (
+    None
+):
+    state = build_planning_state_from_conversation(
+        [
+            ConversationMessage(
+                role="user",
+                content="Förtydliga instruktionen. Ändra inget annat.",
+            )
+        ],
+        flow=_audio_flow(
+            _audio_flow_step(
+                step_order=1,
+                user_description="Transkribera mötesljudet",
+                input_source="flow_input",
+                input_type="audio",
+                output_mode="transcribe_only",
+            ),
+            _audio_flow_step(
+                step_order=2,
+                user_description="Skriv mötessammanfattningen",
+                input_source="previous_step",
+                input_type="text",
+                output_mode="pass_through",
+            ),
+        ),
+    )
+
+    draft = derive_architecture_commit_draft(state)
+
+    assert draft is not None
+    assert draft.tuples_chain[0].output_mode is FlowAuthoringOutputMode.PASS_THROUGH
+    assert draft.chosen_patterns == ["audio_to_artifact_report"]
 
 
 def test_does_not_commit_architecture_from_freeform_heuristics() -> None:

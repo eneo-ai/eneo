@@ -47,6 +47,7 @@ class FlowCapabilityProfile:
     final_output_mode: str | None = None
     final_output_generation_mode: str | None = None
     runtime_metadata_state: RuntimeMetadataState | None = None
+    stops_after_primary_operation: bool = False
     knowledge_base_step_orders: tuple[int, ...] = ()
     citation_step_orders: tuple[int, ...] = ()
     contract_step_orders: tuple[int, ...] = ()
@@ -84,6 +85,8 @@ class FlowCapabilityProfile:
             defaults["pdf_generation_mode"].add("generated_pdf")
         if self.runtime_metadata_state is not None:
             defaults["runtime_metadata_fields"].add(self.runtime_metadata_state)
+        if self.stops_after_primary_operation:
+            defaults["post_processing_goal"].add("stop_after_primary_operation")
 
         return {
             question_id: values for question_id, values in defaults.items() if values
@@ -166,11 +169,30 @@ def build_flow_capability_profile(flow: Flow | None) -> FlowCapabilityProfile:
         final_output_mode=final_output_mode,
         final_output_generation_mode=final_output_generation_mode,
         runtime_metadata_state=runtime_metadata_state,
+        stops_after_primary_operation=_stops_after_primary_operation(steps),
         citation_step_orders=citation_step_orders,
         contract_step_orders=contract_step_orders,
         variable_binding_step_orders=variable_binding_step_orders,
         all_previous_steps_orders=all_previous_steps_orders,
         settled_families=frozenset(settled_families),
+    )
+
+
+def _stops_after_primary_operation(steps: list[FlowStep]) -> bool:
+    """Whether the existing flow delivers its primary result and nothing more.
+
+    A lone transcription step is the flow's own answer to what happens after
+    the transcript: nothing. Editing such a flow must not be read as an
+    unsettled purpose, which would let the architecture claim semantic work
+    the flow does not do.
+    """
+
+    if len(steps) != 1:
+        return False
+    only_step = steps[0]
+    return (
+        only_step.input_source is FlowInputSource.FLOW_INPUT
+        and only_step.output_mode is FlowOutputMode.TRANSCRIBE_ONLY
     )
 
 

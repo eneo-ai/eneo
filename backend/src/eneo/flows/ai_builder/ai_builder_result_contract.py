@@ -264,10 +264,10 @@ def derive_result_contract(planning_state: PlanningState) -> ResultContract | No
     )
     secondary_obligations = _secondary_obligations(planning_state)
     if post_processing_goal == "stop_after_primary_operation":
-        # A settled "only the primary result" is the whole contract. Obligation
-        # signals are model-inferred, always stored as high confidence and never
-        # retracted, so an earlier "also summarize" reading must not quietly
-        # reintroduce the downstream work the user just ruled out.
+        # A commit-grade "only the primary result" is the whole contract.
+        # Obligation signals are model-inferred, always stored as high
+        # confidence and never retracted, so an earlier "also summarize"
+        # reading must not quietly reintroduce ruled-out downstream work.
         secondary_obligations = ()
 
     required_sections = _GOAL_REQUIRED_SECTIONS.get(post_processing_goal or "", ())
