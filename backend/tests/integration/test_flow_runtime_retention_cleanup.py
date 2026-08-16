@@ -2983,13 +2983,34 @@ async def test_debug_retention_deletes_attempt_provider_and_resolved_input_evide
             finished_at=fixture.step_attempt.finished_at,
         )
     )
-    # A transcription that was charged, and a retry of the same audio whose
-    # first attempt never reported an outcome.
+    # One transcription request whose first attempt never reported an outcome,
+    # then the retry of that same audio that completed. Same audio, same
+    # routing, so both attempts carry the same request identity and duration.
     async_session.add(
         FlowProviderCalls(
             flow_step_attempt_id=fixture.step_attempt.id,
             call_kind="transcription",
             ordinal=3,
+            status="outcome_unknown",
+            request_schema_version=2,
+            provider_request_hash="d" * 64,
+            requested_model="openai/whisper-1",
+            provider="openai",
+            response_format="none",
+            requested_capabilities=[],
+            resolved_input_edge_indexes=[],
+            call_reason="initial",
+            audio_seconds=Decimal("51.250"),
+            outcome_reason="provider_error",
+            requested_at=fixture.step_attempt.started_at,
+            finished_at=fixture.step_attempt.finished_at,
+        )
+    )
+    async_session.add(
+        FlowProviderCalls(
+            flow_step_attempt_id=fixture.step_attempt.id,
+            call_kind="transcription",
+            ordinal=4,
             status="completed",
             request_schema_version=2,
             provider_request_hash="d" * 64,
@@ -3004,26 +3025,6 @@ async def test_debug_retention_deletes_attempt_provider_and_resolved_input_evide
             audio_seconds=Decimal("51.250"),
             input_source="not_applicable",
             output_source="not_applicable",
-            requested_at=fixture.step_attempt.started_at,
-            finished_at=fixture.step_attempt.finished_at,
-        )
-    )
-    async_session.add(
-        FlowProviderCalls(
-            flow_step_attempt_id=fixture.step_attempt.id,
-            call_kind="transcription",
-            ordinal=4,
-            status="outcome_unknown",
-            request_schema_version=2,
-            provider_request_hash="e" * 64,
-            requested_model="openai/whisper-1",
-            provider="openai",
-            response_format="none",
-            requested_capabilities=[],
-            resolved_input_edge_indexes=[],
-            call_reason="initial",
-            audio_seconds=Decimal("45.500"),
-            outcome_reason="provider_error",
             requested_at=fixture.step_attempt.started_at,
             finished_at=fixture.step_attempt.finished_at,
         )
@@ -3098,8 +3099,9 @@ async def test_debug_retention_deletes_attempt_provider_and_resolved_input_evide
     assert attempt_counts.token_usage == usage_before_purge[fixture.run.id].token_usage
     assert attempt_counts.token_usage.input_completeness == "incomplete"
     assert attempt_counts.token_usage.output_completeness == "incomplete"
-    # The audio survives the purge in the same summary, counting only what the
-    # completed request sent and marking the unresolved retry as a lower bound.
+    # The audio survives the purge in the same summary, counting the completed
+    # attempt once and marking the total a lower bound because its first
+    # attempt's outcome was never learned.
     assert attempt_counts.transcription_usage_state == "recorded"
     assert attempt_counts.transcription_usage == (
         usage_before_purge[fixture.run.id].transcription_usage

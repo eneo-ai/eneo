@@ -4,7 +4,7 @@ import logging
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
-from typing import Any, TypeAlias, TypedDict, cast
+from typing import Any, TypeAlias, TypedDict, assert_never, cast
 from uuid import UUID
 
 import sqlalchemy as sa
@@ -49,6 +49,7 @@ from eneo.flows.domain.flow import (
     FlowRunTokenUsage,
     FlowRunTranscriptionUsage,
 )
+from eneo.flows.domain.provider_call import ProviderCallStatus
 from eneo.flows.enums import TERMINAL_FLOW_RUN_STATUS_VALUES
 from eneo.flows.flow_retention_policy import resolve_flow_retention_policy
 from eneo.flows.flow_retention_tombstone import (
@@ -137,28 +138,31 @@ class FlowRetentionEvidenceError(RuntimeError):
 
 
 def _transcription_usage_for_call(
-    *, status: str, audio_seconds: Decimal | None
+    *, status: ProviderCallStatus, audio_seconds: Decimal | None
 ) -> FlowRunTranscriptionUsage | None:
     """Summarise one purged transcription call before its row disappears.
 
-    A rejected request was refused, so it contributes nothing. A request whose
-    outcome was never learned may still have been charged, so it is left out of
-    the total and marks it incomplete rather than inflating it.
+    A rejected request was answered and refused, so it contributes nothing. A
+    request whose outcome was never learned may still have been charged, so it
+    is left out of the total and marks it incomplete rather than inflating it.
     """
-    if status == "rejected":
-        return None
-    if status != "completed":
-        return FlowRunTranscriptionUsage.from_counts(
-            audio_seconds=0.0, completeness="incomplete"
-        )
-    if audio_seconds is None:
-        raise FlowRetentionEvidenceError(
-            "A completed transcription call must carry the audio it sent."
-        )
-    return FlowRunTranscriptionUsage.from_counts(
-        audio_seconds=float(audio_seconds),
-        completeness="complete",
-    )
+    match status:
+        case ProviderCallStatus.REJECTED:
+            return None
+        case ProviderCallStatus.STARTED | ProviderCallStatus.OUTCOME_UNKNOWN:
+            return FlowRunTranscriptionUsage.from_counts(
+                audio_seconds=0.0, completeness="incomplete"
+            )
+        case ProviderCallStatus.COMPLETED:
+            if audio_seconds is None:
+                raise FlowRetentionEvidenceError(
+                    "A completed transcription call must carry the audio it sent."
+                )
+            return FlowRunTranscriptionUsage.from_counts(
+                audio_seconds=float(audio_seconds),
+                completeness="complete",
+            )
+    assert_never(status)
 
 
 def _empty_flow_runtime_cleanup_counts() -> FlowRuntimeCleanupCounts:
@@ -2445,7 +2449,7 @@ class DataRetentionService:
                 )
                 if provider_call.call_kind == "transcription":
                     call_audio_usage = _transcription_usage_for_call(
-                        status=provider_call.status,
+                        status=ProviderCallStatus(provider_call.status),
                         audio_seconds=provider_call.audio_seconds,
                     )
                     if call_audio_usage is not None:

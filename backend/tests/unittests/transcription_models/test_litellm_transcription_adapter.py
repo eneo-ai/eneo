@@ -222,12 +222,15 @@ async def test_recorded_duration_is_the_audio_each_request_actually_sent(
 ):
     """The five-minute markers in the transcript are nominal; the rows are not.
 
-    The splitter emits whole blocks, so a chunk's real length is not the
-    interval its timestamp claims. Recording the interval would bill a number
-    the request never sent.
+    The splitter emits whole blocks and only checks the boundary after writing
+    one, so an intermediate chunk overruns the interval its timestamp claims.
+    Recording the interval would report a number the request never sent.
     """
+    sent_durations: list[float] = []
 
     async def fake_atranscription(**kwargs):
+        sent_file = kwargs["file"]
+        sent_durations.append(AudioFile(sent_file.name).duration)
         return SimpleNamespace(text="transcript", model="whisper-1", id="resp")
 
     monkeypatch.setattr(
@@ -235,7 +238,7 @@ async def test_recorded_duration_is_the_audio_each_request_actually_sent(
         AsyncMock(side_effect=fake_atranscription),
     )
     source = tmp_path / "recording.wav"
-    _write_wav(source, seconds=7.5)
+    _write_wav(source, seconds=640.0)
     adapter = LiteLLMTranscriptionAdapter(
         model=SimpleNamespace(name="Whisper", model_name="whisper-1"),
         credential_resolver=_CredentialResolverStub(),
@@ -248,10 +251,12 @@ async def test_recorded_duration_is_the_audio_each_request_actually_sent(
     )
 
     recorded = [request.audio_seconds for request in observer.started_requests]
-    assert recorded
-    assert sum(recorded) == pytest.approx(7.5, abs=0.2)
-    # Not the nominal 300-second interval the transcript header shows.
-    assert all(seconds < 300 for seconds in recorded)
+    assert len(recorded) > 1
+    # Every row is the file that request sent, measured.
+    assert recorded == pytest.approx(sent_durations, abs=0.05)
+    # And at least one emitted chunk is not the nominal five-minute interval its
+    # transcript header claims, which is why the interval cannot be recorded.
+    assert any(abs(seconds - 300.0) > 0.5 for seconds in recorded[:-1])
 
 
 @pytest.mark.asyncio

@@ -1,7 +1,11 @@
 from __future__ import annotations
 
+import wave
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
 from uuid import UUID, uuid4
 
 import pytest
@@ -60,6 +64,28 @@ from eneo.model_providers.domain.provider_call_observer import (
     CompletionCallRequestFacts,
     CompletionCallResultFacts,
 )
+from eneo.transcription_models.infrastructure.adapters.litellm_transcription import (
+    LiteLLMTranscriptionAdapter,
+)
+
+
+class _TranscriptionCredentialResolverStub:
+    provider_id = "provider-id"
+    provider_type = "openai"
+
+    def get_api_key(self, *, required: bool = False) -> str:
+        return "test-key"
+
+    def get_credential_field(self, *, field: str, required: bool = False) -> str | None:
+        return None
+
+
+def _write_silent_wav(path: Path, *, seconds: float, samplerate: int = 8000) -> None:
+    with wave.open(str(path), "w") as handle:
+        handle.setnchannels(1)
+        handle.setsampwidth(2)
+        handle.setframerate(samplerate)
+        handle.writeframes(b"\x00\x00" * int(seconds * samplerate))
 
 
 @dataclass(frozen=True, slots=True)
@@ -1541,3 +1567,94 @@ async def test_run_usage_keeps_token_and_audio_completeness_independent(
     assert token_usage.output_completeness == "complete"
     assert transcription_usage.audio_seconds == 345.5
     assert transcription_usage.completeness == "incomplete"
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_a_retried_transcription_is_durable_from_the_adapter_to_the_run_total(
+    setup_database,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+    monkeypatch,
+    tmp_path,
+):
+    """Drive the real adapter into the real recorder and read the run's total.
+
+    Every other proof stops at an in-memory observer or writes the rows by hand,
+    so a wiring regression could leave them all green while a run recorded
+    nothing. Only the provider itself is faked here.
+    """
+    attempts = {"count": 0}
+
+    async def flaky_atranscription(**kwargs):
+        attempts["count"] += 1
+        if attempts["count"] == 1:
+            raise RuntimeError("provider timed out")
+        return SimpleNamespace(text="transkription", model="whisper-1", id="resp-2")
+
+    monkeypatch.setattr(
+        "eneo.transcription_models.infrastructure.adapters.litellm_transcription"
+        ".litellm_transport.atranscription",
+        AsyncMock(side_effect=flaky_atranscription),
+    )
+    async with sessionmanager.session() as setup_session, setup_session.begin():
+        context = await _create_started_attempt(
+            session=setup_session,
+            admin_user=admin_user,
+            completion_model_factory=completion_model_factory,
+            space_factory=space_factory,
+            assistant_factory=assistant_factory,
+        )
+    chunk_path = tmp_path / "chunk.wav"
+    _write_silent_wav(chunk_path, seconds=12.5)
+    adapter = LiteLLMTranscriptionAdapter(
+        model=SimpleNamespace(name="Whisper", model_name="whisper-1"),
+        credential_resolver=_TranscriptionCredentialResolverStub(),
+        provider_type="openai",
+    )
+    recorder = FlowProviderCallRecorder(
+        run_id=context.run_id,
+        step_id=context.step_id,
+        attempt_no=context.attempt_no,
+        tenant_id=context.tenant_id,
+        mapped_call=None,
+        resolved_input_edge_indexes=(),
+    )
+
+    text = await adapter._transcribe_chunk(
+        chunk_path,
+        language="sv",
+        observer=recorder,
+        audio_seconds=12.5,
+    )
+
+    async with sessionmanager.session() as session, session.begin():
+        repo = FlowProviderCallRepository(session)
+        page = await repo.list_evidence_page(
+            run_id=context.run_id,
+            tenant_id=context.tenant_id,
+            limit=10,
+        )
+        usage_by_run_id = await repo.list_usage_for_runs(
+            run_ids=[context.run_id],
+            tenant_id=context.tenant_id,
+        )
+
+    assert text == "transkription"
+    assert attempts["count"] == 2
+    calls = page.items
+    assert [call.status.value for call in calls] == ["outcome_unknown", "completed"]
+    assert {call.call_kind for call in calls} == {ProviderCallKind.TRANSCRIPTION}
+    # The retry is the same request, so it carries the same identity and length.
+    assert len({call.provider_request_hash for call in calls}) == 1
+    assert [call.audio_seconds for call in calls] == [12.5, 12.5]
+
+    usage = usage_by_run_id[context.run_id]
+    assert usage.token_usage is None
+    assert usage.transcription_usage is not None
+    # Only the attempt that completed is counted, and the attempt whose outcome
+    # was never learned makes the total a lower bound.
+    assert usage.transcription_usage.audio_seconds == 12.5
+    assert usage.transcription_usage.completeness == "incomplete"
