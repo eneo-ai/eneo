@@ -3,15 +3,15 @@
   import type { Space } from "@eneo/eneo-js";
   import { untrack, type ComponentProps } from "svelte";
   import type { AIBuilderClientTransport, FlowAIBuilderState } from "../FlowAIBuilderDriver";
-  import FlowAIBuilderPlanPane from "../FlowAIBuilderPlanPane.svelte";
+  import BuilderReviewScreen from "../BuilderReviewScreen.svelte";
   import { initAIBuilderService } from "../FlowAIBuilderService.svelte.ts";
 
   interface Props {
     currentSpace: Pick<Space, "completion_models" | "transcription_models"> & Partial<Space>;
     state: Partial<FlowAIBuilderState>;
     transport?: AIBuilderClientTransport;
-    /** Render-time props forwarded to the pane, typed by the component. */
-    paneProps?: Partial<ComponentProps<typeof FlowAIBuilderPlanPane>>;
+    /** Render-time props forwarded to the screen, typed by the component. */
+    screenProps?: Partial<ComponentProps<typeof BuilderReviewScreen>>;
     /** Test hook: receive the service instance to drive live state changes. */
     onservice?: (service: ReturnType<typeof initAIBuilderService>) => void;
   }
@@ -19,14 +19,14 @@
   let {
     currentSpace,
     state,
-    paneProps = {},
+    screenProps = {},
     onservice,
     transport = {
       fetch: async () => {
-        throw new Error("Unexpected AI Builder fetch in plan pane harness.");
+        throw new Error("Unexpected AI Builder fetch in review screen harness.");
       },
       stream: async () => {
-        throw new Error("Unexpected AI Builder stream in plan pane harness.");
+        throw new Error("Unexpected AI Builder stream in review screen harness.");
       }
     }
   }: Props = $props();
@@ -50,4 +50,4 @@
   onservice?.(service);
 </script>
 
-<FlowAIBuilderPlanPane {...paneProps} />
+<BuilderReviewScreen {...screenProps} />

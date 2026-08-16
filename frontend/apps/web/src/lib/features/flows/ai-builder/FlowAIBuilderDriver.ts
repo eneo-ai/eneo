@@ -63,8 +63,10 @@ const FLOW_AI_BUILDER_ROUTES = {
 /** A session-mutating plan operation that must lock out all other inputs
  *  while it runs. Owned by the session/plan it was started for so a
  *  replacement session can never inherit (or clear) another one's lock. */
+export type PendingPlanOperationKind = "creating" | "approving" | "applying" | "unpublishing";
+
 export interface PendingPlanOperation {
-  kind: "creating";
+  kind: PendingPlanOperationKind;
   sessionId: string;
   planId: string;
 }
@@ -94,6 +96,10 @@ export interface FlowAIBuilderState {
   draftSessions: AIBuilderDraftSession[];
   pendingOperation: PendingPlanOperation | null;
   createFailureOutcome: CreateFailureOutcome | null;
+  /** Assistant prose from a completed review turn that produced no new plan —
+   *  a typed decline ("I cannot swap the model for you") or a plain answer.
+   *  The plan stays; the review screen renders this as a dismissible notice. */
+  reviewNote: string | null;
 }
 
 export function createInitialFlowAIBuilderState(): FlowAIBuilderState {
@@ -111,7 +117,8 @@ export function createInitialFlowAIBuilderState(): FlowAIBuilderState {
     availableModels: [],
     draftSessions: [],
     pendingOperation: null,
-    createFailureOutcome: null
+    createFailureOutcome: null,
+    reviewNote: null
   };
 }
 
@@ -275,6 +282,13 @@ export class FlowAIBuilderDriver {
     this.#state.error = null;
     this.#state.statusMessage = null;
     this.#state.applyResult = null;
+    this.#state.reviewNote = null;
+    this.#notify();
+  }
+
+  dismissReviewNote(): void {
+    if (this.#state.reviewNote === null) return;
+    this.#state.reviewNote = null;
     this.#notify();
   }
 
@@ -607,13 +621,18 @@ export class FlowAIBuilderDriver {
     if (optimisticUserMessage) {
       this.#state.messages = [...this.#state.messages, optimisticUserMessage];
     }
-    if (this.#state.currentPlan) {
-      this.#state.currentPlan = null;
+    // The plan survives the turn. A change request rewrites it in place when a
+    // `plan` event lands; a turn that produces no plan event lets the refreshed
+    // session's latest_plan_id decide whether the plan is still the truth.
+    const planBeforeTurn = this.#state.currentPlan;
+    if (planBeforeTurn) {
       this.#state.applyResult = null;
     }
+    this.#state.reviewNote = null;
     this.#notify();
 
     let assistantText = "";
+    let receivedPlanEvent = false;
     let receivedUsageEvent = false;
     let receivedDurableStreamEvent = false;
     let receivedStaleQuestionEvent = false;
@@ -645,6 +664,7 @@ export class FlowAIBuilderDriver {
               }
               case "plan": {
                 receivedDurableStreamEvent = true;
+                receivedPlanEvent = true;
                 const data = this.#normalizePlan(event.data);
                 this.#state.currentPlan = data;
                 this.#state.statusMessage = null;
@@ -718,10 +738,15 @@ export class FlowAIBuilderDriver {
       if ((!receivedDone || receivedStreamError) && !abortController.signal.aborted) {
         this.#requiresAuthoritativeRefresh = true;
       }
+      // A review turn that produced no plan is only resolvable against the
+      // server: a typed decline keeps latest_plan_id, a reopened requirements
+      // flow drops it. Never guess from the stream alone.
+      const reviewTurnWithoutPlanEvent = planBeforeTurn !== null && !receivedPlanEvent;
       const shouldRefreshAfterStream =
         !receivedDone ||
         isRetry ||
         receivedStreamError ||
+        reviewTurnWithoutPlanEvent ||
         (requestBody.file_ids && requestBody.file_ids.length > 0) ||
         (!receivedUsageEvent && this.#state.currentPlan !== null) ||
         (requestBody.question_answer?.kind === "structured_question_answer" &&
@@ -731,6 +756,17 @@ export class FlowAIBuilderDriver {
       }
       if (receivedDone && !receivedStreamError) {
         settledStreamState = "idle";
+      }
+      if (
+        reviewTurnWithoutPlanEvent &&
+        receivedDone &&
+        !receivedStreamError &&
+        ownsCurrentStream() &&
+        this.#state.currentPlan !== null &&
+        assistantText.trim().length > 0
+      ) {
+        this.#state.reviewNote = assistantText.trim();
+        this.#notify();
       }
       return receivedDone && !receivedStreamError ? "delivered" : "failed";
     } catch (e) {
@@ -759,6 +795,7 @@ export class FlowAIBuilderDriver {
     const plan = this.#state.currentPlan;
     const owner = this.#currentSessionOwner();
     if (!plan || !owner) return;
+    this.#claimPendingOperation("approving", owner, plan.plan_id);
     this.#state.error = null;
     this.#notify();
 
@@ -780,6 +817,26 @@ export class FlowAIBuilderDriver {
         this.#notify();
       }
       throw e;
+    } finally {
+      this.#releasePendingOperation(owner, plan.plan_id);
+    }
+  }
+
+  /** All four plan operations share one lock so no other session-mutating
+   *  command can interleave with a write the user already committed to. */
+  #claimPendingOperation(
+    kind: PendingPlanOperationKind,
+    owner: SessionOperationOwner,
+    planId: string
+  ): void {
+    this.#state.pendingOperation = { kind, sessionId: owner.sessionId, planId };
+  }
+
+  #releasePendingOperation(owner: SessionOperationOwner, planId: string): void {
+    const pending = this.#state.pendingOperation;
+    if (pending?.planId === planId && pending.sessionId === owner.sessionId) {
+      this.#state.pendingOperation = null;
+      this.#notify();
     }
   }
 
@@ -799,11 +856,7 @@ export class FlowAIBuilderDriver {
       throw new Error("A plan operation is already in progress");
     }
 
-    this.#state.pendingOperation = {
-      kind: "creating",
-      sessionId: owner.sessionId,
-      planId: plan.plan_id
-    };
+    this.#claimPendingOperation("creating", owner, plan.plan_id);
     this.#state.error = null;
     this.#state.applyError = null;
     this.#state.createFailureOutcome = null;
@@ -845,11 +898,7 @@ export class FlowAIBuilderDriver {
       this.#notify();
       throw initialError;
     } finally {
-      const pending = this.#state.pendingOperation;
-      if (pending?.planId === plan.plan_id && pending.sessionId === owner.sessionId) {
-        this.#state.pendingOperation = null;
-        this.#notify();
-      }
+      this.#releasePendingOperation(owner, plan.plan_id);
     }
   }
 
@@ -885,6 +934,17 @@ export class FlowAIBuilderDriver {
       throw new Error("A plan operation is already in progress");
     }
 
+    this.#claimPendingOperation("applying", owner, plan.plan_id);
+    try {
+      return await this.#applyPlan(plan, owner);
+    } finally {
+      this.#releasePendingOperation(owner, plan.plan_id);
+    }
+  }
+
+  /** The apply call without the operation lock, so unpublish-then-apply can
+   *  hold a single "unpublishing" lock across both requests. */
+  async #applyPlan(plan: ProposedPlan, owner: SessionOperationOwner): Promise<ApplyResult> {
     this.#state.error = null;
     this.#state.applyError = null;
     this.#state.isConflict = false;
@@ -936,9 +996,25 @@ export class FlowAIBuilderDriver {
     const plan = this.#state.currentPlan;
     const owner = this.#currentSessionOwner();
     if (!plan || !owner) throw new Error("No plan to apply");
+    if (this.#state.pendingOperation) {
+      throw new Error("A plan operation is already in progress");
+    }
     const flowId = this.#publishedApplyFlowId();
     if (!flowId) throw new Error("No published flow to unpublish");
 
+    this.#claimPendingOperation("unpublishing", owner, plan.plan_id);
+    try {
+      return await this.#unpublishAndApplyPlan(plan, owner, flowId);
+    } finally {
+      this.#releasePendingOperation(owner, plan.plan_id);
+    }
+  }
+
+  async #unpublishAndApplyPlan(
+    plan: ProposedPlan,
+    owner: SessionOperationOwner,
+    flowId: string
+  ): Promise<ApplyResult> {
     this.#state.error = null;
     this.#notify();
 
@@ -965,7 +1041,7 @@ export class FlowAIBuilderDriver {
     }
 
     try {
-      return await this.applyPlan();
+      return await this.#applyPlan(plan, owner);
     } catch (e) {
       if (!this.#ownsPlan(owner, plan.plan_id)) throw e;
       const parsedApplyError = parseAIBuilderError({

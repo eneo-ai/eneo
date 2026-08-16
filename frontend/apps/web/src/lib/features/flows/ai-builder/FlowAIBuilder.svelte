@@ -17,7 +17,7 @@
   import BuilderBuildScreen from "./BuilderBuildScreen.svelte";
   import BuilderTurnAlert from "./BuilderTurnAlert.svelte";
   import BuilderConversationSheet from "./BuilderConversationSheet.svelte";
-  import FlowAIBuilderPlanPane from "./FlowAIBuilderPlanPane.svelte";
+  import BuilderReviewScreen from "./BuilderReviewScreen.svelte";
   import { getAIBuilderService } from "./FlowAIBuilderService.svelte.ts";
   import type {
     AIBuilderSavedFlowStepScope,
@@ -488,7 +488,7 @@
       {:else if screen === "build" && generationFailedWithoutPlan}
         <!-- A failed generation keeps its one existing failure/retry surface. -->
         <div class="bg-primary flex min-h-0 flex-1 flex-col">
-          <FlowAIBuilderPlanPane
+          <BuilderReviewScreen
             showGenerationFailure={true}
             onapplied={(detail) => onapplied?.(detail)}
             onsuggestchange={handleSuggestChange}
@@ -506,7 +506,7 @@
         />
       {:else if screen === "review"}
         <div class="bg-primary flex min-h-0 flex-1 flex-col">
-          <FlowAIBuilderPlanPane
+          <BuilderReviewScreen
             showGenerationFailure={generationFailedWithoutPlan}
             onapplied={(detail) => onapplied?.(detail)}
             onsuggestchange={handleSuggestChange}

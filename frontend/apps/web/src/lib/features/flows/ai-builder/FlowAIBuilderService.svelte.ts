@@ -6,8 +6,10 @@ import {
   type AIBuilderClientTransport,
   type AIBuilderStreamState,
   type CreateFailureOutcome,
-  type FlowAIBuilderState
+  type FlowAIBuilderState,
+  type PendingPlanOperationKind
 } from "./FlowAIBuilderDriver";
+import { classifyAIBuilderConflict, type AIBuilderConflict } from "./aiBuilderConflict";
 import type {
   AIBuilderDraftSession,
   AIBuilderError,
@@ -45,6 +47,25 @@ export class FlowAIBuilderService {
    *  session-mutating control must render disabled while this holds; the
    *  driver enforces the same lock at its command boundaries. */
   isCreating = $derived(this.#state.pendingOperation?.kind === "creating");
+  /** Any plan operation — create, approve, apply, unpublish-and-apply. */
+  isBusy = $derived(this.#state.pendingOperation !== null);
+  pendingOperationKind: PendingPlanOperationKind | null = $derived(
+    this.#state.pendingOperation?.kind ?? null
+  );
+  /** A change request is rewriting a plan the user is already reviewing.
+   *  The review screen dims the plan and locks approval while this holds. */
+  isRevisingPlan = $derived(
+    this.#state.streamState === "streaming" && this.#state.currentPlan !== null
+  );
+  /** One conflict classification for the whole builder, so the review screen
+   *  renders a single card instead of guessing from raw error codes. */
+  conflict: AIBuilderConflict | null = $derived(
+    classifyAIBuilderConflict({
+      applyError: this.#state.applyError,
+      error: this.#state.error,
+      isConflict: this.#state.isConflict
+    })
+  );
   canSendMessage = $derived(
     this.hasSession &&
       this.#state.streamState !== "streaming" &&
@@ -222,6 +243,15 @@ export class FlowAIBuilderService {
 
   get isConflict(): boolean {
     return this.#state.isConflict;
+  }
+
+  /** Assistant prose from the last review turn that produced no new plan. */
+  get latestReviewNote(): string | null {
+    return this.#state.reviewNote;
+  }
+
+  dismissReviewNote(): void {
+    this.#driver.dismissReviewNote();
   }
 
   get statusMessage(): AIBuilderStatus | null {

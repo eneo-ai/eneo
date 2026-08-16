@@ -34,8 +34,8 @@ function listSourceFiles(dir: string): string[] {
   });
 }
 
-describe("FlowAIBuilderCanvas import boundary", () => {
-  it("keeps the builder plan preview independent from the editor graph stack", () => {
+describe("AI Builder graph import boundary", () => {
+  it("keeps the builder plan diagram independent from the editor graph stack", () => {
     // This is a direct-source fence; full route-bundle analysis belongs in the build gate.
     const violations = listSourceFiles(aiBuilderDir).flatMap((path) => {
       const source = readFileSync(path, "utf8");

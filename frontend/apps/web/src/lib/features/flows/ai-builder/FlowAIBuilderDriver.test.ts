@@ -1161,21 +1161,18 @@ describe("FlowAIBuilderDriver", () => {
     expect(driver.state.draftSessions).toEqual([currentDraft]);
   });
 
-  it("does not apply a delayed approval result to a replacement session", async () => {
+  // A delayed plan operation can no longer land in a replacement session: the
+  // operation lock refuses the replacement outright, so the result settles on
+  // the session the user actually started it from.
+  it("refuses a session swap while an approval is pending", async () => {
     const oldPlan = makePlan({ plan_id: "plan-old" });
-    const currentPlan = makePlan({ plan_id: "plan-current" });
-    const currentSession = makeSession({
-      session_id: "session-current",
-      latest_plan_id: currentPlan.plan_id
-    });
     const delayedApproval = Promise.withResolvers<void>();
-    const fetch = vi
-      .fn()
-      .mockReturnValueOnce(delayedApproval.promise)
-      .mockResolvedValueOnce(currentSession)
-      .mockResolvedValueOnce({ models: [], default_model_id: null })
-      .mockResolvedValueOnce(currentPlan)
-      .mockResolvedValueOnce({ sessions: [] });
+    const fetch = vi.fn().mockImplementation((route: string) => {
+      if (route === "/api/v1/flows/ai-builder/plans/{plan_id}/approve") {
+        return delayedApproval.promise;
+      }
+      throw new Error(`Unexpected route while approving: ${route}`);
+    });
     const { driver } = makeDriver({ fetchImpl: fetch });
     driver.seedState({
       session: makeSession({ session_id: "session-old", latest_plan_id: oldPlan.plan_id }),
@@ -1183,41 +1180,39 @@ describe("FlowAIBuilderDriver", () => {
     });
 
     const approval = driver.approvePlan();
-    await driver.resumeSession(currentSession.session_id);
+    await driver.resumeSession("session-current");
+    expect(driver.state.session?.session_id).toBe("session-old");
+
     delayedApproval.resolve();
     await approval;
 
-    expect(driver.state.session?.session_id).toBe(currentSession.session_id);
-    expect(driver.state.currentPlan).toEqual(currentPlan);
+    expect(driver.state.currentPlan?.status).toBe("approved");
     expect(driver.state.error).toBeNull();
   });
 
-  it("does not return or apply a delayed apply result for a replacement session", async () => {
+  it("refuses a session swap while an apply is pending", async () => {
     const oldPlan = makePlan({ plan_id: "plan-old" });
-    const currentPlan = makePlan({ plan_id: "plan-current" });
-    const currentSession = makeSession({
-      session_id: "session-current",
-      flow_id: "flow-current",
-      latest_plan_id: currentPlan.plan_id
+    const oldSession = makeSession({
+      session_id: "session-old",
+      flow_id: "flow-old",
+      latest_plan_id: oldPlan.plan_id
     });
     const delayedApply = Promise.withResolvers<ApplyResult>();
-    const fetch = vi
-      .fn()
-      .mockReturnValueOnce(delayedApply.promise)
-      .mockResolvedValueOnce(currentSession)
-      .mockResolvedValueOnce({ models: [], default_model_id: null })
-      .mockResolvedValueOnce(currentPlan)
-      .mockResolvedValueOnce({ sessions: [] })
-      .mockResolvedValueOnce(currentSession)
-      .mockResolvedValueOnce(currentPlan);
-    const { driver } = makeDriver({ fetchImpl: fetch });
-    driver.seedState({
-      session: makeSession({ session_id: "session-old", latest_plan_id: oldPlan.plan_id }),
-      currentPlan: oldPlan
+    const fetch = vi.fn().mockImplementation((route: string) => {
+      if (route === "/api/v1/flows/ai-builder/plans/{plan_id}/apply") return delayedApply.promise;
+      if (route === "/api/v1/flows/ai-builder/sessions/{session_id}") {
+        return Promise.resolve(oldSession);
+      }
+      if (route === "/api/v1/flows/ai-builder/plans/{plan_id}") return Promise.resolve(oldPlan);
+      throw new Error(`Unexpected route while applying: ${route}`);
     });
+    const { driver } = makeDriver({ fetchImpl: fetch });
+    driver.seedState({ session: oldSession, currentPlan: oldPlan });
 
     const apply = driver.applyPlan();
-    await driver.resumeSession(currentSession.session_id);
+    await driver.resumeSession("session-current");
+    expect(driver.state.session?.session_id).toBe("session-old");
+
     delayedApply.resolve({
       flow_id: "flow-old",
       flow_name: "Old flow",
@@ -1225,54 +1220,49 @@ describe("FlowAIBuilderDriver", () => {
       steps_updated: 0,
       steps_removed: 0
     });
+    await apply;
 
-    await expect(apply).rejects.toMatchObject({ name: "AbortError" });
-    expect(driver.state.session).toEqual(currentSession);
-    expect(driver.state.currentPlan).toEqual(currentPlan);
-    expect(driver.state.applyResult).toBeNull();
+    expect(driver.state.applyResult?.flow_id).toBe("flow-old");
     expect(driver.state.applyError).toBeNull();
     expect(driver.state.error).toBeNull();
   });
 
-  it("does not apply the replacement plan after a delayed unpublish", async () => {
+  it("refuses a session swap while an unpublish-and-apply is pending", async () => {
     const oldPlan = makePlan({ plan_id: "plan-old" });
-    const currentPlan = makePlan({ plan_id: "plan-current" });
-    const currentSession = makeSession({
-      session_id: "session-current",
-      flow_id: "flow-current",
-      latest_plan_id: currentPlan.plan_id
+    const oldSession = makeSession({
+      session_id: "session-old",
+      flow_id: "flow-old",
+      latest_plan_id: oldPlan.plan_id
     });
     const delayedUnpublish = Promise.withResolvers<void>();
-    const fetch = vi
-      .fn()
-      .mockReturnValueOnce(delayedUnpublish.promise)
-      .mockResolvedValueOnce(currentSession)
-      .mockResolvedValueOnce({ models: [], default_model_id: null })
-      .mockResolvedValueOnce(currentPlan)
-      .mockResolvedValueOnce({ sessions: [] })
-      .mockResolvedValueOnce({ flow_id: "flow-current", revision: 3 })
-      .mockResolvedValueOnce(currentSession)
-      .mockResolvedValueOnce(currentPlan);
-    const { driver } = makeDriver({ fetchImpl: fetch });
-    driver.seedState({
-      session: makeSession({
-        session_id: "session-old",
-        flow_id: "flow-old",
-        latest_plan_id: oldPlan.plan_id
-      }),
-      currentPlan: oldPlan
+    const fetch = vi.fn().mockImplementation((route: string) => {
+      if (route === "/api/v1/flows/{id}/unpublish/") return delayedUnpublish.promise;
+      if (route === "/api/v1/flows/ai-builder/plans/{plan_id}/apply") {
+        return Promise.resolve({
+          flow_id: "flow-old",
+          flow_name: "Old flow",
+          steps_created: 0,
+          steps_updated: 1,
+          steps_removed: 0
+        });
+      }
+      if (route === "/api/v1/flows/ai-builder/sessions/{session_id}") {
+        return Promise.resolve(oldSession);
+      }
+      if (route === "/api/v1/flows/ai-builder/plans/{plan_id}") return Promise.resolve(oldPlan);
+      throw new Error(`Unexpected route while unpublishing: ${route}`);
     });
+    const { driver } = makeDriver({ fetchImpl: fetch });
+    driver.seedState({ session: oldSession, currentPlan: oldPlan });
 
     const unpublishAndApply = driver.unpublishAndApplyPlan();
-    await driver.resumeSession(currentSession.session_id);
-    delayedUnpublish.resolve();
+    await driver.resumeSession("session-current");
+    expect(driver.state.session?.session_id).toBe("session-old");
 
-    await expect(unpublishAndApply).rejects.toMatchObject({ name: "AbortError" });
-    expect(
-      fetch.mock.calls.filter(([path]) => path === "/api/v1/flows/ai-builder/plans/{plan_id}/apply")
-    ).toHaveLength(0);
-    expect(driver.state.session).toEqual(currentSession);
-    expect(driver.state.currentPlan).toEqual(currentPlan);
+    delayedUnpublish.resolve();
+    await unpublishAndApply;
+
+    expect(driver.state.applyResult?.steps_updated).toBe(1);
     expect(driver.state.applyError).toBeNull();
     expect(driver.state.error).toBeNull();
   });
@@ -3074,5 +3064,261 @@ describe("FlowAIBuilderDriver.createFlowFromPlan", () => {
     });
     await creating;
     expect(driver.state.pendingOperation).toBeNull();
+  });
+});
+
+describe("FlowAIBuilderDriver plan operation lock", () => {
+  const SESSION_ROUTE = "/api/v1/flows/ai-builder/sessions/{session_id}";
+  const APPROVE_ROUTE = "/api/v1/flows/ai-builder/plans/{plan_id}/approve";
+  const APPLY_ROUTE = "/api/v1/flows/ai-builder/plans/{plan_id}/apply";
+  const UNPUBLISH_ROUTE = "/api/v1/flows/{id}/unpublish/";
+
+  function seedEditSession(driver: ReturnType<typeof makeDriver>["driver"]) {
+    driver.seedState({
+      session: makeSession({
+        status: "awaiting_approval",
+        target_kind: "edit",
+        flow_id: "flow-1",
+        latest_plan_id: "plan-1"
+      }),
+      currentPlan: makePlan({ status: "proposed" })
+    });
+  }
+
+  /** Every session-mutating command must be a no-op while an operation runs. */
+  async function attemptEverySessionMutation(
+    driver: ReturnType<typeof makeDriver>["driver"]
+  ): Promise<void> {
+    await driver.sendMessage("should be ignored");
+    await driver.confirmRequirements();
+    await driver.changeRequirements();
+    await driver.removeAttachment("file-1");
+    await driver.startFreshSession("edit");
+    await driver.resumeSession("session-2");
+    await driver.discardSession("session-1");
+    await driver.createSession("edit");
+    await driver.revisePlan("keep_current_description");
+    await driver.retryLatestTurn();
+    await driver.acknowledgeAndRetryLatestTurn();
+    await driver.approvePlan();
+    await expect(driver.applyPlan()).rejects.toThrow(/already in progress/);
+    await expect(driver.createFlowFromPlan()).rejects.toThrow(/already in progress/);
+    await expect(driver.unpublishAndApplyPlan()).rejects.toThrow(/already in progress/);
+  }
+
+  it.each([
+    [
+      "approving",
+      APPROVE_ROUTE,
+      (driver: ReturnType<typeof makeDriver>["driver"]) => driver.approvePlan()
+    ],
+    [
+      "applying",
+      APPLY_ROUTE,
+      (driver: ReturnType<typeof makeDriver>["driver"]) => driver.applyPlan()
+    ],
+    [
+      "unpublishing",
+      UNPUBLISH_ROUTE,
+      (driver: ReturnType<typeof makeDriver>["driver"]) => driver.unpublishAndApplyPlan()
+    ]
+  ] as const)("blocks every other command while %s is pending", async (kind, route, start) => {
+    let release: (value: unknown) => void = () => {};
+    const fetch = vi.fn().mockImplementation((called: string) => {
+      if (called === route) {
+        return new Promise((resolve) => {
+          release = resolve;
+        });
+      }
+      return Promise.resolve(makeSession({ status: "awaiting_approval" }));
+    });
+    const { driver } = makeDriver({ fetchImpl: fetch });
+    seedEditSession(driver);
+
+    const pending = start(driver);
+    expect(driver.state.pendingOperation?.kind).toBe(kind);
+
+    await attemptEverySessionMutation(driver);
+    expect(fetch.mock.calls).toHaveLength(1);
+    expect(fetch.mock.calls[0][0]).toBe(route);
+
+    release({
+      flow_id: "flow-1",
+      flow_name: "Flow",
+      steps_created: 0,
+      steps_updated: 1,
+      steps_removed: 0
+    });
+    await pending.catch(() => undefined);
+    expect(driver.state.pendingOperation).toBeNull();
+  });
+
+  it("holds one lock across unpublish and the apply that follows it", async () => {
+    const seenKinds: Array<string | undefined> = [];
+    const fetch = vi.fn().mockImplementation((route: string) => {
+      seenKinds.push(driver.state.pendingOperation?.kind);
+      if (route === UNPUBLISH_ROUTE) return Promise.resolve({});
+      if (route === APPLY_ROUTE) {
+        return Promise.resolve({
+          flow_id: "flow-1",
+          flow_name: "Flow",
+          steps_created: 0,
+          steps_updated: 1,
+          steps_removed: 0
+        });
+      }
+      return Promise.resolve(makeSession({ status: "applied", latest_plan_id: "plan-1" }));
+    });
+    const { driver } = makeDriver({ fetchImpl: fetch });
+    seedEditSession(driver);
+    driver.seedState({
+      applyError: makeAIBuilderError({
+        code: "flow_is_published",
+        category: "conflict",
+        details: { flow_id: "flow-1" }
+      })
+    });
+
+    await driver.unpublishAndApplyPlan();
+
+    // The apply never re-claims the lock, so it can never deadlock behind it.
+    expect(seenKinds.slice(0, 2)).toEqual(["unpublishing", "unpublishing"]);
+    expect(driver.state.pendingOperation).toBeNull();
+  });
+
+  it("releases the lock when approve fails", async () => {
+    const fetch = vi.fn().mockRejectedValue(new Error("nope"));
+    const { driver } = makeDriver({ fetchImpl: fetch });
+    seedEditSession(driver);
+
+    await expect(driver.approvePlan()).rejects.toBeTruthy();
+    expect(driver.state.pendingOperation).toBeNull();
+  });
+
+  it("keeps the session route reachable for a refresh after the lock clears", async () => {
+    const fetch = vi.fn().mockResolvedValue(makeSession({ latest_plan_id: null }));
+    const { driver } = makeDriver({ fetchImpl: fetch });
+    seedEditSession(driver);
+
+    await driver.refreshSession();
+    expect(fetch.mock.calls[0][0]).toBe(SESSION_ROUTE);
+  });
+});
+
+describe("FlowAIBuilderDriver review turns", () => {
+  const PLAN_ROUTE = "/api/v1/flows/ai-builder/plans/{plan_id}";
+  const SESSION_ROUTE = "/api/v1/flows/ai-builder/sessions/{session_id}";
+
+  function seedReviewSession(driver: ReturnType<typeof makeDriver>["driver"]) {
+    driver.seedState({
+      session: makeSession({
+        status: "awaiting_approval",
+        target_kind: "create",
+        flow_id: null,
+        latest_plan_id: "plan-1"
+      }),
+      currentPlan: makePlan({ status: "proposed" })
+    });
+  }
+
+  it("keeps the plan on screen while a change request streams", async () => {
+    const planStates: Array<string | null> = [];
+    const stream = vi.fn(async (_path, _init, handlers) => {
+      planStates.push(driver.state.currentPlan?.plan_id ?? null);
+      completeStream(handlers);
+    });
+    const fetch = vi.fn().mockImplementation((route: string) => {
+      if (route === SESSION_ROUTE) {
+        return Promise.resolve(makeSession({ latest_plan_id: "plan-1" }));
+      }
+      return Promise.resolve(makePlan({ plan_id: "plan-1" }));
+    });
+    const { driver } = makeDriver({ fetchImpl: fetch, streamImpl: stream });
+    seedReviewSession(driver);
+
+    await driver.sendMessage("Lägg till ett steg");
+
+    expect(planStates).toEqual(["plan-1"]);
+    expect(driver.state.currentPlan?.plan_id).toBe("plan-1");
+  });
+
+  it("records a decline as a review note and keeps the plan", async () => {
+    const stream = vi.fn(async (_path, _init, handlers) => {
+      handlers.onMessage?.(
+        {
+          id: "",
+          event: "text",
+          data: JSON.stringify({ text: "Jag kan inte byta modell åt dig." })
+        },
+        new AbortController()
+      );
+      completeStream(handlers);
+    });
+    const fetch = vi.fn().mockImplementation((route: string) => {
+      if (route === SESSION_ROUTE) {
+        return Promise.resolve(makeSession({ latest_plan_id: "plan-1" }));
+      }
+      return Promise.resolve(makePlan({ plan_id: "plan-1" }));
+    });
+    const { driver } = makeDriver({ fetchImpl: fetch, streamImpl: stream });
+    seedReviewSession(driver);
+
+    await driver.sendMessage("Byt modell i steg 2");
+
+    expect(driver.state.currentPlan?.plan_id).toBe("plan-1");
+    expect(driver.state.reviewNote).toBe("Jag kan inte byta modell åt dig.");
+    expect(fetch.mock.calls.map(([route]) => route)).toContain(PLAN_ROUTE);
+
+    driver.dismissReviewNote();
+    expect(driver.state.reviewNote).toBeNull();
+  });
+
+  it("drops the plan when the refreshed session no longer names one", async () => {
+    const stream = vi.fn(async (_path, _init, handlers) => {
+      handlers.onMessage?.(
+        { id: "", event: "text", data: JSON.stringify({ text: "Vad ska rapporten innehålla?" }) },
+        new AbortController()
+      );
+      completeStream(handlers);
+    });
+    const fetch = vi.fn().mockResolvedValue(makeSession({ latest_plan_id: null }));
+    const { driver } = makeDriver({ fetchImpl: fetch, streamImpl: stream });
+    seedReviewSession(driver);
+
+    await driver.sendMessage("Börja om med kraven");
+
+    expect(driver.state.currentPlan).toBeNull();
+    expect(driver.state.reviewNote).toBeNull();
+  });
+
+  it("replaces the plan when the turn emits a new one", async () => {
+    const stream = vi.fn(async (_path, _init, handlers) => {
+      handlers.onMessage?.(
+        {
+          id: "",
+          event: "plan",
+          data: JSON.stringify({
+            plan_id: "22222222-2222-4222-8222-222222222222",
+            proposal: makePlan().proposal
+          })
+        },
+        new AbortController()
+      );
+      handlers.onMessage?.(
+        { id: "", event: "usage", data: JSON.stringify({ total_tokens_total: 10 }) },
+        new AbortController()
+      );
+      completeStream(handlers);
+    });
+    const fetch = vi.fn();
+    const { driver } = makeDriver({ fetchImpl: fetch, streamImpl: stream });
+    seedReviewSession(driver);
+
+    await driver.sendMessage("Lägg till en sammanfattning");
+
+    expect(driver.state.currentPlan?.plan_id).toBe("22222222-2222-4222-8222-222222222222");
+    expect(driver.state.reviewNote).toBeNull();
+    // A plan event settles the turn; no reconciliation round trip is needed.
+    expect(fetch).not.toHaveBeenCalled();
   });
 });
