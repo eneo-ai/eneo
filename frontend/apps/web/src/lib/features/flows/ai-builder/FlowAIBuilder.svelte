@@ -1,19 +1,30 @@
 <script lang="ts">
   import { m } from "$lib/paraglide/messages";
-  import { fade } from "svelte/transition";
-  import { SvelteSet } from "svelte/reactivity";
-  import * as Alert from "$lib/components/ui/alert/index.js";
+  import { resolve } from "$app/paths";
+  import { onMount, tick } from "svelte";
+  import { SvelteMap } from "svelte/reactivity";
   import * as AlertDialog from "$lib/components/ui/alert-dialog/index.js";
   import { Button } from "$lib/components/ui/button/index.js";
   import { Skeleton } from "$lib/components/ui/skeleton/index.js";
-  import FlowAIBuilderChat from "./FlowAIBuilderChat.svelte";
-  import FlowAIBuilderDraftRecovery from "./FlowAIBuilderDraftRecovery.svelte";
-  import FlowAIBuilderPhaseIndicator from "./FlowAIBuilderPhaseIndicator.svelte";
+  import IconCheck from "@lucide/svelte/icons/check";
+  import IconMessageSquare from "@lucide/svelte/icons/message-square-text";
+  import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
+  import BuilderPhaseRail, { type BuilderPhaseIndex } from "./BuilderPhaseRail.svelte";
+  import BuilderTaskScreen from "./BuilderTaskScreen.svelte";
+  import BuilderQuestionScreen from "./BuilderQuestionScreen.svelte";
+  import BuilderReplyScreen from "./BuilderReplyScreen.svelte";
+  import BuilderConfirmScreen from "./BuilderConfirmScreen.svelte";
+  import BuilderBuildScreen from "./BuilderBuildScreen.svelte";
+  import BuilderTurnAlert from "./BuilderTurnAlert.svelte";
+  import BuilderConversationSheet from "./BuilderConversationSheet.svelte";
   import FlowAIBuilderPlanPane from "./FlowAIBuilderPlanPane.svelte";
-  import { shouldShowEditStartOver } from "./flowAIBuilderReset";
   import { getAIBuilderService } from "./FlowAIBuilderService.svelte.ts";
-  import type { AIBuilderSavedFlowStepScope, AIBuilderSuggestChangeIntent } from "./protocol";
-  import { onMount, tick } from "svelte";
+  import type {
+    AIBuilderSavedFlowStepScope,
+    AIBuilderSuggestChangeIntent,
+    ChatMessage
+  } from "./protocol";
+  import type { StructuredQuestionAnswerPayload } from "./structuredQuestionAnswer";
 
   interface Props {
     targetKind?: "create" | "edit";
@@ -25,17 +36,159 @@
   let { targetKind = "edit", onapplied, resumeSessionId = null }: Props = $props();
 
   const service = getAIBuilderService();
+  const {
+    state: { currentSpace }
+  } = getSpacesManager();
 
-  let chatRef = $state<FlowAIBuilderChat | undefined>();
-  let wasAutoResumed = $state(false);
-  // The attempted ID prevents repeat auto-resume; the failed ID owns the selected recovery target.
-  let autoResumeAttemptedDraftId = $state<string | null>(null);
-  let failedResumeDraftId = $state<string | null>(null);
+  let taskScreenRef = $state<BuilderTaskScreen | undefined>();
+  let sheetRef = $state<BuilderConversationSheet | undefined>();
+  let sheetOpen = $state(false);
   let pendingSavedFlowStepScope = $state<AIBuilderSavedFlowStepScope | null>(null);
   let showReplaceEditSessionDialog = $state(false);
+  let resumeFailed = $state(false);
 
-  // Once generation is visible in the plan pane, that pane keeps ownership of
-  // any failure so the same error cannot flash in both panes.
+  // ---- Session bootstrap ---------------------------------------------------
+
+  onMount(() => {
+    if (service.hasSession) return;
+    if (targetKind === "create" && resumeSessionId) {
+      void resumeChosenDraft(resumeSessionId);
+    } else if (targetKind === "create") {
+      // A new task always gets its own session; unfinished drafts live in the
+      // Flöden list, so the builder never has to guess which one to reopen.
+      void service.createSession("create");
+    } else {
+      void service.initialize(targetKind);
+    }
+  });
+
+  async function resumeChosenDraft(sessionId: string) {
+    await service.resumeSession(sessionId);
+    if (!service.hasSession) resumeFailed = true;
+  }
+
+  // ---- Phase and screen ----------------------------------------------------
+
+  const phaseIndex = $derived<BuilderPhaseIndex>(
+    service.phase === "reviewing" ? 2 : service.phase === "building" ? 1 : 0
+  );
+  // A completed phase can be revisited without leaving the current one.
+  let peekPhase = $state<BuilderPhaseIndex | null>(null);
+  let lastPhaseIndex: BuilderPhaseIndex | null = null;
+  $effect(() => {
+    if (lastPhaseIndex !== null && phaseIndex !== lastPhaseIndex) {
+      peekPhase = null;
+      editingQuestionId = null;
+    }
+    lastPhaseIndex = phaseIndex;
+  });
+  const viewingPhase = $derived<BuilderPhaseIndex>(peekPhase ?? phaseIndex);
+
+  const lastMessage = $derived<ChatMessage | undefined>(
+    service.messages[service.messages.length - 1]
+  );
+  const pendingQuestionMessage = $derived.by(() => {
+    const message = lastMessage;
+    return message?.question && !service.isQuestionAnswered(message.question.question_id)
+      ? message
+      : null;
+  });
+  let editingQuestionId = $state<string | null>(null);
+  const editingQuestionMessage = $derived.by(() => {
+    if (!editingQuestionId) return null;
+    for (let i = service.messages.length - 1; i >= 0; i -= 1) {
+      const message = service.messages[i];
+      if (message?.question?.question_id === editingQuestionId) return message;
+    }
+    return null;
+  });
+  const questionMessage = $derived(editingQuestionMessage ?? pendingQuestionMessage);
+
+  const askedQuestionIds = $derived.by(() => {
+    const ids: string[] = [];
+    for (const message of service.messages) {
+      const id = message.question?.question_id;
+      if (id && !ids.includes(id)) ids.push(id);
+    }
+    return ids;
+  });
+  const answerLabelByQuestionId = $derived.by(() => {
+    const labels = new SvelteMap<string, string>();
+    for (const message of service.messages) {
+      const id = message.questionAnswer?.question_id;
+      if (id && message.content.trim()) labels.set(id, message.content.trim());
+    }
+    return labels;
+  });
+  const answeredQuestions = $derived(
+    askedQuestionIds
+      .filter((id) => service.isQuestionAnswered(id))
+      .map((id) => ({
+        questionId: id,
+        question:
+          service.messages.find((message) => message.question?.question_id === id)?.question
+            ?.question ?? "",
+        answerLabel: answerLabelByQuestionId.get(id) ?? ""
+      }))
+  );
+  const questionNumber = $derived.by(() => {
+    const id = questionMessage?.question?.question_id;
+    if (!id) return 1;
+    const index = askedQuestionIds.indexOf(id);
+    return index === -1 ? askedQuestionIds.length + 1 : index + 1;
+  });
+
+  const latestSummaryMessageIndex = $derived.by(() => {
+    for (let i = service.messages.length - 1; i >= 0; i -= 1) {
+      if (service.messages[i]?.requirementsSummary) return i;
+    }
+    return -1;
+  });
+  const latestSummary = $derived(
+    latestSummaryMessageIndex === -1
+      ? null
+      : (service.messages[latestSummaryMessageIndex]?.requirementsSummary ?? null)
+  );
+  function latestUserRequestBefore(index: number): string | null {
+    for (let cursor = index - 1; cursor >= 0; cursor -= 1) {
+      const message = service.messages[cursor];
+      if (!message || message.role !== "user") continue;
+      const metadata = message.metadata ?? {};
+      if (metadata.requirements_confirmed === true || message.questionAnswer !== undefined)
+        continue;
+      const content = message.content.trim();
+      if (content.length > 0) return content;
+    }
+    return null;
+  }
+  const lastAssistantText = $derived.by(() => {
+    for (let i = service.messages.length - 1; i >= 0; i -= 1) {
+      const message = service.messages[i];
+      if (message?.role === "assistant" && message.content.trim()) return message.content.trim();
+      if (message?.role === "user") return null;
+    }
+    return null;
+  });
+
+  type Screen = "task" | "question" | "reply" | "confirm" | "build" | "review";
+  const screen = $derived<Screen>(
+    (() => {
+      if (viewingPhase === 2) return "review";
+      if (viewingPhase === 1) return "build";
+      if (questionMessage) return "question";
+      if (service.phase === "confirming" && latestSummary && peekPhase === null) return "confirm";
+      if (service.messages.length === 0 && !service.isStreaming) return "task";
+      if (latestSummary && phaseIndex > 0) return "confirm";
+      return "reply";
+    })()
+  );
+  const screenOwnsComposer = $derived(
+    screen === "task" || (screen === "reply" && !service.isStreaming)
+  );
+
+  // ---- Error ownership ------------------------------------------------------
+  // Once generation is visible, the plan surface keeps ownership of any
+  // failure so the same error cannot flash on two surfaces.
   let hadGenerationStatus = $state(false);
   $effect(() => {
     if (!service.hasSession) {
@@ -48,170 +201,100 @@
       hadGenerationStatus = true;
     }
   });
-
-  // The plan pane claims generation errors before the stream settles so the
-  // chat cannot briefly render the same error. Idle errors remain chat-owned.
-  const planPaneOwnsError = $derived(
+  const planSurfaceOwnsError = $derived(
     hadGenerationStatus && service.error !== null && service.currentPlan === null
   );
-  const planPaneOwnsStreamError = $derived(planPaneOwnsError && service.streamState !== "idle");
   const generationFailedWithoutPlan = $derived(
-    planPaneOwnsStreamError && service.streamState === "failed"
+    planSurfaceOwnsError && service.streamState === "failed"
   );
 
-  const hasPlanContent = $derived(
-    service.currentPlan !== null ||
-      service.isConflict ||
-      service.statusMessage !== null ||
-      (service.phase === "building" && service.isStreaming) ||
-      (service.hasSeenPlanInSession && service.isStreaming) ||
-      generationFailedWithoutPlan
-  );
+  // ---- Actions --------------------------------------------------------------
 
-  // Narrow-container view state. Both panes stay mounted at every width so
-  // drafts, scroll positions and open sections survive switching; below the
-  // split threshold only the active one is displayed.
-  let activePane = $state<"task" | "plan">("task");
-  let hadPlanContent = false;
-  let draftViewRequested = $state(false);
-
-  $effect(() => {
-    if (hasPlanContent && !hadPlanContent) {
-      // The plan pane also hosts the generation wait state, so the first
-      // appearance of plan content pulls narrow layouts over to it.
-      activePane = "plan";
-    } else if (!hasPlanContent) {
-      activePane = "task";
-    }
-    hadPlanContent = hasPlanContent;
+  const activeEditContext = $derived(service.activeStepTransportContext);
+  const savedFlowStepScopeLabel = $derived.by(() => {
+    const scope = service.activeStepScope;
+    if (!scope) return null;
+    return m.ai_builder_edit_context_step({ step: scope.stepNumber, name: scope.stepName });
   });
 
-  const canStartOver = $derived(
-    shouldShowEditStartOver({
-      targetKind,
-      hasSession: service.hasSession,
-      messageCount: service.messages.length,
-      hasPlan: service.currentPlan !== null,
-      isConflict: service.isConflict,
-      statusMessage: service.statusMessage,
-      hasApplyError: service.applyError !== null,
-      hasApplyResult: service.applyResult !== null,
-      isStreaming: service.isStreaming
-    })
+  function handleQuestionAnswer(payload: StructuredQuestionAnswerPayload) {
+    editingQuestionId = null;
+    void service.sendMessage(payload.text, payload.questionAnswer, undefined, activeEditContext);
+  }
+
+  // Delegation is a free-text reply: the server records the explicit
+  // uncertainty and turns its default into a visible assumption.
+  function handleQuestionUnsure() {
+    editingQuestionId = null;
+    void service.sendMessage(
+      m.ai_builder_question_unsure_message(),
+      undefined,
+      undefined,
+      activeEditContext
+    );
+  }
+
+  function handleEditAnswer(questionId: string) {
+    editingQuestionId = questionId;
+    peekPhase = 0;
+    sheetOpen = false;
+  }
+
+  function handleRequirementsConfirm() {
+    void service.confirmRequirements(activeEditContext);
+  }
+
+  function handleRequirementsChange() {
+    void sheetRef?.focusComposer(m.ai_builder_requirements_change_hint());
+  }
+
+  function handleSuggestChange(intent: AIBuilderSuggestChangeIntent) {
+    void sheetRef?.focusComposer(intent);
+  }
+
+  function handleRailSelect(phase: BuilderPhaseIndex) {
+    // The build phase has nothing to revisit once it is done.
+    if (phase === 1 && phaseIndex !== 1) return;
+    editingQuestionId = null;
+    peekPhase = phase === phaseIndex ? null : phase;
+  }
+
+  const visibleMessageCount = $derived(
+    service.messages.filter(
+      (message) =>
+        message.content.trim().length > 0 || message.question || message.requirementsSummary
+    ).length
   );
 
-  const answeredQuestionCount = $derived.by(() => {
-    const ids = new SvelteSet<string>();
-    for (const msg of service.messages) {
-      const questionId = msg.questionAnswer?.question_id;
-      if (questionId) ids.add(questionId);
-    }
-    return ids.size;
-  });
-
-  const showDraftPage = $derived(
-    targetKind === "create" &&
-      ((!service.hasSession && service.recoverableCreateDrafts.length >= 2) ||
-        (draftViewRequested && service.recoverableCreateDrafts.length > 0))
-  );
-  const alternativeDraftCount = $derived(
+  const otherDraftCount = $derived(
     service.recoverableCreateDrafts.filter(
       (draft) => draft.session_id !== service.session?.session_id
     ).length
   );
-  const canViewDrafts = $derived(
-    targetKind === "create" &&
-      service.hasSession &&
-      !service.isStreaming &&
-      !service.isCreating &&
-      !draftViewRequested &&
-      alternativeDraftCount > 0
-  );
+  const flowsHref = $derived(resolve(`/spaces/${$currentSpace.routeId}/flows`));
 
-  const failedResumeDraft = $derived(
-    failedResumeDraftId === null
-      ? null
-      : (service.recoverableCreateDrafts.find(
-          (draft) => draft.session_id === failedResumeDraftId
-        ) ?? null)
-  );
+  // ---- Edit host contract ---------------------------------------------------
 
-  async function resumeDraft(sessionId: string) {
-    await service.resumeSession(sessionId);
-    if (service.session?.session_id === sessionId) {
-      draftViewRequested = false;
-      failedResumeDraftId = null;
-      wasAutoResumed = true;
-    } else if (!service.hasSession && service.error !== null) {
-      failedResumeDraftId = sessionId;
-    }
-  }
-
-  // Single draft: auto-resume
+  // A cold launch from the flow editor can call in before the session exists
+  // and the task screen is mounted; the focus request waits for the real composer.
+  let pendingTaskFocus = $state<{ placeholder: string } | null>(null);
   $effect(() => {
-    if (
-      targetKind === "create" &&
-      !service.hasSession &&
-      !service.isInitializing &&
-      service.recoverableCreateDrafts.length === 1
-    ) {
-      const draft = service.recoverableCreateDrafts[0];
-      if (draft && autoResumeAttemptedDraftId !== draft.session_id) {
-        autoResumeAttemptedDraftId = draft.session_id;
-        void resumeDraft(draft.session_id);
-      }
+    if (pendingTaskFocus && taskScreenRef) {
+      taskScreenRef.focusInput(pendingTaskFocus);
+      pendingTaskFocus = null;
     }
   });
-
-  onMount(() => {
-    if (!service.hasSession) {
-      if (targetKind === "create" && resumeSessionId) {
-        autoResumeAttemptedDraftId = resumeSessionId;
-        void resumeDraft(resumeSessionId);
-      } else {
-        void service.initialize(targetKind);
-      }
-    }
-  });
-
-  function handleDismissResumeBanner() {
-    wasAutoResumed = false;
-  }
-
-  function handleStartFreshFromResume() {
-    wasAutoResumed = false;
-    draftViewRequested = false;
-    service.startFreshSession("create");
-  }
-
-  function handleRetryFailedResume() {
-    if (failedResumeDraft) {
-      void resumeDraft(failedResumeDraft.session_id);
-    }
-  }
-
-  async function handleStartFreshFromFailedResume() {
-    wasAutoResumed = false;
-    draftViewRequested = false;
-    try {
-      await service.startFreshSession("create");
-      failedResumeDraftId = null;
-    } catch {
-      // createSession retains its typed error while failedResumeDraftId keeps recovery visible.
-    }
-  }
-
-  function handleStartOver() {
-    chatRef?.resetComposerContext();
-    void service.startFreshSession("edit");
-  }
 
   async function activateSavedFlowStep(scope: AIBuilderSavedFlowStepScope) {
     service.setSavedFlowStepScope(scope);
-    // The shell can bind before its lazily rendered chat child. Let the scope
-    // render once so the public launch action always reaches the real composer.
+    peekPhase = null;
     await tick();
-    chatRef?.focusInput({ placeholder: m.ai_builder_saved_step_prompt_placeholder() });
+    const focus = { placeholder: m.ai_builder_saved_step_prompt_placeholder() };
+    if (taskScreenRef) {
+      taskScreenRef.focusInput(focus);
+    } else {
+      pendingTaskFocus = focus;
+    }
   }
 
   export async function focusSavedFlowStep(scope: AIBuilderSavedFlowStepScope) {
@@ -230,59 +313,26 @@
   async function confirmSavedFlowStepReplacement() {
     const scope = pendingSavedFlowStepScope;
     if (scope === null) return;
+    sheetRef?.resetComposerContext();
     await service.startFreshSession("edit");
     pendingSavedFlowStepScope = null;
     await activateSavedFlowStep(scope);
   }
+
+  const canStartOver = $derived(
+    targetKind === "edit" &&
+      service.hasSession &&
+      (service.messages.length > 0 || service.currentPlan !== null) &&
+      !service.isStreaming
+  );
+
+  function handleStartOver() {
+    sheetRef?.resetComposerContext();
+    void service.startFreshSession("edit");
+  }
 </script>
 
-{#snippet failedResumeAlert()}
-  {#if failedResumeDraft && service.error}
-    <div
-      class="w-full shrink-0 px-4 pt-3 max-sm:px-3 max-sm:pt-2"
-      transition:fade={{ duration: 180 }}
-    >
-      <Alert.Root
-        variant="destructive"
-        class="grid grid-cols-[auto_minmax(0,1fr)] items-start gap-x-3 rounded-lg px-3.5 py-3"
-      >
-        <svg
-          xmlns="http://www.w3.org/2000/svg"
-          viewBox="0 0 20 20"
-          fill="currentColor"
-          class="mt-0.5 size-4 shrink-0"
-          aria-hidden="true"
-        >
-          <path
-            fill-rule="evenodd"
-            d="M18 10a8 8 0 1 1-16 0 8 8 0 0 1 16 0Zm-7-4a1 1 0 1 0-2 0v4a1 1 0 1 0 2 0V6Zm-1 8a1 1 0 1 0 0-2 1 1 0 0 0 0 2Z"
-            clip-rule="evenodd"
-          />
-        </svg>
-        <div class="min-w-0">
-          <Alert.Description class="text-[0.8125rem] leading-relaxed">
-            {service.error.message}
-          </Alert.Description>
-          <div class="mt-3 flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
-            <Button size="sm" class="w-full sm:w-auto" onclick={handleRetryFailedResume}>
-              {m.retry()}
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              class="w-full sm:w-auto"
-              onclick={handleStartFreshFromFailedResume}
-            >
-              {m.ai_builder_resumed_start_fresh()}
-            </Button>
-          </div>
-        </div>
-      </Alert.Root>
-    </div>
-  {/if}
-{/snippet}
-
-{#if service.isInitializing}
+{#if service.isInitializing || (!service.hasSession && !resumeFailed && !service.error)}
   <div class="flex flex-1 flex-col gap-8 p-6" aria-hidden="true">
     <Skeleton class="h-10 w-full rounded-lg" />
     <div class="flex flex-col gap-3">
@@ -291,202 +341,160 @@
       <Skeleton class="h-4 w-2/5 rounded" />
     </div>
   </div>
-{:else if showDraftPage}
-  <div class="flex min-h-0 flex-1 flex-col">
-    {@render failedResumeAlert()}
-    <FlowAIBuilderDraftRecovery
-      drafts={service.recoverableCreateDrafts}
-      onresume={resumeDraft}
-      onstartfresh={() => {
-        draftViewRequested = false;
-        return service.startFreshSession("create");
-      }}
-      ondiscard={(sessionId) => service.discardSession(sessionId)}
-      onclose={service.hasSession ? () => (draftViewRequested = false) : undefined}
-    />
-  </div>
-{:else}
-  <!-- Container queries reflect the workspace left by the collapsible app sidebar. -->
-  <!-- The container element itself cannot respond to its own query, so the
-       size-dependent scroll behavior lives on the inner wrapper below. -->
-  <div class="bg-primary @container/builder flex min-h-0 w-full flex-1 flex-col">
-    <!-- Scroll padding keeps focused controls clear of the sticky header and footer. -->
-    <div
-      class="builder-page-scroll flex min-h-0 w-full flex-1 flex-col overflow-y-auto break-words hyphens-auto @[1040px]/builder:overflow-hidden"
-    >
-      {@render failedResumeAlert()}
-
-      <!-- Auto-resume banner: inline Alert, flex row, no absolute positioning -->
-      {#if wasAutoResumed && service.hasSession && service.messages.length > 0}
-        <div
-          class="w-full shrink-0 px-4 pt-3 max-sm:px-3 max-sm:pt-2"
-          transition:fade={{ duration: 180 }}
+{:else if resumeFailed && !service.hasSession}
+  <div class="flex flex-1 items-center justify-center p-6">
+    <div class="max-w-[40ch] text-center">
+      <p class="text-primary font-semibold">{m.ai_builder_resume_failed_title()}</p>
+      <p class="text-secondary mt-1 text-sm">{service.error?.message ?? ""}</p>
+      <div class="mt-4 flex justify-center gap-2">
+        <Button variant="outline" href={flowsHref}>{m.ai_builder_resume_failed_back()}</Button>
+        <Button
+          onclick={() => {
+            resumeFailed = false;
+            void service.createSession("create");
+          }}
         >
-          <Alert.Root class="bg-secondary flex items-center gap-2.5 rounded-lg px-3 py-1.5">
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              viewBox="0 0 16 16"
-              fill="currentColor"
-              class="text-secondary size-4 shrink-0"
-              aria-hidden="true"
-            >
-              <path
-                fill-rule="evenodd"
-                d="M13.836 2.477a.75.75 0 0 1 .75.75v3.182a.75.75 0 0 1-.75.75h-3.182a.75.75 0 0 1 0-1.5h1.37l-.84-.841a4.5 4.5 0 0 0-7.08.932.75.75 0 0 1-1.3-.75 6 6 0 0 1 9.44-1.242l.842.84V3.227a.75.75 0 0 1 .75-.75Zm-.911 7.5A.75.75 0 0 1 13.199 11a6 6 0 0 1-9.44 1.241l-.84-.84v1.371a.75.75 0 0 1-1.5 0V9.591a.75.75 0 0 1 .75-.75H5.35a.75.75 0 0 1 0 1.5H3.98l.841.841a4.5 4.5 0 0 0 7.08-.932.75.75 0 0 1 1.025-.273Z"
-                clip-rule="evenodd"
-              />
-            </svg>
-            <Alert.Description class="text-secondary min-w-0 flex-1 text-[0.8125rem] leading-snug">
-              {m.ai_builder_resumed_from()}
-            </Alert.Description>
-            <div class="flex shrink-0 items-center gap-1">
-              <Button variant="ghost" size="xs" onclick={handleStartFreshFromResume}>
-                {m.ai_builder_resumed_start_fresh()}
-              </Button>
-              <Button
-                variant="ghost"
-                size="icon-sm"
-                aria-label={m.ai_builder_dismiss()}
-                onclick={handleDismissResumeBanner}
-              >
-                <svg
-                  xmlns="http://www.w3.org/2000/svg"
-                  viewBox="0 0 16 16"
-                  fill="currentColor"
-                  aria-hidden="true"
-                >
-                  <path
-                    d="M5.28 4.22a.75.75 0 0 0-1.06 1.06L6.94 8l-2.72 2.72a.75.75 0 1 0 1.06 1.06L8 9.06l2.72 2.72a.75.75 0 1 0 1.06-1.06L9.06 8l2.72-2.72a.75.75 0 0 0-1.06-1.06L8 6.94 5.28 4.22Z"
-                  />
-                </svg>
-              </Button>
-            </div>
-          </Alert.Root>
-        </div>
-      {/if}
-
-      <!-- The phase bar and pane switcher stay reachable while narrow layouts scroll. -->
-      <div class="bg-primary sticky top-0 z-20 w-full shrink-0 @[1040px]/builder:static">
-        {#if service.messages.length > 0 || canStartOver || canViewDrafts}
-          <div class="border-border-default w-full shrink-0 border-b">
-            <div
-              class="flex w-full items-center @[1760px]/builder:mx-auto @[1760px]/builder:max-w-[1760px]"
-            >
-              {#if service.messages.length > 0}
-                <div class="min-w-0 flex-1">
-                  <FlowAIBuilderPhaseIndicator
-                    phase={service.phase}
-                    answeredCount={answeredQuestionCount}
-                  />
-                </div>
-              {:else}
-                <div class="min-h-0 flex-1" aria-hidden="true"></div>
-              {/if}
-
-              {#if canStartOver || canViewDrafts}
-                <div class="flex shrink-0 items-center gap-2 pr-4 max-sm:pr-3">
-                  {#if canViewDrafts}
-                    <Button variant="outline" size="sm" onclick={() => (draftViewRequested = true)}>
-                      {m.ai_builder_view_drafts({
-                        count: String(service.recoverableCreateDrafts.length)
-                      })}
-                    </Button>
-                  {/if}
-                  {#if canStartOver}
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onclick={handleStartOver}
-                      disabled={service.isCreating}
-                    >
-                      {m.ai_builder_start_fresh()}
-                    </Button>
-                  {/if}
-                </div>
-              {/if}
-            </div>
-          </div>
-        {/if}
-
-        <!--
-      Uppgift/Plan switcher (<1040px container only). Toggle buttons rather
-      than ARIA tabs on purpose: the panes are permanent layout regions that
-      both render in the split view, so tagging them role="tabpanel" would be
-      wrong at desktop widths, and roles cannot be container-query-conditional.
-    -->
-        {#if hasPlanContent}
-          <div
-            class="border-border-default flex w-full shrink-0 items-stretch border-b px-4 max-sm:px-3 @[1040px]/builder:hidden"
-            role="group"
-            aria-label={m.ai_builder_pane_switcher_aria()}
-          >
-            <button
-              type="button"
-              class="pane-tab"
-              class:selected={activePane === "task"}
-              aria-pressed={activePane === "task"}
-              aria-controls="ai-builder-task-pane"
-              onclick={() => (activePane = "task")}
-            >
-              {m.ai_builder_pane_tab_task()}
-            </button>
-            <button
-              type="button"
-              class="pane-tab"
-              class:selected={activePane === "plan"}
-              aria-pressed={activePane === "plan"}
-              aria-controls="ai-builder-plan-pane"
-              onclick={() => (activePane = "plan")}
-            >
-              {m.ai_builder_pane_tab_plan()}
-            </button>
-          </div>
-        {/if}
-      </div>
-
-      <!-- Workspace: split at ≥1040, capped and centered at ≥1760 -->
-      <div
-        class="flex w-full flex-1 flex-col @[1040px]/builder:min-h-0 @[1040px]/builder:flex-row @[1760px]/builder:mx-auto @[1760px]/builder:max-w-[1760px]"
-      >
-        <!-- Task pane (conversation + composer). Fixed clamped width in split view:
-           growing screens get whitespace, not a wider pane. -->
-        <div
-          id="ai-builder-task-pane"
-          class="flex min-w-0 flex-col @[1040px]/builder:flex @[1040px]/builder:min-h-0 {hasPlanContent
-            ? '@[1040px]/builder:w-[clamp(340px,37cqw,480px)] @[1040px]/builder:shrink-0 @[1180px]/builder:w-[clamp(380px,37cqw,480px)]'
-            : 'w-full'}"
-          class:hidden={hasPlanContent && activePane !== "task"}
-        >
-          <FlowAIBuilderChat
-            bind:this={chatRef}
-            {targetKind}
-            suppressStreamError={planPaneOwnsStreamError || failedResumeDraft !== null}
-          />
-        </div>
-
-        <!-- Plan pane: owns its scroll in split view; the split border lives here
-           so it stays inside the capped workspace on ultrawide screens. -->
-        {#if hasPlanContent}
-          <div
-            id="ai-builder-plan-pane"
-            class="border-border-default bg-primary flex min-w-0 flex-col border-t @[1040px]/builder:flex @[1040px]/builder:min-h-0 @[1040px]/builder:flex-1 @[1040px]/builder:overflow-hidden @[1040px]/builder:border-t-0 @[1040px]/builder:border-l"
-            class:hidden={activePane !== "plan"}
-          >
-            <FlowAIBuilderPlanPane
-              showGenerationFailure={generationFailedWithoutPlan}
-              onapplied={(detail) => onapplied?.(detail)}
-              onsuggestchange={(intent: AIBuilderSuggestChangeIntent) =>
-                chatRef?.focusInput(intent)}
-              onshowconversation={() => {
-                activePane = "task";
-                chatRef?.focusInput();
-              }}
-            />
-          </div>
-        {/if}
+          {m.ai_builder_resume_failed_new()}
+        </Button>
       </div>
     </div>
   </div>
+{:else}
+  <div class="bg-secondary @container/builder flex min-h-0 w-full flex-1 flex-col">
+    <!-- Phase header: rail + saved state + the conversation one gesture away. -->
+    <div class="bg-primary border-default sticky top-0 z-20 shrink-0 border-b px-7 max-sm:px-3">
+      <div class="flex max-w-[63.75rem] items-center gap-3 pt-3">
+        {#if service.hasSession && service.messages.length > 0}
+          <span
+            class="text-secondary inline-flex items-center gap-1.5 text-xs"
+            title={m.ai_builder_saved_state_title()}
+          >
+            <span
+              class="bg-positive-dimmer text-positive-stronger inline-flex size-[0.9375rem] items-center justify-center rounded-full"
+              aria-hidden="true"
+            >
+              <IconCheck class="size-2.5" strokeWidth={3.5} />
+            </span>
+            {m.ai_builder_saved_state_auto()}
+          </span>
+        {:else}
+          <span class="text-secondary text-xs">{m.ai_builder_saved_state_new()}</span>
+        {/if}
+        <div class="ml-auto flex items-center gap-2">
+          {#if canStartOver}
+            <Button
+              variant="ghost"
+              size="sm"
+              onclick={handleStartOver}
+              disabled={service.isCreating}
+            >
+              {m.ai_builder_start_fresh()}
+            </Button>
+          {/if}
+          <Button
+            variant="outline"
+            size="sm"
+            class="gap-1.5"
+            aria-expanded={sheetOpen}
+            title={m.ai_builder_conversation_button_title()}
+            onclick={() => (sheetOpen = true)}
+          >
+            <IconMessageSquare class="size-3.5" />
+            {m.ai_builder_conversation_button()}
+            <span
+              class="bg-tertiary text-secondary inline-flex h-[1.125rem] min-w-[1.125rem] items-center justify-center rounded-full px-1.5 text-[0.6875rem] font-bold"
+            >
+              {visibleMessageCount}
+            </span>
+          </Button>
+        </div>
+      </div>
+      <div class="max-w-[63.75rem] py-3">
+        <BuilderPhaseRail current={phaseIndex} viewing={viewingPhase} onselect={handleRailSelect} />
+      </div>
+    </div>
+
+    <div class="flex min-h-0 flex-1 flex-col overflow-y-auto">
+      <BuilderTurnAlert
+        {targetKind}
+        suppressStreamError={generationFailedWithoutPlan}
+        onbeforestartfresh={() => sheetRef?.resetComposerContext()}
+      />
+
+      {#if screen === "task"}
+        <BuilderTaskScreen
+          bind:this={taskScreenRef}
+          {targetKind}
+          {otherDraftCount}
+          {flowsHref}
+          editContext={activeEditContext}
+          editContextLabel={savedFlowStepScopeLabel}
+          oncleareditcontext={() => service.clearActiveStepScope()}
+        />
+      {:else if screen === "question" && questionMessage}
+        <BuilderQuestionScreen
+          {questionMessage}
+          {questionNumber}
+          answered={answeredQuestions}
+          {editingQuestionId}
+          disabled={service.isCreating || service.isStreaming}
+          onanswer={handleQuestionAnswer}
+          onunsure={handleQuestionUnsure}
+          onedit={handleEditAnswer}
+          oncanceledit={() => (editingQuestionId = null)}
+        />
+      {:else if screen === "confirm" && latestSummary}
+        <BuilderConfirmScreen
+          summary={latestSummary}
+          userRequest={latestUserRequestBefore(latestSummaryMessageIndex)}
+          savedFlowStepScope={service.activeStepScope}
+          confirmed={service.isRequirementsSummaryConfirmed(latestSummary)}
+          disabled={service.isCreating || service.isStreaming}
+          onconfirm={handleRequirementsConfirm}
+          onchange={handleRequirementsChange}
+        />
+      {:else if screen === "build" && generationFailedWithoutPlan}
+        <!-- A failed generation keeps its one existing failure/retry surface. -->
+        <div class="bg-primary flex min-h-0 flex-1 flex-col">
+          <FlowAIBuilderPlanPane
+            showGenerationFailure={true}
+            onapplied={(detail) => onapplied?.(detail)}
+            onsuggestchange={handleSuggestChange}
+            onshowconversation={() => (sheetOpen = true)}
+          />
+        </div>
+      {:else if screen === "build"}
+        <BuilderBuildScreen
+          status={service.statusMessage}
+          stepCount={service.currentPlan?.proposal.spec.steps.length ?? 5}
+        />
+      {:else if screen === "review"}
+        <div class="bg-primary flex min-h-0 flex-1 flex-col">
+          <FlowAIBuilderPlanPane
+            showGenerationFailure={generationFailedWithoutPlan}
+            onapplied={(detail) => onapplied?.(detail)}
+            onsuggestchange={handleSuggestChange}
+            onshowconversation={() => (sheetOpen = true)}
+          />
+        </div>
+      {:else}
+        <BuilderReplyScreen
+          waiting={service.isStreaming}
+          assistantText={lastAssistantText}
+          editContext={activeEditContext}
+          editContextLabel={savedFlowStepScopeLabel}
+          oncleareditcontext={() => service.clearActiveStepScope()}
+        />
+      {/if}
+    </div>
+  </div>
+
+  <BuilderConversationSheet
+    bind:this={sheetRef}
+    bind:open={sheetOpen}
+    showComposer={!screenOwnsComposer}
+    oneditanswer={handleEditAnswer}
+  />
 {/if}
 
 <AlertDialog.Root bind:open={showReplaceEditSessionDialog}>
@@ -509,58 +517,3 @@
     </AlertDialog.Footer>
   </AlertDialog.Content>
 </AlertDialog.Root>
-
-<style lang="postcss">
-  @reference "@eneo/ui/styles";
-
-  /* Narrow-layout scroll padding equals the fixed-region height plus margin,
-     so focus-triggered scrolling never lands under the sticky regions.
-     Header: phase bar + pane switcher (~90px). Footer: composer at rest or the
-     horizontal action bar (~160px). Below the sm viewport breakpoint the
-     action-bar buttons stack vertically (status + two secondaries + primary),
-     so the footer clearance grows to cover that stack plus the safe-area
-     inset. Irrelevant in split view, where the page never scrolls. */
-  .builder-page-scroll {
-    --builder-header-clearance: 7rem;
-    --builder-footer-clearance: 11rem;
-    scroll-padding-block-start: var(--builder-header-clearance);
-    scroll-padding-block-end: var(--builder-footer-clearance);
-  }
-
-  @media (max-width: 639.98px) {
-    .builder-page-scroll {
-      --builder-footer-clearance: calc(17rem + env(safe-area-inset-bottom));
-    }
-  }
-
-  .pane-tab {
-    appearance: none;
-    background: transparent;
-    border: none;
-    border-bottom: 2px solid transparent;
-    margin-bottom: -1px;
-    padding: 0.625rem 0.875rem;
-    font-size: 0.8125rem;
-    font-weight: 500;
-    line-height: 1.2;
-    color: var(--text-secondary);
-    cursor: pointer;
-    min-height: 2.75rem;
-  }
-
-  .pane-tab:hover {
-    color: var(--text-primary);
-  }
-
-  .pane-tab:focus-visible {
-    outline: 2px solid var(--accent-default);
-    outline-offset: -2px;
-    border-radius: var(--radius-sm);
-  }
-
-  .pane-tab.selected {
-    color: var(--text-primary);
-    font-weight: 600;
-    border-bottom-color: var(--accent-default);
-  }
-</style>

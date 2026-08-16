@@ -34,7 +34,13 @@
     /** Interaction lock projected from the service (e.g. while a flow is
      *  being created) — controls must LOOK disabled, not silently no-op. */
     disabled?: boolean;
+    /** Ordinal of this question in the interview, shown as "Fråga n". */
+    questionNumber?: number | null;
+    /** The assistant's sentence that came with the question: "Därför frågar jag". */
+    why?: string | null;
     onanswer?: (payload: StructuredQuestionAnswerPayload) => void;
+    /** "Jag är osäker — välj åt mig": the user delegates this answer to Eneo. */
+    onunsure?: () => void;
   }
 
   let {
@@ -42,7 +48,10 @@
     answered = false,
     answerLabel = null,
     disabled = false,
-    onanswer
+    questionNumber = null,
+    why = null,
+    onanswer,
+    onunsure
   }: Props = $props();
 
   // Generated once per instance so radiogroup + its label can link without colliding.
@@ -69,7 +78,6 @@
 
   const isSingle = $derived(question.selection_mode === "single");
   const isSchemaDirection = $derived(question.question_id === "schema_direction");
-  const requiresConfirm = $derived(question.requires_confirm === true);
   const isInputFieldCollection = $derived(question.input_field_collection === true);
   const purposeOptions = $derived(
     question.options.filter((option) => isStructuredInputFieldPurpose(option.value))
@@ -121,8 +129,7 @@
       );
     }
     if (customSelected) return customText.trim().length > 0;
-    if (!isSingle || requiresConfirm) return selectedOptionKeys.size > 0;
-    return false;
+    return selectedOptionKeys.size > 0;
   });
 
   function selectOption(option: StructuredQuestionOption) {
@@ -137,15 +144,8 @@
 
     const optionKey = getStructuredQuestionOptionKey(option);
 
-    if (isSingle && !requiresConfirm) {
-      // Fill the radio before dispatching so the choice is visibly
-      // registered even for the frames before the card collapses.
-      selectedOptionKeys.clear();
-      selectedOptionKeys.add(optionKey);
-      onanswer?.(buildStructuredQuestionSelection(question, [option]));
-      return;
-    }
-
+    // Every shape selects first and sends on "Bekräfta svaret": the choice is
+    // visible and changeable before it becomes an answer.
     if (isSingle) {
       selectedOptionKeys.clear();
       selectedOptionKeys.add(optionKey);
@@ -237,9 +237,20 @@
       </span>
     </div>
   {:else}
-    <p id={questionLabelId} class="question-title">
-      {question.question}
-    </p>
+    <div class="question-head">
+      {#if questionNumber !== null}
+        <p class="question-kicker">
+          {m.ai_builder_question_number({ number: String(questionNumber) })}
+        </p>
+      {/if}
+      <h2 id={questionLabelId} class="question-title">{question.question}</h2>
+      {#if why}
+        <p class="question-why">
+          <span class="question-why-lead">{m.ai_builder_question_why_lead()}</span>
+          {why}
+        </p>
+      {/if}
+    </div>
 
     {#if isInputFieldCollection}
       <div class="field-collection" aria-labelledby={questionLabelId}>
@@ -425,18 +436,24 @@
       </div>
     {/if}
 
-    {#if isInputFieldCollection || !isSingle || customSelected || requiresConfirm}
-      <div class="actions-row">
-        <Button
-          variant="default"
-          size="sm"
-          onclick={handleConfirm}
-          disabled={!canConfirm || disabled}
-        >
-          {m.ai_builder_question_confirm()}
-        </Button>
-      </div>
-    {/if}
+    <div class="actions-row">
+      {#if onunsure}
+        <span class="unsure-block">
+          <button type="button" class="unsure-link" onclick={onunsure} {disabled}>
+            {m.ai_builder_question_unsure()}
+          </button>
+          <span class="unsure-note">{m.ai_builder_question_unsure_note()}</span>
+        </span>
+      {/if}
+      <Button
+        variant="default"
+        class="ml-auto"
+        onclick={handleConfirm}
+        disabled={!canConfirm || disabled}
+      >
+        {m.ai_builder_question_confirm()}
+      </Button>
+    </div>
   {/if}
 </div>
 
@@ -444,55 +461,67 @@
   @reference "@eneo/ui/styles";
 
   .question-panel {
-    @apply mt-3 flex flex-col rounded-xl border;
+    @apply flex flex-col overflow-hidden rounded-xl border;
     border-color: var(--border-default);
-    background: var(--bg-card, var(--bg-primary));
-    padding: 0.875rem 0.875rem 0.75rem;
-    transition:
-      opacity 0.2s ease,
-      filter 0.2s ease;
+    background: var(--background-primary);
+    animation: questionReveal 200ms ease-out;
   }
 
   .question-panel.answered {
+    @apply mt-3 px-3.5 py-3;
     border-color: oklch(from var(--border-default) l c h / 0.55);
-    background: oklch(from var(--bg-secondary) l c h / 0.28);
+    background: oklch(from var(--background-secondary) l c h / 0.28);
+  }
+
+  .question-head {
+    padding: 1rem 1.125rem 0.875rem;
+  }
+
+  .question-kicker {
+    @apply text-[0.72rem] font-semibold;
+    color: var(--text-secondary);
   }
 
   .question-title {
-    @apply mb-3 flex items-start gap-2 text-sm leading-snug font-medium;
+    @apply mt-2 text-[1.1875rem] leading-snug font-bold tracking-[-0.02em] text-pretty;
     color: var(--text-primary);
   }
 
-  /* One surface with hairline dividers; never one border per option. */
+  .question-why {
+    @apply mt-2 max-w-[62ch] text-[0.8125rem] leading-relaxed text-pretty;
+    color: var(--text-secondary);
+  }
+
+  .question-why-lead {
+    @apply font-semibold;
+    color: var(--text-primary);
+  }
+
   .options-stack {
-    @apply flex flex-col;
+    @apply flex flex-col gap-1.5 border-t px-2.5 pt-1.5 pb-2.5;
+    border-color: var(--border-dimmer);
   }
 
   .option-filter {
-    @apply mb-1 flex flex-col gap-1 text-xs font-medium;
+    @apply mx-4 mb-1 flex flex-col gap-1 text-xs font-medium;
     color: var(--text-secondary);
   }
 
   .option-filter input {
     @apply h-9 rounded-md border px-3 text-sm font-normal;
     border-color: var(--border-default);
-    background: var(--bg-primary);
+    background: var(--background-primary);
     color: var(--text-primary);
   }
 
   .option-filter-summary {
-    @apply mb-2 text-xs;
+    @apply mx-4 mb-2 text-xs;
     color: var(--text-secondary);
-  }
-
-  .options-stack > .option-row + .option-row {
-    border-top: 1px solid var(--border-dimmer);
   }
 
   .answered-prompt {
     @apply flex min-w-0 items-start gap-2 text-[0.8125rem] leading-relaxed;
     color: var(--text-secondary);
-    animation: questionReveal 150ms ease-out;
   }
 
   .answered-check {
@@ -502,19 +531,23 @@
   }
 
   .option-row {
-    @apply relative flex min-h-11 w-full items-start gap-3 rounded-md px-2 py-3 text-left;
+    @apply relative flex min-h-11 w-full items-start gap-3 rounded-[10px] border px-3 py-3 text-left;
+    border-color: var(--border-default);
+    background: var(--background-primary);
     color: var(--text-primary);
     cursor: pointer;
-    transition: background 0.15s ease;
+    transition:
+      background 0.15s ease,
+      border-color 0.15s ease;
   }
 
   .option-row:not(:disabled):hover {
-    background: oklch(from var(--bg-secondary) l c h / 0.55);
+    border-color: var(--accent-default);
   }
 
   .option-row:focus-visible {
     outline: 2px solid var(--accent-default);
-    outline-offset: -2px;
+    outline-offset: 1px;
   }
 
   .option-row:disabled {
@@ -522,17 +555,15 @@
   }
 
   .option-row.is-selected {
-    background: oklch(from var(--accent-default) l c h / 0.06);
-  }
-
-  .option-row.is-selected:hover {
-    background: oklch(from var(--accent-default) l c h / 0.08);
+    border-color: var(--accent-default);
+    box-shadow: inset 0 0 0 1px var(--accent-default);
+    background: oklch(from var(--accent-default) l c h / 0.07);
   }
 
   .option-indicator {
-    @apply relative mt-[0.1875rem] flex size-[1.125rem] shrink-0 items-center justify-center rounded-md;
+    @apply relative mt-0.5 flex size-[1.1875rem] shrink-0 items-center justify-center rounded-md;
     border: 1.5px solid var(--border-stronger);
-    background: var(--bg-primary);
+    background: var(--background-primary);
     color: var(--text-primary);
     transition:
       border-color 0.15s ease,
@@ -555,7 +586,7 @@
   }
 
   .option-indicator-dot {
-    @apply size-1.5 rounded-full;
+    @apply size-[0.4375rem] rounded-full;
     background: var(--text-on-fill);
   }
 
@@ -564,22 +595,23 @@
   }
 
   .option-label {
-    @apply text-[0.8125rem] leading-snug font-medium;
+    @apply text-sm leading-snug font-semibold tracking-[-0.01em];
     color: var(--text-primary);
   }
 
   .option-description {
-    @apply text-xs leading-relaxed;
+    @apply text-[0.8125rem] leading-relaxed text-pretty;
     color: var(--text-secondary);
   }
 
   .field-collection {
-    @apply flex flex-col gap-3;
+    @apply flex flex-col gap-3 border-t px-4 py-3;
+    border-color: var(--border-dimmer);
   }
 
   .field-row {
     @apply grid grid-cols-2 gap-3 rounded-lg p-3;
-    background: var(--bg-secondary);
+    background: var(--background-secondary);
   }
 
   .field-row label:not(.field-required) {
@@ -591,7 +623,7 @@
   .field-row select {
     @apply h-9 rounded-md border px-2 text-sm;
     border-color: var(--border-default);
-    background: var(--bg-primary);
+    background: var(--background-primary);
     color: var(--text-primary);
   }
 
@@ -615,8 +647,8 @@
   }
 
   .custom-input-wrap {
-    @apply mt-1 rounded-lg;
-    padding: 0.25rem 0.25rem 0;
+    @apply rounded-lg;
+    padding: 0.125rem 0.25rem 0;
   }
 
   .custom-input-wrap :global([data-slot="textarea"]) {
@@ -625,12 +657,22 @@
   }
 
   .actions-row {
-    @apply mt-3 flex items-center justify-end gap-2;
+    @apply flex flex-wrap items-center gap-2.5 border-t px-[1.125rem] py-3;
+    border-color: var(--border-dimmer);
   }
 
-  /* One quiet fade, no slides, no staggered entrances. */
-  .question-panel {
-    animation: questionReveal 200ms ease-out;
+  .unsure-block {
+    @apply flex flex-col;
+  }
+
+  .unsure-link {
+    @apply self-start text-[0.8125rem] font-semibold underline-offset-[3px] hover:underline disabled:opacity-50;
+    color: var(--accent-default);
+  }
+
+  .unsure-note {
+    @apply text-[0.72rem];
+    color: var(--text-secondary);
   }
 
   @keyframes questionReveal {
@@ -643,8 +685,7 @@
   }
 
   @media (prefers-reduced-motion: reduce) {
-    .question-panel,
-    .answered-prompt {
+    .question-panel {
       animation: none;
     }
   }

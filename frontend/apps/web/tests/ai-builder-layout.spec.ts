@@ -92,218 +92,114 @@ async function stubAiBuilderApi(page: Page, spaceId: string) {
       return route.fulfill({ json: session });
     }
     if (/\/sessions\/?(\?.*)?$/.test(url)) {
+      if (route.request().method() === "POST") {
+        return route.fulfill({
+          json: {
+            ...draft,
+            session_id: "fresh-session",
+            status: "chatting",
+            latest_plan_id: null,
+            conversation: [],
+            latest_turn: null
+          }
+        });
+      }
       return route.fulfill({ json: { sessions: [draft] } });
+    }
+    if (/\/sessions\/fresh-session\/?$/.test(url)) {
+      return route.fulfill({
+        json: {
+          ...draft,
+          session_id: "fresh-session",
+          status: "chatting",
+          latest_plan_id: null,
+          conversation: [],
+          latest_turn: null
+        }
+      });
     }
     return route.fulfill({ json: {} });
   });
 }
 
-async function openPlanReview(page: Page, request: APIRequestContext) {
+// The phase rail and its labels must track messages/sv.json (`ai_builder_rail_*`,
+// `ai_builder_progress_aria`); the plan surface heading is `ai_builder_how_flow_works`.
+const RAIL_LABEL = "AI-byggarens förlopp";
+const RAIL_UNDERSTANDING = "Eneo förstår uppgiften";
+const RAIL_PLANNING = "Eneo utformar planen";
+const RAIL_REVIEWING = "Du granskar innan det skapas";
+const HOW_FLOW_WORKS = "Så fungerar flödet";
+const CONVERSATION_BUTTON = "Samtal";
+const CONVERSATION_TITLE = "Samtalet";
+const CONFIRM_TITLE = "Så här har Eneo förstått uppgiften";
+const TASK_TITLE = "Vad ska flödet göra?";
+
+async function openBuilder(page: Page, request: APIRequestContext, query = "") {
   await page.goto("/");
   const spaceId = await personalSpaceId(page, request);
   await stubAiBuilderApi(page, spaceId);
-  await page.goto("/spaces/personal/flows/ai-builder");
-  await expect(page.locator("#ai-builder-plan-pane")).toBeAttached({ timeout: 20_000 });
+  await page.goto(`/spaces/personal/flows/ai-builder${query}`);
+  await expect(page.getByRole("navigation", { name: RAIL_LABEL })).toBeVisible({ timeout: 20_000 });
 }
 
-// Must track messages/sv.json `ai_builder_why_this_design`, which the plan pane
-// renders for create-mode reviews (scoped step reviews use `..._why_this_change`).
-const RATIONALE_TRIGGER = "Varför upplägget ser ut så här";
-
-function layoutMetrics(page: Page) {
-  return page.evaluate(() => {
-    const containerEl = [...document.querySelectorAll("div")].find(
-      (d) => getComputedStyle(d).containerName === "builder"
+test.describe("AI builder phase shell", () => {
+  test("a resumed draft with a plan opens on the review phase", async ({ page, request }) => {
+    await openBuilder(page, request, "?session=plan-session");
+    const rail = page.getByRole("navigation", { name: RAIL_LABEL });
+    await expect(rail.getByRole("button", { name: RAIL_REVIEWING })).toHaveAttribute(
+      "aria-current",
+      "step"
     );
-    if (!containerEl) throw new Error("builder container not found");
-    const inner = containerEl.firstElementChild as HTMLElement;
-    const taskRegion = document.querySelector<HTMLElement>(
-      '[role="region"][aria-label="Uppgiftspanel"]'
-    );
-    const planRegion = document.querySelector<HTMLElement>(
-      '[role="region"][aria-label="Planförslag"]'
-    );
-    const stickyGroup = inner.querySelector<HTMLElement>("div.sticky");
-    const compact = document.querySelector<HTMLElement>(".phase-compact");
-    const phaseList = document.querySelector<HTMLElement>(".phase-list");
-    return {
-      containerWidth: containerEl.clientWidth,
-      innerOverflowY: getComputedStyle(inner).overflowY,
-      taskRegionOverflowY: taskRegion ? getComputedStyle(taskRegion).overflowY : null,
-      planRegionOverflowY: planRegion ? getComputedStyle(planRegion).overflowY : null,
-      stickyGroupPosition: stickyGroup ? getComputedStyle(stickyGroup).position : null,
-      compactVisible: compact ? getComputedStyle(compact).display !== "none" : null,
-      phaseListVisible: phaseList ? getComputedStyle(phaseList).display !== "none" : null
-    };
-  });
-}
-
-async function viewportForContainerWidth(page: Page, target: number): Promise<number> {
-  const probe = 1400;
-  await page.setViewportSize({ width: probe, height: 620 });
-  const { containerWidth } = await layoutMetrics(page);
-  return probe - containerWidth + target;
-}
-
-test.describe("AI Builder responsive accessibility", () => {
-  test("split view keeps each pane independently scrollable", async ({ page, request }) => {
-    await page.setViewportSize({ width: 1440, height: 620 });
-    await openPlanReview(page, request);
-
-    const m = await layoutMetrics(page);
-    expect(m.containerWidth).toBeGreaterThanOrEqual(1040);
-    expect(m.innerOverflowY).toBe("hidden");
-    expect(m.taskRegionOverflowY).toBe("auto");
-    expect(m.planRegionOverflowY).toBe("auto");
-    expect(m.compactVisible).toBe(false);
-    expect(m.phaseListVisible).toBe(true);
-
-    await expect(page.getByRole("button", { name: "Uppgift", exact: true })).toBeHidden();
+    await expect(page.getByRole("heading", { name: HOW_FLOW_WORKS })).toBeVisible();
+    // The build phase has nothing to revisit once it is done.
+    await expect(rail.getByRole("button", { name: RAIL_PLANNING })).toBeDisabled();
   });
 
-  test("the rationale default follows the builder container width until the user touches it", async ({
-    page,
-    request
-  }) => {
-    await openPlanReview(page, request);
-    const trigger = page.getByRole("button", { name: RATIONALE_TRIGGER });
-
-    const wideViewport = await viewportForContainerWidth(page, 800);
-    await page.setViewportSize({ width: wideViewport, height: 620 });
-    await expect(trigger).toHaveAttribute("aria-expanded", "true");
-
-    const narrowViewport = await viewportForContainerWidth(page, 740);
-    expect(narrowViewport).toBeGreaterThan(768);
-    await page.setViewportSize({ width: narrowViewport, height: 620 });
-    await expect(trigger).toHaveAttribute("aria-expanded", "false");
-
-    await trigger.click();
-    await expect(trigger).toHaveAttribute("aria-expanded", "true");
-    await page.setViewportSize({ width: wideViewport, height: 620 });
-    await page.setViewportSize({ width: narrowViewport, height: 620 });
-    await expect(trigger).toHaveAttribute("aria-expanded", "true");
+  test("a completed phase can be revisited without leaving the plan", async ({ page, request }) => {
+    await openBuilder(page, request, "?session=plan-session");
+    const rail = page.getByRole("navigation", { name: RAIL_LABEL });
+    await rail.getByRole("button", { name: RAIL_UNDERSTANDING }).click();
+    await expect(page.getByText(CONFIRM_TITLE).first()).toBeVisible();
+    await rail.getByRole("button", { name: RAIL_REVIEWING }).click();
+    await expect(page.getByRole("heading", { name: HOW_FLOW_WORKS })).toBeVisible();
   });
 
-  test("tabs mode: phase group and action bar stay pinned while the page scrolls", async ({
-    page,
-    request
-  }) => {
-    await page.setViewportSize({ width: 900, height: 520 });
-    await openPlanReview(page, request);
-
-    const m = await layoutMetrics(page);
-    expect(m.containerWidth).toBeLessThan(1040);
-    expect(m.stickyGroupPosition).toBe("sticky");
-
-    const pinned = await page.evaluate(() => {
-      const containerEl = [...document.querySelectorAll("div")].find(
-        (d) => getComputedStyle(d).containerName === "builder"
-      );
-      const inner = containerEl?.firstElementChild as HTMLElement;
-      inner.scrollTop = inner.scrollHeight;
-      const group = inner.querySelector<HTMLElement>("div.sticky");
-      const actionBar = document
-        .querySelector('[id="ai-builder-plan-pane"]')
-        ?.querySelector<HTMLElement>("div.sticky.bottom-0");
-      const innerRect = inner.getBoundingClientRect();
-      return {
-        scrolled: inner.scrollTop > 0,
-        groupTopDelta: group ? Math.abs(group.getBoundingClientRect().top - innerRect.top) : null,
-        actionBarPosition: actionBar ? getComputedStyle(actionBar).position : null,
-        actionBarBottomDelta: actionBar
-          ? Math.abs(actionBar.getBoundingClientRect().bottom - innerRect.bottom)
-          : null
-      };
-    });
-    expect(pinned.scrolled).toBe(true);
-    expect(pinned.groupTopDelta ?? 99).toBeLessThanOrEqual(1);
-    expect(pinned.actionBarPosition).toBe("sticky");
-    expect(pinned.actionBarBottomDelta ?? 99).toBeLessThanOrEqual(1);
+  test("the conversation is one gesture away", async ({ page, request }) => {
+    await openBuilder(page, request, "?session=plan-session");
+    await page.getByRole("button", { name: new RegExp(`^${CONVERSATION_BUTTON}`) }).click();
+    const sheet = page.getByRole("dialog");
+    await expect(sheet.getByText(CONVERSATION_TITLE)).toBeVisible();
+    await expect(sheet.getByText("Sammanfatta rapporter till en PDF")).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(sheet).toBeHidden();
   });
 
-  test("mobile: focused plan controls stay clear of the stacked action bar", async ({
-    page,
-    request
-  }) => {
-    await page.setViewportSize({ width: 390, height: 700 });
-    await openPlanReview(page, request);
-
-    const clearance = await page.evaluate(() => {
-      const containerEl = [...document.querySelectorAll("div")].find(
-        (d) => getComputedStyle(d).containerName === "builder"
-      );
-      const scroller = containerEl?.firstElementChild as HTMLElement;
-      const planPane = document.getElementById("ai-builder-plan-pane");
-      const actionBar = planPane?.querySelector<HTMLElement>("div.sticky.bottom-0");
-      if (!scroller || !planPane || !actionBar) throw new Error("layout regions missing");
-
-      const scrollPaddingBottom = parseFloat(getComputedStyle(scroller).scrollPaddingBottom);
-      const actionBarHeight = actionBar.getBoundingClientRect().height;
-
-      const focusables = [...planPane.querySelectorAll<HTMLElement>("button, a[href]")].filter(
-        (el) => !actionBar.contains(el) && el.offsetParent !== null
-      );
-      const target = focusables[focusables.length - 1];
-      if (!target) throw new Error("no focusable plan content control");
-      scroller.scrollTop = 0;
-      target.focus();
-
-      const targetRect = target.getBoundingClientRect();
-      const barRect = actionBar.getBoundingClientRect();
-      return {
-        scrollPaddingBottom,
-        actionBarHeight,
-        focusedAboveBar: targetRect.bottom <= barRect.top + 0.5,
-        focused: document.activeElement === target
-      };
-    });
-
-    expect(clearance.scrollPaddingBottom).toBeGreaterThanOrEqual(clearance.actionBarHeight + 16);
-    expect(clearance.focused).toBe(true);
-    expect(clearance.focusedAboveBar).toBe(true);
+  test("a new task starts on the task screen with the composer", async ({ page, request }) => {
+    await openBuilder(page, request);
+    await expect(page.getByRole("heading", { name: TASK_TITLE })).toBeVisible();
+    const composer = page.getByRole("textbox").first();
+    await expect(composer).toBeVisible();
+    await expect(page.getByRole("button", { name: "Skicka" })).toBeDisabled();
+    await composer.fill("Sammanfatta rapporter");
+    await expect(page.getByRole("button", { name: "Skicka" })).toBeEnabled();
   });
 
-  test("reduced motion disables collapsible height animation", async ({ page, request }) => {
+  test("the rail collapses to one line on a phone", async ({ page, request }) => {
+    await page.setViewportSize({ width: 375, height: 812 });
+    await openBuilder(page, request, "?session=plan-session");
+    const compact = page.locator(".rail-compact");
+    await expect(compact).toBeVisible();
+    await expect(compact).toContainText(RAIL_REVIEWING);
+    await expect(page.locator(".rail-list")).toBeHidden();
+  });
+
+  test("motion is disabled under prefers-reduced-motion", async ({ page, request }) => {
     await page.emulateMedia({ reducedMotion: "reduce" });
-    await page.setViewportSize({ width: 1440, height: 900 });
-    await openPlanReview(page, request);
-
-    const animationName = await page.evaluate((triggerText) => {
-      const trigger = [...document.querySelectorAll<HTMLButtonElement>("button")].find((button) =>
-        button.textContent?.includes(triggerText)
-      );
-      const content = trigger
-        ?.closest("section")
-        ?.querySelector<HTMLElement>('[data-slot="collapsible-content"].collapsible-animate');
-      if (!trigger || !content) throw new Error("rationale disclosure missing");
-      trigger.click();
-      return getComputedStyle(content).animationName;
-    }, RATIONALE_TRIGGER);
-
-    expect(animationName).toBe("none");
-  });
-});
-
-test.describe("AI Builder touch targets", () => {
-  test.use({ hasTouch: true, isMobile: true, viewport: { width: 390, height: 844 } });
-
-  test("disclosure triggers meet the 44px touch-target minimum", async ({ page, request }) => {
-    await openPlanReview(page, request);
-
-    expect(await page.evaluate(() => window.matchMedia("(pointer: coarse)").matches)).toBe(true);
-
-    await page.getByRole("button", { name: "Plan", exact: true }).click();
-    const rationale = page.getByRole("button", { name: RATIONALE_TRIGGER });
-    await rationale.scrollIntoViewIfNeeded();
-    expect(
-      await rationale.evaluate((el) => el.getBoundingClientRect().height)
-    ).toBeGreaterThanOrEqual(44);
-
-    await page.getByRole("button", { name: "Uppgift", exact: true }).click();
-    const assumptions = page.getByRole("button", { name: /^Antaganden \(1\)$/ });
-    await assumptions.scrollIntoViewIfNeeded();
-    expect(
-      await assumptions.evaluate((el) => el.getBoundingClientRect().height)
-    ).toBeGreaterThanOrEqual(44);
+    await openBuilder(page, request);
+    await expect(page.getByRole("heading", { name: TASK_TITLE })).toBeVisible();
+    const target = page.locator(".task-screen");
+    await expect(target).toHaveCount(1);
+    const animation = await target.evaluate((el) => getComputedStyle(el).animationName);
+    expect(animation).toBe("none");
   });
 });

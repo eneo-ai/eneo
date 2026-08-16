@@ -373,8 +373,6 @@ describe("FlowAIBuilderService", () => {
       isConflict: true,
       statusMessage: "repairing",
       availableModels,
-      selectedModelId: "model-1",
-      modelLoadStatus: "loaded",
       draftSessions
     });
 
@@ -389,14 +387,6 @@ describe("FlowAIBuilderService", () => {
     expect(service.isConflict).toBe(true);
     expect(service.statusMessage).toBe("repairing");
     expect(service.availableModels).toBe(availableModels);
-    expect(service.selectedModelId).toBe("model-1");
-    expect(service.modelLoadStatus).toBe("loaded");
-    expect(service.modelsLoaded).toBe(true);
-
-    service.seedState({ modelLoadStatus: "failed" });
-
-    expect(service.modelLoadStatus).toBe("failed");
-    expect(service.modelsLoaded).toBe(false);
     expect(service.draftSessions).toBe(draftSessions);
     expect(service.sessionStatus).toBe("awaiting_approval");
   });
@@ -409,36 +399,13 @@ describe("FlowAIBuilderService", () => {
 
     service.seedState({
       session: makeSession({ status: "chatting" }),
-      streamState: "idle",
-      availableModels: [
-        {
-          id: "model-1",
-          name: "Model",
-          provider: "openai",
-          reasoning_effort_options: []
-        }
-      ],
-      selectedModelId: "model-1",
-      modelLoadStatus: "loaded"
+      streamState: "idle"
     });
 
     expect(service.session?.session_id).toBe("session-1");
+    // The planner model is the server's default; a slow or failed model-name
+    // request must never block the first message.
     expect(service.canSendMessage).toBe(true);
-
-    service.seedState({ availableModels: [], selectedModelId: null });
-    expect(service.canSendMessage).toBe(false);
-
-    service.seedState({
-      availableModels: [
-        {
-          id: "model-1",
-          name: "Model",
-          provider: "openai",
-          reasoning_effort_options: []
-        }
-      ],
-      selectedModelId: "model-1"
-    });
 
     service.seedState({ streamState: "streaming" });
 

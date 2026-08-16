@@ -75,7 +75,6 @@ export interface PendingPlanOperation {
  *  must not claim anything about persistence. */
 export type CreateFailureOutcome = "confirmed_not_applied" | "unknown";
 
-export type ModelLoadStatus = "idle" | "loading" | "loaded" | "failed";
 export type AIBuilderStreamState = "idle" | "streaming" | "failed";
 
 export interface FlowAIBuilderState {
@@ -89,10 +88,9 @@ export interface FlowAIBuilderState {
   applyResult: ApplyResult | null;
   isConflict: boolean;
   statusMessage: AIBuilderStatus | null;
+  /** Display names for per-step model refs. The planner model itself is the
+   *  server's default; the client never chooses or sends one. */
   availableModels: AIBuilderModel[];
-  selectedModelId: string | null;
-  selectedReasoningEffort: string | null;
-  modelLoadStatus: ModelLoadStatus;
   draftSessions: AIBuilderDraftSession[];
   pendingOperation: PendingPlanOperation | null;
   createFailureOutcome: CreateFailureOutcome | null;
@@ -111,9 +109,6 @@ export function createInitialFlowAIBuilderState(): FlowAIBuilderState {
     isConflict: false,
     statusMessage: null,
     availableModels: [],
-    selectedModelId: null,
-    selectedReasoningEffort: null,
-    modelLoadStatus: "idle",
     draftSessions: [],
     pendingOperation: null,
     createFailureOutcome: null
@@ -229,20 +224,6 @@ export class FlowAIBuilderDriver {
     return this.#state.streamState === "streaming";
   }
 
-  get hasValidModelSelection(): boolean {
-    if (this.#state.modelLoadStatus !== "loaded") return false;
-
-    const selectedModel = this.#state.availableModels.find(
-      (model) => model.id === this.#state.selectedModelId
-    );
-    if (!selectedModel) return false;
-
-    return (
-      this.#state.selectedReasoningEffort === null ||
-      (selectedModel.reasoning_effort_options ?? []).includes(this.#state.selectedReasoningEffort)
-    );
-  }
-
   seedState(partial: Partial<FlowAIBuilderState>): void {
     Object.assign(this.#state, partial);
     this.#notify();
@@ -297,34 +278,6 @@ export class FlowAIBuilderDriver {
     this.#notify();
   }
 
-  selectModel(modelId: string): void {
-    if (!this.#state.availableModels.some((model) => model.id === modelId)) return;
-    this.#state.selectedModelId = modelId;
-    this.#state.selectedReasoningEffort = null;
-    this.#notify();
-  }
-
-  selectReasoningEffort(reasoningEffort: string | null): void {
-    const selectedModel = this.#state.availableModels.find(
-      (model) => model.id === this.#state.selectedModelId
-    );
-    if (
-      reasoningEffort !== null &&
-      !(selectedModel?.reasoning_effort_options ?? []).includes(reasoningEffort)
-    ) {
-      return;
-    }
-    this.#state.selectedReasoningEffort = reasoningEffort;
-    this.#notify();
-  }
-
-  async retryModelLoad(): Promise<void> {
-    if (this.#state.modelLoadStatus !== "failed") return;
-    const owner = this.#currentSessionOwner();
-    if (!owner) return;
-    await this.#fetchModels(owner);
-  }
-
   async createSession(targetKind: TargetKind, options?: { forceNew?: boolean }): Promise<void> {
     if (this.isStreaming || this.#state.pendingOperation) return;
     ++this.#initGeneration;
@@ -356,7 +309,7 @@ export class FlowAIBuilderDriver {
         sessionGeneration,
         abortController: this.#abortController
       };
-      await this.#fetchModels(owner);
+      void this.#fetchModels(owner);
       await this.#refreshSession(owner);
       if (this.#ownsSession(owner)) {
         await this.loadDraftSessions();
@@ -458,7 +411,7 @@ export class FlowAIBuilderDriver {
       sessionGeneration,
       abortController: this.#abortController
     };
-    await this.#fetchModels(owner);
+    void this.#fetchModels(owner);
     await this.#syncPlanFromSession(owner);
     await this.loadDraftSessions();
   }
@@ -543,8 +496,7 @@ export class FlowAIBuilderDriver {
       !this.#state.session ||
       this.isStreaming ||
       this.#state.pendingOperation !== null ||
-      !this.canStartNewTurn ||
-      !this.hasValidModelSelection
+      !this.canStartNewTurn
     ) {
       return "not_started";
     }
@@ -575,12 +527,6 @@ export class FlowAIBuilderDriver {
       message,
       ui_language: getLocale()
     };
-    if (this.#state.selectedModelId) {
-      requestBody.model_id = this.#state.selectedModelId;
-    }
-    if (this.#state.selectedReasoningEffort) {
-      requestBody.reasoning_effort = this.#state.selectedReasoningEffort;
-    }
     if (questionAnswer) {
       requestBody.question_answer = questionAnswer;
     }
@@ -1255,36 +1201,32 @@ export class FlowAIBuilderDriver {
     return null;
   }
 
+  // Model names are display data for the plan; the read belongs to the
+  // session, not to any message stream, so a send in flight cannot discard it.
   async #fetchModels(owner: SessionOperationOwner): Promise<void> {
     if (!this.#state.session) return;
-    if (!this.#ownsSession(owner)) return;
-
-    this.#state.modelLoadStatus = "loading";
-    this.#notify();
+    if (!this.#ownsSessionIdentity(owner)) return;
 
     try {
       const result = (await this.#transport.fetch(FLOW_AI_BUILDER_ROUTES.sessionModels, {
         method: "get",
         params: { path: { session_id: this.#state.session.session_id } }
       })) as { models: AIBuilderModel[]; default_model_id: string | null };
-      if (!this.#ownsSession(owner)) return;
+      if (!this.#ownsSessionIdentity(owner)) return;
       this.#state.availableModels = result.models;
-      this.#state.selectedModelId = result.models.some(
-        (model) => model.id === result.default_model_id
-      )
-        ? result.default_model_id
-        : (result.models[0]?.id ?? null);
-      this.#state.selectedReasoningEffort = null;
-      this.#state.modelLoadStatus = "loaded";
       this.#notify();
     } catch {
-      if (!this.#ownsSession(owner)) return;
+      if (!this.#ownsSessionIdentity(owner)) return;
       this.#state.availableModels = [];
-      this.#state.selectedModelId = null;
-      this.#state.selectedReasoningEffort = null;
-      this.#state.modelLoadStatus = "failed";
       this.#notify();
     }
+  }
+
+  #ownsSessionIdentity(owner: Pick<SessionOperationOwner, "sessionId" | "sessionGeneration">) {
+    return (
+      this.#sessionGeneration === owner.sessionGeneration &&
+      this.#state.session?.session_id === owner.sessionId
+    );
   }
 
   #updateOrAddAssistantMessage(

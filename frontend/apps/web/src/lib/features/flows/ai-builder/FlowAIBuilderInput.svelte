@@ -17,8 +17,6 @@
   import { IconCancel } from "@eneo/icons/cancel";
   import { IconTrash } from "@eneo/icons/trash";
   import { getAIBuilderService } from "./FlowAIBuilderService.svelte.ts";
-  import FlowAIBuilderModelSelect from "./FlowAIBuilderModelSelect.svelte";
-  import FlowAIBuilderReasoningSelect from "./FlowAIBuilderReasoningSelect.svelte";
   import { getAIBuilderAttachmentRules } from "./builderAttachmentRules";
   import {
     clearComposerDraft,
@@ -37,6 +35,8 @@
     /** First plan generation in flight: the textarea stays editable as a
      *  saved draft; submit remains gated until the turn completes. */
     generationWait?: boolean;
+    /** Screen-specific placeholder; the composer's own defaults otherwise. */
+    placeholder?: string | null;
   }
 
   let {
@@ -44,7 +44,8 @@
     editContextLabel = null,
     oncleareditcontext,
     refinement = false,
-    generationWait = false
+    generationWait = false,
+    placeholder = null
   }: Props = $props();
 
   const service = getAIBuilderService();
@@ -72,6 +73,7 @@
 
   const currentPlaceholder = $derived(
     activePlaceholder ??
+      placeholder ??
       (generationWait
         ? m.ai_builder_wait_composer_placeholder()
         : refinement
@@ -567,9 +569,6 @@
           <IconAttachment class="composer-attach-icon" />
           <span class="composer-attach-label">{m.attach_files()}</span>
         </button>
-
-        <FlowAIBuilderModelSelect />
-        <FlowAIBuilderReasoningSelect />
       </div>
 
       <Button

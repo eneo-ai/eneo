@@ -164,11 +164,7 @@ function makeDriver(
   const stream = options.streamImpl ?? vi.fn();
 
   const driver = new FlowAIBuilderDriver({ fetch, stream }, "space-1", "flow-1");
-  driver.seedState({
-    availableModels: [makeModel()],
-    selectedModelId: DEFAULT_MODEL_ID,
-    modelLoadStatus: "loaded"
-  });
+  driver.seedState({ availableModels: [makeModel()] });
 
   return {
     driver,
@@ -401,80 +397,6 @@ describe("FlowAIBuilderDriver", () => {
     expect(fetch.mock.calls[1]?.[0]).toBe("/api/v1/flows/ai-builder/sessions");
   });
 
-  it("recovers a failed model load with one bounded user retry", async () => {
-    const modelId = "11111111-1111-4111-8111-111111111113";
-    let modelRequestCount = 0;
-    let resolveRetry!: (value: {
-      models: { id: string; name: string; provider: string }[];
-      default_model_id: string;
-    }) => void;
-    const retryResponse = new Promise<{
-      models: { id: string; name: string; provider: string }[];
-      default_model_id: string;
-    }>((resolve) => {
-      resolveRetry = resolve;
-    });
-    const session = makeSession({ session_id: "model-session" });
-    const fetch = vi.fn(async (path: string, init?: { method?: string }) => {
-      if (path.endsWith("/models")) {
-        modelRequestCount += 1;
-        if (modelRequestCount === 1) throw new Error("model endpoint unavailable");
-        return await retryResponse;
-      }
-      if (path === "/api/v1/flows/ai-builder/sessions" && init?.method === "post") {
-        return session;
-      }
-      if (path === "/api/v1/flows/ai-builder/sessions/{session_id}") {
-        return session;
-      }
-      if (path === "/api/v1/flows/ai-builder/sessions" && init?.method === "get") {
-        return { sessions: [] };
-      }
-      throw new Error(`Unexpected request: ${path}`);
-    });
-    const { driver } = makeDriver({ fetchImpl: fetch });
-
-    await driver.createSession("edit");
-
-    expect(driver.state.modelLoadStatus).toBe("failed");
-    const retry = driver.retryModelLoad();
-    expect(driver.state.modelLoadStatus).toBe("loading");
-    const duplicateRetry = driver.retryModelLoad();
-    resolveRetry({
-      models: [{ id: modelId, name: "GPT-5.4", provider: "openai" }],
-      default_model_id: modelId
-    });
-    await Promise.all([retry, duplicateRetry]);
-
-    expect(driver.state.modelLoadStatus).toBe("loaded");
-    expect(driver.state.availableModels).toEqual([
-      { id: modelId, name: "GPT-5.4", provider: "openai" }
-    ]);
-    expect(driver.state.selectedModelId).toBe(modelId);
-    expect(modelRequestCount).toBe(2);
-  });
-
-  it("accepts only an available model and one of its advertised reasoning efforts", async () => {
-    const { driver, stream } = makeDriver();
-    driver.seedState({
-      session: makeSession(),
-      availableModels: [makeModel({ reasoning_effort_options: ["low", "high"] })]
-    });
-
-    driver.selectModel("unknown-model");
-    driver.selectReasoningEffort("unsupported");
-
-    expect(driver.state.selectedModelId).toBe(DEFAULT_MODEL_ID);
-    expect(driver.state.selectedReasoningEffort).toBeNull();
-
-    driver.selectReasoningEffort("high");
-    expect(driver.state.selectedReasoningEffort).toBe("high");
-
-    driver.seedState({ availableModels: [], selectedModelId: null });
-    expect(await driver.sendMessage("Build a flow")).toBe("not_started");
-    expect(stream).not.toHaveBeenCalled();
-  });
-
   it("does not install a late model response after the session is replaced", async () => {
     const staleModelId = "11111111-1111-4111-8111-111111111114";
     const currentModelId = "11111111-1111-4111-8111-111111111115";
@@ -532,8 +454,6 @@ describe("FlowAIBuilderDriver", () => {
     await driver.createSession("edit");
 
     expect(driver.state.session?.session_id).toBe(currentSession.session_id);
-    expect(driver.state.modelLoadStatus).toBe("loaded");
-    expect(driver.state.selectedModelId).toBe(currentModelId);
     resolveStaleModels({
       models: [{ id: staleModelId, name: "Stale model", provider: "openai" }],
       default_model_id: staleModelId
@@ -541,11 +461,60 @@ describe("FlowAIBuilderDriver", () => {
     await staleCreate;
 
     expect(driver.state.session?.session_id).toBe(currentSession.session_id);
-    expect(driver.state.modelLoadStatus).toBe("loaded");
     expect(driver.state.availableModels).toEqual([
       { id: currentModelId, name: "Current model", provider: "openai" }
     ]);
-    expect(driver.state.selectedModelId).toBe(currentModelId);
+  });
+
+  it("installs a slow model-name response even when a message stream is in flight", async () => {
+    // Model names are display data owned by the session, not by a stream:
+    // sending while /models is pending must not throw the valid answer away.
+    const session = makeSession({ session_id: "session-models", latest_plan_id: null });
+    let resolveModels!: (value: {
+      models: { id: string; name: string; provider: string }[];
+      default_model_id: string | null;
+    }) => void;
+    const models = new Promise<{
+      models: { id: string; name: string; provider: string }[];
+      default_model_id: string | null;
+    }>((resolve) => {
+      resolveModels = resolve;
+    });
+    let releaseStream!: () => void;
+    const streamHeld = new Promise<void>((resolve) => {
+      releaseStream = resolve;
+    });
+    const fetch = vi.fn(async (path: string, init?: { method?: string }) => {
+      if (path === "/api/v1/flows/ai-builder/sessions" && init?.method === "post") return session;
+      if (path === "/api/v1/flows/ai-builder/sessions/{session_id}/models") return models;
+      if (path === "/api/v1/flows/ai-builder/sessions/{session_id}") return session;
+      if (path === "/api/v1/flows/ai-builder/sessions") return { sessions: [] };
+      throw new Error(`Unexpected request: ${path}`);
+    });
+    const { driver } = makeDriver({
+      fetchImpl: fetch,
+      streamImpl: vi.fn(async (_path, _init, handlers) => {
+        await streamHeld;
+        completeStream(handlers);
+      })
+    });
+
+    await driver.createSession("create");
+    const send = driver.sendMessage("Sammanfatta rapporter");
+    expect(driver.isStreaming).toBe(true);
+
+    resolveModels({
+      models: [{ id: "model-late", name: "Late model", provider: "openai" }],
+      default_model_id: "model-late"
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(driver.state.availableModels).toEqual([
+      { id: "model-late", name: "Late model", provider: "openai" }
+    ]);
+
+    releaseStream();
+    await send;
   });
 
   it("ignores a rejected model request after the session is replaced", async () => {
@@ -595,21 +564,17 @@ describe("FlowAIBuilderDriver", () => {
     await driver.createSession("edit");
 
     expect(driver.state.session?.session_id).toBe(currentSession.session_id);
-    expect(driver.state.modelLoadStatus).toBe("loaded");
     expect(driver.state.availableModels).toEqual([
       { id: currentModelId, name: "Current model", provider: "openai" }
     ]);
-    expect(driver.state.selectedModelId).toBe(currentModelId);
 
     staleModels.reject(new Error("stale model request failed"));
     await staleCreate;
 
     expect(driver.state.session?.session_id).toBe(currentSession.session_id);
-    expect(driver.state.modelLoadStatus).toBe("loaded");
     expect(driver.state.availableModels).toEqual([
       { id: currentModelId, name: "Current model", provider: "openai" }
     ]);
-    expect(driver.state.selectedModelId).toBe(currentModelId);
   });
 
   it("initializes edit mode by creating or resuming the session immediately", async () => {

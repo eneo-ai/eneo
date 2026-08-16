@@ -6,8 +6,7 @@ import {
   type AIBuilderClientTransport,
   type AIBuilderStreamState,
   type CreateFailureOutcome,
-  type FlowAIBuilderState,
-  type ModelLoadStatus
+  type FlowAIBuilderState
 } from "./FlowAIBuilderDriver";
 import type {
   AIBuilderDraftSession,
@@ -51,7 +50,6 @@ export class FlowAIBuilderService {
       this.#state.streamState !== "streaming" &&
       this.#state.pendingOperation === null &&
       this.#canStartNewTurn &&
-      this.#hasValidModelSelection &&
       (this.#state.session?.status === "chatting" ||
         this.#state.session?.status === "awaiting_approval")
   );
@@ -90,10 +88,6 @@ export class FlowAIBuilderService {
 
   get #canStartNewTurn(): boolean {
     return this.#driver.canStartNewTurn;
-  }
-
-  get #hasValidModelSelection(): boolean {
-    return this.#driver.hasValidModelSelection;
   }
 
   // Keep "updating plan" copy stable while a re-plan stream briefly clears currentPlan.
@@ -238,22 +232,6 @@ export class FlowAIBuilderService {
     return this.#state.availableModels;
   }
 
-  get selectedModelId(): string | null {
-    return this.#state.selectedModelId;
-  }
-
-  get selectedReasoningEffort(): string | null {
-    return this.#state.selectedReasoningEffort;
-  }
-
-  get modelLoadStatus(): ModelLoadStatus {
-    return this.#state.modelLoadStatus;
-  }
-
-  get modelsLoaded(): boolean {
-    return this.#state.modelLoadStatus === "loaded";
-  }
-
   get draftSessions(): AIBuilderDraftSession[] {
     return this.#state.draftSessions;
   }
@@ -393,18 +371,6 @@ export class FlowAIBuilderService {
 
   async removeAttachment(fileId: string): Promise<void> {
     await this.#driver.removeAttachment(fileId);
-  }
-
-  selectModel(modelId: string): void {
-    this.#driver.selectModel(modelId);
-  }
-
-  selectReasoningEffort(reasoningEffort: string | null): void {
-    this.#driver.selectReasoningEffort(reasoningEffort);
-  }
-
-  async retryModelLoad(): Promise<void> {
-    await this.#driver.retryModelLoad();
   }
 
   clearError(): void {

@@ -2,6 +2,7 @@
   /* eslint-disable eneo/no-raw-color -- the style block derives every colour
      from theme tokens via relative oklch() syntax, which the rule cannot see
      through */
+  import { m } from "$lib/paraglide/messages";
   import { Markdown } from "@eneo/ui";
   import FlowAIBuilderQuestion from "./FlowAIBuilderQuestion.svelte";
   import FlowAIBuilderRequirementsSummary from "./FlowAIBuilderRequirementsSummary.svelte";
@@ -25,10 +26,14 @@
     requirementsConfirmed?: boolean;
     requirementsActive?: boolean;
     onQuestionAnswer?: (answer: StructuredQuestionAnswerPayload) => void;
+    /** Transcript view: reopen an answered question on the phase screen. */
+    onEditAnswer?: () => void;
     onRequirementsConfirm?: () => void;
     onRequirementsChange?: () => void;
     /** Locks question/requirements controls while a plan operation runs. */
     interactionDisabled?: boolean;
+    /** Transcript view: the summary is confirmed on the phase screen, so only a note is shown here. */
+    compactRequirements?: boolean;
   }
 
   let {
@@ -45,9 +50,11 @@
     requirementsConfirmed = false,
     requirementsActive = true,
     onQuestionAnswer = undefined,
+    onEditAnswer = undefined,
     onRequirementsConfirm = undefined,
     onRequirementsChange = undefined,
-    interactionDisabled = false
+    interactionDisabled = false,
+    compactRequirements = false
   }: Props = $props();
 </script>
 
@@ -83,15 +90,44 @@
         </div>
       {/if}
       {#if question}
-        <FlowAIBuilderQuestion
-          {question}
-          answered={questionAnswered}
-          answerLabel={questionAnswerLabel}
-          disabled={interactionDisabled}
-          onanswer={(payload) => onQuestionAnswer?.(payload)}
-        />
+        {#if questionAnswered || onQuestionAnswer}
+          <FlowAIBuilderQuestion
+            {question}
+            answered={questionAnswered}
+            answerLabel={questionAnswerLabel}
+            disabled={interactionDisabled}
+            onanswer={(payload) => onQuestionAnswer?.(payload)}
+          />
+        {:else}
+          <!-- The transcript never hosts a second live question: it is answered on the phase screen. -->
+          <p class="pending-question-note">
+            {question.question}
+            <span class="pending-question-hint">{m.ai_builder_question_answer_in_view()}</span>
+          </p>
+        {/if}
+        {#if questionAnswered && onEditAnswer}
+          <button
+            type="button"
+            class="edit-answer"
+            onclick={onEditAnswer}
+            disabled={interactionDisabled}
+          >
+            {m.ai_builder_conversation_edit_answer()}
+          </button>
+        {/if}
       {/if}
-      {#if requirementsSummary}
+      {#if requirementsSummary && compactRequirements}
+        <p class="pending-question-note">
+          {m.ai_builder_requirements_title()}
+          <span class="pending-question-hint">
+            {requirementsConfirmed
+              ? m.ai_builder_conversation_summary_confirmed()
+              : requirementsActive
+                ? m.ai_builder_question_answer_in_view()
+                : m.ai_builder_requirements_superseded()}
+          </span>
+        </p>
+      {:else if requirementsSummary}
         <FlowAIBuilderRequirementsSummary
           summary={requirementsSummary}
           userRequest={requirementsUserRequest}
@@ -108,6 +144,20 @@
 </div>
 
 <style lang="postcss">
+  .pending-question-note {
+    @apply mt-3 rounded-lg border px-3 py-2 text-[0.8125rem] leading-relaxed;
+    border-color: var(--border-dimmer);
+    color: var(--text-primary);
+  }
+  .pending-question-hint {
+    @apply ml-1 text-xs;
+    color: var(--text-secondary);
+  }
+  .edit-answer {
+    @apply mt-1.5 text-xs font-semibold underline-offset-[3px] hover:underline disabled:opacity-50;
+    color: var(--accent-default);
+  }
+
   @reference "@eneo/ui/styles";
 
   .message-row {
