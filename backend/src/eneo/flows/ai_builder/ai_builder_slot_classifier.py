@@ -849,8 +849,7 @@ def _build_slot_classification_prompt(
         "Typed evidence sources in conversation chronology, followed by stable "
         "file-id order:\n"
         f"{_render_slot_classification_sources(classification_input)}\n\n"
-        "Checkpoints this flow has now:\n"
-        f"{', '.join(active_checkpoint_producers) if active_checkpoint_producers else '(none)'}\n\n"
+        f"{_active_checkpoint_prompt_section(active_checkpoint_producers)}"
         "Unresolved slots and allowed values:\n"
         f"{chr(10).join(dimension_lines)}\n\n"
         "Current declared schema candidates (complete set):\n"
@@ -877,6 +876,22 @@ def _build_slot_classification_prompt(
         {"role": "system", "content": system},
         {"role": "user", "content": user},
     ]
+
+
+def _active_checkpoint_prompt_section(
+    producers: tuple[CheckpointProducerKind, ...],
+) -> str:
+    """Name the flow's checkpoints, and only when it has some.
+
+    A removal has to say which producer it removes, so the reading needs this
+    list to answer "drop the review" at all. Most flows never have a
+    checkpoint, and an empty section on every classification is prompt the
+    model still has to read past.
+    """
+
+    if not producers:
+        return ""
+    return "Checkpoints this flow has now:\n" + ", ".join(producers) + "\n\n"
 
 
 def _schema_candidate_prompt_lines(

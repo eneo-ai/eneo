@@ -701,7 +701,7 @@ async def test_runtime_admits_the_largest_conversation_that_fits() -> None:
             "Typed evidence sources in conversation chronology, followed by stable "
             "file-id order:\n",
             1,
-        )[1].split("\n\nCheckpoints this flow has now:", 1)[0]
+        )[1].split("\n\nUnresolved slots and allowed values:", 1)[0]
         admitted = admitted.split("\n", 1)[1]
 
         def fits(prompt: str) -> bool:

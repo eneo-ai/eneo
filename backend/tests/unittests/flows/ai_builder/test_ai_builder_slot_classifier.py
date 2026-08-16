@@ -2153,18 +2153,22 @@ async def test_classification_cache_separates_active_checkpoint_producers() -> N
 
     first = await classify(("transcript",))
     second = await classify(("structured_result",))
+    none_yet = await classify(())
     repeat = await classify(("transcript",))
 
     assert first.result is not None and first.result.cached is False
     assert second.result is not None and second.result.cached is False
+    assert none_yet.result is not None and none_yet.result.cached is False
     assert repeat.result is not None and repeat.result.cached is True
-    assert litellm_client.acompletion.await_count == 2
+    assert litellm_client.acompletion.await_count == 3
     prompts = [
         call.kwargs["messages"][1]["content"]
         for call in litellm_client.acompletion.await_args_list
     ]
     assert "Checkpoints this flow has now:\ntranscript" in prompts[0]
     assert "Checkpoints this flow has now:\nstructured_result" in prompts[1]
+    # A flow with no checkpoints carries no such section for the model to read.
+    assert "Checkpoints this flow has now" not in prompts[2]
 
 
 @pytest.mark.asyncio
