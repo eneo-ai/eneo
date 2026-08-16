@@ -697,7 +697,6 @@ class TestCreateSession:
         )
 
         repo.find_latest_resumable_session.assert_not_called()
-        repo.cancel_matching_active_sessions.assert_not_called()
         repo.create_session.assert_called_once()
 
     @pytest.mark.anyio
@@ -793,30 +792,6 @@ class TestCreateSession:
             )
 
     @pytest.mark.anyio
-    async def test_force_new_cancels_matching_draft_before_creating(self):
-        user = _make_user()
-        repo = AsyncMock()
-        repo.create_session.return_value = _make_session(
-            tenant_id=user.tenant_id, actor_user_id=user.id
-        )
-        service = _make_service(user=user, repo=repo)
-        space_id = uuid4()
-
-        await service.create_session(
-            space_id=space_id,
-            target_kind=TargetKind.CREATE,
-            force_new=True,
-        )
-
-        repo.cancel_matching_active_sessions.assert_called_once_with(
-            tenant_id=user.tenant_id,
-            actor_user_id=user.id,
-            space_id=space_id,
-            target_kind=TargetKind.CREATE,
-            flow_id=None,
-        )
-
-    @pytest.mark.anyio
     async def test_create_session_serializes_creation_before_resume_or_create(self):
         user = _make_user()
         repo = AsyncMock()
@@ -849,45 +824,6 @@ class TestCreateSession:
         resume_index = method_order.index("find_latest_resumable_session")
         create_index = method_order.index("create_session")
         assert lock_index < resume_index < create_index
-
-    @pytest.mark.anyio
-    async def test_force_new_supersedes_actionable_plans_on_cancelled_sessions(self):
-        user = _make_user()
-        repo = AsyncMock()
-        repo.cancel_matching_active_sessions.return_value = [uuid4(), uuid4()]
-        repo.create_session.return_value = _make_session(
-            tenant_id=user.tenant_id,
-            actor_user_id=user.id,
-            target_kind=TargetKind.EDIT,
-        )
-        flow_id = uuid4()
-        space_id = uuid4()
-        flow_service = AsyncMock()
-        flow_service.get_flow.return_value = SimpleNamespace(
-            id=flow_id,
-            space_id=space_id,
-        )
-        service = _make_service(
-            user=user,
-            repo=repo,
-            flow_service=flow_service,
-        )
-
-        await service.create_session(
-            space_id=space_id,
-            target_kind=TargetKind.EDIT,
-            flow_id=flow_id,
-            force_new=True,
-        )
-
-        assert repo.supersede_existing_plans.await_count == 2
-        superseded_session_ids = {
-            call.kwargs["session_id"]
-            for call in repo.supersede_existing_plans.await_args_list
-        }
-        assert superseded_session_ids == set(
-            repo.cancel_matching_active_sessions.return_value
-        )
 
 
 class TestSessionRecovery:
@@ -3087,3 +3023,30 @@ async def test_get_session_attachment_snapshot_warns_when_attached_file_has_no_r
     assert snapshot.files == [unreadable_file]
     assert any("readable" in warning.lower() for warning in snapshot.warnings)
     assert any(unreadable_file.name in warning for warning in snapshot.warnings)
+
+
+class TestSharedActorSessionIsolation:
+    @pytest.mark.anyio
+    async def test_starting_fresh_only_creates(self):
+        """Several authors can share one API key, so they share one actor.
+
+        Starting fresh must not reach for anyone else's session: the server
+        cannot tell which of them owns it.
+        """
+        user = _make_user()
+        repo = AsyncMock()
+        repo.create_session.return_value = _make_session(
+            tenant_id=user.tenant_id, actor_user_id=user.id
+        )
+        service = _make_service(user=user, repo=repo)
+
+        await service.create_session(
+            space_id=uuid4(),
+            target_kind=TargetKind.CREATE,
+            force_new=True,
+        )
+
+        repo.create_session.assert_awaited_once()
+        for method in repo.mock_calls:
+            assert "cancel" not in method[0]
+            assert "supersede" not in method[0]

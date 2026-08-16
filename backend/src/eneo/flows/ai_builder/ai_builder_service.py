@@ -7,7 +7,7 @@ conversation loop and plan lifecycle live in focused collaborators.
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
-from typing import TYPE_CHECKING, Any, AsyncGenerator, cast
+from typing import TYPE_CHECKING, Any, AsyncGenerator
 from uuid import UUID
 
 import litellm
@@ -227,16 +227,6 @@ class AIBuilderService:
             if existing_session is not None:
                 return existing_session
 
-        if force_new:
-            cancelled_session_ids = await self.repo.cancel_matching_active_sessions(
-                tenant_id=self.user.tenant_id,
-                actor_user_id=self.user.id,
-                space_id=space_id,
-                target_kind=target_kind,
-                flow_id=flow_id,
-            )
-            await self._supersede_cancelled_session_plans(cancelled_session_ids)
-
         return await self.repo.create_session(
             tenant_id=self.user.tenant_id,
             space_id=space_id,
@@ -244,24 +234,6 @@ class AIBuilderService:
             target_kind=target_kind,
             flow_id=flow_id,
         )
-
-    async def _supersede_cancelled_session_plans(
-        self,
-        cancelled_session_ids: object,
-    ) -> None:
-        """Supersede actionable plans from sessions replaced by a fresh start."""
-
-        if not isinstance(cancelled_session_ids, list | tuple | set):
-            return
-
-        for session_id in cast(
-            list[object] | tuple[object, ...] | set[object], cancelled_session_ids
-        ):
-            if isinstance(session_id, UUID):
-                await self.repo.supersede_existing_plans(
-                    session_id=session_id,
-                    tenant_id=self.user.tenant_id,
-                )
 
     async def get_session(self, session_id: UUID) -> BuilderSession:
         return await self.repo.get_session(

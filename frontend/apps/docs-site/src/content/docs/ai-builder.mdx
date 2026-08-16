@@ -115,6 +115,23 @@ OpenAPI schema or generated Eneo client: an unknown or misspelled property
 returns HTTP `422` with code `request_validation_error`. Correct the payload
 instead of retrying the same invalid request.
 
+## Several authors behind one API key
+
+A session belongs to whoever holds the session id, not to whoever created it.
+Everything that ends or advances a session — the send lock, cancel, apply —
+acts on one session id and never on "this caller's other sessions". Authors
+sharing one service key therefore cannot end each other's work, which matters
+because the server cannot tell them apart: one key is one actor.
+
+`force_new` on `POST /api/v1/flows/ai-builder/sessions` only creates a session.
+It does not replace or cancel any other. Sessions a caller abandons stay
+readable until the retention policy removes them.
+
+Two callers who send on the *same* session id do still conflict, and that is
+the only conflict left: the second send is refused with
+`session_send_in_progress` while the first turn is with the provider. Give each
+author their own session id.
+
 ## Reliable message sends and retries
 
 Each message send has one `client_turn_id`. A client creates this UUID once and

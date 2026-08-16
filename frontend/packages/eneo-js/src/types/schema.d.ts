@@ -13531,7 +13531,7 @@ export interface components {
       flow_id?: string | null;
       /**
        * Force New
-       * @description Start a fresh session instead of resuming, replacing this caller's earlier sessions for the same space and target. A session whose message is still being processed is never replaced, so authors sharing one key cannot interrupt each other's turn.
+       * @description Start a fresh session instead of resuming an earlier one. It only creates a session; it never ends another. Authors sharing one API key share an actor, so ending their sessions on their behalf would break whoever was still writing in one.
        * @default false
        */
       force_new?: boolean;

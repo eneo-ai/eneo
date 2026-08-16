@@ -114,6 +114,7 @@ from eneo.flows.ai_builder.ai_builder_router import send_message
 from eneo.flows.ai_builder.ai_builder_server_decision_dispatch import (
     ServerDecisionTelemetry,
 )
+from eneo.flows.ai_builder.ai_builder_service import AIBuilderService
 from eneo.flows.ai_builder.ai_builder_session_turn import (
     SessionSendLease,
     SessionSendTurn,
@@ -1954,14 +1955,15 @@ async def test_revise_plan_api_rejects_active_send_and_rolls_back(
 
 @pytest.mark.integration
 @pytest.mark.asyncio
-async def test_starting_fresh_replaces_idle_sessions_but_not_one_mid_turn(
+async def test_starting_fresh_leaves_every_other_session_of_the_same_actor_alone(
     db_container,
 ) -> None:
     """Several people author in one space through the same service principal.
 
-    Starting fresh replaces that principal's earlier drafts for the same target,
-    but a draft whose turn is already talking to the provider must survive: the
-    author of that turn would otherwise see it fail with a lost lease.
+    They share an actor, so the server cannot tell them apart. Starting fresh
+    must therefore mean "give me a new session", never "end everyone else's":
+    one author pressing it would otherwise cancel a draft another author is
+    still writing, and that author's next message would fail.
     """
     async with db_container() as container:
         user = container.user()
@@ -1974,6 +1976,15 @@ async def test_starting_fresh_replaces_idle_sessions_but_not_one_mid_turn(
         await container.session().flush()
 
         repo = AIBuilderRepository(container.session())
+        service = AIBuilderService(
+            user=user,
+            repo=repo,
+            flow_service=AsyncMock(),
+            completion_service=AsyncMock(),
+            file_service=AsyncMock(),
+            space_service=AsyncMock(),
+            template_asset_service=AsyncMock(),
+        )
         sending_session = await repo.create_session(
             tenant_id=user.tenant_id,
             space_id=space.id,
@@ -1992,29 +2003,26 @@ async def test_starting_fresh_replaces_idle_sessions_but_not_one_mid_turn(
             tenant_id=user.tenant_id,
         )
 
-        cancelled_session_ids = await repo.cancel_matching_active_sessions(
-            tenant_id=user.tenant_id,
-            actor_user_id=user.id,
+        fresh_session = await service.create_session(
             space_id=space.id,
             target_kind=TargetKind.CREATE,
-            flow_id=None,
+            force_new=True,
         )
 
-        # The turn that was in flight still owns its lease and reaches its end.
         await repo.mark_session_turn_processing(turn=turn)
         await repo.complete_session_turn(turn=turn)
-        surviving = await repo.get_session(
+        sending = await repo.get_session(
             session_id=sending_session.id,
             tenant_id=user.tenant_id,
         )
-        replaced = await repo.get_session(
+        idle = await repo.get_session(
             session_id=idle_session.id,
             tenant_id=user.tenant_id,
         )
 
-    assert cancelled_session_ids == [idle_session.id]
-    assert surviving.status == SessionStatus.CHATTING
-    assert replaced.status == SessionStatus.CANCELLED
+    assert fresh_session.id not in {sending_session.id, idle_session.id}
+    assert sending.status == SessionStatus.CHATTING
+    assert idle.status == SessionStatus.CHATTING
 
 
 @pytest.mark.integration
