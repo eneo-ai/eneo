@@ -1,6 +1,6 @@
 # Eneo Flows + Flow AI Builder — Master Program (living document)
 
-Status: EXECUTION PHASE, program **v10.10** (v10.2 architecture retained;
+Status: EXECUTION PHASE, program **v10.11** (v10.2 architecture retained;
 repair-economics order adjudicated 2026-08-12 and the post-smoke hold
 and post-citation order adjudicated 2026-08-13, then the sealed ×3
 conformance order adjudicated 2026-08-14 by max-effort Fable
@@ -155,6 +155,57 @@ selection on literal catalog identities is now a standing ruling (protocol
 names stay inside their adapters). No forecast is stated until the 15 stalls
 are adjudicated; the next sealed ×3 reports the product families against the
 `eeb8371e8` baseline on the unchanged corpus.
+
+v10.11 (2026-08-16, day 2 — landings and measured truth). Landed on
+`refactor/flows-clean` (trace per slice: its cited commit and, where a
+receipt exists, `.codex/artifacts/flow-builder-measure-20260816/`):
+STRICT-CAP, TOKEN-TRUTH, MODEL-IMMUTABLE, TEMPLATE-MODE, SECTION-WRITERS,
+CONFIRM-STABILITY re-landed with five fixes after its first landing regressed
+the corpus and was reverted (`dfd7771c9`, `66bd0364d`; the rule adopted then:
+Builder slices prove cohort + broad 158×1 on their own lane before
+cherry-pick), CP5-D1 roots-only (`ba64a7504`; topology is not model-authored,
+NESTING deferred), STREAM-FIX (`cdaf0ef87`: acceptance graded before classifier
+replay), application-logger visibility (`45ec7f030`: the import-time sweep
+that muted the `eneo` tree is deleted), AUDIO-TEXT (audio → written text now
+plans; `0bcf8333f..95ca5eb7f`), UPLOAD-CEILING (`73fc48cf5`: template drift
+10 MiB vs code 200 MiB; three layers, one min()), PAGE-HEADER (`6ec8a29d8`),
+PROMISE-KEEPING (`78dcf7d99..5a90b54d3`: an accepted requirement cannot be
+re-read away by already-answered evidence), FLOWS-API-DX (`8a3b0e1b1`: docs-site
++ OpenAPI pass a blind LLM buildability test), runtime R4/R5/R7/#17
+(`6f97a5037..505e0dce5`), and CHECKPOINT-DEFAULT (`ddf0d9a3e`, `4dfc097ad`:
+checkpoint updates carry an explicit/inferred grade and only explicit ones are
+stored, for set and clear, at the typed `CheckpointIntent`). Measured on the
+sealed environment: 158×1 on `95ca5eb7f` accepted 134/141 (95.0%), first pass
+130, errors 2, stalls 5, interaction-limit/unconfirmed/provider-unknown/
+stream-failed 0/0/0/0 (band on `da4236386`: 126–132 / 119–123); 158×1 on the
+CHECKPOINT-DEFAULT lane build `9867eb1f6` (`checkpoint-default/` receipt):
+first pass 137, accepted 139/141, errors 0, 0/0/0/0. Adjudications recorded:
+R2 checkpoint variance is not promise-breaking (in the measured captures the
+confirmed summary and the built flow agree); in the sealed `eeb8371e8`
+raw-classifier captures a large share of checkpoint updates cited quotes with
+no review language, mostly at high confidence, so admission by confidence could
+not fix it (qualitative; the exact grain is not frozen in a receipt — see
+commit `ddf0d9a3e`); on the lane's 24-session dirty-candidate probe
+(`checkpoint-default/probe-final-2/manifest.json`: base `5a90b54d3` + candidate
+diff hash; 16 silent, 4 explicit-set, 4 set-then-clear) the 16 silent sessions
+produced 0 explicit checkpoint updates and 0 checkpoints, the explicit-set
+sessions produced them, and set-then-clear removed them; the clean lane
+receipts (`checkpoint-default/`, build `9867eb1f6`) carry the cohort and broad
+numbers above. STALL-POLICY adjudicated
+all 20 stalls by prompt quote (13 intended / 7 product), made decision 8b
+deterministic on the board-packet case (10/10 asked), and surfaced MIXED-INPUT
+(prompts naming ≥2 runtime materials collapse to one modality — pre-existing);
+its commits are parked unlanded until MIXED-INPUT lands and its gate reaches
+≥8; Källgenomgång (`compare` vs `linear`) is PRODUCT/OPEN, not scripted away.
+Tuesday 2026-08-18 readiness (`tuesday-readiness/RECEIPT.md`): READY with two
+conditions — the audio ceiling decision (taken: 200 MiB default,
+admin-raisable) and two rules for app teams: read `final_output.output_type`
+and `steps_requiring_review` from `GET /run-contract/` before wiring the app,
+and say so in the Builder prompt when the flow must run unattended. In flight
+at this writing: MIXED-INPUT, EDIT-LANE (#16/#28), RUNTIME-COST (audio spend
+at the provider boundary; shared-key authors). Order after them: sealed ×3 on
+the head, FLOW-QUALITY report, #43 typed key-decision origin, #30 create
+compilation of explicit checkpoints, #45 producer attribution.
 
 This file owns execution and is the SOLE execution-order owner;
 `cp0-matrix-freeze.md` owns evidence and the gate inventory.
@@ -951,7 +1002,7 @@ ownership defect below.
     claim conformance credit. No alias table, fuzzy matcher, output-selected case
     tuning or cross-generation rescoring harness. CP4 still precedes any bounded
     fix and informs CP5's design gate.
-- [ ] CP5 Named-result completion, redesigned (AMENDED, iteration 33):
+- [x] CP5 Named-result completion, redesigned (AMENDED, iteration 33):
     named evidence owns PRESENCE, never design. Verified blockers the
     design gate must resolve BEFORE code: the current invariant
     accepts an obligated name at ANY depth
@@ -1046,7 +1097,7 @@ ownership defect below.
     recorded as conformance failures — never D1 successes or regressions;
     presence family zero, acceptance and conformance flat or better on the
     32 stable leaf cases, no new family.
-- [ ] STRICT-CAP Native strict-tool-schema capability (user directive
+- [x] STRICT-CAP Native strict-tool-schema capability (user directive
     2026-08-15): strict tool schemas are a transport/model feature like
     `supports_tool_calling`, so the owner is a typed completion-model
     capability (`supports_strict_tool_schema`, fail-closed default false, set
@@ -1060,7 +1111,7 @@ ownership defect below.
     of a code constant; the measurement model row is set true. Migration
     reversible and tested. Docs-site/SDK follow the OpenAPI change. Proof:
     typed contract tests plus the sealed capability probe — no battle cohort.
-- [ ] CONFIRM-STABILITY Confirmed planning evidence is stable (NEW; 4
+- [x] CONFIRM-STABILITY Confirmed planning evidence is stable (NEW; 4
     interaction limits, one case 3/3 in `eeb8371e8`, the same case 2/3 in
     ddb3): unchanged attachment and user evidence must yield the same
     requirements summary and version, so one confirmation matches. Today the
@@ -1095,7 +1146,7 @@ ownership defect below.
     confirmation, plan creation, bounded planner calls and tokens; a changed
     attachment or user message — or a recovered obligation — invalidates the
     confirmation and yields a new complete version.
-- [ ] TEMPLATE-MODE Attached template settles `docx_output_mode` — REUSE the
+- [x] TEMPLATE-MODE Attached template settles `docx_output_mode` — REUSE the
     existing resolver: `resolve_docx_mode_from_template_evidence`
     (`planning_state_builder.py` ~1211) already commits fill mode as a visible
     assumption for exactly one explicit, commit-grade, model-classified
@@ -1106,7 +1157,7 @@ ownership defect below.
     no duplicate logic in the issue rule. Cohort: the two attached-template
     cases ×3 (6/6 stalled in both ddb3 and eeb8371e8) plus one inferred-template
     and one multi-template case that must still ask.
-- [ ] SECTION-WRITERS Example structure is not mandatory topology: the
+- [x] SECTION-WRITERS Example structure is not mandatory topology: the
     requested sections already reach request preparation and the planning
     prompt (`ai_builder_planner_request_preparation.py` ~354,
     `ai_builder_plan_proposal_task.py` ~158), so "project the list" is not the
@@ -1141,7 +1192,7 @@ ownership defect below.
     old/new denominators printed, published as a new rebased lineage — never
     counted as accepted-plan recovery and never before the broad comparison
     run on the unchanged corpus.
-- [ ] TOKEN-TRUTH Prepared-schema token accounting (raised; now a D1
+- [x] TOKEN-TRUTH Prepared-schema token accounting (raised; now a D1
     prerequisite): the charged tool-schema tokens under-count the provider by
     ≈2,544 on the base create schema and ignore `$defs`; the reserve is 2,000
     and the count is consumed at two sites (attachment fitting and `fit()`).
