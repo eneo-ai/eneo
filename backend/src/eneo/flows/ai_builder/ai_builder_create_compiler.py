@@ -297,12 +297,11 @@ def _intent_with_obligated_output_fields(
     obligated root `documents: array`.
 
     The same any-depth search cuts the other way, so the envelope is completed
-    here too rather than in the assembly: an obligation nested as
-    `assessment{risks}` must not stand in for the server's own required root
-    `risks`. Only an obligated ROOT may satisfy an envelope role; the model's
-    own fields keep the assembly's existing satisfaction rule, so nothing about
-    plans without obligations changes. The assembly's global alias semantics
-    are untouched — it simply has nothing left to complete on this branch.
+    here too rather than in the assembly: the model's own fields keep the
+    assembly's existing satisfaction rule, so nothing about plans without
+    obligations changes, while an obligation satisfies an envelope role only by
+    carrying that role's own name. The assembly's global alias semantics are
+    untouched — it simply has nothing left to complete on this branch.
 
     Order matters and it is the whole correctness argument: what the model
     keeps is decided FIRST, and everything afterwards — collisions, envelope
@@ -314,20 +313,12 @@ def _intent_with_obligated_output_fields(
     obligated = intent.obligated_output_fields
     if not obligated or not intent.steps:
         return intent
-    # Two sets, because they answer two questions. Only a ROOT can outrank a
-    # model root; but EVERY obligated name, at any depth, may exist in exactly
-    # one place.
-    obligated_root_identities = {
-        fold_result_field_name(field.name) for field in obligated
-    }
-    obligated_identities = {
-        fold_result_field_name(name) for name in structured_field_draft_names(obligated)
-    }
+    obligated_identities = {fold_result_field_name(field.name) for field in obligated}
     terminal_step = intent.steps[-1]
     surviving_model_fields = [
         field
         for field in (terminal_step.output_fields or [])
-        if fold_result_field_name(field.name) not in obligated_root_identities
+        if fold_result_field_name(field.name) not in obligated_identities
     ]
     _reject_obligated_name_collisions(
         surviving_model_fields,
@@ -337,7 +328,7 @@ def _intent_with_obligated_output_fields(
     uncovered_envelope_fields = [
         field
         for field in envelope_fields
-        if fold_result_field_name(field.name) not in obligated_root_identities
+        if fold_result_field_name(field.name) not in obligated_identities
         and not structured_field_names_satisfy_result_field(
             model_declared_names,
             field.name,
@@ -370,13 +361,12 @@ def _reject_obligated_name_collisions(
 ) -> None:
     """Refuse a surviving model field that repeats a user-named result.
 
-    A model ROOT of an obligated root's identity is simply outranked and has
+    A model ROOT of an obligation's identity is simply outranked and has
     already been removed before this runs, so nothing here asks for a repair
     the model's own text could not perform. What remains is a second,
-    contradictory home for a name the contract binds exactly once — including
-    a nested obligation such as `assessment{risks}` reappearing under some
-    other branch — and that is repairable feedback rather than a silent choice
-    between two placements.
+    contradictory home for a name the contract binds exactly once — the same
+    name buried inside some other branch — and that is repairable feedback
+    rather than a silent choice between two placements.
     """
 
     for field in fields:

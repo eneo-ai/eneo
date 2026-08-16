@@ -75,12 +75,11 @@ class ObligatedResultKey:
 class ProposalObligationProjection:
     """The admitted obligation keys in the exact prepared-schema order.
 
-    The model places each key by naming the *index* of its container, and
-    JSON object member order is not schema order, so the index is meaningless
-    without the order the schema declared. This is that order: one instance is
-    built where the prepared schema is built, travels with it, and is read
-    again at admission, so the indices the model answered with are always
-    resolved against the very order it was shown. Which obligations are
+    One instance is built where the prepared schema is built, travels with it,
+    and is read again at admission, so the record the model answered with is
+    always resolved against the very key set it was shown. It also fixes the
+    order the compiled fields appear in, which JSON object member order cannot:
+    a provider is free to emit the members in any order. Which obligations are
     eligible is re-derived from one pure rule; the ORDER is never re-derived.
     """
 
@@ -102,50 +101,48 @@ def build_result_keys_schema(
 ) -> dict[str, Any]:
     """The flat staged `result_keys` record for one admitted projection.
 
-    Every key is a closed record of `field_type`, `description`, `required`
-    and `container`. `container` is a per-property integer enum of every
-    *other* declared position plus `null`, so self-reference and out-of-range
-    are unrepresentable and raw prepared-schema validation rejects them
-    before any staged check runs. The compact index is flat in cost at every
-    name length, which is why it ships instead of a name enum.
+    Every key is a closed record of `field_type`, `description` and
+    `required`. Placement is NOT among them: every projected obligation is a
+    root of the outcome contract, decided by the server. A parent relationship
+    is user evidence, and the understanding pass does not persist one, so
+    asking the proposal model where a name belongs asks it to re-invent
+    evidence that was never captured — which it did, producing contradictory
+    parents, containment cycles and repairs it could not escape.
+
+    `field_type` is a single-value enum wherever the user declared a shape, so
+    the shape the user attested to is the only legal answer and the server
+    materializes it from the projection either way. Where the user declared no
+    shape the model chooses a leaf type: `object` is excluded, because an
+    object with no way to declare children could never compile.
     """
 
-    names = projection.ordered_keys
+    unshaped_leaf_types = [
+        value for value in _STRUCTURED_FIELD_TYPE_VALUES if value != "object"
+    ]
     properties: dict[str, Any] = {
         key.name: {
             "type": "object",
             "additionalProperties": False,
-            "required": ["field_type", "description", "required", "container"],
+            "required": ["field_type", "description", "required"],
             "properties": {
                 "field_type": {
                     "type": "string",
                     "enum": (
                         [key.declared_shape]
                         if key.declared_shape is not None
-                        else list(_STRUCTURED_FIELD_TYPE_VALUES)
+                        else unshaped_leaf_types
                     ),
                 },
                 "description": {"type": "string"},
                 "required": {"type": "boolean"},
-                "container": {
-                    "type": ["integer", "null"],
-                    "enum": [
-                        *(other for other in range(len(names)) if other != index),
-                        None,
-                    ],
-                    "description": (
-                        "Exactly one declared result_keys key, or null for a "
-                        "root field."
-                    ),
-                },
             },
         }
-        for index, key in enumerate(projection.keys)
+        for key in projection.keys
     }
     return {
         "type": "object",
         "additionalProperties": False,
-        "required": list(names),
+        "required": list(projection.ordered_keys),
         "properties": properties,
     }
 
@@ -163,7 +160,6 @@ class _StagedObligatedField(BaseModel):
     field_type: StructuredFieldType
     description: str
     required: bool
-    container: int | None
 
 
 class FlowInputFieldIntent(BaseModel):
@@ -485,13 +481,18 @@ def _materialize_obligated_output_fields(
     *,
     projection: ProposalObligationProjection,
 ) -> tuple[StructuredFieldDraft, ...]:
-    """Turn the staged flat record into the obligated field graph.
+    """Turn the staged flat record into the obligated root fields.
 
-    Containment resolves against the projection's key order and never against
-    the returned object's member order, so permuting the members the provider
-    happens to emit cannot change the compiled graph. Only what the schema
-    cannot express is checked here: containment cycles, parent field types
-    that cannot hold children, and authoring depth.
+    Every obligation is a root, in the projection's order rather than the
+    returned object's member order, so permuting the members a provider
+    happens to emit cannot change the compiled graph. The shape comes from the
+    projection wherever the user declared one; the model only ever chooses a
+    leaf type for a name the user left unshaped.
+
+    A user-declared group compiles as an open object. Nothing in this contract
+    can name what belongs inside it — the parent relationship was never
+    captured — so the honest contract is an object whose members are not
+    constrained, not a string that quietly loses the group.
     """
 
     names = projection.ordered_keys
@@ -503,58 +504,16 @@ def _materialize_obligated_output_fields(
         raise ValueError(f"missing records for {', '.join(missing)}")
     staged = {name: _StagedObligatedField.model_validate(raw[name]) for name in names}
 
-    children: dict[str, list[str]] = {name: [] for name in names}
-    roots: list[str] = []
-    for name in names:
-        container = staged[name].container
-        if container is None:
-            roots.append(name)
-            continue
-        if not 0 <= container < len(names) or names[container] == name:
-            raise ValueError(f"{name}: container must name another declared key")
-        children[names[container]].append(name)
-
-    _reject_containment_cycles(staged, names=names)
-
-    def draft(name: str) -> StructuredFieldDraft:
-        record = staged[name]
-        nested = [draft(child) for child in children[name]]
-        if nested and record.field_type not in ("object", "array"):
-            raise ValueError(
-                f"{name}: field_type {record.field_type!r} cannot contain "
-                f"{', '.join(children[name])}; declare it as an object or array."
-            )
-        return StructuredFieldDraft(
-            name=name,
-            field_type=record.field_type,
-            description=record.description,
-            required=record.required,
-            fields=nested if record.field_type == "object" else None,
-            item_fields=(nested if record.field_type == "array" and nested else None),
+    return tuple(
+        StructuredFieldDraft(
+            name=key.name,
+            field_type=key.declared_shape or staged[key.name].field_type,
+            description=staged[key.name].description,
+            required=staged[key.name].required,
+            allow_additional_properties=key.declared_shape == "object",
         )
-
-    fields = [draft(name) for name in roots]
-    ensure_structured_field_depth(fields)
-    return tuple(fields)
-
-
-def _reject_containment_cycles(
-    staged: dict[str, _StagedObligatedField],
-    *,
-    names: tuple[str, ...],
-) -> None:
-    for name in names:
-        seen = {name}
-        container = staged[name].container
-        while container is not None:
-            parent = names[container]
-            if parent in seen:
-                raise ValueError(
-                    f"{name}: result keys must not contain each other in a cycle "
-                    f"({' -> '.join(sorted(seen))})."
-                )
-            seen.add(parent)
-            container = staged[parent].container
+        for key in projection.keys
+    )
 
 
 class ProposalIntentArgumentError(ValueError):

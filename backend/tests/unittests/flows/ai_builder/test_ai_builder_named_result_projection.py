@@ -9,16 +9,12 @@ every earlier version of this contract failed between two of those steps.
 
 from __future__ import annotations
 
-import importlib.util
-import json
-import sys
 from dataclasses import replace
 from datetime import datetime, timezone
-from pathlib import Path
-from types import ModuleType
 from typing import Any
 
 import pytest
+from pydantic import ValidationError
 
 from eneo.flows.ai_builder.ai_builder_action_policy import (
     NAMED_RESULT_PROJECTION_MAX_ITEMS,
@@ -68,6 +64,10 @@ from eneo.flows.ai_builder.ai_builder_schema_evidence import (
     build_schema_evidence,
     schema_fingerprint,
 )
+from eneo.flows.ai_builder.ai_builder_structured_field_normalizer import (
+    StructuredFieldAdmissionError,
+    normalize_structured_field_list,
+)
 from eneo.flows.ai_builder.ai_builder_tools import (
     ProposalToolArgumentsError,
     build_propose_flow_tool_schema,
@@ -87,29 +87,20 @@ from eneo.flows.ai_builder.planning_state import (
     ResolvedSlot,
 )
 from eneo.flows.flow_authoring_spec import FlowDraftSpecCore
-
-
-def _battle_harness() -> ModuleType:
-    """The corpus grader itself owns what "matches the declared graph" means."""
-
-    module_path = (
-        Path(__file__).resolve().parents[4]
-        / "scripts"
-        / "ai_builder_api_battle_test.py"
-    )
-    spec = importlib.util.spec_from_file_location(
-        "ai_builder_api_battle_test", module_path
-    )
-    assert spec is not None and spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[spec.name] = module
-    spec.loader.exec_module(module)
-    return module
-
+from eneo.flows.output_processing import (
+    prune_extras_to_strict_schema,
+    validate_against_contract,
+)
 
 # The two nested cases the repository already declares an outcome contract
-# for. They are the fixtures because they are the shapes the projection
-# exists to reach, not because they are convenient.
+# for. They are the fixtures because they carry the most user-named fields in
+# the corpus — but the projection compiles every one of them as a ROOT, so
+# neither reaches its declared nesting. That is a recorded conformance failure,
+# not a success: a parent relationship is user evidence, the understanding pass
+# does not persist one, and asking the proposal model to supply it produced
+# contradictory parents and repairs it could not escape. Nesting belongs to a
+# follow-up slice that captures cited parents first, and the acceptance test
+# for the exact nested graph is that slice's to write.
 PUBLIC_RECORD_OBLIGATIONS: tuple[tuple[str, NamedResultDeclaredShape | None], ...] = (
     ("documents", "array"),
     ("source_reference", None),
@@ -120,16 +111,6 @@ PUBLIC_RECORD_OBLIGATIONS: tuple[tuple[str, NamedResultDeclaredShape | None], ..
     ("excerpt_reference", None),
     ("reason_for_review", None),
 )
-PUBLIC_RECORD_CONTAINERS: dict[str, str | None] = {
-    "documents": None,
-    "source_reference": "documents",
-    "candidate_passages": "documents",
-    "stated_rule_reference": "documents",
-    "uncertainty": "documents",
-    "page_or_section": "candidate_passages",
-    "excerpt_reference": "candidate_passages",
-    "reason_for_review": "candidate_passages",
-}
 
 MEETING_ACTION_OBLIGATIONS: tuple[tuple[str, NamedResultDeclaredShape | None], ...] = (
     ("agenda_items", "array"),
@@ -142,17 +123,6 @@ MEETING_ACTION_OBLIGATIONS: tuple[tuple[str, NamedResultDeclaredShape | None], .
     ("evidence_excerpt", None),
     ("confidence", None),
 )
-MEETING_ACTION_CONTAINERS: dict[str, str | None] = {
-    "agenda_items": None,
-    "decisions": None,
-    "actions": None,
-    "open_questions": None,
-    "description": "actions",
-    "named_owner": "actions",
-    "stated_due_date": "actions",
-    "evidence_excerpt": "actions",
-    "confidence": "actions",
-}
 
 
 def _slot(name: str, value: str) -> ResolvedSlot:
@@ -235,7 +205,6 @@ def _arguments(
 
 def _staged_result_keys(
     projection: ProposalObligationProjection,
-    containers: dict[str, str | None],
     *,
     field_types: dict[str, str] | None = None,
     order: tuple[str, ...] | None = None,
@@ -252,17 +221,10 @@ def _staged_result_keys(
             ),
             "description": f"Innehållet för {name}.",
             "required": True,
-            "container": (
-                None if containers[name] is None else names.index(containers[name])  # type: ignore[arg-type]
-            ),
         }
         for name in names
     }
     return {name: records[name] for name in (order or names)}
-
-
-def _container_index(names: tuple[str, ...], container: str | None) -> int | None:
-    return None if container is None else names.index(container)
 
 
 def _terminal_output_contract(spec: FlowDraftSpecCore) -> dict[str, Any] | None:
@@ -308,32 +270,26 @@ def _compile_through_the_whole_path(
     return prepared.spec
 
 
-def _declared_case_schema(case_id: str) -> dict[str, Any]:
-    corpus = Path(__file__).resolve().parents[4] / "scripts"
-    payload = json.loads(
-        (corpus / "ai_builder_api_battle_cases.json").read_text(encoding="utf-8")
-    )
-    cases = payload["cases"] if isinstance(payload, dict) else payload
-    case = next(entry for entry in cases if entry["id"] == case_id)
-    return dict(case["expected"]["expected_output_contract_schema"])
-
-
-def test_admitted_obligations_compile_to_the_repository_declared_graph() -> None:
+def test_every_admitted_obligation_compiles_as_a_root() -> None:
+    # Every user-named field reaches the contract, each exactly once, with the
+    # shape the user declared. Placement is the part this slice does not
+    # attempt.
     state = _state(PUBLIC_RECORD_OBLIGATIONS)
     projection = named_result_projection(state)
     assert projection is not None
 
     spec = _compile_through_the_whole_path(
         state,
-        result_keys=_staged_result_keys(projection, PUBLIC_RECORD_CONTAINERS),
+        result_keys=_staged_result_keys(projection),
     )
 
     contract = _terminal_output_contract(spec)
     assert contract is not None
-    assert _battle_harness()._json_subset_matches(
-        _declared_case_schema("advanced_explicit_public_record_redaction_support"),
-        contract,
-    )
+    properties = contract["properties"]
+    assert set(properties) >= {name for name, _ in PUBLIC_RECORD_OBLIGATIONS}
+    assert properties["documents"]["type"] == "array"
+    assert properties["candidate_passages"]["type"] == "array"
+    assert properties["source_reference"]["type"] == "string"
 
 
 def test_permuting_returned_result_keys_preserves_the_compiled_graph() -> None:
@@ -345,15 +301,11 @@ def test_permuting_returned_result_keys_preserves_the_compiled_graph() -> None:
 
     in_declared_order = _compile_through_the_whole_path(
         state,
-        result_keys=_staged_result_keys(projection, PUBLIC_RECORD_CONTAINERS),
+        result_keys=_staged_result_keys(projection),
     )
     in_reversed_order = _compile_through_the_whole_path(
         state,
-        result_keys=_staged_result_keys(
-            projection,
-            PUBLIC_RECORD_CONTAINERS,
-            order=reversed_order,
-        ),
+        result_keys=_staged_result_keys(projection, order=reversed_order),
     )
 
     assert declared_order != reversed_order
@@ -362,41 +314,106 @@ def test_permuting_returned_result_keys_preserves_the_compiled_graph() -> None:
     )
 
 
-def test_admitted_obligations_compile_to_the_declared_meeting_action_nesting() -> None:
-    # The declared meeting-action contract also asks for JSON `null` unions on
-    # two leaves. Nullability is not in the authoring field-type vocabulary at
-    # all (`StructuredFieldType`), so it is a corpus expectation no create
-    # proposal can reach — a separate gap from placement, which is what D1
-    # owns and what this asserts.
-    state = _state(MEETING_ACTION_OBLIGATIONS, primary_runtime_input="audio")
+@pytest.mark.parametrize(
+    (
+        "obligations",
+        "runtime_input",
+        "declared_case_id",
+        "nested_parent",
+        "nested_child",
+    ),
+    [
+        pytest.param(
+            PUBLIC_RECORD_OBLIGATIONS,
+            "documents",
+            "advanced_explicit_public_record_redaction_support",
+            "documents",
+            "candidate_passages",
+            id="public_record",
+        ),
+        pytest.param(
+            MEETING_ACTION_OBLIGATIONS,
+            "audio",
+            None,
+            "actions",
+            "named_owner",
+            id="meeting_action",
+        ),
+    ],
+)
+def test_the_user_is_told_that_a_field_they_nested_will_be_top_level(
+    obligations: tuple[tuple[str, NamedResultDeclaredShape | None], ...],
+    runtime_input: str,
+    declared_case_id: str | None,
+    nested_parent: str,
+    nested_child: str,
+) -> None:
+    # Both corpus cases describe a child living inside a parent, and both
+    # compile flat. That is a real limitation, so what this pins is that the
+    # user is told before confirming — and told the one way to get the
+    # hierarchy they described. The limitation itself is measured in the
+    # cohort, not blessed here.
+    state = _state(obligations, primary_runtime_input=runtime_input)
     projection = named_result_projection(state)
     assert projection is not None
 
+    disclosure = build_requirements_disclosure(
+        state,
+        ui_language="sv",
+        discovery_assumptions=(),
+    )
+    assert "namngett innehåll" in disclosure.summary
+    assert "översta nivån" in disclosure.summary
+    assert "utdataschema" in disclosure.summary
+
     spec = _compile_through_the_whole_path(
         state,
-        result_keys=_staged_result_keys(projection, MEETING_ACTION_CONTAINERS),
+        result_keys=_staged_result_keys(projection),
     )
-
     contract = _terminal_output_contract(spec)
     assert contract is not None
-    properties = contract["properties"]
-    assert set(properties) >= {
-        "agenda_items",
-        "decisions",
-        "actions",
-        "open_questions",
-    }
-    action_item_properties = properties["actions"]["items"]["properties"]
-    assert set(action_item_properties) == {
-        "description",
-        "named_owner",
-        "stated_due_date",
-        "evidence_excerpt",
-        "confidence",
-    }
-    assert set(properties["actions"]["items"]["required"]) == set(
-        action_item_properties
+    parent = contract["properties"][nested_parent]
+    assert nested_child in contract["properties"]
+    assert nested_child not in parent.get("items", {}).get("properties", {})
+
+
+def test_an_edit_confirmation_shows_no_placement_limitation() -> None:
+    # Edit mode projects nothing, so the sentence would be attesting to a
+    # behaviour the turn does not have — and the confirmation is hashed, so the
+    # user would be confirming it.
+    state = _state(PUBLIC_RECORD_OBLIGATIONS)
+
+    assert named_result_projection(state, is_edit_mode=True) is None
+    disclosure = build_requirements_disclosure(
+        state,
+        ui_language="sv",
+        discovery_assumptions=(),
+        is_edit_mode=True,
     )
+
+    assert "namngett innehåll" in disclosure.summary
+    assert "översta nivån" not in disclosure.summary
+
+
+def test_a_declared_output_schema_shows_no_placement_limitation() -> None:
+    # The projection stands down entirely, so the flat-placement sentence would
+    # be describing something that is not happening.
+    state = _state(PUBLIC_RECORD_OBLIGATIONS)
+    state.output_schema_evidence = build_schema_evidence(
+        json_schema={"type": "object", "properties": {"documents": {"type": "array"}}},
+        source="declared_schema",
+        confidence="high",
+        evidence=("quote:user_message:user-1:schema",),
+    )
+
+    assert named_result_projection(state) is None
+    disclosure = build_requirements_disclosure(
+        state,
+        ui_language="sv",
+        discovery_assumptions=(),
+    )
+
+    assert "översta nivån" not in disclosure.summary
 
 
 def test_the_obligated_graph_wins_over_a_conflicting_model_field() -> None:
@@ -410,7 +427,7 @@ def test_the_obligated_graph_wins_over_a_conflicting_model_field() -> None:
 
     spec = _compile_through_the_whole_path(
         state,
-        result_keys=_staged_result_keys(projection, PUBLIC_RECORD_CONTAINERS),
+        result_keys=_staged_result_keys(projection),
         model_output_fields=[
             {
                 "name": "documents",
@@ -451,6 +468,7 @@ def _refusal_or_confirmation(
         state,
         ui_language="sv",
         discovery_assumptions=(),
+        is_edit_mode=is_edit_mode,
     )
     return resolve_turn_control(
         session_state=state,
@@ -514,19 +532,130 @@ def test_a_compilable_name_is_admitted_verbatim() -> None:
     assert isinstance(_refusal_or_confirmation(state), ConfirmRequirements)
 
 
-def test_a_lone_declared_object_refuses_instead_of_looping_repair() -> None:
-    # An object must declare nested fields and only another projected key can
-    # nest inside one, so a single declared object is a grain no proposal can
-    # satisfy.
-    state = _state((("case_metadata", "object"),))
+def test_a_declared_group_compiles_as_an_open_object() -> None:
+    # `stated_route{}` is a group the user named without saying what belongs
+    # inside it. Nothing in this contract can name its members, so the honest
+    # compilation is an object whose members are unconstrained — not a string
+    # that quietly loses the group, and not a refusal.
+    state = _state((("stated_route", "object"), ("case_id", None)))
+    projection = named_result_projection(state)
+    assert projection is not None
+    assert isinstance(_refusal_or_confirmation(state), ConfirmRequirements)
 
-    decision = _refusal_or_confirmation(state)
+    spec = _compile_through_the_whole_path(
+        state,
+        result_keys=_staged_result_keys(projection),
+    )
 
-    assert isinstance(decision, RefuseArchitectureCommit)
-    # Its own code: the name is valid, so telling the user to fix the spelling
-    # would be advice that cannot work.
-    assert decision.code is AIBuilderErrorCode.NAMED_RESULT_GRAIN_UNSUPPORTED
-    assert "inneh" in decision.message
+    contract = _terminal_output_contract(spec)
+    assert contract is not None
+    stated_route = contract["properties"]["stated_route"]
+    assert stated_route["type"] == "object"
+    assert stated_route["additionalProperties"] is True
+    assert "properties" not in stated_route
+
+
+def test_an_open_group_keeps_its_members_through_runtime_pruning() -> None:
+    # The open object is only worth compiling if the runtime keeps what the
+    # step puts in it. Pruning drops keys solely beneath an explicit
+    # `additionalProperties: false`, so these members survive.
+    state = _state((("stated_route", "object"),))
+    projection = named_result_projection(state)
+    assert projection is not None
+    spec = _compile_through_the_whole_path(
+        state,
+        result_keys=_staged_result_keys(projection),
+    )
+    contract = _terminal_output_contract(spec)
+    assert contract is not None
+    payload: dict[str, Any] = {
+        "stated_route": {"fran": "Sundsvall", "till": "Timrå"},
+        "ej_deklarerad": "tas bort",
+    }
+
+    result = prune_extras_to_strict_schema(payload, contract)
+
+    assert result.dropped_paths == ("/ej_deklarerad",)
+    assert payload["stated_route"] == {"fran": "Sundsvall", "till": "Timrå"}
+    validate_against_contract(payload, contract, label="terminal")
+
+
+def test_the_open_object_capability_is_unreachable_from_the_wire() -> None:
+    # It is a server capability, so the prepared schema must not offer it: a
+    # model cannot ask for an unconstrained object on one of its own fields.
+    state = _state((("case_id", None),))
+    projection = named_result_projection(state)
+    assert projection is not None
+
+    with pytest.raises(ProposalToolArgumentsError):
+        validate_propose_flow_tool_arguments(
+            arguments=_arguments(
+                result_keys=_staged_result_keys(projection),
+                model_output_fields=[
+                    {
+                        "name": "egen_grupp",
+                        "field_type": "object",
+                        "description": "Modellens egen öppna grupp.",
+                        "required": True,
+                        "allow_additional_properties": True,
+                    }
+                ],
+            ),
+            tool_schema=_prepared_schema(projection),
+        )
+
+
+def test_the_typed_admission_boundary_also_refuses_the_server_only_flag() -> None:
+    # The tool schema does not offer it, but the typed boundary must not depend
+    # on that: it is the owner of what a proposal may put in an output field.
+    with pytest.raises(StructuredFieldAdmissionError) as failure:
+        normalize_structured_field_list(
+            [
+                {
+                    "name": "egen_grupp",
+                    "field_type": "object",
+                    "description": "Modellens egen öppna grupp.",
+                    "required": True,
+                    "allow_additional_properties": True,
+                }
+            ]
+        )
+
+    assert "allow_additional_properties" in str(failure.value)
+
+
+def test_a_model_authored_empty_object_is_still_refused() -> None:
+    # The open object is a server capability for a user-declared group only.
+    # A model that invents an empty object still gets the repairable message.
+    with pytest.raises(ValidationError):
+        StructuredFieldDraft(
+            name="tom_grupp",
+            field_type="object",
+            description="En grupp modellen hittade på.",
+        )
+    with pytest.raises(ValidationError):
+        StructuredFieldDraft(
+            name="inte_ett_objekt",
+            field_type="string",
+            description="Öppenhet hör bara hemma på objekt.",
+            allow_additional_properties=True,
+        )
+    # Both at once would let the compiler silently pick one: it answers
+    # "declared members" first, so the openness would vanish without a word.
+    with pytest.raises(ValidationError):
+        StructuredFieldDraft(
+            name="bade_och",
+            field_type="object",
+            description="Både beskrivna och öppna medlemmar.",
+            allow_additional_properties=True,
+            fields=[
+                StructuredFieldDraft(
+                    name="medlem",
+                    field_type="string",
+                    description="En beskriven medlem.",
+                )
+            ],
+        )
 
 
 def test_pending_schema_direction_asks_before_the_projection_refuses() -> None:
@@ -599,36 +728,21 @@ def test_result_keys_are_refused_when_no_projection_was_prepared() -> None:
         parse_create_flow_intent_arguments(arguments)
 
 
-@pytest.mark.parametrize(
-    "container",
-    [0, 99],
-    ids=["own_index", "out_of_range"],
-)
-def test_the_container_index_enum_is_closed_and_self_excluding(
-    container: int,
-) -> None:
+def test_a_model_authored_placement_is_rejected_as_an_extra_property() -> None:
+    # Placement left the wire contract with the parent relationship it was
+    # guessing at. Raw prepared-schema validation is where that is enforced,
+    # before any staged check runs.
     state = _state(PUBLIC_RECORD_OBLIGATIONS)
     projection = named_result_projection(state)
     assert projection is not None
-    result_keys = _staged_result_keys(projection, PUBLIC_RECORD_CONTAINERS)
-    result_keys["documents"]["container"] = container
+    result_keys = _staged_result_keys(projection)
+    result_keys["source_reference"]["container"] = 0
 
     with pytest.raises(ProposalToolArgumentsError):
         validate_propose_flow_tool_arguments(
             arguments=_arguments(result_keys=result_keys),
             tool_schema=_prepared_schema(projection),
         )
-
-
-def test_a_containment_cycle_is_repairable_rather_than_fatal() -> None:
-    state = _state((("alpha", "object"), ("beta", "object")))
-    projection = named_result_projection(state)
-    assert projection is not None
-    result_keys = _staged_result_keys(
-        projection,
-        {"alpha": "beta", "beta": "alpha"},
-    )
-
     with pytest.raises(ProposalIntentArgumentError):
         parse_create_flow_intent_arguments(
             _arguments(result_keys=result_keys),
@@ -636,23 +750,45 @@ def test_a_containment_cycle_is_repairable_rather_than_fatal() -> None:
         )
 
 
-def test_a_parent_that_cannot_hold_children_is_repairable() -> None:
-    state = _state((("case_id", None), ("status", None)))
+def test_the_wire_record_asks_the_model_only_what_the_user_left_open() -> None:
+    # A declared shape is the user's, so its enum has exactly one member and
+    # the server materializes it either way. An unshaped name is a leaf the
+    # model may type — but never as an object, which could not compile.
+    state = _state((("documents", "array"), ("case_id", None)))
     projection = named_result_projection(state)
     assert projection is not None
-    result_keys = _staged_result_keys(
-        projection,
-        {"case_id": None, "status": "case_id"},
-        field_types={"case_id": "string"},
+
+    result_keys = _prepared_schema(projection)["function"]["parameters"]["properties"][
+        "result_keys"
+    ]
+
+    for record in result_keys["properties"].values():
+        assert set(record["properties"]) == {"field_type", "description", "required"}
+        assert record["required"] == ["field_type", "description", "required"]
+    assert result_keys["properties"]["documents"]["properties"]["field_type"][
+        "enum"
+    ] == ["array"]
+    case_id_types = result_keys["properties"]["case_id"]["properties"]["field_type"][
+        "enum"
+    ]
+    assert "object" not in case_id_types
+    assert "string" in case_id_types
+
+
+def test_a_declared_shape_wins_over_a_model_answer() -> None:
+    # The single-value enum makes disagreement unrepresentable on the wire, and
+    # the server materializes from the projection so it stays that way.
+    state = _state((("documents", "array"),))
+    projection = named_result_projection(state)
+    assert projection is not None
+    result_keys = _staged_result_keys(projection, field_types={"documents": "string"})
+
+    intent = parse_create_flow_intent_arguments(
+        _arguments(result_keys=result_keys),
+        obligation_projection=projection,
     )
 
-    with pytest.raises(ProposalIntentArgumentError) as failure:
-        parse_create_flow_intent_arguments(
-            _arguments(result_keys=result_keys),
-            obligation_projection=projection,
-        )
-
-    assert "case_id" in str(failure.value)
+    assert intent.obligated_output_fields[0].field_type == "array"
 
 
 def test_the_compiler_fails_closed_when_it_drops_an_admitted_obligation() -> None:
@@ -664,7 +800,7 @@ def test_the_compiler_fails_closed_when_it_drops_an_admitted_obligation() -> Non
     assert projection is not None
     spec = _compile_through_the_whole_path(
         state,
-        result_keys=_staged_result_keys(projection, PUBLIC_RECORD_CONTAINERS),
+        result_keys=_staged_result_keys(projection),
     )
 
     with pytest.raises(AIBuilderArchitectureError) as failure:
@@ -684,31 +820,26 @@ def test_the_compiler_fails_closed_when_it_drops_an_admitted_obligation() -> Non
     )
 
 
-def test_a_nested_obligation_does_not_suppress_a_server_owned_envelope_root() -> None:
-    # The assembly's completion finds a name at any depth, so an obligation
-    # nested as `assessment{risks}` would have stood in for the server's own
-    # required root `risks`. Only an obligated ROOT may satisfy an envelope
-    # role; the envelope is merged here for exactly that reason.
+def test_an_obligation_takes_the_envelope_role_of_its_own_name() -> None:
+    # The user named `risks` and the server's envelope wants a `risks` too.
+    # One field carries both, described the way the user's obligation is —
+    # merging the envelope copy beside it would bind the name twice.
     state = _state((("assessment", "object"), ("risks", None)))
     projection = named_result_projection(state)
     assert projection is not None
     context = create_compile_context_from_planning_state(state)
     assert context is not None
-    envelope_risks = StructuredFieldDraft(
-        name="risks",
-        field_type="string",
-        description="Serverägda risker.",
-    )
     context = replace(
         context,
-        result_contract_output_fields=(envelope_risks,),
+        result_contract_output_fields=(
+            StructuredFieldDraft(
+                name="risks",
+                field_type="string",
+                description="Serverägda risker.",
+            ),
+        ),
     )
-    arguments = _arguments(
-        result_keys=_staged_result_keys(
-            projection,
-            {"assessment": None, "risks": "assessment"},
-        )
-    )
+    arguments = _arguments(result_keys=_staged_result_keys(projection))
     validate_propose_flow_tool_arguments(
         arguments=arguments,
         tool_schema=_prepared_schema(projection),
@@ -722,9 +853,8 @@ def test_a_nested_obligation_does_not_suppress_a_server_owned_envelope_root() ->
 
     contract = _terminal_output_contract(spec)
     assert contract is not None
-    assert "assessment" in contract["properties"]
-    assert "risks" in contract["properties"]
-    assert "risks" in contract["properties"]["assessment"]["properties"]
+    assert contract["properties"]["risks"]["description"] == "Innehållet för risks."
+    assert contract["properties"]["assessment"]["additionalProperties"] is True
 
 
 def test_an_envelope_field_the_model_already_declared_is_not_duplicated() -> None:
@@ -744,7 +874,7 @@ def test_an_envelope_field_the_model_already_declared_is_not_duplicated() -> Non
         ),
     )
     arguments = _arguments(
-        result_keys=_staged_result_keys(projection, {"case_id": None}),
+        result_keys=_staged_result_keys(projection),
         model_output_fields=[
             {
                 "name": "risks",
@@ -772,7 +902,7 @@ def test_a_model_field_that_buries_an_obligated_name_is_repairable() -> None:
     assert projection is not None
     context = create_compile_context_from_planning_state(state)
     arguments = _arguments(
-        result_keys=_staged_result_keys(projection, {"case_id": None}),
+        result_keys=_staged_result_keys(projection),
         model_output_fields=[
             {
                 "name": "envelope",
@@ -818,7 +948,7 @@ def test_an_optional_obligation_survives_compilation_as_optional() -> None:
     state = _state((("case_id", None), ("note", None)))
     projection = named_result_projection(state)
     assert projection is not None
-    result_keys = _staged_result_keys(projection, {"case_id": None, "note": None})
+    result_keys = _staged_result_keys(projection)
     result_keys["note"]["required"] = False
 
     spec = _compile_through_the_whole_path(state, result_keys=result_keys)
@@ -829,26 +959,21 @@ def test_an_optional_obligation_survives_compilation_as_optional() -> None:
     assert contract["required"] == ["case_id"]
 
 
-def test_an_over_deep_obligation_chain_is_repairable() -> None:
-    depth = MAX_STRUCTURED_FIELD_DEPTH + 1
-    names = tuple(f"level_{index}" for index in range(depth))
-    state = _state(
-        tuple(
-            (name, "object" if index < depth - 1 else None)
-            for index, name in enumerate(names)
-        )
-    )
+def test_every_obligation_compiles_at_depth_one() -> None:
+    # Placement is server-owned and flat, so the authoring depth limit cannot
+    # be reached from a projection however many keys it admits.
+    names = tuple(f"level_{index}" for index in range(MAX_STRUCTURED_FIELD_DEPTH + 1))
+    state = _state(tuple((name, None) for name in names))
     projection = named_result_projection(state)
     assert projection is not None
-    containers = {
-        name: (names[index - 1] if index else None) for index, name in enumerate(names)
-    }
 
-    with pytest.raises(ProposalIntentArgumentError):
-        parse_create_flow_intent_arguments(
-            _arguments(result_keys=_staged_result_keys(projection, containers)),
-            obligation_projection=projection,
-        )
+    intent = parse_create_flow_intent_arguments(
+        _arguments(result_keys=_staged_result_keys(projection)),
+        obligation_projection=projection,
+    )
+
+    assert tuple(field.name for field in intent.obligated_output_fields) == names
+    assert all(field.fields is None for field in intent.obligated_output_fields)
 
 
 def test_a_discarded_model_root_cannot_suppress_an_envelope_field() -> None:
@@ -873,10 +998,7 @@ def test_a_discarded_model_root_cannot_suppress_an_envelope_field() -> None:
     )
     intent = parse_create_flow_intent_arguments(
         _arguments(
-            result_keys=_staged_result_keys(
-                projection,
-                {"assessment": None, "detail": "assessment"},
-            ),
+            result_keys=_staged_result_keys(projection),
             model_output_fields=[
                 {
                     "name": "assessment",
@@ -902,20 +1024,17 @@ def test_a_discarded_model_root_cannot_suppress_an_envelope_field() -> None:
     contract = _terminal_output_contract(spec)
     assert contract is not None
     assert "risks" in contract["properties"]
-    assert "risks" not in contract["properties"]["assessment"]["properties"]
+    assert "properties" not in contract["properties"]["assessment"]
 
 
-def test_a_surviving_model_field_repeating_a_nested_obligation_is_repairable() -> None:
+def test_a_surviving_model_field_repeating_an_obligation_is_repairable() -> None:
     state = _state((("assessment", "object"), ("risks", None)))
     projection = named_result_projection(state)
     assert projection is not None
     context = create_compile_context_from_planning_state(state)
     intent = parse_create_flow_intent_arguments(
         _arguments(
-            result_keys=_staged_result_keys(
-                projection,
-                {"assessment": None, "risks": "assessment"},
-            ),
+            result_keys=_staged_result_keys(projection),
             model_output_fields=[
                 {
                     "name": "other",
@@ -954,10 +1073,7 @@ def test_a_wholly_discarded_model_tree_does_not_demand_a_repair() -> None:
     context = create_compile_context_from_planning_state(state)
     intent = parse_create_flow_intent_arguments(
         _arguments(
-            result_keys=_staged_result_keys(
-                projection,
-                {"assessment": None, "detail": "assessment"},
-            ),
+            result_keys=_staged_result_keys(projection),
             model_output_fields=[
                 {
                     "name": "assessment",
@@ -1007,7 +1123,7 @@ def test_legacy_any_depth_model_satisfaction_of_an_envelope_field_is_unchanged()
     )
     intent = parse_create_flow_intent_arguments(
         _arguments(
-            result_keys=_staged_result_keys(projection, {"case_id": None}),
+            result_keys=_staged_result_keys(projection),
             model_output_fields=[
                 {
                     "name": "wrapper",
@@ -1036,38 +1152,57 @@ def test_legacy_any_depth_model_satisfaction_of_an_envelope_field_is_unchanged()
     assert "risks" in contract["properties"]["wrapper"]["properties"]
 
 
-def test_the_postcondition_covers_a_dropped_nested_obligation() -> None:
-    # A lost `assessment.risks` is exactly as broken a promise as a lost
-    # `assessment`, and only the roots survive by accident when a branch is
-    # rewritten.
-    # The server's envelope legitimately puts a `risks` root beside the user's
-    # `assessment.risks`, so a flat name set would let the survivor mask the
-    # loss. The postcondition matches paths for exactly that reason.
-    state = _state((("assessment", "object"), ("risks", None)))
+def test_the_postcondition_reports_the_path_it_lost_not_just_the_name() -> None:
+    # The projection is roots-only, so it hands the postcondition roots. The
+    # postcondition still checks each obligation at its own PATH, because a
+    # `risks` surviving elsewhere would otherwise mask the loss of the one that
+    # was promised. Handing it a nested obligation directly keeps that guard
+    # honest, and it is the guard the slice that adds nesting will rely on.
+    state = _state((("case_id", None),))
     projection = named_result_projection(state)
     assert projection is not None
-    context = create_compile_context_from_planning_state(state)
-    assert context is not None
-    context = replace(
-        context,
-        result_contract_output_fields=(
-            StructuredFieldDraft(
-                name="risks",
-                field_type="string",
-                description="Serverägda risker.",
-            ),
-        ),
+    spec = _compile_through_the_whole_path(
+        state,
+        result_keys=_staged_result_keys(projection),
+        model_output_fields=[
+            {
+                "name": "assessment",
+                "field_type": "object",
+                "description": "Modellens egen bedömning.",
+                "required": True,
+                "fields": [
+                    {
+                        "name": "risks",
+                        "field_type": "string",
+                        "description": "Risker inuti bedömningen.",
+                        "required": True,
+                    }
+                ],
+            },
+            {
+                "name": "risks",
+                "field_type": "string",
+                "description": "En rot med samma namn.",
+                "required": True,
+            },
+        ],
     )
-    containers = {"assessment": None, "risks": "assessment"}
-    intent = parse_create_flow_intent_arguments(
-        _arguments(result_keys=_staged_result_keys(projection, containers)),
-        obligation_projection=projection,
-    )
-    spec = compile_create_intent_to_spec(intent, context=context)
     compiled = _terminal_output_contract(spec)
     assert compiled is not None
     assert "risks" in compiled["properties"]
     assert "risks" in compiled["properties"]["assessment"]["properties"]
+    nested_obligation = StructuredFieldDraft(
+        name="assessment",
+        field_type="object",
+        description="Bedömningen.",
+        fields=[
+            StructuredFieldDraft(
+                name="risks",
+                field_type="string",
+                description="Risker inuti bedömningen.",
+            )
+        ],
+    )
 
     stripped_step = spec.steps[-1].model_copy(
         update={
@@ -1083,7 +1218,7 @@ def test_the_postcondition_covers_a_dropped_nested_obligation() -> None:
     stripped = spec.model_copy(update={"steps": [*spec.steps[:-1], stripped_step]})
 
     with pytest.raises(AIBuilderArchitectureError) as failure:
-        _spec_preserving_obligations(stripped, intent.obligated_output_fields)
+        _spec_preserving_obligations(stripped, (nested_obligation,))
 
     assert failure.value.log_context["failure_code"] == (
         "named_result_obligation_dropped"

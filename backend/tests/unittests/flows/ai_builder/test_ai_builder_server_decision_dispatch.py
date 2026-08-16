@@ -505,3 +505,10 @@ async def test_chained_confirmation_of_an_edit_session_ignores_named_result_admi
         "status",
         "requirements_summary",
     ]
+    # The chained path builds its own disclosure, so it also has to carry the
+    # edit-mode fact: an edit projects nothing, and the confirmation is hashed,
+    # so a create-only placement sentence would be attested to here.
+    summary = next(
+        event for event in result.events if event.event == "requirements_summary"
+    )
+    assert "top level" not in summary.data.summary

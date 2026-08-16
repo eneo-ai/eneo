@@ -102,6 +102,12 @@ class StructuredFieldDraft(BaseModel):
     required: bool = True
     fields: list["StructuredFieldDraft"] | None = None
     item_fields: list["StructuredFieldDraft"] | None = None
+    # An object whose members are deliberately left open. Server-set only, for
+    # a group the user named without saying what belongs inside it. Authoring
+    # cannot reach it: it is absent from the tool contract and refused by typed
+    # admission. It stays in dumps because admission round-trips a field
+    # through one — excluding it silently closed every open group.
+    allow_additional_properties: bool = False
 
     @field_validator("name")
     @classmethod
@@ -136,7 +142,22 @@ class StructuredFieldDraft(BaseModel):
     def _validate_shape(self) -> "StructuredFieldDraft":
         # Naming the offending field is what makes the rejection repairable
         # in one round; a bare shape message leaves the model guessing.
-        if self.field_type == "object" and not self.fields:
+        if self.allow_additional_properties and self.field_type != "object":
+            raise ValueError(
+                f"Only object fields may leave their members open ({self.name!r})."
+            )
+        if self.allow_additional_properties and self.fields is not None:
+            # The compiler answers "declared members" before "open members", so
+            # allowing both would let one silently win. A group is either
+            # described or open, never quietly half of each.
+            raise ValueError(
+                f"An open object declares no nested fields ({self.name!r})."
+            )
+        if (
+            self.field_type == "object"
+            and not self.fields
+            and not self.allow_additional_properties
+        ):
             raise ValueError(
                 f"Object field {self.name!r} must declare nested fields, "
                 "or use field_type string with the details in its description."

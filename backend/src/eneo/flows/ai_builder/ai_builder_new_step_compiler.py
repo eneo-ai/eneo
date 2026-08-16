@@ -916,6 +916,12 @@ def _compile_field_schema(field: StructuredFieldDraft) -> dict[str, Any]:
     }
     if field.field_type == "object" and field.fields is not None:
         schema.update(_compile_object_schema(field.fields))
+    elif field.field_type == "object" and field.allow_additional_properties:
+        # A group the user named without saying what belongs inside it. Its
+        # members stay unconstrained, so the step may fill them and runtime
+        # pruning keeps every one — pruning only drops keys beneath an
+        # explicit `additionalProperties: false`.
+        schema["additionalProperties"] = True
     elif field.field_type == "array":
         schema["items"] = _compile_array_items_schema(field)
     return schema

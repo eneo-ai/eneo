@@ -244,6 +244,7 @@ async def _dispatch_architecture_commit(
             session_state,
             ui_language=request.ui_language,
             discovery_assumptions=request.discovery_assumptions,
+            is_edit_mode=request.flow is not None,
         ),
         confirmed_requirements_version=request.confirmed_requirements_version,
         ui_language=request.ui_language,

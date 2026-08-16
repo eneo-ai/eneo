@@ -23,6 +23,13 @@ _REJECTION_SUFFIX = (
     "Resend the complete output_fields list using the declared tool shape."
 )
 
+# Set by the server for a group the user named without saying what belongs
+# inside it. The tool contract does not offer it, and this boundary is where
+# that is enforced rather than assumed. Admission round-trips a field through
+# its own dump, so the default travels with it: what is refused is a payload
+# that ASKS for an open object, not one carrying the default.
+_SERVER_ONLY_FIELD = "allow_additional_properties"
+
 
 class StructuredFieldAdmissionError(ValueError):
     """One decisive, model-repairable admission failure."""
@@ -61,6 +68,11 @@ def _admit_structured_field_item(value: Any, *, path: str) -> dict[str, Any]:
         draft = value
     elif isinstance(value, dict):
         raw_item = cast(dict[str, Any], value)
+        if raw_item.get(_SERVER_ONLY_FIELD):
+            raise StructuredFieldAdmissionError(
+                f"{path}.{_SERVER_ONLY_FIELD}",
+                "is not part of the field contract",
+            )
         try:
             draft = StructuredFieldDraft.model_validate(raw_item)
         except ValidationError as error:

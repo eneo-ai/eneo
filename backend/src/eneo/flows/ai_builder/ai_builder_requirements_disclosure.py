@@ -24,6 +24,9 @@ import json
 from collections.abc import Callable, Mapping
 from typing import assert_never
 
+from eneo.flows.ai_builder.ai_builder_action_policy import (
+    named_result_projection,
+)
 from eneo.flows.ai_builder.ai_builder_attachment_context import (
     render_ai_builder_evidence_value,
 )
@@ -100,6 +103,7 @@ def build_requirements_disclosure(
     *,
     ui_language: str | None,
     discovery_assumptions: tuple[str, ...] = (),
+    is_edit_mode: bool = False,
 ) -> RequirementsSummaryPayload:
     """Render the complete disclosure and stamp the version that hashes it."""
 
@@ -109,12 +113,14 @@ def build_requirements_disclosure(
         locale,
         discovery_assumptions,
         render_value=_whole_evidence_value,
+        is_edit_mode=is_edit_mode,
     )
     display = _disclosure_content(
         session_state,
         locale,
         discovery_assumptions,
         render_value=render_ai_builder_evidence_value,
+        is_edit_mode=is_edit_mode,
     )
     return RequirementsSummaryPayload(
         **display.model_dump(),
@@ -128,6 +134,7 @@ def _disclosure_content(
     discovery_assumptions: tuple[str, ...],
     *,
     render_value: RenderEvidenceValue,
+    is_edit_mode: bool,
 ) -> RequirementsDisclosureContent:
     resolved = session_state.resolved_slots
     key_decisions = [
@@ -153,7 +160,7 @@ def _disclosure_content(
     output_description = _output_description(resolved, locale)
     summary = _summary_text(resolved, locale)
     schema_summary_lines = _schema_summary_lines(
-        session_state, locale, render_value=render_value
+        session_state, locale, render_value=render_value, is_edit_mode=is_edit_mode
     )
     if schema_summary_lines:
         summary = f"{summary} {' '.join(schema_summary_lines)}"
@@ -522,6 +529,7 @@ def _schema_summary_lines(
     locale: Locale,
     *,
     render_value: RenderEvidenceValue,
+    is_edit_mode: bool,
 ) -> list[str]:
     lines: list[str] = []
     input_evidence = session_state.input_schema_evidence
@@ -542,7 +550,7 @@ def _schema_summary_lines(
             )
         )
     named_result_line = _named_result_summary_line(
-        session_state, locale, render_value=render_value
+        session_state, locale, render_value=render_value, is_edit_mode=is_edit_mode
     )
     if named_result_line is not None:
         lines.append(named_result_line)
@@ -559,6 +567,7 @@ def _named_result_summary_line(
     locale: Locale,
     *,
     render_value: RenderEvidenceValue,
+    is_edit_mode: bool,
 ) -> str | None:
     # Every obligation with the shape the user wrote next to it. The old line
     # showed eight bare names and then claimed structure was not fixed, which
@@ -571,10 +580,34 @@ def _named_result_summary_line(
         for obligation in obligations
     )
     if locale == "sv":
-        return (
+        preserved = (
             f"Användaren har namngett innehåll som slutresultatet ska bevara: {names}."
         )
-    return f"The user named content that the final result must preserve: {names}."
+    else:
+        preserved = (
+            f"The user named content that the final result must preserve: {names}."
+        )
+    if named_result_projection(session_state, is_edit_mode=is_edit_mode) is None:
+        # Nothing is being projected — an edit has no create schema to project
+        # into, an exact declared schema owns the shape, or this is not a
+        # structured result at all — so describing flat placement would
+        # describe something that is not happening. The confirmation is hashed,
+        # so a sentence that does not apply would be attested to as if it did.
+        return preserved
+    # The placement limitation belongs here, not in a later error: these fields
+    # are built side by side at the top level, so a user who described one
+    # field as living inside another sees that before confirming, together with
+    # the one way to get the hierarchy they asked for.
+    if locale == "sv":
+        return (
+            f"{preserved} Varje fält byggs på översta nivån, sida vid sida. "
+            "Bifoga ett uttryckligt utdataschema om något fält ska ligga inuti "
+            "ett annat."
+        )
+    return (
+        f"{preserved} Each field is built at the top level, side by side. Attach "
+        "an explicit output schema if a field belongs inside another."
+    )
 
 
 def _named_result_text(

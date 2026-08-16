@@ -135,7 +135,6 @@ class AIBuilderErrorCode(StrEnum):
     INVALID_QUESTION_PAYLOAD = "invalid_question_payload"
     INVALID_SESSION_TRANSITION = "invalid_session_transition"
     MODEL_NOT_AVAILABLE = "model_not_available"
-    NAMED_RESULT_GRAIN_UNSUPPORTED = "named_result_grain_unsupported"
     NAMED_RESULT_KEY_UNSUPPORTED = "named_result_key_unsupported"
     NOT_FOUND = "not_found"
     NO_PLANNER_MODEL_AVAILABLE = "no_planner_model_available"
@@ -678,12 +677,6 @@ AI_BUILDER_ERROR_REGISTRY: _AIBuilderErrorRegistry = MappingProxyType(
             eneo_error_code=ErrorCodes.BAD_REQUEST,
         ),
         AIBuilderErrorCode.SCHEMA_LIMIT_EXCEEDED: _entry(
-            category=AIBuilderErrorCategory.BAD_REQUEST,
-            http_status=400,
-            eneo_error_code=ErrorCodes.BAD_REQUEST,
-            default_phase=AIBuilderErrorPhase.PLANNER,
-        ),
-        AIBuilderErrorCode.NAMED_RESULT_GRAIN_UNSUPPORTED: _entry(
             category=AIBuilderErrorCategory.BAD_REQUEST,
             http_status=400,
             eneo_error_code=ErrorCodes.BAD_REQUEST,

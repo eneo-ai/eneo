@@ -122,15 +122,6 @@ def _named_result_projection_refusal_code(
         for key in projection.keys
     ):
         return AIBuilderErrorCode.NAMED_RESULT_KEY_UNSUPPORTED
-    if len(projection.keys) == 1 and projection.keys[0].declared_shape == "object":
-        # An object must declare nested fields, and the only thing that can
-        # nest inside a projected key is another projected key. A lone
-        # declared object is therefore a grain no proposal can satisfy — it
-        # would loop the repair path instead of failing — so it is refused
-        # while the user can still say what belongs inside it. The name is
-        # perfectly valid, so this is its own code: telling the user to fix
-        # the spelling of a name that is already fine is worse than silence.
-        return AIBuilderErrorCode.NAMED_RESULT_GRAIN_UNSUPPORTED
     return None
 
 
