@@ -574,6 +574,17 @@ This is especially useful for browser retries, webhook retries, and unreliable n
 
 #### Receiving terminal Flow webhooks
 
+There is no callback parameter on run creation. `FlowRunCreateRequest` accepts
+exactly `expected_flow_version`, `input_payload_json`, and `step_inputs`, and
+rejects anything else, so a client cannot register a URL for Eneo to call back.
+Completion is discovered by polling the run.
+
+A push notification is instead something the **flow author** builds: a terminal
+step with output mode `http_post` and a destination configured at authoring
+time. The run contract then reports `final_output.delivery` as `outbound_http`,
+and the run detail response exposes each attempt read-only through
+`webhook_deliveries`. Everything below describes that authored delivery.
+
 Terminal HTTP POST output uses an **at-least-once sender contract**. A timeout,
 connection loss, worker crash, or claim expiry can occur after the receiver
 accepted a request but before Eneo committed its receipt, so duplicate POSTs
@@ -673,6 +684,11 @@ const page = await client.flows.runs.list({
   offset: 0
 });
 ```
+
+Page through on `has_more`, not on `count`: `count` is the number of items in
+the page you just received, not the total number of matching runs. It cannot
+tell you whether pagination is complete, and using it as the stop condition
+typically stops after the first page and silently skips the rest.
 
 Typical polling loop:
 

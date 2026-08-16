@@ -1245,6 +1245,20 @@ async def test_count_active_runs_counts_only_queued_and_running_statuses(
                 }
             ],
         )
+        awaiting_review_run = await run_repo.create(
+            flow_id=flow.id,
+            flow_version=1,
+            principal_user_id=admin_user.id,
+            tenant_id=admin_user.tenant_id,
+            input_payload_json={"case": "awaiting_review"},
+            preseed_steps=[
+                {
+                    "step_id": flow.steps[0].id,
+                    "assistant_id": flow.steps[0].assistant_id,
+                    "step_order": 1,
+                }
+            ],
+        )
 
         claimed = await run_repo.mark_running_if_claimable(
             run_id=running_run.id,
@@ -1256,6 +1270,14 @@ async def test_count_active_runs_counts_only_queued_and_running_statuses(
             sa.update(FlowRuns)
             .where(FlowRuns.id == completed_run.id)
             .values(status=FlowRunStatus.COMPLETED.value)
+        )
+        # A run paused for human review is the one status that is neither
+        # terminal nor active. It holds no concurrency slot, which is exactly
+        # what the public capacity contract promises.
+        await session.execute(
+            sa.update(FlowRuns)
+            .where(FlowRuns.id == awaiting_review_run.id)
+            .values(status=FlowRunStatus.AWAITING_REVIEW.value)
         )
 
         active_count = await run_repo.count_active_runs(tenant_id=admin_user.tenant_id)

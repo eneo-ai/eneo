@@ -424,7 +424,7 @@ That split is deliberate. A service key is a **runtime principal**, not a draft 
 
 ### Core rules
 
-- **Drafts are user-principal-owned.** Draft CRUD, publish/unpublish, template management, flow-assistant authoring, and AI Builder require a user principal.
+- **Drafts are user-principal-owned.** Draft create, update, and delete, publish/unpublish, template management, flow-assistant authoring, and AI Builder require a user principal. Reading a draft additionally allows an admin service key whose scope covers the flow.
 - **Published runtime is broader.** Published flows can be executed by a user principal or a service key, but runtime visibility still depends on who owns the run and who is a trusted operator.
 - **Own-run isolation matters.** Service keys are always own-run-only. They do not become cross-run space operators, even if the key is scoped to a space.
 - **Trusted operator roles use user principals.** In this context, trusted in-space operators means **space owner** and **space admin**. Tenant admin remains the tenant-wide trusted operator.
@@ -436,8 +436,9 @@ That split is deliberate. A service key is a **runtime principal**, not a draft 
   runtime-safe projection with{" "}
   <code>GET /api/v1/flows/{"{id}"}/published/</code>. Do <strong>not</strong>{" "}
   treat <code>GET /api/v1/flows/{"{id}"}/</code> as a service-key discovery
-  endpoint; that route requires a user principal and returns the current
-  draft/current-definition view.
+  endpoint; it serves the draft/current-definition view, and a non-admin
+  service key receives <code>403</code> with{" "}
+  <code>flow_service_key_admin_required</code>.
 </Callout>
 
 ![Run visibility and evidence access showing four actor types with their access scope and evidence gating](/diagrams/flows-run-visibility.svg)

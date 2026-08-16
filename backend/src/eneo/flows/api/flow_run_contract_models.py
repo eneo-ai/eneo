@@ -403,8 +403,10 @@ class FlowRunCapacityPublic(BaseModel):
     tenant_id: UUID = Field(description="Tenant the capacity is measured for.")
     active_runs: int = Field(
         description=(
-            "Runs currently occupying tenant concurrency, in any non-terminal "
-            "status. Includes work queued or running from other clients."
+            "Runs currently occupying tenant concurrency: those `queued` or "
+            "`running`. Includes work from other clients. A run paused at "
+            "`awaiting_review` is not terminal but holds no slot, so it is "
+            "not counted here."
         )
     )
     max_concurrent_runs: int = Field(

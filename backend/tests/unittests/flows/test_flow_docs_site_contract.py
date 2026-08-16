@@ -4043,9 +4043,13 @@ def test_flow_consumer_docs_match_sdk_and_service_key_runtime_contract() -> None
     assert "`resource_permissions.flows >= read`" in guide
     assert "`flow_evidence >= write`" in guide
     assert "ordinary file API" in key_management
-    assert "Flow runtime input routes are a separate" in key_management
+    assert "Flow-scoped exception" in key_management
     assert "/steps/{step_id}/runtime-files/" in key_management
     assert "/runtime-files/{file_id}/" in key_management
+    assert "/runs/" in key_management
+    # A key that omits `flows` is refused on every Flow route, so the page has
+    # to name the resource type, not only describe the exception.
+    assert "`flows`" in key_management
     assert "Service keys cannot upload files and cannot delete files." not in (
         key_management
     )

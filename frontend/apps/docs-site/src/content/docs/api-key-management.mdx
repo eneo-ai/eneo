@@ -15,7 +15,7 @@ Every API key has a type prefix that determines its intended use and security co
 | **Use case**             | Server-to-server, backend integrations | Browser-based, frontend apps                                              |
 | **Access restriction**   | IP allowlist (CIDR notation)           | Origin allowlist (scheme required)                                        |
 | **Max permission**       | `admin`                                | `read`                                                                    |
-| **Resource permissions** | Supported                              | Supported for `none`/`read` only (`jobs` and `prompts` are not available) |
+| **Resource permissions** | Supported                              | Supported for `none`/`read` only (`jobs`, `prompts`, and `flow_evidence` are not available) |
 | **Origin restrictions**  | Not allowed                            | Required for creation (at least one)                                      |
 | **IP restrictions**      | Optional                               | Not allowed                                                               |
 
@@ -64,7 +64,14 @@ Service keys are automation principals, not service accounts. They can read, upd
 
 The ordinary file API is the important exception to "delete existing resources": files are user-owned today. Service keys cannot use the general file upload or delete endpoints. General file upload returns `403` with `code: "service_key_cannot_create_resources"`, and general file delete returns `403` with `code: "service_key_cannot_delete_files"`.
 
-Flow runtime input routes are a separate, Flow-scoped exception. A service key with `resource_permissions.flows = write`—or an equivalent top-level write grant on a key without resource permissions—can upload runtime inputs to a published Flow through `POST /api/v1/flows/{flow_id}/steps/{step_id}/runtime-files/`. It can delete only its own unattached upload through `DELETE /api/v1/flows/{flow_id}/runtime-files/{file_id}/`. Once a runtime file is attached to persisted run or rerun state, cleanup returns `409` with `code: "flow_runtime_file_attached"` instead of deleting it.
+Published-Flow runtime routes are a separate, Flow-scoped exception, and they are what an external integration actually needs. A service key with `resource_permissions.flows = write`—or an equivalent top-level write grant on a key without resource permissions—can:
+
+- upload runtime inputs through `POST /api/v1/flows/{flow_id}/steps/{step_id}/runtime-files/`;
+- **create runs of a published Flow** through `POST /api/v1/flows/{flow_id}/runs/`;
+- cancel its own runs, and edit, approve, reject, or resume human-review checkpoints for runs the same key created;
+- delete only its own unattached upload through `DELETE /api/v1/flows/{flow_id}/runtime-files/{file_id}/`. Once a runtime file is attached to persisted run or rerun state, cleanup returns `409` with `code: "flow_runtime_file_attached"` instead of deleting it.
+
+`flows = read` covers the read half of that journey: published flows, runtime paths, run contracts, own run status, and active review checkpoints. Authoring—draft create, update, delete, publish, template management, and AI Builder—stays with user principals.
 
 Two related guardrails come from the same principle:
 
@@ -150,7 +157,16 @@ Per-key overrides are possible via the `rate_limit` field. The tenant policy `ma
 
 Some endpoints override this mapping. For example, certain POST endpoints that are semantically read operations (like search) accept `read` permission.
 
-**Resource-level** (feature-gated): If the key has `resource_permissions` configured, per-resource-type permissions are checked for `assistants`, `apps`, `spaces`, `knowledge`, `conversations`, `files`, `jobs`, and `prompts`. For `sk_` keys, the top-level `permission` is derived from the highest configured resource permission when the key is created or updated. For `pk_` keys, every resource permission is capped to `none` or `read`, and `jobs`/`prompts` are rejected.
+**Resource-level** (feature-gated): If the key has `resource_permissions` configured, per-resource-type permissions are checked for `flows`, `flow_evidence`, `assistants`, `apps`, `spaces`, `knowledge`, `conversations`, `files`, `jobs`, and `prompts`. For `sk_` keys, the top-level `permission` is derived from the highest configured resource permission when the key is created or updated. For `pk_` keys, every resource permission is capped to `none` or `read`, and `jobs`, `prompts`, and `flow_evidence` are rejected.
+
+<Callout type="warning">
+  Once `resource_permissions` is set it replaces the top-level permission for
+  every listed resource type, and a type left unset counts as `none`. A key
+  configured without `flows` is refused on every Flow route with `403` and
+  `code: "insufficient_resource_permission"`, even when its top-level
+  `permission` is `admin`. Set `flows` explicitly on any key that drives Flow
+  runs.
+</Callout>
 
 ### 7. Scope Enforcement
 
@@ -187,7 +203,7 @@ Permissions define what operations a key can perform within its scope:
 | `write`    | EDITOR     | Create and update resources             | Update supported existing resources (creation is gated)                  |
 | `admin`    | ADMIN      | Delete resources, manage space settings | Delete supported existing resources, manage settings (creation is gated) |
 
-For the ordinary file API, `write` allows a user key to upload files owned by that user. `admin` is required to delete files, and deletion is still limited to files owned by the key's user. Service keys cannot use those ordinary upload/delete routes. The published-Flow runtime input routes described above are the narrow exception for service-owned pre-run uploads and orphan cleanup.
+For the ordinary file API, `write` allows a user key to upload files owned by that user. `admin` is required to delete files, and deletion is still limited to files owned by the key's user. Service keys cannot use those ordinary upload/delete routes. The published-Flow runtime routes described above are the narrow exception, covering service-owned pre-run uploads, run creation, orphan cleanup, and own-run review decisions.
 
 ### How Service Keys Derive Space Roles
 
@@ -306,7 +322,7 @@ Tenant administrators can configure API key policies that apply to all keys in t
 
 Use an `sk_` key for backend systems, scheduled jobs, MCP servers, and other server-to-server integrations. `sk_` keys can use `read`, `write`, or `admin` permission and may be restricted by client IP.
 
-Use a `pk_` key only for browser-based integrations. `pk_` keys are read-only, must list allowed origins, cannot use IP restrictions, and can only use `none` or `read` resource permissions. `jobs` and `prompts` resource permissions are rejected for `pk_` keys.
+Use a `pk_` key only for browser-based integrations. `pk_` keys are read-only, must list allowed origins, cannot use IP restrictions, and can only use `none` or `read` resource permissions. The `jobs`, `prompts`, and `flow_evidence` resource permissions are rejected for `pk_` keys. Because `pk_` keys never reach `write`, they cannot upload Flow runtime files or create Flow runs; those calls belong to the application's own server.
 
 ### Should integrations use user keys or service keys?
 
@@ -322,7 +338,7 @@ V2 keys add explicit permission levels, scopes, ownership, and optional per-reso
 - `write` allows create/update-style requests such as `POST`, `PUT`, and `PATCH`
 - `admin` allows delete-style requests such as `DELETE`
 
-Routes can override the method mapping when a request is semantically read-only. If `resource_permissions` are set, the key must also have enough permission for that resource type. Resource permissions can be configured for `assistants`, `apps`, `spaces`, `knowledge`, `conversations`, `files`, `jobs`, and `prompts`. For `sk_` keys, the top-level permission is derived from the highest configured resource permission. For `pk_` keys, every resource permission is capped at `read`, and `jobs`/`prompts` are not available.
+Routes can override the method mapping when a request is semantically read-only. If `resource_permissions` are set, the key must also have enough permission for that resource type, and a resource type left unset counts as `none`. See [Permission Enforcement](#6-permission-enforcement) above for the resource types, the `pk_` restrictions, and why a key that drives Flows must set `flows` explicitly.
 
 ### How do scopes affect access?
 
@@ -343,7 +359,7 @@ No. API-key management endpoints require a session login. API-key callers, inclu
 
 No. This is the main caveat with service keys: they are automation principals, not resource owners. Service keys can operate on supported existing resources within their scope, but endpoints that create new rows owned by `user_id` reject service-key callers with `code: "service_key_cannot_create_resources"`.
 
-Create assistants, apps, spaces, group chats, prompts, collections, websites, ordinary files, info blobs, roles, and MCP servers with a user account first. Then use the service key for supported automation around those resources. The general file API remains user-owned; the narrow exception is published-Flow runtime input upload and cleanup for the same service principal, using the Flow-scoped runtime routes documented above.
+Create assistants, apps, spaces, group chats, prompts, collections, websites, ordinary files, info blobs, roles, and MCP servers with a user account first. Then use the service key for supported automation around those resources. The general file API remains user-owned; the narrow exception is the published-Flow runtime routes documented above, which let the same service principal upload runtime inputs, create runs, clean up its own unattached uploads, and resolve its own runs' review checkpoints.
 
 ### What happens to our old keys?
 

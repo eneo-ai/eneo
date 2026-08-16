@@ -4160,8 +4160,9 @@ export interface paths {
      *
      *     Use this before submitting a batch, so a client discovers the tenant ceiling
      *     up front instead of as a rejected `create_run` partway through. `active_runs`
-     *     counts every non-terminal run in the tenant, including work started by other
-     *     clients and stale queued work that has not been recovered.
+     *     counts the tenant's `queued` and `running` runs, including work started by
+     *     other clients and stale queued work that has not been recovered. A run paused
+     *     at `awaiting_review` holds no slot and is not counted.
      *
      *     This is a snapshot, not a reservation: another caller can consume a slot
      *     between this response and `create_run`, which still enforces the limit.
@@ -17687,7 +17688,7 @@ export interface components {
     FlowRunCapacityPublic: {
       /**
        * Active Runs
-       * @description Runs currently occupying tenant concurrency, in any non-terminal status. Includes work queued or running from other clients.
+       * @description Runs currently occupying tenant concurrency: those `queued` or `running`. Includes work from other clients. A run paused at `awaiting_review` is not terminal but holds no slot, so it is not counted here.
        */
       active_runs: number;
       /**
