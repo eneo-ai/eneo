@@ -55,8 +55,6 @@
     files_count?: number;
     model?: string;
     language?: string;
-    used_cache?: boolean;
-    cached_files_count?: number;
   };
 
   let evidence: EvidencePayload | null = $state(null);
@@ -279,21 +277,6 @@
     return `${(value / (1024 * 1024)).toFixed(1)} MB`;
   }
 
-  function getCacheStatusLabel(
-    usedCache: boolean | undefined,
-    cachedFilesCount: number | undefined,
-    filesCount: number | undefined
-  ): string {
-    if (usedCache === true) return m.flow_run_transcription_cache_hit();
-    if ((cachedFilesCount ?? 0) > 0 && (filesCount ?? 0) > 0) {
-      return m.flow_run_transcription_cache_partial({
-        cached: String(cachedFilesCount ?? 0),
-        total: String(filesCount ?? 0)
-      });
-    }
-    return m.flow_run_transcription_cache_miss();
-  }
-
   function getRuntimeInputSummaryLabel(fileCount: number): string {
     return fileCount === 1
       ? m.flow_run_uploaded_files_singular()
@@ -478,7 +461,6 @@
         {getRuntimeInputSummaryLabel}
         {formatElapsedMs}
         {formatBytes}
-        {getCacheStatusLabel}
       />
     {/each}
   </div>

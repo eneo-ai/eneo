@@ -123,8 +123,6 @@ class FlowTranscriptionResult:
     audio_seconds: float | None
     elapsed_ms: int
     files_count: int
-    used_cache: bool
-    cached_files_count: int
     near_inline_limit: bool
 
     def to_metadata(self) -> dict[str, Any]:
@@ -140,8 +138,6 @@ class FlowTranscriptionResult:
             "model": self.model_name,
             "model_id": str(self.model_id) if self.model_id is not None else None,
             "language": self.language,
-            "used_cache": self.used_cache,
-            "cached_files_count": self.cached_files_count,
             "file_ids": [str(file_id) for file_id in self.file_ids],
         }
 
@@ -326,8 +322,6 @@ async def transcribe_audio_input(
         audio_seconds=round(sum(measured_seconds), 3) if every_file_measured else None,
         elapsed_ms=elapsed_ms,
         files_count=len(files),
-        used_cache=False,
-        cached_files_count=0,
         near_inline_limit=near_inline_limit,
     )
 

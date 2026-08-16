@@ -143,7 +143,6 @@ async def log_audio_transcribed_audit(
                     else 0,
                     "elapsed_ms": metadata.get("elapsed_ms"),
                     "files_count": metadata.get("files_count"),
-                    "used_cache": metadata.get("used_cache"),
                 },
             ),
             outcome=Outcome.SUCCESS,

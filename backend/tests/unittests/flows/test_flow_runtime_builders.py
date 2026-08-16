@@ -124,7 +124,7 @@ def test_build_completed_step_result_includes_optional_sections_and_hash():
         diagnostics=[StepDiagnostic(code="diag", message="detail", severity="info")],
         artifacts=[{"file_id": "x"}],
         rag_metadata={"status": "success"},
-        transcription_metadata={"used_cache": False},
+        transcription_metadata={"audio_seconds": 12.5},
     )
 
     built = build_completed_step_result(
@@ -139,7 +139,7 @@ def test_build_completed_step_result_includes_optional_sections_and_hash():
     )
 
     assert built.status == FlowStepResultStatus.COMPLETED
-    assert built.input_payload_json["transcription"] == {"used_cache": False}
+    assert built.input_payload_json["transcription"] == {"audio_seconds": 12.5}
     # The step result keeps citation identity; passages live in provenance.
     assert built.input_payload_json["rag"] == {
         "status": "success",

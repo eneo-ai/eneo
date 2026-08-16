@@ -29,8 +29,6 @@
     files_count?: number;
     model?: string;
     language?: string;
-    used_cache?: boolean;
-    cached_files_count?: number;
   };
 
   let {
@@ -56,8 +54,7 @@
     onDownloadArtifact,
     getRuntimeInputSummaryLabel,
     formatElapsedMs,
-    formatBytes,
-    getCacheStatusLabel
+    formatBytes
   }: {
     result: FlowRunStep;
     currentEvidenceNotLoaded?: boolean;
@@ -82,11 +79,6 @@
     getRuntimeInputSummaryLabel: (fileCount: number) => string;
     formatElapsedMs: (value: number | undefined) => string;
     formatBytes: (value: number | undefined) => string;
-    getCacheStatusLabel: (
-      usedCache: boolean | undefined,
-      cachedFilesCount: number | undefined,
-      filesCount: number | undefined
-    ) => string;
   } = $props();
 
   const stepReviewPolicy = $derived(stepDef?.review_policy ?? null);
@@ -303,15 +295,6 @@
                 <Badge variant="outline">
                   {m.flow_run_transcription_estimated_tokens({
                     tokens: String(transcription.estimated_tokens ?? 0)
-                  })}
-                </Badge>
-                <Badge variant="outline">
-                  {m.flow_run_transcription_cache({
-                    status: getCacheStatusLabel(
-                      transcription.used_cache,
-                      transcription.cached_files_count,
-                      transcription.files_count
-                    )
                   })}
                 </Badge>
               </div>

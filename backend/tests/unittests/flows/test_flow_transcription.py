@@ -457,9 +457,6 @@ async def test_audio_resolve_ignores_shared_file_transcription_cache(user):
     assert run.input_payload_json[FLOW_INPUT_TRANSCRIPTION_KEY] == (
         "fresh flow transcript"
     )
-    assert resolved.transcription_metadata is not None
-    assert resolved.transcription_metadata["used_cache"] is False
-    assert resolved.transcription_metadata["cached_files_count"] == 0
 
 
 @pytest.mark.asyncio
@@ -1012,8 +1009,6 @@ async def test_resolve_transcribe_attach_updates_payload_context_and_audits(
         audio_seconds=95.5,
         elapsed_ms=1234,
         files_count=1,
-        used_cache=False,
-        cached_files_count=0,
         near_inline_limit=True,
     )
     resolver = AsyncMock(return_value=transcription_result)
@@ -1086,8 +1081,6 @@ async def test_resolve_transcribe_attach_swallow_audit_errors(user, monkeypatch)
         audio_seconds=95.5,
         elapsed_ms=1234,
         files_count=1,
-        used_cache=False,
-        cached_files_count=0,
         near_inline_limit=False,
     )
     monkeypatch.setattr(

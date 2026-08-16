@@ -38,8 +38,7 @@ function renderCard(currentEvidenceNotLoaded: boolean): string {
       onDownloadArtifact: async () => undefined,
       getRuntimeInputSummaryLabel: () => "",
       formatElapsedMs: () => "",
-      formatBytes: () => "",
-      getCacheStatusLabel: () => ""
+      formatBytes: () => ""
     }
   }).body;
 }
