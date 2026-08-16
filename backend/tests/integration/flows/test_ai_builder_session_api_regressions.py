@@ -1958,12 +1958,13 @@ async def test_revise_plan_api_rejects_active_send_and_rolls_back(
 async def test_starting_fresh_leaves_every_other_session_of_the_same_actor_alone(
     db_container,
 ) -> None:
-    """Several people author in one space through the same service principal.
+    """One user drives AI Builder from several clients at once.
 
-    They share an actor, so the server cannot tell them apart. Starting fresh
-    must therefore mean "give me a new session", never "end everyone else's":
-    one author pressing it would otherwise cancel a draft another author is
-    still writing, and that author's next message would fail.
+    They authenticate as the same user, so the server cannot tell them apart.
+    Starting fresh must therefore mean "give me a new session", never "end
+    every other one this user has": a client pressing it would otherwise cancel
+    a draft another client was still writing, and that client's next message
+    would fail.
     """
     async with db_container() as container:
         user = container.user()

@@ -124,14 +124,20 @@ still belongs to that user: only its creator may read or send to it, and a
 session id on its own grants nothing. Service-key principals cannot author
 Builder sessions at all.
 
-Because those clients are indistinguishable, none of them acts on the others'
-sessions. `force_new` on `POST /api/v1/flows/ai-builder/sessions` only creates a
-session; it never replaces or cancels one. A session a client abandons keeps its
-conversation, its proposed plan and its attachments until retention removes it.
+The guarantee is one specific rule: creating or resuming a session never
+mutates another session. `force_new` on `POST /api/v1/flows/ai-builder/sessions`
+creates one session and does not replace or cancel another, so a session a
+client abandons keeps its conversation, its proposed plan and its attachments.
 
-The one conflict left is two sends on the *same* session id: the second is
-refused with `session_send_in_progress` while the first turn is with the
-provider. Give each concurrent client its own session id.
+This is not isolation between clients. They authenticate as the same user, so
+any of them may list that user's sessions and explicitly send to or cancel a
+session that was created through another client; retention and other explicit
+operations can also end sessions. Only the create/resume path is guaranteed not
+to touch a sibling.
+
+Two sends on the *same* session id still conflict: the second is refused with
+`session_send_in_progress` while the first turn is with the provider. Give each
+concurrent client its own session id.
 
 ## Reliable message sends and retries
 

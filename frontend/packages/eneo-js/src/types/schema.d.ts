@@ -13531,7 +13531,7 @@ export interface components {
       flow_id?: string | null;
       /**
        * Force New
-       * @description Start a fresh session instead of resuming an earlier one. It only creates a session; it never replaces or cancels another. One user may be driving several clients at once, and they are indistinguishable to the server, so no client ends another's session on its behalf.
+       * @description Start a fresh session instead of resuming one. This request creates one session and does not replace or cancel another.
        * @default false
        */
       force_new?: boolean;
