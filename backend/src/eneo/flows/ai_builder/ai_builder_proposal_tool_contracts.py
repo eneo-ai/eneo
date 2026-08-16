@@ -317,7 +317,9 @@ class CompiledProposal:
 class ToolProcessingResult:
     events: tuple[AIBuilderStreamEvent, ...] = ()
     compiled_proposal: CompiledProposal | None = None
-    user_message: str | None = None
+    # A completed answer with no plan. The submission owner persists it like an
+    # accepted proposal, so it is never a turn the conversation forgets.
+    terminal_answer: str | None = None
     feedback: str | None = None
     failure_kind: ToolProcessingFailureKind | None = None
     failure_codes: frozenset[str] = frozenset()

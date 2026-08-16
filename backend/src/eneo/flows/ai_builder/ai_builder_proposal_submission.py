@@ -19,11 +19,6 @@ from eneo.flows.ai_builder.ai_builder_create_proposal import (
     PROPOSE_FLOW_CREATE_FORCED_TOOL_PROMPT,
     process_create_intent_arguments,
 )
-from eneo.flows.ai_builder.ai_builder_decline_outcome import (
-    decline_message,
-    decline_reason_from_arguments,
-    persist_declined_flow_change,
-)
 from eneo.flows.ai_builder.ai_builder_domain_models import (
     ConversationMessage,
     TargetKind,
@@ -40,12 +35,16 @@ from eneo.flows.ai_builder.ai_builder_error_contract import (
     build_ai_builder_error_event,
 )
 from eneo.flows.ai_builder.ai_builder_event_models import AIBuilderStreamEvent
-from eneo.flows.ai_builder.ai_builder_events import build_text_event
 from eneo.flows.ai_builder.ai_builder_litellm_completion import (
     LLMCompletionMessage,
     LLMCompletionToolCall,
     call_proposal_completion,
     make_usage_tracked_proposal_completion,
+)
+from eneo.flows.ai_builder.ai_builder_non_plan_outcome import (
+    decline_message,
+    decline_reason_from_arguments,
+    persist_non_plan_turn,
 )
 from eneo.flows.ai_builder.ai_builder_plan_edit_context import (
     ResolvedAIBuilderEditContext,
@@ -645,12 +644,14 @@ class ProposalSubmissionOwner:
             tool_name=DECLINE_FLOW_CHANGE_TOOL_NAME,
             success=True,
         )
-        result = await persist_declined_flow_change(
+        result = await persist_non_plan_turn(
             repo=self.repo,
             turn=ctx.turn,
             conversation=ctx.conversation,
             new_messages_start=ctx.new_messages_start,
-            reason=reason,
+            tool_name=DECLINE_FLOW_CHANGE_TOOL_NAME,
+            arguments={"reason": reason},
+            tool_content="Flow change declined; no plan was proposed.",
             message=decline_message(
                 reason,
                 ui_language=(
@@ -741,8 +742,28 @@ class ProposalSubmissionOwner:
                 compile_context=ctx.compile_context,
                 metadata_tool_call=tool_call,
             )
-            if is_create and result.user_message is not None:
-                yield build_text_event(result.user_message)
+            if is_create and result.terminal_answer is not None:
+                answered = await persist_non_plan_turn(
+                    repo=self.repo,
+                    turn=ctx.turn,
+                    conversation=ctx.conversation,
+                    new_messages_start=ctx.new_messages_start,
+                    tool_name=PROPOSE_FLOW_TOOL_NAME,
+                    arguments={"plan_rationale": arguments.get("plan_rationale", "")},
+                    tool_content="No plan was proposed; the user was answered.",
+                    message=result.terminal_answer,
+                    tool_call_id=tool_call.id,
+                    assistant_metadata=assistant_metadata_with_usage(
+                        conversation=ctx.conversation,
+                        base_metadata=ctx.assistant_metadata,
+                        usage_tracker=ctx.usage_tracker,
+                        tool_calls=[tool_call],
+                    ),
+                    planning_state=planning_state,
+                    flow=ctx.flow,
+                )
+                for event in answered.events:
+                    yield event
                 return
             if not result.events:
                 proposal_repair_reason = proposal_repair_reason_from_tool_failure(

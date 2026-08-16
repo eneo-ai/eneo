@@ -386,12 +386,12 @@ def _self_correction_user_message(
 def _repair_terminal_events(
     result: ToolProcessingResult,
 ) -> tuple[AIBuilderStreamEvent, ...]:
-    user_message_events = (
-        (build_text_event(result.user_message),)
-        if result.user_message is not None
+    terminal_answer_events = (
+        (build_text_event(result.terminal_answer),)
+        if result.terminal_answer is not None
         else tuple()
     )
-    return (*result.events, *user_message_events)
+    return (*result.events, *terminal_answer_events)
 
 
 def _proposal_failure_fingerprint(

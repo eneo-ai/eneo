@@ -21,9 +21,11 @@ from eneo.flows.ai_builder.ai_builder_domain_models import (
     LintWarning,
     TargetKind,
 )
+from eneo.flows.ai_builder.ai_builder_non_plan_outcome import (
+    scoped_revision_out_of_reach_message,
+)
 from eneo.flows.ai_builder.ai_builder_plan_edit_context import (
     ResolvedAIBuilderEditContext,
-    scoped_revision_out_of_reach_message,
     validate_scoped_plan_revision,
 )
 from eneo.flows.ai_builder.ai_builder_proposal_capture import (
@@ -230,17 +232,19 @@ async def _process_create_spec(
         )
         logger.info(
             "ai_builder_scoped_plan_revision_rejected session_id=%s "
-            "target_step_ref=%s model_can_fix=%s",
+            "target_step_ref=%s reason=%s",
             turn.session_id,
             target_step_ref,
-            scoped_rejection.model_can_fix,
+            scoped_rejection.reason,
         )
-        if not scoped_rejection.model_can_fix:
-            # Repairs cannot reach this bar, so the user gets one answer with
-            # the editing scope that can carry the change instead of paying
-            # for three more provider calls that fail the same way.
+        if scoped_rejection.reason == "unrelated_compiled_step_changed":
+            # A create revision returns the whole plan but is shown only each
+            # other step's name and types, so it cannot reproduce their
+            # compiled content and no repair can reach this bar. The user gets
+            # one answer naming the scope that can carry the change instead of
+            # three more provider calls that fail the same way.
             return ToolProcessingResult(
-                user_message=scoped_revision_out_of_reach_message(
+                terminal_answer=scoped_revision_out_of_reach_message(
                     ui_language=ui_language
                 )
             )

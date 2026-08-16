@@ -1,11 +1,10 @@
-"""The non-mutating outcome a revision turn can return instead of a plan.
+"""Turns that answer the user without proposing a plan.
 
-A revision turn otherwise offers exactly one forced tool, so a request the
-Builder must not carry out — changing a step's model, which lives in the step
-editor and nowhere else — leaves the model with nothing legal to answer except
-a change the user never asked for. This contract gives it a typed way to
-decline, and keeps the sentence the user reads on the server: the model
-chooses the reason, never the wording.
+Two of them exist. The model can decline a change the edit contract cannot
+carry — a step's model lives in the step editor and nowhere else — and the
+server can refuse a scoped revision it knows the model cannot satisfy. Both
+own their user-visible sentence here, and both are stored like an accepted
+proposal, so the conversation records what was asked and what was answered.
 """
 
 from __future__ import annotations
@@ -99,26 +98,48 @@ def _uses_english(ui_language: str | None) -> bool:
     return ui_language is not None and ui_language.casefold().startswith("en")
 
 
+SCOPED_REVISION_OUT_OF_REACH_MESSAGES: Final[dict[str, str]] = {
+    "sv": (
+        "Jag kunde inte göra den ändringen på bara det markerade steget. "
+        "Redigera hela planen så kan jag göra den där."
+    ),
+    "en": (
+        "I couldn't make that change to the selected step alone. Edit the "
+        "whole plan and I can make it there."
+    ),
+}
+
+
+def scoped_revision_out_of_reach_message(*, ui_language: str | None) -> str:
+    """What the user is told when only a whole-plan edit can carry the change."""
+
+    return SCOPED_REVISION_OUT_OF_REACH_MESSAGES[
+        "en" if _uses_english(ui_language) else "sv"
+    ]
+
+
 @dataclass(frozen=True, slots=True)
-class DeclinedFlowChangeResult:
+class NonPlanTurnResult:
     events: tuple[AIBuilderStreamEvent, ...]
     new_planning_state_version: int
 
 
-async def persist_declined_flow_change(
+async def persist_non_plan_turn(
     *,
     repo: AIBuilderRepository,
     turn: SessionSendTurn,
     conversation: list[ConversationMessage],
     new_messages_start: int,
-    reason: DeclineReason,
+    tool_name: str,
+    arguments: dict[str, Any],
+    tool_content: str,
     message: str,
     tool_call_id: str,
     assistant_metadata: dict[str, Any] | None,
     planning_state: PlanningState,
     flow: "Flow | None",
-) -> DeclinedFlowChangeResult:
-    """Store the declined turn the same way an accepted proposal is stored.
+) -> NonPlanTurnResult:
+    """Store an answered turn the same way an accepted proposal is stored.
 
     The answer the user reads is part of the conversation, so the next turn
     sees that the Builder already explained itself. No plan is created and the
@@ -127,8 +148,8 @@ async def persist_declined_flow_change(
 
     tool_call = make_persisted_assistant_tool_call(
         tool_call_id=tool_call_id,
-        tool_name=DECLINE_FLOW_CHANGE_TOOL_NAME,
-        arguments={"reason": reason},
+        tool_name=tool_name,
+        arguments=arguments,
     )
     conversation.append(
         ConversationMessage(
@@ -141,7 +162,7 @@ async def persist_declined_flow_change(
     conversation.append(
         ConversationMessage(
             role="tool",
-            content="Flow change declined; no plan was proposed.",
+            content=tool_content,
             tool_call_id=tool_call_id,
         )
     )
@@ -151,7 +172,7 @@ async def persist_declined_flow_change(
         flow=flow,
         planning_state=planning_state,
     )
-    return DeclinedFlowChangeResult(
+    return NonPlanTurnResult(
         events=(build_text_event(message),),
         new_planning_state_version=new_version,
     )

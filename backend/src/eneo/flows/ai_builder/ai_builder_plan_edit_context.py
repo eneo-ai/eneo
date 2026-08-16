@@ -31,18 +31,26 @@ if TYPE_CHECKING:
 PlanEditScope = Literal["whole_plan", "step"]
 
 
+ScopedRevisionRejectionReason = Literal[
+    "target_step_missing",
+    "target_step_unchanged",
+    "runtime_form_fields_changed",
+    "step_sequence_changed",
+    "unrelated_compiled_step_changed",
+    "target_step_model_changed",
+]
+
+
 @dataclass(frozen=True, slots=True)
 class ScopedRevisionRejection:
-    """Why a step-scoped revision was refused, and who can act on it.
+    """Why a step-scoped revision was refused.
 
-    `model_can_fix` is false when the feedback names something the model was
-    never shown. A create-mode revision returns a whole plan but only ever sees
-    each other step's name and types, so it cannot reproduce their compiled
-    content, and repeating the request cannot change that.
+    The reason says what failed; whether a repair can reach it is the proposal
+    owner's decision, because only that owner knows what the model was shown.
     """
 
+    reason: ScopedRevisionRejectionReason
     feedback: str
-    model_can_fix: bool = True
 
 
 class AIBuilderPlanEditContext(BaseModel):
@@ -374,20 +382,6 @@ def build_plan_revision_prompt_block(
     return "\n".join(lines)
 
 
-def scoped_revision_out_of_reach_message(*, ui_language: str | None) -> str:
-    """What the user is told when only a whole-plan edit can carry the change."""
-
-    if ui_language is not None and ui_language.casefold().startswith("en"):
-        return (
-            "I couldn't make that change to the selected step alone. Edit the "
-            "whole plan and I can make it there."
-        )
-    return (
-        "Jag kunde inte göra den ändringen på bara det markerade steget. "
-        "Redigera hela planen så kan jag göra den där."
-    )
-
-
 def validate_scoped_plan_revision(
     *,
     context: ScopedEditContext | None,
@@ -430,8 +424,9 @@ def validate_scoped_plan_revision(
     target_ref = step_ref_for_context(context) or "unknown"
     if prior_target is None:
         return ScopedRevisionRejection(
+            "target_step_missing",
             f"Scoped plan edit target `{target_ref}` was not found in the prior plan. "
-            "Use the current plan step refs exactly."
+            "Use the current plan step refs exactly.",
         )
 
     # The user can select the renderer itself. Every field it has is server
@@ -440,8 +435,9 @@ def validate_scoped_plan_revision(
     if not target_is_server_owned:
         if proposed_target is None:
             return ScopedRevisionRejection(
+                "target_step_missing",
                 f"Scoped plan edit target `{target_ref}` disappeared from the revised plan. "
-                "Keep the selected step ref and revise that step instead of replacing it with an unrelated step."
+                "Keep the selected step ref and revise that step instead of replacing it with an unrelated step.",
             )
         if _step_dump_for_context(proposed_target, context) == _step_dump_for_context(
             prior_target, context
@@ -449,8 +445,9 @@ def validate_scoped_plan_revision(
             prior_renderer, proposed_renderer, context
         ):
             return ScopedRevisionRejection(
+                "target_step_unchanged",
                 f"Scoped plan edit target `{target_ref}` was unchanged. "
-                "Apply the user's requested change to that selected step, not only to the plan title, description, or another step."
+                "Apply the user's requested change to that selected step, not only to the plan title, description, or another step.",
             )
 
     preservation_feedback = _validate_non_target_preservation(
@@ -462,7 +459,6 @@ def validate_scoped_plan_revision(
         prior_form_fields=_runtime_form_fields_dump(prior_spec),
         proposed_form_fields=_runtime_form_fields_dump(proposed_spec),
         target_step_ref=_step_identity(prior_target, context),
-        model_authors_unrelated_steps=target_kind is TargetKind.CREATE,
     )
     if preservation_feedback is not None:
         return preservation_feedback
@@ -473,7 +469,11 @@ def validate_scoped_plan_revision(
         proposed_target=proposed_target,
         target_ref=target_ref,
     )
-    return None if model_feedback is None else ScopedRevisionRejection(model_feedback)
+    return (
+        None
+        if model_feedback is None
+        else ScopedRevisionRejection("target_step_model_changed", model_feedback)
+    )
 
 
 def _terminal_document_renderer(spec: FlowDraftSpecCore) -> StepSpec | None:
@@ -536,13 +536,13 @@ def _validate_non_target_preservation(
     prior_form_fields: list[dict[str, object]],
     proposed_form_fields: list[dict[str, object]],
     target_step_ref: str,
-    model_authors_unrelated_steps: bool,
 ) -> ScopedRevisionRejection | None:
     if prior_form_fields != proposed_form_fields:
         return ScopedRevisionRejection(
+            "runtime_form_fields_changed",
             "Step-scoped plan edits must not change runtime form fields. Use a "
             "whole-plan edit when the requested change needs new or different "
-            "inputs from the user."
+            "inputs from the user.",
         )
 
     prior_refs = [_step_identity(step, context) for step in prior_steps]
@@ -551,16 +551,18 @@ def _validate_non_target_preservation(
     duplicate_refs = _duplicate_refs(proposed_refs)
     if duplicate_refs:
         return ScopedRevisionRejection(
+            "step_sequence_changed",
             "Step-scoped plan edits must keep stable step refs unique. "
-            f"Duplicate step refs: {', '.join(duplicate_refs)}."
+            f"Duplicate step refs: {', '.join(duplicate_refs)}.",
         )
 
     if proposed_refs != prior_refs:
         return ScopedRevisionRejection(
+            "step_sequence_changed",
             "Step-scoped plan edits must not add, remove, or reorder steps. "
             "Use a whole-plan edit when the requested change alters the flow "
             f"structure. Expected refs: {', '.join(prior_refs)}. Received refs: "
-            f"{', '.join(proposed_refs)}."
+            f"{', '.join(proposed_refs)}.",
         )
 
     proposed_by_ref = {_step_identity(step, context): step for step in proposed_steps}
@@ -577,10 +579,10 @@ def _validate_non_target_preservation(
             proposed_step, context
         ):
             return ScopedRevisionRejection(
+                "unrelated_compiled_step_changed",
                 "Step-scoped plan edits must preserve unrelated steps. "
                 f"Step `{ref}` changed even though the user selected "
                 f"`{target_step_ref}`.",
-                model_can_fix=not model_authors_unrelated_steps,
             )
 
     return None

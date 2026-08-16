@@ -18,6 +18,9 @@ from eneo.flows.ai_builder.ai_builder_domain_models import (
     TargetKind,
 )
 from eneo.flows.ai_builder.ai_builder_error_contract import AIBuilderBadRequestException
+from eneo.flows.ai_builder.ai_builder_non_plan_outcome import (
+    scoped_revision_out_of_reach_message,
+)
 from eneo.flows.ai_builder.ai_builder_plan_edit_context import (
     AIBuilderPlanEditContext,
     AIBuilderSavedFlowStepEditContext,
@@ -25,7 +28,6 @@ from eneo.flows.ai_builder.ai_builder_plan_edit_context import (
     _validate_target_step_model,
     build_plan_revision_prompt_block,
     resolve_plan_edit_context,
-    scoped_revision_out_of_reach_message,
     validate_scoped_plan_revision,
 )
 from eneo.flows.ai_builder.ai_builder_proposal_policy import (
@@ -914,9 +916,9 @@ def test_a_create_revision_cannot_be_asked_to_reproduce_unrelated_steps() -> Non
     )
 
     assert created is not None and edited is not None
+    assert created.reason == "unrelated_compiled_step_changed"
     assert "preserve unrelated steps" in created.feedback
-    assert created.model_can_fix is False
-    assert edited.model_can_fix is True
+    assert edited.reason == created.reason
 
 
 @pytest.mark.parametrize(

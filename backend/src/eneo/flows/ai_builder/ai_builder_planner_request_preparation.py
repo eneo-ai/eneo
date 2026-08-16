@@ -27,9 +27,6 @@ from eneo.flows.ai_builder.ai_builder_create_compile_context import (
     CreateCompileContext,
     create_compile_context_from_planning_state,
 )
-from eneo.flows.ai_builder.ai_builder_decline_outcome import (
-    build_decline_flow_change_tool_schema,
-)
 from eneo.flows.ai_builder.ai_builder_discovery_models import (
     DiscoveryAnalysis,
 )
@@ -59,6 +56,9 @@ from eneo.flows.ai_builder.ai_builder_form_intake_signals import (
 )
 from eneo.flows.ai_builder.ai_builder_framework_policy import (
     aggregate_unprompted_user_text_preserving_case,
+)
+from eneo.flows.ai_builder.ai_builder_non_plan_outcome import (
+    build_decline_flow_change_tool_schema,
 )
 from eneo.flows.ai_builder.ai_builder_output_sections_signals import (
     extract_requested_output_sections,

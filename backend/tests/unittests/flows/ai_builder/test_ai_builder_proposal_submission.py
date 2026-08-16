@@ -738,8 +738,13 @@ async def test_create_propose_flow_keeps_unrelated_post_provider_failure_unknown
 
 
 @pytest.mark.asyncio
-async def test_create_propose_flow_user_message_emits_text_event() -> None:
-    submission = _make_submission()
+async def test_create_propose_flow_terminal_answer_is_committed_not_just_streamed() -> (
+    None
+):
+    """An answered turn belongs in the conversation, like an accepted plan."""
+    repo = AsyncMock()
+    repo.commit_turn = AsyncMock(return_value=3)
+    submission = _make_submission(repo=repo)
     tool_call = _make_tool_call(
         PROPOSE_FLOW_TOOL_NAME,
         {
@@ -750,7 +755,7 @@ async def test_create_propose_flow_user_message_emits_text_event() -> None:
         tool_call_id="call-create-user-message",
     )
     process_outline = AsyncMock(
-        return_value=ToolProcessingResult(user_message="I need one more detail.")
+        return_value=ToolProcessingResult(terminal_answer="I need one more detail.")
     )
 
     with (
@@ -769,6 +774,12 @@ async def test_create_propose_flow_user_message_emits_text_event() -> None:
     assert len(events) == 1
     assert events[0]["event"] == "text"
     assert json.loads(events[0]["data"]) == {"text": "I need one more detail."}
+    repo.create_plan.assert_not_awaited()
+    repo.commit_turn.assert_awaited_once()
+    stored = repo.commit_turn.await_args.kwargs["new_messages"]
+    assert [message.role for message in stored] == ["assistant", "tool"]
+    assert stored[0].content == "I need one more detail."
+    assert stored[0].tool_calls[0]["name"] == PROPOSE_FLOW_TOOL_NAME
 
 
 @pytest.mark.asyncio
@@ -856,7 +867,7 @@ async def test_edit_propose_flow_user_message_routes_to_self_correction() -> Non
     )
     process_edit = AsyncMock(
         return_value=ToolProcessingResult(
-            user_message="I need one more detail.",
+            terminal_answer="I need one more detail.",
             failure_kind="validation",
         )
     )

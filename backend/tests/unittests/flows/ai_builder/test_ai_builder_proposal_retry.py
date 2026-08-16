@@ -497,7 +497,7 @@ async def test_run_forced_tool_retry_after_text_surfaces_tool_user_message() -> 
         _: ToolRetryInvocation,
     ) -> ToolProcessingResult:
         return ToolProcessingResult(
-            user_message="Det markerade steget använder ingen chattmodell."
+            terminal_answer="Det markerade steget använder ingen chattmodell."
         )
 
     result = await run_forced_tool_retry_after_text(

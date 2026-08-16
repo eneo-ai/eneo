@@ -6,13 +6,13 @@ from unittest.mock import AsyncMock
 import pytest
 
 from eneo.flows.ai_builder.ai_builder_create_compile_context import CreateCompileContext
-from eneo.flows.ai_builder.ai_builder_decline_outcome import (
+from eneo.flows.ai_builder.ai_builder_domain_models import TargetKind
+from eneo.flows.ai_builder.ai_builder_events import encode_ai_builder_stream_event
+from eneo.flows.ai_builder.ai_builder_non_plan_outcome import (
     build_decline_flow_change_tool_schema,
     decline_message,
     decline_reason_from_arguments,
 )
-from eneo.flows.ai_builder.ai_builder_domain_models import TargetKind
-from eneo.flows.ai_builder.ai_builder_events import encode_ai_builder_stream_event
 from eneo.flows.ai_builder.ai_builder_proposal_telemetry import ProposalTurnTelemetry
 from eneo.flows.ai_builder.ai_builder_proposal_tool_contracts import (
     forced_tool_choice,
