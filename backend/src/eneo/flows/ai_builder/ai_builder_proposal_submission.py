@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import AsyncGenerator, Awaitable, Callable, Sequence
+from collections.abc import AsyncGenerator, Awaitable, Callable
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Any
 
@@ -199,12 +199,6 @@ class ProposalSubmissionOwner:
         if tool_name != PROPOSE_FLOW_TOOL_NAME:
             return None
         return self._handle_propose_flow_tool_call(ctx=ctx, tool_call=tool_call)
-
-    def contains_submission_tool_call(
-        self,
-        tool_calls: Sequence[RuntimeToolCall],
-    ) -> bool:
-        return any(call.function.name in _SUBMISSION_TOOL_NAMES for call in tool_calls)
 
     async def run_active_submission_attempt(
         self,
