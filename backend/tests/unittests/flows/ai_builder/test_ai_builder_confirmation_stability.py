@@ -799,7 +799,10 @@ def test_the_rebuild_pins_the_same_architecture_the_acknowledgment_committed() -
     assert derive_architecture_commit_draft(rebuilt) == pinned
 
 
-def _accepted_audio_conversation() -> tuple[
+def _accepted_audio_conversation(
+    *,
+    confirmation_metadata: dict[str, object] | None = None,
+) -> tuple[
     list[ConversationMessage],
     RequirementsSummaryPayload,
 ]:
@@ -856,6 +859,7 @@ def _accepted_audio_conversation() -> tuple[
                 role="user",
                 content="",
                 metadata={
+                    **(confirmation_metadata or {}),
                     "requirements_confirmed": True,
                     "requirements_version": disclosed.requirements_version,
                 },
@@ -946,4 +950,38 @@ def test_what_the_user_says_after_accepting_still_changes_the_output() -> None:
     assert (
         build_requirements_disclosure(rebuilt, ui_language="sv").requirements_version
         != disclosed.requirements_version
+    )
+
+
+def test_the_confirmation_turns_own_reading_does_not_replace_what_it_confirms() -> None:
+    """The classification a confirmation turn makes is not what it confirmed.
+
+    A confirmation whose attachments or deployment policy moved since the
+    disclosure falls through to an ordinary classified turn, and that turn's
+    reading is persisted on the confirmation message itself. The disclosure the
+    user answered was built before it, so it is a re-reading like any other —
+    but it shares the confirmation's own position in the conversation, which is
+    the one place chronology can be read as "already accepted".
+    """
+
+    conversation, disclosed = _accepted_audio_conversation(
+        confirmation_metadata=_classifier_metadata(
+            _classified(
+                "terminal_output",
+                "structured_json",
+                "high",
+                "strukturerad JSON",
+            ),
+        ),
+    )
+
+    rebuilt = build_planning_state_from_conversation(conversation)
+
+    assert rebuilt.resolved_slots["terminal_output"].value == "docx_document"
+    draft = derive_architecture_commit_draft(rebuilt)
+    assert draft is not None
+    assert draft.tuples_chain[-1].output_type.value == "docx"
+    assert (
+        build_requirements_disclosure(rebuilt, ui_language="sv").requirements_version
+        == disclosed.requirements_version
     )

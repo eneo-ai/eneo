@@ -1850,9 +1850,12 @@ def attested_slots_without_newer_evidence(
     confident it is: an open prompt that names two plausible results can be read
     either way, and the reading the user accepted is the one that settled it.
 
-    Only a classification made *after* the acceptance can be that re-reading.
-    The earlier ones are how the accepted state is reconstructed at all, so
-    they are replayed untouched.
+    Only a classification made *before* the acceptance is part of what was
+    accepted, and those are how the accepted state is reconstructed at all, so
+    they are replayed untouched. A confirmation that falls through to an
+    ordinary classified turn persists that turn's reading on the confirmation
+    message itself: it shares the confirmation's position but the disclosure
+    the user answered was built before it, so it is a re-reading like any other.
 
     Freshness is chronology, not the current turn: the user says something new
     once, and a turn whose classification failed must still be able to act on it
@@ -1862,7 +1865,7 @@ def attested_slots_without_newer_evidence(
     """
 
     attested = resolve_attested_disclosure(conversation)
-    if attested is None or classified_at_index <= attested.confirmation_index:
+    if attested is None or classified_at_index < attested.confirmation_index:
         return frozenset()
     accepted = attested_requirement_values(attested.summary)
     if not accepted:
