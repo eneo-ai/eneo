@@ -297,13 +297,33 @@
     }
   }
 
-  export async function focusSavedFlowStep(scope: AIBuilderSavedFlowStepScope) {
+  // The flow editor may launch a saved-step edit before this shell's session
+  // exists. Edit bootstrap resumes an ongoing session when there is one, so the
+  // "replace the ongoing edit?" decision must wait until that is known.
+  let pendingSavedFlowStepLaunch = $state<AIBuilderSavedFlowStepScope | null>(null);
+  $effect(() => {
+    const scope = pendingSavedFlowStepLaunch;
+    if (scope && service.hasSession && !service.isInitializing) {
+      pendingSavedFlowStepLaunch = null;
+      void launchSavedFlowStep(scope);
+    }
+  });
+
+  async function launchSavedFlowStep(scope: AIBuilderSavedFlowStepScope) {
     if (service.messages.length > 0 || service.currentPlan !== null) {
       pendingSavedFlowStepScope = scope;
       showReplaceEditSessionDialog = true;
       return;
     }
     await activateSavedFlowStep(scope);
+  }
+
+  export async function focusSavedFlowStep(scope: AIBuilderSavedFlowStepScope) {
+    if (!service.hasSession || service.isInitializing) {
+      pendingSavedFlowStepLaunch = scope;
+      return;
+    }
+    await launchSavedFlowStep(scope);
   }
 
   function cancelSavedFlowStepReplacement() {

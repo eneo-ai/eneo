@@ -892,6 +892,67 @@ describe("FlowAIBuilder edit host contract", () => {
     expect(calls[0]!.body).toMatchObject({ edit_context: SAVED_STEP_SCOPE.editContext });
   });
 
+  it("waits for edit bootstrap before deciding whether a cold launch replaces an ongoing edit", async () => {
+    // Edit bootstrap resumes an ongoing session; a launch that arrives before
+    // it settles must still get the replacement question, not silently join.
+    let releaseCreate!: () => void;
+    const held = new Promise<void>((resolve) => {
+      releaseCreate = resolve;
+    });
+    const ongoing = makeSession({
+      session_id: "e-ongoing",
+      target_kind: "edit",
+      flow_id: "flow-1",
+      conversation: [
+        userMessage("u1", "Byt rubrik på rapporten"),
+        assistantMessage("a1", "Vad ska rubriken vara?")
+      ]
+    });
+    const fresh = editSession();
+    let posts = 0;
+    const { fetch } = makeFetch({ sessions: [ongoing, fresh] });
+    const baseFetch = fetch.getMockImplementation()!;
+    fetch.mockImplementation(async (path, init) => {
+      if (path === SESSIONS_ROUTE && init?.method === "post") {
+        posts += 1;
+        if (posts === 1) {
+          await held;
+          return ongoing;
+        }
+        return fresh;
+      }
+      return baseFetch(path, init);
+    });
+    const { stream, calls } = makeStream();
+    const { builder } = renderShell({ fetch, stream, targetKind: "edit", flowId: "flow-1" });
+
+    await waitFor(() => expect(builder()).toBeDefined());
+    const launched = builder().focusSavedFlowStep(SAVED_STEP_SCOPE);
+    releaseCreate();
+    await launched;
+
+    expect(await screen.findByText(m.ai_builder_replace_edit_title())).toBeTruthy();
+    expect(screen.queryByText(SAVED_STEP_LABEL)).toBeNull();
+
+    await fireEvent.click(button(m.ai_builder_replace_edit_action()));
+
+    expect(await screen.findByText(SAVED_STEP_LABEL)).toBeTruthy();
+    const secondPost = fetch.mock.calls.filter(
+      ([path, init]) => path === SESSIONS_ROUTE && init?.method === "post"
+    )[1];
+    expect(secondPost?.[1]?.requestBody?.["application/json"]).toMatchObject({
+      force_new: true,
+      target_kind: "edit"
+    });
+    const input = (await screen.findByRole("textbox", {
+      name: m.ai_builder_saved_step_prompt_placeholder()
+    })) as HTMLTextAreaElement;
+    await fireEvent.input(input, { target: { value: "Byt rubrik" } });
+    await fireEvent.keyDown(input, { key: "Enter" });
+    await waitFor(() => expect(calls).toHaveLength(1));
+    expect(calls[0]!.body).toMatchObject({ edit_context: SAVED_STEP_SCOPE.editContext });
+  });
+
   it("asks before replacing an ongoing edit and starts fresh on confirm", async () => {
     const { fetch, posts } = makeFetch({ created: editSession() });
     const { service, builder } = renderShell({
