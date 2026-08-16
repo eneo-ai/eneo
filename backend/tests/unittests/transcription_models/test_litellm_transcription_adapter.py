@@ -61,7 +61,9 @@ async def test_kb_whisper_language_fallback_only_when_language_is_auto(
         provider_type="openai",
     )
 
-    result = await adapter._transcribe_chunk(audio_path, language=language)
+    result = await adapter._transcribe_chunk(
+        audio_path, language=language, audio_seconds=1.0
+    )
 
     assert result == "transcript"
     assert captured_kwargs["language"] == expected_language
@@ -238,7 +240,7 @@ async def test_recorded_duration_is_the_audio_each_request_actually_sent(
         AsyncMock(side_effect=fake_atranscription),
     )
     source = tmp_path / "recording.wav"
-    _write_wav(source, seconds=640.0)
+    _write_wav(source, seconds=318.0)
     adapter = LiteLLMTranscriptionAdapter(
         model=SimpleNamespace(name="Whisper", model_name="whisper-1"),
         credential_resolver=_CredentialResolverStub(),

@@ -156,7 +156,7 @@ class LiteLLMTranscriptionAdapter:
         *,
         language: str | None = None,
         observer: "ProviderCallObserver | None" = None,
-        audio_seconds: float = 0.0,
+        audio_seconds: float,
     ) -> str:
         """
         Transcribe a single audio chunk using LiteLLM.
