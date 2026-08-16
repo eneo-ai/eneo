@@ -1954,6 +1954,71 @@ async def test_revise_plan_api_rejects_active_send_and_rolls_back(
 
 @pytest.mark.integration
 @pytest.mark.asyncio
+async def test_starting_fresh_replaces_idle_sessions_but_not_one_mid_turn(
+    db_container,
+) -> None:
+    """Several people author in one space through the same service principal.
+
+    Starting fresh replaces that principal's earlier drafts for the same target,
+    but a draft whose turn is already talking to the provider must survive: the
+    author of that turn would otherwise see it fail with a lost lease.
+    """
+    async with db_container() as container:
+        user = container.user()
+        space = Spaces(
+            tenant_id=user.tenant_id,
+            user_id=user.id,
+            name=f"ai-builder-concurrent-authors-{uuid4().hex}",
+        )
+        container.session().add(space)
+        await container.session().flush()
+
+        repo = AIBuilderRepository(container.session())
+        sending_session = await repo.create_session(
+            tenant_id=user.tenant_id,
+            space_id=space.id,
+            actor_user_id=user.id,
+            target_kind=TargetKind.CREATE,
+        )
+        idle_session = await repo.create_session(
+            tenant_id=user.tenant_id,
+            space_id=space.id,
+            actor_user_id=user.id,
+            target_kind=TargetKind.CREATE,
+        )
+        turn = await _claim_session_send_turn(
+            repo=repo,
+            session_id=sending_session.id,
+            tenant_id=user.tenant_id,
+        )
+
+        cancelled_session_ids = await repo.cancel_matching_active_sessions(
+            tenant_id=user.tenant_id,
+            actor_user_id=user.id,
+            space_id=space.id,
+            target_kind=TargetKind.CREATE,
+            flow_id=None,
+        )
+
+        # The turn that was in flight still owns its lease and reaches its end.
+        await repo.mark_session_turn_processing(turn=turn)
+        await repo.complete_session_turn(turn=turn)
+        surviving = await repo.get_session(
+            session_id=sending_session.id,
+            tenant_id=user.tenant_id,
+        )
+        replaced = await repo.get_session(
+            session_id=idle_session.id,
+            tenant_id=user.tenant_id,
+        )
+
+    assert cancelled_session_ids == [idle_session.id]
+    assert surviving.status == SessionStatus.CHATTING
+    assert replaced.status == SessionStatus.CANCELLED
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("mark_processing", "expected_state"),
     [

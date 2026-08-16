@@ -349,7 +349,15 @@ class CreateSessionRequest(BaseModel):
     target_kind: TargetKind
     space_id: UUID
     flow_id: UUID | None = None
-    force_new: bool = False
+    force_new: bool = Field(
+        default=False,
+        description=(
+            "Start a fresh session instead of resuming, replacing this caller's "
+            "earlier sessions for the same space and target. A session whose "
+            "message is still being processed is never replaced, so authors "
+            "sharing one key cannot interrupt each other's turn."
+        ),
+    )
 
 
 class SendMessageRequest(BaseModel):

@@ -452,6 +452,12 @@ class AIBuilderRepository:
         target_kind: TargetKind,
         flow_id: UUID | None,
     ) -> list[UUID]:
+        """Replace this actor's idle sessions for the same target.
+
+        A session whose send lock is still live is left alone: another author
+        starting fresh in the same space must not destroy a turn that is already
+        talking to the provider, which would fail that turn with a lost lease.
+        """
         async with self._transaction():
             session_ids_stmt = (
                 select(BuilderSessions.id)
@@ -466,6 +472,7 @@ class AIBuilderRepository:
                             SessionStatus.AWAITING_APPROVAL.value,
                         ]
                     ),
+                    _session_send_lock_available_clause(),
                     BuilderSessions.flow_id.is_(None)
                     if flow_id is None
                     else BuilderSessions.flow_id == flow_id,
