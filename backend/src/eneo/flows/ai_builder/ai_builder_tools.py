@@ -11,6 +11,7 @@ from eneo.flows.ai_builder.ai_builder_edit_tool_schema import (
     build_edit_flow_tool_schema,
 )
 from eneo.flows.ai_builder.ai_builder_proposal_intent import (
+    ProposalObligationProjection,
     build_create_flow_tool_schema,
     parse_create_flow_intent_arguments,
 )
@@ -46,6 +47,7 @@ def build_propose_flow_tool_schema(
     current_steps: list["FlowStep"] | None = None,
     is_pure_audio_transcription: bool = False,
     confirmed_runtime_inputs: tuple[ConfirmedRuntimeInputRequirement, ...] = (),
+    obligation_projection: ProposalObligationProjection | None = None,
 ) -> ProposalToolSchema:
     if current_steps is None:
         return cast(
@@ -55,6 +57,7 @@ def build_propose_flow_tool_schema(
                 tool_name=PROPOSE_FLOW_TOOL_NAME,
                 is_pure_audio_transcription=is_pure_audio_transcription,
                 confirmed_runtime_inputs=confirmed_runtime_inputs,
+                obligation_projection=obligation_projection,
             ),
         )
     return cast(

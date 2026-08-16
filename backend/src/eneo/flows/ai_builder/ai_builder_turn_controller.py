@@ -17,6 +17,7 @@ from dataclasses import dataclass
 from typing import TypeAlias
 
 from eneo.flows.ai_builder.ai_builder_action_policy import (
+    NAMED_RESULT_PROJECTION_MAX_ITEMS,
     PlannerActionPolicy,
     build_planner_action_policy,
 )
@@ -92,6 +93,45 @@ _ARCHITECTURE_REFUSAL_MESSAGES: Mapping[AIBuilderErrorCode, Mapping[Locale, str]
             "giltig DOCX-fil och försök igen."
         ),
     },
+    AIBuilderErrorCode.SCHEMA_LIMIT_EXCEEDED: {
+        "en": (
+            "Without an attached output schema, at most "
+            f"{NAMED_RESULT_PROJECTION_MAX_ITEMS} named result fields can be "
+            "built for you, and this flow names more. Name fewer result fields, "
+            "group the details inside one of them, or attach the output schema "
+            "you want, and try again."
+        ),
+        "sv": (
+            "Utan ett bifogat utdataschema kan högst "
+            f"{NAMED_RESULT_PROJECTION_MAX_ITEMS} namngivna resultatfält byggas "
+            "åt dig, och flödet namnger fler. Namnge färre resultatfält, samla "
+            "detaljerna i ett av dem, eller bifoga det utdataschema du vill ha, "
+            "och försök igen."
+        ),
+    },
+    AIBuilderErrorCode.NAMED_RESULT_GRAIN_UNSUPPORTED: {
+        "en": (
+            "The only named result field is a group, and a group needs contents. "
+            "Name at least one result field that belongs inside it, and try again."
+        ),
+        "sv": (
+            "Det enda namngivna resultatfältet är en grupp, och en grupp behöver "
+            "innehåll. Namnge minst ett resultatfält som hör hemma i den och "
+            "försök igen."
+        ),
+    },
+    AIBuilderErrorCode.NAMED_RESULT_KEY_UNSUPPORTED: {
+        "en": (
+            "One of the named result fields cannot be used as a key in a "
+            "structured result. Use names of letters, digits and underscores "
+            "that begin with a letter, and try again."
+        ),
+        "sv": (
+            "Ett av de namngivna resultatfälten kan inte användas som nyckel i "
+            "ett strukturerat resultat. Använd namn med bokstäver, siffror och "
+            "understreck som börjar med en bokstav, och försök igen."
+        ),
+    },
 }
 
 
@@ -153,11 +193,14 @@ def resolve_turn_control(
     schema_candidates: tuple[DeclaredSchemaCandidate, ...] = (),
     schema_direction_pending: bool = False,
     requirements_confirmation_required: bool = True,
+    is_edit_mode: bool = False,
 ) -> BuilderTurnControl:
     locale = resolve_locale(ui_language)
     action_policy = build_planner_action_policy(
         session_state=session_state,
         selected_discovery_question_ids=selected_discovery_question_ids,
+        is_edit_mode=is_edit_mode,
+        schema_direction_pending=schema_direction_pending,
         requirements_confirmed=(
             not requirements_confirmation_required
             or (

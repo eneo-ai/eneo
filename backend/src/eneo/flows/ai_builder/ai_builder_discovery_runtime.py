@@ -566,6 +566,7 @@ async def build_runtime_discovery_context(
         action_policy = build_planner_action_policy(
             session_state=state,
             selected_discovery_question_ids=(),
+            is_edit_mode=flow is not None,
         )
         if action_policy.allowed_action_kinds == ("refuse_architecture_commit",):
             return _complete_runtime_discovery_context(

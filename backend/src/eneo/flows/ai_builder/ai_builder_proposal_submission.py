@@ -52,6 +52,9 @@ from eneo.flows.ai_builder.ai_builder_proposal_finalization import (
     CompiledProposalFinalizationRequest,
     CompiledProposalFinalizer,
 )
+from eneo.flows.ai_builder.ai_builder_proposal_intent import (
+    ProposalObligationProjection,
+)
 from eneo.flows.ai_builder.ai_builder_proposal_retry import (
     ForcedToolAfterTextRequest,
     ProposalSelfCorrectionRequest,
@@ -205,6 +208,7 @@ class ProposalSubmissionOwner:
         assistant_metadata: dict[str, Any] | None = None,
         planning_state: PlanningState,
         compile_context: "CreateCompileContext | None",
+        obligation_projection: ProposalObligationProjection | None = None,
         plan_edit_context: ResolvedAIBuilderEditContext | None = None,
         prior_spec_for_revision: FlowDraftSpecCore | None = None,
         before_provider_call: Callable[[], Awaitable[None]] | None = None,
@@ -220,6 +224,7 @@ class ProposalSubmissionOwner:
             available_model_refs=available_model_refs,
             available_kb_refs=available_kb_refs,
             resource_catalog=resource_catalog,
+            obligation_projection=obligation_projection,
             max_output_tokens=max_output_tokens,
             request_id=request_id,
             flow=flow,
@@ -367,6 +372,7 @@ class ProposalSubmissionOwner:
         usage_tracker: ProposalTurnTelemetry | None,
         proposal_tool_schema: ProposalToolSchema,
         compile_context: "CreateCompileContext | None",
+        obligation_projection: "ProposalObligationProjection | None" = None,
     ) -> ToolRetryConfig:
         async def _process_tool_invocation(
             invocation: ToolRetryInvocation,
@@ -381,6 +387,7 @@ class ProposalSubmissionOwner:
                 request_id=request_id,
                 usage_tracker=usage_tracker,
                 proposal_tool_schema=proposal_tool_schema,
+                obligation_projection=obligation_projection,
                 compile_context=compile_context,
             )
 
@@ -407,6 +414,7 @@ class ProposalSubmissionOwner:
         usage_tracker: ProposalTurnTelemetry | None,
         proposal_tool_schema: ProposalToolSchema,
         compile_context: "CreateCompileContext | None",
+        obligation_projection: "ProposalObligationProjection | None" = None,
         metadata_tool_call: RuntimeToolCall | None = None,
     ) -> ToolProcessingResult:
         try:
@@ -446,6 +454,7 @@ class ProposalSubmissionOwner:
                 plan_edit_context=plan_edit_context,
                 prior_spec_for_revision=prior_spec_for_revision,
                 compile_context=compile_context,
+                obligation_projection=obligation_projection,
             )
         else:
             result = await process_edit_arguments(
@@ -614,6 +623,7 @@ class ProposalSubmissionOwner:
             prior_spec_for_revision=ctx.prior_spec_for_revision,
             usage_tracker=ctx.usage_tracker,
             proposal_tool_schema=ctx.proposal_tool_schema,
+            obligation_projection=ctx.obligation_projection,
             compile_context=ctx.compile_context,
         )
 
@@ -655,6 +665,7 @@ class ProposalSubmissionOwner:
                 request_id=ctx.request_id,
                 usage_tracker=ctx.usage_tracker,
                 proposal_tool_schema=ctx.proposal_tool_schema,
+                obligation_projection=ctx.obligation_projection,
                 compile_context=ctx.compile_context,
                 metadata_tool_call=tool_call,
             )
@@ -738,6 +749,7 @@ class ProposalSubmissionOwner:
             prior_spec_for_revision=ctx.prior_spec_for_revision,
             usage_tracker=ctx.usage_tracker,
             proposal_tool_schema=ctx.proposal_tool_schema,
+            obligation_projection=ctx.obligation_projection,
             compile_context=ctx.compile_context,
         )
         outcome = await run_forced_tool_retry_after_text(

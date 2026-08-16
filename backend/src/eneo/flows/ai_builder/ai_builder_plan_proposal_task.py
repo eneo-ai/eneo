@@ -45,7 +45,6 @@ from eneo.flows.ai_builder.ai_builder_template_attachment_contract import (
 from eneo.flows.ai_builder.ai_builder_tool_names import PROPOSE_FLOW_TOOL_NAME
 from eneo.flows.ai_builder.planning_state import (
     FileRoleEvidence,
-    NamedResultEvidence,
     PlanningState,
     ResolvedSlot,
 )
@@ -151,9 +150,6 @@ def build_plan_proposal_system_prompt(
     output_schema_block = _output_schema_evidence_block(planning_state)
     if output_schema_block is not None:
         lines.extend(["", "Output schema evidence:", output_schema_block])
-    named_result_block = _named_result_obligations_block(planning_state)
-    if named_result_block is not None:
-        lines.extend(["", "Named result obligations:", named_result_block])
     example_evidence_block = _example_output_evidence_block(planning_state)
     if example_evidence_block is not None:
         lines.extend(["", "Example-output evidence:", example_evidence_block])
@@ -356,38 +352,6 @@ def _output_schema_evidence_block(planning_state: PlanningState) -> str | None:
             "- Use output_fields consistent with these user-declared fields.",
         ]
     )
-
-
-def _named_result_obligations_block(planning_state: PlanningState) -> str | None:
-    terminal_output = planning_state.resolved_slots.get("terminal_output")
-    obligations = planning_state.named_result_obligations
-    if (
-        terminal_output is None
-        or terminal_output.value != "structured_json"
-        or not obligations
-    ):
-        return None
-    # The user's declared shape is persisted evidence and it is disclosed at
-    # confirmation, so the planner is told the same thing the user attested to.
-    names = ", ".join(
-        _named_result_prompt_text(obligation)
-        for obligation in planning_state.named_result_evidence
-    )
-    return "\n".join(
-        [
-            f"- user-named result keys: {names}",
-            "- Preserve every name as a key somewhere in the outcome contract, "
-            "honouring any shape the user declared beside it. Requiredness and "
-            "validation constraints remain unspecified.",
-        ]
-    )
-
-
-def _named_result_prompt_text(obligation: NamedResultEvidence) -> str:
-    name = render_ai_builder_evidence_value(obligation.name)
-    if obligation.declared_shape is None:
-        return name
-    return f"{name} ({obligation.declared_shape})"
 
 
 def _input_schema_evidence_block(planning_state: PlanningState) -> str | None:

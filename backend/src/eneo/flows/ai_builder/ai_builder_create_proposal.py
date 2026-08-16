@@ -31,6 +31,7 @@ from eneo.flows.ai_builder.ai_builder_proposal_capture import (
 from eneo.flows.ai_builder.ai_builder_proposal_intent import (
     CreateFlowIntent,
     ProposalIntentArgumentError,
+    ProposalObligationProjection,
 )
 from eneo.flows.ai_builder.ai_builder_proposal_telemetry import (
     PROPOSAL_PARSE_MODEL_FAILURE_CODE,
@@ -64,6 +65,10 @@ _NON_MODEL_REPAIRABLE_ARCHITECTURE_FAILURE_CODES = frozenset(
         "assembly_document_report_compose_topology_missing",
         "flow_input_schema_composite_bindings_unsupported",
         "flow_input_schema_target_missing",
+        # A dropped obligation is a compiler defect against a name the user
+        # already confirmed. No model can repair a server bug, and asking one
+        # to try would spend the turn's budget hiding it.
+        "named_result_obligation_dropped",
         "section_writer_structured_source_ambiguous",
         "terminal_output_type_mismatch",
         "template_attachment_selection_invalid",
@@ -85,9 +90,13 @@ async def process_create_intent_arguments(
     plan_edit_context: ResolvedAIBuilderEditContext | None = None,
     prior_spec_for_revision: FlowDraftSpecCore | None = None,
     compile_context: CreateCompileContext | None = None,
+    obligation_projection: ProposalObligationProjection | None = None,
 ) -> ToolProcessingResult:
     try:
-        intent = parse_create_flow_intent_arguments(arguments)
+        intent = parse_create_flow_intent_arguments(
+            arguments,
+            obligation_projection=obligation_projection,
+        )
         field_diagnostics: list[LintWarning] = []
         spec = compile_create_intent_to_spec(
             intent,

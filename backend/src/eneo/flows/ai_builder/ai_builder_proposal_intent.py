@@ -1,12 +1,14 @@
 from __future__ import annotations
 
-from typing import Annotated, Any, Literal, cast
+from dataclasses import dataclass
+from typing import Annotated, Any, Literal, cast, get_args
 
 from pydantic import (
     BaseModel,
     BeforeValidator,
     ConfigDict,
     Field,
+    PrivateAttr,
     ValidationError,
     field_validator,
     model_validator,
@@ -22,6 +24,7 @@ from eneo.flows.ai_builder.ai_builder_new_step_models import (
     PreviousFieldRef,
     PreviousOutputRef,
     StructuredFieldDraft,
+    StructuredFieldType,
     ensure_structured_field_depth,
     normalize_authoring_string_list,
 )
@@ -56,6 +59,111 @@ from eneo.flows.flow_review_policy import FlowStepReviewMode
 # Safety guard against runaway tool output. This should not be a practical
 # product cap for legitimate advanced flows.
 MAX_PROPOSAL_STEPS = 256
+
+RESULT_KEYS_ARGUMENT = "result_keys"
+
+
+@dataclass(frozen=True, slots=True)
+class ObligatedResultKey:
+    """One user-named result key the server projects into the create schema."""
+
+    name: str
+    declared_shape: Literal["array", "object"] | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class ProposalObligationProjection:
+    """The admitted obligation keys in the exact prepared-schema order.
+
+    The model places each key by naming the *index* of its container, and
+    JSON object member order is not schema order, so the index is meaningless
+    without the order the schema declared. This is that order: one instance is
+    built where the prepared schema is built, travels with it, and is read
+    again at admission, so the indices the model answered with are always
+    resolved against the very order it was shown. Which obligations are
+    eligible is re-derived from one pure rule; the ORDER is never re-derived.
+    """
+
+    keys: tuple[ObligatedResultKey, ...]
+
+    def __post_init__(self) -> None:
+        if not self.keys:
+            raise ValueError("An obligation projection requires at least one key")
+        if len({key.name for key in self.keys}) != len(self.keys):
+            raise ValueError("Obligation projection keys must be unique")
+
+    @property
+    def ordered_keys(self) -> tuple[str, ...]:
+        return tuple(key.name for key in self.keys)
+
+
+def build_result_keys_schema(
+    projection: ProposalObligationProjection,
+) -> dict[str, Any]:
+    """The flat staged `result_keys` record for one admitted projection.
+
+    Every key is a closed record of `field_type`, `description`, `required`
+    and `container`. `container` is a per-property integer enum of every
+    *other* declared position plus `null`, so self-reference and out-of-range
+    are unrepresentable and raw prepared-schema validation rejects them
+    before any staged check runs. The compact index is flat in cost at every
+    name length, which is why it ships instead of a name enum.
+    """
+
+    names = projection.ordered_keys
+    properties: dict[str, Any] = {
+        key.name: {
+            "type": "object",
+            "additionalProperties": False,
+            "required": ["field_type", "description", "required", "container"],
+            "properties": {
+                "field_type": {
+                    "type": "string",
+                    "enum": (
+                        [key.declared_shape]
+                        if key.declared_shape is not None
+                        else list(_STRUCTURED_FIELD_TYPE_VALUES)
+                    ),
+                },
+                "description": {"type": "string"},
+                "required": {"type": "boolean"},
+                "container": {
+                    "type": ["integer", "null"],
+                    "enum": [
+                        *(other for other in range(len(names)) if other != index),
+                        None,
+                    ],
+                    "description": (
+                        "Exactly one declared result_keys key, or null for a "
+                        "root field."
+                    ),
+                },
+            },
+        }
+        for index, key in enumerate(projection.keys)
+    }
+    return {
+        "type": "object",
+        "additionalProperties": False,
+        "required": list(names),
+        "properties": properties,
+    }
+
+
+# The canonical field-type vocabulary has one owner; this reads it rather
+# than restating it.
+_STRUCTURED_FIELD_TYPE_VALUES: tuple[str, ...] = get_args(StructuredFieldType)
+
+
+class _StagedObligatedField(BaseModel):
+    """One returned `result_keys` record, before it becomes a field graph."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    field_type: StructuredFieldType
+    description: str
+    required: bool
+    container: int | None
 
 
 class FlowInputFieldIntent(BaseModel):
@@ -277,6 +385,25 @@ class CreateFlowIntent(BaseModel):
     steps: list[CreateSemanticStepIntent]
     assumptions: list[str] = Field(default_factory=list)
 
+    # The projected obligation graph is server-owned: it is materialized from
+    # the staged `result_keys` record against the prepared schema's key order,
+    # never accepted as a model-authored argument.
+    _obligated_output_fields: tuple[StructuredFieldDraft, ...] = PrivateAttr(
+        default=(),
+    )
+
+    @property
+    def obligated_output_fields(self) -> tuple[StructuredFieldDraft, ...]:
+        return self._obligated_output_fields
+
+    def admit_obligated_output_fields(
+        self,
+        fields: tuple[StructuredFieldDraft, ...],
+    ) -> None:
+        """Record the server-materialized obligation graph on this intent."""
+
+        self._obligated_output_fields = fields
+
     @field_validator("flow_name", "plan_rationale")
     @classmethod
     def _normalize_required_text(cls, value: str) -> str:
@@ -324,11 +451,110 @@ class CreateFlowIntent(BaseModel):
         return normalized
 
 
-def parse_create_flow_intent_arguments(arguments: dict[str, Any]) -> CreateFlowIntent:
+def parse_create_flow_intent_arguments(
+    arguments: dict[str, Any],
+    *,
+    obligation_projection: ProposalObligationProjection | None = None,
+) -> CreateFlowIntent:
+    remaining = dict(arguments)
+    staged_result_keys = (
+        remaining.pop(RESULT_KEYS_ARGUMENT, None)
+        if obligation_projection is not None
+        else None
+    )
     try:
-        return CreateFlowIntent.model_validate(arguments)
+        intent = CreateFlowIntent.model_validate(remaining)
+        if obligation_projection is not None:
+            intent.admit_obligated_output_fields(
+                _materialize_obligated_output_fields(
+                    staged_result_keys,
+                    projection=obligation_projection,
+                )
+            )
     except ValidationError as error:
         raise ProposalIntentArgumentError(safe_validation_issues(error)) from error
+    except ValueError as error:
+        raise ProposalIntentArgumentError(
+            (f"{RESULT_KEYS_ARGUMENT}: {error} [value_error]",)
+        ) from error
+    return intent
+
+
+def _materialize_obligated_output_fields(
+    staged_result_keys: object,
+    *,
+    projection: ProposalObligationProjection,
+) -> tuple[StructuredFieldDraft, ...]:
+    """Turn the staged flat record into the obligated field graph.
+
+    Containment resolves against the projection's key order and never against
+    the returned object's member order, so permuting the members the provider
+    happens to emit cannot change the compiled graph. Only what the schema
+    cannot express is checked here: containment cycles, parent field types
+    that cannot hold children, and authoring depth.
+    """
+
+    names = projection.ordered_keys
+    if not isinstance(staged_result_keys, dict):
+        raise ValueError("a record for every declared result key is required")
+    raw = cast(dict[str, Any], staged_result_keys)
+    missing = [name for name in names if name not in raw]
+    if missing:
+        raise ValueError(f"missing records for {', '.join(missing)}")
+    staged = {name: _StagedObligatedField.model_validate(raw[name]) for name in names}
+
+    children: dict[str, list[str]] = {name: [] for name in names}
+    roots: list[str] = []
+    for name in names:
+        container = staged[name].container
+        if container is None:
+            roots.append(name)
+            continue
+        if not 0 <= container < len(names) or names[container] == name:
+            raise ValueError(f"{name}: container must name another declared key")
+        children[names[container]].append(name)
+
+    _reject_containment_cycles(staged, names=names)
+
+    def draft(name: str) -> StructuredFieldDraft:
+        record = staged[name]
+        nested = [draft(child) for child in children[name]]
+        if nested and record.field_type not in ("object", "array"):
+            raise ValueError(
+                f"{name}: field_type {record.field_type!r} cannot contain "
+                f"{', '.join(children[name])}; declare it as an object or array."
+            )
+        return StructuredFieldDraft(
+            name=name,
+            field_type=record.field_type,
+            description=record.description,
+            required=record.required,
+            fields=nested if record.field_type == "object" else None,
+            item_fields=(nested if record.field_type == "array" and nested else None),
+        )
+
+    fields = [draft(name) for name in roots]
+    ensure_structured_field_depth(fields)
+    return tuple(fields)
+
+
+def _reject_containment_cycles(
+    staged: dict[str, _StagedObligatedField],
+    *,
+    names: tuple[str, ...],
+) -> None:
+    for name in names:
+        seen = {name}
+        container = staged[name].container
+        while container is not None:
+            parent = names[container]
+            if parent in seen:
+                raise ValueError(
+                    f"{name}: result keys must not contain each other in a cycle "
+                    f"({' -> '.join(sorted(seen))})."
+                )
+            seen.add(parent)
+            container = staged[parent].container
 
 
 class ProposalIntentArgumentError(ValueError):
@@ -364,6 +590,7 @@ def build_create_flow_tool_schema(
     tool_name: str,
     is_pure_audio_transcription: bool = False,
     confirmed_runtime_inputs: tuple[ConfirmedRuntimeInputRequirement, ...] = (),
+    obligation_projection: ProposalObligationProjection | None = None,
 ) -> dict[str, Any]:
     model_refs = resource_catalog.small_ref_enum_for_kind("model")
     kb_refs = resource_catalog.small_ref_enum_for_kind("knowledge_base")
@@ -400,6 +627,11 @@ def build_create_flow_tool_schema(
             f"{rendered_runtime_inputs}. Do not repeat any exact runtime-input "
             "identity as a source output field."
         )
+    projected_result_keys = (
+        {RESULT_KEYS_ARGUMENT: build_result_keys_schema(obligation_projection)}
+        if obligation_projection is not None
+        else {}
+    )
     return {
         "type": "function",
         "function": {
@@ -418,6 +650,7 @@ def build_create_flow_tool_schema(
                     "plan_rationale",
                     "steps",
                     "assumptions",
+                    *projected_result_keys,
                 ],
                 "properties": {
                     "flow_name": {
@@ -448,6 +681,7 @@ def build_create_flow_tool_schema(
                         "type": "array",
                         "items": {"type": "string"},
                     },
+                    **projected_result_keys,
                 },
                 "additionalProperties": False,
             },
@@ -536,7 +770,10 @@ def build_semantic_step_schema(
 
 __all__ = [
     "CreateFlowIntent",
+    "ObligatedResultKey",
     "ProposalIntentArgumentError",
+    "ProposalObligationProjection",
+    "RESULT_KEYS_ARGUMENT",
     "AddStep",
     "AssistantSpecPatch",
     "FlowInputFieldIntent",
@@ -545,6 +782,7 @@ __all__ = [
     "OrderedEditStep",
     "SemanticStepIntent",
     "build_create_flow_tool_schema",
+    "build_result_keys_schema",
     "build_semantic_step_schema",
     "parse_create_flow_intent_arguments",
     "safe_validation_issues",

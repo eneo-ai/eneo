@@ -241,6 +241,7 @@ class AIBuilderPlanner:
                         ),
                         resource_catalog=proposal_request.resource_catalog,
                         proposal_tool_schema=proposal_request.proposal_tool_schema,
+                        obligation_projection=proposal_request.obligation_projection,
                         max_output_tokens=max_output_tokens,
                         proposal_temperature=self.planner_temperature,
                         request_id=request_id,

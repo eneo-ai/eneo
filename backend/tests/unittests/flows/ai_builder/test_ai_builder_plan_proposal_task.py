@@ -33,7 +33,6 @@ from eneo.flows.ai_builder.planning_state import (
     ExampleOutputSourceCoverage,
     ExampleOutputStyleConstraint,
     FileRoleEvidence,
-    NamedResultEvidence,
     PlanningState,
     ResolvedSlot,
     SchemaResolution,
@@ -380,78 +379,6 @@ def test_plan_proposal_prompt_renders_output_schema_evidence_compactly() -> None
     assert "declared_schema, high confidence" in prompt
     assert "Use output_fields consistent with these user-declared fields." in prompt
     assert "additionalProperties" not in prompt
-
-
-def test_plan_proposal_prompt_carries_named_fields_with_their_declared_shape() -> None:
-    state = _state_with_slot("terminal_output", "structured_json")
-    state.named_result_evidence = [
-        NamedResultEvidence(
-            name=name,
-            confidence="high",
-            evidence=["quote:user_message:user-1:case_id and status"],
-        )
-        for name in ("case_id", "status")
-    ]
-
-    prompt = build_plan_proposal_system_prompt(
-        planning_state=state,
-        confirmed_requirements=_requirements(summary="Return case_id and status."),
-        attachment_context=None,
-        flow_context=None,
-        is_edit_mode=False,
-        resource_catalog=_empty_catalog(),
-    )
-
-    assert "Named result obligations:" in prompt
-    assert "user-named result keys: case_id, status" in prompt
-    assert "honouring any shape the user declared beside it" in prompt
-
-
-def test_plan_proposal_prompt_includes_complete_bounded_named_result() -> None:
-    exact_name = "municipal_case_reference"
-    state = _state_with_slot("terminal_output", "structured_json")
-    state.named_result_evidence = [
-        NamedResultEvidence(
-            name=exact_name,
-            confidence="high",
-            evidence=[f"quote:user_message:user-1:{exact_name}"],
-        )
-    ]
-
-    prompt = build_plan_proposal_system_prompt(
-        planning_state=state,
-        confirmed_requirements=_requirements(summary="Return named JSON fields."),
-        attachment_context=None,
-        flow_context=None,
-        is_edit_mode=False,
-        resource_catalog=_empty_catalog(),
-    )
-
-    assert "Named result obligations:" in prompt
-    assert exact_name in prompt
-
-
-def test_plan_proposal_prompt_does_not_project_non_json_named_results() -> None:
-    state = _state_with_slot("terminal_output", "pdf_document")
-    state.named_result_evidence = [
-        NamedResultEvidence(
-            name="case_summary",
-            confidence="high",
-            evidence=["quote:user_message:user-1:case summary"],
-        )
-    ]
-
-    prompt = build_plan_proposal_system_prompt(
-        planning_state=state,
-        confirmed_requirements=_requirements(summary="Return a PDF report."),
-        attachment_context=None,
-        flow_context=None,
-        is_edit_mode=False,
-        resource_catalog=_empty_catalog(),
-    )
-
-    assert "Named result obligations:" not in prompt
-    assert "case_summary" not in prompt
 
 
 def test_plan_proposal_prompt_describes_input_schema_without_directing_docx_output() -> (

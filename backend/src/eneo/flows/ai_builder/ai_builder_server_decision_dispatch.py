@@ -247,6 +247,7 @@ async def _dispatch_architecture_commit(
         ),
         confirmed_requirements_version=request.confirmed_requirements_version,
         ui_language=request.ui_language,
+        is_edit_mode=request.flow is not None,
     )
     if isinstance(turn_control.decision, ConfirmRequirements) or (
         isinstance(turn_control.decision, AskCanonicalQuestion)

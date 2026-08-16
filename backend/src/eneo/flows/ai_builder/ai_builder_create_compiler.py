@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 from copy import deepcopy
-from typing import cast
+from typing import Any, cast
 
 from eneo.flows.ai_builder.ai_builder_architecture_errors import (
     AIBuilderArchitectureError,
@@ -21,6 +21,13 @@ from eneo.flows.ai_builder.ai_builder_checkpoint_contract import (
 from eneo.flows.ai_builder.ai_builder_create_compile_context import CreateCompileContext
 from eneo.flows.ai_builder.ai_builder_domain_models import LintWarning
 from eneo.flows.ai_builder.ai_builder_flow_schema_values import FlowInputFieldProvenance
+from eneo.flows.ai_builder.ai_builder_json_schema_paths import (
+    resolve_schema_properties,
+)
+from eneo.flows.ai_builder.ai_builder_new_step_models import (
+    StructuredFieldDraft,
+    structured_field_draft_names,
+)
 from eneo.flows.ai_builder.ai_builder_output_sections_signals import (
     EMPTY_REQUESTED_OUTPUT_SECTIONS,
 )
@@ -32,6 +39,7 @@ from eneo.flows.ai_builder.ai_builder_proposal_intent import (
 )
 from eneo.flows.ai_builder.ai_builder_result_contract import (
     fold_result_field_name,
+    structured_field_names_satisfy_result_field,
 )
 from eneo.flows.ai_builder.ai_builder_runtime_input_fields import (
     RuntimeInputFieldHint,
@@ -64,6 +72,14 @@ def compile_create_intent_to_spec(
     context: CreateCompileContext | None = None,
     field_diagnostics: list[LintWarning] | None = None,
 ) -> FlowDraftSpecCore:
+    obligated_output_fields = intent.obligated_output_fields
+    envelope_output_fields = (
+        context.result_contract_output_fields if context is not None else ()
+    )
+    intent = _intent_with_obligated_output_fields(
+        intent,
+        envelope_fields=envelope_output_fields,
+    )
     runtime_input_type = (
         context.effective_runtime_input_type if context is not None else InputType.TEXT
     )
@@ -144,8 +160,12 @@ def compile_create_intent_to_spec(
         aggregation_intent=aggregation_intent,
         terminal_output_schema=context.terminal_output_schema if context else None,
         source_reader_required_fields=source_reader_required_fields,
+        # With obligations, the envelope is already merged onto the terminal
+        # step above, under a precedence the assembly's any-depth completion
+        # cannot express. Leaving it here as well would let it re-complete
+        # that branch against the merged graph.
         result_contract_output_fields=(
-            context.result_contract_output_fields if context is not None else ()
+            () if obligated_output_fields else envelope_output_fields
         ),
         result_contract_required_roles=(
             context.result_contract_required_roles if context is not None else ()
@@ -213,7 +233,7 @@ def compile_create_intent_to_spec(
                 },
             )
         if context is None or context.checkpoint_intents is None:
-            return compiled_spec
+            return _spec_preserving_obligations(compiled_spec, obligated_output_fields)
         compiled_spec = project_checkpoint_intents(
             compiled_spec,
             context.checkpoint_intents,
@@ -258,7 +278,230 @@ def compile_create_intent_to_spec(
                     "mismatch_count": len(mismatches),
                 },
             )
-        return compiled_spec
+        return _spec_preserving_obligations(compiled_spec, obligated_output_fields)
+
+
+def _intent_with_obligated_output_fields(
+    intent: CreateFlowIntent,
+    *,
+    envelope_fields: tuple[StructuredFieldDraft, ...],
+) -> CreateFlowIntent:
+    """Place the admitted obligation graph on the terminal step, once.
+
+    Precedence is explicit and it is enforced where it cannot be defeated.
+    Routing obligations through the server-owned result-contract parameter
+    would not do it: that path only *completes* a field it cannot already
+    find, and it finds one at any depth and under any folded alias
+    (`_complete_result_contract_output_fields` in the assembly), so a
+    model-authored nested `documents: string` would silently stand in for an
+    obligated root `documents: array`.
+
+    The same any-depth search cuts the other way, so the envelope is completed
+    here too rather than in the assembly: an obligation nested as
+    `assessment{risks}` must not stand in for the server's own required root
+    `risks`. Only an obligated ROOT may satisfy an envelope role; the model's
+    own fields keep the assembly's existing satisfaction rule, so nothing about
+    plans without obligations changes. The assembly's global alias semantics
+    are untouched — it simply has nothing left to complete on this branch.
+
+    Order matters and it is the whole correctness argument: what the model
+    keeps is decided FIRST, and everything afterwards — collisions, envelope
+    satisfaction — is judged against the fields that actually survive. Judging
+    against the fields that were merely submitted let a discarded subtree both
+    demand a repair and suppress an envelope root it would never emit.
+    """
+
+    obligated = intent.obligated_output_fields
+    if not obligated or not intent.steps:
+        return intent
+    # Two sets, because they answer two questions. Only a ROOT can outrank a
+    # model root; but EVERY obligated name, at any depth, may exist in exactly
+    # one place.
+    obligated_root_identities = {
+        fold_result_field_name(field.name) for field in obligated
+    }
+    obligated_identities = {
+        fold_result_field_name(name) for name in structured_field_draft_names(obligated)
+    }
+    terminal_step = intent.steps[-1]
+    surviving_model_fields = [
+        field
+        for field in (terminal_step.output_fields or [])
+        if fold_result_field_name(field.name) not in obligated_root_identities
+    ]
+    _reject_obligated_name_collisions(
+        surviving_model_fields,
+        obligated_identities=obligated_identities,
+    )
+    model_declared_names = structured_field_draft_names(tuple(surviving_model_fields))
+    uncovered_envelope_fields = [
+        field
+        for field in envelope_fields
+        if fold_result_field_name(field.name) not in obligated_root_identities
+        and not structured_field_names_satisfy_result_field(
+            model_declared_names,
+            field.name,
+        )
+    ]
+    model_fields = surviving_model_fields
+    return intent.model_copy(
+        update={
+            "steps": [
+                *intent.steps[:-1],
+                terminal_step.model_copy(
+                    update={
+                        "output_fields": [
+                            *obligated,
+                            *model_fields,
+                            *uncovered_envelope_fields,
+                        ]
+                    }
+                ),
+            ]
+        }
+    )
+
+
+def _reject_obligated_name_collisions(
+    fields: list[StructuredFieldDraft],
+    *,
+    obligated_identities: set[str],
+    path: str = "",
+) -> None:
+    """Refuse a surviving model field that repeats a user-named result.
+
+    A model ROOT of an obligated root's identity is simply outranked and has
+    already been removed before this runs, so nothing here asks for a repair
+    the model's own text could not perform. What remains is a second,
+    contradictory home for a name the contract binds exactly once — including
+    a nested obligation such as `assessment{risks}` reappearing under some
+    other branch — and that is repairable feedback rather than a silent choice
+    between two placements.
+    """
+
+    for field in fields:
+        field_path = f"{path}.{field.name}" if path else field.name
+        if fold_result_field_name(field.name) in obligated_identities:
+            raise AIBuilderArchitectureError(
+                public_code="architecture_materialization_failed",
+                detail=(
+                    f"{field_path} repeats a result field the user named. Each "
+                    "user-named field belongs in exactly one place; remove this "
+                    "copy and let the named field keep its own placement."
+                ),
+                log_context={
+                    "failure_code": "named_result_obligation_collision",
+                    "reason": "named_result_obligation_collision",
+                    "field_names": field_path,
+                },
+            )
+        _reject_obligated_name_collisions(
+            (field.fields or []) + (field.item_fields or []),
+            obligated_identities=obligated_identities,
+            path=field_path,
+        )
+
+
+def _missing_obligation_paths(
+    fields: tuple[StructuredFieldDraft, ...],
+    schema: dict[str, Any],
+    *,
+    path: str = "",
+) -> list[str]:
+    """Obligation paths the compiled contract does not carry, in graph order.
+
+    Each obligation is looked for beneath its own obligated parent, so the
+    answer is a path and not a name. Identity is still folded per segment, so
+    a fold-equivalent spelling of the same field is preserved rather than
+    reported.
+    """
+
+    properties = {
+        fold_result_field_name(str(name)): value
+        for name, value in resolve_schema_properties(_schema_object(schema)).items()
+    }
+    missing: list[str] = []
+    for field in fields:
+        field_path = f"{path}.{field.name}" if path else field.name
+        declared = properties.get(fold_result_field_name(field.name))
+        if not isinstance(declared, dict):
+            missing.append(field_path)
+            continue
+        children = tuple((field.fields or []) + (field.item_fields or []))
+        if children:
+            missing.extend(
+                _missing_obligation_paths(
+                    children,
+                    cast(dict[str, Any], declared),
+                    path=field_path,
+                )
+            )
+    return missing
+
+
+def _schema_object(schema: dict[str, Any]) -> dict[str, Any]:
+    """The object node whose properties a field's children live in.
+
+    An array's children are declared on its `items`, and the obligated graph
+    reaches them through `item_fields` without a numeric segment, so the array
+    node is transparent here.
+    """
+
+    items = schema.get("items")
+    if schema.get("type") == "array" and isinstance(items, dict):
+        return _schema_object(cast(dict[str, Any], items))
+    return schema
+
+
+def _spec_preserving_obligations(
+    spec: FlowDraftSpecCore,
+    obligated_output_fields: tuple[StructuredFieldDraft, ...],
+) -> FlowDraftSpecCore:
+    """Compiler postcondition: every admitted obligation survived compilation.
+
+    A defect detector, never a repair. The model cannot cause this to fire —
+    placement is server-owned above — so firing means the compiler dropped a
+    name the user was already shown at confirmation, and shipping that plan
+    would break the promise the confirmation made. It fails closed as a
+    non-repairable architecture failure rather than asking a model to fix a
+    server bug.
+
+    It checks every admitted obligation at its own PATH, not merely somewhere
+    in the contract: a lost `assessment.risks` is exactly as broken a promise
+    as a lost `assessment`, and the same name legitimately exists at another
+    depth — the server's envelope `risks` sits at the root while the user's
+    `risks` sits inside `assessment` — so a flat name set would let one mask
+    the other's loss.
+    """
+
+    if not obligated_output_fields:
+        return spec
+    outcome_contract = next(
+        (
+            step.output_contract
+            for step in reversed(spec.steps)
+            if step.output_contract is not None
+        ),
+        None,
+    )
+    missing = _missing_obligation_paths(
+        obligated_output_fields,
+        outcome_contract if isinstance(outcome_contract, dict) else {},
+    )
+    if not missing:
+        return spec
+    raise AIBuilderArchitectureError(
+        public_code="architecture_materialization_failed",
+        detail=(
+            "The compiled Flow lost result fields the user named: "
+            f"{', '.join(missing)}."
+        ),
+        log_context={
+            "failure_code": "named_result_obligation_dropped",
+            "reason": "named_result_obligation_dropped",
+            "field_names": ",".join(missing),
+        },
+    )
 
 
 def _apply_flow_input_schema(

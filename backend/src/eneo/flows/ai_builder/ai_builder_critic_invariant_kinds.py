@@ -31,7 +31,6 @@ CRITIC_INVARIANT_KINDS: Mapping[str, CriticInvariantKind] = {
     "mixed_audio_doc_rejects_pseudo_transcription": "architecture",
     "mixed_audio_doc_requires_real_transcription_step": "architecture",
     "multi_document_compare_requires_all_previous_steps": "architecture",
-    "named_result_obligations_must_survive": "semantic",
     "non_terminal_step_document_conversion_forbidden": "architecture",
     "non_terminal_step_template_fill_forbidden": "architecture",
     "pdf_terminal_output_alignment": "architecture",

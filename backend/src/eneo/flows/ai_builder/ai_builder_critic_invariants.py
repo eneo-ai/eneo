@@ -61,7 +61,6 @@ from eneo.flows.ai_builder.ai_builder_planner_pattern_signals import (
 )
 from eneo.flows.ai_builder.ai_builder_result_contract import (
     ResultContract,
-    fold_result_field_name,
     resolve_result_output_field_roles,
 )
 from eneo.flows.ai_builder.ai_builder_slot_classification_contract import (
@@ -131,7 +130,6 @@ class CriticContext:
     resolved_slots: Mapping[str, ResolvedSlot] = field(
         default_factory=dict[str, ResolvedSlot]
     )
-    named_result_obligations: tuple[str, ...] = ()
     output_schema_evidence: SchemaEvidence | None = None
 
 
@@ -843,63 +841,6 @@ def _action_followup_requires_followup_fields_evidence(
     return (
         not set(context.result_contract.required_output_field_roles) <= declared_roles
     )
-
-
-def _missing_named_result_obligations(context: CriticContext) -> tuple[str, ...]:
-    if (
-        not context.named_result_obligations
-        or not context.spec.steps
-        or context.spec.steps[-1].output_type != OutputType.JSON
-    ):
-        return ()
-    outcome_contract = next(
-        (
-            step.output_contract
-            for step in reversed(context.spec.steps)
-            if step.output_contract is not None
-        ),
-        None,
-    )
-    if outcome_contract is None:
-        return context.named_result_obligations
-    declared = {
-        fold_result_field_name(name)
-        for name in schema_property_names_at_any_depth(outcome_contract)
-    }
-    return tuple(
-        name
-        for name in context.named_result_obligations
-        if fold_result_field_name(name) not in declared
-    )
-
-
-def _named_result_obligations_must_survive_evidence(
-    context: CriticContext,
-) -> bool:
-    return bool(_missing_named_result_obligations(context))
-
-
-def _named_result_obligations_remediation(context: CriticContext) -> str:
-    missing = ", ".join(
-        f"`{name}`" for name in _missing_named_result_obligations(context)
-    )
-    return (
-        "Användaren namngav utdatafält som saknas i planens strukturerade "
-        f"kontrakt: {missing}. Behåll varje användarnamngivet fält som nyckel "
-        "(valfri typ och nästling); ta inte bort eller döp om dem."
-    )
-
-
-_NAMED_RESULT_OBLIGATIONS_MUST_SURVIVE = CriticInvariant(
-    id="named_result_obligations_must_survive",
-    description=(
-        "Field names the user explicitly requested must survive as keys in "
-        "the outcome contract; named-result evidence does not pin the schema, so "
-        "survival is the enforced contract."
-    ),
-    evidence=_named_result_obligations_must_survive_evidence,
-    remediation=_named_result_obligations_remediation,
-)
 
 
 _ACTION_FOLLOWUP_REQUIRES_FOLLOWUP_FIELDS = CriticInvariant(
@@ -1705,7 +1646,6 @@ CRITIC_INVARIANTS: tuple[CriticInvariant, ...] = (
     _STANDALONE_AUDIO_REQUIRES_TRANSCRIPTION_STEP,
     _SOURCE_READER_REQUIRED_FIELDS_MUST_BE_CAPTURED,
     _ACTION_FOLLOWUP_REQUIRES_FOLLOWUP_FIELDS,
-    _NAMED_RESULT_OBLIGATIONS_MUST_SURVIVE,
     _FIELD_REUSE_REQUIRES_INPUT_BINDINGS,
     _MULTI_DOCUMENT_COMPARE_REQUIRES_EXPLICIT_FAN_IN,
     _SIMPLE_TEXT_TRANSFORM_MUST_REMAIN_SINGLE_STEP,

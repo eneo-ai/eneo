@@ -8,6 +8,7 @@ controller and downstream server/proposal dispatch.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Literal
@@ -30,6 +31,13 @@ from eneo.flows.ai_builder.ai_builder_discovery_questions import (
     question_suggestion_for_id,
 )
 from eneo.flows.ai_builder.ai_builder_error_contract import AIBuilderErrorCode
+from eneo.flows.ai_builder.ai_builder_new_step_models import (
+    STRUCTURED_FIELD_NAME_PATTERN,
+)
+from eneo.flows.ai_builder.ai_builder_proposal_intent import (
+    ObligatedResultKey,
+    ProposalObligationProjection,
+)
 from eneo.flows.ai_builder.ai_builder_template_attachment_contract import (
     selected_template_is_readable,
     template_attachment_selection_is_valid,
@@ -40,6 +48,12 @@ from eneo.flows.enums import FlowAuthoringOutputMode
 _CORE_ARCHITECTURAL_SLOTS: frozenset[str] = frozenset(
     {"primary_runtime_input", "terminal_output"}
 )
+
+# How many user-named result keys one create schema projects. Its own
+# constant on purpose: the classifier's per-delta citation bound is a
+# different contract, and obligations accumulate across turns while
+# citations do not. The observed corpus maximum is 9.
+NAMED_RESULT_PROJECTION_MAX_ITEMS = 12
 PlannerActionKind = Literal[
     "ask_question",
     "confirm_requirements",
@@ -59,11 +73,74 @@ class PlannerActionPolicy:
     architecture_refusal_code: AIBuilderErrorCode | None = None
 
 
+def named_result_projection(
+    session_state: PlanningState,
+    *,
+    is_edit_mode: bool = False,
+) -> ProposalObligationProjection | None:
+    """The obligation keys this turn projects into the create tool schema.
+
+    One rule, read by both admission and the schema builder, so the refusal
+    the user sees before confirming and the schema the model later answers
+    can never disagree about which names are in play. An exact declared
+    output schema is already authoritative, and edit mode has no create
+    schema to project into, so both stand down.
+    """
+
+    if is_edit_mode:
+        return None
+    if session_state.commit_grade_slot_value("terminal_output") != "structured_json":
+        return None
+    output_evidence = session_state.output_schema_evidence
+    if output_evidence is not None and output_evidence.source == "declared_schema":
+        return None
+    keys = tuple(
+        ObligatedResultKey(name=item.name, declared_shape=item.declared_shape)
+        for item in session_state.named_result_evidence
+        if item.is_commit_grade
+    )
+    return ProposalObligationProjection(keys=keys) if keys else None
+
+
+def _named_result_projection_refusal_code(
+    projection: ProposalObligationProjection | None,
+) -> AIBuilderErrorCode | None:
+    """Refuse a projection the create schema cannot express, before confirming.
+
+    Both checks are about the stored spelling the user attested to. A name
+    that only compiles after folding would reach the terminal contract under
+    a different spelling than the one disclosed, so it is refused rather than
+    quietly renamed.
+    """
+
+    if projection is None:
+        return None
+    if len(projection.keys) > NAMED_RESULT_PROJECTION_MAX_ITEMS:
+        return AIBuilderErrorCode.SCHEMA_LIMIT_EXCEEDED
+    if any(
+        not re.fullmatch(STRUCTURED_FIELD_NAME_PATTERN, key.name)
+        for key in projection.keys
+    ):
+        return AIBuilderErrorCode.NAMED_RESULT_KEY_UNSUPPORTED
+    if len(projection.keys) == 1 and projection.keys[0].declared_shape == "object":
+        # An object must declare nested fields, and the only thing that can
+        # nest inside a projected key is another projected key. A lone
+        # declared object is therefore a grain no proposal can satisfy — it
+        # would loop the repair path instead of failing — so it is refused
+        # while the user can still say what belongs inside it. The name is
+        # perfectly valid, so this is its own code: telling the user to fix
+        # the spelling of a name that is already fine is worse than silence.
+        return AIBuilderErrorCode.NAMED_RESULT_GRAIN_UNSUPPORTED
+    return None
+
+
 def build_planner_action_policy(
     *,
     session_state: PlanningState,
     selected_discovery_question_ids: tuple[str, ...],
     requirements_confirmed: bool = False,
+    is_edit_mode: bool = False,
+    schema_direction_pending: bool = False,
 ) -> PlannerActionPolicy:
     """Compute the legal action surface from typed server state.
 
@@ -80,6 +157,16 @@ def build_planner_action_policy(
         session_state,
         derived_commit=derived_commit,
         unresolved_core_slots=unresolved_core_slots,
+    ) or (
+        # An unresolved schema direction can still make the projection
+        # inapplicable: selecting the attached schema as the output schema
+        # stands the projection down entirely. Asking first is the only way
+        # the refusal can be about the request the user actually made.
+        None
+        if schema_direction_pending
+        else _named_result_projection_refusal_code(
+            named_result_projection(session_state, is_edit_mode=is_edit_mode)
+        )
     )
     architecture_committed = session_state.architecture_commit is not None
     pinned_commit_matches_current_slots = architecture_commit_draft_matches_pinned(
@@ -257,7 +344,9 @@ def _ordered_ask_targets(
 
 
 __all__ = [
+    "NAMED_RESULT_PROJECTION_MAX_ITEMS",
     "PlannerActionKind",
     "PlannerActionPolicy",
     "build_planner_action_policy",
+    "named_result_projection",
 ]

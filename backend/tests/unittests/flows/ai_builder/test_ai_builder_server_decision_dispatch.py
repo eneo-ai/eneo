@@ -1,11 +1,18 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from typing import TYPE_CHECKING, cast
 from unittest.mock import AsyncMock
 from uuid import UUID, uuid4
 
 import pytest
 
+if TYPE_CHECKING:
+    from eneo.flows.domain.flow import Flow
+
+from eneo.flows.ai_builder.ai_builder_action_policy import (
+    NAMED_RESULT_PROJECTION_MAX_ITEMS,
+)
 from eneo.flows.ai_builder.ai_builder_architecture_commit import (
     canonical_architecture_commit_payload,
     finalize_architecture_commit,
@@ -48,6 +55,7 @@ from eneo.flows.ai_builder.planning_state import (
     ArchitectureCommit,
     ArchitectureCommitDraft,
     FileRoleEvidence,
+    NamedResultEvidence,
     PlanningState,
     ResolvedSlot,
 )
@@ -74,6 +82,7 @@ def _request(
     planning_state: PlanningState | None = None,
     confirmed_requirements_version: str | None = None,
     discovery_assumptions: tuple[str, ...] = (),
+    flow: object | None = None,
 ) -> ServerDecisionDispatchRequest:
     return ServerDecisionDispatchRequest(
         repo=repo,
@@ -81,7 +90,7 @@ def _request(
         decision=decision,
         conversation=conversation,
         new_messages_start=new_messages_start,
-        flow=None,
+        flow=cast("Flow | None", flow),
         confirmed_requirements_version=confirmed_requirements_version,
         ui_language="en",
         telemetry=ServerDecisionTelemetry(
@@ -453,3 +462,46 @@ async def test_architecture_revision_reconfirms_changed_hidden_attachment() -> N
     ]
     assert result.new_planning_state_version == 6
     assert result.proposal_continuation is None
+
+
+@pytest.mark.asyncio
+async def test_chained_confirmation_of_an_edit_session_ignores_named_result_admission() -> (
+    None
+):
+    # The chained confirmation resolves turn control itself, so it needs the
+    # same edit-mode fact the direct path has. Without it an edit session with
+    # more named results than the create projection admits would be refused
+    # over a create schema it never builds.
+    repo = AsyncMock()
+    repo.commit_turn.side_effect = [5, 6]
+    state = _confirmed_state()
+    state.resolved_slots["terminal_output"] = _slot(
+        "terminal_output",
+        "structured_json",
+    )
+    state.named_result_evidence = [
+        NamedResultEvidence(
+            name=f"field_{index}",
+            confidence="high",
+            evidence=[f"quote:user_message:user-1:field_{index}"],
+        )
+        for index in range(NAMED_RESULT_PROJECTION_MAX_ITEMS + 1)
+    ]
+    state.architecture_commit = _finalized_commit_for_state(state)
+    repo.load_planning_state.return_value = state
+    conversation = [ConversationMessage(role="user", content="Change the flow")]
+    decision = CommitArchitecture(architecture_commit=_draft_for_state(state))
+
+    result = await dispatch_server_decision(
+        _request(
+            repo=repo,
+            decision=decision,
+            conversation=conversation,
+            flow=object(),
+        )
+    )
+
+    assert [event.event for event in result.events] == [
+        "status",
+        "requirements_summary",
+    ]

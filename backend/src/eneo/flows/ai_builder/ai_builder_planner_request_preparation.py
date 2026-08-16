@@ -7,6 +7,9 @@ from typing import TYPE_CHECKING, Any, TypeAlias, cast
 from uuid import UUID
 
 from eneo.files.file_models import File
+from eneo.flows.ai_builder.ai_builder_action_policy import (
+    named_result_projection,
+)
 from eneo.flows.ai_builder.ai_builder_attachment_context import (
     AIBuilderAttachmentContext,
     AIBuilderAttachmentContextPolicy,
@@ -64,6 +67,9 @@ from eneo.flows.ai_builder.ai_builder_plan_proposal_task import (
 from eneo.flows.ai_builder.ai_builder_planner_pattern_signals import (
     build_requirements_signal_text,
     form_intake_signal_values_from_planning_state,
+)
+from eneo.flows.ai_builder.ai_builder_proposal_intent import (
+    ProposalObligationProjection,
 )
 from eneo.flows.ai_builder.ai_builder_proposal_telemetry import ProposalTurnTelemetry
 from eneo.flows.ai_builder.ai_builder_proposal_tool_contracts import (
@@ -197,6 +203,7 @@ class ProposalPrepared(_PreparedBase):
     planning_state: PlanningState
     compile_context: CreateCompileContext | None
     proposal_tool_schema: ProposalToolSchema
+    obligation_projection: ProposalObligationProjection | None = None
     request_budget: ProposalRequestBudget | None = None
 
     @property
@@ -321,6 +328,7 @@ async def prepare_planner_request(
             request.plan_edit_context is None
             or request.plan_edit_context.scope != "step"
         ),
+        is_edit_mode=request.flow is not None,
     )
     if not isinstance(turn_control.decision, GenerateProposal):
         return ServerOutputPrepared(
@@ -520,6 +528,10 @@ def build_proposal_prepared(
                 "secondary_obligations": list(compile_context.secondary_obligations),
             },
         )
+    obligation_projection = named_result_projection(
+        planning_state,
+        is_edit_mode=is_edit_mode,
+    )
     proposal_tool_schema = build_propose_flow_tool_schema(
         current_steps=None if flow is None else list(flow.steps),
         resource_catalog=resource_catalog,
@@ -529,6 +541,7 @@ def build_proposal_prepared(
             if compile_context is not None and not is_edit_mode
             else ()
         ),
+        obligation_projection=obligation_projection,
     )
     incompatible_field_names = (
         compile_context.incompatible_confirmed_form_field_names
@@ -656,6 +669,7 @@ def build_proposal_prepared(
         planning_state=planning_state,
         compile_context=compile_context,
         proposal_tool_schema=proposal_tool_schema,
+        obligation_projection=obligation_projection,
         request_budget=ProposalRequestBudget(
             context_window_tokens=max_input_tokens,
             output_reserve_tokens=max_output_tokens,

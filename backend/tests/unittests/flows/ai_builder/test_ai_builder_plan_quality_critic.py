@@ -4796,7 +4796,6 @@ class TestCriticInvariantRegistry:
             "standalone_audio_requires_transcription_step",
             "source_reader_required_fields_must_be_captured",
             "action_followup_requires_followup_fields",
-            "named_result_obligations_must_survive",
             "field_reuse_requires_input_bindings",
             "multi_document_compare_requires_all_previous_steps",
             "simple_text_transform_must_remain_single_step",
@@ -5579,81 +5578,6 @@ def test_named_result_evidence_does_not_exempt_the_followup_critic() -> None:
     )
 
     assert "action_followup_requires_followup_fields" in {issue.id for issue in issues}
-
-
-def _named_result_state(*names: str) -> PlanningState:
-    planning_state = PlanningState.empty()
-    planning_state.resolved_slots["terminal_output"] = ResolvedSlot(
-        name="terminal_output",
-        value="structured_json",
-        source="structured_answer",
-        confidence="high",
-        evidence=["question_answer:terminal_output"],
-    )
-    planning_state.named_result_evidence = [
-        NamedResultEvidence(
-            name=name,
-            confidence="high",
-            evidence=[f"quote:user_message:user-1:{name}"],
-        )
-        for name in names
-    ]
-    return planning_state
-
-
-def test_named_result_obligations_must_survive_into_the_outcome_contract() -> None:
-    # Named-result evidence does not pin the compiled schema; the critic owns its
-    # survival instead. A contract that drops a user-named field fails with
-    # repairable feedback; covering all names (any depth, any casing fold)
-    # passes.
-    planning_state = _named_result_state("service_reference", "applicant_channels")
-    dropped_spec = FlowDraftSpecCore(
-        flow_name="Mappning",
-        steps=[
-            _step(
-                "step_a",
-                "Mappa",
-                "Mappa ansökan till kontraktet.",
-                output_type=OutputType.JSON,
-                output_contract={
-                    "type": "object",
-                    "properties": {"service_reference": {"type": "string"}},
-                },
-            )
-        ],
-    )
-    issues = evaluate_critic_invariants(
-        build_conversation_critic_context(
-            [{"role": "user", "content": "Utdata ska ha fälten."}],
-            dropped_spec,
-            planning_state=planning_state,
-        )
-    )
-    assert "named_result_obligations_must_survive" in {issue.id for issue in issues}
-
-    covered_step = dropped_spec.steps[0].model_copy(
-        update={
-            "output_contract": {
-                "type": "object",
-                "properties": {
-                    "service_reference": {"type": "string"},
-                    "applicant_channels": {
-                        "type": "array",
-                        "items": {"type": "string"},
-                    },
-                },
-            }
-        }
-    )
-    covered_spec = dropped_spec.model_copy(update={"steps": [covered_step]})
-    issues = evaluate_critic_invariants(
-        build_conversation_critic_context(
-            [{"role": "user", "content": "Utdata ska ha fälten."}],
-            covered_spec,
-            planning_state=planning_state,
-        )
-    )
-    assert "named_result_obligations_must_survive" not in {issue.id for issue in issues}
 
 
 class TestSourceReaderRequiredFieldsCaptured:

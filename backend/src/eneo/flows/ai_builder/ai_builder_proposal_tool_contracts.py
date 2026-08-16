@@ -29,6 +29,9 @@ from eneo.flows.ai_builder.ai_builder_event_models import AIBuilderStreamEvent
 from eneo.flows.ai_builder.ai_builder_plan_edit_context import (
     ResolvedAIBuilderEditContext,
 )
+from eneo.flows.ai_builder.ai_builder_proposal_intent import (
+    ProposalObligationProjection,
+)
 from eneo.flows.ai_builder.ai_builder_proposal_telemetry import (
     ProposalTurnTelemetry,
     ToolProcessingFailureKind,
@@ -352,6 +355,7 @@ class ProposalTurnContext:
     usage_tracker: ProposalTurnTelemetry | None = None
     plan_edit_context: ResolvedAIBuilderEditContext | None = None
     prior_spec_for_revision: FlowDraftSpecCore | None = None
+    obligation_projection: ProposalObligationProjection | None = None
     before_provider_call: Callable[[], Awaitable[None]] | None = None
     proposal_call_budget: ProposalCallBudget = field(default_factory=ProposalCallBudget)
     proposal_request_budget: ProposalRequestBudget | None = None
