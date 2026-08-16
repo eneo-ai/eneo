@@ -32,6 +32,7 @@ const validEvents: AIBuilderStreamEvent[] = [
   {
     event: "requirements_summary",
     data: JSON.stringify({
+      requirements_version: "a".repeat(64),
       summary: "Create a report",
       key_decisions: [{ topic: "Output", decision: "Word" }],
       input_description: "Uploaded documents",
@@ -92,8 +93,19 @@ const invalidPayloads: AIBuilderStreamEvent[] = [
   {
     event: "requirements_summary",
     data: JSON.stringify({
+      requirements_version: "a".repeat(64),
       summary: "Create a report",
       key_decisions: "Word",
+      input_description: "Uploaded documents",
+      output_description: "One Word report"
+    })
+  },
+  {
+    // A summary the client cannot name is one the user cannot confirm.
+    event: "requirements_summary",
+    data: JSON.stringify({
+      summary: "Create a report",
+      key_decisions: [{ topic: "Output", decision: "Word" }],
       input_description: "Uploaded documents",
       output_description: "One Word report"
     })

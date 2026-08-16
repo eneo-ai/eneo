@@ -30,6 +30,10 @@ from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
 )
 from eneo.flows.ai_builder.ai_builder_domain_models import ConversationMessage
 from eneo.flows.ai_builder.ai_builder_error_contract import AIBuilderErrorCode
+from eneo.flows.ai_builder.ai_builder_requirements_disclosure import (
+    _slot_is_key_decision,
+    build_requirements_disclosure,
+)
 from eneo.flows.ai_builder.ai_builder_requirements_state import (
     build_requirements_version,
 )
@@ -44,12 +48,12 @@ from eneo.flows.ai_builder.ai_builder_tool_names import (
 )
 from eneo.flows.ai_builder.ai_builder_turn_controller import (
     AskCanonicalQuestion,
+    BuilderTurnControl,
     CommitArchitecture,
     ConfirmRequirements,
     GenerateProposal,
     RefuseArchitectureCommit,
     ReviseArchitecture,
-    _slot_is_key_decision,
     resolve_turn_control,
 )
 from eneo.flows.ai_builder.planning_state import (
@@ -98,6 +102,31 @@ def _slot(
     )
 
 
+def _turn_control(
+    *,
+    session_state: PlanningState,
+    selected_discovery_question_ids: tuple[str, ...] = (),
+    confirmed_requirements_version: str | None = None,
+    ui_language: str | None = None,
+    discovery_assumptions: tuple[str, ...] = (),
+    **kwargs: object,
+) -> BuilderTurnControl:
+    """Build the disclosure first, exactly as both production callers do."""
+
+    return resolve_turn_control(
+        session_state=session_state,
+        selected_discovery_question_ids=selected_discovery_question_ids,
+        requirements_disclosure=build_requirements_disclosure(
+            session_state,
+            ui_language=ui_language,
+            discovery_assumptions=discovery_assumptions,
+        ),
+        confirmed_requirements_version=confirmed_requirements_version,
+        ui_language=ui_language,
+        **kwargs,  # type: ignore[arg-type]
+    )
+
+
 def _state(**slots: str) -> PlanningState:
     state = PlanningState.empty()
     state.resolved_slots = {name: _slot(name, value) for name, value in slots.items()}
@@ -121,27 +150,19 @@ def _decision(
     discovery_assumptions: tuple[str, ...] = (),
     selected_discovery_question_ids: tuple[str, ...] = (),
 ) -> object:
-    confirmed_attachment_evidence_fingerprint: str | None = None
-    if requirements_confirmed:
-        unconfirmed = resolve_turn_control(
-            session_state=state,
-            selected_discovery_question_ids=selected_discovery_question_ids,
-            confirmed_attachment_evidence_fingerprint=None,
-            ui_language=ui_language,
-            discovery_assumptions=discovery_assumptions,
-        ).decision
-        if isinstance(unconfirmed, ConfirmRequirements):
-            confirmed_attachment_evidence_fingerprint = (
-                unconfirmed.attachment_evidence_fingerprint
-            )
+    disclosure = build_requirements_disclosure(
+        state,
+        ui_language=ui_language,
+        discovery_assumptions=discovery_assumptions,
+    )
     return resolve_turn_control(
         session_state=state,
         selected_discovery_question_ids=selected_discovery_question_ids,
-        confirmed_attachment_evidence_fingerprint=(
-            confirmed_attachment_evidence_fingerprint
+        requirements_disclosure=disclosure,
+        confirmed_requirements_version=(
+            disclosure.requirements_version if requirements_confirmed else None
         ),
         ui_language=ui_language,
-        discovery_assumptions=discovery_assumptions,
     ).decision
 
 
@@ -334,10 +355,10 @@ def test_schema_direction_maximum_question_covers_complete_set_and_fits_limit(
         schema_discovery=AIBuilderAttachmentSchemaDiscovery(candidates=candidates),
     )
 
-    decision = resolve_turn_control(
+    decision = _turn_control(
         session_state=PlanningState.empty(),
         selected_discovery_question_ids=(),
-        confirmed_attachment_evidence_fingerprint=None,
+        confirmed_requirements_version=None,
         ui_language=ui_language,
         attachment_context=attachment_context,
         schema_candidates=candidates,
@@ -408,14 +429,14 @@ def test_schema_direction_maximum_question_covers_complete_set_and_fits_limit(
 
 
 def test_confirmation_survives_reclassification_churn() -> None:
-    """The fingerprint attests to what the user saw, not derivation traces.
+    """The version attests to what the user saw, not to derivation traces.
 
     Live loop (text_terminal_intranatsnyhet_namndbeslut, 3/3): every turn's
     re-classification appended a fresh `model:file_role:<hash>` plus a
-    duplicate quote to the file role's evidence, so the fingerprint moved
-    every turn while the requirements payload stayed byte-identical. The
-    confirmation gate compared fingerprints, no confirmation could ever
-    match, and the builder re-summarized the same requirements forever.
+    duplicate quote to the file role's evidence, so the retired raw-state
+    fingerprint moved every turn while the requirements payload stayed
+    byte-identical. No confirmation could ever match, and the builder
+    re-summarized the same requirements forever.
     """
 
     file_id = UUID("00000000-0000-0000-0000-000000000712")
@@ -438,10 +459,10 @@ def test_confirmation_survives_reclassification_churn() -> None:
     state = _state(primary_runtime_input="document", terminal_output="structured_text")
     state.architecture_commit = _finalized_commit_for_state(state)
     state.file_roles = [role(["quote:user_message:1:exempel"], "high")]
-    confirmed = resolve_turn_control(
+    confirmed = _turn_control(
         session_state=state,
         selected_discovery_question_ids=(),
-        confirmed_attachment_evidence_fingerprint=None,
+        confirmed_requirements_version=None,
         ui_language="sv",
     ).decision
     assert isinstance(confirmed, ConfirmRequirements)
@@ -462,12 +483,10 @@ def test_confirmation_survives_reclassification_churn() -> None:
         )
     ]
 
-    decision = resolve_turn_control(
+    decision = _turn_control(
         session_state=churned,
         selected_discovery_question_ids=(),
-        confirmed_attachment_evidence_fingerprint=(
-            confirmed.attachment_evidence_fingerprint
-        ),
+        confirmed_requirements_version=(confirmed.payload.requirements_version),
         ui_language="sv",
     ).decision
 
@@ -497,10 +516,10 @@ def test_role_change_invalidates_confirmation() -> None:
     state = _state(primary_runtime_input="document", terminal_output="structured_text")
     state.architecture_commit = _finalized_commit_for_state(state)
     state.file_roles = [role("runtime_input_sample")]
-    confirmed = resolve_turn_control(
+    confirmed = _turn_control(
         session_state=state,
         selected_discovery_question_ids=(),
-        confirmed_attachment_evidence_fingerprint=None,
+        confirmed_requirements_version=None,
         ui_language="sv",
     ).decision
     assert isinstance(confirmed, ConfirmRequirements)
@@ -511,12 +530,10 @@ def test_role_change_invalidates_confirmation() -> None:
     changed.architecture_commit = _finalized_commit_for_state(changed)
     changed.file_roles = [role("template")]
 
-    decision = resolve_turn_control(
+    decision = _turn_control(
         session_state=changed,
         selected_discovery_question_ids=(),
-        confirmed_attachment_evidence_fingerprint=(
-            confirmed.attachment_evidence_fingerprint
-        ),
+        confirmed_requirements_version=(confirmed.payload.requirements_version),
         ui_language="sv",
     ).decision
 
@@ -588,7 +605,7 @@ def test_server_builds_confirm_requirements_checkpoint_after_commit() -> None:
     assert {decision.decision for decision in payload.key_decisions} >= {
         "Genererad DOCX utan mall",
         "Ibland ett, ibland flera dokument",
-        "Skapa DOCX",
+        "Skapa DOCX (ett resultat per underlag)",
     }
     assert {
         "Metadata vid körning: Inga extra fält",
@@ -722,25 +739,12 @@ def test_server_confirmation_distinguishes_named_results_from_full_schema(
 
     assert isinstance(decision, ConfirmRequirements)
     assert named_text in decision.payload.summary
-    assert contract_text in decision.payload.summary
+    assert contract_text not in decision.payload.summary
 
 
-@pytest.mark.parametrize(
-    ("ui_language", "expected"),
-    [
-        (
-            "sv",
-            "field_7 (+1)",
-        ),
-        (
-            "en",
-            "field_7 (+1)",
-        ),
-    ],
-)
-def test_server_confirmation_discloses_bounded_named_result_preview(
+@pytest.mark.parametrize("ui_language", ["sv", "en"])
+def test_server_confirmation_discloses_every_named_result_with_its_shape(
     ui_language: str,
-    expected: str,
 ) -> None:
     state = _state(primary_runtime_input="text", terminal_output="structured_json")
     state.named_result_evidence = [
@@ -748,6 +752,7 @@ def test_server_confirmation_discloses_bounded_named_result_preview(
             name=f"field_{index}",
             confidence="high",
             evidence=["quote:user_message:user-1:named result"],
+            declared_shape="array" if index == 8 else None,
         )
         for index in range(9)
     ]
@@ -756,7 +761,15 @@ def test_server_confirmation_discloses_bounded_named_result_preview(
     decision = _decision(state=state, ui_language=ui_language)
 
     assert isinstance(decision, ConfirmRequirements)
-    assert expected in decision.payload.summary
+    summary = decision.payload.summary
+    assert all(f"field_{index}" in summary for index in range(9))
+    assert "(+" not in summary
+    shape_text = (
+        "field_8 (användaren skrev en lista)"
+        if ui_language == "sv"
+        else "field_8 (the user wrote a list)"
+    )
+    assert shape_text in summary
 
 
 def test_server_confirmation_discloses_truncated_template_placeholders_in_english() -> (
@@ -917,7 +930,7 @@ def test_server_confirmation_discloses_inferred_example_structure_and_style(
     assert layout_fragment in assumptions
 
 
-def test_confirmation_fingerprint_covers_nonvisible_example_evidence() -> None:
+def test_the_requirements_version_covers_nonvisible_example_evidence() -> None:
     file_id = UUID("00000000-0000-0000-0000-000000000712")
     state = _state(primary_runtime_input="text", terminal_output="structured_text")
     state.architecture_commit = _finalized_commit_for_state(state)
@@ -969,10 +982,10 @@ def test_confirmation_fingerprint_covers_nonvisible_example_evidence() -> None:
             ),
         }
     )
-    first = resolve_turn_control(
+    first = _turn_control(
         session_state=state,
         selected_discovery_question_ids=(),
-        confirmed_attachment_evidence_fingerprint=None,
+        confirmed_requirements_version=None,
         ui_language="en",
     ).decision
     assert isinstance(first, ConfirmRequirements)
@@ -993,19 +1006,15 @@ def test_confirmation_fingerprint_covers_nonvisible_example_evidence() -> None:
             "example_output_constraints": changed_constraints,
         }
     )
-    second = resolve_turn_control(
+    second = _turn_control(
         session_state=changed,
         selected_discovery_question_ids=(),
-        confirmed_attachment_evidence_fingerprint=(
-            first.attachment_evidence_fingerprint
-        ),
+        confirmed_requirements_version=(first.payload.requirements_version),
         ui_language="en",
     ).decision
 
     assert isinstance(second, ConfirmRequirements)
-    assert (
-        second.attachment_evidence_fingerprint != first.attachment_evidence_fingerprint
-    )
+    assert second.payload.requirements_version != first.payload.requirements_version
 
 
 def test_server_confirmation_discloses_attachment_roles_and_honest_coverage() -> None:
@@ -1053,26 +1062,28 @@ def test_server_confirmation_discloses_attachment_roles_and_honest_coverage() ->
     assert isinstance(swedish, ConfirmRequirements)
     assert isinstance(english, ConfirmRequirements)
     assert any(
-        'Bilageunderlag – Bilaga "complete.docx": vald roll Mall; '
+        'Bilageunderlag – Bilaga "complete.docx" '
+        f"(#{UUID('00000000-0000-0000-0000-000000000701')}): vald roll Mall; "
         "läsbar text: ja; "
-        "täckning: hela den läsbara texten ingår." == assumption
+        "täckning: hela den läsbara texten ingår." in assumption
         for assumption in swedish.payload.assumptions
     )
     assert any(
-        'Bilageunderlag – Bilaga "not-excerpted.pdf": vald roll Referensmaterial; '
+        'Bilageunderlag – Bilaga "not-excerpted.pdf" '
+        f"(#{UUID('00000000-0000-0000-0000-000000000702')}): vald roll Referensmaterial; "
         "läsbar text: ja; täckning: läsbar text finns men "
-        "inget utdrag ingår." == assumption
+        "inget utdrag ingår." in assumption
         for assumption in swedish.payload.assumptions
     )
     assert any(
-        'Attachment evidence — Attachment "unreadable.bin": '
-        "selected role Context only; "
-        "readable text: no; coverage: no readable text is available." == assumption
+        'Attachment evidence — Attachment "unreadable.bin" '
+        f"(#{UUID('00000000-0000-0000-0000-000000000703')}): selected role Context only; "
+        "readable text: no; coverage: no readable text is available." in assumption
         for assumption in english.payload.assumptions
     )
 
 
-def test_server_confirmation_bounds_attachment_detail_and_versions_coverage() -> None:
+def test_server_confirmation_discloses_every_attachment_and_versions_coverage() -> None:
     state = _state(primary_runtime_input="text", terminal_output="docx_document")
     long_filename = f"attachment-0-{'x' * 120}.txt"
     state.file_roles = [
@@ -1098,14 +1109,10 @@ def test_server_confirmation_bounds_attachment_detail_and_versions_coverage() ->
         for assumption in first.payload.assumptions
         if assumption.startswith('Attachment evidence — Attachment "')
     ]
-    assert len(attachment_assumptions) == 10
+    assert len(attachment_assumptions) == 12
     assert all(long_filename not in assumption for assumption in attachment_assumptions)
     assert "…" in attachment_assumptions[0]
     assert all("fully_seen" not in assumption for assumption in attachment_assumptions)
-    assert (
-        "Attachment evidence — 2 additional attachments are omitted from this "
-        "summary (12 total)." in first.payload.assumptions
-    )
     first_version = build_requirements_version(first.payload)
 
     state.file_roles[0] = state.file_roles[0].model_copy(
@@ -1133,10 +1140,10 @@ def test_server_reconfirms_when_omitted_attachment_facts_change() -> None:
         for index in range(12)
     ]
     state.architecture_commit = _finalized_commit_for_state(state)
-    prior = resolve_turn_control(
+    prior = _turn_control(
         session_state=state,
         selected_discovery_question_ids=(),
-        confirmed_attachment_evidence_fingerprint=None,
+        confirmed_requirements_version=None,
         ui_language="en",
     ).decision
     assert isinstance(prior, ConfirmRequirements)
@@ -1147,12 +1154,10 @@ def test_server_reconfirms_when_omitted_attachment_facts_change() -> None:
             "role": "reference_material",
         }
     )
-    current = resolve_turn_control(
+    current = _turn_control(
         session_state=state,
         selected_discovery_question_ids=(),
-        confirmed_attachment_evidence_fingerprint=(
-            prior.attachment_evidence_fingerprint
-        ),
+        confirmed_requirements_version=(prior.payload.requirements_version),
         ui_language="en",
     ).decision
 
@@ -1176,10 +1181,10 @@ def test_server_reconfirms_for_clipped_filename_identity_collision() -> None:
         )
     ]
     state.architecture_commit = _finalized_commit_for_state(state)
-    prior = resolve_turn_control(
+    prior = _turn_control(
         session_state=state,
         selected_discovery_question_ids=(),
-        confirmed_attachment_evidence_fingerprint=None,
+        confirmed_requirements_version=None,
         ui_language="en",
     ).decision
     assert isinstance(prior, ConfirmRequirements)
@@ -1190,12 +1195,10 @@ def test_server_reconfirms_for_clipped_filename_identity_collision() -> None:
             "filename": f"{shared_prefix}-second.txt",
         }
     )
-    current = resolve_turn_control(
+    current = _turn_control(
         session_state=state,
         selected_discovery_question_ids=(),
-        confirmed_attachment_evidence_fingerprint=(
-            prior.attachment_evidence_fingerprint
-        ),
+        confirmed_requirements_version=(prior.payload.requirements_version),
         ui_language="en",
     ).decision
 
@@ -1305,10 +1308,10 @@ def test_checkpoint_intent_change_requires_fresh_confirmation() -> None:
         )
     ]
     state.architecture_commit = _finalized_commit_for_state(state)
-    prior = resolve_turn_control(
+    prior = _turn_control(
         session_state=state,
         selected_discovery_question_ids=(),
-        confirmed_attachment_evidence_fingerprint=None,
+        confirmed_requirements_version=None,
         ui_language="en",
     ).decision
     assert isinstance(prior, ConfirmRequirements)
@@ -1322,19 +1325,15 @@ def test_checkpoint_intent_change_requires_fresh_confirmation() -> None:
             evidence=["quote:user_message:user-1:edit the transcript"],
         )
     ]
-    current = resolve_turn_control(
+    current = _turn_control(
         session_state=state,
         selected_discovery_question_ids=(),
-        confirmed_attachment_evidence_fingerprint=(
-            prior.attachment_evidence_fingerprint
-        ),
+        confirmed_requirements_version=(prior.payload.requirements_version),
         ui_language="en",
     ).decision
 
     assert isinstance(current, ConfirmRequirements)
-    assert (
-        current.attachment_evidence_fingerprint != prior.attachment_evidence_fingerprint
-    )
+    assert current.payload.requirements_version != prior.payload.requirements_version
 
 
 def test_server_confirmation_names_json_to_json_architecture() -> None:
@@ -1351,7 +1350,10 @@ def test_server_confirmation_names_json_to_json_architecture() -> None:
     decisions = {
         decision.topic: decision.decision for decision in decision.payload.key_decisions
     }
-    assert decisions["Planerad bearbetning"] == "JSON till JSON"
+    assert (
+        decisions["Planerad bearbetning"]
+        == "JSON till JSON (ett resultat per underlag)"
+    )
 
 
 def test_server_revises_architecture_for_commit_grade_terminal_output_change() -> None:
@@ -1412,10 +1414,10 @@ def test_step_scoped_edit_uses_plan_review_instead_of_duplicate_confirmation() -
     state = _state(primary_runtime_input="text", terminal_output="structured_text")
     state.architecture_commit = _finalized_commit_for_state(state)
 
-    decision = resolve_turn_control(
+    decision = _turn_control(
         session_state=state,
         selected_discovery_question_ids=(),
-        confirmed_attachment_evidence_fingerprint=None,
+        confirmed_requirements_version=None,
         ui_language="sv",
         requirements_confirmation_required=False,
     ).decision

@@ -3,6 +3,7 @@ from pydantic import ValidationError
 
 from eneo.flows.ai_builder.ai_builder_event_models import (
     KeyDecisionPayload,
+    RequirementsDisclosureContent,
     RequirementsSummaryPayload,
     ResolvedRequirementPayload,
 )
@@ -11,8 +12,8 @@ from eneo.flows.ai_builder.ai_builder_slot_vocabulary import (
 )
 
 
-def _summary(key_decisions: list[KeyDecisionPayload]) -> RequirementsSummaryPayload:
-    return RequirementsSummaryPayload(
+def _summary(key_decisions: list[KeyDecisionPayload]) -> RequirementsDisclosureContent:
+    return RequirementsDisclosureContent(
         summary="Flödet ska ta emot ljud och leverera en PDF.",
         key_decisions=key_decisions,
         input_description="Primär indata vid körning: Ljud.",
@@ -88,7 +89,7 @@ def test_requirements_summary_keeps_first_resolved_value_per_requirement() -> No
         }
     )
 
-    restored = RequirementsSummaryPayload.model_validate(
+    restored = RequirementsDisclosureContent.model_validate(
         summary.model_dump(mode="json")
     )
 
@@ -103,7 +104,7 @@ def test_requirements_summary_keeps_first_resolved_value_per_requirement() -> No
 
 def test_requirements_summary_bounds_resolved_requirement_projection() -> None:
     with pytest.raises(ValidationError):
-        RequirementsSummaryPayload(
+        RequirementsDisclosureContent(
             summary="Checkpoint ready.",
             key_decisions=[],
             input_description="Input confirmed.",
@@ -116,3 +117,19 @@ def test_requirements_summary_bounds_resolved_requirement_projection() -> None:
                 for index in range(len(KNOWN_REQUIREMENT_SLOT_NAMES) + 1)
             ],
         )
+
+
+def test_an_emitted_summary_must_name_itself() -> None:
+    """A disclosure the client cannot name is one the user cannot confirm."""
+
+    content = _summary([]).model_dump(mode="json")
+
+    with pytest.raises(ValidationError):
+        RequirementsSummaryPayload.model_validate(content)
+    with pytest.raises(ValidationError):
+        RequirementsSummaryPayload.model_validate(
+            {**content, "requirements_version": "not-a-digest"}
+        )
+    assert RequirementsSummaryPayload.model_validate(
+        {**content, "requirements_version": "a" * 64}
+    ).requirements_version == ("a" * 64)

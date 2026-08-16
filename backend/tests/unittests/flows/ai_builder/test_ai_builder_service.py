@@ -86,8 +86,8 @@ from eneo.flows.ai_builder.ai_builder_planner import AIBuilderPlanner
 from eneo.flows.ai_builder.ai_builder_planner_request_preparation import (
     conversation_message_to_llm_message,
 )
-from eneo.flows.ai_builder.ai_builder_requirements_state import (
-    build_requirements_version,
+from eneo.flows.ai_builder.ai_builder_requirements_disclosure import (
+    build_requirements_disclosure,
 )
 from eneo.flows.ai_builder.ai_builder_service import (
     QUALITY_RETRY_WARNING_CODES,
@@ -389,10 +389,12 @@ def _make_file(
 
 
 def _make_requirements_decision() -> ConfirmRequirements:
+    state = _make_committed_planning_state()
     decision = resolve_turn_control(
-        session_state=_make_committed_planning_state(),
+        session_state=state,
         selected_discovery_question_ids=(),
-        confirmed_attachment_evidence_fingerprint=None,
+        requirements_disclosure=build_requirements_disclosure(state, ui_language="en"),
+        confirmed_requirements_version=None,
         ui_language="en",
     ).decision
     assert isinstance(decision, ConfirmRequirements)
@@ -404,7 +406,7 @@ def _make_requirements_summary_payload() -> RequirementsSummaryPayload:
 
 
 def _make_requirements_confirmation() -> dict[str, Any]:
-    version = build_requirements_version(_make_requirements_summary_payload())
+    version = _make_requirements_summary_payload().requirements_version
     return {
         "requirements_confirmed": True,
         "requirements_version": version,
@@ -457,7 +459,7 @@ def _make_committed_planning_state() -> PlanningState:
 def _make_confirmed_requirements_conversation() -> list[ConversationMessage]:
     decision = _make_requirements_decision()
     summary = decision.payload
-    version = build_requirements_version(summary)
+    version = summary.requirements_version
     summary_data = summary.model_dump(mode="json")
     return [
         ConversationMessage(
@@ -466,9 +468,6 @@ def _make_confirmed_requirements_conversation() -> list[ConversationMessage]:
             metadata={
                 "requirements_summary": summary_data,
                 "requirements_version": version,
-                "attachment_evidence_fingerprint": (
-                    decision.attachment_evidence_fingerprint
-                ),
             },
         ),
     ]
@@ -1732,8 +1731,8 @@ class TestSendMessage:
                     session_id=session.id,
                     client_turn_id=_TEST_CLIENT_TURN_ID,
                     request_fingerprint=_TEST_REQUEST_FINGERPRINT,
-                    request_snapshot=_test_request_snapshot("Hello"),
-                    message="Hello",
+                    request_snapshot=_test_request_snapshot(""),
+                    message="",
                     question_answer=_make_requirements_confirmation(),
                     completion_model_route=_route(kwargs={"api_key": "sk-test"}),
                 )
@@ -1755,14 +1754,9 @@ class TestSendMessage:
         )
         acceptance = repo.accept_session_turn.await_args.kwargs["acceptance"]
         assert acceptance.acknowledge_duplicate_provider_spend is False
-        mock_litellm.acompletion.assert_awaited_once()
-        classification_call = mock_litellm.acompletion.await_args.kwargs
-        assert classification_call["stream"] is False
-        assert "tools" not in classification_call
-        assert classification_call["response_format"]["type"] == "json_schema"
-        assert classification_call["response_format"]["json_schema"]["name"].startswith(
-            "ai_builder_slot_classification_v"
-        )
+        # An acknowledgment turn makes no understanding call, so the refused
+        # proposal costs the tenant nothing at all.
+        mock_litellm.acompletion.assert_not_awaited()
 
     @pytest.mark.anyio
     async def test_llm_error_preserves_provider_outcome_unknown(self):
@@ -1898,7 +1892,6 @@ class TestSendMessageToolCall:
                                 "evidence_level": "explicit",
                             },
                         ],
-                        "assumptions": [],
                         "contradictions": [],
                     }
                 )
@@ -2049,8 +2042,8 @@ class TestSendMessageToolCall:
                     session_id=session.id,
                     client_turn_id=_TEST_CLIENT_TURN_ID,
                     request_fingerprint=_TEST_REQUEST_FINGERPRINT,
-                    request_snapshot=_test_request_snapshot("Build it"),
-                    message="Build it",
+                    request_snapshot=_test_request_snapshot(""),
+                    message="",
                     question_answer=_make_requirements_confirmation(),
                     completion_model_route=_route(kwargs={"api_key": "sk-test"}),
                 )
@@ -2101,8 +2094,8 @@ class TestSendMessageToolCall:
                     session_id=session.id,
                     client_turn_id=_TEST_CLIENT_TURN_ID,
                     request_fingerprint=_TEST_REQUEST_FINGERPRINT,
-                    request_snapshot=_test_request_snapshot("Build it"),
-                    message="Build it",
+                    request_snapshot=_test_request_snapshot(""),
+                    message="",
                     question_answer=_make_requirements_confirmation(),
                     completion_model_route=_route(kwargs={"api_key": "sk-test"}),
                 )
@@ -2174,8 +2167,8 @@ class TestSendMessageToolCall:
                     session_id=session.id,
                     client_turn_id=_TEST_CLIENT_TURN_ID,
                     request_fingerprint=_TEST_REQUEST_FINGERPRINT,
-                    request_snapshot=_test_request_snapshot("Build it"),
-                    message="Build it",
+                    request_snapshot=_test_request_snapshot(""),
+                    message="",
                     question_answer=_make_requirements_confirmation(),
                     completion_model_route=_route(kwargs={"api_key": "sk-test"}),
                 )

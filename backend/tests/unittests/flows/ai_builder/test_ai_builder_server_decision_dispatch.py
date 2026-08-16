@@ -23,6 +23,9 @@ from eneo.flows.ai_builder.ai_builder_event_models import (
     AIBuilderStatus,
 )
 from eneo.flows.ai_builder.ai_builder_proposal_telemetry import ProposalTurnTelemetry
+from eneo.flows.ai_builder.ai_builder_requirements_disclosure import (
+    build_requirements_disclosure,
+)
 from eneo.flows.ai_builder.ai_builder_server_decision_dispatch import (
     ServerDecisionDispatchRequest,
     ServerDecisionTelemetry,
@@ -69,7 +72,7 @@ def _request(
     conversation: list[ConversationMessage],
     new_messages_start: int = 0,
     planning_state: PlanningState | None = None,
-    confirmed_attachment_evidence_fingerprint: str | None = None,
+    confirmed_requirements_version: str | None = None,
     discovery_assumptions: tuple[str, ...] = (),
 ) -> ServerDecisionDispatchRequest:
     return ServerDecisionDispatchRequest(
@@ -79,9 +82,7 @@ def _request(
         conversation=conversation,
         new_messages_start=new_messages_start,
         flow=None,
-        confirmed_attachment_evidence_fingerprint=(
-            confirmed_attachment_evidence_fingerprint
-        ),
+        confirmed_requirements_version=confirmed_requirements_version,
         ui_language="en",
         telemetry=ServerDecisionTelemetry(
             request_id="req-test",
@@ -373,7 +374,8 @@ async def test_confirmed_architecture_revision_returns_proposal_continuation() -
     confirmation = resolve_turn_control(
         session_state=state,
         selected_discovery_question_ids=(),
-        confirmed_attachment_evidence_fingerprint=None,
+        requirements_disclosure=build_requirements_disclosure(state, ui_language="en"),
+        confirmed_requirements_version=None,
         ui_language="en",
     ).decision
     assert isinstance(confirmation, ConfirmRequirements)
@@ -383,9 +385,7 @@ async def test_confirmed_architecture_revision_returns_proposal_continuation() -
             repo=repo,
             decision=decision,
             conversation=conversation,
-            confirmed_attachment_evidence_fingerprint=(
-                confirmation.attachment_evidence_fingerprint
-            ),
+            confirmed_requirements_version=(confirmation.payload.requirements_version),
         )
     )
 
@@ -422,7 +422,8 @@ async def test_architecture_revision_reconfirms_changed_hidden_attachment() -> N
     confirmation = resolve_turn_control(
         session_state=state,
         selected_discovery_question_ids=(),
-        confirmed_attachment_evidence_fingerprint=None,
+        requirements_disclosure=build_requirements_disclosure(state, ui_language="en"),
+        confirmed_requirements_version=None,
         ui_language="en",
     ).decision
     assert isinstance(confirmation, ConfirmRequirements)
@@ -441,9 +442,7 @@ async def test_architecture_revision_reconfirms_changed_hidden_attachment() -> N
             conversation=[
                 ConversationMessage(role="user", content="Use the new reference")
             ],
-            confirmed_attachment_evidence_fingerprint=(
-                confirmation.attachment_evidence_fingerprint
-            ),
+            confirmed_requirements_version=(confirmation.payload.requirements_version),
         )
     )
 

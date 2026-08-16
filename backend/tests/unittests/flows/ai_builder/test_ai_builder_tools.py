@@ -78,10 +78,6 @@ class TestBuildToolSchema:
             ai_builder_tool_names.ASK_STRUCTURED_QUESTION_TOOL_NAME
             == "ask_structured_question"
         )
-        assert (
-            ai_builder_tool_names.CONFIRM_REQUIREMENTS_TOOL_NAME
-            == "confirm_requirements"
-        )
 
     def test_outline_schema_hides_backend_owned_mechanics(self) -> None:
         schema = build_propose_flow_tool_schema(resource_catalog=_empty_catalog())

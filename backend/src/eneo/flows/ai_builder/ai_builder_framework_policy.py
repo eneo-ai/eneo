@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
-from typing import Any, cast
+from typing import Any
 
 from eneo.flows.ai_builder.ai_builder_canonicalization import (
     canonical_option_id,
@@ -41,9 +41,6 @@ from eneo.flows.ai_builder.ai_builder_discovery_text_matcher import (
 from eneo.flows.ai_builder.ai_builder_domain_models import (
     ConversationMessage,
 )
-from eneo.flows.ai_builder.ai_builder_input_architecture_policy import (
-    resolve_input_intent,
-)
 from eneo.flows.ai_builder.ai_builder_keywords import (
     DOCX_CONTEXT_MARKERS,
     DOCX_GENERATED_MODE_MARKERS,
@@ -80,7 +77,6 @@ __all__ = [
     "mentions_output_change",
     "mentions_runtime_metadata",
     "needs_structured_extraction",
-    "normalize_requirements_summary_for_flow",
     "normalize_question_answer",
     "normalize_structured_question_payload",
     "has_explicit_docx_mode_text",
@@ -403,145 +399,6 @@ def extract_answer_signals(
         values = question_answer_values(answer)
         signals[question_id] = values
     return signals
-
-
-def normalize_requirements_summary_for_flow(
-    requirements_data: Mapping[str, Any],
-    *,
-    conversation: Sequence[ConversationMessage | Mapping[str, Any]],
-    flow: Flow | None,
-    language: str | None = None,
-) -> dict[str, Any]:
-    if flow is None:
-        return dict(requirements_data)
-
-    default_runtime_input = _single_runtime_input_default(
-        build_flow_discovery_defaults(flow).get("primary_runtime_input", set())
-    )
-    if default_runtime_input is None:
-        return dict(requirements_data)
-
-    input_description = normalize_signal_text(
-        str(requirements_data.get("input_description") or "")
-    )
-    summary_runtime_input = resolve_input_intent(
-        input_description, {}
-    ).primary_runtime_input
-    if summary_runtime_input in {"unknown", default_runtime_input}:
-        return dict(requirements_data)
-
-    if _conversation_explicitly_changes_runtime_input(
-        conversation=conversation,
-        default_runtime_input=default_runtime_input,
-    ):
-        return dict(requirements_data)
-
-    normalized = dict(requirements_data)
-    normalized["input_description"] = _format_runtime_input_description(
-        default_runtime_input,
-        language=language,
-    )
-    normalized["key_decisions"] = _replace_runtime_input_decision(
-        requirements_data.get("key_decisions"),
-        default_runtime_input=default_runtime_input,
-        language=language,
-    )
-    return normalized
-
-
-def _single_runtime_input_default(values: set[str]) -> str | None:
-    ordered_defaults = ("audio", "documents", "text_and_documents", "text")
-    matches = [value for value in ordered_defaults if value in values]
-    if len(matches) != 1:
-        return None
-    return matches[0]
-
-
-def _conversation_explicitly_changes_runtime_input(
-    *,
-    conversation: Sequence[ConversationMessage | Mapping[str, Any]],
-    default_runtime_input: str,
-) -> bool:
-    if has_explicit_structured_answer(conversation, "primary_runtime_input"):
-        return True
-    if has_explicit_structured_answer(conversation, "flow_input_architecture"):
-        return True
-
-    requested_input = resolve_input_intent(
-        aggregate_unprompted_user_text(conversation),
-        {},
-    ).primary_runtime_input
-    return requested_input not in {"unknown", default_runtime_input}
-
-
-def _format_runtime_input_description(
-    runtime_input: str,
-    *,
-    language: str | None,
-) -> str:
-    if language == "en":
-        return f"Primary runtime input: {_runtime_input_label(runtime_input, language='en')}."
-    return (
-        "Primär indata vid körning: "
-        f"{_runtime_input_label(runtime_input, language='sv')}."
-    )
-
-
-def _replace_runtime_input_decision(
-    raw_decisions: object,
-    *,
-    default_runtime_input: str,
-    language: str | None,
-) -> list[dict[str, str]]:
-    label = _runtime_input_label(default_runtime_input, language=language)
-    if language == "en":
-        topic = "Runtime input"
-        decision = f"Keep the existing flow runtime input: {label}."
-    else:
-        topic = "Indata"
-        decision = f"Behåll befintlig körningsindata: {label}."
-
-    replacement = {"topic": topic, "decision": decision}
-    if not isinstance(raw_decisions, list):
-        return [replacement]
-
-    decisions: list[dict[str, str]] = []
-    replaced = False
-    for item in cast(list[object], raw_decisions):
-        if not isinstance(item, Mapping):
-            continue
-        decision_item = cast(Mapping[str, object], item)
-        item_topic = decision_item.get("topic")
-        item_decision = decision_item.get("decision")
-        if not isinstance(item_topic, str) or not isinstance(item_decision, str):
-            continue
-        normalized_topic = normalize_signal_text(item_topic)
-        if normalized_topic in {"indata", "input", "runtime input", "körningsindata"}:
-            if not replaced:
-                decisions.append(replacement)
-                replaced = True
-            continue
-        decisions.append({"topic": item_topic, "decision": item_decision})
-
-    if not replaced:
-        return [replacement, *decisions]
-    return decisions or [replacement]
-
-
-def _runtime_input_label(runtime_input: str, *, language: str | None) -> str:
-    if language == "en":
-        return {
-            "audio": "audio",
-            "documents": "documents",
-            "text": "text",
-            "text_and_documents": "text and documents",
-        }.get(runtime_input, runtime_input)
-    return {
-        "audio": "ljud",
-        "documents": "dokument",
-        "text": "text",
-        "text_and_documents": "text och dokument",
-    }.get(runtime_input, runtime_input)
 
 
 def resolve_explicit_output_choice(

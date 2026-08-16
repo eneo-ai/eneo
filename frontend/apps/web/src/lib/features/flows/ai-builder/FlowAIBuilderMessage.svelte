@@ -58,11 +58,15 @@
   class:message-enter={isLast}
 >
   {#if role === "user"}
-    <div class="flex justify-end">
-      <div class="user-bubble">
-        <p class="text-[0.9375rem] leading-relaxed whitespace-pre-wrap">{content}</p>
+    <!-- A structured action — confirming the requirements — sends no text of
+         its own, so there is no bubble to draw for it. -->
+    {#if content}
+      <div class="flex justify-end">
+        <div class="user-bubble">
+          <p class="text-[0.9375rem] leading-relaxed whitespace-pre-wrap">{content}</p>
+        </div>
       </div>
-    </div>
+    {/if}
   {:else}
     <div class="assistant-message">
       {#if content || (isStreaming && isLast)}

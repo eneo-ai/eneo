@@ -61,6 +61,9 @@ from eneo.flows.ai_builder.ai_builder_error_contract import (
 from eneo.flows.ai_builder.ai_builder_plan_proposal_task import (
     build_plan_proposal_system_prompt,
 )
+from eneo.flows.ai_builder.ai_builder_requirements_disclosure import (
+    build_requirements_disclosure,
+)
 from eneo.flows.ai_builder.ai_builder_resource_catalog import (
     build_ai_builder_resource_catalog,
 )
@@ -754,7 +757,13 @@ def test_slot_classification_input_keeps_parser_shape_invariants() -> None:
     assert structured_source.truncated is True
 
 
-def test_discovery_analysis_carries_classifier_assumptions() -> None:
+def test_classifier_prose_never_reaches_the_requirements_disclosure() -> None:
+    """Model notes are diagnostics; the confirmation identity is server-derived.
+
+    Copying regenerated model prose into the summary moved the requirements
+    version on every turn over unchanged evidence.
+    """
+
     analysis = analyze_discovery(
         [ConversationMessage(role="user", content="Build a document summary flow.")],
         planning_state=_resolved_state(),
@@ -763,7 +772,7 @@ def test_discovery_analysis_carries_classifier_assumptions() -> None:
         ),
     )
 
-    assert analysis.assumptions == ("The output can be a short summary.",)
+    assert analysis.assumptions == ()
 
 
 @pytest.mark.asyncio
@@ -2431,7 +2440,10 @@ async def test_runtime_classifies_named_results_after_slots_are_resolved(
     confirmation = resolve_turn_control(
         session_state=replayed,
         selected_discovery_question_ids=(),
-        confirmed_attachment_evidence_fingerprint=None,
+        requirements_disclosure=build_requirements_disclosure(
+            replayed, ui_language="sv"
+        ),
+        confirmed_requirements_version=None,
         ui_language="sv",
     ).decision
     assert isinstance(confirmation, ConfirmRequirements)

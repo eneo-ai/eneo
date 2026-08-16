@@ -563,8 +563,8 @@ class AIBuilderPlanner:
                                 conversation=conversation,
                                 new_messages_start=new_messages_start,
                                 flow=flow,
-                                confirmed_attachment_evidence_fingerprint=(
-                                    requirements_state.confirmed_attachment_evidence_fingerprint
+                                confirmed_requirements_version=(
+                                    requirements_state.confirmed_requirements_version
                                 ),
                                 ui_language=ui_language,
                                 telemetry=ServerDecisionTelemetry(

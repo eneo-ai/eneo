@@ -1003,7 +1003,36 @@ def _merged_model_example_output_constraints(
         )
     ):
         return None
+    if _describes_same_example_evidence(current, constraints):
+        # The same files, seen the same way, re-read by the model. Its wording
+        # moves anyway — headings vanish and reappear, style descriptions
+        # switch language — and every move rewrote the requirements summary,
+        # so the confirmation the user had just given could never match again.
+        # New evidence replaces an interpretation; re-reading the old evidence
+        # does not.
+        return current
     return constraints
+
+
+def _describes_same_example_evidence(
+    current: ExampleOutputConstraintEvidence | None,
+    candidate: ExampleOutputConstraintEvidence,
+) -> bool:
+    """Whether the classifier is re-reading exactly the evidence already read.
+
+    Citations are part of the answer: a user who writes a new instruction about
+    the example produces a new citation, and that is new user evidence which
+    must replace the interpretation. Only identical files, identical coverage
+    and identical citations mean nothing was added.
+    """
+
+    if current is None:
+        return False
+    return (
+        current.source_file_ids == candidate.source_file_ids
+        and current.source_coverage == candidate.source_coverage
+        and current.citations == candidate.citations
+    )
 
 
 def _example_output_inference_matches_constraints(

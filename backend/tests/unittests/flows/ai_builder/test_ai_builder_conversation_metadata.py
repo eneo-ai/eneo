@@ -71,7 +71,9 @@ _AI_BUILDER_SRC = (
     Path(__file__).resolve().parents[4] / "src" / "eneo" / "flows" / "ai_builder"
 )
 _CLASSIFICATION_SOURCE_ID = "user_message:user-1"
-_ATTACHMENT_EVIDENCE_FINGERPRINT = "f" * 64
+
+
+_REQUIREMENTS_VERSION = "a" * 64
 
 
 def _classified_evidence(quote: str) -> ClassifiedEvidence:
@@ -366,17 +368,17 @@ def test_requirements_confirmation_is_persisted_as_top_level_metadata() -> None:
         question_answer={
             "kind": "requirements_confirmation",
             "requirements_confirmed": True,
-            "requirements_version": "req_1",
+            "requirements_version": _REQUIREMENTS_VERSION,
         }
     )
 
     assert metadata == {
         "requirements_confirmed": True,
-        "requirements_version": "req_1",
+        "requirements_version": _REQUIREMENTS_VERSION,
     }
     confirmation = requirements_confirmation_from_metadata(metadata)
     assert confirmation is not None
-    assert confirmation.requirements_version == "req_1"
+    assert confirmation.requirements_version == _REQUIREMENTS_VERSION
 
 
 def test_tool_calls_from_message_parses_persisted_json_arguments() -> None:
@@ -404,7 +406,7 @@ def test_tool_calls_from_message_ignores_extra_persisted_fields() -> None:
                 {
                     "id": "call_legacy",
                     "name": "confirm_requirements",
-                    "arguments": {"requirements_version": "req_1"},
+                    "arguments": {"requirements_version": _REQUIREMENTS_VERSION},
                     "legacy_extra": "kept by old rows",
                 }
             ]
@@ -414,7 +416,7 @@ def test_tool_calls_from_message_ignores_extra_persisted_fields() -> None:
     assert tool_call.model_dump(mode="json") == {
         "id": "call_legacy",
         "name": "confirm_requirements",
-        "arguments": {"requirements_version": "req_1"},
+        "arguments": {"requirements_version": _REQUIREMENTS_VERSION},
     }
 
 
@@ -495,7 +497,7 @@ def test_requirements_summary_round_trips_through_canonical_metadata() -> None:
     metadata = requirements_summary_to_metadata(
         RequirementsSummaryPayload.model_validate(
             {
-                "requirements_version": "req_1",
+                "requirements_version": _REQUIREMENTS_VERSION,
                 "summary": "Build a document summary flow.",
                 "key_decisions": [
                     {
@@ -508,43 +510,14 @@ def test_requirements_summary_round_trips_through_canonical_metadata() -> None:
                 "assumptions": ["The user will upload files at runtime."],
             }
         ),
-        attachment_evidence_fingerprint=_ATTACHMENT_EVIDENCE_FINGERPRINT,
     )
 
     parsed = requirements_summary_from_metadata(metadata)
 
-    assert metadata["requirements_version"] == "req_1"
-    assert (
-        metadata["attachment_evidence_fingerprint"] == _ATTACHMENT_EVIDENCE_FINGERPRINT
-    )
+    assert metadata["requirements_version"] == _REQUIREMENTS_VERSION
     assert parsed is not None
-    assert parsed.requirements_version == "req_1"
-    assert parsed.attachment_evidence_fingerprint == _ATTACHMENT_EVIDENCE_FINGERPRINT
-    assert parsed.requirements_summary.summary == "Build a document summary flow."
-
-
-def test_requirements_summary_metadata_requires_attachment_fingerprint(
-    monkeypatch,
-) -> None:
-    warnings = _capture_metadata_warnings(monkeypatch)
-    payload = RequirementsSummaryPayload(
-        requirements_version="req_1",
-        summary="Build a document summary flow.",
-        key_decisions=[],
-        input_description="Uploaded documents.",
-        output_description="A concise summary.",
-    )
-
-    parsed = requirements_summary_from_metadata(
-        {
-            "requirements_summary": payload.model_dump(mode="json"),
-            "requirements_version": "req_1",
-        }
-    )
-
-    assert parsed is None
-    assert warnings
-    assert warnings[0][1]["metadata_kind"] == "requirements_summary"
+    assert parsed.requirements_version == _REQUIREMENTS_VERSION
+    assert parsed.summary == "Build a document summary flow."
 
 
 def test_slot_classification_round_trips_all_llm_resolvable_slots() -> None:
@@ -590,7 +563,6 @@ def test_slot_classification_round_trips_all_llm_resolvable_slots() -> None:
             ),
         ),
         secondary_obligations=("risks", "actions"),
-        assumptions=("User wants runtime form fields.",),
         contradictions=("No contradiction.",),
     )
     named_result_evidence_snapshot = (
@@ -881,7 +853,6 @@ def test_classifier_retention_identities_follow_replay_confidence_rules() -> Non
                 evidence=(),
             ),
         ),
-        assumptions=("diagnostic note",),
         contradictions=("another diagnostic note",),
     )
     classification = slot_classification_metadata_from_attempt(
@@ -1182,7 +1153,7 @@ def test_requirements_summary_metadata_logs_invalid_persisted_shape(
                 "requirements_summary": {
                     "summary_markdown": "missing required version field"
                 },
-                "requirements_version": "req_1",
+                "requirements_version": _REQUIREMENTS_VERSION,
             }
         )
         is None

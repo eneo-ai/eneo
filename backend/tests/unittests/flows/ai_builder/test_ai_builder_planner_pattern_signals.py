@@ -21,6 +21,7 @@ def _requirements(**overrides: object) -> RequirementsSummaryPayload:
         "input_description": "Primär indata vid körning behöver granskas.",
         "output_description": "Huvudsakligt slutresultat behöver granskas.",
         "assumptions": [],
+        "requirements_version": "0" * 64,
     }
     payload.update(overrides)
     return RequirementsSummaryPayload.model_validate(payload)
@@ -103,7 +104,7 @@ def test_requirements_signal_text_ignores_confirmation_boilerplate() -> None:
 def test_requirements_signal_text_uses_typed_payload_without_version_leak() -> None:
     signal_text = build_requirements_signal_text(
         _requirements(
-            requirements_version="do-not-render",
+            requirements_version="d0" * 32,
             summary="Skapa ett mötesprotokoll.",
             key_decisions=[
                 {"topic": "Indata", "decision": "Mötesljud vid körning."},
@@ -125,4 +126,4 @@ def test_requirements_signal_text_uses_typed_payload_without_version_leak() -> N
             "Koppla transkriberingsmodellen.",
         )
     )
-    assert "do-not-render" not in signal_text
+    assert "d0" * 32 not in signal_text

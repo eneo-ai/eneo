@@ -3114,7 +3114,6 @@ def test_execute_flow_case_requires_matching_diagnostics_before_scoring_error(
                 file_ids=(),
                 ui_language="sv",
                 auto_confirm_requirements=False,
-                confirm_message=harness.DEFAULT_CONFIRM_MESSAGE,
                 timeout_seconds=1,
             ),
             existing_session_id=None,
@@ -4606,7 +4605,7 @@ def test_replacement_batch_reuses_context_and_preflights_publication(
                 "ui_language": "sv",
                 "auto_confirm_requirements": True,
                 "confirm_message_sha256": hashlib.sha256(
-                    harness.DEFAULT_CONFIRM_MESSAGE.encode()
+                    harness.CONFIRM_MESSAGE.encode()
                 ).hexdigest(),
                 "repetitions": 5,
                 "max_concurrency": 2,
@@ -4689,14 +4688,13 @@ def test_replacement_batch_reuses_context_and_preflights_publication(
         replacement_reason="failed observation in original receipt",
         output_dir=str(output_dir),
         cases_file=None,
-        confirm_message=(
-            "Different confirmation"
-            if scenario == "confirmation-drift"
-            else harness.DEFAULT_CONFIRM_MESSAGE
-        ),
         timeout_seconds=1,
     )
     collision_path = suite_dir / "replacement-provider-b-r2.json"
+    if scenario == "confirmation-drift":
+        # A receipt measured under a different confirmation turn is not a base
+        # this batch can extend.
+        receipt.summary["run_context"]["confirm_message_sha256"] = "0" * 64
     if scenario == "scheduling-drift":
         receipt.summary["run_context"]["max_concurrent_observations_per_case"] = 2
     if scenario == "flow-isolation-drift":
@@ -4706,7 +4704,7 @@ def test_replacement_batch_reuses_context_and_preflights_publication(
 
     if scenario != "success":
         match = (
-            "confirm-message does not match"
+            "measured under a different confirmation turn"
             if scenario == "confirmation-drift"
             else (
                 "does not serialize concurrent repetitions"
@@ -8547,7 +8545,6 @@ def test_a_capped_journey_stays_within_the_planned_request_demand(
             file_ids=(),
             ui_language="sv",
             auto_confirm_requirements=False,
-            confirm_message=harness.DEFAULT_CONFIRM_MESSAGE,
             timeout_seconds=1,
         ),
         existing_session_id=None,
