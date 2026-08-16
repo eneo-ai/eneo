@@ -4,7 +4,16 @@ import json
 from collections.abc import Iterable
 from dataclasses import dataclass
 from enum import Enum
-from typing import TYPE_CHECKING, Any, Awaitable, Callable, Final, Sequence, cast
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Awaitable,
+    Callable,
+    Final,
+    NoReturn,
+    Sequence,
+    cast,
+)
 from uuid import UUID
 
 from eneo.files.text import PDF_TEXT_LIKELY_REVERSED_WARNING, TextExtractor
@@ -42,7 +51,10 @@ from eneo.flows.input_binding_contract_rules import (
     source_ref_bindings,
 )
 from eneo.flows.runtime.http_orchestration import FlowHttpInputResolution
-from eneo.flows.runtime.input_files import load_files_by_requested_ids
+from eneo.flows.runtime.input_files import (
+    describe_files_by_requested_ids,
+    load_files_by_requested_ids,
+)
 from eneo.flows.runtime.transcription_runtime import (
     AudioRuntimeDeps,
     AudioRuntimeRequest,
@@ -60,7 +72,7 @@ from eneo.main.exceptions import (
 )
 
 if TYPE_CHECKING:
-    from eneo.files.file_models import File
+    from eneo.files.file_models import File, FileInfo
     from eneo.files.file_service import FileService
 
 RUNTIME_INPUT_SOURCE_HEADER_TEMPLATE: Final = "[SOURCE {source_number}]"
@@ -165,31 +177,32 @@ async def resolve_step_input(
     diagnostics: list[StepDiagnostic] = []
     transcription_metadata: dict[str, Any] | None = None
     runtime_input_metadata: dict[str, Any] | None = None
-    files = None
+    # Content-bearing inputs only. An audio step has none: its payloads are read
+    # one at a time during transcription and never reach a model as files.
+    files: list[File] | None = None
+    described_files: list[FileInfo] | None = None
     runtime_input_config = build_runtime_input_config(step.input_config)
     runtime_input_text = ""
     runtime_file_edges: tuple[FlowResolvedInputEdge, ...] = ()
     requested_ids = list(requested_file_ids) if runtime_input_config.enabled else []
 
     if requested_ids:
-        files = await _load_runtime_files(
-            requested_ids=requested_ids,
-            state=state,
-            deps=deps,
-        )
-
         if runtime_input_config.input_format == "audio":
             if deps.transcriber is None:
                 raise TypedIOValidationException(
                     "Transcriber service is not available for audio input execution.",
                     code=FlowApiErrorCode.TYPED_IO_TRANSCRIPTION_FAILED.value,
                 )
+            described_files = await _describe_runtime_files(
+                requested_ids=requested_ids,
+                deps=deps,
+            )
             audio_request = AudioRuntimeRequest(
                 run=run,
                 step=step,
                 context=context,
                 version_metadata=version_metadata,
-                files=files,
+                files=described_files,
                 requested_ids=requested_ids,
                 max_audio_files=deps.max_audio_files,
                 max_inline_text_bytes=deps.max_inline_text_bytes,
@@ -200,6 +213,7 @@ async def resolve_step_input(
                 flow_run_repo=deps.flow_run_repo,
                 audit_service=deps.audit_service,
                 actor=deps.actor,
+                load_audio_payload=deps.file_service.get_file_content,
             )
             audio_resolution = await resolve_transcribe_and_attach_audio_input(
                 request=audio_request,
@@ -215,6 +229,11 @@ async def resolve_step_input(
                     )
                 )
         else:
+            files = await _load_runtime_files(
+                requested_ids=requested_ids,
+                state=state,
+                deps=deps,
+            )
             runtime_input_text, file_text_diagnostics = _extract_text_from_files(
                 files,
                 step_order=step.step_order,
@@ -224,14 +243,15 @@ async def resolve_step_input(
             if runtime_input_text:
                 raw_extracted_text = runtime_input_text
 
+        resolved_files: list[File] | list[FileInfo] = files or described_files or []
         runtime_input_metadata = _build_runtime_input_metadata(
             text=runtime_input_text,
             requested_ids=requested_ids,
             input_format=runtime_input_config.input_format,
-            files=files,
+            files=resolved_files,
             capture_mode="runtime_input",
         )
-        runtime_file_edges = _runtime_file_edges(files)
+        runtime_file_edges = _runtime_file_edges(resolved_files)
 
     bindings = step.input_bindings if isinstance(step.input_bindings, dict) else None
     explicit_binding_edges: tuple[FlowResolvedInputEdge, ...] = ()
@@ -1015,24 +1035,60 @@ async def _load_runtime_files(
             file_cache=file_cache,
         )
     except NotFoundException as exc:
-        deps.logger.warning(
-            "flow_executor.runtime_input_file_content_unavailable "
-            "requested_file_ids=%s",
-            requested_ids,
-            exc_info=exc,
+        _raise_runtime_files_unavailable(
+            requested_ids=requested_ids, deps=deps, exc=exc
         )
-        raise TypedIOValidationException(
-            f"File content is unavailable for: {requested_ids}",
-            code=FlowApiErrorCode.TYPED_IO_FILE_NOT_FOUND.value,
-        ) from exc
-    returned_ids = {f.id for f in files}
-    missing = [fid for fid in requested_ids if fid not in returned_ids]
+    _require_every_requested_file(files, requested_ids=requested_ids)
+    return files
+
+
+async def _describe_runtime_files(
+    *,
+    requested_ids: list[UUID],
+    deps: StepInputResolutionDeps,
+) -> list[FileInfo]:
+    try:
+        described = await describe_files_by_requested_ids(
+            file_service=deps.file_service,
+            requested_ids=requested_ids,
+        )
+    except NotFoundException as exc:
+        _raise_runtime_files_unavailable(
+            requested_ids=requested_ids, deps=deps, exc=exc
+        )
+    _require_every_requested_file(described, requested_ids=requested_ids)
+    return described
+
+
+def _raise_runtime_files_unavailable(
+    *,
+    requested_ids: list[UUID],
+    deps: StepInputResolutionDeps,
+    exc: NotFoundException,
+) -> NoReturn:
+    deps.logger.warning(
+        "flow_executor.runtime_input_file_content_unavailable requested_file_ids=%s",
+        requested_ids,
+        exc_info=exc,
+    )
+    raise TypedIOValidationException(
+        f"File content is unavailable for: {requested_ids}",
+        code=FlowApiErrorCode.TYPED_IO_FILE_NOT_FOUND.value,
+    ) from exc
+
+
+def _require_every_requested_file(
+    files: Sequence[Any],
+    *,
+    requested_ids: list[UUID],
+) -> None:
+    returned_ids = {file.id for file in files}
+    missing = [file_id for file_id in requested_ids if file_id not in returned_ids]
     if missing:
         raise TypedIOValidationException(
             f"File(s) not found or not accessible: {missing}",
             code=FlowApiErrorCode.TYPED_IO_FILE_NOT_FOUND.value,
         )
-    return files
 
 
 def _extract_text_from_files(

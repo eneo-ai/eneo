@@ -5,6 +5,7 @@ import pytest
 from pydantic import ValidationError
 
 from eneo.object_content.configuration import (
+    MAXIMUM_INLINE_BYTES,
     ObjectContentCoreSettings,
     ObjectContentSettings,
     load_object_content_core_settings,
@@ -46,6 +47,20 @@ def test_inline_tuning_does_not_require_object_store_configuration(
         inline_maximum_bytes=2 * 1024**2,
         inline_io_chunk_bytes=64 * 1024,
     )
+
+
+def test_inline_maximum_above_the_postgres_field_limit_is_rejected() -> None:
+    """A ceiling PostgreSQL cannot store would admit uploads that then fail."""
+
+    # 1 GB datum limit minus the four-byte varlena header.
+    assert MAXIMUM_INLINE_BYTES == 1024**3 - 5
+    ObjectContentCoreSettings(_env_file=None, inline_maximum_bytes=MAXIMUM_INLINE_BYTES)
+
+    with pytest.raises(ValidationError):
+        ObjectContentCoreSettings(
+            _env_file=None,
+            inline_maximum_bytes=MAXIMUM_INLINE_BYTES + 1,
+        )
 
 
 def test_operator_guardrails_do_not_trigger_legacy_connection_loading(

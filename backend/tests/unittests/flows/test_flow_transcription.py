@@ -12,7 +12,7 @@ from eneo.audit.domain.action_types import ActionType
 from eneo.audit.domain.entity_types import EntityType
 from eneo.audit.domain.outcome import Outcome
 from eneo.authentication.principal_types import PrincipalType
-from eneo.files.file_models import File, FileType
+from eneo.files.file_models import File, FileInfo, FileType
 from eneo.files.file_service import FileService
 from eneo.flows.domain.flow import FlowRun, FlowRunStatus
 from eneo.flows.flow_input_limits import resolve_flow_input_limits
@@ -32,7 +32,7 @@ from eneo.flows.runtime.transcription_runtime import (
     AudioRuntimeRequest,
     resolve_transcribe_and_attach_audio_input,
 )
-from eneo.main.exceptions import TypedIOValidationException
+from eneo.main.exceptions import NotFoundException, TypedIOValidationException
 
 
 def _audio_file(
@@ -158,6 +158,42 @@ def _build_executor(
     file_repo = AsyncMock()
     file_content_loader = AsyncMock()
     file_service = create_autospec(FileService, instance=True)
+
+    def _staged_files() -> list[File]:
+        return list(file_service.get_files_by_ids.return_value or [])
+
+    async def _owned_file_infos(file_ids, **_kwargs):
+        # The audio path identifies files without their bytes, so the double
+        # must hand back identities — never the blob-bearing File. A step that
+        # regressed to reading content up front fails here.
+        requested = set(file_ids)
+        return [
+            FileInfo(
+                id=staged.id,
+                created_at=staged.created_at,
+                updated_at=staged.updated_at,
+                name=staged.name,
+                checksum=staged.checksum,
+                size=staged.size,
+                mimetype=staged.mimetype,
+                file_type=staged.file_type,
+                owner_type=staged.owner_type,
+                owner_user_id=staged.owner_user_id,
+                owner_service_id=staged.owner_service_id,
+                tenant_id=staged.tenant_id,
+            )
+            for staged in _staged_files()
+            if staged.id in requested
+        ]
+
+    async def _get_file_content(file_id, **_kwargs):
+        for staged in _staged_files():
+            if staged.id == file_id:
+                return staged
+        raise AssertionError(f"unstaged file content requested: {file_id}")
+
+    file_service.get_owned_file_infos.side_effect = _owned_file_infos
+    file_service.get_file_content.side_effect = _get_file_content
     template_asset_repo = AsyncMock()
     encryption_service = AsyncMock()
     transcriber = AsyncMock()
@@ -666,6 +702,196 @@ async def test_audio_resolve_multifile_near_cap_keeps_request_order(user):
 
 
 @pytest.mark.asyncio
+async def test_audio_step_reads_one_payload_at_a_time(user):
+    """A step's memory cost must be its largest audio file, not their sum.
+
+    The step resolves against metadata and reads each file's bytes only while
+    that file is being transcribed, so ten permitted 200 MiB uploads cannot
+    materialize together in one worker.
+    """
+
+    executor, flow_run_repo, space_repo, file_service, transcriber = _build_executor(
+        user, max_inline_text_bytes=1000
+    )
+    file_id_1 = uuid4()
+    file_id_2 = uuid4()
+    step = _runtime_step()
+    run = _run(user=user, payload={})
+    _patch_run_input_payload(flow_run_repo, run)
+    context = executor.variable_resolver.build_context(run.input_payload_json, [])
+
+    file_service.get_files_by_ids.return_value = [
+        _audio_file(file_id=file_id_1, name="a.wav"),
+        _audio_file(file_id=file_id_2, name="b.wav"),
+    ]
+    model = SimpleNamespace(
+        id=uuid4(), name="whisper-1", model_name="whisper-1", can_access=True
+    )
+    space_repo.get_space_by_assistant = AsyncMock(
+        return_value=_SpaceStub(models=[model], default_model=model)
+    )
+
+    events: list[str] = []
+
+    async def _tx(file_obj, transcription_model, *, language=None, **_kwargs):
+        events.append(f"transcribe {file_obj.name}")
+        return f"text for {file_obj.name}"
+
+    staged_names = {
+        file.id: file.name for file in file_service.get_files_by_ids.return_value
+    }
+    original_get_file_content = file_service.get_file_content.side_effect
+
+    async def _recorded_get_file_content(file_id, **kwargs):
+        events.append(f"load {staged_names[file_id]}")
+        return await original_get_file_content(file_id, **kwargs)
+
+    file_service.get_file_content.side_effect = _recorded_get_file_content
+    transcriber.transcribe = AsyncMock(side_effect=_tx)
+
+    resolved = await executor._resolve_step_input(
+        step=step,
+        context=context,
+        run=run,
+        prior_results=[],
+        state=_state(),
+        version_metadata={
+            "wizard": {
+                "transcription_enabled": True,
+                "transcription_model": {"id": str(model.id)},
+                "transcription_language": "sv",
+            }
+        },
+        requested_file_ids=[file_id_1, file_id_2],
+    )
+
+    # The step never asks for content-bearing files at all...
+    file_service.get_files_by_ids.assert_not_awaited()
+    file_service.get_owned_file_infos.assert_awaited_once()
+    # ...and each payload is read immediately before its own transcription, so
+    # a prefetching implementation ("load a, load b, transcribe a, ...") fails.
+    assert events == [
+        "load a.wav",
+        "transcribe a.wav",
+        "load b.wav",
+        "transcribe b.wav",
+    ]
+    # An audio step contributes no content-bearing files to the model channel.
+    assert resolved.files is None
+    assert resolved.runtime_input_metadata is not None
+    assert [file["name"] for file in resolved.runtime_input_metadata["files"]] == [
+        "a.wav",
+        "b.wav",
+    ]
+    # Evidence identity is the contract most exposed by leaving files empty.
+    staged = {file.id: file for file in file_service.get_files_by_ids.return_value}
+    runtime_edges = [
+        edge for edge in resolved.edges if edge.source.kind == "runtime_file"
+    ]
+    assert [edge.source.file_id for edge in runtime_edges] == [file_id_1, file_id_2]
+    assert [edge.source.checksum for edge in runtime_edges] == [
+        staged[file_id_1].checksum,
+        staged[file_id_2].checksum,
+    ]
+    assert [edge.source.byte_size for edge in runtime_edges] == [
+        staged[file_id_1].size,
+        staged[file_id_2].size,
+    ]
+
+
+@pytest.mark.asyncio
+async def test_audio_payload_lost_between_identify_and_read_is_a_missing_file(user):
+    """Deferred reads must keep the missing-file failure, not blame transcription."""
+
+    executor, flow_run_repo, space_repo, file_service, transcriber = _build_executor(
+        user
+    )
+    file_id = uuid4()
+    step = _runtime_step()
+    run = _run(user=user, payload={})
+    _patch_run_input_payload(flow_run_repo, run)
+    context = executor.variable_resolver.build_context(run.input_payload_json, [])
+
+    file_service.get_files_by_ids.return_value = [
+        _audio_file(file_id=file_id, name="deleted-midway.wav")
+    ]
+    model = SimpleNamespace(
+        id=uuid4(), name="whisper-1", model_name="whisper-1", can_access=True
+    )
+    space_repo.get_space_by_assistant = AsyncMock(
+        return_value=_SpaceStub(models=[model], default_model=model)
+    )
+    file_service.get_file_content.side_effect = NotFoundException()
+
+    with pytest.raises(TypedIOValidationException) as exc:
+        await executor._resolve_step_input(
+            step=step,
+            context=context,
+            run=run,
+            prior_results=[],
+            state=_state(),
+            version_metadata={
+                "wizard": {
+                    "transcription_enabled": True,
+                    "transcription_model": {"id": str(model.id)},
+                    "transcription_language": "sv",
+                }
+            },
+            requested_file_ids=[file_id],
+        )
+
+    assert exc.value.code == "typed_io_file_not_found"
+    transcriber.transcribe.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_audio_payload_read_failure_stays_inside_the_typed_contract(user):
+    """Every way a deferred read can fail must reach the caller as a flow error."""
+
+    executor, flow_run_repo, space_repo, file_service, transcriber = _build_executor(
+        user
+    )
+    file_id = uuid4()
+    step = _runtime_step()
+    run = _run(user=user, payload={})
+    _patch_run_input_payload(flow_run_repo, run)
+    context = executor.variable_resolver.build_context(run.input_payload_json, [])
+
+    file_service.get_files_by_ids.return_value = [
+        _audio_file(file_id=file_id, name="unreadable.wav")
+    ]
+    model = SimpleNamespace(
+        id=uuid4(), name="whisper-1", model_name="whisper-1", can_access=True
+    )
+    space_repo.get_space_by_assistant = AsyncMock(
+        return_value=_SpaceStub(models=[model], default_model=model)
+    )
+    # Not a missing file: storage unreachable, ownership raced, bytes failed
+    # verification. None of these may escape as an untyped exception.
+    file_service.get_file_content.side_effect = RuntimeError("object content down")
+
+    with pytest.raises(TypedIOValidationException) as exc:
+        await executor._resolve_step_input(
+            step=step,
+            context=context,
+            run=run,
+            prior_results=[],
+            state=_state(),
+            version_metadata={
+                "wizard": {
+                    "transcription_enabled": True,
+                    "transcription_model": {"id": str(model.id)},
+                    "transcription_language": "sv",
+                }
+            },
+            requested_file_ids=[file_id],
+        )
+
+    assert exc.value.code == "typed_io_transcription_failed"
+    transcriber.transcribe.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_audio_resolve_multifile_overflow_raises_typed_error(user):
     executor, flow_run_repo, space_repo, file_service, transcriber = _build_executor(
         user, max_inline_text_bytes=90
@@ -796,6 +1022,7 @@ async def test_resolve_transcribe_attach_updates_payload_context_and_audits(
         flow_run_repo=flow_run_repo,
         audit_service=audit_service,
         actor=FlowRunActor.from_user(user=user),
+        load_audio_payload=AsyncMock(),
     )
 
     result = await resolve_transcribe_and_attach_audio_input(
@@ -866,6 +1093,7 @@ async def test_resolve_transcribe_attach_swallow_audit_errors(user, monkeypatch)
         flow_run_repo=flow_run_repo,
         audit_service=audit_service,
         actor=FlowRunActor.from_user(user=user),
+        load_audio_payload=AsyncMock(),
     )
 
     result = await resolve_transcribe_and_attach_audio_input(

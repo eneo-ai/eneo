@@ -236,6 +236,61 @@ describe("flow settings page — mapped restore lifecycle", () => {
     await expect.element(page.getByRole("tab", { name: "Sparat källunderlag" })).toBeVisible();
   });
 
+  test("upload ceilings say what they are and where they are raised", async () => {
+    render(FlowSettingsPage, pageProps());
+    await page.getByRole("tab", { name: "Uppladdningar och körtider" }).click();
+
+    // Without the provenance an admin sees a limit they cannot explain or
+    // raise, because it is owned by the deployment-wide storage policy.
+    await expect
+      .element(
+        page.getByText(
+          "Räcker till ungefär 3 h 38 min tal som MP3 i 128 kbit/s. Verklig speltid varierar med format och inspelningskvalitet. Högsta tillåtna värde: 200 MiB. Taket gäller hela driftmiljön och ändras av en lagringsadministratör under Admin > Fillagring."
+        )
+      )
+      .toBeVisible();
+    await expect
+      .element(
+        page.getByText(
+          "Högsta tillåtna värde: 10 MiB. Taket gäller hela driftmiljön och ändras av en lagringsadministratör under Admin > Fillagring."
+        )
+      )
+      .toBeVisible();
+  });
+
+  test("states the recording time an audio limit buys, and follows the value", async () => {
+    render(FlowSettingsPage, pageProps());
+    await page.getByRole("tab", { name: "Uppladdningar och körtider" }).click();
+
+    // 200 MiB of 128 kbit/s MP3 is roughly 3 h 38 min of speech.
+    await expect
+      .element(
+        page.getByText("Räcker till ungefär 3 h 38 min tal som MP3 i 128 kbit/s.", { exact: false })
+      )
+      .toBeVisible();
+
+    await page.getByRole("textbox", { name: "Största ljudfil" }).fill("60");
+
+    await expect
+      .element(
+        page.getByText("Räcker till ungefär 1 h 6 min tal som MP3 i 128 kbit/s.", { exact: false })
+      )
+      .toBeVisible();
+  });
+
+  test("hides the running time while the audio size is invalid", async () => {
+    render(FlowSettingsPage, pageProps());
+    await page.getByRole("tab", { name: "Uppladdningar och körtider" }).click();
+
+    // Above the ceiling: an estimate here would read as the entered value's.
+    await page.getByRole("textbox", { name: "Största ljudfil" }).fill("300");
+
+    expect(page.getByText("Räcker till ungefär", { exact: false }).query()).toBeNull();
+    await expect
+      .element(page.getByText("Högsta tillåtna värde: 200 MiB.", { exact: false }))
+      .toBeVisible();
+  });
+
   test("dirty upload rows expose row-specific undo actions without repeated default links", async () => {
     render(FlowSettingsPage, pageProps());
     await page.getByRole("tab", { name: "Uppladdningar och körtider" }).click();

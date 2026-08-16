@@ -39,6 +39,11 @@
 
   const MB = 1024 * 1024;
   const KB = 1024;
+  // A size in MiB means nothing to an administrator choosing a limit for
+  // meeting recordings, so the audio field states the running time it buys.
+  // The assumed bitrate is stated in the copy, because a real recording's
+  // running time depends on its own format and quality.
+  const MP3_BYTES_PER_SECOND = 128_000 / 8;
   const EVIDENCE_MAX_SOURCES = 500;
   const EVIDENCE_MAX_PASSAGES = 50;
   const EVIDENCE_MAX_PASSAGE_BYTES = 65536;
@@ -252,6 +257,29 @@
     if (value >= MB) return `${Number((value / MB).toFixed(1))} MB`;
     return `${Number((value / KB).toFixed(1))} KB`;
   }
+
+  /** Say what an audio size limit buys, in running time an admin recognises. */
+  function audioRunningTime(bytes: number | null): string {
+    const effective = bytes ?? initial.flowInputLimits.audio_max_size_ceiling_bytes;
+    const minutes = Math.round(effective / MP3_BYTES_PER_SECOND / 60);
+    if (minutes < 60) {
+      return m.flow_input_limits_audio_equivalent_minutes({ minutes });
+    }
+    return m.flow_input_limits_audio_equivalent_hours({
+      hours: Math.floor(minutes / 60),
+      minutes: minutes % 60
+    });
+  }
+
+  const audioCeilingHint = $derived.by(() => {
+    const ceiling = m.flow_input_limits_ceiling_hint({
+      ceiling: `${Math.floor(initial.flowInputLimits.audio_max_size_ceiling_bytes / MB)} MiB`
+    });
+    // While the entry is invalid there is no size to describe; showing the
+    // ceiling's running time next to an error would read as if it applied.
+    if (audioMaxSize.value === undefined) return ceiling;
+    return `${audioRunningTime(audioMaxSize.value)} ${ceiling}`;
+  });
 
   const evidenceSummary = $derived(
     m.flow_knowledge_evidence_summary({
@@ -690,9 +718,9 @@
             title={m.flow_input_limits_file_title()}
             description={m.flow_input_limits_file_description()}
             placeholder={m.flow_input_limits_deployment_default_hint()}
-            unit="MB"
-            hint={m.flow_knowledge_evidence_ceiling_bytes_hint({
-              ceiling: `${Math.floor(initial.flowInputLimits.file_max_size_ceiling_bytes / MB)} MB`
+            unit="MiB"
+            hint={m.flow_input_limits_ceiling_hint({
+              ceiling: `${Math.floor(initial.flowInputLimits.file_max_size_ceiling_bytes / MB)} MiB`
             })}
             field={fileMaxSize}
           />
@@ -713,10 +741,8 @@
             title={m.flow_input_limits_audio_title()}
             description={m.flow_input_limits_audio_description()}
             placeholder={m.flow_input_limits_deployment_default_hint()}
-            unit="MB"
-            hint={m.flow_knowledge_evidence_ceiling_bytes_hint({
-              ceiling: `${Math.floor(initial.flowInputLimits.audio_max_size_ceiling_bytes / MB)} MB`
-            })}
+            unit="MiB"
+            hint={audioCeilingHint}
             field={audioMaxSize}
           />
           <Settings.NumberRow

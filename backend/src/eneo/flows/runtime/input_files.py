@@ -1,11 +1,13 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, TypeVar
 from uuid import UUID
 
 if TYPE_CHECKING:
-    from eneo.files.file_models import File
+    from eneo.files.file_models import File, FileInfo
     from eneo.files.file_service import FileService
+
+_RuntimeFile = TypeVar("_RuntimeFile", "File", "FileInfo")
 
 
 async def load_files_by_requested_ids(
@@ -29,9 +31,28 @@ async def load_files_by_requested_ids(
     return _order_files_by_requested_ids(files=files, requested_ids=requested_ids)
 
 
+async def describe_files_by_requested_ids(
+    *,
+    file_service: FileService,
+    requested_ids: list[UUID],
+) -> list["FileInfo"]:
+    """Identify run input files without reading their bytes.
+
+    Audio steps use this and read each payload only while that file is being
+    transcribed, so a run's memory cost is one audio file rather than every file
+    the step requested. Deliberately uncached: identities are cheap, and a cache
+    entry here must never be mistaken for one carrying content.
+    """
+    described = await file_service.get_owned_file_infos(file_ids=requested_ids)
+    return _order_files_by_requested_ids(
+        files=described,
+        requested_ids=requested_ids,
+    )
+
+
 def _order_files_by_requested_ids(
-    *, files: list["File"], requested_ids: list[UUID]
-) -> list["File"]:
+    *, files: list[_RuntimeFile], requested_ids: list[UUID]
+) -> list[_RuntimeFile]:
     file_by_id = {file.id: file for file in files}
     return [
         file_by_id[file_id]

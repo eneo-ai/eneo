@@ -37,6 +37,11 @@ def _audio_file(name: str, file_id: UUID | None = None) -> SimpleNamespace:
 async def _transcribe(files: list[SimpleNamespace], blocks: list[str]):
     transcriber = SimpleNamespace(transcribe=AsyncMock(side_effect=blocks))
     model = SimpleNamespace(id=uuid4(), name="whisper-1", model_name="whisper-1")
+    by_id = {file.id: file for file in files}
+
+    async def load_audio_payload(file_id: UUID) -> SimpleNamespace:
+        return by_id[file_id]
+
     return await transcribe_audio_input(
         files=files,
         transcriber=transcriber,
@@ -45,6 +50,7 @@ async def _transcribe(files: list[SimpleNamespace], blocks: list[str]):
         step_order=1,
         max_files=10,
         max_inline_text_bytes=10_000,
+        load_audio_payload=load_audio_payload,
     )
 
 

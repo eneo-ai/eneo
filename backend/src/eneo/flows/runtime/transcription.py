@@ -2,9 +2,10 @@ from __future__ import annotations
 
 import re
 import time
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import datetime
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, TypeAlias
 from uuid import UUID
 
 from eneo.completion_models.infrastructure.context_builder import count_tokens
@@ -16,7 +17,10 @@ from eneo.flows.transcription_config import (
     parse_transcription_config,
     to_provider_language,
 )
-from eneo.main.exceptions import TypedIOValidationException
+from eneo.main.exceptions import NotFoundException, TypedIOValidationException
+
+# Reads one authorized audio file's bytes, immediately before transcription.
+LoadAudioPayload: TypeAlias = Callable[[UUID], Awaitable["File"]]
 
 # Must stay aligned with
 # frontend/apps/web/src/lib/features/audio/recordingSession.ts::buildSegmentFilenameBase.
@@ -99,7 +103,7 @@ def _join_transcription_blocks(
 
 
 if TYPE_CHECKING:
-    from eneo.files.file_models import File
+    from eneo.files.file_models import File, FileInfo
     from eneo.files.transcriber import Transcriber
     from eneo.spaces.space_repo import SpaceRepository
     from eneo.transcription_models.domain.transcription_model import (
@@ -136,11 +140,11 @@ class FlowTranscriptionResult:
 
 
 def order_files_by_request(
-    files: list["File"],
+    files: list["FileInfo"],
     requested_ids: list[UUID],
-) -> list["File"]:
+) -> list["FileInfo"]:
     by_id = {item.id: item for item in files}
-    ordered: list["File"] = []
+    ordered: list["FileInfo"] = []
     seen: set[UUID] = set()
     for file_id in requested_ids:
         if file_id in seen:
@@ -189,15 +193,23 @@ async def resolve_transcription_model_for_step(
 
 async def transcribe_audio_input(
     *,
-    files: list["File"],
+    files: list["FileInfo"],
     transcriber: "Transcriber",
     transcription_model: "TranscriptionModel",
     language: str,
     step_order: int,
     max_files: int,
     max_inline_text_bytes: int,
+    load_audio_payload: "LoadAudioPayload",
     near_limit_ratio: float = 0.85,
 ) -> FlowTranscriptionResult:
+    """Transcribe each audio file in request order, one payload at a time.
+
+    ``files`` carries descriptive fields only. ``load_audio_payload`` reads one
+    file's bytes immediately before it is transcribed and the result is released
+    afterwards, so a step's memory cost is its largest audio file rather than
+    the sum of every file it was given.
+    """
     if not files:
         raise TypedIOValidationException(
             f"Step {step_order}: audio input requires at least one audio file.",
@@ -226,13 +238,29 @@ async def transcribe_audio_input(
     block_segments: list[tuple[str, int, datetime] | None] = []
 
     for file in files:
+        # Reading a payload is part of this step's typed failure surface: it
+        # authorizes, hydrates and verifies bytes, and every way it can fail
+        # must reach the caller as a flow error rather than an escaping
+        # exception.
         try:
-            block_text = await transcriber.transcribe(
-                file,
-                transcription_model,
-                language=provider_language,
-                persist_cache_to_file=False,
-            )
+            try:
+                audio_file = await load_audio_payload(file.id)
+            except NotFoundException as exc:
+                # A file can disappear between being identified and being read.
+                # Report it as the missing file it is, not a transcription fault.
+                raise TypedIOValidationException(
+                    f"File content is unavailable for: [{file.id}]",
+                    code=FlowApiErrorCode.TYPED_IO_FILE_NOT_FOUND.value,
+                ) from exc
+            try:
+                block_text = await transcriber.transcribe(
+                    audio_file,
+                    transcription_model,
+                    language=provider_language,
+                    persist_cache_to_file=False,
+                )
+            finally:
+                del audio_file
         except TypedIOValidationException:
             raise
         except Exception as exc:
@@ -293,11 +321,12 @@ async def resolve_and_transcribe_audio_for_step(
     space_repo: "SpaceRepository",
     assistant_id: UUID,
     step_order: int,
-    files: list["File"],
+    files: list["FileInfo"],
     requested_ids: list[UUID],
     transcriber: "Transcriber",
     max_files: int,
     max_inline_text_bytes: int,
+    load_audio_payload: LoadAudioPayload,
 ) -> FlowTranscriptionResult:
     try:
         transcription_config = parse_transcription_config(version_metadata)
@@ -341,4 +370,5 @@ async def resolve_and_transcribe_audio_for_step(
         step_order=step_order,
         max_files=max_files,
         max_inline_text_bytes=max_inline_text_bytes,
+        load_audio_payload=load_audio_payload,
     )

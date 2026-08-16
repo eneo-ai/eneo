@@ -9,7 +9,10 @@ import pytest
 from eneo.files.file_service import FileService
 from eneo.flows.domain.runtime import RunExecutionState
 from eneo.flows.flow_run_input_envelope import FLOW_INPUT_TRANSCRIPTION_KEY
-from eneo.flows.runtime.input_files import load_files_by_requested_ids
+from eneo.flows.runtime.input_files import (
+    describe_files_by_requested_ids,
+    load_files_by_requested_ids,
+)
 from eneo.flows.runtime.step_input_resolution import (
     enforce_inline_input_cap,
     resolve_input_source_text,
@@ -173,6 +176,27 @@ async def test_load_files_by_requested_ids_cache_hit_reorders_per_request() -> N
     assert first_result == [first_file, second_file]
     assert second_result == [second_file, first_file]
     assert file_service.get_files_by_ids.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_describing_files_never_reads_their_bytes() -> None:
+    """Audio steps identify files without paying for their payloads."""
+
+    first = SimpleNamespace(id=uuid4())
+    second = SimpleNamespace(id=uuid4())
+    file_service = create_autospec(FileService, instance=True)
+    file_service.get_owned_file_infos.return_value = [second, first]
+
+    described = await describe_files_by_requested_ids(
+        file_service=file_service,
+        requested_ids=[first.id, second.id],
+    )
+
+    assert described == [first, second]
+    file_service.get_files_by_ids.assert_not_awaited()
+    file_service.get_owned_file_infos.assert_awaited_once_with(
+        file_ids=[first.id, second.id]
+    )
 
 
 @pytest.mark.asyncio

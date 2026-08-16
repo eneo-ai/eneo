@@ -297,8 +297,10 @@ endpoint URL, command line, image, repository, logs, or backup manifest.
 Inline capacity and common reconciliation tuning live in `env_backend.env`.
 `OBJECT_CONTENT_INLINE_MAXIMUM_BYTES` is an operator admission ceiling that
 bounds PostgreSQL row, WAL, backup, and process memory exposure; it is not a
-business limit. Lowering it affects new inline writes, not reads of existing
-rows. For PostgreSQL-inline session uploads, the effective limit is the smaller
+business limit. It defaults to 200 MiB, which holds about one hour of 16 kHz
+mono PCM audio, or several hours of the same recording as 128 kbit/s MP3. What a
+given recorder produces varies, so size a deployment against real files.
+Lowering it affects new inline writes, not reads of existing rows. For PostgreSQL-inline session uploads, the effective limit is the smaller
 of the admin policy and this ceiling. **Admin > Storage** shows the configured
 limit, effective limit, and constraining source. Object-store session uploads
 use the same rule with the portable multipart envelope derived from configured
@@ -307,6 +309,27 @@ admission and may use temporary disk. Eneo rejects an oversized File or Icon
 before its own capture/spool or any storage mutation. Operators must use
 ingress/request-body limits and configure and monitor temporary-disk capacity
 to protect that earlier parsing boundary.
+
+### Changing the ceiling on an existing deployment
+
+`env_backend.env` is a copy of the shipped template, so an installation keeps
+whatever value it was created with. Changing the template does not change a
+running deployment, and each backend and worker process reads this setting once
+at startup — editing the file alone has no effect.
+
+```bash
+# 1. See what the running processes actually read.
+docker compose exec backend printenv OBJECT_CONTENT_INLINE_MAXIMUM_BYTES
+docker compose exec celery-worker-flows printenv OBJECT_CONTENT_INLINE_MAXIMUM_BYTES
+
+# 2. Edit env_backend.env, then recreate every process that reads it.
+docker compose up -d --force-recreate backend worker \
+  celery-worker-flows celery-worker-flows-maintenance celery-beat-flows
+```
+
+Then confirm the new ceiling reached the product: **Admin > Storage** must show
+it as the operator ceiling, and **Admin > Flow settings → Uploads and runtimes**
+must offer it as the writable maximum for file and audio size.
 
 Business limits apply to the user's original upload. Generated text, model
 input, and page variants may be larger and are bounded by the selected

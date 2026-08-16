@@ -1084,7 +1084,7 @@ async def prepare_step_execution(
 
     if deps.logger is not None:
         deps.logger.info(
-            "flow_executor.input_resolved run_id=%s step_order=%d has_files=%s has_structured=%s text_len=%d",
+            "flow_executor.input_resolved run_id=%s step_order=%d has_model_files=%s has_structured=%s text_len=%d",
             run.id,
             step.step_order,
             step_input.files is not None and len(step_input.files) > 0,

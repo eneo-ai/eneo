@@ -42,6 +42,12 @@ _MAXIMUM_MULTIPART_PART_BYTES = 5 * 1024 * _MEBIBYTE
 _MAXIMUM_MULTIPART_PARTS = 10_000
 _MAXIMUM_S3_OBJECT_BYTES = 5 * 1024 * 1024 * _MEBIBYTE
 _MAXIMUM_S3_PAGE_SIZE = 1_000
+# A PostgreSQL variable-length datum is capped at 1 GB *including* its
+# four-byte length header, so the largest storable ``bytea`` payload is
+# 2**30 - 5 bytes. An inline admission ceiling above that would admit uploads
+# that then fail at materialization; reject it at startup instead.
+_VARLENA_HEADER_BYTES = 4
+MAXIMUM_INLINE_BYTES = 1024 * _MEBIBYTE - 1 - _VARLENA_HEADER_BYTES
 
 
 class ObjectContentCoreSettings(BaseSettings):
@@ -52,10 +58,16 @@ class ObjectContentCoreSettings(BaseSettings):
         hide_input_in_errors=True,
     )
 
-    # Preserve the established maximum audio upload when upgrading an existing
-    # deployment without this new setting. Operators can lower both limits
-    # together after measuring their PostgreSQL capacity.
-    inline_maximum_bytes: int = Field(default=200 * _MEBIBYTE, ge=1)
+    # The deployment-wide capacity bound on one PostgreSQL-inline payload, and
+    # the ceiling every administrator-configurable upload limit is capped by.
+    # Raising it grows the largest bytea row, its WAL record, and the transient
+    # memory of whichever process reads it; operators move it in either
+    # direction after measuring their own PostgreSQL capacity.
+    inline_maximum_bytes: int = Field(
+        default=200 * _MEBIBYTE,
+        ge=1,
+        le=MAXIMUM_INLINE_BYTES,
+    )
     inline_io_chunk_bytes: int = Field(default=256 * 1024, ge=1)
     reconciliation_batch_size: int = Field(
         default=100,

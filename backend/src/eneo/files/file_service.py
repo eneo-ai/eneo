@@ -563,6 +563,24 @@ class FileService:
             include_text_original_bytes=include_text_original_bytes,
         )
 
+    async def get_owned_file_infos(self, file_ids: list[UUID]) -> list[FileInfo]:
+        """Identify owned files without reading their bytes.
+
+        Same owner filtering as ``get_files_by_ids`` — unknown or unowned ids
+        are absent rather than an error, so the caller reports which of its
+        requested files are missing. ``get_file_infos`` instead rejects the
+        whole request, which a runtime step must not do.
+        """
+        metadata = await self.repo.get_list_by_id_and_owner(
+            ids=file_ids,
+            owner=self._owner(),
+        )
+        references = await self.repo.get_content_references(
+            [file.id for file in metadata]
+        )
+        by_file = self._references_by_file(references)
+        return [project_file_info(file, by_file[file.id]) for file in metadata]
+
     async def get_public_files(self) -> list[FilePublic]:
         metadata = await self.repo.get_list_by_owner(self._owner())
         return await self._project_public_files(metadata)

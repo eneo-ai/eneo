@@ -14,11 +14,11 @@ from eneo.flows.flow_run_input_envelope import (
 )
 from eneo.flows.runtime.flow_run_actor import FlowRunActor
 
-from .transcription import resolve_and_transcribe_audio_for_step
+from .transcription import LoadAudioPayload, resolve_and_transcribe_audio_for_step
 
 if TYPE_CHECKING:
     from eneo.audit.application.audit_service import AuditService
-    from eneo.files.file_models import File
+    from eneo.files.file_models import FileInfo
     from eneo.files.transcriber import Transcriber
     from eneo.flows.domain.flow import FlowRun
     from eneo.flows.infrastructure.flow_run_repo import FlowRunRepository
@@ -51,7 +51,7 @@ class AudioRuntimeRequest:
     step: RuntimeAudioStep
     context: dict[str, Any]
     version_metadata: dict[str, Any] | None
-    files: list["File"]
+    files: list["FileInfo"]
     requested_ids: list[UUID]
     max_audio_files: int
     max_inline_text_bytes: int
@@ -64,6 +64,8 @@ class AudioRuntimeDeps:
     flow_run_repo: "FlowRunRepository"
     audit_service: "AuditService | None"
     actor: FlowRunActor
+    # Reads one already-authorized audio file's bytes at transcription time.
+    load_audio_payload: LoadAudioPayload
 
 
 def apply_transcription_to_context(*, context: dict[str, Any], transcript: str) -> None:
@@ -170,6 +172,7 @@ async def resolve_transcribe_and_attach_audio_input(
         transcriber=deps.transcriber,
         max_files=request.max_audio_files,
         max_inline_text_bytes=request.max_inline_text_bytes,
+        load_audio_payload=deps.load_audio_payload,
     )
     metadata = transcription_result.to_metadata()
 

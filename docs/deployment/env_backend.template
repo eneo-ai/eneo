@@ -207,8 +207,16 @@ ENEO_SUPER_DUPER_API_KEY=
 # These settings are active whether or not an external object store is enabled.
 # The inline ceiling is a deployment safety/admission bound, not a user-facing
 # upload policy. Reads of existing inline content remain possible if it is
-# lowered. Product upload limits remain admin-configurable in Eneo.
-OBJECT_CONTENT_INLINE_MAXIMUM_BYTES=10485760
+# lowered. Product upload limits remain admin-configurable in Eneo, under
+# Admin > Storage (deployment-wide) and Admin > Flow settings (per tenant);
+# neither can be raised above this ceiling.
+#
+# 200 MiB holds about one hour of 16 kHz mono PCM audio (110 MiB), or several
+# hours of the same recording as 128 kbit/s MP3.
+# Raise it only after measuring PostgreSQL capacity: inline payloads are TOAST'd
+# bytea rows that are written to WAL and carried in every base backup, and each
+# audio file being transcribed is held in worker memory while it is prepared.
+OBJECT_CONTENT_INLINE_MAXIMUM_BYTES=209715200
 OBJECT_CONTENT_INLINE_IO_CHUNK_BYTES=262144
 
 # Bounded lifecycle and reference reconciliation. Increase only after measuring
