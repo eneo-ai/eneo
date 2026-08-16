@@ -69,6 +69,7 @@ from eneo.flows.ai_builder.ai_builder_events import (
 from eneo.flows.ai_builder.ai_builder_plan_edit_context import (
     AIBuilderPlanEditContext,
     AIBuilderSavedFlowStepEditContext,
+    ResolvedAIBuilderEditContext,
 )
 from eneo.flows.ai_builder.ai_builder_planner import (
     AIBuilderPlanner,
@@ -164,7 +165,15 @@ from eneo.flows.ai_builder.planning_state_builder import (
 )
 from eneo.flows.domain.flow import FlowPersistedJsonObject
 from eneo.flows.domain.mapped_execution_policy import FlowMappedExecutionPolicy
-from eneo.flows.flow_authoring_spec import AssistantSpec
+from eneo.flows.flow_authoring_spec import (
+    AssistantSpec,
+    FlowDraftSpecCore,
+    InputSource,
+    InputType,
+    OutputMode,
+    OutputType,
+    StepSpec,
+)
 from eneo.flows.flow_resource_bindings import (
     LocalResourceBinding,
     LocalResourceKind,
@@ -3711,6 +3720,96 @@ async def test_a_first_create_turn_is_offered_no_way_to_decline() -> None:
     system_prompt = prepared.message_groups[0].messages[0]["content"]
     assert isinstance(system_prompt, str)
     assert DECLINE_FLOW_CHANGE_TOOL_NAME not in system_prompt
+
+
+def _proposal_prepared_for_test(
+    *,
+    planning_state: PlanningState,
+    conversation: list[ConversationMessage],
+    architecture_revised_this_turn: bool,
+) -> ProposalPrepared:
+    return build_proposal_prepared(
+        requirements_state=_requirements_state_confirmed(),
+        ui_language="sv",
+        slot_classification_metadata=None,
+        conversation=conversation,
+        planning_state=planning_state,
+        attachment_context=None,
+        flow_context=None,
+        is_edit_mode=False,
+        resource_catalog=build_ai_builder_resource_catalog(
+            available_models=[],
+            available_kbs=[],
+            prior_bindings=(),
+        ),
+        flow=None,
+        assistant_snapshots=None,
+        plan_edit_context=ResolvedAIBuilderEditContext(
+            request=AIBuilderPlanEditContext(
+                scope="step",
+                plan_id=uuid4(),
+                target_plan_step_ref="step_a",
+            ),
+            scope="step",
+            target_plan_step_ref="step_a",
+        ),
+        prior_plan_for_revision=cast(
+            Any,
+            SimpleNamespace(
+                spec=FlowDraftSpecCore(
+                    flow_name="Beslutsunderlag",
+                    steps=[
+                        StepSpec(
+                            plan_step_ref="step_a",
+                            name="Skriv underlaget",
+                            assistant_spec=AssistantSpec(instructions="Skriv."),
+                            input_source=InputSource.FLOW_INPUT,
+                            input_type=InputType.TEXT,
+                            output_mode=OutputMode.PASS_THROUGH,
+                            output_type=OutputType.TEXT,
+                        )
+                    ],
+                )
+            ),
+        ),
+        litellm_model=_route().litellm_model,
+        max_input_tokens=32000,
+        max_output_tokens=2048,
+        budget_policy=AIBuilderBudgetPolicy(
+            conversation_safety_buffer_tokens=128,
+            minimum_conversation_budget_tokens=256,
+        ),
+        attachment_file_count=0,
+        current_turn_start=0,
+        architecture_revised_this_turn=architecture_revised_this_turn,
+    )
+
+
+def test_a_turn_that_just_revised_the_architecture_cannot_decline() -> None:
+    """The revision is already persisted, so this turn is not model-only.
+
+    Declining here would tell the user nothing changed while the session keeps
+    the architecture change that same turn committed.
+    """
+
+    state = _document_architecture_state()
+    conversation = _confirmation_conversation(
+        build_requirements_disclosure(state, ui_language="en")
+    )
+
+    revising = _proposal_prepared_for_test(
+        planning_state=state,
+        conversation=conversation,
+        architecture_revised_this_turn=True,
+    )
+    plain = _proposal_prepared_for_test(
+        planning_state=state,
+        conversation=conversation,
+        architecture_revised_this_turn=False,
+    )
+
+    assert revising.decline_tool_schema is None
+    assert plain.decline_tool_schema is not None
 
 
 @pytest.mark.asyncio

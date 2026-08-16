@@ -602,6 +602,9 @@ class AIBuilderPlanner:
                             budget_policy=budget_policy,
                             attachment_file_count=len(attachment_files or []),
                             current_turn_start=new_messages_start,
+                            architecture_revised_this_turn=(
+                                dispatch_result.action_kind == "revise_architecture"
+                            ),
                         )
                         pending_events.extend(
                             [

@@ -481,6 +481,7 @@ def build_proposal_prepared(
     budget_policy: AIBuilderBudgetPolicy,
     attachment_file_count: int,
     current_turn_start: int,
+    architecture_revised_this_turn: bool = False,
 ) -> ProposalPrepared:
     confirmed_requirements = latest_confirmed_requirements(conversation)
     # Only the user's own wording names an output topology. The disclosure
@@ -501,10 +502,14 @@ def build_proposal_prepared(
         resource_catalog=resource_catalog,
     )
     # A first create turn has nothing to decline yet: the decline outcome only
-    # answers a request against a plan or Flow that already exists.
+    # answers a request against a plan or Flow that already exists. A turn that
+    # just revised the committed architecture cannot be model-only either, and
+    # that revision is already persisted, so declining it would leave the
+    # session holding a change it told the user it did not make.
     decline_tool_schema = (
         build_decline_flow_change_tool_schema()
-        if is_edit_mode or plan_edit_context is not None
+        if (is_edit_mode or plan_edit_context is not None)
+        and not architecture_revised_this_turn
         else None
     )
     plan_revision_context = build_plan_revision_prompt_block(
