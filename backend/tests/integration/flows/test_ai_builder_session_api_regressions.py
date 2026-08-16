@@ -1997,6 +1997,40 @@ async def test_starting_fresh_leaves_every_other_session_of_the_same_actor_alone
             actor_user_id=user.id,
             target_kind=TargetKind.CREATE,
         )
+        idle_plan = await repo.create_plan(
+            session_id=idle_session.id,
+            tenant_id=user.tenant_id,
+            proposal=FlowBuilderProposal(
+                content=FlowBuilderProposalContent(
+                    spec=_make_builder_plan_spec(existing_step_ref=None)
+                )
+            ),
+        )
+        idle_turn = await _claim_session_send_turn(
+            repo=repo,
+            session_id=idle_session.id,
+            tenant_id=user.tenant_id,
+        )
+        await repo.update_session_latest_plan(
+            session_id=idle_session.id,
+            tenant_id=user.tenant_id,
+            plan_id=idle_plan.id,
+            lease=idle_turn.lease,
+        )
+        idle_attachment = await container.file_service().save_generated_file(
+            payload=b"idle-sibling-attachment",
+            name="idle-sibling-attachment.txt",
+            mimetype="text/plain",
+            file_type=FileType.TEXT,
+        )
+        container.session().add(
+            BuilderSessionFiles(
+                session_id=idle_session.id,
+                file_id=idle_attachment.id,
+                tenant_id=user.tenant_id,
+            )
+        )
+        await container.session().flush()
         turn = await _claim_session_send_turn(
             repo=repo,
             session_id=sending_session.id,
@@ -2019,10 +2053,22 @@ async def test_starting_fresh_leaves_every_other_session_of_the_same_actor_alone
             session_id=idle_session.id,
             tenant_id=user.tenant_id,
         )
+        idle_plan_after = await repo.get_plan(
+            plan_id=idle_plan.id,
+            tenant_id=user.tenant_id,
+        )
+        idle_attachments_after = await repo.list_session_file_ids(
+            session_id=idle_session.id,
+            tenant_id=user.tenant_id,
+        )
 
     assert fresh_session.id not in {sending_session.id, idle_session.id}
     assert sending.status == SessionStatus.CHATTING
-    assert idle.status == SessionStatus.CHATTING
+    # The idle sibling keeps its state, its actionable plan and its attachment.
+    assert idle.status == SessionStatus.AWAITING_APPROVAL
+    assert idle.latest_plan_id == idle_plan.id
+    assert idle_plan_after.status == PlanStatus.PROPOSED
+    assert list(idle_attachments_after) == [idle_attachment.id]
 
 
 @pytest.mark.integration

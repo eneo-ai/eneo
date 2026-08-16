@@ -3027,11 +3027,11 @@ async def test_get_session_attachment_snapshot_warns_when_attached_file_has_no_r
 
 class TestSharedActorSessionIsolation:
     @pytest.mark.anyio
-    async def test_starting_fresh_only_creates(self):
-        """Several authors can share one API key, so they share one actor.
+    async def test_starting_fresh_does_not_serialize_on_the_tenant(self):
+        """A request that always creates has no find-or-create race to lose.
 
-        Starting fresh must not reach for anyone else's session: the server
-        cannot tell which of them owns it.
+        Holding the tenant-wide lock for it would serialize every concurrent
+        client of one user behind the slowest.
         """
         user = _make_user()
         repo = AsyncMock()
@@ -3046,7 +3046,5 @@ class TestSharedActorSessionIsolation:
             force_new=True,
         )
 
+        repo.acquire_session_creation_lock.assert_not_awaited()
         repo.create_session.assert_awaited_once()
-        for method in repo.mock_calls:
-            assert "cancel" not in method[0]
-            assert "supersede" not in method[0]
