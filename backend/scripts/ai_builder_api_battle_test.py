@@ -134,6 +134,12 @@ from ai_builder_release_gate import replacement_limit  # noqa: E402
 from eneo.flows.ai_builder.ai_builder_conversation_metadata import (  # noqa: E402
     StructuredQuestionAnswerMetadata,
 )
+from eneo.flows.ai_builder.ai_builder_flow_schema_values import (  # noqa: E402
+    builder_form_field_type_values,
+)
+from eneo.flows.ai_builder.ai_builder_new_step_models import (  # noqa: E402
+    normalize_authoring_string_list,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -1056,6 +1062,7 @@ _EXPECTATION_KEYS = frozenset(
         "expected_file_roles",
         "expected_form_field_groups",
         "expected_input_contract_schema",
+        "expected_input_field_contracts",
         "expected_leaf_output_field_groups",
         "expected_output_contract_schema",
         "expected_output_modes",
@@ -1091,6 +1098,11 @@ _EXPECTATION_KEYS = frozenset(
         "terminal_output_types",
     }
 )
+_INPUT_FIELD_CONTRACT_KEYS = frozenset({"name_groups", "type", "required", "options"})
+# The authorable type vocabulary itself comes from
+# `builder_form_field_type_values()`. Only which of those types carry an option
+# list is a case-authoring rule, and it has no backend owner to import today.
+_OPTION_BEARING_INPUT_FIELD_TYPES = frozenset({"select", "multiselect"})
 _REVIEW_POLICY_EXPECTATION_KEYS = frozenset(
     {
         "mode",
@@ -1561,6 +1573,9 @@ def _validate_release_expectations(
             raise ValueError(
                 f"{path} case {case_id}.{schema_key} must be a JSON object."
             )
+    input_field_contracts = expected.get("expected_input_field_contracts")
+    if input_field_contracts is not None:
+        _validate_input_field_contracts(path, case_id, input_field_contracts)
     first_pass = expected.get("expected_first_pass_authoring")
     if first_pass is not None:
         _validate_first_pass_authoring_expectation(path, case_id, first_pass)
@@ -1721,6 +1736,99 @@ def _require_non_empty_field_groups(
         raise ValueError(
             f"{path} case {case_id}.{key} must be non-empty string groups."
         )
+
+
+def _validate_input_field_contracts(
+    path: Path,
+    case_id: str,
+    contracts: object,
+) -> None:
+    """Reject input-field contracts the evaluator would have to guess at.
+
+    Option lists are authored in the case, never inferred from the prompt, so a
+    select without options and a text field carrying options are both case bugs.
+    A contract the corpus can never satisfy, or that two contracts could both
+    claim, would report a measurement result that says nothing about the
+    Builder, so both are rejected here rather than at comparison time.
+    """
+
+    if not isinstance(contracts, list) or not contracts:
+        raise ValueError(
+            f"{path} case {case_id}.expected_input_field_contracts must be a "
+            "non-empty list."
+        )
+    seen_aliases: dict[str, int] = {}
+    for index, contract in enumerate(contracts):
+        location = f"expected_input_field_contracts[{index}]"
+        if not isinstance(contract, Mapping) or set(contract) != (
+            _INPUT_FIELD_CONTRACT_KEYS
+        ):
+            raise ValueError(
+                f"{path} case {case_id}.{location} must carry exactly "
+                + ", ".join(sorted(_INPUT_FIELD_CONTRACT_KEYS))
+                + "."
+            )
+        _require_non_empty_field_groups(
+            path,
+            case_id,
+            f"{location}.name_groups",
+            [contract.get("name_groups")],
+        )
+        field_type = contract.get("type")
+        authorable_types = builder_form_field_type_values()
+        if field_type not in authorable_types:
+            raise ValueError(
+                f"{path} case {case_id}.{location}.type must be one of "
+                + ", ".join(sorted(authorable_types))
+                + "."
+            )
+        if not isinstance(contract.get("required"), bool):
+            raise ValueError(
+                f"{path} case {case_id}.{location}.required must be a boolean."
+            )
+        options = contract.get("options")
+        if not isinstance(options, list) or not all(
+            isinstance(item, str) for item in options
+        ):
+            raise ValueError(
+                f"{path} case {case_id}.{location}.options must be a list of "
+                "unique, non-empty strings."
+            )
+        # Authoring strips blanks, surrounding whitespace and duplicates before
+        # the options reach a plan, so an option list that does not survive that
+        # normalization can never be matched and would fail for the wrong reason.
+        if normalize_authoring_string_list(options) != options:
+            raise ValueError(
+                f"{path} case {case_id}.{location}.options must already be "
+                "normalized: unique, non-empty and free of surrounding "
+                "whitespace."
+            )
+        if field_type in _OPTION_BEARING_INPUT_FIELD_TYPES and not options:
+            raise ValueError(
+                f"{path} case {case_id}.{location} declares a {field_type} field "
+                "without authored options."
+            )
+        if field_type not in _OPTION_BEARING_INPUT_FIELD_TYPES and options:
+            raise ValueError(
+                f"{path} case {case_id}.{location} declares options on a "
+                f"{field_type} field."
+            )
+        # Each contract independently selects the first field its aliases match,
+        # so two contracts sharing an alias could both be satisfied by one
+        # produced field. Aliases inside a single contract are synonyms for the
+        # same field, so only cross-contract collisions are a case bug.
+        for alias in {
+            _normalized_field_name(alias)
+            for alias in _string_list(contract.get("name_groups"))
+        }:
+            claimed_by = seen_aliases.get(alias)
+            if claimed_by is not None:
+                raise ValueError(
+                    f"{path} case {case_id}.{location}.name_groups shares alias "
+                    f"{alias!r} with "
+                    f"expected_input_field_contracts[{claimed_by}]."
+                )
+            seen_aliases[alias] = index
 
 
 def _validate_classifier_expectations(
@@ -6175,12 +6283,15 @@ def _summarize_plan(plan: JsonObject | None) -> JsonObject:
 
     form_fields = spec.get("form_fields")
     form_field_names: list[str] = []
+    form_field_facts: list[JsonObject] = []
     if isinstance(form_fields, list):
-        form_field_names = [
-            str(field.get("name"))
-            for field in form_fields
-            if isinstance(field, Mapping) and isinstance(field.get("name"), str)
-        ]
+        for raw_field in form_fields:
+            if not isinstance(raw_field, Mapping) or not isinstance(
+                raw_field.get("name"), str
+            ):
+                continue
+            form_field_names.append(str(raw_field["name"]))
+            form_field_facts.append(_input_field_facts(raw_field))
     step_summaries: list[JsonObject] = []
     for index, raw_step in enumerate(steps, start=1):
         if not isinstance(raw_step, Mapping):
@@ -6256,6 +6367,7 @@ def _summarize_plan(plan: JsonObject | None) -> JsonObject:
         "has_plan": True,
         "flow_name": spec.get("flow_name"),
         "form_field_names": form_field_names,
+        "form_fields": form_field_facts,
         "step_count": len(step_summaries),
         "json_step_count": sum(
             1 for step in step_summaries if step["output_type"] == "json"
@@ -6283,6 +6395,28 @@ def _summarize_plan(plan: JsonObject | None) -> JsonObject:
             step["order"] for step in step_summaries if step["instruction_has_template"]
         ],
         "steps": step_summaries,
+    }
+
+
+def _input_field_facts(field: Mapping[str, Any]) -> JsonObject:
+    """Complete typed record of one runtime input field, as authored in the plan.
+
+    Names alone cannot tell a single-select from an open text box, so the
+    receipt keeps the same facts the `FlowInputFieldIntent` contract carries:
+    declared type, requiredness, and the option list a select offers.
+    """
+
+    raw_options = field.get("options")
+    return {
+        "name": str(field["name"]),
+        "label": field.get("label") if isinstance(field.get("label"), str) else None,
+        "type": field.get("type") if isinstance(field.get("type"), str) else None,
+        "required": field.get("required") is True,
+        "options": (
+            [option for option in raw_options if isinstance(option, str)]
+            if isinstance(raw_options, list)
+            else []
+        ),
     }
 
 
@@ -7966,6 +8100,21 @@ def _quality_report(
             expected_form_fields,
         )
 
+    input_field_contracts = expected.get("expected_input_field_contracts")
+    if isinstance(input_field_contracts, list) and input_field_contracts:
+        actual_fields = _summary_input_fields(summary)
+        contract_results = [
+            _input_field_contract_result(contract, actual_fields)
+            for contract in input_field_contracts
+            if isinstance(contract, Mapping)
+        ]
+        add_check(
+            "expected_input_field_contracts",
+            all(result["satisfied"] for result in contract_results),
+            {"fields": actual_fields, "contracts": contract_results},
+            list(input_field_contracts),
+        )
+
     forbidden_form_fields = _field_groups_from_expected_key(
         expected,
         "forbidden_form_field_groups",
@@ -9046,6 +9195,67 @@ def _post_json_text_cleanup_steps(steps: list[Mapping[str, Any]]) -> list[int]:
         and order != terminal_order
         and step.get("output_type") == "text"
     ]
+
+
+def _summary_input_fields(summary: Mapping[str, Any]) -> list[Mapping[str, Any]]:
+    fields = summary.get("form_fields")
+    if not isinstance(fields, list):
+        return []
+    return [field for field in fields if isinstance(field, Mapping)]
+
+
+def _input_field_contract_result(
+    contract: Mapping[str, Any],
+    actual_fields: list[Mapping[str, Any]],
+) -> JsonObject:
+    """Compare one authored input-field contract against the produced field.
+
+    Type, requiredness and the option list must match exactly, option order
+    included.
+    """
+
+    name_groups = _string_list(contract.get("name_groups"))
+    matched = next(
+        (
+            field
+            for field in actual_fields
+            if isinstance(field.get("name"), str)
+            and any(
+                _field_name_matches(expected_name, str(field["name"]))
+                for expected_name in name_groups
+            )
+        ),
+        None,
+    )
+    if matched is None:
+        return {
+            "name_groups": name_groups,
+            "satisfied": False,
+            "mismatches": ["field_missing"],
+            "actual": None,
+        }
+    expected_options = _string_list(contract.get("options"))
+    actual_options = _string_list(matched.get("options"))
+    mismatches: list[str] = []
+    if matched.get("type") != contract.get("type"):
+        mismatches.append("type")
+    if bool(matched.get("required")) is not (contract.get("required") is True):
+        mismatches.append("required")
+    # Option order is user-visible: a municipal dropdown lists its choices in the
+    # order the author chose, so a reordered list is a different contract.
+    if actual_options != expected_options:
+        mismatches.append("options")
+    return {
+        "name_groups": name_groups,
+        "satisfied": not mismatches,
+        "mismatches": mismatches,
+        "actual": {
+            "name": matched.get("name"),
+            "type": matched.get("type"),
+            "required": bool(matched.get("required")),
+            "options": actual_options,
+        },
+    }
 
 
 def _summary_steps(summary: Mapping[str, Any]) -> list[Mapping[str, Any]]:

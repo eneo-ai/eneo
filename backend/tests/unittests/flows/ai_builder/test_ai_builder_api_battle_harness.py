@@ -16,6 +16,9 @@ from uuid import UUID
 
 from pytest import CaptureFixture, MonkeyPatch, mark, raises
 
+from eneo.flows.ai_builder.ai_builder_flow_schema_values import (
+    builder_form_field_type_values,
+)
 from eneo.flows.ai_builder.ai_builder_slot_classification_contract import (
     SLOT_CLASSIFICATION_SCHEMA_VERSION,
 )
@@ -7688,6 +7691,331 @@ def test_configured_runtime_input_fields_require_collection_question() -> None:
         )
 
 
+def _input_field_plan(fields: list[dict[str, Any]]) -> dict[str, Any]:
+    return {
+        "proposal": {
+            "spec": {
+                "flow_name": "Runtime metadata flow",
+                "form_fields": fields,
+                "steps": [
+                    {
+                        "plan_step_ref": "step_a",
+                        "name": "Read case",
+                        "input_source": "flow_input",
+                        "input_type": "text",
+                        "output_type": "json",
+                        "output_mode": "pass_through",
+                    }
+                ],
+            }
+        }
+    }
+
+
+def test_plan_summary_records_the_typed_input_field_contract() -> None:
+    # Names alone cannot distinguish a single-select from an open text box, so
+    # the receipt has to carry declared type, requiredness, and options.
+    harness = _battle_harness()
+    plan = _input_field_plan(
+        [
+            {
+                "name": "arendetyp",
+                "label": "Ärendetyp",
+                "type": "select",
+                "required": True,
+                "options": ["Nybyggnad", "Rivning"],
+            },
+            {
+                "name": "notering",
+                "label": "Notering",
+                "type": "text",
+                "required": False,
+                "options": [],
+            },
+        ]
+    )
+
+    summary = harness._summarize_plan(plan)
+
+    assert summary["form_field_names"] == ["arendetyp", "notering"]
+    assert summary["form_fields"] == [
+        {
+            "name": "arendetyp",
+            "label": "Ärendetyp",
+            "type": "select",
+            "required": True,
+            "options": ["Nybyggnad", "Rivning"],
+        },
+        {
+            "name": "notering",
+            "label": "Notering",
+            "type": "text",
+            "required": False,
+            "options": [],
+        },
+    ]
+
+
+def test_input_field_contract_check_names_type_required_and_option_drift() -> None:
+    harness = _battle_harness()
+    expected = {
+        "expected_input_field_contracts": [
+            {
+                "name_groups": ["arendetyp", "case_type"],
+                "type": "select",
+                "required": True,
+                "options": ["Nybyggnad", "Rivning"],
+            }
+        ]
+    }
+    faithful_plan = _input_field_plan(
+        [
+            {
+                "name": "arendetyp",
+                "label": "Ärendetyp",
+                "type": "select",
+                "required": True,
+                "options": ["Nybyggnad", "Rivning"],
+            }
+        ]
+    )
+
+    faithful = harness._quality_report(
+        plan=faithful_plan,
+        summary=harness._summarize_plan(faithful_plan),
+        expected=expected,
+        event_summary={},
+    )
+
+    faithful_check = {check["name"]: check for check in faithful["checks"]}[
+        "expected_input_field_contracts"
+    ]
+    assert faithful_check["passed"] is True
+
+    # Option order is part of the contract: the user sees the dropdown in the
+    # order the author chose, so the same options in another order is drift.
+    reordered_plan = _input_field_plan(
+        [
+            {
+                "name": "arendetyp",
+                "label": "Ärendetyp",
+                "type": "select",
+                "required": True,
+                "options": ["Rivning", "Nybyggnad"],
+            }
+        ]
+    )
+
+    reordered = harness._quality_report(
+        plan=reordered_plan,
+        summary=harness._summarize_plan(reordered_plan),
+        expected=expected,
+        event_summary={},
+    )
+
+    reordered_check = {check["name"]: check for check in reordered["checks"]}[
+        "expected_input_field_contracts"
+    ]
+    assert reordered_check["passed"] is False
+    assert reordered_check["actual"]["contracts"][0]["mismatches"] == ["options"]
+
+    # The failure this exists to catch: an authored select that the Builder
+    # flattens into an optional free-text box with no options.
+    degraded_plan = _input_field_plan(
+        [
+            {
+                "name": "arendetyp",
+                "label": "Ärendetyp",
+                "type": "text",
+                "required": False,
+                "options": [],
+            }
+        ]
+    )
+
+    degraded = harness._quality_report(
+        plan=degraded_plan,
+        summary=harness._summarize_plan(degraded_plan),
+        expected=expected,
+        event_summary={},
+    )
+
+    degraded_check = {check["name"]: check for check in degraded["checks"]}[
+        "expected_input_field_contracts"
+    ]
+    assert degraded_check["passed"] is False
+    assert degraded_check["actual"]["contracts"][0]["mismatches"] == [
+        "type",
+        "required",
+        "options",
+    ]
+
+    missing_plan = _input_field_plan([])
+    missing = harness._quality_report(
+        plan=missing_plan,
+        summary=harness._summarize_plan(missing_plan),
+        expected=expected,
+        event_summary={},
+    )
+    missing_check = {check["name"]: check for check in missing["checks"]}[
+        "expected_input_field_contracts"
+    ]
+    assert missing_check["passed"] is False
+    assert missing_check["actual"]["contracts"][0]["mismatches"] == ["field_missing"]
+
+
+@mark.parametrize(
+    ("contract", "message"),
+    [
+        (
+            {
+                "name_groups": ["arendetyp"],
+                "type": "select",
+                "required": True,
+                "options": [],
+            },
+            "without authored options",
+        ),
+        (
+            {
+                "name_groups": ["notering"],
+                "type": "text",
+                "required": False,
+                "options": ["Ja", "Nej"],
+            },
+            "declares options on a text field",
+        ),
+        (
+            {
+                "name_groups": ["arendetyp"],
+                "type": "dropdown",
+                "required": True,
+                "options": ["Nybyggnad"],
+            },
+            "type must be one of",
+        ),
+        # Authoring strips surrounding whitespace and duplicates before options
+        # reach a plan, so these contracts could only fail for the wrong reason.
+        (
+            {
+                "name_groups": ["arendetyp"],
+                "type": "select",
+                "required": True,
+                "options": [" Nybyggnad", "Rivning"],
+            },
+            "must already be normalized",
+        ),
+        (
+            {
+                "name_groups": ["arendetyp"],
+                "type": "select",
+                "required": True,
+                "options": ["Nybyggnad", "Nybyggnad"],
+            },
+            "must already be normalized",
+        ),
+    ],
+)
+def test_cases_file_rejects_unauthorable_input_field_contracts(
+    tmp_path: Path,
+    contract: dict[str, Any],
+    message: str,
+) -> None:
+    # Expected options are authored in the case, never inferred by the
+    # evaluator, so a contract the evaluator would have to guess at is a bug.
+    cases_path = tmp_path / "cases.json"
+    cases_path.write_text(
+        json.dumps(
+            {
+                "version": 8,
+                "cases": [
+                    {
+                        "id": "bad-input-field-contract",
+                        "prompt": "Build a flow.",
+                        "expected": {"expected_input_field_contracts": [contract]},
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with raises(ValueError, match=message):
+        _battle_harness()._read_cases_file(cases_path)
+
+
+def test_cases_file_rejects_input_field_contracts_that_claim_the_same_field(
+    tmp_path: Path,
+) -> None:
+    # Each contract picks the first field its aliases match, so overlapping
+    # alias sets would let one produced field satisfy two contracts and report
+    # coverage the run never had.
+    cases_path = tmp_path / "cases.json"
+    cases_path.write_text(
+        json.dumps(
+            {
+                "version": 8,
+                "cases": [
+                    {
+                        "id": "overlapping-input-field-contracts",
+                        "prompt": "Build a flow.",
+                        "expected": {
+                            "expected_input_field_contracts": [
+                                {
+                                    "name_groups": ["arendetyp", "case_type"],
+                                    "type": "text",
+                                    "required": True,
+                                    "options": [],
+                                },
+                                {
+                                    "name_groups": ["notering", "Ärende_typ"],
+                                    "type": "text",
+                                    "required": False,
+                                    "options": [],
+                                },
+                            ]
+                        },
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with raises(ValueError, match="shares alias"):
+        _battle_harness()._read_cases_file(cases_path)
+
+
+def test_corpus_input_field_contracts_cover_the_authorable_field_types() -> None:
+    harness = _battle_harness()
+
+    cases = harness._read_cases_file(harness.DEFAULT_CASES_FILE)
+    contracts = [
+        contract
+        for case in cases
+        for contract in (case.expected or {}).get("expected_input_field_contracts")
+        or []
+    ]
+
+    # The types that carry options are a harness authoring rule; if the backend
+    # ever renames one, the rule must not silently stop firing.
+    assert harness._OPTION_BEARING_INPUT_FIELD_TYPES <= set(
+        builder_form_field_type_values()
+    )
+
+    assert contracts
+    assert {contract["type"] for contract in contracts} >= {
+        "select",
+        "multiselect",
+        "text",
+    }
+    assert {contract["required"] for contract in contracts} == {True, False}
+    # An open text field the Builder must not turn into a select.
+    assert any(
+        contract["type"] == "text" and not contract["options"] for contract in contracts
+    )
+
+
 def test_plan_required_form_field_cases_have_complete_synthetic_answers() -> None:
     harness = _battle_harness()
 
@@ -8244,7 +8572,7 @@ def test_suite_demand_for_the_frozen_corpus_exceeds_the_default_ceilings() -> No
         cases=cases, repetitions=3, timeout_seconds=900
     )
 
-    assert demand["total"] == 10_852
+    assert demand["total"] == 11_056
     assert demand["total"] > 10_000
 
 

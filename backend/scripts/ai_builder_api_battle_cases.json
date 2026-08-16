@@ -10471,6 +10471,309 @@
           "selected_option_id": "stop_after_primary_operation"
         }
       }
+    },
+    {
+      "id": "input_field_single_select_permit_case_type",
+      "complexity": "easy",
+      "domain": "municipality_building_permits",
+      "prompt": "Jag vill skapa ett flöde för bygglovsenheten. Vid körning laddar jag upp ett ansökningsdokument och väljer ärendetyp i en lista med fasta val. Flödet ska sammanfatta ansökan, lista vilka handlingar som saknas och returnera resultatet som JSON.",
+      "question_answer_overrides": {
+        "runtime_metadata_fields": {
+          "selected_option_id": "basic_runtime_metadata"
+        },
+        "runtime_metadata_field_details": {
+          "input_fields": [
+            {
+              "value": {
+                "name": "arendetyp",
+                "label": "Ärendetyp",
+                "type": "select",
+                "required": true,
+                "options": [
+                  "Nybyggnad",
+                  "Tillbyggnad",
+                  "Rivning",
+                  "Marklov"
+                ]
+              },
+              "purpose": "shape_result"
+            }
+          ]
+        }
+      },
+      "expected": {
+        "allowed_question_event_ids": [
+          "runtime_metadata_fields",
+          "runtime_metadata_field_details"
+        ],
+        "min_steps": 1,
+        "max_steps": 4,
+        "terminal_output_type": "json",
+        "min_json_steps": 1,
+        "max_all_previous_steps": 0,
+        "min_form_field_count": 1,
+        "forbid_primary_material_form_fields": true,
+        "expected_form_field_groups": [
+          [
+            "arendetyp",
+            "arende_typ",
+            "case_type",
+            "permit_type"
+          ]
+        ],
+        "expected_input_field_contracts": [
+          {
+            "name_groups": [
+              "arendetyp",
+              "arende_typ",
+              "case_type",
+              "permit_type"
+            ],
+            "type": "select",
+            "required": true,
+            "options": [
+              "Nybyggnad",
+              "Tillbyggnad",
+              "Rivning",
+              "Marklov"
+            ]
+          }
+        ]
+      },
+      "cohorts": [
+        "form_fields",
+        "input_field_contract",
+        "json"
+      ]
+    },
+    {
+      "id": "input_field_multiselect_records_disclosure_scope",
+      "complexity": "medium",
+      "domain": "municipality_records",
+      "prompt": "Jag vill skapa ett flöde för registraturen. Vid körning laddar jag upp en begäran om allmän handling och markerar vilka verksamheter som berörs — flera verksamheter ska kunna markeras samtidigt i samma fält. Flödet ska bedöma begäran och returnera JSON med bedömning, berörda verksamheter och nästa steg.",
+      "question_answer_overrides": {
+        "runtime_metadata_fields": {
+          "selected_option_id": "basic_runtime_metadata"
+        },
+        "runtime_metadata_field_details": {
+          "input_fields": [
+            {
+              "value": {
+                "name": "berorda_verksamheter",
+                "label": "Berörda verksamheter",
+                "type": "multiselect",
+                "required": true,
+                "options": [
+                  "Socialtjänst",
+                  "Utbildning",
+                  "Miljö och bygg",
+                  "Teknik och fastighet"
+                ]
+              },
+              "purpose": "shape_result"
+            }
+          ]
+        }
+      },
+      "expected": {
+        "allowed_question_event_ids": [
+          "runtime_metadata_fields",
+          "runtime_metadata_field_details"
+        ],
+        "min_steps": 1,
+        "max_steps": 4,
+        "terminal_output_type": "json",
+        "min_json_steps": 1,
+        "max_all_previous_steps": 0,
+        "min_form_field_count": 1,
+        "forbid_primary_material_form_fields": true,
+        "expected_form_field_groups": [
+          [
+            "berorda_verksamheter",
+            "verksamheter",
+            "affected_units",
+            "units"
+          ]
+        ],
+        "expected_input_field_contracts": [
+          {
+            "name_groups": [
+              "berorda_verksamheter",
+              "verksamheter",
+              "affected_units",
+              "units"
+            ],
+            "type": "multiselect",
+            "required": true,
+            "options": [
+              "Socialtjänst",
+              "Utbildning",
+              "Miljö och bygg",
+              "Teknik och fastighet"
+            ]
+          }
+        ]
+      },
+      "cohorts": [
+        "form_fields",
+        "input_field_contract",
+        "json"
+      ]
+    },
+    {
+      "id": "input_field_required_and_optional_metadata",
+      "complexity": "easy",
+      "domain": "municipality_service_center",
+      "prompt": "Jag vill skapa ett flöde för servicecenter. Vid körning klistrar jag in ett ärende och fyller i diarienummer, som alltid måste anges, samt en frivillig notering från handläggaren som får lämnas tom. Flödet ska sammanfatta ärendet och föreslå nästa steg som JSON.",
+      "question_answer_overrides": {
+        "runtime_metadata_fields": {
+          "selected_option_id": "basic_runtime_metadata"
+        },
+        "runtime_metadata_field_details": {
+          "input_fields": [
+            {
+              "value": {
+                "name": "diarienummer",
+                "label": "Diarienummer",
+                "type": "text",
+                "required": true,
+                "options": []
+              },
+              "purpose": "shape_result"
+            },
+            {
+              "value": {
+                "name": "notering_fran_handlaggare",
+                "label": "Notering från handläggaren",
+                "type": "text",
+                "required": false,
+                "options": []
+              },
+              "purpose": "shape_result"
+            }
+          ]
+        }
+      },
+      "expected": {
+        "allowed_question_event_ids": [
+          "runtime_metadata_fields",
+          "runtime_metadata_field_details"
+        ],
+        "min_steps": 1,
+        "max_steps": 4,
+        "terminal_output_type": "json",
+        "min_json_steps": 1,
+        "max_all_previous_steps": 0,
+        "min_form_field_count": 2,
+        "forbid_primary_material_form_fields": true,
+        "expected_form_field_groups": [
+          [
+            "diarienummer",
+            "arendenummer",
+            "case_number",
+            "reference_number"
+          ],
+          [
+            "notering_fran_handlaggare",
+            "notering",
+            "note",
+            "handlaggarnotering"
+          ]
+        ],
+        "expected_input_field_contracts": [
+          {
+            "name_groups": [
+              "diarienummer",
+              "arendenummer",
+              "case_number",
+              "reference_number"
+            ],
+            "type": "text",
+            "required": true,
+            "options": []
+          },
+          {
+            "name_groups": [
+              "notering_fran_handlaggare",
+              "notering",
+              "note",
+              "handlaggarnotering"
+            ],
+            "type": "text",
+            "required": false,
+            "options": []
+          }
+        ]
+      },
+      "cohorts": [
+        "form_fields",
+        "input_field_contract",
+        "json"
+      ]
+    },
+    {
+      "id": "input_field_open_text_must_not_become_select",
+      "complexity": "easy",
+      "domain": "municipality_service_center",
+      "prompt": "Jag vill skapa ett flöde för kommunens kontaktcenter. Vid körning klistrar jag in ett ärende och skriver in ansvarig enhet i fritext, eftersom kommunen har många enheter och namnen ändras — det får inte bli en lista med fasta val. Flödet ska sammanfatta ärendet och föreslå nästa steg som JSON.",
+      "question_answer_overrides": {
+        "runtime_metadata_fields": {
+          "selected_option_id": "basic_runtime_metadata"
+        },
+        "runtime_metadata_field_details": {
+          "input_fields": [
+            {
+              "value": {
+                "name": "ansvarig_enhet",
+                "label": "Ansvarig enhet",
+                "type": "text",
+                "required": true,
+                "options": []
+              },
+              "purpose": "shape_result"
+            }
+          ]
+        }
+      },
+      "expected": {
+        "allowed_question_event_ids": [
+          "runtime_metadata_fields",
+          "runtime_metadata_field_details"
+        ],
+        "min_steps": 1,
+        "max_steps": 4,
+        "terminal_output_type": "json",
+        "min_json_steps": 1,
+        "max_all_previous_steps": 0,
+        "min_form_field_count": 1,
+        "forbid_primary_material_form_fields": true,
+        "expected_form_field_groups": [
+          [
+            "ansvarig_enhet",
+            "enhet",
+            "responsible_unit",
+            "unit"
+          ]
+        ],
+        "expected_input_field_contracts": [
+          {
+            "name_groups": [
+              "ansvarig_enhet",
+              "enhet",
+              "responsible_unit",
+              "unit"
+            ],
+            "type": "text",
+            "required": true,
+            "options": []
+          }
+        ]
+      },
+      "cohorts": [
+        "form_fields",
+        "input_field_contract",
+        "json"
+      ]
     }
   ]
 }
