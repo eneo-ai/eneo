@@ -39,8 +39,6 @@
     /** The assistant's sentence that came with the question: "Därför frågar jag". */
     why?: string | null;
     onanswer?: (payload: StructuredQuestionAnswerPayload) => void;
-    /** "Jag är osäker — välj åt mig": the user delegates this answer to Eneo. */
-    onunsure?: () => void;
   }
 
   let {
@@ -50,8 +48,7 @@
     disabled = false,
     questionNumber = null,
     why = null,
-    onanswer,
-    onunsure
+    onanswer
   }: Props = $props();
 
   // Generated once per instance so radiogroup + its label can link without colliding.
@@ -437,14 +434,6 @@
     {/if}
 
     <div class="actions-row">
-      {#if onunsure}
-        <span class="unsure-block">
-          <button type="button" class="unsure-link" onclick={onunsure} {disabled}>
-            {m.ai_builder_question_unsure()}
-          </button>
-          <span class="unsure-note">{m.ai_builder_question_unsure_note()}</span>
-        </span>
-      {/if}
       <Button
         variant="default"
         class="ml-auto"
@@ -659,20 +648,6 @@
   .actions-row {
     @apply flex flex-wrap items-center gap-2.5 border-t px-[1.125rem] py-3;
     border-color: var(--border-dimmer);
-  }
-
-  .unsure-block {
-    @apply flex flex-col;
-  }
-
-  .unsure-link {
-    @apply self-start text-[0.8125rem] font-semibold underline-offset-[3px] hover:underline disabled:opacity-50;
-    color: var(--accent-default);
-  }
-
-  .unsure-note {
-    @apply text-[0.72rem];
-    color: var(--text-secondary);
   }
 
   @keyframes questionReveal {

@@ -19,7 +19,6 @@
     editingQuestionId?: string | null;
     disabled?: boolean;
     onanswer: (payload: StructuredQuestionAnswerPayload) => void;
-    onunsure: () => void;
     onedit: (questionId: string) => void;
     oncanceledit?: () => void;
   }
@@ -31,7 +30,6 @@
     editingQuestionId = null,
     disabled = false,
     onanswer,
-    onunsure,
     onedit,
     oncanceledit
   }: Props = $props();
@@ -77,7 +75,7 @@
     {/if}
 
     {#key question.question_id}
-      <FlowAIBuilderQuestion {question} {questionNumber} {why} {disabled} {onanswer} {onunsure} />
+      <FlowAIBuilderQuestion {question} {questionNumber} {why} {disabled} {onanswer} />
     {/key}
 
     <p class="text-secondary mt-3.5 px-0.5 text-[0.8125rem] text-pretty">

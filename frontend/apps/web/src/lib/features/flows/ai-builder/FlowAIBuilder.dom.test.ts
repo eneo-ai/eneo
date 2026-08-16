@@ -608,40 +608,6 @@ describe("FlowAIBuilder discovery screens", () => {
     });
   });
 
-  it("delegates an unsure answer as a plain message", async () => {
-    const { fetch } = makeFetch({ sessions: [questionSession()] });
-    const { stream, calls } = makeStream();
-    renderShell({ fetch, stream, resumeSessionId: "s-1" });
-
-    await fireEvent.click(
-      await screen.findByRole("button", { name: m.ai_builder_question_unsure() })
-    );
-
-    await waitFor(() => expect(calls).toHaveLength(1));
-    expect(calls[0]!.body).toMatchObject({ message: m.ai_builder_question_unsure_message() });
-    expect(calls[0]!.body).not.toHaveProperty("question_answer");
-  });
-
-  it("offers the unsure delegation for the runtime field editor too", async () => {
-    const fieldQuestion = question(
-      "runtime_metadata_field_details",
-      "Vilka fält ska fyllas i vid körning?",
-      [{ id: "shape_result", label: "Formar resultatet", value: "shape_result" } as never],
-      { input_field_collection: true, allow_custom: false }
-    );
-    const { fetch } = makeFetch({ sessions: [questionSession(fieldQuestion)] });
-    const { stream, calls } = makeStream(() => "hold");
-    renderShell({ fetch, stream, resumeSessionId: questionSession().session_id });
-
-    await screen.findByRole("heading", { name: fieldQuestion.question });
-    await fireEvent.click(button(m.ai_builder_question_unsure()));
-
-    await waitFor(() => expect(calls).toHaveLength(1));
-    expect(calls[0]!.body.message).toBe(m.ai_builder_question_unsure_message());
-    expect(calls[0]!.body.question_answer).toBeUndefined();
-    calls[0]!.finish();
-  });
-
   it("lets the user change an earlier answer from the answer chips", async () => {
     const { fetch } = makeFetch({ sessions: [answeredThenPendingSession()] });
     const { stream, calls } = makeStream();
@@ -684,7 +650,7 @@ describe("FlowAIBuilder confirm, build and review", () => {
   it("shows the confirm screen on a summary and confirms with an empty message", async () => {
     const { calls } = await driveToConfirm(() => "hold");
 
-    await fireEvent.click(button(m.ai_builder_requirements_confirm()));
+    await fireEvent.click(button(m.ai_builder_confirm_action()));
 
     await waitFor(() => expect(calls).toHaveLength(2));
     expect(calls[1]!.body).toMatchObject({
@@ -697,9 +663,36 @@ describe("FlowAIBuilder confirm, build and review", () => {
     calls[1]!.finish();
   });
 
+  it("re-arms the confirmation when a newer requirements version replaces a confirmed one", async () => {
+    const rearmed = makeSession({
+      session_id: "s-rearm",
+      latest_plan_id: null,
+      conversation: [
+        userMessage("u1", "Sammanfatta rapporter till en PDF"),
+        assistantMessage("a1", "", { requirements_summary: SUMMARY }),
+        userMessage("u2", "", {
+          requirements_confirmation: {
+            requirements_confirmed: true,
+            requirements_version: REQUIREMENTS_VERSION
+          }
+        }),
+        userMessage("u3", "Nej, en PDF per rapport."),
+        assistantMessage("a2", "", {
+          requirements_summary: { ...SUMMARY, requirements_version: "f".repeat(64) }
+        })
+      ]
+    });
+    const { fetch } = makeFetch({ sessions: [rearmed] });
+    const { stream } = makeStream(() => "hold");
+    renderShell({ fetch, stream, resumeSessionId: "s-rearm" });
+
+    expect(await screen.findByText(m.ai_builder_confirm_stale_title())).toBeTruthy();
+    expect(button(m.ai_builder_confirm_action()).disabled).toBe(false);
+  });
+
   it("narrates the build from backend status and marks phase two current", async () => {
     const { calls } = await driveToConfirm(() => "hold");
-    await fireEvent.click(button(m.ai_builder_requirements_confirm()));
+    await fireEvent.click(button(m.ai_builder_confirm_action()));
     await waitFor(() => expect(calls).toHaveLength(2));
 
     calls[1]!.emit([statusEvent("architecture_committed")]);
@@ -725,7 +718,7 @@ describe("FlowAIBuilder confirm, build and review", () => {
     renderShell({ fetch, stream });
     await sendTask();
     await screen.findByRole("heading", { name: m.ai_builder_requirements_title() });
-    await fireEvent.click(button(m.ai_builder_requirements_confirm()));
+    await fireEvent.click(button(m.ai_builder_confirm_action()));
     await waitFor(() => expect(calls).toHaveLength(2));
 
     calls[1]!.emit([
@@ -756,7 +749,7 @@ describe("FlowAIBuilder confirm, build and review", () => {
   it("opens the review surface when the plan arrives", async () => {
     await driveToConfirm(() => [planEvent(), usageEvent()]);
 
-    await fireEvent.click(button(m.ai_builder_requirements_confirm()));
+    await fireEvent.click(button(m.ai_builder_confirm_action()));
 
     expect(await screen.findByRole("heading", { name: "Sammanfatta till PDF" })).toBeTruthy();
     expect(railButton(m.ai_builder_rail_reviewing()).getAttribute("aria-current")).toBe("step");
@@ -951,6 +944,57 @@ describe("FlowAIBuilder edit host contract", () => {
     await fireEvent.keyDown(input, { key: "Enter" });
     await waitFor(() => expect(calls).toHaveLength(1));
     expect(calls[0]!.body).toMatchObject({ edit_context: SAVED_STEP_SCOPE.editContext });
+  });
+
+  it("treats a plan-only resumed edit session as ongoing before its plan has loaded", async () => {
+    let releaseCreate!: () => void;
+    const held = new Promise<void>((resolve) => {
+      releaseCreate = resolve;
+    });
+    // Empty conversation but a latest plan: the plan fetch happens after the
+    // session is published, so the launch decision must read the session fact.
+    const planOnly = makeSession({
+      session_id: "e-plan-only",
+      target_kind: "edit",
+      flow_id: "flow-1",
+      status: "awaiting_approval",
+      latest_plan_id: PLAN_ID,
+      conversation: []
+    });
+    const fresh = editSession();
+    let posts = 0;
+    const { fetch } = makeFetch({
+      sessions: [planOnly, fresh],
+      plans: { [PLAN_ID]: PLAN_RESPONSE }
+    });
+    const baseFetch = fetch.getMockImplementation()!;
+    fetch.mockImplementation(async (path, init) => {
+      if (path === SESSIONS_ROUTE && init?.method === "post") {
+        posts += 1;
+        if (posts === 1) {
+          await held;
+          return planOnly;
+        }
+        return fresh;
+      }
+      return baseFetch(path, init);
+    });
+    const { stream } = makeStream();
+    const { builder } = renderShell({ fetch, stream, targetKind: "edit", flowId: "flow-1" });
+
+    await waitFor(() => expect(builder()).toBeDefined());
+    const launched = builder().focusSavedFlowStep(SAVED_STEP_SCOPE);
+    releaseCreate();
+    await launched;
+
+    expect(await screen.findByText(m.ai_builder_replace_edit_title())).toBeTruthy();
+    expect(screen.queryByText(SAVED_STEP_LABEL)).toBeNull();
+    await fireEvent.click(button(m.ai_builder_replace_edit_action()));
+    expect(await screen.findByText(SAVED_STEP_LABEL)).toBeTruthy();
+    const secondPost = fetch.mock.calls.filter(
+      ([path, init]) => path === SESSIONS_ROUTE && init?.method === "post"
+    )[1];
+    expect(secondPost?.[1]?.requestBody?.["application/json"]).toMatchObject({ force_new: true });
   });
 
   it("asks before replacing an ongoing edit and starts fresh on confirm", async () => {

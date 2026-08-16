@@ -31,20 +31,6 @@
     return labels;
   });
 
-  function latestUserRequestBefore(index: number): string | null {
-    for (let cursor = index - 1; cursor >= 0; cursor -= 1) {
-      const message = service.messages[cursor];
-      if (!message || message.role !== "user") continue;
-      const metadata = message.metadata ?? {};
-      // Control replies confirm the builder state; edit-context messages are still user intent.
-      if (metadata.requirements_confirmed === true || message.questionAnswer !== undefined)
-        continue;
-      const content = message.content.trim();
-      if (content.length > 0) return content;
-    }
-    return null;
-  }
-
   let inputRef = $state<FlowAIBuilderInput | undefined>();
   let pendingEditContext = $state<AIBuilderPlanEditContext | null>(null);
   const activeEditContext = $derived(pendingEditContext ?? service.activeStepTransportContext);
@@ -154,9 +140,6 @@
           ? () => oneditanswer?.(message.question!.question_id)
           : undefined}
         requirementsSummary={message.requirementsSummary}
-        compactRequirements={true}
-        requirementsUserRequest={message.requirementsSummary ? latestUserRequestBefore(i) : null}
-        savedFlowStepScope={service.activeStepScope}
         requirementsConfirmed={message.requirementsSummary
           ? service.isRequirementsSummaryConfirmed(message.requirementsSummary)
           : false}

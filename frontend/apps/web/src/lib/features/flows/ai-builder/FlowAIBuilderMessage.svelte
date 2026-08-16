@@ -5,8 +5,7 @@
   import { m } from "$lib/paraglide/messages";
   import { Markdown } from "@eneo/ui";
   import FlowAIBuilderQuestion from "./FlowAIBuilderQuestion.svelte";
-  import FlowAIBuilderRequirementsSummary from "./FlowAIBuilderRequirementsSummary.svelte";
-  import type { AIBuilderStepScopePresentation, RequirementsSummary } from "./protocol";
+  import type { RequirementsSummary } from "./protocol";
   import type {
     StructuredQuestion,
     StructuredQuestionAnswerPayload
@@ -21,19 +20,13 @@
     questionAnswered?: boolean;
     questionAnswerLabel?: string | null;
     requirementsSummary?: RequirementsSummary;
-    requirementsUserRequest?: string | null;
-    savedFlowStepScope?: AIBuilderStepScopePresentation | null;
     requirementsConfirmed?: boolean;
     requirementsActive?: boolean;
     onQuestionAnswer?: (answer: StructuredQuestionAnswerPayload) => void;
     /** Transcript view: reopen an answered question on the phase screen. */
     onEditAnswer?: () => void;
-    onRequirementsConfirm?: () => void;
-    onRequirementsChange?: () => void;
-    /** Locks question/requirements controls while a plan operation runs. */
+    /** Locks question controls while a plan operation runs. */
     interactionDisabled?: boolean;
-    /** Transcript view: the summary is confirmed on the phase screen, so only a note is shown here. */
-    compactRequirements?: boolean;
   }
 
   let {
@@ -45,16 +38,11 @@
     questionAnswered = false,
     questionAnswerLabel = null,
     requirementsSummary = undefined,
-    requirementsUserRequest = null,
-    savedFlowStepScope = null,
     requirementsConfirmed = false,
     requirementsActive = true,
     onQuestionAnswer = undefined,
     onEditAnswer = undefined,
-    onRequirementsConfirm = undefined,
-    onRequirementsChange = undefined,
-    interactionDisabled = false,
-    compactRequirements = false
+    interactionDisabled = false
   }: Props = $props();
 </script>
 
@@ -116,7 +104,8 @@
           </button>
         {/if}
       {/if}
-      {#if requirementsSummary && compactRequirements}
+      {#if requirementsSummary}
+        <!-- The summary is confirmed on the Bekräfta screen; the transcript only notes it. -->
         <p class="pending-question-note">
           {m.ai_builder_requirements_title()}
           <span class="pending-question-hint">
@@ -127,17 +116,6 @@
                 : m.ai_builder_requirements_superseded()}
           </span>
         </p>
-      {:else if requirementsSummary}
-        <FlowAIBuilderRequirementsSummary
-          summary={requirementsSummary}
-          userRequest={requirementsUserRequest}
-          {savedFlowStepScope}
-          confirmed={requirementsConfirmed}
-          active={requirementsActive}
-          disabled={interactionDisabled}
-          onconfirm={requirementsActive ? onRequirementsConfirm : undefined}
-          onchange={requirementsActive ? onRequirementsChange : undefined}
-        />
       {/if}
     </div>
   {/if}

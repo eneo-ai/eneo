@@ -211,37 +211,42 @@ describe("FlowAIBuilderDriver", () => {
     );
   });
 
-  it("resets confirmation phase when the user changes requirements after confirming", async () => {
+  it("keeps a confirmation until the server discloses a new requirements version", async () => {
+    // Later prose is evidence the server answers with a fresh summary when the
+    // requirements change; the client never revokes a confirmation on its own.
     const { driver } = makeDriver();
+    const summary = (version: string) => ({
+      summary: "Build a DOCX flow",
+      key_decisions: [{ topic: "DOCX", decision: "Without template" }],
+      input_description: "PDF upload",
+      output_description: "DOCX report",
+      requirements_version: version
+    });
     driver.seedState({
       messages: [
-        {
-          role: "assistant",
-          content: "",
-          requirementsSummary: {
-            summary: "Build a DOCX flow",
-            key_decisions: [{ topic: "DOCX", decision: "Without template" }],
-            input_description: "PDF upload",
-            output_description: "DOCX report",
-            requirements_version: "req-v1"
-          },
-          timestamp: 1
-        },
+        { role: "assistant", content: "", requirementsSummary: summary("req-v1"), timestamp: 1 },
         {
           role: "user",
-          content: "Ja, det stämmer. Bygg planen.",
+          content: "",
           metadata: { requirements_confirmed: true, requirements_version: "req-v1" },
           timestamp: 2
         },
-        {
-          role: "user",
-          content: "Jag vill ändra till en PDF i taget.",
-          timestamp: 3
-        }
+        { role: "user", content: "Jag vill ändra till en PDF i taget.", timestamp: 3 }
+      ]
+    });
+
+    expect(driver.derivePhase()).toBe("building");
+
+    driver.seedState({
+      messages: [
+        ...driver.state.messages,
+        { role: "assistant", content: "", requirementsSummary: summary("req-v2"), timestamp: 4 }
       ]
     });
 
     expect(driver.derivePhase()).toBe("confirming");
+    expect(driver.isRequirementsSummaryConfirmed(summary("req-v1"))).toBe(true);
+    expect(driver.isRequirementsSummaryConfirmed(summary("req-v2"))).toBe(false);
   });
 
   it("tracks answered structured questions from question metadata instead of message position", async () => {

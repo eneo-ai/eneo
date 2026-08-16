@@ -149,6 +149,19 @@
       ? null
       : (service.messages[latestSummaryMessageIndex]?.requirementsSummary ?? null)
   );
+  // "Uppdaterad — bekräfta igen": an earlier version of the requirements was
+  // confirmed and this newer version replaced it, so the old confirmation
+  // cannot carry over.
+  const summaryIsStale = $derived.by(() => {
+    const latest = latestSummary;
+    if (!latest || service.isRequirementsSummaryConfirmed(latest)) return false;
+    return service.messages.some(
+      (message) =>
+        message.requirementsSummary &&
+        message.requirementsSummary.requirements_version !== latest.requirements_version &&
+        service.isRequirementsSummaryConfirmed(message.requirementsSummary)
+    );
+  });
   function latestUserRequestBefore(index: number): string | null {
     for (let cursor = index - 1; cursor >= 0; cursor -= 1) {
       const message = service.messages[cursor];
@@ -222,18 +235,6 @@
     void service.sendMessage(payload.text, payload.questionAnswer, undefined, activeEditContext);
   }
 
-  // Delegation is a free-text reply: the server records the explicit
-  // uncertainty and turns its default into a visible assumption.
-  function handleQuestionUnsure() {
-    editingQuestionId = null;
-    void service.sendMessage(
-      m.ai_builder_question_unsure_message(),
-      undefined,
-      undefined,
-      activeEditContext
-    );
-  }
-
   function handleEditAnswer(questionId: string) {
     editingQuestionId = questionId;
     peekPhase = 0;
@@ -245,7 +246,7 @@
   }
 
   function handleRequirementsChange() {
-    void sheetRef?.focusComposer(m.ai_builder_requirements_change_hint());
+    void sheetRef?.focusComposer(m.ai_builder_confirm_change_hint());
   }
 
   function handleSuggestChange(intent: AIBuilderSuggestChangeIntent) {
@@ -310,7 +311,13 @@
   });
 
   async function launchSavedFlowStep(scope: AIBuilderSavedFlowStepScope) {
-    if (service.messages.length > 0 || service.currentPlan !== null) {
+    // A resumed session can carry a plan before the plan itself has loaded;
+    // its latest_plan_id already says the edit is ongoing.
+    if (
+      service.messages.length > 0 ||
+      service.currentPlan !== null ||
+      service.session?.latest_plan_id != null
+    ) {
       pendingSavedFlowStepScope = scope;
       showReplaceEditSessionDialog = true;
       return;
@@ -459,7 +466,6 @@
           {editingQuestionId}
           disabled={service.isCreating || service.isStreaming}
           onanswer={handleQuestionAnswer}
-          onunsure={handleQuestionUnsure}
           onedit={handleEditAnswer}
           oncanceledit={() => (editingQuestionId = null)}
         />
@@ -468,10 +474,16 @@
           summary={latestSummary}
           userRequest={latestUserRequestBefore(latestSummaryMessageIndex)}
           savedFlowStepScope={service.activeStepScope}
+          attachments={service.session?.attachments ?? []}
+          answered={answeredQuestions}
+          noQuestions={askedQuestionIds.length === 0}
           confirmed={service.isRequirementsSummaryConfirmed(latestSummary)}
+          stale={summaryIsStale}
+          readOnly={phaseIndex > 0}
           disabled={service.isCreating || service.isStreaming}
           onconfirm={handleRequirementsConfirm}
           onchange={handleRequirementsChange}
+          oneditanswer={handleEditAnswer}
         />
       {:else if screen === "build" && generationFailedWithoutPlan}
         <!-- A failed generation keeps its one existing failure/retry surface. -->
@@ -487,6 +499,10 @@
         <BuilderBuildScreen
           status={service.statusMessage}
           stepCount={service.currentPlan?.proposal.spec.steps.length ?? 5}
+          confirmedLine={latestSummary
+            ? `${latestSummary.input_description} → ${latestSummary.output_description}`
+            : null}
+          onshowconfirmation={() => (peekPhase = 0)}
         />
       {:else if screen === "review"}
         <div class="bg-primary flex min-h-0 flex-1 flex-col">

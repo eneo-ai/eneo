@@ -1103,33 +1103,28 @@ export class FlowAIBuilderDriver {
     return "discovering";
   }
 
+  // A confirmation names the exact version it confirms and stays valid until
+  // the server discloses a new version. Later prose does not revoke it: the
+  // server reads that prose as evidence and answers with a fresh summary
+  // (a new version) when the requirements actually change.
   isRequirementsSummaryConfirmed(summary: RequirementsSummary): boolean {
     const version = summary.requirements_version;
-    let confirmed = false;
     let seenSummary = false;
     for (const message of this.#state.messages) {
       if (message.requirementsSummary?.requirements_version === version) {
         seenSummary = true;
-        confirmed = false;
         continue;
       }
-
-      if (!seenSummary || message.role !== "user") {
-        continue;
-      }
-
       if (
+        seenSummary &&
+        message.role === "user" &&
         message.metadata?.requirements_confirmed === true &&
         message.metadata?.requirements_version === version
       ) {
-        confirmed = true;
-        continue;
+        return true;
       }
-
-      confirmed = false;
     }
-
-    return confirmed;
+    return false;
   }
 
   isLatestRequirementsSummary(summary: RequirementsSummary): boolean {

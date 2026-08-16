@@ -7,9 +7,22 @@
     status: AIBuilderStatus | null;
     /** Number of skeleton rows: the last known plan length, or a typical five. */
     stepCount?: number;
+    /** One-line recap of the confirmed task ("Ljud → PDF-dokument"). */
+    confirmedLine?: string | null;
+    onshowconfirmation?: () => void;
   }
 
-  let { status, stepCount = 5 }: Props = $props();
+  let { status, stepCount = 5, confirmedLine = null, onshowconfirmation }: Props = $props();
+
+  // Planning usually finishes within a minute; past that the wait deserves a
+  // calm word so nobody wonders whether the page froze. Real time, not progress.
+  const SLOW_AFTER_MS = 45_000;
+  let slow = $state(false);
+  $effect(() => {
+    slow = false;
+    const timer = setTimeout(() => (slow = true), SLOW_AFTER_MS);
+    return () => clearTimeout(timer);
+  });
 
   // Only backend-reported phases are narrated; nothing here simulates progress.
   const narration = $derived.by(() => {
@@ -27,6 +40,23 @@
 
 <div class="flex justify-center px-7 pt-6 pb-10 max-sm:px-3 max-sm:pt-4">
   <div class="w-full max-w-[43.75rem]">
+    {#if confirmedLine}
+      <div
+        class="border-default bg-primary mb-4 flex flex-wrap items-center gap-2.5 rounded-[10px] border px-3.5 py-2.5"
+      >
+        <span class="text-secondary text-[0.8125rem]">{m.ai_builder_build_confirmed_label()}</span>
+        <span class="text-primary text-[0.8125rem] font-semibold">{confirmedLine}</span>
+        {#if onshowconfirmation}
+          <button
+            type="button"
+            class="text-accent-default ml-auto text-[0.8125rem] font-semibold hover:underline"
+            onclick={onshowconfirmation}
+          >
+            {m.ai_builder_build_show_confirmation()}
+          </button>
+        {/if}
+      </div>
+    {/if}
     <div class="border-default bg-primary overflow-hidden rounded-xl border">
       <div class="px-5 pt-[1.125rem] pb-4">
         <h2 class="text-primary text-[1.0625rem] font-bold tracking-[-0.015em]">
@@ -38,6 +68,11 @@
         <p class="text-secondary mt-2.5 text-[0.8125rem]" role="status" aria-live="polite">
           {narration} …
         </p>
+        {#if slow}
+          <p class="text-warning-stronger mt-2 text-[0.8125rem]">
+            {m.ai_builder_build_slow_note()}
+          </p>
+        {/if}
       </div>
       <div class="border-dimmer flex flex-col gap-2 border-t px-5 pt-4 pb-5" aria-hidden="true">
         {#each Array.from({ length: Math.max(1, Math.min(stepCount, 12)) }) as _, i (i)}
