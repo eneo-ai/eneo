@@ -80,6 +80,10 @@ from eneo.flows.ai_builder.ai_builder_architecture_derivation import (
     derive_architecture_commit_draft,
 )
 from eneo.flows.ai_builder.ai_builder_commit_invariance import CommitDriftError
+from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
+    metadata_with_slot_classification,
+    slot_classification_metadata_from_attempt,
+)
 from eneo.flows.ai_builder.ai_builder_domain_models import (
     BuilderTurnState,
     ConversationMessage,
@@ -107,6 +111,9 @@ from eneo.flows.ai_builder.ai_builder_proposal_tool_contracts import (
 )
 from eneo.flows.ai_builder.ai_builder_repo import AIBuilderRepository
 from eneo.flows.ai_builder.ai_builder_router import send_message
+from eneo.flows.ai_builder.ai_builder_server_decision_dispatch import (
+    ServerDecisionTelemetry,
+)
 from eneo.flows.ai_builder.ai_builder_session_turn import (
     SessionSendLease,
     SessionSendTurn,
@@ -119,6 +126,7 @@ from eneo.flows.ai_builder.ai_builder_slot_classification_contract import (
     SlotClassificationAttempt,
     SlotClassificationInput,
     SlotClassificationResult,
+    SlotClassificationSource,
 )
 from eneo.flows.ai_builder.ai_builder_tool_names import PROPOSE_FLOW_TOOL_NAME
 from eneo.flows.ai_builder.ai_builder_validation_common import SpecValidationResult
@@ -128,6 +136,7 @@ from eneo.flows.ai_builder.planning_state import (
     PLANNER_CONTRACT_VERSION,
     ArchitectureCommit,
     FileRoleEvidence,
+    MappedFileLimit,
     PlanningState,
     ResolvedSlot,
     StepTriple,
@@ -355,13 +364,20 @@ async def _claim_session_send_turn(
     client_turn_id: UUID | None = None,
     lease: SessionSendLease | None = None,
     message_content: str = "Accepted turn",
+    message_metadata: dict[str, object] | None = None,
 ) -> SessionSendTurn:
     resolved_lease = lease or SessionSendLease(
         request_id=uuid4(),
         lock_token=uuid4(),
     )
     resolved_turn_id = client_turn_id or uuid4()
-    message = ConversationMessage(role="user", content=message_content)
+    # The router persists the user turn with the metadata the client sent, so a
+    # confirmation reaches the rebuild as the structured action it is.
+    message = ConversationMessage(
+        role="user",
+        content=message_content,
+        metadata=message_metadata,
+    )
     preflight = await repo.preflight_session_turn(
         session_id=session_id,
         tenant_id=tenant_id,
@@ -755,6 +771,7 @@ async def _create_proposed_ai_builder_plan(
                 spec or _make_builder_plan_spec(existing_step_ref=None)
             ),
             flow=None,
+            planning_state=PlanningState.empty(),
         )
         await repo.release_session_send(
             session_id=session_id,
@@ -5175,6 +5192,7 @@ async def test_ai_builder_repo_commit_turn_persists_conversation_and_planning_st
         await repo.commit_turn(
             turn=turn,
             new_messages=[assistant_msg],
+            planning_state=PlanningState.empty(),
         )
 
     async with db_container() as container:
@@ -5194,6 +5212,439 @@ async def test_ai_builder_repo_commit_turn_persists_conversation_and_planning_st
     assert loaded is not None
     assert loaded.resolved_slots == {}
     assert "evidence" not in loaded.model_dump(mode="json")
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_ai_builder_repo_commit_turn_keeps_the_mapped_file_limit_it_disclosed(
+    client,
+    bearer_token,
+    completion_model_factory,
+    db_container,
+):
+    """The persisted state must still describe the disclosure it committed.
+
+    `mapped_file_limit` comes from the organization's mapped-execution policy,
+    which no conversation states, so the commit-time rebuild proposes none.
+    Dropping the turn's own value made every persisted session claim
+    `policy_unset`: a later acknowledgment could not recognize the state whose
+    disclosure the user had just confirmed, and re-read its attachments instead
+    of building the plan.
+    """
+
+    space_id = await _create_space_with_planner_model(
+        client=client,
+        bearer_token=bearer_token,
+        db_container=db_container,
+        completion_model_factory=completion_model_factory,
+        space_name="AI Builder Commit Turn Mapped File Limit",
+    )
+    disclosed_limit = MappedFileLimit(
+        proposed_value=149,
+        accepted_value=149,
+        provenance="policy_default",
+    )
+    async with db_container() as container:
+        repo = AIBuilderRepository(container.session())
+        user = container.user()
+        session = await repo.create_session(
+            tenant_id=user.tenant_id,
+            space_id=UUID(space_id),
+            actor_user_id=user.id,
+            target_kind=TargetKind.CREATE,
+            flow_id=None,
+        )
+        disclosing_state = _planning_state_fixture()
+        disclosing_state.mapped_file_limit = disclosed_limit
+        await repo.commit_turn(
+            turn=await _claim_session_send_turn(
+                repo=repo,
+                session_id=session.id,
+                tenant_id=user.tenant_id,
+            ),
+            new_messages=[ConversationMessage(role="assistant", content="Summary")],
+            planning_state=disclosing_state,
+        )
+        disclosed = await repo.load_planning_state(
+            session_id=session.id, tenant_id=user.tenant_id
+        )
+
+    assert disclosed is not None
+    assert disclosed.mapped_file_limit == disclosed_limit
+
+
+class _ProviderFreeLiteLLMClient:
+    """A client that fails loudly instead of reaching a provider.
+
+    The acknowledgment must resolve from persisted state alone. Asserting
+    that no provider is reached is the behaviour; patching the discovery
+    runtime would only assert that one internal helper went unused.
+    """
+
+    def __getattr__(self, name: str) -> object:
+        raise AssertionError(
+            f"acknowledgment reached the provider through litellm_client.{name}"
+        )
+
+
+_CLASSIFIED_REQUEST_MESSAGE_ID = "user-request-1"
+
+
+def _inferred_report_disposition_message() -> ConversationMessage:
+    """The classifier's own reading, persisted the way a real turn persists it.
+
+    Built through the production metadata factory rather than a hand-written
+    dict: the grade is the whole point of the case, and a look-alike payload
+    would stop tracking it the moment the contract moves.
+    """
+
+    quote = "en samlad rapport"
+    source_id = f"user_message:{_CLASSIFIED_REQUEST_MESSAGE_ID}"
+    classification = slot_classification_metadata_from_attempt(
+        SlotClassificationAttempt(
+            outcome="resolved",
+            result=SlotClassificationResult(
+                slots=(
+                    ClassifiedSlot(
+                        slot_name="report_disposition",
+                        value="synthesized_overview",
+                        confidence="medium",
+                        reason="Användaren beskriver en samlad rapport.",
+                        evidence=(
+                            ClassifiedEvidence(source_id=source_id, quote=quote),
+                        ),
+                        evidence_level="inferred",
+                    ),
+                )
+            ),
+        ),
+        prompt_hash="c" * 64,
+        classification_input=SlotClassificationInput(
+            sources=(
+                SlotClassificationSource(
+                    source_id=source_id,
+                    kind="user_message",
+                    text=quote,
+                    message_id=_CLASSIFIED_REQUEST_MESSAGE_ID,
+                    file_id=None,
+                    coverage=None,
+                ),
+            ),
+            current_user_message_id=_CLASSIFIED_REQUEST_MESSAGE_ID,
+        ),
+        model="openai/gpt-4o-mini",
+        provider="openai",
+    )
+    metadata = metadata_with_slot_classification(None, classification)
+    assert metadata is not None
+    return ConversationMessage(
+        message_id="classification-1",
+        role="assistant",
+        content="Klassificering.",
+        metadata=metadata,
+    )
+
+
+def _server_decision_telemetry(request_id: str) -> ServerDecisionTelemetry:
+    return ServerDecisionTelemetry(
+        request_id=request_id,
+        litellm_model="server",
+        usage_tracker=ProposalTurnTelemetry(
+            request_id=request_id,
+            model="server",
+            target_kind=TargetKind.CREATE,
+        ),
+    )
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_accepting_an_inferred_requirement_pins_it_and_converges(
+    client,
+    bearer_token,
+    completion_model_factory,
+    db_container,
+):
+    """Disclosing, accepting, pinning and planning must compose.
+
+    Each part was covered alone: that `commit_turn` keeps the mapped file limit
+    it disclosed, and that an acknowledgment makes no discovery call. Run in
+    sequence against a real repository, neither proof held. The measured
+    sessions disclosed a report disposition the classifier had only inferred;
+    accepting it is what makes it commit-grade, and the compiler reads it from
+    the architecture commit alone. The persisted state was erased of the
+    ceiling it had disclosed, so the acknowledgment re-entered the discovery
+    runtime, and the acceptance either never reached the architecture or was
+    withdrawn again by the next disclosure — `CommitDriftError`, and a session
+    re-confirming until the interaction limit.
+
+    One disclosure is the whole budget: accepting it revises the architecture
+    it described and the turn goes on to the proposal.
+    """
+
+    from eneo.flows.ai_builder.ai_builder_attachment_context import (
+        AIBuilderAttachmentContextPolicy,
+    )
+    from eneo.flows.ai_builder.ai_builder_planner_request_preparation import (
+        PlannerRequestPreparationInput,
+        ServerOutputPrepared,
+        prepare_planner_request,
+    )
+    from eneo.flows.ai_builder.ai_builder_requirements_state import (
+        resolve_requirements_state,
+    )
+    from eneo.flows.ai_builder.ai_builder_server_decision_dispatch import (
+        ServerDecisionDispatchRequest,
+        dispatch_server_decision,
+    )
+    from eneo.flows.ai_builder.ai_builder_settings import AIBuilderBudgetPolicy
+    from eneo.flows.ai_builder.ai_builder_turn_controller import (
+        CommitArchitecture,
+        ReviseArchitecture,
+    )
+    from eneo.flows.domain.mapped_execution_policy import FlowMappedExecutionPolicy
+
+    # The shipped deployment ceiling, not the unbounded default: an
+    # acknowledgment under a policy that proposes no ceiling at all is the one
+    # case that never reached production.
+    mapped_execution_policy = FlowMappedExecutionPolicy(
+        max_provider_calls_per_mapped_step=150
+    )
+    disclosed_limit = MappedFileLimit(
+        proposed_value=149,
+        accepted_value=149,
+        provenance="policy_default",
+    )
+    space_id = await _create_space_with_planner_model(
+        client=client,
+        bearer_token=bearer_token,
+        db_container=db_container,
+        completion_model_factory=completion_model_factory,
+        space_name="AI Builder Confirmed Architecture Plans",
+    )
+    request_text = (
+        "Skapa ett flöde som läser flera dokument och ger en samlad rapport som PDF."
+    )
+    # The measured shape: the three architecture prerequisites are commit-grade
+    # structured answers, while the report disposition is only the classifier's
+    # medium-confidence inferred reading. It is disclosed, but it cannot pin an
+    # architecture until the user accepts it.
+    conversation = [
+        ConversationMessage(
+            message_id=_CLASSIFIED_REQUEST_MESSAGE_ID,
+            role="user",
+            content=request_text,
+        ),
+        _structured_answer_message(
+            question_id="primary_runtime_input",
+            value="documents",
+            content="Dokument",
+        ),
+        _structured_answer_message(
+            question_id="terminal_output",
+            value="pdf_document",
+            content="PDF-dokument",
+        ),
+        _structured_answer_message(
+            question_id="document_material_scope",
+            value="multiple_documents_case",
+            content="Flera dokument",
+        ),
+        _inferred_report_disposition_message(),
+    ]
+    turn_state = build_planning_state_from_conversation(
+        conversation,
+        mapped_execution_policy=mapped_execution_policy,
+    )
+    assert turn_state.mapped_file_limit == disclosed_limit
+    assert turn_state.commit_grade_slot_value("report_disposition") is None
+    undisclosed_draft = derive_architecture_commit_draft(turn_state)
+    assert undisclosed_draft is not None
+    assert undisclosed_draft.report_disposition is None
+
+    async with db_container() as container:
+        repo = AIBuilderRepository(container.session())
+        user = container.user()
+        session = await repo.create_session(
+            tenant_id=user.tenant_id,
+            space_id=UUID(space_id),
+            actor_user_id=user.id,
+            target_kind=TargetKind.CREATE,
+            flow_id=None,
+        )
+        session_id = session.id
+        tenant_id = user.tenant_id
+        disclosing_turn = await _claim_session_send_turn(
+            repo=repo,
+            session_id=session_id,
+            tenant_id=tenant_id,
+            message_content=request_text,
+        )
+        # With nothing pinned yet the controller commits the architecture it can
+        # derive, and that write chains the disclosure the user is asked about.
+        disclosing = await dispatch_server_decision(
+            ServerDecisionDispatchRequest(
+                repo=repo,
+                turn=disclosing_turn,
+                decision=CommitArchitecture(architecture_commit=undisclosed_draft),
+                conversation=conversation,
+                new_messages_start=1,
+                flow=None,
+                confirmed_requirements_version=None,
+                ui_language="sv",
+                telemetry=_server_decision_telemetry("req-disclosure"),
+                planning_state=turn_state,
+            )
+        )
+        await repo.release_session_send(
+            session_id=session_id,
+            tenant_id=tenant_id,
+            lease=disclosing_turn.lease,
+        )
+        disclosed_conversation = list(
+            (
+                await repo.get_session(session_id=session_id, tenant_id=tenant_id)
+            ).conversation
+        )
+        disclosed_state = await repo.load_planning_state(
+            session_id=session_id, tenant_id=tenant_id
+        )
+
+    assert disclosing.action_kind == "commit_architecture"
+    assert disclosed_state is not None
+    assert disclosed_state.mapped_file_limit == disclosed_limit
+    # The architecture is pinned without the disposition: the classifier only
+    # inferred it, so it cannot drive an irreversible decision yet.
+    assert disclosed_state.architecture_commit is not None
+    assert disclosed_state.architecture_commit.report_disposition is None
+    assert disclosed_state.commit_grade_slot_value("report_disposition") is None
+    disclosure = resolve_requirements_state(disclosed_conversation).latest_summary
+    assert disclosure is not None
+    assert "Högst 149 filer behandlas i samma körning." in disclosure.assumptions
+    assert "Rapportupplägg: Samlad översikt" in disclosure.assumptions
+
+    # The acknowledgment turn: an exact content-free confirmation of the
+    # disclosure the user was shown.
+    acknowledgment = [
+        *disclosed_conversation,
+        ConversationMessage(
+            role="user",
+            content="",
+            metadata={
+                "requirements_confirmed": True,
+                "requirements_version": disclosure.requirements_version,
+            },
+        ),
+    ]
+    prepared = await prepare_planner_request(
+        PlannerRequestPreparationInput(
+            conversation=acknowledgment,
+            litellm_client=_ProviderFreeLiteLLMClient(),
+            completion_model_route=_route(),
+            available_models=None,
+            available_kbs=None,
+            flow=None,
+            assistant_snapshots=None,
+            attachment_files=[],
+            max_input_tokens=8000,
+            max_output_tokens=1024,
+            budget_policy=AIBuilderBudgetPolicy(
+                conversation_safety_buffer_tokens=128,
+                minimum_conversation_budget_tokens=256,
+            ),
+            attachment_context_policy=AIBuilderAttachmentContextPolicy(),
+            mapped_execution_policy=mapped_execution_policy,
+            base_planning_state_version=disclosing.new_planning_state_version,
+            tenant_id=tenant_id,
+            plan_edit_context=None,
+            prior_plan_for_revision=None,
+            persisted_planning_state=disclosed_state,
+            current_turn_start=len(acknowledgment) - 1,
+            usage_tracker=ProposalTurnTelemetry(
+                request_id="req-acknowledgment",
+                model=_route().litellm_model,
+                target_kind=TargetKind.CREATE,
+            ),
+        )
+    )
+
+    # Accepting is what admits the inferred disposition to the architecture,
+    # and it happens without re-reading anything: the provider-free client
+    # would have raised, and the classifier left no new metadata.
+    assert isinstance(prepared, ServerOutputPrepared)
+    assert prepared.slot_classification_metadata is None
+    assert prepared.requirements_state.confirmed
+    assert isinstance(prepared.server_decision, ReviseArchitecture)
+    accepted_draft = prepared.server_decision.architecture_commit
+    assert accepted_draft.report_disposition == "synthesized_overview"
+
+    async with db_container() as container:
+        repo = AIBuilderRepository(container.session())
+        acknowledging_turn = await _claim_session_send_turn(
+            repo=repo,
+            session_id=session_id,
+            tenant_id=tenant_id,
+            message_content="",
+            message_metadata={
+                "requirements_confirmed": True,
+                "requirements_version": disclosure.requirements_version,
+            },
+        )
+        # The revision chains straight into the next decision, so this one call
+        # performs both writes of the real turn.
+        revised = await dispatch_server_decision(
+            ServerDecisionDispatchRequest(
+                repo=repo,
+                turn=acknowledging_turn,
+                decision=prepared.server_decision,
+                conversation=acknowledgment,
+                new_messages_start=len(acknowledgment),
+                flow=None,
+                confirmed_requirements_version=(
+                    prepared.requirements_state.confirmed_requirements_version
+                ),
+                ui_language="sv",
+                telemetry=_server_decision_telemetry("req-acknowledgment"),
+                planning_state=prepared.planning_state,
+            )
+        )
+        await repo.release_session_send(
+            session_id=session_id,
+            tenant_id=tenant_id,
+            lease=acknowledging_turn.lease,
+        )
+        revised_conversation = list(
+            (
+                await repo.get_session(session_id=session_id, tenant_id=tenant_id)
+            ).conversation
+        )
+        revised_state = await repo.load_planning_state(
+            session_id=session_id, tenant_id=tenant_id
+        )
+
+    assert revised.action_kind == "revise_architecture"
+    assert revised_state is not None
+    assert revised_state.mapped_file_limit == disclosed_limit
+    # The compiler reads the report disposition from the pinned commit and
+    # nowhere else, so this is the fact that decides what gets built — and it is
+    # the one the user accepted, surviving the chained second write.
+    assert revised_state.architecture_commit is not None
+    assert revised_state.architecture_commit.report_disposition == (
+        "synthesized_overview"
+    )
+    # Accepting settled the requirements rather than restating them: the turn
+    # goes on to the proposal, and the user is never shown a second disclosure.
+    assert revised.proposal_continuation is not None
+    assert (
+        sum(
+            1
+            for message in revised_conversation
+            if isinstance(message.metadata, dict)
+            and message.metadata.get("requirements_summary")
+        )
+        == 1
+    )
+    assert resolve_requirements_state(revised_conversation).latest_summary == disclosure
 
 
 @pytest.mark.integration
@@ -5243,6 +5694,7 @@ async def test_ai_builder_repo_commit_turn_rolls_back_when_planning_state_drifts
                 await repo.commit_turn(
                     turn=turn,
                     new_messages=[assistant_msg],
+                    planning_state=PlanningState.empty(),
                 )
 
     async with db_container() as container:
@@ -5257,23 +5709,34 @@ async def test_ai_builder_repo_commit_turn_rolls_back_when_planning_state_drifts
 
 @pytest.mark.integration
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("appends_messages", "complete_turn"),
+    [(True, True), (False, False)],
+    ids=["appends-messages", "appends-nothing"],
+)
 async def test_ai_builder_repo_commit_turn_rejects_write_when_lease_is_lost(
     client,
     bearer_token,
     completion_model_factory,
     db_container,
+    appends_messages: bool,
+    complete_turn: bool,
 ):
     """Lease-lost guard: commit_turn must reject the write when the
     caller's request_id/lock_token no longer matches the row's lease.
     Otherwise a reclaimed session could land a stale planner turn on top
     of another worker's active commit.
+
+    A turn that appends no messages still writes planning state, and the
+    architecture-commit path leaves the turn open, so nothing downstream
+    re-checks the lease. That case has to be rejected by the same guard.
     """
     space_id = await _create_space_with_planner_model(
         client=client,
         bearer_token=bearer_token,
         db_container=db_container,
         completion_model_factory=completion_model_factory,
-        space_name="AI Builder Commit Turn Lease",
+        space_name=f"AI Builder Commit Turn Lease {complete_turn}",
     )
     async with db_container() as container:
         repo = AIBuilderRepository(container.session())
@@ -5298,13 +5761,22 @@ async def test_ai_builder_repo_commit_turn_rejects_write_when_lease_is_lost(
             tenant_id=user.tenant_id,
             base_planning_state_version=0,
         )
-        assistant_msg = ConversationMessage(role="assistant", content="Stale lease")
+        new_messages = (
+            [ConversationMessage(role="assistant", content="Stale lease")]
+            if appends_messages
+            else []
+        )
 
-        with pytest.raises(BadRequestException):
+        with pytest.raises(AIBuilderBadRequestException) as lease_error:
             await repo.commit_turn(
                 turn=stale_turn,
-                new_messages=[assistant_msg],
+                new_messages=new_messages,
+                planning_state=_planning_state_fixture(),
+                architecture_commit=_architecture_commit_fixture(),
+                complete_turn=complete_turn,
             )
+
+        assert lease_error.value.code == AIBuilderErrorCode.SESSION_SEND_LEASE_LOST
 
     async with db_container() as container:
         repo = AIBuilderRepository(container.session())
@@ -5380,6 +5852,7 @@ async def test_ai_builder_repo_commit_turn_persists_architecture_commit_atomical
             turn=turn,
             new_messages=[assistant_msg],
             architecture_commit=commit,
+            planning_state=PlanningState.empty(),
         )
 
     async with db_container() as container:
@@ -5452,6 +5925,7 @@ async def test_ai_builder_repo_commit_turn_rolls_back_architecture_commit_on_dri
                     turn=turn,
                     new_messages=[assistant_msg],
                     architecture_commit=commit,
+                    planning_state=PlanningState.empty(),
                 )
 
     async with db_container() as container:
@@ -5539,6 +6013,7 @@ async def test_ai_builder_repo_commit_turn_rolls_back_pinned_architecture_drift(
                 ConversationMessage(role="assistant", content="Architecture pinned"),
             ],
             architecture_commit=finalize_architecture_commit(prior_draft),
+            planning_state=prior_state,
         )
         await repo.release_session_send(
             session_id=session.id,
@@ -5573,6 +6048,7 @@ async def test_ai_builder_repo_commit_turn_rolls_back_pinned_architecture_drift(
                         content="Should roll back",
                     ),
                 ],
+                planning_state=PlanningState.empty(),
             )
 
     async with db_container() as container:
@@ -5650,12 +6126,14 @@ async def test_ai_builder_repo_commit_turn_preserves_previously_persisted_archit
                 ConversationMessage(role="assistant", content="commit turn 1")
             ],
             architecture_commit=commit,
+            planning_state=PlanningState.empty(),
         )
         await repo.commit_turn(
             turn=replace(turn, base_planning_state_version=next_version),
             new_messages=[
                 ConversationMessage(role="assistant", content="commit turn 2")
             ],
+            planning_state=PlanningState.empty(),
         )
 
     async with db_container() as container:
@@ -5729,6 +6207,7 @@ async def test_ai_builder_repo_commit_turn_replaces_persisted_commit_when_kwarg_
                 ConversationMessage(role="assistant", content="first commit")
             ],
             architecture_commit=first,
+            planning_state=PlanningState.empty(),
         )
         await repo.commit_turn(
             turn=replace(turn, base_planning_state_version=next_version),
@@ -5736,6 +6215,7 @@ async def test_ai_builder_repo_commit_turn_replaces_persisted_commit_when_kwarg_
                 ConversationMessage(role="assistant", content="second commit")
             ],
             architecture_commit=second,
+            planning_state=PlanningState.empty(),
         )
 
     async with db_container() as container:
@@ -5816,6 +6296,7 @@ async def test_store_plan_and_update_conversation_rejects_stale_planning_state_v
                     _make_builder_plan_spec(existing_step_ref=None)
                 ),
                 flow=None,
+                planning_state=PlanningState.empty(),
             )
 
     assert exc.value.code == "planning_state_version_mismatch"
@@ -5905,6 +6386,7 @@ async def test_store_plan_and_update_conversation_rejects_lost_session_send_leas
                     _make_builder_plan_spec(existing_step_ref=None)
                 ),
                 flow=None,
+                planning_state=PlanningState.empty(),
             )
 
     assert exc.value.code == "session_send_lease_lost"
@@ -6247,6 +6729,7 @@ async def test_handle_edit_flow_with_lost_lease_rolls_back(
                     ),
                     flow=flow,
                     assistant_snapshots=None,
+                    planning_state=PlanningState.empty(),
                     before_provider_call=mark_provider_work_started,
                 )
             ]
@@ -6322,6 +6805,7 @@ async def test_store_plan_and_update_conversation_accepts_matching_planning_stat
                 _make_builder_plan_spec(existing_step_ref=None)
             ),
             flow=None,
+            planning_state=PlanningState.empty(),
         )
 
     async with db_container() as container:
@@ -6391,6 +6875,7 @@ async def test_store_plan_and_update_conversation_preserves_persisted_architectu
                 ConversationMessage(role="assistant", content="architecture committed"),
             ],
             architecture_commit=commit,
+            planning_state=PlanningState.empty(),
         )
 
         fetched = await repo.get_session(
@@ -6428,6 +6913,7 @@ async def test_store_plan_and_update_conversation_preserves_persisted_architectu
             tool_name="propose_plan",
             arguments={},
             compiled=_compiled_builder_plan(spec),
+            planning_state=PlanningState.empty(),
         )
 
     async with db_container() as container:
@@ -6509,6 +6995,7 @@ async def test_store_plan_and_update_conversation_rolls_back_when_append_fails(
                     tool_name=PROPOSE_FLOW_TOOL_NAME,
                     arguments={},
                     compiled=_compiled_builder_plan(spec),
+                    planning_state=PlanningState.empty(),
                 )
         finally:
             repo.append_session_messages = original_append  # type: ignore[method-assign]
@@ -6583,6 +7070,7 @@ async def test_store_plan_and_update_conversation_saves_planning_state(
             arguments={},
             compiled=_compiled_builder_plan(spec),
             flow=None,
+            planning_state=PlanningState.empty(),
         )
 
     async with db_container() as container:
@@ -6664,6 +7152,7 @@ async def test_store_plan_and_update_conversation_updates_latest_plan_pointer(
             arguments={},
             compiled=_compiled_builder_plan(spec),
             flow=None,
+            planning_state=PlanningState.empty(),
         )
 
     async with db_container() as container:
@@ -6746,6 +7235,7 @@ async def test_store_plan_and_update_conversation_state_matches_compacted_conver
             arguments={},
             compiled=_compiled_builder_plan(spec),
             flow=None,
+            planning_state=PlanningState.empty(),
         )
 
     async with db_container() as container:

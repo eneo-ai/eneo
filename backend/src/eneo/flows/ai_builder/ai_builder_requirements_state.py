@@ -71,9 +71,20 @@ _BOILERPLATE_REQUIREMENT_TEXTS = frozenset(
 
 @dataclass(frozen=True)
 class RequirementsState:
+    """What the user has been shown, and what the user has accepted.
+
+    These are two different facts and the difference is load-bearing.
+    `latest_summary` is the disclosure currently awaiting an answer;
+    `attested_summary` is the last disclosure the user actually accepted.
+    Showing a new disclosure supersedes what is *pending*, never what was
+    already accepted: the architecture is pinned from accepted facts, so
+    conflating the two makes a re-disclosure silently unpin them.
+    """
+
     latest_summary: RequirementsSummaryPayload | None = None
     latest_version: str | None = None
     confirmed_version: str | None = None
+    attested_summary: RequirementsSummaryPayload | None = None
 
     @property
     def confirmed(self) -> bool:
@@ -171,6 +182,8 @@ def resolve_requirements_state(
     if latest_summary is None or latest_version is None or latest_summary_index is None:
         return RequirementsState()
 
+    attested = resolve_attested_disclosure(conversation)
+
     confirmed_version: str | None = None
     has_plan_after_confirmation = False
     for message in conversation[latest_summary_index + 1 :]:
@@ -204,7 +217,61 @@ def resolve_requirements_state(
         latest_summary=latest_summary,
         latest_version=latest_version,
         confirmed_version=confirmed_version,
+        attested_summary=attested.summary if attested is not None else None,
     )
+
+
+@dataclass(frozen=True)
+class AttestedDisclosure:
+    """The disclosure the user accepted, and the two messages that prove it.
+
+    The indices are part of the contract, not a convenience: acceptance is only
+    recoverable while both messages survive, so whatever prunes the
+    conversation has to be able to ask which two those are.
+    """
+
+    summary: RequirementsSummaryPayload
+    summary_index: int
+    confirmation_index: int
+
+
+def resolve_attested_disclosure(
+    conversation: list[ConversationMessage],
+) -> AttestedDisclosure | None:
+    """The last disclosure the user accepted, whatever has been shown since.
+
+    A confirmation names one disclosure by version, so acceptance survives a
+    later disclosure the user has not answered yet. Only an explicit request to
+    restart discovery withdraws it. That is deliberately narrower than what
+    withdraws a *pending* confirmation, where any ordinary message before a
+    plan is a change of mind: the user cannot un-say something they already
+    said, and the pinned architecture is derived from it.
+    """
+
+    shown: dict[str, tuple[int, RequirementsSummaryPayload]] = {}
+    attested: AttestedDisclosure | None = None
+    for index, message in enumerate(conversation):
+        if message.role in ("tool", "assistant"):
+            payload = requirements_summary_from_metadata(message.metadata)
+            if payload is not None:
+                shown[payload.requirements_version] = (index, payload)
+            continue
+        if message.role != "user":
+            continue
+        confirmation = content_free_confirmation(message)
+        if confirmation is not None:
+            accepted = shown.get(confirmation.requirements_version)
+            if accepted is not None:
+                attested = AttestedDisclosure(
+                    summary=accepted[1],
+                    summary_index=accepted[0],
+                    confirmation_index=index,
+                )
+            continue
+        content = message.content if isinstance(message.content, str) else ""
+        if _is_requirements_invalidation(content.casefold()):
+            attested = None
+    return attested
 
 
 def latest_confirmed_requirements(

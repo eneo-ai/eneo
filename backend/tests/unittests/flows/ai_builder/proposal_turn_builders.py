@@ -37,6 +37,7 @@ from eneo.flows.ai_builder.ai_builder_session_turn import (
 )
 from eneo.flows.ai_builder.ai_builder_tool_names import PROPOSE_FLOW_TOOL_NAME
 from eneo.flows.ai_builder.ai_builder_validation_common import SpecValidationResult
+from eneo.flows.ai_builder.planning_state import PlanningState
 from eneo.flows.flow_authoring_spec import (
     AssistantSpec,
     FlowDraftSpecCore,
@@ -115,6 +116,7 @@ def _make_context(**overrides: object) -> ProposalTurnContext:
         "resource_catalog": None,
         "max_output_tokens": 4096,
         "request_id": "req-1",
+        "planning_state": PlanningState.empty(),
         "flow": None,
         "assistant_snapshots": None,
         "text_content": None,

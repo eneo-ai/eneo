@@ -18,6 +18,7 @@ from eneo.flows.ai_builder.ai_builder_session_turn import (
     SessionSendLease,
     SessionSendTurn,
 )
+from eneo.flows.ai_builder.planning_state import PlanningState
 
 
 def _make_turn() -> SessionSendTurn:
@@ -102,6 +103,7 @@ async def test_persist_backend_question_commits_turn_with_flow_and_lease() -> No
         turn=turn,
         conversation=conversation,
         new_messages_start=1,
+        planning_state=PlanningState.empty(),
         question=_backend_question(),
         flow=flow,  # type: ignore[arg-type]
     )
@@ -140,6 +142,7 @@ async def test_persist_backend_question_preserves_explicit_id_and_confirm_flag()
         turn=_make_turn(),
         conversation=conversation,
         new_messages_start=1,
+        planning_state=PlanningState.empty(),
         question=BackendQuestion(
             question_data=StructuredQuestionPayload.model_validate(expected_arguments),
             assistant_text="Hur ska rapporten sammanställas?",
@@ -163,6 +166,7 @@ async def test_persist_backend_question_merges_assistant_and_question_metadata()
         turn=_make_turn(),
         conversation=conversation,
         new_messages_start=1,
+        planning_state=PlanningState.empty(),
         question=_backend_question(),
         assistant_metadata={
             "planner_telemetry": {
@@ -190,6 +194,7 @@ async def test_persist_backend_question_omits_empty_metadata() -> None:
         turn=_make_turn(),
         conversation=conversation,
         new_messages_start=1,
+        planning_state=PlanningState.empty(),
         question=BackendQuestion(
             question_data=_empty_question_id_payload().model_copy(
                 update={"question_id": ""}
@@ -211,6 +216,7 @@ async def test_persist_backend_question_preserves_custom_tool_content() -> None:
         turn=_make_turn(),
         conversation=conversation,
         new_messages_start=1,
+        planning_state=PlanningState.empty(),
         question=_backend_question(),
         tool_content="Backend question presented after a repair attempt.",
     )

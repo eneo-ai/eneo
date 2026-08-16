@@ -203,7 +203,7 @@ class ProposalSubmissionOwner:
         flow: "Flow | None" = None,
         assistant_snapshots: AssistantAuthoringSnapshots | None = None,
         assistant_metadata: dict[str, Any] | None = None,
-        planning_state: PlanningState | None = None,
+        planning_state: PlanningState,
         compile_context: "CreateCompileContext | None",
         plan_edit_context: ResolvedAIBuilderEditContext | None = None,
         prior_spec_for_revision: FlowDraftSpecCore | None = None,
@@ -361,7 +361,7 @@ class ProposalSubmissionOwner:
         target_kind: TargetKind,
         assistant_snapshots: AssistantAuthoringSnapshots | None,
         request_id: str,
-        planning_state: PlanningState | None,
+        planning_state: PlanningState,
         plan_edit_context: ResolvedAIBuilderEditContext | None,
         prior_spec_for_revision: FlowDraftSpecCore | None,
         usage_tracker: ProposalTurnTelemetry | None,
@@ -399,7 +399,7 @@ class ProposalSubmissionOwner:
         *,
         invocation: ToolRetryInvocation,
         target_kind: TargetKind,
-        planning_state: PlanningState | None,
+        planning_state: PlanningState,
         assistant_snapshots: AssistantAuthoringSnapshots | None,
         plan_edit_context: ResolvedAIBuilderEditContext | None,
         prior_spec_for_revision: FlowDraftSpecCore | None,
@@ -426,7 +426,7 @@ class ProposalSubmissionOwner:
                 failure_codes=frozenset({PROPOSAL_PARSE_SCHEMA_FAILURE_CODE}),
             )
         if target_kind == TargetKind.CREATE:
-            if planning_state is None or planning_state.architecture_commit is None:
+            if planning_state.architecture_commit is None:
                 raise AIBuilderArchitectureError(
                     public_code="architecture_materialization_failed",
                     detail="Create proposal requires a committed architecture.",
@@ -486,7 +486,7 @@ class ProposalSubmissionOwner:
         request_id: str,
         usage_tracker: ProposalTurnTelemetry | None,
         metadata_tool_call: RuntimeToolCall | None,
-        planning_state: PlanningState | None,
+        planning_state: PlanningState,
         compile_context: "CreateCompileContext | None",
     ) -> ToolProcessingResult:
         return await self._compiled_proposal_finalizer.finalize_compiled_proposal(

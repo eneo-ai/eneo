@@ -109,6 +109,7 @@ from eneo.flows.ai_builder.ai_builder_turn_controller import (
     resolve_turn_control,
 )
 from eneo.flows.ai_builder.planning_state import PlanningState
+from eneo.flows.ai_builder.planning_state_builder import apply_attested_requirements
 from eneo.flows.application.flow_authoring_snapshot import current_flow_authoring_spec
 from eneo.flows.assistant_authoring_snapshot import AssistantAuthoringSnapshots
 from eneo.flows.domain.mapped_execution_policy import (
@@ -239,10 +240,14 @@ async def prepare_planner_request(
     )
     if acknowledged_disclosure is not None:
         # Nothing new was said, so nothing is re-read: the turn resolves from
-        # the very state whose disclosure the user just confirmed.
+        # the very state whose disclosure the user just confirmed. That state
+        # was persisted before the user answered it, so the acceptance itself
+        # still has to be applied — deterministically, from the disclosure
+        # that was confirmed, not by re-reading the evidence behind it.
         assert request.persisted_planning_state is not None
         discovery_analysis = DiscoveryAnalysis(issues=())
-        rebuilt_planning_state = request.persisted_planning_state
+        rebuilt_planning_state = request.persisted_planning_state.model_copy(deep=True)
+        apply_attested_requirements(rebuilt_planning_state, acknowledged_disclosure)
         schema_direction_pending = False
         control_schema_candidates: tuple[DeclaredSchemaCandidate, ...] = ()
         slot_classification_metadata = None

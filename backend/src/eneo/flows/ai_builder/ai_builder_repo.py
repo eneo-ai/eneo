@@ -753,10 +753,14 @@ class AIBuilderRepository:
         back on the next turn. Without this, long sessions could save
         slot state derived from messages that had been compacted away
         before persist.
-        """
-        if not conversation:
-            return []
 
+        An empty `conversation` still runs the whole path. Nothing to append
+        is not an empty session: callers derive the state they persist from
+        what this returns, so short-circuiting made a turn that added no
+        messages — a server decision on an acknowledgment, above all — rebuild
+        and save a state with none of the session's slots. It also has to stay
+        lease-guarded, because such a turn still writes planning state.
+        """
         async with self._transaction():
             stmt = select(BuilderSessions).where(
                 BuilderSessions.id == session_id,
@@ -1683,8 +1687,8 @@ class AIBuilderRepository:
         turn: SessionSendTurn,
         new_messages: list[ConversationMessage],
         flow: "Flow | None" = None,
+        planning_state: PlanningState,
         architecture_commit: ArchitectureCommit | None = None,
-        planning_state_overlay: PlanningState | None = None,
         complete_turn: bool = True,
     ) -> int:
         """Append new conversation messages and save `PlanningState` atomically.
@@ -1693,6 +1697,12 @@ class AIBuilderRepository:
         that `append_session_messages` actually persisted. Building it
         from the caller's pre-compaction list would drift once a session
         crosses the compaction threshold.
+
+        `planning_state` is the state this turn resolved, and it is
+        required: the conversation alone cannot rebuild what the turn
+        derived from inputs it does not carry, so a caller allowed to
+        omit it is a caller allowed to persist a state the session never
+        had.
 
         When `architecture_commit` is provided, it is stamped on the
         rebuilt state inside the savepoint so the commit lands as one
@@ -1734,11 +1744,18 @@ class AIBuilderRepository:
             state = build_planning_state_from_conversation(persisted, flow=flow)
             if architecture_commit is not None:
                 state.architecture_commit = architecture_commit
-            # Current-turn overlay must run before prior state: carry-forward only
+            # The proposed file ceiling comes from the organization's
+            # mapped-execution policy, which no conversation states, so this
+            # rebuild proposes none and drops the acceptance derived from it.
+            # The current turn resolved the whole value and speaks for the
+            # current policy; carry-forward cannot, because it cannot tell a
+            # rebuild that had no policy from an organization that opted out.
+            state.mapped_file_limit = planning_state.mapped_file_limit
+            # The current turn must run before prior state: carry-forward only
             # fills missing planner-owned fields, so the current upload role wins.
             carry_forward_persisted_planner_state(
                 state,
-                planning_state_overlay,
+                planning_state,
                 attached_file_ids=attached_file_ids,
             )
             carry_forward_persisted_planner_state(

@@ -35,6 +35,7 @@ from eneo.flows.ai_builder.ai_builder_error_contract import (
     AIBuilderBadRequestException,
     AIBuilderErrorCode,
 )
+from eneo.flows.ai_builder.ai_builder_event_models import RequirementsSummaryPayload
 from eneo.flows.ai_builder.ai_builder_field_identity import fold_result_field_name
 from eneo.flows.ai_builder.ai_builder_form_intake_signals import (
     FORM_INTAKE_NEEDS_FIELDS_SIGNAL,
@@ -1442,7 +1443,11 @@ def _resolve_slots(
 ) -> dict[str, ResolvedSlot]:
     answer_signals = extract_answer_signals(conversation)
     requirements_state = resolve_requirements_state(conversation)
-    requirements_summary_values = _requirements_summary_values(requirements_state)
+    # What the user accepted, not what is currently on screen: a disclosure the
+    # user has not answered yet must not unpin the facts an earlier one settled.
+    requirements_summary_values = attested_requirement_values(
+        requirements_state.attested_summary
+    )
     freeform_text = _semantic_planning_text(
         aggregate_unprompted_user_text(conversation),
         requirements_state,
@@ -1736,7 +1741,7 @@ def _resolve_slot_origin(
     if requirements_summary_values.get(question_id) == slot_value:
         return (
             "requirements_summary",
-            (f"requirements_summary.resolved_requirements:{question_id}={slot_value}",),
+            (_attested_requirement_evidence(question_id, slot_value),),
             "high",
         )
 
@@ -1767,12 +1772,17 @@ def _resolve_slot_origin(
     )
 
 
-def _requirements_summary_values(
-    requirements_state: RequirementsState,
+def attested_requirement_values(
+    summary: RequirementsSummaryPayload | None,
 ) -> dict[str, str]:
-    if not requirements_state.confirmed:
-        return {}
-    summary = requirements_state.latest_summary
+    """The typed facts a user accepted by confirming this disclosure.
+
+    Accepting a disclosure makes its values the user's own answer, which is
+    what lets an inferred value drive an irreversible decision. Only values
+    the vocabulary still admits are returned, so a disclosure persisted under
+    an older vocabulary cannot resurrect a value the planner no longer has.
+    """
+
     if summary is None:
         return {}
     return {
@@ -1781,6 +1791,67 @@ def _requirements_summary_values(
         if requirement.requirement_id in KNOWN_REQUIREMENT_SLOT_NAMES
         and requirement.selected_value in legal_slot_values(requirement.requirement_id)
     }
+
+
+def apply_attested_requirements(
+    state: PlanningState,
+    summary: RequirementsSummaryPayload | None,
+) -> None:
+    """Regrade slots the user accepted, on a state built before they did.
+
+    A disclosure is persisted before the user answers it, so the state that
+    produced it still grades its own inferences as model evidence. The
+    acknowledgment resolves entirely from that persisted state, and only
+    commit-grade facts reach the architecture — so without this the plan is
+    built without the very requirements the user just accepted.
+
+    Values are never changed here, only their provenance, exactly as the
+    deterministic rebuild attributes them.
+    """
+
+    for requirement_id, value in attested_requirement_values(summary).items():
+        slot = state.resolved_slots.get(requirement_id)
+        if slot is None or slot.value != value:
+            continue
+        if not _attestation_outranks(slot):
+            continue
+        state.resolved_slots[requirement_id] = _requirements_summary_slot(
+            requirement_id,
+            value,
+        )
+
+
+def _attestation_outranks(slot: ResolvedSlot) -> bool:
+    """Whether acceptance regrades this slot, by the rebuild's own precedence.
+
+    The deterministic rebuild already ranks an attested value against every
+    other source. Restating that ranking here would let the two disagree, and
+    a fast path that grades a slot differently from the rebuild discloses a
+    different record than the one it just persisted.
+    """
+
+    if slot.source in _MODEL_PROTECTED_SOURCES:
+        return False
+    if slot.source == "model":
+        return not _model_slot_can_replace(
+            existing_slot=_requirements_summary_slot(slot.name, slot.value),
+            model_confidence=slot.confidence,
+        )
+    return True
+
+
+def _attested_requirement_evidence(name: str, value: str) -> str:
+    return f"requirements_summary.resolved_requirements:{name}={value}"
+
+
+def _requirements_summary_slot(name: str, value: str) -> ResolvedSlot:
+    return ResolvedSlot(
+        name=name,
+        value=value,
+        source="requirements_summary",
+        evidence=[_attested_requirement_evidence(name, value)],
+        confidence="high",
+    )
 
 
 def _heuristic_slot_confidence(

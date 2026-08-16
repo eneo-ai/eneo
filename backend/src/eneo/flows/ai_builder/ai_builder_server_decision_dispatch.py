@@ -178,7 +178,7 @@ async def _dispatch_question(
                 planner_telemetry=telemetry,
                 tool_calls=[{"name": ASK_STRUCTURED_QUESTION_TOOL_NAME}],
             ),
-            planning_state_overlay=request.planning_state,
+            planning_state=request.planning_state,
         )
         return ServerDecisionDispatchResult(
             action_kind="ask_question",
@@ -221,7 +221,7 @@ async def _dispatch_architecture_commit(
         new_messages=request.conversation[request.new_messages_start :],
         flow=request.flow,
         architecture_commit=finalize_architecture_commit(decision.architecture_commit),
-        planning_state_overlay=request.planning_state,
+        planning_state=request.planning_state,
         complete_turn=False,
     )
     events: list[AIBuilderStreamEvent] = [build_status_event(status)]
@@ -314,7 +314,7 @@ async def _dispatch_requirements_confirmation(
         turn=request.turn,
         new_messages=request.conversation[request.new_messages_start :],
         flow=request.flow,
-        planning_state_overlay=request.planning_state,
+        planning_state=request.planning_state,
     )
     return ServerDecisionDispatchResult(
         action_kind="confirm_requirements",

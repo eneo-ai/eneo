@@ -344,11 +344,11 @@ class ProposalTurnContext:
     resource_catalog: AIBuilderResourceCatalog | None
     max_output_tokens: int
     request_id: str
+    planning_state: PlanningState
     flow: "Flow | None" = None
     assistant_snapshots: AssistantAuthoringSnapshots | None = None
     text_content: str | None = None
     assistant_metadata: dict[str, Any] | None = None
-    planning_state: PlanningState | None = None
     usage_tracker: ProposalTurnTelemetry | None = None
     plan_edit_context: ResolvedAIBuilderEditContext | None = None
     prior_spec_for_revision: FlowDraftSpecCore | None = None

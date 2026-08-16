@@ -792,10 +792,25 @@ def _no_inference_assumption(
 
 def _slot_is_key_decision(slot: ResolvedSlot) -> bool:
     match slot.source:
-        case "structured_answer" | "requirements_summary" | "flow_default":
+        case "structured_answer" | "flow_default":
             return True
+        case "requirements_summary":
+            # Confirming a disclosure must not change that disclosure. This
+            # provenance is created *by* the confirmation, so promoting the
+            # fact from an assumption to a key decision here hashes a
+            # different record and asks the user to attest to the same
+            # requirements again — the loop that ran sessions into the
+            # interaction limit. How the user answered is provenance, not a
+            # different requirement.
+            return False
         case "model":
-            return slot.evidence_level == "explicit" and slot.is_commit_grade
+            # The bucket follows the same boundary as attestation precedence:
+            # acceptance regrades any classification it outranks, and a regraded
+            # fact reads as an assumption, so a classification acceptance would
+            # regrade has to read as one already. High confidence is what
+            # survives acceptance; an explicit reading is what earns the
+            # stronger presentation.
+            return slot.confidence == "high" and slot.evidence_level == "explicit"
         case "attachment_structure" | "policy_default" | "heuristic":
             return False
     return assert_never(slot.source)

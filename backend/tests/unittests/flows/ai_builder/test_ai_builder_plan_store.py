@@ -395,6 +395,7 @@ async def test_store_plan_and_update_conversation_saves_planning_state_inside_sa
         turn=_make_turn(base_version=7),
         conversation=[],
         new_messages_start=0,
+        planning_state=PlanningState.empty(),
         assistant_content="plan ready",
         tool_call_id="call-unit-1",
         tool_name=PROPOSE_FLOW_TOOL_NAME,
@@ -436,6 +437,7 @@ async def test_store_plan_rejects_proposal_when_current_slots_drift_from_commit(
             turn=_make_turn(base_version=7),
             conversation=conversation,
             new_messages_start=len(conversation),
+            planning_state=PlanningState.empty(),
             assistant_content="plan ready",
             tool_call_id="call-unit-1",
             tool_name=PROPOSE_FLOW_TOOL_NAME,
@@ -462,6 +464,7 @@ async def test_commit_turn_rejects_non_plan_conversation_drift_before_state_save
         await AIBuilderRepository.commit_turn(
             repo,
             turn=_make_turn(base_version=7),
+            planning_state=PlanningState.empty(),
             new_messages=[ConversationMessage(role="assistant", content="Nästa fråga")],
         )
 
@@ -479,6 +482,7 @@ async def test_commit_turn_rebuilds_state_from_messages_that_append_persisted() 
     await AIBuilderRepository.commit_turn(
         repo,
         turn=_make_turn(base_version=7),
+        planning_state=PlanningState.empty(),
         new_messages=[
             ConversationMessage(role="assistant", content="Caller-only transient text")
         ],
@@ -503,6 +507,7 @@ async def test_commit_turn_accepts_explicit_architecture_revision() -> None:
     await AIBuilderRepository.commit_turn(
         repo,
         turn=_make_turn(base_version=7),
+        planning_state=PlanningState.empty(),
         new_messages=[ConversationMessage(role="assistant", content="Reviderad")],
         architecture_commit=revised_commit,
         complete_turn=False,
@@ -527,6 +532,7 @@ async def test_store_plan_preserves_proposal_when_current_slots_match_commit() -
         turn=_make_turn(base_version=7),
         conversation=conversation,
         new_messages_start=len(conversation),
+        planning_state=PlanningState.empty(),
         assistant_content="plan ready",
         tool_call_id="call-unit-1",
         tool_name=PROPOSE_FLOW_TOOL_NAME,
@@ -571,7 +577,7 @@ async def test_store_plan_persists_prepared_file_roles() -> None:
         tool_name=PROPOSE_FLOW_TOOL_NAME,
         arguments={},
         compiled=_compiled_proposal(),
-        planning_state_overlay=prepared_state,
+        planning_state=prepared_state,
     )
 
     saved_state = repo.save_planning_state.await_args.kwargs["state"]
@@ -629,7 +635,7 @@ async def test_store_plan_prefers_current_file_role_over_prior_same_file() -> No
         tool_name=PROPOSE_FLOW_TOOL_NAME,
         arguments={},
         compiled=_compiled_proposal(),
-        planning_state_overlay=prepared_state,
+        planning_state=prepared_state,
     )
 
     saved_state = repo.save_planning_state.await_args.kwargs["state"]
@@ -675,6 +681,7 @@ async def test_store_plan_drops_prior_file_evidence_when_file_is_detached() -> N
         turn=_make_turn(base_version=7),
         conversation=[],
         new_messages_start=0,
+        planning_state=PlanningState.empty(),
         assistant_content="plan ready",
         tool_call_id="call-unit-1",
         tool_name=PROPOSE_FLOW_TOOL_NAME,
@@ -699,6 +706,7 @@ async def test_store_plan_and_update_conversation_passes_resource_bindings_to_re
         turn=_make_turn(),
         conversation=[],
         new_messages_start=0,
+        planning_state=PlanningState.empty(),
         assistant_content="plan ready",
         tool_call_id="call-unit-1",
         tool_name=PROPOSE_FLOW_TOOL_NAME,

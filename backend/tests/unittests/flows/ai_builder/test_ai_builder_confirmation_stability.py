@@ -23,11 +23,15 @@ from eneo.flows.ai_builder.ai_builder_architecture_commit import (
 from eneo.flows.ai_builder.ai_builder_architecture_derivation import (
     derive_architecture_commit_draft,
 )
+from eneo.flows.ai_builder.ai_builder_domain_models import ConversationMessage
 from eneo.flows.ai_builder.ai_builder_event_models import (
     RequirementsSummaryPayload,
 )
 from eneo.flows.ai_builder.ai_builder_requirements_disclosure import (
     build_requirements_disclosure,
+)
+from eneo.flows.ai_builder.ai_builder_requirements_state import (
+    resolve_requirements_state,
 )
 from eneo.flows.ai_builder.ai_builder_slot_classification_contract import (
     SlotClassificationResult,
@@ -46,8 +50,14 @@ from eneo.flows.ai_builder.planning_state import (
     NamedResultEvidence,
     PlanningState,
     ResolvedSlot,
+    SlotConfidence,
+    SlotEvidenceLevel,
+    SlotSource,
 )
-from eneo.flows.ai_builder.planning_state_builder import merge_llm_resolved_slots
+from eneo.flows.ai_builder.planning_state_builder import (
+    apply_attested_requirements,
+    merge_llm_resolved_slots,
+)
 
 _EXAMPLE_FILE = UUID("00000000-0000-0000-0000-0000000000e1")
 
@@ -353,6 +363,151 @@ def test_the_disclosure_is_a_pure_function_of_planning_state() -> None:
 
     assert first == second
     assert first.requirements_version is not None
+
+
+def _report_disposition_slot(
+    *,
+    source: SlotSource,
+    confidence: SlotConfidence,
+    evidence_level: SlotEvidenceLevel | None,
+) -> ResolvedSlot:
+    evidence = (
+        ["quote:user_message:user-1:en samlad rapport"]
+        if source == "model"
+        else [f"{source}:report_disposition"]
+    )
+    return ResolvedSlot(
+        name="report_disposition",
+        value="synthesized_overview",
+        source=source,
+        confidence=confidence,
+        evidence=evidence,
+        evidence_level=evidence_level,
+    )
+
+
+@pytest.mark.parametrize(
+    ("source", "confidence", "evidence_level"),
+    [
+        ("model", "high", "explicit"),
+        ("model", "high", "inferred"),
+        ("model", "medium", "explicit"),
+        ("model", "medium", "inferred"),
+        ("heuristic", "high", None),
+        ("heuristic", "medium", None),
+        ("heuristic", "low", None),
+        ("policy_default", "medium", None),
+        ("requirements_summary", "high", None),
+        ("structured_answer", "high", None),
+        ("flow_default", "high", None),
+        ("attachment_structure", "high", None),
+    ],
+)
+def test_accepting_a_disclosure_does_not_change_that_disclosure(
+    source: SlotSource,
+    confidence: SlotConfidence,
+    evidence_level: SlotEvidenceLevel | None,
+) -> None:
+    """Confirmation is a fixed point, for every grade a slot can carry.
+
+    Accepting a disclosure makes its inferred values the user's own answer,
+    which is what lets them drive the architecture. It is also the only thing
+    that changed, so re-rendering has to yield the same record. When acceptance
+    instead moved a fact from an assumption to a key decision, the server
+    disclosed a new version of what the user had just accepted and asked again,
+    every turn, until the interaction limit — so the bucket boundary and the
+    attestation precedence boundary have to agree on every combination, not
+    just the one that was measured.
+    """
+
+    state = _document_state()
+    state.resolved_slots["report_disposition"] = _report_disposition_slot(
+        source=source,
+        confidence=confidence,
+        evidence_level=evidence_level,
+    )
+    disclosed = build_requirements_disclosure(state, ui_language="sv")
+
+    accepted = state.model_copy(deep=True)
+    apply_attested_requirements(accepted, disclosed)
+
+    assert build_requirements_disclosure(accepted, ui_language="sv") == disclosed
+
+
+def test_accepting_an_inferred_requirement_admits_it_to_the_architecture() -> None:
+    """Acceptance is not cosmetic: it is what makes the value commit-grade.
+
+    Only commit-grade facts reach the architecture commit, and the compiler
+    reads the report disposition from there and nowhere else.
+    """
+
+    state = _document_state()
+    state.resolved_slots["report_disposition"] = _report_disposition_slot(
+        source="model",
+        confidence="medium",
+        evidence_level="inferred",
+    )
+    assert state.commit_grade_slot_value("report_disposition") is None
+
+    apply_attested_requirements(
+        state,
+        build_requirements_disclosure(state, ui_language="sv"),
+    )
+
+    assert state.commit_grade_slot_value("report_disposition") == "synthesized_overview"
+    draft = derive_architecture_commit_draft(state)
+    assert draft is not None
+    assert draft.report_disposition == "synthesized_overview"
+
+
+def test_a_later_disclosure_does_not_withdraw_what_was_already_accepted() -> None:
+    """A pending disclosure supersedes the pending one, not the accepted one.
+
+    A changed policy or attachment earns a new disclosure mid-session. While it
+    waits for an answer, the facts the user accepted earlier still hold: the
+    architecture was pinned from them, so dropping them makes the next commit
+    look like the model re-authored the architecture.
+    """
+
+    disclosed = build_requirements_disclosure(_document_state(), ui_language="sv")
+    conversation = [
+        ConversationMessage(role="user", content="Bygg ett dokumentflöde."),
+        ConversationMessage(
+            role="assistant",
+            content=disclosed.summary,
+            metadata={
+                "requirements_summary": disclosed.model_dump(mode="json"),
+                "requirements_version": disclosed.requirements_version,
+            },
+        ),
+        ConversationMessage(
+            role="user",
+            content="",
+            metadata={
+                "requirements_confirmed": True,
+                "requirements_version": disclosed.requirements_version,
+            },
+        ),
+    ]
+    assert resolve_requirements_state(conversation).attested_summary == disclosed
+
+    superseded = [
+        *conversation,
+        ConversationMessage(
+            role="assistant",
+            content="Ny sammanfattning",
+            metadata={
+                "requirements_summary": disclosed.model_copy(
+                    update={"requirements_version": "b" * 64}
+                ).model_dump(mode="json"),
+                "requirements_version": "b" * 64,
+            },
+        ),
+    ]
+    state = resolve_requirements_state(superseded)
+
+    assert not state.confirmed
+    assert state.attested_summary == disclosed
 
 
 def test_a_user_revision_over_the_same_attachment_replaces_the_interpretation() -> None:

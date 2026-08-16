@@ -236,7 +236,7 @@ async def test_server_question_preserves_prepared_file_roles_on_commit() -> None
     )
 
     repo.commit_turn.assert_awaited_once()
-    assert repo.commit_turn.await_args.kwargs["planning_state_overlay"] is state
+    assert repo.commit_turn.await_args.kwargs["planning_state"] is state
 
 
 @pytest.mark.asyncio

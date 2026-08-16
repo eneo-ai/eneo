@@ -22,6 +22,9 @@ from eneo.flows.ai_builder.ai_builder_domain_models import ConversationMessage
 from eneo.flows.ai_builder.ai_builder_framework_policy import (
     extract_freeform_user_messages,
 )
+from eneo.flows.ai_builder.ai_builder_requirements_state import (
+    resolve_attested_disclosure,
+)
 from eneo.flows.ai_builder.ai_builder_schema_evidence import (
     SchemaLimitExceeded,
     derive_freeform_schema_candidates,
@@ -270,6 +273,16 @@ def _required_message_indices(
         )
         if confirmation_index is not None:
             required_indices.add(confirmation_index)
+    # The accepted disclosure is not always the latest one: a changed policy or
+    # attachment discloses a new one that is still waiting for an answer. What
+    # the user already accepted is what the architecture was pinned from, and it
+    # is only recoverable from these two messages, so pruning them withdraws
+    # commit-grade facts and makes the next commit look like the model
+    # re-authored the pinned architecture.
+    attested = resolve_attested_disclosure(conversation)
+    if attested is not None:
+        required_indices.add(attested.summary_index)
+        required_indices.add(attested.confirmation_index)
     required_indices.update(_latest_question_interaction_indices(conversation))
     required_indices.update(_latest_tool_trace_indices(conversation))
     required_indices.update(_classifier_semantic_indices(conversation))

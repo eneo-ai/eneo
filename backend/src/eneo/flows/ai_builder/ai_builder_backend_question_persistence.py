@@ -46,8 +46,8 @@ async def persist_backend_question(
     question: BackendQuestion,
     assistant_metadata: dict[str, Any] | None = None,
     tool_content: str = "Question presented to user. Awaiting their selection.",
+    planning_state: PlanningState,
     flow: Flow | None = None,
-    planning_state_overlay: PlanningState | None = None,
 ) -> BackendQuestionPersistenceResult:
     """Append a backend-owned discovery question turn and refresh `PlanningState` atomically.
 
@@ -89,7 +89,7 @@ async def persist_backend_question(
         turn=turn,
         new_messages=conversation[new_messages_start:],
         flow=flow,
-        planning_state_overlay=planning_state_overlay,
+        planning_state=planning_state,
     )
 
     return BackendQuestionPersistenceResult(

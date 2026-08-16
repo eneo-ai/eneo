@@ -413,14 +413,10 @@ def test_forced_submission_response_accepts_one_active_submission_tool() -> None
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize(
-    "planning_state",
-    [None, PlanningState.empty()],
-    ids=["missing-state", "missing-commit"],
-)
-async def test_create_propose_flow_without_committed_architecture_returns_error(
-    planning_state: PlanningState | None,
-) -> None:
+async def test_create_propose_flow_without_committed_architecture_returns_error() -> (
+    None
+):
+    planning_state = PlanningState.empty()
     submission = _make_submission()
     tool_call = _make_tool_call(
         PROPOSE_FLOW_TOOL_NAME,

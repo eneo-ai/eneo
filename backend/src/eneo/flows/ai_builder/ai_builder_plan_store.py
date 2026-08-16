@@ -88,8 +88,8 @@ async def store_plan_and_update_conversation(
     tool_name: str,
     arguments: dict[str, Any],
     compiled: CompiledProposal,
+    planning_state: PlanningState,
     flow: "Flow | None" = None,
-    planning_state_overlay: PlanningState | None = None,
 ) -> StoredPlanResult:
     proposal = build_flow_builder_proposal(compiled)
     append_plan_messages(
@@ -112,7 +112,7 @@ async def store_plan_and_update_conversation(
             turn=turn,
             new_messages=conversation[new_messages_start:],
             flow=flow,
-            planning_state_overlay=planning_state_overlay,
+            planning_state=planning_state,
         )
     return StoredPlanResult(
         plan=plan,

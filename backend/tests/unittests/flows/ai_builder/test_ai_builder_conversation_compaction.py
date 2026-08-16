@@ -28,6 +28,9 @@ from eneo.flows.ai_builder.ai_builder_framework_policy import (
 from eneo.flows.ai_builder.ai_builder_planner_request_preparation import (
     conversation_message_to_llm_message,
 )
+from eneo.flows.ai_builder.ai_builder_requirements_state import (
+    resolve_requirements_state,
+)
 from eneo.flows.ai_builder.ai_builder_schema_evidence import (
     SCHEMA_CANDIDATE_MAX_ITEMS,
     build_declared_schema_candidate,
@@ -897,6 +900,104 @@ def test_compaction_keeps_latest_requirements_summary_even_if_old() -> None:
         and msg.metadata.get("requirements_confirmed") is True
         for msg in compacted
     )
+
+
+def _disclosure_payload(version: str, summary: str) -> dict[str, object]:
+    return {
+        "summary": summary,
+        "key_decisions": [],
+        "assumptions": [],
+        "input_description": "Underlag",
+        "output_description": "Rapport",
+        "requirements_version": version,
+        "resolved_requirements": [
+            {
+                "requirement_id": "report_disposition",
+                "selected_value": "synthesized_overview",
+                "label": "Rapportupplägg",
+                "display_value": "Samlad översikt",
+            }
+        ],
+    }
+
+
+@pytest.mark.parametrize(
+    ("max_messages", "max_conversation_bytes"),
+    [(20, 1024 * 1024), (100, 4096)],
+    ids=["count", "bytes"],
+)
+def test_compaction_keeps_the_disclosure_the_user_accepted(
+    max_messages: int,
+    max_conversation_bytes: int,
+) -> None:
+    """A pending disclosure does not make the accepted one droppable.
+
+    A changed policy or attachment discloses a new summary mid-session, so the
+    latest summary is no longer the one the user answered. The architecture was
+    pinned from the accepted one, and acceptance is only recoverable while its
+    summary and confirmation both survive: pruning them withdraws commit-grade
+    facts and makes the next commit look like the model re-authored the pinned
+    architecture.
+    """
+
+    accepted_version = "a" * 64
+    pending_version = "b" * 64
+    conversation = [_msg("user", content=f"msg {i}") for i in range(70)]
+    conversation[5] = _msg(
+        "assistant",
+        content="Accepterad sammanfattning",
+        metadata={
+            "requirements_summary": _disclosure_payload(
+                accepted_version, "Accepterad sammanfattning"
+            ),
+            "requirements_version": accepted_version,
+        },
+    )
+    conversation[6] = _msg(
+        "user",
+        content="",
+        metadata={
+            "requirements_confirmed": True,
+            "requirements_version": accepted_version,
+        },
+    )
+    conversation[-1] = _msg(
+        "assistant",
+        content="Ny sammanfattning",
+        metadata={
+            "requirements_summary": _disclosure_payload(
+                pending_version, "Ny sammanfattning"
+            ),
+            "requirements_version": pending_version,
+        },
+    )
+    before = resolve_requirements_state(conversation)
+    assert before.attested_summary is not None
+    assert before.attested_summary.requirements_version == accepted_version
+    assert not before.confirmed
+    # Each parameter has to reach the eviction path it names, or the case is
+    # only re-running the other one.
+    original_bytes = conversation_serialized_size_bytes(conversation)
+    assert (len(conversation) > max_messages) != (
+        original_bytes > max_conversation_bytes
+    )
+
+    compacted = compact_ai_builder_conversation(
+        conversation,
+        max_messages=max_messages,
+        tail_messages=10,
+        max_conversation_bytes=max_conversation_bytes,
+    )
+
+    assert len(compacted) < len(conversation)
+    assert len(compacted) <= max_messages
+    assert conversation_serialized_size_bytes(compacted) <= max_conversation_bytes
+    after = resolve_requirements_state(list(compacted))
+    assert after.attested_summary is not None
+    assert after.attested_summary.requirements_version == accepted_version
+    # And the pending disclosure is still the one awaiting an answer.
+    assert after.latest_version == pending_version
+    assert not after.confirmed
 
 
 def test_compaction_keeps_latest_tool_trace_pair() -> None:

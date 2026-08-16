@@ -69,7 +69,7 @@ class CompiledProposalFinalizationRequest:
     flow: "Flow | None"
     request_id: str
     usage_tracker: ProposalTurnTelemetry | None
-    planning_state: PlanningState | None
+    planning_state: PlanningState
     compile_context: "CreateCompileContext | None"
 
     @property
@@ -143,7 +143,7 @@ class CompiledProposalFinalizer:
             arguments=request.arguments,
             compiled=compiled,
             flow=request.flow,
-            planning_state_overlay=request.planning_state,
+            planning_state=request.planning_state,
         )
         return ToolProcessingResult(
             events=(

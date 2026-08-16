@@ -1529,7 +1529,10 @@ def test_slot_sources_land_in_exactly_one_summary_bucket() -> None:
     assert set(source_to_slot) == set(get_args(SlotSource))
     assert bucket_by_source == {
         "structured_answer": "decision",
-        "requirements_summary": "decision",
+        # Confirming a disclosure may not move a fact between buckets: that
+        # provenance is created by the confirmation itself, so promoting it
+        # would rewrite the very record the user attested to.
+        "requirements_summary": "assumption",
         "flow_default": "decision",
         "attachment_structure": "assumption",
         "policy_default": "assumption",

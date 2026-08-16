@@ -3760,10 +3760,19 @@ async def test_confirmation_acknowledgment_makes_no_understanding_call() -> None
     confirmation turn itself. Re-interpreting the same attachments moved the
     summary, so the confirmation could never match and the session re-confirmed
     until the interaction limit.
+
+    The deployment ships a mapped-execution ceiling, so the persisted state
+    carries the file limit it disclosed. Acknowledging under a policy that
+    proposes nothing at all is the one case that never reached production.
     """
 
     planner = _make_planner()
     state = _document_architecture_state()
+    state.mapped_file_limit = MappedFileLimit(
+        proposed_value=149,
+        accepted_value=149,
+        provenance="policy_default",
+    )
     conversation = _confirmation_conversation(
         build_requirements_disclosure(state, ui_language="en")
     )
@@ -3778,6 +3787,9 @@ async def test_confirmation_acknowledgment_makes_no_understanding_call() -> None
             conversation=conversation,
             completion_model_route=_route(),
             persisted_planning_state=state,
+            mapped_execution_policy=FlowMappedExecutionPolicy(
+                max_provider_calls_per_mapped_step=150
+            ),
         )
 
     build_runtime.assert_not_awaited()
