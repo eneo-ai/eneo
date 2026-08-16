@@ -26,7 +26,6 @@ from eneo.flows.ai_builder.ai_builder_architecture_errors import (
     AIBuilderArchitectureError,
 )
 from eneo.flows.ai_builder.ai_builder_assembly.document_report import (
-    document_report_compose_covers_requested_sections,
     is_bound_document_report_compose_topology,
 )
 from eneo.flows.ai_builder.ai_builder_assembly.plan import SOURCE_READER_INPUT_TYPES
@@ -56,9 +55,6 @@ from eneo.flows.ai_builder.ai_builder_input_architecture_policy import (
 from eneo.flows.ai_builder.ai_builder_json_schema_paths import (
     schema_leaf_property_names,
     schema_property_names_at_any_depth,
-)
-from eneo.flows.ai_builder.ai_builder_output_sections_signals import (
-    RequestedOutputSections,
 )
 from eneo.flows.ai_builder.ai_builder_planner_pattern_signals import (
     PlannerPatternSignals,
@@ -126,7 +122,6 @@ class CriticContext:
     planner_patterns: PlannerPatternSignals
     output_intent: OutputIntentResolution
     mixed_audio_doc_input: bool
-    requested_output_sections: RequestedOutputSections
     primary_runtime_input: PrimaryRuntimeInput = "unknown"
     aggregation_intent: AggregationIntent = "linear"
     source_reader_required_field_names: frozenset[str] = frozenset()
@@ -216,10 +211,6 @@ _CHECKPOINT_INTENT_MISMATCH = CriticInvariant(
     ),
 )
 
-
-_SOURCE_SURFACING_INPUT_TYPES = frozenset(
-    {InputType.AUDIO, InputType.DOCUMENT, InputType.FILE}
-)
 
 _FIELD_REUSE_MARKERS: tuple[str, ...] = (
     "specific fields",
@@ -1035,19 +1026,6 @@ def _is_document_renderer(
     }
 
 
-def _is_source_surfacing_text(
-    *,
-    input_source: InputSource,
-    input_type: InputType,
-    output_type: OutputType,
-) -> bool:
-    return (
-        input_source == InputSource.FLOW_INPUT
-        and input_type in _SOURCE_SURFACING_INPUT_TYPES
-        and output_type == OutputType.TEXT
-    )
-
-
 def _spec_has_multiple_content_steps(spec: FlowDraftSpecCore) -> bool:
     content_steps = [step for step in spec.steps if not _is_renderer_step(step)]
     return len(content_steps) >= 2
@@ -1350,72 +1328,6 @@ def _prior_json_contract_count(spec: FlowDraftSpecCore, *, before_index: int) ->
         and step.output_type == OutputType.JSON
         and step.output_contract is not None
     )
-
-
-def _requested_output_sections_require_section_writers_evidence(
-    context: CriticContext,
-) -> bool:
-    requested = context.requested_output_sections
-    if not requested.high_confidence or not _spec_has_report_terminal(context.spec):
-        return False
-    lowered_composers = tuple(
-        step
-        for step in context.spec.steps
-        if is_bound_document_report_compose_topology(context.spec, step)
-    )
-    if lowered_composers:
-        return not any(
-            document_report_compose_covers_requested_sections(
-                composer,
-                requested,
-            )
-            for composer in lowered_composers
-        )
-    # One writer may cover at most two adjacent requested sections; fewer writers
-    # recreates the overloaded single-step shape this invariant is meant to reject.
-    required_writers = (len(requested.sections) + 1) // 2
-    return _section_writer_count(context.spec) < required_writers
-
-
-def _spec_has_report_terminal(spec: FlowDraftSpecCore) -> bool:
-    terminal = spec.steps[-1] if spec.steps else None
-    return terminal is not None and terminal.output_type in {
-        OutputType.TEXT,
-        OutputType.DOCX,
-        OutputType.PDF,
-    }
-
-
-def _section_writer_count(spec: FlowDraftSpecCore) -> int:
-    return sum(
-        1
-        for step in spec.steps
-        if step.output_type == OutputType.TEXT
-        and not _is_renderer_step(step)
-        and not _looks_like_review_only_text_step(spec, step)
-        and not _is_source_surfacing_text(
-            input_source=step.input_source,
-            input_type=step.input_type,
-            output_type=step.output_type,
-        )
-    )
-
-
-_REQUESTED_OUTPUT_SECTIONS_REQUIRE_SECTION_WRITERS = CriticInvariant(
-    id="requested_output_sections_require_section_writers",
-    description=(
-        "When the user names several output sections for a generated report, "
-        "the plan must preserve them as section-writing work. A single broad "
-        "composer loses reviewability and gives weaker models too much to do."
-    ),
-    evidence=_requested_output_sections_require_section_writers_evidence,
-    remediation=(
-        "Användaren har namngivit flera rubriker/avsnitt för slutrapporten. "
-        "Dela upp intentionen i tydliga semantiska avsnittssteg, högst ett "
-        "par närliggande rubriker per steg, och lägg ett avslutande "
-        "sammanställningssteg före DOCX/PDF/textleveransen."
-    ),
-)
 
 
 def _redundant_terminal_json_format_tail_after_final_text_composer_evidence(
@@ -1799,7 +1711,6 @@ CRITIC_INVARIANTS: tuple[CriticInvariant, ...] = (
     _SIMPLE_TEXT_TRANSFORM_MUST_REMAIN_SINGLE_STEP,
     _DOCUMENT_RENDERER_MUST_IMMEDIATELY_FOLLOW_BODY_WRITER,
     _TERMINAL_RENDERER_MUST_NOT_CONSUME_REVIEW_ONLY_STEP,
-    _REQUESTED_OUTPUT_SECTIONS_REQUIRE_SECTION_WRITERS,
     _REDUNDANT_TERMINAL_JSON_FORMAT_TAIL_AFTER_FINAL_TEXT_COMPOSER,
     _FINAL_TEXT_STEP_MUST_REFERENCE_RELEVANT_STRUCTURED_OUTPUTS,
     _FORM_FIELDS_DECLARED_MUST_BE_REFERENCED,

@@ -21,9 +21,6 @@ from eneo.flows.ai_builder.ai_builder_critic_invariants import (
 from eneo.flows.ai_builder.ai_builder_event_models import (
     RequirementsSummaryPayload,
 )
-from eneo.flows.ai_builder.ai_builder_output_sections_signals import (
-    RequestedOutputSections,
-)
 from eneo.flows.ai_builder.ai_builder_plan_quality_critic import (
     build_conversation_aware_quality_feedback,
     build_conversation_critic_context,
@@ -34,9 +31,6 @@ from eneo.flows.ai_builder.ai_builder_requirements_state import (
 )
 from eneo.flows.ai_builder.ai_builder_schema_evidence import build_schema_evidence
 from eneo.flows.ai_builder.planning_state import (
-    BUILDER_SCHEMA_VERSION,
-    FCM_VERSION,
-    PLANNER_CONTRACT_VERSION,
     CheckpointIntent,
     NamedResultEvidence,
     PlanningSignal,
@@ -197,97 +191,6 @@ def _requirements(**overrides: object) -> RequirementsSummaryPayload:
     }
     payload.update(overrides)
     return RequirementsSummaryPayload.model_validate(payload)
-
-
-def _named_section_report_prompt() -> str:
-    return """
-    Skapa ett flöde som får ett Word-dokument och skriver ett beslutsunderlag.
-    Följande rubriker ska finnas med:
-
-    Rubrik: Problem/nuläge
-    Rubrik: Lösningsförslag/nyläge
-    Rubrik: Resursåtgång
-    Rubrik: Planerad tidplan
-    Rubrik: Ekonomisk nytta och kostnader
-    Rubrik: Nyttor
-    Rubrik: Finansiering
-    Rubrik: Ansvarig för nyttorealisering
-    Rubrik: Bedömning av förändringens komplexitet
-    Rubrik: Plan för nyttorealisering
-    """
-
-
-def _four_section_report_prompt() -> str:
-    return """
-    Skapa ett flöde som får ett dokument och skriver en rapport.
-    Följande rubriker ska finnas med:
-
-    Rubrik: Bakgrund
-    Rubrik: Bedömning
-    Rubrik: Åtgärder
-    Rubrik: Risker
-    """
-
-
-def _named_output_sections() -> RequestedOutputSections:
-    return RequestedOutputSections(
-        sections=(
-            "problem/nuläge",
-            "lösningsförslag/nyläge",
-            "resursåtgång",
-            "planerad tidplan",
-            "ekonomisk nytta och kostnader",
-            "nyttor",
-            "finansiering",
-            "ansvarig för nyttorealisering",
-            "bedömning av förändringens komplexitet",
-            "plan för nyttorealisering",
-        ),
-        confidence="high",
-    )
-
-
-def _four_output_sections() -> RequestedOutputSections:
-    return RequestedOutputSections(
-        sections=("bakgrund", "bedömning", "åtgärder", "risker"),
-        confidence="high",
-    )
-
-
-def test_build_conversation_critic_context_uses_canonical_requested_sections() -> None:
-    spec = FlowDraftSpecCore(
-        flow_name="Beslutsunderlag",
-        steps=[
-            _step(
-                "step_a",
-                "Skriv beslutsunderlag",
-                "Skriv ett beslutsunderlag.",
-                output_type=OutputType.TEXT,
-            )
-        ],
-    )
-
-    requested_output_sections = _named_output_sections()
-    context = build_conversation_critic_context(
-        [{"role": "user", "content": _named_section_report_prompt()}],
-        spec,
-        requested_output_sections=requested_output_sections,
-    )
-
-    assert context.requested_output_sections is requested_output_sections
-    assert context.requested_output_sections.high_confidence
-    assert context.requested_output_sections.sections == (
-        "problem/nuläge",
-        "lösningsförslag/nyläge",
-        "resursåtgång",
-        "planerad tidplan",
-        "ekonomisk nytta och kostnader",
-        "nyttor",
-        "finansiering",
-        "ansvarig för nyttorealisering",
-        "bedömning av förändringens komplexitet",
-        "plan för nyttorealisering",
-    )
 
 
 def test_action_followup_critic_uses_typed_goal_and_declared_schema_leaves() -> None:
@@ -566,252 +469,6 @@ def test_action_followup_roles_must_survive_into_the_outcome_contract() -> None:
     assert "action_followup_requires_followup_fields" in {issue.id for issue in issues}
 
 
-def _structured_source_step() -> StepSpec:
-    return _step(
-        "step_a",
-        "Extrahera beslutsunderlag",
-        "Extrahera återanvändbara fakta från dokumentet.",
-        input_source=InputSource.FLOW_INPUT,
-        input_type=InputType.DOCUMENT,
-        output_type=OutputType.JSON,
-        output_contract={
-            "type": "object",
-            "properties": {
-                "problem_och_behov": {"type": "string"},
-                "losning": {"type": "string"},
-            },
-        },
-    )
-
-
-def _section_writer_step(
-    ref: str, name: str, previous_ref: str | None = None
-) -> StepSpec:
-    prior_text = f"{{{{ {previous_ref}.output.text }}}}\n\n" if previous_ref else ""
-    return _step(
-        ref,
-        name,
-        f"Skriv avsnittet {name}.",
-        input_source=InputSource.PREVIOUS_STEP,
-        input_type=InputType.TEXT,
-        output_type=OutputType.TEXT,
-        input_bindings={
-            "question": prior_text
-            + "Problem och behov: {{ step_a.output.structured.problem_och_behov }}"
-        },
-    )
-
-
-def test_named_output_sections_require_enough_section_writers() -> None:
-    spec = FlowDraftSpecCore(
-        flow_name="Beslutsunderlag",
-        flow_description="",
-        steps=[
-            _structured_source_step(),
-            _step(
-                "step_b",
-                "Skriv beslutsunderlag",
-                "Skriv hela beslutsunderlaget med alla rubriker.",
-                input_source=InputSource.PREVIOUS_STEP,
-                input_type=InputType.JSON,
-                output_type=OutputType.TEXT,
-                input_bindings={
-                    "question": (
-                        "Problem och behov: "
-                        "{{ step_a.output.structured.problem_och_behov }}"
-                    )
-                },
-            ),
-            _step(
-                "step_c",
-                "Skapa DOCX",
-                "Skapa Word-dokument.",
-                input_source=InputSource.PREVIOUS_STEP,
-                input_type=InputType.TEXT,
-                output_type=OutputType.DOCX,
-            ),
-        ],
-    )
-
-    context = build_conversation_critic_context(
-        [{"role": "user", "content": _named_section_report_prompt()}],
-        spec,
-        requested_output_sections=_named_output_sections(),
-    )
-
-    issue_ids = {issue.id for issue in evaluate_critic_invariants(context)}
-    assert "requested_output_sections_require_section_writers" in issue_ids
-
-
-def test_named_output_sections_do_not_count_review_only_step_as_writer() -> None:
-    spec = FlowDraftSpecCore(
-        flow_name="Rapport",
-        flow_description="",
-        steps=[
-            _structured_source_step(),
-            _section_writer_step("step_b", "Skriv bakgrund och bedömning"),
-            _step(
-                "step_c",
-                "Validera rapporten",
-                "Validera kvaliteten innan den slutliga versionen sätts samman.",
-                input_source=InputSource.PREVIOUS_STEP,
-                input_type=InputType.TEXT,
-                output_type=OutputType.TEXT,
-            ),
-            _step(
-                "step_d",
-                "Skapa DOCX",
-                "Skapa Word-dokument.",
-                input_source=InputSource.PREVIOUS_STEP,
-                input_type=InputType.TEXT,
-                output_type=OutputType.DOCX,
-            ),
-        ],
-    )
-    context = build_conversation_critic_context(
-        [{"role": "user", "content": _four_section_report_prompt()}],
-        spec,
-        requested_output_sections=_four_output_sections(),
-    )
-
-    issue_ids = {issue.id for issue in evaluate_critic_invariants(context)}
-    assert "requested_output_sections_require_section_writers" in issue_ids
-
-
-def test_named_output_sections_count_typed_document_body_writer() -> None:
-    spec = FlowDraftSpecCore(
-        flow_name="Rapport",
-        flow_description="",
-        steps=[
-            _structured_source_step(),
-            _section_writer_step("step_b", "Skriv bakgrund"),
-            _step(
-                "step_c",
-                "Validera rapporten",
-                "Validera kvaliteten innan den slutliga versionen sätts samman.",
-                input_source=InputSource.PREVIOUS_STEP,
-                input_type=InputType.TEXT,
-                output_type=OutputType.TEXT,
-            ),
-            _step(
-                "step_d",
-                "Skapa DOCX",
-                "Skapa Word-dokument.",
-                input_source=InputSource.PREVIOUS_STEP,
-                input_type=InputType.TEXT,
-                output_type=OutputType.DOCX,
-            ),
-        ],
-        document_body_writer_step_refs=("step_c",),
-    )
-    context = build_conversation_critic_context(
-        [{"role": "user", "content": _four_section_report_prompt()}],
-        spec,
-        requested_output_sections=_four_output_sections(),
-    )
-
-    issue_ids = {issue.id for issue in evaluate_critic_invariants(context)}
-    assert "requested_output_sections_require_section_writers" not in issue_ids
-
-
-def test_named_output_sections_allow_grouped_section_writers() -> None:
-    steps = [_structured_source_step()]
-    previous_ref: str | None = None
-    for ref, name in (
-        ("step_b", "Skriv problem och lösningsförslag"),
-        ("step_c", "Skriv resurser och tidplan"),
-        ("step_d", "Skriv nytta och kostnader"),
-        ("step_e", "Skriv finansiering och ansvar"),
-        ("step_f", "Skriv komplexitet"),
-        ("step_g", "Skriv plan för nyttorealisering"),
-    ):
-        steps.append(_section_writer_step(ref, name, previous_ref))
-        previous_ref = ref
-    steps.extend(
-        [
-            _step(
-                "step_h",
-                "Sammanställ beslutsunderlag",
-                "Sammanställ alla avsnitt.",
-                input_source=InputSource.PREVIOUS_STEP,
-                input_type=InputType.TEXT,
-                output_type=OutputType.TEXT,
-                input_bindings={
-                    "question": "\n\n".join(
-                        [
-                            "{{ step_b.output.text }}",
-                            "{{ step_c.output.text }}",
-                            "{{ step_d.output.text }}",
-                            "{{ step_e.output.text }}",
-                            "{{ step_f.output.text }}",
-                            "{{ step_g.output.text }}",
-                            "{{ step_a.output.structured.problem_och_behov }}",
-                        ]
-                    )
-                },
-            ),
-            _step(
-                "step_i",
-                "Skapa DOCX",
-                "Skapa Word-dokument.",
-                input_source=InputSource.PREVIOUS_STEP,
-                input_type=InputType.TEXT,
-                output_type=OutputType.DOCX,
-            ),
-        ]
-    )
-    spec = FlowDraftSpecCore(
-        flow_name="Beslutsunderlag",
-        flow_description="",
-        steps=steps,
-    )
-
-    context = build_conversation_critic_context(
-        [{"role": "user", "content": _named_section_report_prompt()}],
-        spec,
-        requested_output_sections=_named_output_sections(),
-    )
-
-    issue_ids = {issue.id for issue in evaluate_critic_invariants(context)}
-    assert "requested_output_sections_require_section_writers" not in issue_ids
-
-
-def test_sectioned_form_intake_does_not_require_section_writers() -> None:
-    spec = FlowDraftSpecCore(
-        flow_name="Formulär till rapport",
-        flow_description="",
-        form_fields=[
-            FormFieldSpec(name="bakgrund", type="text", label="Bakgrund"),
-            FormFieldSpec(name="bedomning", type="text", label="Bedömning"),
-        ],
-        steps=[
-            _step(
-                "step_a",
-                "Sammanställ rapport",
-                "Sammanställ användarens fritext.",
-                input_source=InputSource.FLOW_INPUT,
-                input_type=InputType.TEXT,
-                output_type=OutputType.TEXT,
-            )
-        ],
-    )
-    context = build_conversation_critic_context(
-        [
-            {
-                "role": "user",
-                "content": (
-                    "Skapa ett formulär där användaren ska lämna fritext "
-                    "under varje rubrik: Bakgrund, Bedömning, Risker och Beslut."
-                ),
-            }
-        ],
-        spec,
-    )
-
-    issue_ids = {issue.id for issue in evaluate_critic_invariants(context)}
-    assert "requested_output_sections_require_section_writers" not in issue_ids
-
-
 def test_create_critic_leaves_sectioned_form_field_placement_to_assembly() -> None:
     spec = FlowDraftSpecCore(
         flow_name="Formulär till rapport",
@@ -827,20 +484,16 @@ def test_create_critic_leaves_sectioned_form_field_placement_to_assembly() -> No
             )
         ],
     )
-    planning_state = PlanningState(
-        fcm_version=FCM_VERSION,
-        planner_contract_version=PLANNER_CONTRACT_VERSION,
-        builder_schema_version=BUILDER_SCHEMA_VERSION,
-        signals=[
-            PlanningSignal(
-                question_id="form_intake_pattern",
-                value="sectioned_form_intake",
-                confidence="high",
-                source="model",
-                provenance=["quote:fritext under varje rubrik"],
-            )
-        ],
-    )
+    planning_state = PlanningState.empty()
+    planning_state.signals = [
+        PlanningSignal(
+            question_id="form_intake_pattern",
+            value="sectioned_form_intake",
+            confidence="high",
+            source="model",
+            provenance=["quote:fritext under varje rubrik"],
+        )
+    ]
     context = build_conversation_critic_context(
         [{"role": "user", "content": "Bygg flödet enligt beskrivningen."}],
         spec,
@@ -866,59 +519,6 @@ def test_unreferenced_form_field_guard_is_edit_only() -> None:
     assert "form_fields_declared_must_be_referenced" in {
         issue.id for issue in evaluate_critic_invariants(edit_context)
     }
-
-
-def test_model_sectioned_form_intake_signal_suppresses_section_writer_rule() -> None:
-    spec = FlowDraftSpecCore(
-        flow_name="Formulär till rapport",
-        flow_description="",
-        form_fields=[
-            FormFieldSpec(name="bakgrund", type="text", label="Bakgrund"),
-            FormFieldSpec(name="bedomning", type="text", label="Bedömning"),
-            FormFieldSpec(name="risker", type="text", label="Risker"),
-            FormFieldSpec(name="beslut", type="text", label="Beslut"),
-        ],
-        steps=[
-            _step(
-                "step_a",
-                "Sammanställ rapport",
-                "Sammanställ användarens svar.",
-                input_source=InputSource.FLOW_INPUT,
-                input_type=InputType.TEXT,
-                output_type=OutputType.TEXT,
-            )
-        ],
-    )
-    planning_state = PlanningState(
-        fcm_version=FCM_VERSION,
-        planner_contract_version=PLANNER_CONTRACT_VERSION,
-        builder_schema_version=BUILDER_SCHEMA_VERSION,
-        signals=[
-            PlanningSignal(
-                question_id="form_intake_pattern",
-                value="sectioned_form_intake",
-                confidence="high",
-                source="model",
-                provenance=["quote:fritext under varje rubrik"],
-            )
-        ],
-    )
-    context = build_conversation_critic_context(
-        [
-            {
-                "role": "user",
-                "content": (
-                    "Skapa ett dokument med rubrikerna Bakgrund, Bedömning, "
-                    "Risker och Beslut."
-                ),
-            }
-        ],
-        spec,
-        planning_state=planning_state,
-    )
-
-    issue_ids = {issue.id for issue in evaluate_critic_invariants(context)}
-    assert "requested_output_sections_require_section_writers" not in issue_ids
 
 
 def _pdf_mismatch_context() -> "CriticContext":
@@ -1019,7 +619,6 @@ def _create_gated_architecture_context(
         planner_patterns=PlannerPatternSignals(),
         output_intent=OutputIntentResolution(terminal_output=terminal_output),
         mixed_audio_doc_input=False,
-        requested_output_sections=RequestedOutputSections.empty(),
         primary_runtime_input=cast("PrimaryRuntimeInput", primary_runtime_input),
         aggregation_intent=cast("AggregationIntent", aggregation_intent),
     )
@@ -2992,7 +2591,6 @@ class TestCriticInvariantLoop:
             planner_patterns=PlannerPatternSignals(),
             output_intent=OutputIntentResolution(terminal_output="pdf_document"),
             mixed_audio_doc_input=False,
-            requested_output_sections=RequestedOutputSections.empty(),
         )
 
         issues = render_critic_issues(context)
@@ -3033,7 +2631,6 @@ class TestCriticInvariantLoop:
             planner_patterns=PlannerPatternSignals(),
             output_intent=OutputIntentResolution(terminal_output="pdf_document"),
             mixed_audio_doc_input=False,
-            requested_output_sections=RequestedOutputSections.empty(),
         )
 
         assert render_critic_issues(context) == []
@@ -3065,7 +2662,6 @@ class TestCriticInvariantLoop:
             planner_patterns=PlannerPatternSignals(),
             output_intent=OutputIntentResolution(terminal_output=None),
             mixed_audio_doc_input=False,
-            requested_output_sections=RequestedOutputSections.empty(),
         )
 
         assert render_critic_issues(context) == []
@@ -3112,7 +2708,6 @@ def _final_text_step_critic_context(
         planner_patterns=PlannerPatternSignals(),
         output_intent=OutputIntentResolution(terminal_output=terminal_output),
         mixed_audio_doc_input=False,
-        requested_output_sections=RequestedOutputSections.empty(),
         aggregation_intent=cast("AggregationIntent", aggregation_intent),
         result_contract=(
             ResultContract(
@@ -5001,7 +4596,6 @@ class TestStandaloneAudioInvariant:
             planner_patterns=PlannerPatternSignals(),
             output_intent=OutputIntentResolution(terminal_output=None),
             mixed_audio_doc_input=mixed_audio_doc_input,
-            requested_output_sections=RequestedOutputSections.empty(),
             primary_runtime_input=cast("PrimaryRuntimeInput", primary_runtime_input),
         )
 
@@ -5214,7 +4808,6 @@ class TestCriticInvariantRegistry:
             "simple_text_transform_must_remain_single_step",
             "document_renderer_must_immediately_follow_body_writer",
             "terminal_renderer_must_not_consume_review_only_step",
-            "requested_output_sections_require_section_writers",
             "redundant_terminal_json_format_tail_after_final_text_composer",
             "final_text_step_must_reference_relevant_structured_outputs",
             "form_fields_declared_must_be_referenced",
@@ -5291,7 +4884,6 @@ class TestRichWorkflowInvariants:
             ),
             output_intent=OutputIntentResolution(terminal_output=None),
             mixed_audio_doc_input=False,
-            requested_output_sections=RequestedOutputSections.empty(),
             result_contract=(
                 ResultContract(
                     terminal_output="docx_document",
@@ -6099,7 +5691,6 @@ class TestSourceReaderRequiredFieldsCaptured:
             planner_patterns=PlannerPatternSignals(),
             output_intent=OutputIntentResolution(terminal_output=None),
             mixed_audio_doc_input=False,
-            requested_output_sections=RequestedOutputSections.empty(),
             source_reader_required_field_names=required,
         )
 
@@ -6193,7 +5784,6 @@ class TestRuntimeMetadataRemediationNamesTheFields:
             planner_patterns=PlannerPatternSignals(),
             output_intent=OutputIntentResolution(terminal_output=None),
             mixed_audio_doc_input=False,
-            requested_output_sections=RequestedOutputSections.empty(),
             resolved_slots={
                 "runtime_metadata_fields": ResolvedSlot(
                     name="runtime_metadata_fields",

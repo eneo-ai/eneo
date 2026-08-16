@@ -28,10 +28,6 @@ from eneo.flows.ai_builder.ai_builder_input_architecture_policy import (
 from eneo.flows.ai_builder.ai_builder_json_schema_paths import (
     schema_leaf_property_names,
 )
-from eneo.flows.ai_builder.ai_builder_output_sections_signals import (
-    EMPTY_REQUESTED_OUTPUT_SECTIONS,
-    RequestedOutputSections,
-)
 from eneo.flows.ai_builder.ai_builder_planner_pattern_signals import (
     build_requirements_signal_text,
     detect_planner_pattern_signals,
@@ -61,9 +57,6 @@ def build_conversation_aware_quality_feedback(
     aggregation_intent: AggregationIntent = "linear",
     resource_catalog: "AIBuilderResourceCatalog | None" = None,
     planning_state: PlanningState | None = None,
-    requested_output_sections: RequestedOutputSections = (
-        EMPTY_REQUESTED_OUTPUT_SECTIONS
-    ),
     include_edit_topology_advisories: bool = True,
     compile_context: CreateCompileContext | None = None,
 ) -> str | None:
@@ -74,7 +67,6 @@ def build_conversation_aware_quality_feedback(
         aggregation_intent=aggregation_intent,
         resource_catalog=resource_catalog,
         planning_state=planning_state,
-        requested_output_sections=requested_output_sections,
         compile_context=compile_context,
     )
     return build_quality_feedback_from_critic_context(
@@ -132,9 +124,6 @@ def build_conversation_critic_context(
     aggregation_intent: AggregationIntent | None = None,
     resource_catalog: "AIBuilderResourceCatalog | None" = None,
     planning_state: PlanningState | None = None,
-    requested_output_sections: RequestedOutputSections = (
-        EMPTY_REQUESTED_OUTPUT_SECTIONS
-    ),
     compile_context: CreateCompileContext | None = None,
 ) -> CriticContext:
     answer_signals = extract_answer_signals(conversation)
@@ -221,11 +210,6 @@ def build_conversation_critic_context(
             else None
         ),
         resource_catalog=resource_catalog,
-        requested_output_sections=(
-            compile_context.requested_output_sections
-            if compile_context is not None
-            else requested_output_sections
-        ),
     )
 
 

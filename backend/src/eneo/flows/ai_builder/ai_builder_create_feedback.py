@@ -43,9 +43,6 @@ CREATE_CRITIC_REMEDIATION: dict[str, str] = {
     "document_renderer_must_immediately_follow_body_writer": (
         "Placera DOCX/PDF-renderaren direkt efter det semantiska steg som skriver den färdiga dokumenttexten. Flytta eller ta bort mellanliggande steg som bryter den dokumentkedjan."
     ),
-    "requested_output_sections_require_section_writers": (
-        "Bevara användarens namngivna rapportavsnitt som tydliga semantiska skrivsteg i intentionen, och gruppera bara närliggande rubriker när det behövs."
-    ),
     "redundant_terminal_json_format_tail_after_final_text_composer": (
         "Ta bort det extra JSON-formatsteget efter sluttexten när användaren inte har valt JSON som slutformat. Låt det semantiska textsteget som skriver slutversionen vara terminalt."
     ),

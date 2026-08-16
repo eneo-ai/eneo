@@ -1,4 +1,10 @@
-"""Detect named output sections requested for generated reports."""
+"""Detect named output sections the user requested for generated reports.
+
+Only the user's own wording counts. Headings observed in an attached example
+document describe how one earlier document looked; they are structural evidence
+for the model, not an output topology the plan must reproduce, and they are
+projected as such by the example-output evidence prompt block.
+"""
 
 from __future__ import annotations
 
@@ -85,7 +91,6 @@ def extract_requested_output_sections(
     text: str,
     *,
     model_form_intake_signals: Collection[str] = (),
-    confirmed_headings: Collection[str] = (),
 ) -> RequestedOutputSections:
     normalized = text.casefold()
     if (
@@ -95,7 +100,7 @@ def extract_requested_output_sections(
         return RequestedOutputSections.empty()
 
     explicit_titles = _explicit_heading_titles(text) if normalized else ()
-    conversation_candidates = (
+    candidates = (
         list(explicit_titles)
         if explicit_titles
         else (
@@ -108,16 +113,7 @@ def extract_requested_output_sections(
             else []
         )
     )
-    confirmed_candidates = [
-        heading for raw in confirmed_headings if (heading := _clean_title(raw))
-    ]
-    candidates = [*conversation_candidates, *confirmed_candidates]
     sections = _dedupe_titles(candidates)
-    if confirmed_candidates and sections:
-        return RequestedOutputSections(
-            sections=sections[:_MAX_HIGH_CONFIDENCE_SECTIONS],
-            confidence="high",
-        )
     if (
         len(sections) < _MIN_HIGH_CONFIDENCE_SECTIONS
         or len(sections) > _MAX_HIGH_CONFIDENCE_SECTIONS

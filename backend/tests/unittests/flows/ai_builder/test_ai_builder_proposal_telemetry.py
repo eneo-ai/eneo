@@ -303,7 +303,7 @@ def test_proposal_attempt_telemetry_is_bounded_and_content_free() -> None:
         failure_codes=frozenset(
             {
                 "duplicate_step_name",
-                "requested_output_sections_require_section_writers",
+                "named_result_obligations_must_survive",
                 "raw user text must never be telemetry",
             }
         ),
@@ -325,7 +325,7 @@ def test_proposal_attempt_telemetry_is_bounded_and_content_free() -> None:
             "failure_kind": "quality",
             "failure_codes": [
                 "duplicate_step_name",
-                "requested_output_sections_require_section_writers",
+                "named_result_obligations_must_survive",
             ],
             "failure_code_count": 2,
         }

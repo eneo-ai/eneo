@@ -356,11 +356,6 @@ def build_proposal_prepared(
         model_form_intake_signals=form_intake_signal_values_from_planning_state(
             planning_state
         ),
-        confirmed_headings=(
-            planning_state.example_output_constraints.headings
-            if planning_state.example_output_constraints is not None
-            else ()
-        ),
     )
     prior_spec_for_revision = _prior_spec_for_revision(
         context=plan_edit_context,

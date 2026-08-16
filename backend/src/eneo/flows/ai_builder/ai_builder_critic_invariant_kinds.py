@@ -36,7 +36,6 @@ CRITIC_INVARIANT_KINDS: Mapping[str, CriticInvariantKind] = {
     "non_terminal_step_template_fill_forbidden": "architecture",
     "pdf_terminal_output_alignment": "architecture",
     "redundant_terminal_json_format_tail_after_final_text_composer": "semantic",
-    "requested_output_sections_require_section_writers": "semantic",
     "rich_workflow_requires_form_fields": "semantic",
     "rich_workflow_requires_json_contract_step": "semantic",
     "rich_workflow_requires_multiple_steps": "semantic",

@@ -556,19 +556,18 @@ def test_plan_proposal_prompt_treats_example_shape_and_style_as_guidance() -> No
         flow_context=None,
         is_edit_mode=False,
         resource_catalog=_empty_catalog(),
-        requested_output_sections=RequestedOutputSections(
-            sections=("Summary", "Decision"),
-            confidence="high",
-        ),
     )
 
     assert "inferred top-level fields:" in prompt
     assert "showing 8 of 12" in prompt
     assert "not as an explicit or closed contract" in prompt
-    assert "Example-output style evidence:" in prompt
+    assert "Example-output evidence:" in prompt
+    assert "- heading: Summary" in prompt
+    assert "- heading: Decision" in prompt
     assert "- tone: Formal and concise" in prompt
-    assert "do not promise exact visual layout" in prompt
-    assert "Requested output sections:" in prompt
+    assert "it is not a required output topology" in prompt
+    assert "Do not promise exact visual layout" in prompt
+    assert "Requested output sections:" not in prompt
 
 
 def test_plan_proposal_prompt_renders_template_placeholder_evidence() -> None:

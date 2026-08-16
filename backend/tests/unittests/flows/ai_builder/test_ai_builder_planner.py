@@ -34,9 +34,6 @@ from eneo.flows.ai_builder.ai_builder_create_compile_context import CreateCompil
 from eneo.flows.ai_builder.ai_builder_create_compiler import (
     compile_create_intent_to_spec,
 )
-from eneo.flows.ai_builder.ai_builder_critic_invariants import (
-    evaluate_critic_invariants,
-)
 from eneo.flows.ai_builder.ai_builder_discovery_models import DiscoveryAnalysis
 from eneo.flows.ai_builder.ai_builder_discovery_runtime import DiscoveryRuntimeResult
 from eneo.flows.ai_builder.ai_builder_domain_models import (
@@ -68,9 +65,6 @@ from eneo.flows.ai_builder.ai_builder_events import (
 from eneo.flows.ai_builder.ai_builder_plan_edit_context import (
     AIBuilderPlanEditContext,
     AIBuilderSavedFlowStepEditContext,
-)
-from eneo.flows.ai_builder.ai_builder_plan_quality_critic import (
-    build_conversation_critic_context,
 )
 from eneo.flows.ai_builder.ai_builder_planner import (
     AIBuilderPlanner,
@@ -144,6 +138,9 @@ from eneo.flows.ai_builder.ai_builder_user_question_metadata import (
 from eneo.flows.ai_builder.planning_state import (
     ArchitectureCommit,
     ConfirmedRuntimeMetadataField,
+    ExampleOutputCitation,
+    ExampleOutputConstraintEvidence,
+    ExampleOutputSourceCoverage,
     FileRoleEvidence,
     PlanningSignal,
     PlanningState,
@@ -871,17 +868,143 @@ def test_named_report_sections_flow_from_request_preparation_into_lowering() -> 
         (("requested_section_3",), "Analysis"),
         (("requested_section_4",), "Recommendations"),
     }
-    issues = evaluate_critic_invariants(
-        build_conversation_critic_context(
-            conversation,
-            spec,
-            planning_state=prepared.planning_state,
-            requested_output_sections=context.requested_output_sections,
+
+
+def test_example_document_headings_stay_guidance_and_never_become_topology() -> None:
+    """An attached example shows how one earlier document looked.
+
+    Its headings guide the model's structure and style, but they are not an
+    output topology the plan owes the user: they must not become requested
+    output sections, must not reach the prompt as a requirement, and must not
+    be lowered into per-section report contracts.
+    """
+
+    file_id = uuid4()
+    conversation = [
+        ConversationMessage(
+            role="user",
+            content=(
+                "The attached report is only a format example of how our "
+                "reviews look. It is not a source and nothing from it may end "
+                "up in my reviews."
+            ),
         )
+    ]
+    state = _document_architecture_state()
+    state.architecture_commit = ArchitectureCommit(
+        tuples_chain=[
+            StepTriple(
+                input_type="document",
+                output_type="pdf",
+                output_mode="render_verbatim",
+            )
+        ],
+        chosen_patterns=["document_to_structured_report"],
+        required_capabilities=["input_document", "output_pdf"],
+        report_disposition="both",
+        committed_at=datetime(2026, 8, 5, tzinfo=timezone.utc),
+        architecture_hash="b" * 64,
     )
-    assert "requested_output_sections_require_section_writers" not in {
-        issue.id for issue in issues
-    }
+    state.file_roles = [
+        FileRoleEvidence(
+            file_id=file_id,
+            filename="example_report.docx",
+            file_type=FileType.TEXT,
+            has_readable_text=True,
+            coverage="fully_seen",
+            role="example_output",
+            source="model",
+            confidence="high",
+            evidence=["quote:only a format example"],
+            evidence_level="explicit",
+        )
+    ]
+    state.example_output_constraints = ExampleOutputConstraintEvidence(
+        source_file_ids=[file_id],
+        source_coverage=[
+            ExampleOutputSourceCoverage(file_id=file_id, coverage="fully_seen")
+        ],
+        headings=["Résumé", "Findings", "Analysis", "Recommendations"],
+        confidence="high",
+        citations=[
+            ExampleOutputCitation(
+                source_id="user_message:0",
+                quote="only a format example of how our reviews look",
+            )
+        ],
+    )
+    prepared = build_proposal_prepared(
+        requirements_state=RequirementsState(),
+        ui_language="en",
+        slot_classification_metadata=None,
+        conversation=conversation,
+        planning_state=state,
+        attachment_context=None,
+        flow_context=None,
+        is_edit_mode=False,
+        resource_catalog=build_ai_builder_resource_catalog(
+            available_models=[], available_kbs=[], prior_bindings=()
+        ),
+        flow=None,
+        assistant_snapshots=None,
+        plan_edit_context=None,
+        prior_plan_for_revision=None,
+        litellm_model="openai/gpt-5.4",
+        max_input_tokens=4096,
+        max_output_tokens=1024,
+        budget_policy=_budget_policy(),
+        attachment_file_count=1,
+        current_turn_start=0,
+    )
+    context = prepared.compile_context
+    assert context is not None
+    assert context.requested_output_sections.sections == ()
+
+    prompt = prepared.llm_messages[0]["content"]
+    assert isinstance(prompt, str)
+    assert "Requested output sections:" not in prompt
+    assert "Example-output evidence:" in prompt
+    assert "- heading: Findings" in prompt
+    assert "it is not a required output topology" in prompt
+
+    intent = parse_create_flow_intent_arguments(
+        {
+            "flow_name": "Source report",
+            "plan_rationale": "Extract source evidence and render the report.",
+            "steps": [
+                {
+                    "name": "Read documents",
+                    "instructions": "Extract source-grounded evidence.",
+                    "output_fields": [
+                        {
+                            "name": "documents",
+                            "field_type": "array",
+                            "description": "One record per source.",
+                            "item_fields": [
+                                {
+                                    "name": "summary",
+                                    "field_type": "string",
+                                    "description": "Source summary.",
+                                }
+                            ],
+                        }
+                    ],
+                },
+                {
+                    "name": "Write report",
+                    "instructions": "Write the requested report.",
+                },
+            ],
+        }
+    )
+    spec = compile_create_intent_to_spec(intent, context=context)
+
+    assert not [
+        ref
+        for step in spec.steps
+        for ref in source_ref_bindings(step.input_bindings)
+        if any(part.startswith("requested_section_") for part in ref.field_path)
+    ]
 
 
 def _server_output_prepared() -> ServerOutputPrepared:

@@ -213,33 +213,19 @@ def test_model_sectioned_form_intake_signal_suppresses_output_sections() -> None
     assert not result.high_confidence
 
 
-def test_confirmed_example_headings_use_the_shared_section_projection() -> None:
-    result = extract_requested_output_sections(
-        "",
-        confirmed_headings=("Summary", "Decision", "Next steps"),
-    )
+def test_example_document_headings_are_not_requested_output_sections() -> None:
+    """Headings quoted from an attached example describe one earlier document.
 
-    assert result.sections == ("Summary", "Decision", "Next steps")
-    assert result.high_confidence
+    They are structural evidence for the model, never an obligation the plan
+    must satisfy, so only the user's own wording reaches this signal.
+    """
 
-
-def test_confirmed_example_headings_merge_after_direct_user_headings() -> None:
     result = extract_requested_output_sections(
         """
-        Create a report with the following headings:
-        Heading: Overview
-        Heading: Decision
-        Heading: Risks
-        Heading: Actions
-        """,
-        confirmed_headings=("Decision", "Appendix"),
+        Det bifogade dokumentet är ett tidigare remissvar och visar den
+        disposition som utkastet ska följa.
+        """
     )
 
-    assert result.sections == (
-        "Overview",
-        "Decision",
-        "Risks",
-        "Actions",
-        "Appendix",
-    )
-    assert result.high_confidence
+    assert result.sections == ()
+    assert not result.high_confidence

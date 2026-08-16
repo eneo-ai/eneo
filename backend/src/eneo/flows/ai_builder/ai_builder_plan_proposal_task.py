@@ -49,6 +49,9 @@ from eneo.flows.ai_builder.planning_state import (
     ResolvedSlot,
 )
 
+# Keeps the example-output evidence block bounded in the proposal prompt.
+_MAX_VISIBLE_EXAMPLE_EVIDENCE = 8
+
 
 def build_plan_proposal_system_prompt(
     *,
@@ -150,9 +153,9 @@ def build_plan_proposal_system_prompt(
     named_result_block = _named_result_obligations_block(planning_state)
     if named_result_block is not None:
         lines.extend(["", "Named result obligations:", named_result_block])
-    example_style_block = _example_output_style_evidence_block(planning_state)
-    if example_style_block is not None:
-        lines.extend(["", "Example-output style evidence:", example_style_block])
+    example_evidence_block = _example_output_evidence_block(planning_state)
+    if example_evidence_block is not None:
+        lines.extend(["", "Example-output evidence:", example_evidence_block])
     if result_contract_block is not None:
         lines.extend(["", "Result contract:", result_contract_block])
     section_block = _requested_output_sections_block(requested_output_sections)
@@ -401,23 +404,33 @@ def _input_schema_evidence_block(planning_state: PlanningState) -> str | None:
     )
 
 
-def _example_output_style_evidence_block(
+def _example_output_evidence_block(
     planning_state: PlanningState,
 ) -> str | None:
     constraints = planning_state.example_output_constraints
-    if constraints is None or not constraints.style_constraints:
+    if constraints is None:
         return None
-    visible = constraints.style_constraints[:8]
-    lines = [
+    lines: list[str] = []
+    visible_headings = constraints.headings[:_MAX_VISIBLE_EXAMPLE_EVIDENCE]
+    for heading in visible_headings:
+        lines.append(f"- heading: {render_ai_builder_evidence_value(heading)}")
+    omitted_headings = len(constraints.headings) - len(visible_headings)
+    if omitted_headings:
+        lines.append(f"- {omitted_headings} additional example headings omitted")
+    visible_style = constraints.style_constraints[:_MAX_VISIBLE_EXAMPLE_EVIDENCE]
+    lines.extend(
         f"- {item.category}: {render_ai_builder_evidence_value(item.description)}"
-        for item in visible
-    ]
-    omitted = len(constraints.style_constraints) - len(visible)
-    if omitted:
-        lines.append(f"- {omitted} additional style constraints omitted")
+        for item in visible_style
+    )
+    omitted_style = len(constraints.style_constraints) - len(visible_style)
+    if omitted_style:
+        lines.append(f"- {omitted_style} additional style constraints omitted")
+    if not lines:
+        return None
     lines.append(
-        "- Use this evidence to guide structure and style; do not promise exact "
-        "visual layout or copy accidental example content."
+        "- This describes how one earlier document looked. Use it to guide "
+        "structure and style; it is not a required output topology. Do not "
+        "promise exact visual layout or copy accidental example content."
     )
     return "\n".join(lines)
 

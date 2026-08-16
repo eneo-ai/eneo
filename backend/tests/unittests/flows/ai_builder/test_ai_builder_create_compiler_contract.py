@@ -4314,37 +4314,6 @@ def test_per_source_requested_section_label_stays_with_canonical_producer() -> N
     assert independent_ref["label"] == "Requested section 1"
     assert validate_spec(compiled).valid
 
-    corrupt_canonical_ref = dict(canonical_ref)
-    corrupt_canonical_ref["item_template"] = canonical_ref["item_template"].replace(
-        "Résumé: {requested_section_1}",
-        "Other section: {requested_section_1}",
-    )
-    corrupt_independent_ref = dict(independent_ref)
-    corrupt_independent_ref["label"] = "Résumé"
-    corrupt_compose = compiled.steps[-2].model_copy(
-        update={
-            "input_bindings": {
-                **compose_bindings,
-                "source_refs": [corrupt_canonical_ref, corrupt_independent_ref],
-            }
-        }
-    )
-    corrupt_spec = compiled.model_copy(
-        update={"steps": [*compiled.steps[:-2], corrupt_compose, compiled.steps[-1]]}
-    )
-    assert validate_spec(corrupt_spec).valid
-    corrupt_issue_ids = {
-        issue.id
-        for issue in evaluate_critic_invariants(
-            build_conversation_critic_context(
-                [],
-                corrupt_spec,
-                requested_output_sections=requested_sections,
-            )
-        )
-    }
-    assert "requested_output_sections_require_section_writers" in corrupt_issue_ids
-
 
 def test_per_source_report_keeps_first_section_producer_canonical() -> None:
     requested_sections = RequestedOutputSections(
@@ -4459,13 +4428,7 @@ def test_per_source_report_keeps_first_section_producer_canonical() -> None:
     assert compose_refs[0].item_template is not None
     assert "Résumé: {requested_section_1}" in compose_refs[0].item_template
     assert validate_spec(compiled).valid
-    issues = evaluate_critic_invariants(
-        build_conversation_critic_context(
-            [],
-            compiled,
-            requested_output_sections=requested_sections,
-        )
-    )
+    issues = evaluate_critic_invariants(build_conversation_critic_context([], compiled))
     assert not issues
 
 
@@ -6035,17 +5998,6 @@ def test_requested_section_labels_with_braces_compile_for_every_disposition(
     )
     validation = validate_spec(compiled)
     assert validation.valid, validation.errors
-    issue_ids = {
-        issue.id
-        for issue in evaluate_critic_invariants(
-            build_conversation_critic_context(
-                [],
-                compiled,
-                requested_output_sections=requested_sections,
-            )
-        )
-    }
-    assert "requested_output_sections_require_section_writers" not in issue_ids
 
 
 def test_mapped_reader_canonicalizes_authored_identity_fields_for_runtime() -> None:

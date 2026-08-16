@@ -286,46 +286,6 @@ def is_bound_document_report_compose_topology(
     )
 
 
-def document_report_compose_covers_requested_sections(
-    composer: StepSpec,
-    requested: RequestedOutputSections,
-) -> bool:
-    contracts = requested_output_section_contracts(requested)
-    refs = source_ref_bindings(composer.input_bindings)
-    section_source = _bound_document_report_section_source(refs)
-    overview_producer_ref = next(
-        (
-            ref.step_ref
-            for ref in refs
-            if ref.field_path == (COMPOSE_OVERALL_OVERVIEW_KEY,)
-            and ref.item_template is None
-        ),
-        None,
-    )
-    return bool(contracts) and all(
-        any(
-            (
-                overview_producer_ref is not None
-                and ref.step_ref == overview_producer_ref
-                and ref.field_path == (contract.derived_key,)
-                and ref.label == contract.original_label
-            )
-            or (
-                section_source is not None
-                and ref.step_ref == section_source.producer_ref
-                and ref.field_path == (section_source.field_name,)
-                and ref.item_template is not None
-                and (
-                    f"{_item_template_literal(contract.original_label)}: "
-                    f"{{{contract.derived_key}}}" in ref.item_template.splitlines()
-                )
-            )
-            for ref in refs
-        )
-        for contract in contracts
-    )
-
-
 def _bound_document_report_section_source(
     refs: tuple[SourceRefBinding, ...],
 ) -> DocumentReportSectionSource | None:

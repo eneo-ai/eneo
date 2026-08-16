@@ -46,6 +46,7 @@ from eneo.flows.ai_builder.ai_builder_tool_names import PROPOSE_FLOW_TOOL_NAME
 from eneo.flows.ai_builder.ai_builder_validation_common import SpecValidationResult
 from eneo.flows.ai_builder.ai_builder_validator import validate_spec
 from eneo.flows.ai_builder.planning_state import AggregationIntent, ReportDisposition
+from eneo.flows.domain.flow import Flow
 from eneo.flows.flow_authoring_spec import (
     AssistantSpec,
     FlowDraftSpecCore,
@@ -243,13 +244,10 @@ def _make_request(**overrides) -> CompiledProposalFinalizationRequest:
 
 
 @pytest.mark.asyncio
-async def test_finalization_passes_compile_context_sections_to_quality() -> None:
-    requested_output_sections = RequestedOutputSections(
-        sections=("Executive summary", "Recommendations"),
-        confidence="high",
-    )
+async def test_finalization_passes_the_compile_context_to_quality() -> None:
     compile_context = CreateCompileContext(
-        requested_output_sections=requested_output_sections
+        aggregation_intent="compare",
+        ui_language="sv",
     )
     finalizer = _make_finalizer()
     contextual_quality = MagicMock(feedback=None, failure_codes=frozenset())
@@ -273,7 +271,7 @@ async def test_finalization_passes_compile_context_sections_to_quality() -> None
     assert result.events
     quality_context = build_quality.call_args.kwargs["compile_context"]
     assert quality_context is compile_context
-    assert quality_context.requested_output_sections is requested_output_sections
+    assert quality_context.aggregation_intent == "compare"
 
 
 def test_finalization_request_is_frozen_without_retry_snapshot_payload() -> None:
@@ -511,7 +509,7 @@ async def test_finalize_compiled_proposal_preserves_contextual_quality_issue_cod
     ids=["no-named-sections", "named-sections"],
 )
 @pytest.mark.asyncio
-async def test_finalize_compiler_lowered_report_enforces_named_section_coverage(
+async def test_finalize_compiler_lowered_report_needs_no_planner_repair(
     report_disposition: ReportDisposition,
     requested_output_sections: RequestedOutputSections,
 ) -> None:
@@ -584,6 +582,158 @@ async def test_finalize_compiler_lowered_report_enforces_named_section_coverage(
 
     assert result.feedback is None
     assert [event.event for event in result.events] == ["plan"]
+    store_plan.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_finalize_single_composer_text_report_needs_no_planner_repair() -> None:
+    """One composer may write every requested section.
+
+    How many writing steps a report needs is the model's semantic judgement,
+    so a single-composer plan finalizes without planner repair feedback.
+    """
+
+    intent = parse_create_flow_intent_arguments(
+        {
+            "flow_name": "Consultation reply",
+            "plan_rationale": "Draft the reply from the uploaded material.",
+            "steps": [
+                {
+                    "name": "Read the material",
+                    "instructions": "Extract the facts the reply must build on.",
+                    "output_fields": [
+                        {
+                            "name": "underlag",
+                            "field_type": "string",
+                            "description": "Facts from the uploaded material.",
+                        }
+                    ],
+                },
+                {
+                    "name": "Write the reply",
+                    "instructions": (
+                        "Write the complete reply draft under the requested headings."
+                    ),
+                },
+            ],
+        }
+    )
+    compile_context = CreateCompileContext(
+        runtime_input_type=InputType.DOCUMENT,
+        final_output_type=OutputType.TEXT,
+        requested_output_sections=RequestedOutputSections(
+            sections=("Bakgrund", "Bedömning", "Åtgärder", "Risker"),
+            confidence="high",
+        ),
+        ui_language="sv",
+    )
+    spec = compile_create_intent_to_spec(intent, context=compile_context)
+    compiled = CompiledProposal(
+        content=FlowBuilderProposalContent(
+            spec=spec,
+            plan_rationale="Draft the reply from the uploaded material.",
+        ),
+        validation=validate_spec(spec),
+    )
+    store_plan = AsyncMock(return_value=_stored_plan_result())
+
+    with patch(
+        "eneo.flows.ai_builder.ai_builder_proposal_finalization."
+        "store_plan_and_update_conversation",
+        new=store_plan,
+    ):
+        result = await _make_finalizer().finalize_compiled_proposal(
+            _make_request(compiled=compiled, compile_context=compile_context)
+        )
+
+    assert result.feedback is None
+    assert [event.event for event in result.events] == ["plan"]
+    store_plan.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_edit_of_single_composer_report_needs_no_planner_repair() -> None:
+    """Editing an existing report keeps the same judgement as creating one.
+
+    Contextual quality runs the full critic registry on the edit path too, so
+    an already-compiled one-composer report must finalize without repair
+    feedback there as well.
+    """
+
+    spec = FlowDraftSpecCore(
+        flow_name="Remissvar",
+        flow_description="Skriver ett utkast till remissvar.",
+        steps=[
+            StepSpec(
+                plan_step_ref="step_a",
+                name="Läs underlaget",
+                assistant_spec=AssistantSpec(instructions="Läs underlaget."),
+                input_source=InputSource.FLOW_INPUT,
+                input_type=InputType.DOCUMENT,
+                output_mode=OutputMode.PASS_THROUGH,
+                output_type=OutputType.JSON,
+                output_contract={
+                    "type": "object",
+                    "properties": {"underlag": {"type": "string"}},
+                },
+            ),
+            StepSpec(
+                plan_step_ref="step_b",
+                name="Skriv utkastet",
+                assistant_spec=AssistantSpec(
+                    instructions="Skriv hela utkastet under de begärda rubrikerna."
+                ),
+                input_source=InputSource.PREVIOUS_STEP,
+                input_type=InputType.TEXT,
+                output_mode=OutputMode.PASS_THROUGH,
+                output_type=OutputType.TEXT,
+            ),
+        ],
+    )
+    compile_context = CreateCompileContext(
+        runtime_input_type=InputType.DOCUMENT,
+        final_output_type=OutputType.TEXT,
+        requested_output_sections=RequestedOutputSections(
+            sections=("Bakgrund", "Bedömning", "Åtgärder", "Risker"),
+            confidence="high",
+        ),
+        ui_language="sv",
+    )
+    store_plan = AsyncMock(return_value=_stored_plan_result())
+
+    with patch(
+        "eneo.flows.ai_builder.ai_builder_proposal_finalization."
+        "store_plan_and_update_conversation",
+        new=store_plan,
+    ):
+        result = await _make_finalizer().finalize_compiled_proposal(
+            _make_request(
+                target_kind=TargetKind.EDIT,
+                compiled=_compiled_edit_proposal(compiled_spec=spec),
+                compile_context=compile_context,
+                conversation=[
+                    {
+                        "role": "user",
+                        "content": (
+                            "Rapporten ska ha rubrikerna Bakgrund, Bedömning, "
+                            "Åtgärder och Risker."
+                        ),
+                    }
+                ],
+                flow=Flow(
+                    id=uuid4(),
+                    tenant_id=uuid4(),
+                    space_id=uuid4(),
+                    name="Remissvar",
+                    description="Skriver ett utkast till remissvar.",
+                    metadata_json={"ai_builder": {"description": {}}},
+                    steps=[],
+                    draft_revision=3,
+                ),
+            )
+        )
+
+    assert result.feedback is None
     store_plan.assert_awaited_once()
 
 
