@@ -5345,3 +5345,184 @@ class TestDocxModeFromTemplateEvidence:
         slot = state.resolved_slots["docx_output_mode"]
         assert slot.value == "generated_docx"
         assert slot.source == "structured_answer"
+
+
+class TestMixedRuntimeMaterialChoice:
+    """The mixed-material question settles which material a run receives."""
+
+    PROMPT = (
+        "Jag vill skapa ett flöde för beslutsberedning där jag vid körning kan "
+        "ladda upp mötesljud och flera bilagor. Flödet ska transkribera ljudet, "
+        "koppla uttalanden till bilagorna och skapa en besluts-PM i PDF."
+    )
+
+    def _answer(
+        self,
+        question_id: str,
+        selected_value: str,
+    ) -> ConversationMessage:
+        return ConversationMessage(
+            role="user",
+            content=selected_value,
+            metadata={
+                "question_answer": {
+                    "question_id": question_id,
+                    "selected_values": [selected_value],
+                }
+            },
+        )
+
+    def _conversation(self, selected_value: str) -> list[ConversationMessage]:
+        return [
+            ConversationMessage(role="user", content=self.PROMPT),
+            self._answer("flow_input_architecture", selected_value),
+        ]
+
+    @pytest.mark.parametrize(
+        ("answers", "expected_input", "expected_evidence_question"),
+        [
+            (
+                (
+                    ("flow_input_architecture", "audio_primary_input"),
+                    ("primary_runtime_input", "documents"),
+                ),
+                "documents",
+                "primary_runtime_input",
+            ),
+            (
+                (
+                    ("primary_runtime_input", "documents"),
+                    ("flow_input_architecture", "audio_primary_input"),
+                ),
+                "audio",
+                "flow_input_architecture",
+            ),
+        ],
+    )
+    def test_the_newest_answer_decides(
+        self,
+        answers: tuple[tuple[str, str], ...],
+        expected_input: str,
+        expected_evidence_question: str,
+    ) -> None:
+        conversation = [
+            ConversationMessage(role="user", content=self.PROMPT),
+            *(self._answer(question_id, value) for question_id, value in answers),
+        ]
+
+        state = build_planning_state_from_conversation(conversation)
+
+        slot = state.resolved_slots["primary_runtime_input"]
+        assert slot.value == expected_input
+        assert slot.evidence == [f"question_answer:{expected_evidence_question}"]
+
+    @pytest.mark.parametrize(
+        "selected_values",
+        [
+            ("banana",),
+            ("audio_primary_input", "banana"),
+            ("audio_primary_input", "document_primary_input"),
+        ],
+    )
+    def test_a_selection_the_question_never_offered_settles_nothing(
+        self,
+        selected_values: tuple[str, ...],
+    ) -> None:
+        conversation = [
+            ConversationMessage(role="user", content=self.PROMPT),
+            ConversationMessage(
+                role="user",
+                content=", ".join(selected_values),
+                metadata={
+                    "question_answer": {
+                        "question_id": "flow_input_architecture",
+                        "selected_values": list(selected_values),
+                    }
+                },
+            ),
+        ]
+
+        state = build_planning_state_from_conversation(conversation)
+
+        assert "primary_runtime_input" not in state.resolved_slots
+
+    def test_a_later_correction_in_the_users_own_words_wins(self) -> None:
+        conversation = [
+            ConversationMessage(role="user", content=self.PROMPT),
+            self._answer("flow_input_architecture", "audio_primary_input"),
+            ConversationMessage(
+                role="user",
+                content="Jag laddar hellre upp dokumenten vid körning i stället.",
+            ),
+        ]
+
+        state = build_planning_state_from_conversation(conversation)
+
+        slot = state.resolved_slots["primary_runtime_input"]
+        assert slot.value == "documents"
+        assert slot.source == "heuristic"
+
+    def test_a_free_text_question_response_is_left_to_the_classifier(self) -> None:
+        conversation = [
+            ConversationMessage(
+                message_id="test-source",
+                role="user",
+                content="Jag laddar upp dokumenten vid körning.",
+                metadata={
+                    "question_response": {"question_id": "primary_runtime_input"}
+                },
+            )
+        ]
+
+        state = build_planning_state_from_conversation(conversation)
+
+        assert "primary_runtime_input" not in state.resolved_slots
+
+    @pytest.mark.parametrize(
+        ("selected_value", "expected_input"),
+        [
+            ("audio_primary_input", "audio"),
+            ("document_primary_input", "documents"),
+        ],
+    )
+    def test_answer_becomes_the_committed_primary_input(
+        self,
+        selected_value: str,
+        expected_input: str,
+    ) -> None:
+        state = build_planning_state_from_conversation(
+            self._conversation(selected_value)
+        )
+
+        slot = state.resolved_slots["primary_runtime_input"]
+        assert slot.value == expected_input
+        assert slot.source == "structured_answer"
+        assert slot.is_commit_grade is True
+        assert state.commit_grade_slot_value("primary_runtime_input") == expected_input
+
+    def test_the_choice_outranks_an_earlier_model_reading(self) -> None:
+        state = build_planning_state_from_conversation(
+            self._conversation("document_primary_input")
+        )
+        classification = SlotClassificationResult(
+            slots=[
+                _classified(
+                    "primary_runtime_input",
+                    "audio",
+                    "high",
+                    evidence=("ladda upp mötesljud",),
+                    evidence_level="explicit",
+                )
+            ]
+        )
+
+        merge_llm_resolved_slots(
+            state,
+            classification,
+            prompt_hash="test-prompt-hash",
+            freeform_text=self.PROMPT,
+        )
+
+        slot = state.resolved_slots["primary_runtime_input"]
+        assert slot.value == "documents"
+        assert slot.source == "structured_answer"

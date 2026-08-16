@@ -187,6 +187,61 @@ def test_resolve_input_intent_still_requires_architecture_for_audio_and_document
     assert intent.needs_architecture_clarification is True
 
 
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Use documents as the runtime input, not the recording.",
+        "Använd dokumenten som indata vid körning, inte inspelningen.",
+    ],
+)
+def test_resolve_input_intent_never_reads_a_ruled_out_material_as_the_choice(
+    text: str,
+) -> None:
+    intent = resolve_input_intent(text, {})
+
+    assert intent.primary_runtime_input != "audio"
+
+
+@pytest.mark.parametrize(
+    "selected_values",
+    [
+        {"banana"},
+        {"audio_primary_input", "banana"},
+        {"audio_primary_input", "document_primary_input"},
+    ],
+)
+def test_resolve_input_intent_ignores_a_selection_the_question_never_offered(
+    selected_values: set[str],
+) -> None:
+    intent = resolve_input_intent(
+        "Jag vill skicka in en ljudfil och ett bifogat dokument i samma körning.",
+        {"flow_input_architecture": selected_values},
+    )
+
+    assert intent.primary_runtime_input == "unknown"
+    assert intent.needs_architecture_clarification is True
+
+
+def test_resolve_input_intent_keeps_pasted_text_with_documents_as_one_choice() -> None:
+    intent = resolve_input_intent(
+        "Vid körning klistrar jag in text och laddar upp dokument som ska analyseras.",
+        {},
+    )
+
+    assert intent.needs_architecture_clarification is False
+    assert intent.primary_runtime_input == "text_and_documents"
+
+
+def test_resolve_input_intent_reports_no_primary_while_the_choice_is_open() -> None:
+    intent = resolve_input_intent(
+        "Jag vill skicka in en ljudfil och ett bifogat dokument i samma körning.",
+        {"primary_runtime_input": {"audio"}},
+    )
+
+    assert intent.needs_architecture_clarification is True
+    assert intent.primary_runtime_input == "unknown"
+
+
 def test_resolve_input_intent_keeps_terse_terminal_docx_upload_as_document_input() -> (
     None
 ):

@@ -187,6 +187,10 @@ def _infer_primary_runtime_input(
     primary = input_intent.primary_runtime_input
     if primary != "unknown":
         return primary
+    if input_intent.needs_architecture_clarification:
+        # Two materials are on the table and the user has not chosen between
+        # them; naming one here would settle it behind their back.
+        return None
     input_text = build_role_scoped_text(text).preferred_input_text()
     if _contains_any(
         input_text,
@@ -244,18 +248,6 @@ def _infer_flow_input_architecture(text: str) -> str | None:
         ),
     ):
         return "audio_primary_input"
-    if _contains_any(
-        text,
-        (
-            "blandade filer",
-            "mixed files",
-            "all file types",
-            "alla typer",
-            "generic file",
-            "fil alla typer",
-        ),
-    ):
-        return "generic_file_input"
     return None
 
 

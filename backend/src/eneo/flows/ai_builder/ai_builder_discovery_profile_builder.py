@@ -36,16 +36,23 @@ from eneo.flows.ai_builder.ai_builder_input_architecture_policy import (
 )
 from eneo.flows.ai_builder.planning_state import PlanningState, SlotSource
 from eneo.flows.ai_builder.planning_state_builder import (
+    ChosenPrimaryRuntimeInput,
     build_planning_state_from_conversation,
+    chosen_input_question_ids,
+    chosen_primary_runtime_input,
 )
 from eneo.flows.domain.flow import Flow
 
-_ACTIVE_REQUEST_ANSWER_SOURCES: frozenset[SlotSource] = frozenset(
+# What the user settled, as opposed to what the request was read to imply. An
+# accepted requirements summary is authoritative without being a direct choice.
+_USER_AUTHORITATIVE_ANSWER_SOURCES: frozenset[SlotSource] = frozenset(
     {
-        "model",
         "requirements_summary",
         "structured_answer",
     }
+)
+_ACTIVE_REQUEST_ANSWER_SOURCES: frozenset[SlotSource] = (
+    _USER_AUTHORITATIVE_ANSWER_SOURCES | (frozenset[SlotSource]({"model"}))
 )
 _PROFILE_DEFAULT_ANSWER_SOURCES: frozenset[SlotSource] = frozenset(
     {
@@ -269,20 +276,27 @@ def build_discovery_profile(
         flow_defaults=flow_defaults,
         conversation=active_conversation,
     )
-    explicit_input_question_ids = {
-        question_id
-        for question_id in ("primary_runtime_input", "flow_input_architecture")
-        if has_explicit_structured_answer(conversation, question_id)
-    }
+    chosen_input = chosen_primary_runtime_input(active_conversation)
     input_intent = resolve_input_intent(
         text,
         active_answers,
         flow=flow,
-        explicit_question_ids=explicit_input_question_ids,
+        explicit_question_ids=chosen_input_question_ids(chosen_input),
     )
     input_intent = _project_canonical_input_intent(
         input_intent,
         canonical_planning_state_answers,
+        # Only an answer the user gave outranks the persisted reading; a value
+        # read out of their prose is already in the resolution above.
+        answered_input=(
+            chosen_input
+            if chosen_input is not None and chosen_input.question_id is not None
+            else None
+        ),
+        user_authoritative_answers=answer_signals_from_planning_state(
+            planning_state,
+            accepted_sources=_USER_AUTHORITATIVE_ANSWER_SOURCES,
+        ),
     )
     explicit_output = output_intent.terminal_output
     default_input_modes = flow_defaults.get("primary_runtime_input", set())
@@ -433,9 +447,15 @@ def answer_signals_from_planning_state(
 def _project_canonical_input_intent(
     resolved: InputIntentResolution,
     canonical_planning_state_answers: dict[str, set[str]],
+    *,
+    answered_input: ChosenPrimaryRuntimeInput | None,
+    user_authoritative_answers: dict[str, set[str]],
 ) -> InputIntentResolution:
-    primary_runtime_input = canonical_planning_state_answers.get(
-        "primary_runtime_input"
+    # The user's own answer outranks every persisted reading of the request.
+    primary_runtime_input = (
+        {answered_input.value}
+        if answered_input is not None
+        else canonical_planning_state_answers.get("primary_runtime_input")
     )
     if not primary_runtime_input:
         return resolved
@@ -455,6 +475,15 @@ def _project_canonical_input_intent(
         raise ValueError(
             "PlanningState primary_runtime_input contains an unsupported value"
         )
+    if (
+        resolved.needs_architecture_clarification
+        and answered_input is None
+        and not user_authoritative_answers.get("primary_runtime_input")
+    ):
+        # The request names two kinds of runtime material and the flow accepts
+        # one. Reading the request cannot settle that trade-off, however
+        # confidently: the user owns the choice until they make it.
+        return resolved
     return canonical
 
 

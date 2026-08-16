@@ -339,6 +339,7 @@ def test_typed_primary_input_projects_one_coherent_runtime_architecture() -> Non
     planning_state.resolved_slots["primary_runtime_input"] = _resolved_slot(
         "primary_runtime_input",
         "documents",
+        source="structured_answer",
     )
 
     profile = build_discovery_profile(
@@ -360,6 +361,55 @@ def test_typed_primary_input_projects_one_coherent_runtime_architecture() -> Non
     assert profile.input_intent.needs_architecture_clarification is False
     assert profile.output_intent.terminal_output == "pdf_document"
     assert profile.answers["primary_runtime_input"] == {"documents"}
+
+
+def test_accepted_requirements_summary_settles_the_runtime_material() -> None:
+    planning_state = PlanningState.empty()
+    planning_state.resolved_slots["primary_runtime_input"] = _resolved_slot(
+        "primary_runtime_input",
+        "documents",
+        source="requirements_summary",
+    )
+
+    profile = build_discovery_profile(
+        [
+            ConversationMessage(
+                role="user",
+                content=(
+                    "I will upload an audio file and documents at runtime. "
+                    "Transcribe the audio, analyze the documents, then return a report."
+                ),
+            )
+        ],
+        planning_state=planning_state,
+    )
+
+    assert profile.input_intent.primary_runtime_input == "documents"
+    assert profile.input_intent.needs_architecture_clarification is False
+
+
+def test_model_reading_cannot_settle_the_runtime_material() -> None:
+    planning_state = PlanningState.empty()
+    planning_state.resolved_slots["primary_runtime_input"] = _resolved_slot(
+        "primary_runtime_input",
+        "audio",
+    )
+
+    profile = build_discovery_profile(
+        [
+            ConversationMessage(
+                role="user",
+                content=(
+                    "I will upload an audio file and documents at runtime. "
+                    "Transcribe the audio, analyze the documents, then return a report."
+                ),
+            )
+        ],
+        planning_state=planning_state,
+    )
+
+    assert profile.input_intent.needs_architecture_clarification is True
+    assert profile.input_intent.primary_runtime_input == "unknown"
 
 
 def test_typed_primary_input_rejects_unsupported_persisted_value() -> None:

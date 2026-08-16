@@ -436,15 +436,12 @@ def document_cardinality_is_vague(profile: DiscoveryProfile) -> bool:
     return profile.comparison_requested
 
 
-def mixed_input_architecture_is_vague(
-    profile: DiscoveryProfile,
-    *,
-    explicit_resolved: bool,
-) -> bool:
-    if explicit_resolved:
-        return False
+def mixed_input_architecture_is_vague(profile: DiscoveryProfile) -> bool:
     if _family_inactive(profile, "flow_input_architecture"):
         return False
+    # The user's own choice already cleared the intent, so answer presence is
+    # not a second thing to check — an answer the question never offered must
+    # not silence it.
     return profile.input_intent.needs_architecture_clarification
 
 

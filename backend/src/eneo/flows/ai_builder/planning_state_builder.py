@@ -8,7 +8,7 @@ and committed architecture state.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Collection, Mapping
+from collections.abc import Callable, Collection, Mapping, Sequence
 from dataclasses import dataclass
 from uuid import UUID
 
@@ -16,10 +16,14 @@ from eneo.flows.ai_builder.ai_builder_aggregation_intent import (
     comparison_scope_is_relevant,
     report_disposition_is_relevant,
 )
+from eneo.flows.ai_builder.ai_builder_canonicalization import canonical_question_id
 from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
     ClassifierRetentionClass,
     SlotClassificationNamedResultEvidenceMetadata,
     question_answer_from_metadata,
+    question_answer_question_id,
+    question_answer_values,
+    question_response_from_metadata,
     slot_classification_from_metadata,
 )
 from eneo.flows.ai_builder.ai_builder_discovery_flow_defaults import (
@@ -52,6 +56,9 @@ from eneo.flows.ai_builder.ai_builder_framework_policy import (
     slot_names_blocked_by_explicit_uncertainty,
 )
 from eneo.flows.ai_builder.ai_builder_input_architecture_policy import (
+    PRIMARY_RUNTIME_INPUT_QUESTION_IDS,
+    PrimaryRuntimeInput,
+    primary_runtime_input_from_answer,
     resolve_input_intent,
 )
 from eneo.flows.ai_builder.ai_builder_requirements_state import (
@@ -1502,7 +1509,13 @@ def _resolve_slots(
         requirements_state,
     )
     flow_defaults = build_flow_discovery_defaults(flow)
-    input_intent = resolve_input_intent(freeform_text, answer_signals, flow=flow)
+    chosen_input = chosen_primary_runtime_input(conversation)
+    input_intent = resolve_input_intent(
+        freeform_text,
+        answer_signals,
+        flow=flow,
+        explicit_question_ids=chosen_input_question_ids(chosen_input),
+    )
     output_intent = resolve_output_intent(
         freeform_text,
         answer_signals,
@@ -1513,13 +1526,17 @@ def _resolve_slots(
     slots: dict[str, ResolvedSlot] = {}
 
     primary_runtime_input = (
-        _single_slot_value(
-            answer_signals=answer_signals,
-            flow_defaults=flow_defaults,
-            requirements_summary_values=requirements_summary_values,
-            question_id="primary_runtime_input",
+        chosen_input.value
+        if chosen_input is not None
+        else (
+            _single_slot_value(
+                answer_signals=answer_signals,
+                flow_defaults=flow_defaults,
+                requirements_summary_values=requirements_summary_values,
+                question_id="primary_runtime_input",
+            )
+            or input_intent.primary_runtime_input
         )
-        or input_intent.primary_runtime_input
     )
     if primary_runtime_input != "unknown":
         slots["primary_runtime_input"] = _build_slot(
@@ -1763,6 +1780,98 @@ def _build_slot(
     )
 
 
+def _answered_question_id_for_slot(
+    *,
+    conversation: list[ConversationMessage],
+    question_id: str,
+) -> str | None:
+    """The question the user answered to settle this slot, if they answered one.
+
+    Usually a slot is settled by the question that carries its name. The
+    runtime-input dimension is the exception: the mixed-material question
+    states the trade-off in the user's terms and settles the same slot.
+    """
+
+    if question_id == "primary_runtime_input":
+        chosen = chosen_primary_runtime_input(conversation)
+        return chosen.question_id if chosen is not None else None
+    if has_explicit_structured_answer(conversation, question_id):
+        return question_id
+    return None
+
+
+def chosen_input_question_ids(
+    chosen_input: ChosenPrimaryRuntimeInput | None,
+) -> set[str] | None:
+    if chosen_input is None or chosen_input.question_id is None:
+        return None
+    return {chosen_input.question_id}
+
+
+@dataclass(frozen=True, slots=True)
+class ChosenPrimaryRuntimeInput:
+    value: PrimaryRuntimeInput
+    # The question the user answered, or None when a later message said it in
+    # their own words instead.
+    question_id: str | None
+
+
+def chosen_primary_runtime_input(
+    conversation: Sequence[ConversationMessage],
+) -> ChosenPrimaryRuntimeInput | None:
+    """What the user last said the run receives, and how they said it.
+
+    Two questions settle this dimension and a plain sentence can change it
+    again, so the newest usable statement wins whichever form it took. A
+    selection the question never offered says nothing, so the search keeps
+    going back.
+    """
+
+    for message in reversed(list(conversation)):
+        if message.role != "user":
+            continue
+        answer = question_answer_from_metadata(message.metadata)
+        if answer is None:
+            # A free-text reply to a question is the classifier's to read with
+            # cited evidence, not this heuristic's.
+            if question_response_from_metadata(message.metadata) is not None:
+                continue
+            chosen = _primary_runtime_input_from_freeform(message.content)
+            if chosen is not None:
+                return chosen
+            continue
+        raw_question_id = question_answer_question_id(answer)
+        if not isinstance(raw_question_id, str):
+            continue
+        question_id = canonical_question_id(raw_question_id)
+        if question_id not in PRIMARY_RUNTIME_INPUT_QUESTION_IDS:
+            continue
+        value = primary_runtime_input_from_answer(
+            question_id,
+            question_answer_values(answer),
+        )
+        if value is None:
+            continue
+        return ChosenPrimaryRuntimeInput(value=value, question_id=question_id)
+    return None
+
+
+def _primary_runtime_input_from_freeform(
+    content: str | None,
+) -> ChosenPrimaryRuntimeInput | None:
+    if not isinstance(content, str) or not content.strip():
+        return None
+    # Only the plain material words count here. An architecture guess read out
+    # of a sentence is not the user choosing between two materials.
+    selected = infer_answer_signals_from_text(content).get("primary_runtime_input")
+    if not selected:
+        return None
+    value = primary_runtime_input_from_answer("primary_runtime_input", selected)
+    if value is None:
+        return None
+    return ChosenPrimaryRuntimeInput(value=value, question_id=None)
+
+
 def _resolve_slot_origin(
     *,
     question_id: str,
@@ -1772,10 +1881,14 @@ def _resolve_slot_origin(
     freeform_text: str,
     slot_value: str,
 ) -> tuple[SlotSource, tuple[str, ...], SlotConfidence]:
-    if has_explicit_structured_answer(conversation, question_id):
+    answered_question_id = _answered_question_id_for_slot(
+        conversation=conversation,
+        question_id=question_id,
+    )
+    if answered_question_id is not None:
         return (
             "structured_answer",
-            (f"question_answer:{question_id}",),
+            (f"question_answer:{answered_question_id}",),
             "high",
         )
 

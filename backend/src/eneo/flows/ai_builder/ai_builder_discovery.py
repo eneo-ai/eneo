@@ -406,13 +406,7 @@ def _build_flow_input_architecture_issue(
     conversation: list[ConversationMessage],
     profile: DiscoveryProfile,
 ) -> DiscoveryIssue | None:
-    if not _mixed_input_architecture_is_vague(
-        profile,
-        explicit_resolved=has_explicit_structured_answer(
-            conversation,
-            "flow_input_architecture",
-        ),
-    ):
+    if not _mixed_input_architecture_is_vague(profile):
         return None
     return DiscoveryIssue(
         issue_id="flow_input_architecture",

@@ -1256,7 +1256,7 @@ class TestExtendedClarificationHints:
         assert "flow_input_architecture" not in question_ids
         assert "primary_runtime_input" not in question_ids
 
-    def test_cited_document_input_does_not_reask_from_stale_raw_conflict(self) -> None:
+    def test_chosen_document_input_does_not_reask_from_stale_raw_conflict(self) -> None:
         conversation = [
             ConversationMessage(
                 role="user",
@@ -1272,6 +1272,7 @@ class TestExtendedClarificationHints:
             "primary_runtime_input": _resolved_slot(
                 "primary_runtime_input",
                 "documents",
+                source="structured_answer",
             ),
             "terminal_output": _resolved_slot(
                 "terminal_output",
@@ -1292,6 +1293,114 @@ class TestExtendedClarificationHints:
         assert "flow_input_architecture" not in question_ids
         assert "primary_runtime_input" not in question_ids
         assert "terminal_output" not in question_ids
+
+    def test_model_guess_does_not_settle_two_runtime_materials(self) -> None:
+        conversation = [
+            ConversationMessage(
+                role="user",
+                content=(
+                    "I will upload an audio file and documents at runtime. "
+                    "Transcribe the audio, analyze the documents, and return a report."
+                ),
+                metadata={"ui_language": "en"},
+            )
+        ]
+        planning_state = PlanningState.empty()
+        planning_state.resolved_slots = {
+            "primary_runtime_input": _resolved_slot(
+                "primary_runtime_input",
+                "audio",
+            ),
+        }
+
+        analysis = analyze_discovery(
+            conversation,
+            planning_state=planning_state,
+        )
+        question_ids = {
+            issue.suggestion.question_id
+            for issue in analysis.blocking_issues
+            if issue.suggestion is not None
+        }
+
+        assert "flow_input_architecture" in question_ids
+
+    def test_answered_architecture_survives_a_conflicting_model_guess(self) -> None:
+        conversation = [
+            ConversationMessage(
+                role="user",
+                content=(
+                    "I will upload an audio file and documents at runtime. "
+                    "Transcribe the audio, analyze the documents, and return a report."
+                ),
+                metadata={"ui_language": "en"},
+            ),
+            ConversationMessage(
+                role="user",
+                content="The recording",
+                metadata={
+                    "question_answer": {
+                        "question_id": "flow_input_architecture",
+                        "selected_values": ["audio_primary_input"],
+                    }
+                },
+            ),
+        ]
+        planning_state = PlanningState.empty()
+        planning_state.resolved_slots = {
+            "primary_runtime_input": _resolved_slot(
+                "primary_runtime_input",
+                "documents",
+            ),
+        }
+
+        analysis = analyze_discovery(
+            conversation,
+            planning_state=planning_state,
+        )
+        question_ids = {
+            issue.suggestion.question_id
+            for issue in analysis.blocking_issues
+            if issue.suggestion is not None
+        }
+
+        assert "flow_input_architecture" not in question_ids
+        assert "primary_runtime_input" not in question_ids
+        profile = build_discovery_profile(conversation, planning_state=planning_state)
+        assert profile.input_intent.primary_runtime_input == "audio", (
+            "the answered choice, not the model slot, decides the runtime material"
+        )
+
+    def test_unoffered_architecture_answer_does_not_settle_the_material(self) -> None:
+        conversation = [
+            ConversationMessage(
+                role="user",
+                content=(
+                    "I will upload an audio file and documents at runtime. "
+                    "Transcribe the audio, analyze the documents, and return a report."
+                ),
+                metadata={"ui_language": "en"},
+            ),
+            ConversationMessage(
+                role="user",
+                content="banana",
+                metadata={
+                    "question_answer": {
+                        "question_id": "flow_input_architecture",
+                        "selected_values": ["banana"],
+                    }
+                },
+            ),
+        ]
+
+        analysis = analyze_discovery(conversation)
+        question_ids = {
+            issue.suggestion.question_id
+            for issue in analysis.blocking_issues
+            if issue.suggestion is not None
+        }
+
+        assert "flow_input_architecture" in question_ids
 
     def test_audio_edit_with_derived_underlag_does_not_trigger_mixed_input_question(
         self,

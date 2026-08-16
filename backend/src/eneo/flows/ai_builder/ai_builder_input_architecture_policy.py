@@ -14,6 +14,7 @@ from eneo.flows.ai_builder.ai_builder_discovery_text_matcher import (
     contains_any_token_prefix,
     normalize_discovery_text,
 )
+from eneo.flows.ai_builder.question_catalog import legal_slot_values
 from eneo.flows.flow_authoring_spec import (
     AssistantSpec,
     FlowDraftSpecCore,
@@ -30,6 +31,17 @@ if TYPE_CHECKING:
 PrimaryRuntimeInput = Literal[
     "audio", "documents", "json", "text", "text_and_documents", "unknown"
 ]
+
+# Two user-facing questions settle which material a run receives: the plain
+# one, and the one that states the trade-off when a request names two. Either
+# answer is the user's choice of primary runtime input.
+PRIMARY_RUNTIME_INPUT_QUESTION_IDS: frozenset[str] = frozenset(
+    {"primary_runtime_input", "flow_input_architecture"}
+)
+_PRIMARY_RUNTIME_INPUT_BY_ARCHITECTURE_CHOICE: dict[str, PrimaryRuntimeInput] = {
+    "audio_primary_input": "audio",
+    "document_primary_input": "documents",
+}
 
 _DOCUMENT_REFERENCE_PREFIXES: tuple[str, ...] = (
     "avtal",
@@ -219,7 +231,7 @@ def resolve_input_intent(
 ) -> InputIntentResolution:
     normalized = _normalize_signal_text(text)
     scoped_text = build_role_scoped_text(normalized)
-    input_text = (
+    request_text = (
         " ".join(
             part for part in (scoped_text.input_text, scoped_text.neutral_text) if part
         ).strip()
@@ -228,10 +240,10 @@ def resolve_input_intent(
     defaults = build_flow_discovery_defaults(flow)
     explicit_primary = _resolve_primary_from_answers(answer_signals)
     default_primary = _resolve_primary_from_defaults(defaults)
-    inferred_primary = _infer_primary_runtime_input(input_text)
 
-    audio_requested = _audio_requested(answer_signals, defaults, input_text)
-    document_requested = _document_requested(answer_signals, defaults, input_text)
+    audio_requested = _audio_requested(answer_signals, defaults, request_text)
+    document_requested = _document_requested(answer_signals, defaults, request_text)
+    inferred_primary = _infer_primary_runtime_input(request_text)
     if (
         not audio_requested
         and inferred_primary == "unknown"
@@ -255,7 +267,11 @@ def resolve_input_intent(
     )
 
     return InputIntentResolution(
-        primary_runtime_input=primary,
+        # A run has one primary material. While the choice between two is still
+        # the user's to make, there is no primary to report.
+        primary_runtime_input="unknown"
+        if needs_architecture_clarification
+        else primary,
         audio_requested=audio_requested,
         document_runtime_input_requested=document_requested,
         needs_architecture_clarification=needs_architecture_clarification,
@@ -317,26 +333,44 @@ def _normalize_signal_text(value: str) -> str:
     return normalize_discovery_text(value)
 
 
+def primary_runtime_input_from_answer(
+    question_id: str,
+    selected_values: set[str],
+) -> PrimaryRuntimeInput | None:
+    """The runtime material one structured answer selects, if it selects one.
+
+    A question about which material a run receives admits exactly one choice,
+    and only the choices the question offers. Anything else — several options,
+    a value from an older option set, free text — leaves the dimension open.
+    """
+
+    if len(selected_values) != 1:
+        return None
+    selected_value = next(iter(selected_values))
+    if question_id == "flow_input_architecture":
+        return _PRIMARY_RUNTIME_INPUT_BY_ARCHITECTURE_CHOICE.get(selected_value)
+    if question_id == "primary_runtime_input":
+        return cast(
+            PrimaryRuntimeInput | None,
+            selected_value
+            if selected_value in legal_slot_values("primary_runtime_input")
+            else None,
+        )
+    return None
+
+
 def _resolve_primary_from_answers(
     answer_signals: dict[str, set[str]],
 ) -> PrimaryRuntimeInput:
-    architecture = answer_signals.get("flow_input_architecture", set())
-    if "audio_primary_input" in architecture:
-        return "audio"
-    if architecture.intersection({"document_primary_input", "generic_file_input"}):
-        return "documents"
-
-    input_modes = answer_signals.get("primary_runtime_input", set())
-    if "text_and_documents" in input_modes:
-        return "text_and_documents"
-    if "json" in input_modes:
-        return "json"
-    if "audio" in input_modes:
-        return "audio"
-    if "documents" in input_modes:
-        return "documents"
-    if "text" in input_modes:
-        return "text"
+    # Every answer goes through the same decoder, so a selection the question
+    # never offered cannot settle the dimension by set membership here.
+    for question_id in ("flow_input_architecture", "primary_runtime_input"):
+        selected = answer_signals.get(question_id)
+        if not selected:
+            continue
+        primary = primary_runtime_input_from_answer(question_id, selected)
+        if primary is not None:
+            return primary
     return "unknown"
 
 
@@ -387,9 +421,7 @@ def _audio_requested(
     defaults: dict[str, set[str]],
     text: str,
 ) -> bool:
-    if "audio" in answer_signals.get("primary_runtime_input", set()):
-        return True
-    if "audio_primary_input" in answer_signals.get("flow_input_architecture", set()):
+    if _resolve_primary_from_answers(answer_signals) == "audio":
         return True
     if "audio" in defaults.get("primary_runtime_input", set()):
         return True
@@ -401,13 +433,10 @@ def _document_requested(
     defaults: dict[str, set[str]],
     text: str,
 ) -> bool:
-    if answer_signals.get("flow_input_architecture", set()).intersection(
-        {"document_primary_input", "generic_file_input"}
-    ):
-        return True
-    if answer_signals.get("primary_runtime_input", set()).intersection(
-        {"documents", "text_and_documents"}
-    ):
+    if _resolve_primary_from_answers(answer_signals) in {
+        "documents",
+        "text_and_documents",
+    }:
         return True
     if defaults.get("primary_runtime_input", set()).intersection(
         {"documents", "text_and_documents"}
@@ -550,11 +579,7 @@ def _mentions_runtime_text_input(text: str) -> bool:
 def _has_explicit_input_resolution(explicit_question_ids: set[str] | None) -> bool:
     if explicit_question_ids is None:
         return False
-    return bool(
-        explicit_question_ids.intersection(
-            {"flow_input_architecture", "primary_runtime_input"}
-        )
-    )
+    return bool(explicit_question_ids.intersection(PRIMARY_RUNTIME_INPUT_QUESTION_IDS))
 
 
 def _reference_has_nearby_runtime_action(
