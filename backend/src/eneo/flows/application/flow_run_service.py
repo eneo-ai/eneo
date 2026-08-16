@@ -147,7 +147,7 @@ class FlowRunDetailView(FlowRunWithResultFilesAndUsage):
 
 
 @dataclass(frozen=True, slots=True)
-class FlowRunPageWithResultFilesAndTokenUsage:
+class FlowRunPageWithResultFilesAndUsage:
     items: Sequence[FlowRunWithResultFilesAndUsage]
     has_more: bool
 
@@ -710,7 +710,7 @@ class FlowRunService:
         statuses: Sequence[FlowRunStatus] | None = None,
         limit: int,
         offset: int,
-    ) -> FlowRunPageWithResultFilesAndTokenUsage:
+    ) -> FlowRunPageWithResultFilesAndUsage:
         runs = await self.list_runs(
             flow_id=flow_id,
             statuses=statuses,
@@ -718,7 +718,7 @@ class FlowRunService:
             offset=offset,
         )
         page_runs = tuple(runs[:limit])
-        return FlowRunPageWithResultFilesAndTokenUsage(
+        return FlowRunPageWithResultFilesAndUsage(
             items=await self._runs_with_result_files_and_usage(runs=page_runs),
             has_more=len(runs) > limit,
         )

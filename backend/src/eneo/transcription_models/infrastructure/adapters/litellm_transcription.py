@@ -14,6 +14,7 @@ from tenacity import (
 )
 
 from eneo.files.audio import AudioFile
+from eneo.main.exceptions import ProviderRejectedRequestException
 from eneo.main.logging import get_logger
 from eneo.model_providers.domain.model_route import resolve_model_route
 from eneo.model_providers.domain.provider_call_observer import (
@@ -116,7 +117,10 @@ class LiteLLMTranscriptionAdapter:
                     path,
                     language=language,
                     observer=observer,
-                    audio_seconds=max(float(chunk_end - start_time), 0.0),
+                    # The timestamps below are nominal five-minute markers; the
+                    # splitter emits whole blocks, so what this request actually
+                    # sends has to be measured from the file itself.
+                    audio_seconds=await asyncio.to_thread(_measure_seconds, path),
                 )
 
                 end_time = chunk_end
@@ -210,14 +214,23 @@ class LiteLLMTranscriptionAdapter:
             raise
         except Exception as e:
             logger.exception(f"[LiteLLM] {self.litellm_model}: Unknown exception:")
-            if observer is not None and call_id is not None:
-                await observer.outcome_unknown(call_id, "provider_error")
-            litellm_transport.raise_public_litellm_error(
-                e,
-                provider_type=self.provider_type,
-                is_unavailable=litellm_transport.is_provider_unavailable_error,
-                raise_unavailable=litellm_transport.raise_provider_unavailable,
-            )
+            try:
+                litellm_transport.raise_public_litellm_error(
+                    e,
+                    provider_type=self.provider_type,
+                    is_unavailable=litellm_transport.is_provider_unavailable_error,
+                    raise_unavailable=litellm_transport.raise_provider_unavailable,
+                )
+            except ProviderRejectedRequestException:
+                # The provider answered and refused. That is a known outcome, so
+                # it must not leave the run's audio total marked incomplete.
+                if observer is not None and call_id is not None:
+                    await observer.rejected(call_id, "provider_rejected")
+                raise
+            except Exception:
+                if observer is not None and call_id is not None:
+                    await observer.outcome_unknown(call_id, "provider_error")
+                raise
             raise AssertionError("Provider error mapping unexpectedly returned.")
 
         logger.debug(f"[LiteLLM] {self.litellm_model}: Transcription successful")
@@ -230,6 +243,10 @@ class LiteLLMTranscriptionAdapter:
                 ),
             )
         return response.text  # type: ignore[return-value]
+
+
+def _measure_seconds(file_path: Path) -> float:
+    return AudioFile(str(file_path)).duration
 
 
 def _digest_file(file_path: Path) -> str:

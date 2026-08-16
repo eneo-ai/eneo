@@ -45,7 +45,7 @@ from eneo.flows.application.flow_run_evidence_service import (
     FlowRunEvidenceService,
 )
 from eneo.flows.application.flow_run_service import (
-    FlowRunPageWithResultFilesAndTokenUsage,
+    FlowRunPageWithResultFilesAndUsage,
     FlowRunService,
 )
 from eneo.flows.application.flow_webhook_delivery_policy import (
@@ -621,7 +621,7 @@ async def _measure_run_listing_page(
     flow_id: UUID,
     offset: int,
     expected_statement_count: int,
-) -> tuple[FlowRunPageWithResultFilesAndTokenUsage, list[dict[str, object]]]:
+) -> tuple[FlowRunPageWithResultFilesAndUsage, list[dict[str, object]]]:
     bind = session.sync_session.bind
     assert bind is not None
     with _capture_queries(bind) as captured:

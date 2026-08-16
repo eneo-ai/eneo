@@ -22,7 +22,7 @@ from eneo.files.file_models import FileType
 from eneo.flows.application.flow_run_access_policy import FlowRunAccessPolicy
 from eneo.flows.application.flow_run_evidence_service import FlowRunEvidenceService
 from eneo.flows.application.flow_run_service import (
-    FlowRunPageWithResultFilesAndTokenUsage,
+    FlowRunPageWithResultFilesAndUsage,
     FlowRunService,
     FlowRunVersionedView,
     FlowRunWithResultFilesAndUsage,
@@ -2336,7 +2336,7 @@ async def test_list_runs_with_result_files_and_usage_enriches_page(user):
         offset=4,
     )
 
-    assert isinstance(page, FlowRunPageWithResultFilesAndTokenUsage)
+    assert isinstance(page, FlowRunPageWithResultFilesAndUsage)
     assert page.has_more is True
     assert [item.run for item in page.items] == [run_with_file, run_with_usage]
     assert page.items[0].result_files == (result_file,)

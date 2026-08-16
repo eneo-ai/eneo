@@ -429,10 +429,10 @@ class FlowRunTokenUsage(BaseModel):
 class FlowRunTranscriptionUsage(BaseModel):
     """Audio a run sent to a transcription provider, across every attempt.
 
-    Rejected requests never left, so they contribute nothing. A request whose
-    outcome is unknown may still have been charged, so it is left out of the
-    total and marks it incomplete: the number is a lower bound, never a claim
-    about what was billed.
+    A rejected request was answered and refused, so it contributes nothing. A
+    request whose outcome is unknown may still have been charged, so it is left
+    out of the total and marks it incomplete: the number is a lower bound, never
+    a claim about what was billed.
     """
 
     model_config = ConfigDict(extra="forbid", frozen=True)

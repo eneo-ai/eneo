@@ -132,21 +132,31 @@ class FlowRuntimeCleanupCounts(TypedDict):
     flow_runs_skipped_active_rerun: int
 
 
-def _transcription_usage_for_call(row: Any) -> FlowRunTranscriptionUsage | None:
+class FlowRetentionEvidenceError(RuntimeError):
+    """Raised when a purged provider call contradicts its own database shape."""
+
+
+def _transcription_usage_for_call(
+    *, status: str, audio_seconds: Decimal | None
+) -> FlowRunTranscriptionUsage | None:
     """Summarise one purged transcription call before its row disappears.
 
-    A rejected request never reached the provider. A request whose outcome was
-    never learned may still have been charged, so it is left out of the total
-    and marks it incomplete rather than inflating it.
+    A rejected request was refused, so it contributes nothing. A request whose
+    outcome was never learned may still have been charged, so it is left out of
+    the total and marks it incomplete rather than inflating it.
     """
-    if row.status == "rejected":
+    if status == "rejected":
         return None
-    if row.status != "completed":
+    if status != "completed":
         return FlowRunTranscriptionUsage.from_counts(
             audio_seconds=0.0, completeness="incomplete"
         )
+    if audio_seconds is None:
+        raise FlowRetentionEvidenceError(
+            "A completed transcription call must carry the audio it sent."
+        )
     return FlowRunTranscriptionUsage.from_counts(
-        audio_seconds=float(row.audio_seconds or 0),
+        audio_seconds=float(audio_seconds),
         completeness="complete",
     )
 
@@ -2434,7 +2444,10 @@ class DataRetentionService:
                     provider_call_counts.get(attempt_id, 0) + 1
                 )
                 if provider_call.call_kind == "transcription":
-                    call_audio_usage = _transcription_usage_for_call(provider_call)
+                    call_audio_usage = _transcription_usage_for_call(
+                        status=provider_call.status,
+                        audio_seconds=provider_call.audio_seconds,
+                    )
                     if call_audio_usage is not None:
                         combined_audio_usage = FlowRunTranscriptionUsage.combine(
                             usage

@@ -1,11 +1,16 @@
 from __future__ import annotations
 
+import wave
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 from uuid import UUID, uuid4
 
 import pytest
+from litellm.exceptions import BadRequestError
 
+from eneo.files.audio import AudioFile
+from eneo.main.exceptions import ProviderRejectedRequestException
 from eneo.model_providers.domain.provider_call_observer import (
     ProviderCallObserverError,
     TranscriptionCallRequestFacts,
@@ -68,6 +73,7 @@ class _Observer:
     def __init__(self) -> None:
         self.started_requests: list[TranscriptionCallRequestFacts] = []
         self.completed_calls: list[UUID] = []
+        self.rejected_calls: list[tuple[UUID, str]] = []
         self.unknown_calls: list[tuple[UUID, str]] = []
 
     async def started(self, request: TranscriptionCallRequestFacts) -> UUID:
@@ -78,7 +84,7 @@ class _Observer:
         self.completed_calls.append(call_id)
 
     async def rejected(self, call_id: UUID, reason: str) -> None:
-        raise AssertionError("A transcription request cannot be capability-rejected.")
+        self.rejected_calls.append((call_id, reason))
 
     async def outcome_unknown(self, call_id: UUID, reason: str) -> None:
         self.unknown_calls.append((call_id, reason))
@@ -199,3 +205,85 @@ async def test_two_chunks_of_one_recording_are_different_requests(
         300.0,
         45.5,
     ]
+
+
+def _write_wav(path: Path, *, seconds: float, samplerate: int = 8000) -> None:
+    frames = int(seconds * samplerate)
+    with wave.open(str(path), "w") as handle:
+        handle.setnchannels(1)
+        handle.setsampwidth(2)
+        handle.setframerate(samplerate)
+        handle.writeframes(b"\x00\x00" * frames)
+
+
+@pytest.mark.asyncio
+async def test_recorded_duration_is_the_audio_each_request_actually_sent(
+    monkeypatch, tmp_path
+):
+    """The five-minute markers in the transcript are nominal; the rows are not.
+
+    The splitter emits whole blocks, so a chunk's real length is not the
+    interval its timestamp claims. Recording the interval would bill a number
+    the request never sent.
+    """
+
+    async def fake_atranscription(**kwargs):
+        return SimpleNamespace(text="transcript", model="whisper-1", id="resp")
+
+    monkeypatch.setattr(
+        "eneo.transcription_models.infrastructure.adapters.litellm_transcription.litellm_transport.atranscription",
+        AsyncMock(side_effect=fake_atranscription),
+    )
+    source = tmp_path / "recording.wav"
+    _write_wav(source, seconds=7.5)
+    adapter = LiteLLMTranscriptionAdapter(
+        model=SimpleNamespace(name="Whisper", model_name="whisper-1"),
+        credential_resolver=_CredentialResolverStub(),
+        provider_type="openai",
+    )
+    observer = _Observer()
+
+    await adapter.get_text_from_file(
+        AudioFile(str(source)), language="sv", observer=observer
+    )
+
+    recorded = [request.audio_seconds for request in observer.started_requests]
+    assert recorded
+    assert sum(recorded) == pytest.approx(7.5, abs=0.2)
+    # Not the nominal 300-second interval the transcript header shows.
+    assert all(seconds < 300 for seconds in recorded)
+
+
+@pytest.mark.asyncio
+async def test_a_refused_request_is_recorded_as_rejected_and_not_retried(
+    monkeypatch, tmp_path
+):
+    calls = {"count": 0}
+
+    async def refusing_atranscription(**kwargs):
+        calls["count"] += 1
+        raise BadRequestError(
+            message="unsupported audio", model="whisper-1", llm_provider="openai"
+        )
+
+    monkeypatch.setattr(
+        "eneo.transcription_models.infrastructure.adapters.litellm_transcription.litellm_transport.atranscription",
+        AsyncMock(side_effect=refusing_atranscription),
+    )
+    audio_path = tmp_path / "chunk.wav"
+    audio_path.write_bytes(b"audio bytes")
+    adapter = LiteLLMTranscriptionAdapter(
+        model=SimpleNamespace(name="Whisper", model_name="whisper-1"),
+        credential_resolver=_CredentialResolverStub(),
+        provider_type="openai",
+    )
+    observer = _Observer()
+
+    with pytest.raises(ProviderRejectedRequestException):
+        await adapter._transcribe_chunk(
+            audio_path, language="sv", observer=observer, audio_seconds=12.0
+        )
+
+    assert calls["count"] == 1
+    assert [reason for _, reason in observer.rejected_calls] == ["provider_rejected"]
+    assert observer.unknown_calls == []

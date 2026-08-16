@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+from decimal import Decimal
 from hashlib import sha256
 from uuid import UUID, uuid4
 
@@ -2982,6 +2983,51 @@ async def test_debug_retention_deletes_attempt_provider_and_resolved_input_evide
             finished_at=fixture.step_attempt.finished_at,
         )
     )
+    # A transcription that was charged, and a retry of the same audio whose
+    # first attempt never reported an outcome.
+    async_session.add(
+        FlowProviderCalls(
+            flow_step_attempt_id=fixture.step_attempt.id,
+            call_kind="transcription",
+            ordinal=3,
+            status="completed",
+            request_schema_version=2,
+            provider_request_hash="d" * 64,
+            requested_model="openai/whisper-1",
+            provider="openai",
+            response_format="none",
+            requested_capabilities=[],
+            resolved_input_edge_indexes=[],
+            call_reason="initial",
+            response_model="whisper-1",
+            provider_response_id="transcription-retention-1",
+            audio_seconds=Decimal("51.250"),
+            input_source="not_applicable",
+            output_source="not_applicable",
+            requested_at=fixture.step_attempt.started_at,
+            finished_at=fixture.step_attempt.finished_at,
+        )
+    )
+    async_session.add(
+        FlowProviderCalls(
+            flow_step_attempt_id=fixture.step_attempt.id,
+            call_kind="transcription",
+            ordinal=4,
+            status="outcome_unknown",
+            request_schema_version=2,
+            provider_request_hash="e" * 64,
+            requested_model="openai/whisper-1",
+            provider="openai",
+            response_format="none",
+            requested_capabilities=[],
+            resolved_input_edge_indexes=[],
+            call_reason="initial",
+            audio_seconds=Decimal("45.500"),
+            outcome_reason="provider_error",
+            requested_at=fixture.step_attempt.started_at,
+            finished_at=fixture.step_attempt.finished_at,
+        )
+    )
     await async_session.flush()
 
     usage_before_purge = await FlowProviderCallRepository(
@@ -3024,7 +3070,7 @@ async def test_debug_retention_deletes_attempt_provider_and_resolved_input_evide
     counts = await flow_retention_service.cleanup_old_flow_runtime_data()
     await _flush_and_clear_identity_map(async_session)
 
-    assert counts["debug_provider_calls"] == 2
+    assert counts["debug_provider_calls"] == 4
     assert counts["debug_resolved_input_aggregates"] == 1
     assert counts["debug_resolved_input_edges"] == resolved_input_edge_count
     assert await async_session.get(FlowProviderCalls, provider_call.id) is None
@@ -3045,13 +3091,21 @@ async def test_debug_retention_deletes_attempt_provider_and_resolved_input_evide
     attempt_counts = attempt_marker.tombstone.counts
     assert isinstance(attempt_counts, RunDebugAttemptRetentionCounts)
     assert attempt_counts.cleared_field_count == 3
-    assert attempt_counts.provider_call_count == 2
+    assert attempt_counts.provider_call_count == 4
     assert attempt_counts.resolved_input_aggregate_count == 1
     assert attempt_counts.resolved_input_edge_count == resolved_input_edge_count
     assert attempt_counts.token_usage_state == "recorded"
     assert attempt_counts.token_usage == usage_before_purge[fixture.run.id].token_usage
     assert attempt_counts.token_usage.input_completeness == "incomplete"
     assert attempt_counts.token_usage.output_completeness == "incomplete"
+    # The audio survives the purge in the same summary, counting only what the
+    # completed request sent and marking the unresolved retry as a lower bound.
+    assert attempt_counts.transcription_usage_state == "recorded"
+    assert attempt_counts.transcription_usage == (
+        usage_before_purge[fixture.run.id].transcription_usage
+    )
+    assert attempt_counts.transcription_usage.audio_seconds == 51.25
+    assert attempt_counts.transcription_usage.completeness == "incomplete"
 
     usage_after_purge = await FlowProviderCallRepository(
         async_session

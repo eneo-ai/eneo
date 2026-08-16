@@ -54,7 +54,7 @@ from eneo.flows.application.flow_dispatch import (
 from eneo.flows.application.flow_run_service import (
     CreateRunResult,
     FlowRunDetailView,
-    FlowRunPageWithResultFilesAndTokenUsage,
+    FlowRunPageWithResultFilesAndUsage,
     FlowRunVersionedView,
     FlowRunWithResultFilesAndUsage,
 )
@@ -865,7 +865,7 @@ async def test_flow_run_endpoints_delegate_to_run_service(monkeypatch):
     )
     run_service = AsyncMock()
     run_service.list_runs_with_result_files_and_usage.return_value = (
-        FlowRunPageWithResultFilesAndTokenUsage(
+        FlowRunPageWithResultFilesAndUsage(
             items=(
                 FlowRunWithResultFilesAndUsage(
                     run=run,

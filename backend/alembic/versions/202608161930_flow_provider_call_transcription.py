@@ -108,8 +108,14 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    bind = op.get_bind()
     op.execute(f"LOCK TABLE {_TABLE} IN ACCESS EXCLUSIVE MODE")
-    op.execute(f"DELETE FROM {_TABLE}")
+    row_count = bind.scalar(sa.text(f"SELECT count(*) FROM {_TABLE}"))
+    if row_count:
+        raise RuntimeError(
+            "Cannot downgrade while provider-call evidence would be discarded "
+            f"({row_count} rows); delete them explicitly or roll forward."
+        )
 
     op.drop_constraint(_KIND_SHAPE_CHECK, _TABLE, type_="check")
     op.drop_constraint(_INPUT_USAGE_CHECK, _TABLE, type_="check")

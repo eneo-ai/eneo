@@ -59,7 +59,7 @@ from eneo.flows.api.flow_run_lifecycle_router import (
 from eneo.flows.api.flow_run_rerun_router import rerun_flow_run_step
 from eneo.flows.api.flow_run_steps_router import get_flow_graph
 from eneo.flows.application.flow_run_service import (
-    FlowRunPageWithResultFilesAndTokenUsage,
+    FlowRunPageWithResultFilesAndUsage,
     FlowRunWithResultFilesAndUsage,
 )
 from eneo.flows.enums import (
@@ -1143,7 +1143,7 @@ async def test_tenant_scoped_user_api_key_loads_space_membership_check(monkeypat
 
     run_service = AsyncMock()
     run_service.list_runs_with_result_files_and_usage.return_value = (
-        FlowRunPageWithResultFilesAndTokenUsage(
+        FlowRunPageWithResultFilesAndUsage(
             items=(
                 FlowRunWithResultFilesAndUsage(
                     run=run,
@@ -1244,7 +1244,7 @@ async def test_space_scoped_api_key_matching_space_succeeds(monkeypatch):
 
     run_service = AsyncMock()
     run_service.list_runs_with_result_files_and_usage.return_value = (
-        FlowRunPageWithResultFilesAndTokenUsage(
+        FlowRunPageWithResultFilesAndUsage(
             items=(
                 FlowRunWithResultFilesAndUsage(
                     run=run,
