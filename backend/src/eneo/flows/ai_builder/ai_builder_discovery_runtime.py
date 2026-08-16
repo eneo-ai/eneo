@@ -702,8 +702,9 @@ async def build_runtime_discovery_context(
 
     result = attempt.result
     assert result is not None
-    # This turn is newer than every persisted message, so acceptance protects
-    # only the slots this classification cites nothing new for.
+    # This classification happens after every message in the conversation,
+    # including a confirmation carried by the current one, so acceptance
+    # protects the slots it cites nothing newer than the confirmation for.
     cited_message_ids_by_source = {
         source.source_id: source.message_id for source in classification_input.sources
     }
