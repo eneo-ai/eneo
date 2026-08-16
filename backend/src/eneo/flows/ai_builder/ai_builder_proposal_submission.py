@@ -75,6 +75,7 @@ from eneo.flows.ai_builder.ai_builder_proposal_telemetry import (
     ProposalRepairReason,
     ProposalTurnTelemetry,
     ToolProcessingFailureKind,
+    assistant_metadata_with_usage,
     log_proposal_failed_turn,
     log_proposal_repair_invoked,
     proposal_repair_reason_from_tool_failure,
@@ -668,7 +669,12 @@ class ProposalSubmissionOwner:
                 kind="decline_flow_change",
                 stable_key=ctx.request_id,
             ),
-            assistant_metadata=ctx.assistant_metadata,
+            assistant_metadata=assistant_metadata_with_usage(
+                conversation=ctx.conversation,
+                base_metadata=ctx.assistant_metadata,
+                usage_tracker=ctx.usage_tracker,
+                tool_calls=[tool_call],
+            ),
             planning_state=ctx.planning_state,
             flow=ctx.flow,
         )

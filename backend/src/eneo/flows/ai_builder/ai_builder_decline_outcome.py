@@ -75,7 +75,16 @@ def build_decline_flow_change_tool_schema() -> ProposalToolSchema:
 
 
 def decline_reason_from_arguments(arguments: dict[str, Any]) -> DeclineReason | None:
-    reason = arguments.get("reason")
+    """Read the one closed argument, or nothing.
+
+    The schema is a closed object with a single enum member, so anything the
+    provider adds beside it is outside the contract and the turn falls back to
+    ordinary proposal handling rather than guessing an intent.
+    """
+
+    if set(arguments) != {"reason"}:
+        return None
+    reason = arguments["reason"]
     if isinstance(reason, str) and reason in DECLINE_REASONS:
         return reason
     return None

@@ -400,7 +400,8 @@ class ProposalTurnContext:
                 self.message_groups if message_groups is None else message_groups
             ),
             tool_schemas=proposal_turn_tool_schemas(
-                self.proposal_tool_schema, self.decline_tool_schema
+                self.proposal_tool_schema,
+                None if counts_as_repair else self.decline_tool_schema,
             ),
             route=self.route,
             target_kind=self.target_kind,
@@ -408,7 +409,7 @@ class ProposalTurnContext:
             temperature=temperature,
             tool_choice=(
                 "required"
-                if self.decline_tool_schema is not None
+                if self.decline_tool_schema is not None and not counts_as_repair
                 else forced_tool_choice(PROPOSE_FLOW_TOOL_NAME)
             ),
             counts_as_repair=counts_as_repair,

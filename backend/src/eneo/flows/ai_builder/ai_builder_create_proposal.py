@@ -213,6 +213,7 @@ async def _process_create_spec(
     validation = prepared.validation
 
     scoped_revision_feedback = validate_scoped_plan_revision(
+        target_kind=TargetKind.CREATE,
         context=plan_edit_context,
         prior_spec=prior_spec_for_revision,
         proposed_spec=spec,

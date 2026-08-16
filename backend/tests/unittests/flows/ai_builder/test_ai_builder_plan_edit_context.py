@@ -375,6 +375,7 @@ def test_step_scoped_revision_rejects_unchanged_target_step() -> None:
     )
 
     feedback = validate_scoped_plan_revision(
+        target_kind=TargetKind.CREATE,
         context=context,
         prior_spec=prior,
         proposed_spec=proposed,
@@ -400,6 +401,7 @@ def test_step_scoped_revision_accepts_changed_target_step() -> None:
 
     assert (
         validate_scoped_plan_revision(
+            target_kind=TargetKind.CREATE,
             context=context,
             prior_spec=prior,
             proposed_spec=proposed,
@@ -431,6 +433,7 @@ def test_step_scoped_revision_rejects_helper_step_insertion() -> None:
     )
 
     feedback = validate_scoped_plan_revision(
+        target_kind=TargetKind.CREATE,
         context=context,
         prior_spec=prior,
         proposed_spec=proposed,
@@ -495,6 +498,7 @@ def test_saved_flow_step_revision_uses_stable_existing_step_refs() -> None:
 
     assert (
         validate_scoped_plan_revision(
+            target_kind=TargetKind.CREATE,
             context=context,
             prior_spec=prior,
             proposed_spec=proposed,
@@ -529,6 +533,7 @@ def test_step_scoped_revision_rejects_unrelated_step_rewrite() -> None:
     )
 
     feedback = validate_scoped_plan_revision(
+        target_kind=TargetKind.CREATE,
         context=context,
         prior_spec=prior,
         proposed_spec=proposed,
@@ -571,6 +576,7 @@ def test_step_scoped_revision_rejects_downstream_semantic_rewrite() -> None:
     )
 
     feedback = validate_scoped_plan_revision(
+        target_kind=TargetKind.CREATE,
         context=context,
         prior_spec=prior,
         proposed_spec=proposed,
@@ -604,6 +610,7 @@ def test_step_scoped_revision_rejects_existing_step_reorder() -> None:
     )
 
     feedback = validate_scoped_plan_revision(
+        target_kind=TargetKind.CREATE,
         context=context,
         prior_spec=prior,
         proposed_spec=proposed,
@@ -634,6 +641,7 @@ def test_step_scoped_revision_rejects_duplicate_step_refs() -> None:
     )
 
     feedback = validate_scoped_plan_revision(
+        target_kind=TargetKind.CREATE,
         context=context,
         prior_spec=prior,
         proposed_spec=proposed,
@@ -661,6 +669,7 @@ def test_step_scoped_revision_allows_descriptive_plan_text_changes() -> None:
 
     assert (
         validate_scoped_plan_revision(
+            target_kind=TargetKind.CREATE,
             context=context,
             prior_spec=prior,
             proposed_spec=proposed,
@@ -705,6 +714,7 @@ def test_step_scoped_revision_accepts_the_compiler_appended_renderer() -> None:
 
     assert (
         validate_scoped_plan_revision(
+            target_kind=TargetKind.CREATE,
             context=context,
             prior_spec=prior,
             proposed_spec=proposed,
@@ -741,6 +751,7 @@ def test_step_scoped_revision_keeps_a_mixed_request_whole() -> None:
 
     assert (
         validate_scoped_plan_revision(
+            target_kind=TargetKind.CREATE,
             context=context,
             prior_spec=prior,
             proposed_spec=proposed,
@@ -768,6 +779,7 @@ def test_step_scoped_revision_accepts_a_renderer_the_architecture_dropped() -> N
 
     assert (
         validate_scoped_plan_revision(
+            target_kind=TargetKind.CREATE,
             context=context,
             prior_spec=prior,
             proposed_spec=proposed,
@@ -798,6 +810,7 @@ def test_step_scoped_revision_accepts_a_renderer_that_changed_artifact() -> None
 
     assert (
         validate_scoped_plan_revision(
+            target_kind=TargetKind.CREATE,
             context=context,
             prior_spec=prior,
             proposed_spec=proposed,
@@ -833,6 +846,94 @@ def test_step_scoped_revision_still_rejects_a_model_authored_extra_step() -> Non
     )
 
     feedback = validate_scoped_plan_revision(
+        target_kind=TargetKind.CREATE,
+        context=context,
+        prior_spec=prior,
+        proposed_spec=proposed,
+    )
+
+    assert feedback is not None
+    assert "must not add, remove, or reorder steps" in feedback
+
+
+def test_a_saved_flow_renderer_is_judged_like_any_other_step() -> None:
+    """Only a create-compiled renderer is server owned.
+
+    A saved Flow's modify contract offers the model that step's name, its
+    instructions and its types, so rewriting it while another step is selected
+    is ordinary drift.
+    """
+    context = ResolvedAIBuilderEditContext(
+        request=AIBuilderSavedFlowStepEditContext(flow_step_id=uuid4()),
+        scope="step",
+        target_existing_step_ref="existing_step_1",
+    )
+    prior = _edit_spec(
+        [
+            _edit_step(
+                "step_a",
+                "Create final result",
+                output_type=OutputType.TEXT,
+                existing_step_ref="existing_step_1",
+            ),
+            _renderer_step("step_b", OutputType.DOCX).model_copy(
+                update={"existing_step_ref": "existing_step_2"}
+            ),
+        ]
+    )
+    proposed = _edit_spec(
+        [
+            _edit_step(
+                "step_a",
+                "Create final result",
+                output_type=OutputType.TEXT,
+                existing_step_ref="existing_step_1",
+                instructions="Always name the decision date.",
+            ),
+            _renderer_step("step_b", OutputType.DOCX)
+            .model_copy(update={"existing_step_ref": "existing_step_2"})
+            .model_copy(update={"name": "Renamed by the model"}),
+        ]
+    )
+
+    feedback = validate_scoped_plan_revision(
+        target_kind=TargetKind.EDIT,
+        context=context,
+        prior_spec=prior,
+        proposed_spec=proposed,
+    )
+
+    assert feedback is not None
+    assert "preserve unrelated steps" in feedback
+
+
+def test_an_ordinary_step_cannot_inherit_a_dropped_renderer_ref() -> None:
+    """Losing the renderer must not license a new step in its place."""
+    context = AIBuilderPlanEditContext(
+        scope="step",
+        plan_id=UUID("00000000-0000-0000-0000-000000000001"),
+        target_plan_step_ref="step_a",
+    )
+    prior = _edit_spec(
+        [
+            _edit_step("step_a", "Create final result", output_type=OutputType.TEXT),
+            _renderer_step("step_b", OutputType.DOCX),
+        ]
+    )
+    proposed = _edit_spec(
+        [
+            _edit_step(
+                "step_a",
+                "Create final result",
+                output_type=OutputType.TEXT,
+                instructions="Always name the decision date.",
+            ),
+            _edit_step("step_b", "Publish the result", output_type=OutputType.TEXT),
+        ]
+    )
+
+    feedback = validate_scoped_plan_revision(
+        target_kind=TargetKind.CREATE,
         context=context,
         prior_spec=prior,
         proposed_spec=proposed,
@@ -864,6 +965,7 @@ def test_step_scoped_revision_rejects_runtime_form_field_changes() -> None:
     )
 
     feedback = validate_scoped_plan_revision(
+        target_kind=TargetKind.CREATE,
         context=context,
         prior_spec=prior,
         proposed_spec=proposed,
@@ -955,6 +1057,30 @@ def test_step_scoped_context_requires_a_stable_step_ref() -> None:
             scope="step",
             plan_id=UUID("00000000-0000-0000-0000-000000000001"),
         )
+
+
+def test_a_revision_that_can_decline_is_told_when_to_use_it() -> None:
+    """One directive, two cases: model only declines, mixed still edits."""
+    context = AIBuilderPlanEditContext(
+        scope="step",
+        plan_id=UUID("00000000-0000-0000-0000-000000000001"),
+        target_plan_step_ref="step_a",
+    )
+    prior = _edit_spec(
+        [_edit_step("step_a", "Create final result", output_type=OutputType.TEXT)]
+    )
+
+    declining = build_plan_revision_prompt_block(
+        context=context, prior_spec=prior, can_decline=True
+    )
+    proposing = build_plan_revision_prompt_block(
+        context=context, prior_spec=prior, can_decline=False
+    )
+
+    assert declining is not None and proposing is not None
+    assert "decline_flow_change" in declining
+    assert "model is chosen in the picker" in declining
+    assert "decline_flow_change" not in proposing
 
 
 def test_revision_prompt_names_the_target_step_and_prior_refs() -> None:
@@ -1049,6 +1175,7 @@ def test_step_scoped_edit_rejects_a_model_change_on_the_selected_step(
     )
 
     feedback = validate_scoped_plan_revision(
+        target_kind=TargetKind.CREATE,
         context=_step_context(target_plan_step_ref="step_b"),
         prior_spec=prior,
         proposed_spec=proposed,
@@ -1099,6 +1226,7 @@ def test_step_scoped_model_check_is_correct_when_the_step_order_also_drifted() -
     )
 
     feedback = validate_scoped_plan_revision(
+        target_kind=TargetKind.CREATE,
         context=_step_context(target_plan_step_ref="step_b"),
         prior_spec=prior,
         proposed_spec=proposed,
@@ -1159,6 +1287,7 @@ def test_step_scoped_model_check_does_not_accuse_a_step_after_an_insertion() -> 
     )
 
     feedback = validate_scoped_plan_revision(
+        target_kind=TargetKind.CREATE,
         context=_step_context(target_plan_step_ref="step_b"),
         prior_spec=prior,
         proposed_spec=proposed,
@@ -1177,6 +1306,7 @@ def test_whole_plan_outline_revision_is_not_model_guarded_yet() -> None:
 
     assert (
         validate_scoped_plan_revision(
+            target_kind=TargetKind.CREATE,
             context=_step_context(scope="whole_plan"),
             prior_spec=prior,
             proposed_spec=proposed,
@@ -1193,6 +1323,7 @@ def test_step_scoped_edit_accepts_an_instruction_change_that_keeps_the_model() -
 
     assert (
         validate_scoped_plan_revision(
+            target_kind=TargetKind.CREATE,
             context=_step_context(target_plan_step_ref="step_b"),
             prior_spec=prior,
             proposed_spec=proposed,

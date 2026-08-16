@@ -500,9 +500,17 @@ def build_proposal_prepared(
         assistant_snapshots=assistant_snapshots,
         resource_catalog=resource_catalog,
     )
+    # A first create turn has nothing to decline yet: the decline outcome only
+    # answers a request against a plan or Flow that already exists.
+    decline_tool_schema = (
+        build_decline_flow_change_tool_schema()
+        if is_edit_mode or plan_edit_context is not None
+        else None
+    )
     plan_revision_context = build_plan_revision_prompt_block(
         context=plan_edit_context,
         prior_spec=prior_spec_for_revision,
+        can_decline=decline_tool_schema is not None,
     )
     compile_context = create_compile_context_from_planning_state(
         planning_state,
@@ -528,13 +536,6 @@ def build_proposal_prepared(
             else ()
         ),
         obligation_projection=obligation_projection,
-    )
-    # A first create turn has nothing to decline yet: the decline outcome only
-    # answers a request against a plan or Flow that already exists.
-    decline_tool_schema = (
-        build_decline_flow_change_tool_schema()
-        if is_edit_mode or plan_edit_context is not None
-        else None
     )
     incompatible_field_names = (
         compile_context.incompatible_confirmed_form_field_names

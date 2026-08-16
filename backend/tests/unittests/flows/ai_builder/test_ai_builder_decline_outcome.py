@@ -12,7 +12,13 @@ from eneo.flows.ai_builder.ai_builder_decline_outcome import (
     decline_reason_from_arguments,
 )
 from eneo.flows.ai_builder.ai_builder_events import encode_ai_builder_stream_event
-from eneo.flows.ai_builder.ai_builder_tool_names import DECLINE_FLOW_CHANGE_TOOL_NAME
+from eneo.flows.ai_builder.ai_builder_proposal_tool_contracts import (
+    forced_tool_choice,
+)
+from eneo.flows.ai_builder.ai_builder_tool_names import (
+    DECLINE_FLOW_CHANGE_TOOL_NAME,
+    PROPOSE_FLOW_TOOL_NAME,
+)
 from eneo.flows.ai_builder.ai_builder_tools import validate_native_strict_schema
 from tests.unittests.flows.ai_builder.proposal_turn_builders import _make_context
 from tests.unittests.flows.ai_builder.proposal_turn_test_doubles import (
@@ -45,6 +51,12 @@ def test_only_contract_reasons_decline() -> None:
     )
     assert decline_reason_from_arguments({"reason": "because I said so"}) is None
     assert decline_reason_from_arguments({}) is None
+    assert (
+        decline_reason_from_arguments(
+            {"reason": "model_choice_belongs_to_step_editor", "note": "extra"}
+        )
+        is None
+    )
 
 
 @pytest.mark.parametrize(
@@ -98,6 +110,29 @@ async def test_a_model_change_request_is_declined_without_a_plan() -> None:
     assert stored[0].tool_calls[0]["arguments"] == {
         "reason": "model_choice_belongs_to_step_editor"
     }
+
+
+def test_a_repair_request_never_offers_the_decline_tool() -> None:
+    """A repair answers a rejected proposal; declining is not one of its options.
+
+    Both repair parsers accept `propose_flow` only, so offering the decline
+    tool there would spend a bounded provider call on an answer the turn
+    cannot read.
+    """
+    ctx = _make_context(decline_tool_schema=build_decline_flow_change_tool_schema())
+
+    initial = ctx.completion_request(temperature=0.1)
+    repair = ctx.completion_request(temperature=0.1, counts_as_repair=True)
+
+    assert [schema["function"]["name"] for schema in initial.tool_schemas] == [
+        PROPOSE_FLOW_TOOL_NAME,
+        DECLINE_FLOW_CHANGE_TOOL_NAME,
+    ]
+    assert initial.tool_choice == "required"
+    assert [schema["function"]["name"] for schema in repair.tool_schemas] == [
+        PROPOSE_FLOW_TOOL_NAME
+    ]
+    assert repair.tool_choice == forced_tool_choice(PROPOSE_FLOW_TOOL_NAME)
 
 
 @pytest.mark.asyncio

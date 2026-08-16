@@ -9,11 +9,13 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from eneo.flows.ai_builder.ai_builder_domain_models import (
     BuilderPlan,
     BuilderSession,
+    TargetKind,
 )
 from eneo.flows.ai_builder.ai_builder_error_contract import (
     AIBuilderBadRequestException,
     AIBuilderErrorCode,
 )
+from eneo.flows.ai_builder.ai_builder_tool_names import DECLINE_FLOW_CHANGE_TOOL_NAME
 from eneo.flows.flow_authoring_spec import (
     FlowDraftSpecCore,
     OutputMode,
@@ -293,10 +295,23 @@ def build_plan_revision_prompt_block(
     *,
     context: ScopedEditContext | None,
     prior_spec: FlowDraftSpecCore | None,
+    can_decline: bool = False,
 ) -> str | None:
     if context is None or prior_spec is None:
         return None
 
+    model_rule = (
+        "- A step's model is chosen in the step's modellväljare/model picker and is "
+        f"never part of this revision. When the model is all the user asks to "
+        f"change, call `{DECLINE_FLOW_CHANGE_TOOL_NAME}` with reason "
+        "`model_choice_belongs_to_step_editor`. When the message also asks for a "
+        "change you can make, make that change and say in plan_rationale that the "
+        "model is chosen in the picker."
+        if can_decline
+        else "- A step's model is chosen in the step's modellväljare/model picker and "
+        "is never part of this revision; when the user asks for another model, say "
+        "that in plan_rationale instead of changing the step's model."
+    )
     lines = [
         "Plan revision directive:",
         *(
@@ -305,9 +320,7 @@ def build_plan_revision_prompt_block(
             else ["- Current source: saved Flow draft."]
         ),
         "- Treat the user's latest message as a revision request for this flow.",
-        "- A step's model is chosen in the step's modellväljare/model picker and is "
-        "never part of this revision; when the user asks for another model, say that "
-        "in plan_rationale instead of changing the step's model.",
+        model_rule,
     ]
 
     if context.scope == "whole_plan":
@@ -352,6 +365,7 @@ def validate_scoped_plan_revision(
     context: ScopedEditContext | None,
     prior_spec: FlowDraftSpecCore | None,
     proposed_spec: FlowDraftSpecCore,
+    target_kind: TargetKind,
 ) -> str | None:
     """Return repair feedback when a step-scoped plan edit drifts.
 
@@ -365,22 +379,24 @@ def validate_scoped_plan_revision(
     told apart from a model change. Saved-Flow steps do not need the guard —
     their modify contract has no `model_ref` at all.
 
-    The terminal document renderer is exempt. It is the create compiler's own
-    materialization of the committed output architecture, so it appears,
-    disappears or retypes itself whenever that architecture changes — never
-    because the model drifted.
+    A create-compiled revision exempts its terminal document renderer. That
+    step is the compiler's own materialization of the committed output
+    architecture, so it appears, disappears or retypes itself whenever that
+    architecture changes — never because the model drifted. An edit-compiled
+    revision has no such exemption: a saved Flow's modify contract lets the
+    model author that step's name, instructions and types like any other.
     """
 
     if context is None or context.scope != "step" or prior_spec is None:
         return None
 
-    prior_renderer = _terminal_document_renderer(prior_spec)
-    proposed_renderer = _terminal_document_renderer(proposed_spec)
-    server_owned_refs = {
-        _step_identity(step, context)
-        for step in (prior_renderer, proposed_renderer)
-        if step is not None
-    }
+    exempt_renderer = target_kind is TargetKind.CREATE
+    prior_renderer = (
+        _terminal_document_renderer(prior_spec) if exempt_renderer else None
+    )
+    proposed_renderer = (
+        _terminal_document_renderer(proposed_spec) if exempt_renderer else None
+    )
     prior_target = _find_target_step(prior_spec, context)
     proposed_target = _find_target_step(proposed_spec, context)
     target_ref = step_ref_for_context(context) or "unknown"
@@ -392,7 +408,7 @@ def validate_scoped_plan_revision(
 
     # The user can select the renderer itself. Every field it has is server
     # owned, so this guard has nothing of the model's to judge on it.
-    target_is_server_owned = _step_identity(prior_target, context) in server_owned_refs
+    target_is_server_owned = prior_target is prior_renderer
     if not target_is_server_owned:
         if proposed_target is None:
             return (
@@ -411,10 +427,13 @@ def validate_scoped_plan_revision(
 
     preservation_feedback = _validate_non_target_preservation(
         context=context,
-        prior_spec=prior_spec,
-        proposed_spec=proposed_spec,
+        prior_steps=[step for step in prior_spec.steps if step is not prior_renderer],
+        proposed_steps=[
+            step for step in proposed_spec.steps if step is not proposed_renderer
+        ],
+        prior_form_fields=_runtime_form_fields_dump(prior_spec),
+        proposed_form_fields=_runtime_form_fields_dump(proposed_spec),
         target_step_ref=_step_identity(prior_target, context),
-        server_owned_refs=server_owned_refs,
     )
     if preservation_feedback is not None:
         return preservation_feedback
@@ -482,30 +501,21 @@ def _validate_target_step_model(
 def _validate_non_target_preservation(
     *,
     context: ScopedEditContext,
-    prior_spec: FlowDraftSpecCore,
-    proposed_spec: FlowDraftSpecCore,
+    prior_steps: list[StepSpec],
+    proposed_steps: list[StepSpec],
+    prior_form_fields: list[dict[str, object]],
+    proposed_form_fields: list[dict[str, object]],
     target_step_ref: str,
-    server_owned_refs: set[str],
 ) -> str | None:
-    if _runtime_form_fields_dump(prior_spec) != _runtime_form_fields_dump(
-        proposed_spec
-    ):
+    if prior_form_fields != proposed_form_fields:
         return (
             "Step-scoped plan edits must not change runtime form fields. Use a "
             "whole-plan edit when the requested change needs new or different "
             "inputs from the user."
         )
 
-    prior_refs = [
-        ref
-        for ref in (_step_identity(step, context) for step in prior_spec.steps)
-        if ref not in server_owned_refs
-    ]
-    proposed_refs = [
-        ref
-        for ref in (_step_identity(step, context) for step in proposed_spec.steps)
-        if ref not in server_owned_refs
-    ]
+    prior_refs = [_step_identity(step, context) for step in prior_steps]
+    proposed_refs = [_step_identity(step, context) for step in proposed_steps]
 
     duplicate_refs = _duplicate_refs(proposed_refs)
     if duplicate_refs:
@@ -513,11 +523,6 @@ def _validate_non_target_preservation(
             "Step-scoped plan edits must keep stable step refs unique. "
             f"Duplicate step refs: {', '.join(duplicate_refs)}."
         )
-
-    prior_steps = {_step_identity(step, context): step for step in prior_spec.steps}
-    proposed_steps = {
-        _step_identity(step, context): step for step in proposed_spec.steps
-    }
 
     if proposed_refs != prior_refs:
         return (
@@ -527,10 +532,13 @@ def _validate_non_target_preservation(
             f"{', '.join(proposed_refs)}."
         )
 
-    for ref, prior_step in prior_steps.items():
-        if ref == target_step_ref or ref in server_owned_refs:
+    proposed_by_ref = {_step_identity(step, context): step for step in proposed_steps}
+    for ref, prior_step in (
+        (_step_identity(step, context), step) for step in prior_steps
+    ):
+        if ref == target_step_ref:
             continue
-        proposed_step = proposed_steps.get(ref)
+        proposed_step = proposed_by_ref.get(ref)
         if proposed_step is None:
             continue
 

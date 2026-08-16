@@ -248,6 +248,7 @@ async def process_edit_arguments(
     )
 
     scoped_revision_feedback = validate_scoped_plan_revision(
+        target_kind=TargetKind.EDIT,
         context=plan_edit_context,
         prior_spec=prior_spec_for_revision,
         proposed_spec=compiled_spec,
