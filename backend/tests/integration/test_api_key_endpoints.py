@@ -2379,3 +2379,58 @@ async def test_revoked_api_key_is_committed_before_the_endpoint_returns(
         "revocation was reported to the operator before it was committed, so the "
         "key still authenticates after the response"
     )
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_notification_preferences_are_committed_before_the_endpoint_returns(
+    setup_database,
+    default_user,
+    test_tenant,
+    object_content_runtime_ready,
+):
+    """A saved preference is state the caller can read back immediately.
+
+    These three settings routes kept the default container, so their 200
+    described a write that only landed at dependency teardown; the caller's own
+    reload could still show the previous value.
+    """
+    from dependency_injector import providers
+
+    from eneo.authentication.api_key_router import update_notification_preferences
+    from eneo.authentication.auth_models import ApiKeyNotificationPreferencesUpdate
+    from eneo.database.database import sessionmanager
+    from eneo.database.tables.settings_table import Settings
+    from eneo.main.container.container import Container
+
+    async with sessionmanager.session() as session:
+        assert not session.in_transaction()
+        response = await update_notification_preferences(
+            request=ApiKeyNotificationPreferencesUpdate(days_before_expiry=[21, 3]),
+            container=Container(
+                session=providers.Object(session),
+                user=providers.Object(default_user),
+                tenant=providers.Object(test_tenant),
+            ),
+        )
+        assert response.days_before_expiry == [21, 3]
+
+        # Stand-in for the caller's next request, on a different connection.
+        async with (
+            sessionmanager.session() as next_request_session,
+            next_request_session.begin(),
+        ):
+            durable_widget = await next_request_session.scalar(
+                sa.select(Settings.chatbot_widget)
+                .where(Settings.user_id == default_user.id)
+                .order_by(Settings.updated_at.desc())
+                .limit(1)
+            )
+
+    assert isinstance(durable_widget, dict)
+    assert durable_widget["api_key_notifications"]["preferences"][
+        "days_before_expiry"
+    ] == [21, 3], (
+        "the preference was reported as saved before it was committed, so the "
+        "caller's next read can still return the previous value"
+    )

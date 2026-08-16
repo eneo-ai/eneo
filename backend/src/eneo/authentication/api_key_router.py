@@ -71,10 +71,12 @@ from eneo.users.user import UserInDB
 
 router = APIRouter(tags=["API Keys"])
 
-# Issuing or re-dating a key hands the caller something it is expected to use on
-# its very next request. The default container commits at dependency teardown —
-# after the response has been sent — so that next request can race the commit and
-# be rejected. These endpoints own their transaction and commit before replying.
+# A successful response here describes state the caller is entitled to act on
+# immediately: a usable secret, a dead key, or a saved preference. The default
+# container commits at dependency teardown — after the response has been sent —
+# so the caller's next request can race that commit and miss the state it was
+# just told about. These endpoints own their transaction and commit before
+# replying.
 ContainerWithUserExplicitTransactionDep = Annotated[
     Container, Depends(get_container_for_explicit_transaction(with_user=True))
 ]
@@ -516,46 +518,47 @@ async def update_notification_preferences(
         ApiKeyNotificationPreferencesUpdate,
         Body(examples=[{"enabled": True, "days_before_expiry": [30, 14, 7, 3, 1]}]),
     ],
-    container: Annotated[Container, Depends(get_container(with_user=True))],
+    container: ContainerWithUserExplicitTransactionDep,
     _session_guard: None = Depends(require_session_auth),
     _guard: None = Depends(require_api_key_permission(ApiKeyPermission.WRITE)),
 ) -> ApiKeyNotificationPreferencesResponse:
     user: UserInDB = container.user()
     session = cast(AsyncSession, container.session())
     policy = _notification_policy_for_user(user)
-    current_preferences, subscriptions = await _load_api_key_notification_settings(
-        session=session,
-        user_id=user.id,
-        policy=policy,
-    )
+    async with session.begin():
+        current_preferences, subscriptions = await _load_api_key_notification_settings(
+            session=session,
+            user_id=user.id,
+            policy=policy,
+        )
 
-    merged_preferences = current_preferences.model_dump(mode="python")
-    merged_preferences.update(request.model_dump(exclude_unset=True))
-    validated_preferences = ApiKeyNotificationPreferencesResponse.model_validate(
-        merged_preferences
-    )
-    updated_preferences = ApiKeyNotificationPreferencesResponse(
-        enabled=validated_preferences.enabled and policy.enabled,
-        days_before_expiry=_normalize_days_against_policy(
-            validated_preferences.days_before_expiry,
-            policy,
-        ),
-        auto_follow_published_assistants=(
-            validated_preferences.auto_follow_published_assistants
-            and policy.allow_auto_follow_published_assistants
-        ),
-        auto_follow_published_apps=(
-            validated_preferences.auto_follow_published_apps
-            and policy.allow_auto_follow_published_apps
-        ),
-    )
+        merged_preferences = current_preferences.model_dump(mode="python")
+        merged_preferences.update(request.model_dump(exclude_unset=True))
+        validated_preferences = ApiKeyNotificationPreferencesResponse.model_validate(
+            merged_preferences
+        )
+        updated_preferences = ApiKeyNotificationPreferencesResponse(
+            enabled=validated_preferences.enabled and policy.enabled,
+            days_before_expiry=_normalize_days_against_policy(
+                validated_preferences.days_before_expiry,
+                policy,
+            ),
+            auto_follow_published_assistants=(
+                validated_preferences.auto_follow_published_assistants
+                and policy.allow_auto_follow_published_assistants
+            ),
+            auto_follow_published_apps=(
+                validated_preferences.auto_follow_published_apps
+                and policy.allow_auto_follow_published_apps
+            ),
+        )
 
-    await _save_api_key_notification_settings(
-        session=session,
-        user_id=user.id,
-        preferences=updated_preferences,
-        subscriptions=subscriptions,
-    )
+        await _save_api_key_notification_settings(
+            session=session,
+            user_id=user.id,
+            preferences=updated_preferences,
+            subscriptions=subscriptions,
+        )
     return updated_preferences
 
 
@@ -598,7 +601,7 @@ async def list_notification_subscriptions(
 async def upsert_notification_subscription(
     target_type: ApiKeyNotificationTargetType,
     target_id: UUID,
-    container: Annotated[Container, Depends(get_container(with_user=True))],
+    container: ContainerWithUserExplicitTransactionDep,
     _session_guard: None = Depends(require_session_auth),
     _guard: None = Depends(require_api_key_permission(ApiKeyPermission.WRITE)),
 ) -> ApiKeyNotificationSubscriptionListResponse:
@@ -608,44 +611,45 @@ async def upsert_notification_subscription(
     session = cast(AsyncSession, container.session())
     notification_policy = _notification_policy_for_user(user)
 
-    await _validate_notification_follow_target(
-        target_type=target_type,
-        target_id=target_id,
-        tenant_id=user.tenant_id,
-        repo=repo,
-        policy=policy,
-    )
+    async with session.begin():
+        await _validate_notification_follow_target(
+            target_type=target_type,
+            target_id=target_id,
+            tenant_id=user.tenant_id,
+            repo=repo,
+            policy=policy,
+        )
 
-    preferences, current_subscriptions = await _load_api_key_notification_settings(
-        session=session,
-        user_id=user.id,
-        policy=notification_policy,
-    )
-    updated = {
-        (subscription.target_type.value, subscription.target_id): subscription
-        for subscription in current_subscriptions
-    }
-    new_subscription = ApiKeyNotificationSubscription(
-        target_type=target_type,
-        target_id=target_id,
-    )
-    updated[(new_subscription.target_type.value, new_subscription.target_id)] = (
-        new_subscription
-    )
-    subscriptions = sorted(
-        updated.values(),
-        key=lambda subscription: (
-            subscription.target_type.value,
-            str(subscription.target_id),
-        ),
-    )
+        preferences, current_subscriptions = await _load_api_key_notification_settings(
+            session=session,
+            user_id=user.id,
+            policy=notification_policy,
+        )
+        updated = {
+            (subscription.target_type.value, subscription.target_id): subscription
+            for subscription in current_subscriptions
+        }
+        new_subscription = ApiKeyNotificationSubscription(
+            target_type=target_type,
+            target_id=target_id,
+        )
+        updated[(new_subscription.target_type.value, new_subscription.target_id)] = (
+            new_subscription
+        )
+        subscriptions = sorted(
+            updated.values(),
+            key=lambda subscription: (
+                subscription.target_type.value,
+                str(subscription.target_id),
+            ),
+        )
 
-    await _save_api_key_notification_settings(
-        session=session,
-        user_id=user.id,
-        preferences=preferences,
-        subscriptions=subscriptions,
-    )
+        await _save_api_key_notification_settings(
+            session=session,
+            user_id=user.id,
+            preferences=preferences,
+            subscriptions=subscriptions,
+        )
     return ApiKeyNotificationSubscriptionListResponse(items=subscriptions)
 
 
@@ -663,33 +667,34 @@ async def upsert_notification_subscription(
 async def delete_notification_subscription(
     target_type: ApiKeyNotificationTargetType,
     target_id: UUID,
-    container: Annotated[Container, Depends(get_container(with_user=True))],
+    container: ContainerWithUserExplicitTransactionDep,
     _session_guard: None = Depends(require_session_auth),
     _guard: None = Depends(require_api_key_permission(ApiKeyPermission.WRITE)),
 ) -> ApiKeyNotificationSubscriptionListResponse:
     user: UserInDB = container.user()
     session = cast(AsyncSession, container.session())
     policy = _notification_policy_for_user(user)
-    preferences, current_subscriptions = await _load_api_key_notification_settings(
-        session=session,
-        user_id=user.id,
-        policy=policy,
-    )
-    subscriptions = [
-        subscription
-        for subscription in current_subscriptions
-        if not (
-            subscription.target_type == target_type
-            and subscription.target_id == target_id
+    async with session.begin():
+        preferences, current_subscriptions = await _load_api_key_notification_settings(
+            session=session,
+            user_id=user.id,
+            policy=policy,
         )
-    ]
+        subscriptions = [
+            subscription
+            for subscription in current_subscriptions
+            if not (
+                subscription.target_type == target_type
+                and subscription.target_id == target_id
+            )
+        ]
 
-    await _save_api_key_notification_settings(
-        session=session,
-        user_id=user.id,
-        preferences=preferences,
-        subscriptions=subscriptions,
-    )
+        await _save_api_key_notification_settings(
+            session=session,
+            user_id=user.id,
+            preferences=preferences,
+            subscriptions=subscriptions,
+        )
     return ApiKeyNotificationSubscriptionListResponse(items=subscriptions)
 
 
