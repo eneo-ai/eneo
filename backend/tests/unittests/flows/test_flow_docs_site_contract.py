@@ -28,6 +28,7 @@ from eneo.flows.api.flow_api_error_metadata import (
     render_flow_error_taxonomy_docs_page,
 )
 from eneo.flows.api.flow_models import (
+    FLOW_RUN_DETAIL_PUBLIC_EXAMPLE,
     FLOW_RUN_PUBLIC_EXAMPLE,
     FLOW_RUN_QUEUED_AFTER_DISPATCH_EXAMPLE,
     FLOW_RUN_REVIEW_CHECKPOINT_APPROVE_REQUEST_EXAMPLE,
@@ -36,6 +37,7 @@ from eneo.flows.api.flow_models import (
     FLOW_RUN_REVIEW_CHECKPOINT_RESUME_REQUEST_EXAMPLE,
     FLOW_RUN_STEP_PUBLIC_EXAMPLE,
     FlowRunCreateRequest,
+    FlowRunDetailPublic,
     FlowRunPublic,
     FlowRunReviewCheckpointEditRequest,
     FlowRunReviewCheckpointPublic,
@@ -127,6 +129,12 @@ DOCS_SITE_CONTENT_ROOT = (
 DOCS_SITE_GLOBAL_CSS = (
     REPO_ROOT / "frontend" / "apps" / "docs-site" / "src" / "app" / "globals.css"
 )
+DOCS_SITE_SCRIPT_TESTS = tuple(
+    REPO_ROOT / "frontend" / "apps" / "docs-site" / "scripts" / name
+    for name in ("build-llm-text.test.mjs", "published-client.test.mjs")
+)
+DOCS_SITE_PACKAGE_JSON = REPO_ROOT / "frontend" / "apps" / "docs-site" / "package.json"
+DOCS_SITE_DEPLOY_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "deploy_docs.yml"
 FLOW_GUIDES_DIR = DOCS_SITE_CONTENT_ROOT / "guides"
 FLOW_GUIDES_INDEX = FLOW_GUIDES_DIR / "index.mdx"
 FLOW_GUIDES_META = FLOW_GUIDES_DIR / "_meta.ts"
@@ -2805,6 +2813,68 @@ def test_flow_consumer_guides_are_generated_from_contract_catalogs() -> None:
         assert PLACEHOLDER_DOC_PATTERN.search(page) is None
 
 
+def _fenced_blocks(page: str, language: str) -> list[str]:
+    blocks: list[str] = []
+    current: list[str] | None = None
+    for line in page.splitlines():
+        if current is None:
+            if line.strip() == f"```{language}":
+                current = []
+            continue
+        if line.strip() == "```":
+            blocks.append("\n".join(current))
+            current = None
+            continue
+        current.append(line)
+    return blocks
+
+
+def test_integrating_guide_client_listings_are_runnable() -> None:
+    """The guide advertises two copy-pasteable clients, so both must parse."""
+
+    page = _read(FLOW_CONSUMER_INTEGRATING_GUIDE)
+
+    bash_blocks = _fenced_blocks(page, "bash")
+    assert len(bash_blocks) == 1, "the guide publishes exactly one shell client"
+    result = subprocess.run(  # noqa: S603 - fixed argv, syntax check only
+        ["bash", "-n"],
+        input=bash_blocks[0],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+
+    typescript_blocks = _fenced_blocks(page, "ts")
+    assert len(typescript_blocks) == 1, "the guide publishes exactly one TS client"
+    typescript = typescript_blocks[0]
+    # The published client must not build request URLs from a hardcoded prefix,
+    # because the guide itself documents the prefix as an operator setting.
+    assert "fetch(`${this.apiBase}${path}`" in typescript
+    assert "/api/v1${path}" not in typescript
+    for declaration in ("export class EneoFlows", "export type RunResult"):
+        assert declaration in typescript
+
+
+def test_docs_site_build_scripts_are_wired_and_guarded() -> None:
+    """The Markdown mirror ships with the site and its behavior is tested there.
+
+    The flattener and the published client are exercised by executing them in
+    `frontend/apps/docs-site/scripts/*.test.mjs`; this test only guards the
+    wiring, which is what a Python suite can honestly check.
+    """
+
+    package_json = json.loads(_read(DOCS_SITE_PACKAGE_JSON))
+    scripts = package_json.get("scripts", {})
+    assert "build-llm-text.mjs" in scripts.get("build", "")
+    assert scripts.get("test") == "bun test scripts"
+    for test_file in DOCS_SITE_SCRIPT_TESTS:
+        assert test_file.exists(), test_file
+    assert "bun run test" in _read(DOCS_SITE_DEPLOY_WORKFLOW), (
+        "the docs deploy workflow must run the build-script tests before building"
+    )
+
+
 def test_flow_review_edit_docs_define_the_payload_integrity_contract() -> None:
     integrating_guide = _read(FLOW_CONSUMER_INTEGRATING_GUIDE)
     api_guide = _read(FLOW_API_GUIDE)
@@ -2838,8 +2908,8 @@ def test_flow_consumer_section_index_is_generated_from_nav_catalog() -> None:
     assert page.count("Next: ") == 1
     assert [entry.slug for entry in nav_entries] == [
         "index",
-        "designing-flows",
         "integrating-flows",
+        "designing-flows",
         "flows-faq",
         "reference",
     ]
@@ -3348,7 +3418,7 @@ def test_flow_api_guide_pins_canonical_runtime_response_examples() -> None:
 
 def test_flow_api_guide_pins_canonical_run_and_step_examples() -> None:
     FlowRunCreateRequest.model_validate(_flow_run_create_request_example())
-    FlowRunPublic.model_validate(FLOW_RUN_PUBLIC_EXAMPLE)
+    FlowRunDetailPublic.model_validate(FLOW_RUN_DETAIL_PUBLIC_EXAMPLE)
     FlowRunStepPublic.model_validate(FLOW_RUN_STEP_PUBLIC_EXAMPLE)
 
     assert (
@@ -3362,12 +3432,15 @@ def test_flow_api_guide_pins_canonical_run_and_step_examples() -> None:
         )
         == _flow_run_create_request_example()
     )
+    # The guide documents the run-polling endpoint, which answers with
+    # FlowRunDetailPublic; pinning the detail example keeps webhook_deliveries in the
+    # published example instead of quietly documenting the create-response shape.
     assert (
         _find_json_object(
             FLOW_API_GUIDE,
             required_keys={"flow_version", "tenant_id", "trace_id", "status", "error"},
         )
-        == FLOW_RUN_PUBLIC_EXAMPLE
+        == FLOW_RUN_DETAIL_PUBLIC_EXAMPLE
     )
     assert _find_json_list(
         FLOW_API_GUIDE,

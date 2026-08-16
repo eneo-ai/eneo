@@ -239,8 +239,23 @@ class SignedURLRequest(BaseModel):
         }
     )
 
-    expires_in: int = Field(default=3600, gt=0, le=86400)
-    content_disposition: ContentDisposition = ContentDisposition.ATTACHMENT
+    expires_in: int = Field(
+        default=3600,
+        gt=0,
+        le=86400,
+        description=(
+            "Lifetime of the signed URL in seconds, from 1 to 86400 (24 hours). The response "
+            "reports the resulting deadline as a Unix epoch integer in `expires_at`."
+        ),
+    )
+    content_disposition: ContentDisposition = Field(
+        default=ContentDisposition.ATTACHMENT,
+        description=(
+            "Whether the download should be offered as a file (`attachment`) or rendered in "
+            "place (`inline`). Fetch the returned URL without an authentication header; the "
+            "signature already carries the authorization."
+        ),
+    )
 
 
 FILE_ORIGINAL_SIGNED_URL_MAXIMUM_EXPIRY_SECONDS = 60 * 60

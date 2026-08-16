@@ -36,6 +36,13 @@ jobs:
         working-directory: ./frontend
         run: bun install --frozen-lockfile
 
+      # The published guides carry copy-pasteable client listings, and the build
+      # writes the Markdown mirror those listings must survive. Prove both before
+      # the site ships.
+      - name: Test docs-site build scripts
+        working-directory: ./frontend/apps/docs-site
+        run: bun run test
+
       - name: Build docs site
         working-directory: ./frontend/apps/docs-site
         run: bun run build

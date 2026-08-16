@@ -4524,6 +4524,21 @@ export interface paths {
      *         `result` is null until the run completes successfully, then discriminates inline text,
      *         authored structured JSON, current artifact metadata, or successful outbound delivery.
      *         Structured values and contracts are interpreted with this run's pinned `flow_version`.
+     *
+     *         This response model is `FlowRunDetailPublic`: it is the run-create model plus an
+     *         always-present `webhook_deliveries` array, which stays empty unless the flow's final step
+     *         was authored with outbound HTTP delivery.
+     *
+     *         Polling is the only mechanism a caller controls for observing run status: there is no
+     *         client-registered run-status subscription, server-sent event, or WebSocket surface. A
+     *         flow author can separately configure a terminal step to deliver its result over outbound
+     *         HTTP, which is what `webhook_deliveries` reports; that does signal successful completion
+     *         to the receiver they configured, but it is designed into the flow rather than requested
+     *         by the caller and it reports neither failure nor review states. Poll this endpoint about
+     *         every 2 seconds for the first 30 seconds, then every 5 seconds, then every 15 seconds,
+     *         and stop when the status capability `should_poll` is false. Keep polling while the status
+     *         is `awaiting_review`, because a reviewer can act at any time and the checkpoint can also
+     *         expire.
      *         Current runtime visibility is policy-based: callers always see their own runs, tenant admins
      *         can inspect runs across the tenant, same-space admins and owners can inspect run metadata for
      *         flows in their space, and service-key principals can inspect only their own runs.
@@ -4578,6 +4593,19 @@ export interface paths {
     /**
      * Cancel flow run
      * @description Cancel a flow run if it is not already terminal.
+     *
+     *     Cancelling is idempotent and never fails on state. Calling it on a run that is already
+     *     `completed`, `failed`, or `cancelled` returns `200` with that run unchanged, still in its
+     *     existing terminal status. Do not assume the response status is `cancelled`; read
+     *     `status` from the response body.
+     *
+     *     The run status changes before the response returns, but the worker stops asynchronously.
+     *     An in-flight completion-model call is aborted within a few seconds; an in-flight
+     *     transcription or outbound HTTP call runs to completion and is honored only at the next
+     *     step boundary. Provider work can therefore still be billed after this endpoint returns,
+     *     and a step result can settle shortly after the run already reads `cancelled`.
+     *
+     *     A cancelled run cannot be resumed or rerun. Create a new run instead.
      *
      *     This is the canonical run control endpoint for flow consumers. Current runtime lifecycle control
      *     is policy-based: callers can cancel their own runs, tenant admins can cancel runs across the
@@ -18406,11 +18434,15 @@ export interface components {
      *     }
      */
     FlowRunDetailPublic: {
-      /** Cancelled At */
+      /**
+       * Cancelled At
+       * @description When the run was cancelled. Null unless `status` is `cancelled`.
+       */
       cancelled_at?: string | null;
       /**
        * Created At
        * Format: date-time
+       * @description When the run row was created.
        */
       created_at: string;
       /**
@@ -18447,26 +18479,41 @@ export interface components {
       dispatched_at?: string | null;
       /** @description Structured terminal run error. API consumers should branch on `error.code`; null means the run has no terminal run-level error. */
       error?: components["schemas"]["FlowRunError"] | null;
-      /** Finished At */
+      /**
+       * Finished At
+       * @description When the run reached a terminal status. Null while non-terminal.
+       */
       finished_at?: string | null;
       /**
        * Flow Id
        * Format: uuid
+       * @description Identifier of the flow that owns this run.
        */
       flow_id: string;
-      /** Flow Version */
+      /**
+       * Flow Version
+       * @description Published flow version this run is pinned to. It is the version the run executes against even after the flow is republished.
+       */
       flow_version: number;
       /**
        * Id
        * Format: uuid
+       * @description Durable run identifier. Use it as the `{run_id}` path segment for polling, review, cancel, rerun, and artifact requests.
        */
       id: string;
-      /** Input Payload Json */
+      /**
+       * Input Payload Json
+       * @description Structured run input as accepted at creation, echoed back for display. It holds the published form-field values; uploaded files are referenced from step results, not from here.
+       */
       input_payload_json?: {
         [key: string]: unknown;
       } | null;
-      /** Job Id */
+      /**
+       * Job Id
+       * @description Background job that owns the current execution attempt. Diagnostic only; it is not addressable through the public API.
+       */
       job_id?: string | null;
+      /** @description Principal kind that created the run, once resolved. Service-key callers only see runs their own key created. */
       principal_type?: components["schemas"]["PrincipalType"] | null;
       /**
        * Result
@@ -18481,19 +18528,27 @@ export interface components {
             | components["schemas"]["FlowRunOutboundHttpResultPublic"]
           )
         | null;
-      /** Result Files */
+      /**
+       * Result Files
+       * @description Every downloadable file produced by the current attempt of any step, including files the final result does not carry. Download one with `POST {api_prefix}/flows/{id}/runs/{run_id}/artifacts/{file_id}/signed-url/` using its `file_id`, and only when its `availability` is `available`.
+       */
       result_files?: components["schemas"]["FlowRunStepResultFile"][];
       /**
        * Revision
        * @description Monotonic run lifecycle compare token. Step-rerun requests use this value as `expected_run_revision`.
        */
       revision: number;
-      /** Started At */
+      /**
+       * Started At
+       * @description When a worker began executing the first step. Null while queued.
+       */
       started_at?: string | null;
+      /** @description Current lifecycle status. `queued` and `running` are active, `awaiting_review` means a human review checkpoint is open and the run will not advance until it is approved and resumed, and `completed`, `failed`, and `cancelled` are terminal. Call `GET {api_prefix}/flows/runs/status-capabilities/` for the machine-readable matrix that says which statuses to keep polling, cancel, redispatch, or rerun. */
       status: components["schemas"]["FlowRunStatus"];
       /**
        * Tenant Id
        * Format: uuid
+       * @description Tenant that owns the run and its data.
        */
       tenant_id: string;
       /** @description Aggregated recorded token usage for every model attempt in this run. Null when no token-metered call exists or retention left no recoverable count. */
@@ -18501,14 +18556,19 @@ export interface components {
       /**
        * Trace Id
        * Format: uuid
+       * @description Correlation id shared by this run's audit and evidence records. Quote it in support requests.
        */
       trace_id: string;
       /**
        * Updated At
        * Format: date-time
+       * @description When the run row last changed. It moves on every status change.
        */
       updated_at: string;
-      /** Webhook Deliveries */
+      /**
+       * Webhook Deliveries
+       * @description Secret-free outbound HTTP delivery attempts for this run. The field is always present and is empty unless the flow's final step was authored with outbound HTTP delivery. Eneo has no inbound webhook subscription surface, so this reports deliveries the flow author configured, never callbacks a client registered.
+       */
       webhook_deliveries: components["schemas"]["FlowRunWebhookDeliveryPublic"][];
     };
     /**
@@ -18850,7 +18910,7 @@ export interface components {
      *             "flow_run_id": "00000000-0000-0000-0000-000000000301",
      *             "id": "00000000-0000-0000-0000-000000000901",
      *             "next_step_ids": [
-     *               "00000000-0000-0000-0000-000000000102"
+     *               "00000000-0000-0000-0000-000000000104"
      *             ],
      *             "original_payload_json": {
      *               "text": "Draft answer."
@@ -18872,9 +18932,9 @@ export interface components {
      *             "revision": 4,
      *             "schema_version": 1,
      *             "state": "resumed",
-     *             "step_id": "00000000-0000-0000-0000-000000000101",
-     *             "step_label": "Review draft answer",
-     *             "step_order": 1,
+     *             "step_id": "00000000-0000-0000-0000-000000000103",
+     *             "step_label": "Review transcription",
+     *             "step_order": 2,
      *             "tenant_id": "00000000-0000-0000-0000-000000000010",
      *             "updated_at": "2026-03-17T10:05:30Z"
      *           }
@@ -18955,7 +19015,7 @@ export interface components {
      *           }
      *         ]
      *       },
-     *       "content_hash": "5ff9c2925588426dc669df439fd12a7aeaa1d3a5f977c6cc29b43fcca747bb73",
+     *       "content_hash": "a5528f6f25955d3238a267dcaef5ac807d50444ccbffc6562a28b04cf4ae0b30",
      *       "generated_at": "2026-03-31T12:00:00Z",
      *       "manifest": {
      *         "actor": {
@@ -18991,7 +19051,7 @@ export interface components {
      *           "total_size_bytes": 14012,
      *           "tracking_state": "tracked"
      *         },
-     *         "content_hash": "5ff9c2925588426dc669df439fd12a7aeaa1d3a5f977c6cc29b43fcca747bb73",
+     *         "content_hash": "a5528f6f25955d3238a267dcaef5ac807d50444ccbffc6562a28b04cf4ae0b30",
      *         "content_hash_input": "redacted",
      *         "detail_mode": "redacted",
      *         "export_reason": "support_debug",
@@ -19570,7 +19630,7 @@ export interface components {
      *           "flow_run_id": "00000000-0000-0000-0000-000000000301",
      *           "id": "00000000-0000-0000-0000-000000000901",
      *           "next_step_ids": [
-     *             "00000000-0000-0000-0000-000000000102"
+     *             "00000000-0000-0000-0000-000000000104"
      *           ],
      *           "original_payload_json": {
      *             "text": "Draft answer."
@@ -19592,9 +19652,9 @@ export interface components {
      *           "revision": 4,
      *           "schema_version": 1,
      *           "state": "resumed",
-     *           "step_id": "00000000-0000-0000-0000-000000000101",
-     *           "step_label": "Review draft answer",
-     *           "step_order": 1,
+     *           "step_id": "00000000-0000-0000-0000-000000000103",
+     *           "step_label": "Review transcription",
+     *           "step_order": 2,
      *           "tenant_id": "00000000-0000-0000-0000-000000000010",
      *           "updated_at": "2026-03-17T10:05:30Z"
      *         }
@@ -19846,11 +19906,15 @@ export interface components {
      *     }
      */
     FlowRunPublic: {
-      /** Cancelled At */
+      /**
+       * Cancelled At
+       * @description When the run was cancelled. Null unless `status` is `cancelled`.
+       */
       cancelled_at?: string | null;
       /**
        * Created At
        * Format: date-time
+       * @description When the run row was created.
        */
       created_at: string;
       /**
@@ -19887,26 +19951,41 @@ export interface components {
       dispatched_at?: string | null;
       /** @description Structured terminal run error. API consumers should branch on `error.code`; null means the run has no terminal run-level error. */
       error?: components["schemas"]["FlowRunError"] | null;
-      /** Finished At */
+      /**
+       * Finished At
+       * @description When the run reached a terminal status. Null while non-terminal.
+       */
       finished_at?: string | null;
       /**
        * Flow Id
        * Format: uuid
+       * @description Identifier of the flow that owns this run.
        */
       flow_id: string;
-      /** Flow Version */
+      /**
+       * Flow Version
+       * @description Published flow version this run is pinned to. It is the version the run executes against even after the flow is republished.
+       */
       flow_version: number;
       /**
        * Id
        * Format: uuid
+       * @description Durable run identifier. Use it as the `{run_id}` path segment for polling, review, cancel, rerun, and artifact requests.
        */
       id: string;
-      /** Input Payload Json */
+      /**
+       * Input Payload Json
+       * @description Structured run input as accepted at creation, echoed back for display. It holds the published form-field values; uploaded files are referenced from step results, not from here.
+       */
       input_payload_json?: {
         [key: string]: unknown;
       } | null;
-      /** Job Id */
+      /**
+       * Job Id
+       * @description Background job that owns the current execution attempt. Diagnostic only; it is not addressable through the public API.
+       */
       job_id?: string | null;
+      /** @description Principal kind that created the run, once resolved. Service-key callers only see runs their own key created. */
       principal_type?: components["schemas"]["PrincipalType"] | null;
       /**
        * Result
@@ -19921,19 +20000,27 @@ export interface components {
             | components["schemas"]["FlowRunOutboundHttpResultPublic"]
           )
         | null;
-      /** Result Files */
+      /**
+       * Result Files
+       * @description Every downloadable file produced by the current attempt of any step, including files the final result does not carry. Download one with `POST {api_prefix}/flows/{id}/runs/{run_id}/artifacts/{file_id}/signed-url/` using its `file_id`, and only when its `availability` is `available`.
+       */
       result_files?: components["schemas"]["FlowRunStepResultFile"][];
       /**
        * Revision
        * @description Monotonic run lifecycle compare token. Step-rerun requests use this value as `expected_run_revision`.
        */
       revision: number;
-      /** Started At */
+      /**
+       * Started At
+       * @description When a worker began executing the first step. Null while queued.
+       */
       started_at?: string | null;
+      /** @description Current lifecycle status. `queued` and `running` are active, `awaiting_review` means a human review checkpoint is open and the run will not advance until it is approved and resumed, and `completed`, `failed`, and `cancelled` are terminal. Call `GET {api_prefix}/flows/runs/status-capabilities/` for the machine-readable matrix that says which statuses to keep polling, cancel, redispatch, or rerun. */
       status: components["schemas"]["FlowRunStatus"];
       /**
        * Tenant Id
        * Format: uuid
+       * @description Tenant that owns the run and its data.
        */
       tenant_id: string;
       /** @description Aggregated recorded token usage for every model attempt in this run. Null when no token-metered call exists or retention left no recoverable count. */
@@ -19941,11 +20028,13 @@ export interface components {
       /**
        * Trace Id
        * Format: uuid
+       * @description Correlation id shared by this run's audit and evidence records. Quote it in support requests.
        */
       trace_id: string;
       /**
        * Updated At
        * Format: date-time
+       * @description When the run row last changed. It moves on every status change.
        */
       updated_at: string;
     };
@@ -20347,7 +20436,7 @@ export interface components {
     FlowRunReviewCheckpointEditRequest: {
       /**
        * Current Payload Json
-       * @description Full corrected payload for the reviewed step. Send the complete payload, not a JSON Patch document. `text` is required, must be a string, and must fit the ordinary inline UTF-8 output limit. Preserve every runtime-owned key unchanged. `text_overflow` cannot be created or changed and is accepted only when its existing generated-output file still belongs to this exact run step attempt. `structured`, when present, must satisfy the checkpoint output contract. PDF and DOCX artifact steps cannot use edit review.
+       * @description Full corrected payload for the reviewed step. Send the complete payload, not a JSON Patch document: start from the checkpoint's own `current_payload_json` and change only the editable keys, because every other key is runtime-owned and a missing or altered one returns `400` with code `typed_io_validation_failed`. `text` is required, must be a string, and must fit the ordinary inline UTF-8 output limit. `text_overflow` cannot be created or changed and is accepted only when its existing generated-output file still belongs to this exact run step attempt; while it is present the payload is overflow-backed and `text` is a frozen preview that must be resent unchanged, although `structured` on such a checkpoint can still be edited. `structured`, when present, must satisfy the checkpoint output contract. PDF and DOCX artifact steps cannot use edit review.
        */
       current_payload_json: {
         [key: string]: unknown;
@@ -20374,7 +20463,7 @@ export interface components {
      *       "flow_run_id": "00000000-0000-0000-0000-000000000301",
      *       "id": "00000000-0000-0000-0000-000000000901",
      *       "next_step_ids": [
-     *         "00000000-0000-0000-0000-000000000102"
+     *         "00000000-0000-0000-0000-000000000104"
      *       ],
      *       "original_payload_json": {
      *         "text": "Draft answer."
@@ -20396,9 +20485,9 @@ export interface components {
      *       "revision": 4,
      *       "schema_version": 1,
      *       "state": "resumed",
-     *       "step_id": "00000000-0000-0000-0000-000000000101",
-     *       "step_label": "Review draft answer",
-     *       "step_order": 1,
+     *       "step_id": "00000000-0000-0000-0000-000000000103",
+     *       "step_label": "Review transcription",
+     *       "step_order": 2,
      *       "tenant_id": "00000000-0000-0000-0000-000000000010",
      *       "updated_at": "2026-03-17T10:05:30Z"
      *     }
@@ -20515,7 +20604,7 @@ export interface components {
      *       "flow_run_id": "00000000-0000-0000-0000-000000000301",
      *       "id": "00000000-0000-0000-0000-000000000901",
      *       "next_step_ids": [
-     *         "00000000-0000-0000-0000-000000000102"
+     *         "00000000-0000-0000-0000-000000000104"
      *       ],
      *       "original_payload_json": {
      *         "text": "Draft answer."
@@ -20535,9 +20624,9 @@ export interface components {
      *       "revision": 1,
      *       "schema_version": 1,
      *       "state": "awaiting_review",
-     *       "step_id": "00000000-0000-0000-0000-000000000101",
-     *       "step_label": "Review draft answer",
-     *       "step_order": 1,
+     *       "step_id": "00000000-0000-0000-0000-000000000103",
+     *       "step_label": "Review transcription",
+     *       "step_order": 2,
      *       "tenant_id": "00000000-0000-0000-0000-000000000010",
      *       "updated_at": "2026-03-17T10:05:30Z"
      *     }
@@ -20699,7 +20788,7 @@ export interface components {
      *         "flow_run_id": "00000000-0000-0000-0000-000000000301",
      *         "id": "00000000-0000-0000-0000-000000000901",
      *         "next_step_ids": [
-     *           "00000000-0000-0000-0000-000000000102"
+     *           "00000000-0000-0000-0000-000000000104"
      *         ],
      *         "original_payload_json": {
      *           "text": "Draft answer."
@@ -20720,9 +20809,9 @@ export interface components {
      *         "revision": 4,
      *         "schema_version": 1,
      *         "state": "resumed",
-     *         "step_id": "00000000-0000-0000-0000-000000000101",
-     *         "step_label": "Review draft answer",
-     *         "step_order": 1,
+     *         "step_id": "00000000-0000-0000-0000-000000000103",
+     *         "step_label": "Review transcription",
+     *         "step_order": 2,
      *         "tenant_id": "00000000-0000-0000-0000-000000000010",
      *         "updated_at": "2026-03-17T10:05:30Z"
      *       },
@@ -21189,59 +21278,89 @@ export interface components {
     };
     /** FlowRunStepResultFile */
     FlowRunStepResultFile: {
-      /** Attempt No */
+      /**
+       * Attempt No
+       * @description Execution attempt that produced the file. Only the current attempt's files are returned.
+       */
       attempt_no: number;
       /**
        * Availability
+       * @description `available` means the bytes can still be downloaded. `content_purged` means retention removed the bytes and only this metadata row remains; requesting a signed URL for it returns `410` with code `flow_run_artifact_content_unavailable`.
        * @enum {string}
        */
       availability: "available" | "content_purged";
-      /** Checksum */
+      /**
+       * Checksum
+       * @description Content checksum of the stored bytes, prefixed with its algorithm.
+       */
       checksum: string;
       /**
        * File Id
        * Format: uuid
+       * @description Identifier to download the file with: `POST {api_prefix}/flows/{id}/runs/{run_id}/artifacts/{file_id}/signed-url/`, where the prefix is the one this document's own paths use.
        */
       file_id: string;
+      /** @description Coarse content bucket used by the platform file layer. Branch on `mimetype` when you need the exact format. */
       file_type: components["schemas"]["FileType"];
       /**
        * Flow Id
        * Format: uuid
+       * @description Flow that owns the run.
        */
       flow_id: string;
       /**
        * Flow Run Id
        * Format: uuid
+       * @description Run that produced this file.
        */
       flow_run_id: string;
-      /** Mimetype */
+      /**
+       * Mimetype
+       * @description Media type of the stored bytes, when one was recorded.
+       */
       mimetype: string | null;
-      /** Name */
+      /**
+       * Name
+       * @description Suggested download filename.
+       */
       name: string;
-      /** Ordinal */
+      /**
+       * Ordinal
+       * @description Stable position of this file within its step, starting at 0.
+       */
       ordinal: number;
-      /** Size */
+      /**
+       * Size
+       * @description Size of the stored bytes in bytes.
+       */
       size: number;
       /**
        * Source
+       * @description `generated_output` means the step rendered or generated the file as its own output, such as a DOCX or PDF. `declared_artifact` means the step's authored configuration explicitly declared the file as an artifact of the step.
        * @enum {string}
        */
       source: "generated_output" | "declared_artifact";
       /**
        * Step Id
        * Format: uuid
+       * @description Published step that produced the file. Use it to match a file to a step from the run contract or the step list.
        */
       step_id: string;
-      /** Step Order */
+      /**
+       * Step Order
+       * @description Position of the producing step in the flow, starting at 1.
+       */
       step_order: number;
       /**
        * Step Result Id
        * Format: uuid
+       * @description Step result row this file belongs to.
        */
       step_result_id: string;
       /**
        * Tenant Id
        * Format: uuid
+       * @description Tenant that owns the file.
        */
       tenant_id: string;
     };
@@ -25161,7 +25280,10 @@ export interface components {
      *     }
      */
     OriginalSignedURLRequest: {
-      /** @default attachment */
+      /**
+       * @description Whether the download should be offered as a file (`attachment`) or rendered in place (`inline`). Fetch the returned URL without an authentication header; the signature already carries the authorization.
+       * @default attachment
+       */
       content_disposition?: components["schemas"]["ContentDisposition"];
       /**
        * Expires In
@@ -28894,10 +29016,14 @@ export interface components {
      *     }
      */
     SignedURLRequest: {
-      /** @default attachment */
+      /**
+       * @description Whether the download should be offered as a file (`attachment`) or rendered in place (`inline`). Fetch the returned URL without an authentication header; the signature already carries the authorization.
+       * @default attachment
+       */
       content_disposition?: components["schemas"]["ContentDisposition"];
       /**
        * Expires In
+       * @description Lifetime of the signed URL in seconds, from 1 to 86400 (24 hours). The response reports the resulting deadline as a Unix epoch integer in `expires_at`.
        * @default 3600
        */
       expires_in?: number;
@@ -49576,7 +49702,7 @@ export interface operations {
     parameters: {
       query?: never;
       header?: {
-        /** @description Optional caller-supplied idempotency key. Reusing the same key with the same request payload returns the existing run payload. Reusing the same key with a different payload returns `400` with code `flow_run_idempotency_conflict`. Replay is available while the matching run row is retained; clients should keep the returned run id as the durable polling handle. */
+        /** @description Optional caller-supplied idempotency key of 1 to 255 characters after trimming; a longer or blank key returns `400` with code `flow_run_invalid_idempotency_key`. That bound is enforced as a typed error rather than as a schema `maxLength`, so a validator generated from this document will not catch it. Reusing the same key with the same request payload returns the existing run payload. Reusing the same key with a different payload returns `400` with code `flow_run_idempotency_conflict`. Replay is available while the matching run row is retained; once retention removes the row the key no longer matches and the same request creates a new run, so keep the returned run id as the durable polling handle. */
         "Idempotency-Key"?: string | null;
       };
       path: {
@@ -50437,7 +50563,7 @@ export interface operations {
            *       "flow_run_id": "00000000-0000-0000-0000-000000000301",
            *       "id": "00000000-0000-0000-0000-000000000901",
            *       "next_step_ids": [
-           *         "00000000-0000-0000-0000-000000000102"
+           *         "00000000-0000-0000-0000-000000000104"
            *       ],
            *       "original_payload_json": {
            *         "text": "Draft answer."
@@ -50457,9 +50583,9 @@ export interface operations {
            *       "revision": 2,
            *       "schema_version": 1,
            *       "state": "edited",
-           *       "step_id": "00000000-0000-0000-0000-000000000101",
-           *       "step_label": "Review draft answer",
-           *       "step_order": 1,
+           *       "step_id": "00000000-0000-0000-0000-000000000103",
+           *       "step_label": "Review transcription",
+           *       "step_order": 2,
            *       "tenant_id": "00000000-0000-0000-0000-000000000010",
            *       "updated_at": "2026-03-17T10:05:30Z"
            *     }
@@ -50564,7 +50690,7 @@ export interface operations {
            *       "flow_run_id": "00000000-0000-0000-0000-000000000301",
            *       "id": "00000000-0000-0000-0000-000000000901",
            *       "next_step_ids": [
-           *         "00000000-0000-0000-0000-000000000102"
+           *         "00000000-0000-0000-0000-000000000104"
            *       ],
            *       "original_payload_json": {
            *         "text": "Draft answer."
@@ -50584,9 +50710,9 @@ export interface operations {
            *       "revision": 3,
            *       "schema_version": 1,
            *       "state": "approved",
-           *       "step_id": "00000000-0000-0000-0000-000000000101",
-           *       "step_label": "Review draft answer",
-           *       "step_order": 1,
+           *       "step_id": "00000000-0000-0000-0000-000000000103",
+           *       "step_label": "Review transcription",
+           *       "step_order": 2,
            *       "tenant_id": "00000000-0000-0000-0000-000000000010",
            *       "updated_at": "2026-03-17T10:05:30Z"
            *     }
@@ -50690,7 +50816,7 @@ export interface operations {
            *       "flow_run_id": "00000000-0000-0000-0000-000000000301",
            *       "id": "00000000-0000-0000-0000-000000000901",
            *       "next_step_ids": [
-           *         "00000000-0000-0000-0000-000000000102"
+           *         "00000000-0000-0000-0000-000000000104"
            *       ],
            *       "original_payload_json": {
            *         "text": "Draft answer."
@@ -50711,9 +50837,9 @@ export interface operations {
            *       "revision": 3,
            *       "schema_version": 1,
            *       "state": "rejected",
-           *       "step_id": "00000000-0000-0000-0000-000000000101",
-           *       "step_label": "Review draft answer",
-           *       "step_order": 1,
+           *       "step_id": "00000000-0000-0000-0000-000000000103",
+           *       "step_label": "Review transcription",
+           *       "step_order": 2,
            *       "tenant_id": "00000000-0000-0000-0000-000000000010",
            *       "updated_at": "2026-03-17T10:05:30Z"
            *     }
@@ -50780,7 +50906,7 @@ export interface operations {
     parameters: {
       query?: never;
       header: {
-        /** @description Required caller-supplied idempotency key for review resume retries. */
+        /** @description Required caller-supplied idempotency key for review resume retries, 1 to 255 characters after trimming. A missing or blank key returns `400` with code `flow_review_idempotency_key_required`; a longer key returns `400` with code `flow_run_invalid_idempotency_key`. Both bounds are enforced as typed errors rather than as schema constraints, so a validator generated from this document will not catch them. Derive one stable key per logical resume and send that same key on every retry: replaying it returns the current checkpoint and run without dispatching again, while a different key against an already-resumed checkpoint returns `400` with code `flow_review_already_resumed`. */
         "Idempotency-Key": string;
       };
       path: {
@@ -50822,7 +50948,7 @@ export interface operations {
            *         "flow_run_id": "00000000-0000-0000-0000-000000000301",
            *         "id": "00000000-0000-0000-0000-000000000901",
            *         "next_step_ids": [
-           *           "00000000-0000-0000-0000-000000000102"
+           *           "00000000-0000-0000-0000-000000000104"
            *         ],
            *         "original_payload_json": {
            *           "text": "Draft answer."
@@ -50843,9 +50969,9 @@ export interface operations {
            *         "revision": 4,
            *         "schema_version": 1,
            *         "state": "resumed",
-           *         "step_id": "00000000-0000-0000-0000-000000000101",
-           *         "step_label": "Review draft answer",
-           *         "step_order": 1,
+           *         "step_id": "00000000-0000-0000-0000-000000000103",
+           *         "step_label": "Review transcription",
+           *         "step_order": 2,
            *         "tenant_id": "00000000-0000-0000-0000-000000000010",
            *         "updated_at": "2026-03-17T10:05:30Z"
            *       },

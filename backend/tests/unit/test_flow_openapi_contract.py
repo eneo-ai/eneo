@@ -1836,13 +1836,16 @@ def test_openapi_signed_url_request_bounds_expiry(openapi_spec: dict) -> None:
     ]["expires_in"]
 
     assert type(expires_in["exclusiveMinimum"]) in (int, float)
-    assert expires_in == {
+    assert {
+        key: value for key, value in expires_in.items() if key != "description"
+    } == {
         "default": 3600,
         "exclusiveMinimum": 0,
         "maximum": 86400,
         "title": "Expires In",
         "type": "integer",
     }
+    assert "seconds" in expires_in["description"]
 
 
 def test_openapi_runtime_paths_example_matches_operation_paths(
@@ -2094,10 +2097,13 @@ def test_openapi_resume_review_checkpoint_uses_idempotency_header(
     parameter = idempotency_parameters[0]
     assert parameter.get("required") is True
     assert parameter.get("schema", {}).get("type") == "string"
-    assert (
-        parameter.get("description")
-        == "Required caller-supplied idempotency key for review resume retries."
-    )
+    description = parameter.get("description", "")
+    assert description.startswith("Required caller-supplied idempotency key")
+    # The length bound and both rejection codes are typed errors, not schema
+    # constraints, so the description is the only place a client can learn them.
+    assert "1 to 255 characters" in description
+    assert "flow_review_idempotency_key_required" in description
+    assert "flow_run_invalid_idempotency_key" in description
     for path_parameter_name in ("id", "run_id", "checkpoint_id"):
         path_parameter = _find_parameter(
             operation, name=path_parameter_name, location="path"

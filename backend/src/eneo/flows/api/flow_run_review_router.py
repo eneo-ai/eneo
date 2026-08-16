@@ -61,7 +61,15 @@ from eneo.server.dependencies.container import (
 router = APIRouter()
 
 _FLOW_REVIEW_RESUME_IDEMPOTENCY_HEADER_DESCRIPTION = (
-    "Required caller-supplied idempotency key for review resume retries."
+    "Required caller-supplied idempotency key for review resume retries, 1 to 255 "
+    "characters after trimming. A missing or blank key returns `400` with code "
+    "`flow_review_idempotency_key_required`; a longer key returns `400` with code "
+    "`flow_run_invalid_idempotency_key`. Both bounds are enforced as typed errors "
+    "rather than as schema constraints, so a validator generated from this document "
+    "will not catch them. Derive one stable key per logical resume and send that same "
+    "key on every retry: replaying it returns the current checkpoint and run without "
+    "dispatching again, while a different key against an already-resumed checkpoint "
+    "returns `400` with code `flow_review_already_resumed`."
 )
 _FLOW_REVIEW_RESUME_IDEMPOTENCY_HEADER_PARAMETER: Final[Mapping[str, object]] = {
     "name": "Idempotency-Key",

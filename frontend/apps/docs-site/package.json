@@ -4,8 +4,9 @@
   "private": true,
   "scripts": {
     "dev": "next dev --turbopack --port=3001",
-    "build": "next build && pagefind --site out --output-path out/_pagefind",
+    "build": "next build && node scripts/build-llm-text.mjs && pagefind --site out --output-path out/_pagefind",
     "start": "next start",
+    "test": "bun test scripts",
     "lint": "next lint"
   },
   "dependencies": {

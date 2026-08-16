@@ -176,16 +176,16 @@ FLOW_CONSUMER_SECTION_NAV: tuple[ConsumerSectionNavEntry, ...] = (
         job="Choose the right Eneo Flows consumer page for your task.",
     ),
     ConsumerSectionNavEntry(
-        slug="designing-flows",
-        title="Designing Flows",
-        href=f"{FLOW_CONSUMER_GUIDES_HREF}/designing-flows",
-        job="Design a published flow shape from supported inputs, steps, reviews, and artifacts.",
-    ),
-    ConsumerSectionNavEntry(
         slug="integrating-flows",
         title="Integrating Flows",
         href=f"{FLOW_CONSUMER_GUIDES_HREF}/integrating-flows",
-        job="Call endpoints in the right order to create, monitor, review, rerun, and finish runs.",
+        job="Build an application on the runtime API: upload, create, poll, human review, cancel, retry, and download outputs.",
+    ),
+    ConsumerSectionNavEntry(
+        slug="designing-flows",
+        title="Designing Flows",
+        href=f"{FLOW_CONSUMER_GUIDES_HREF}/designing-flows",
+        job="Understand the published flow shapes the runtime supports, before you commit to a design.",
     ),
     ConsumerSectionNavEntry(
         slug="flows-faq",
@@ -473,10 +473,12 @@ def validate_consumer_section_nav(
     slugs = [entry.slug for entry in entries]
     if len(slugs) != len(set(slugs)):
         raise ValueError("Consumer section nav slugs must be unique")
+    # Integrating Flows is the section's primary destination: it is the build guide an
+    # application developer opens first, so it leads the nav and the journey table.
     if slugs != [
         "index",
-        "designing-flows",
         "integrating-flows",
+        "designing-flows",
         "flows-faq",
         "reference",
     ]:
@@ -725,8 +727,6 @@ def render_scenario(scenario: Scenario) -> str:
             ),
             "",
             scenario.why_this_shape,
-            "",
-            "Build coverage: This scenario is covered by the Flow AI Builder golden matrix.",
         ]
     )
 

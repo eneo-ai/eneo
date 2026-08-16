@@ -27,15 +27,24 @@ def render_flow_consumer_section_index_page() -> str:
         if entry.slug != "index"
     )
     body = (
+        "**Building an application on Flows? Go straight to "
+        "[Integrating Flows](/guides/flows/integrating-flows).** It is the authoritative "
+        "build guide and covers the whole runtime lifecycle end to end, with a complete "
+        "client in `curl` and TypeScript.",
+        "",
         "## Journey map",
         "",
         render_markdown_table(("Page", "Use it for", "Link"), journey_rows),
         "",
         "## Reference owners",
         "",
+        "- [Integrating Flows](/guides/flows/integrating-flows) owns the runtime lifecycle: the call order, the state machine, and the rules a client must follow.",
         f"- [Flow Runtime API Reference]({FLOW_API_GUIDE_HREF}) owns the full runtime API field catalog.",
         f"- [Flow error reference]({FLOW_CONSUMER_ERROR_REFERENCE_HREF}) owns machine-readable error handling.",
         "- The pages in this section link to those references instead of duplicating request and response shapes.",
+        "- The live contract for the deployment you target is served from its own origin at `/openapi.json`, with interactive documentation at `/docs`. When a page and the deployment disagree, the deployment is right.",
+        "",
+        "Flows themselves are created by people in the Eneo Builder. Nothing in this section asks you to author one.",
     )
     return render_page(
         GuidePage(

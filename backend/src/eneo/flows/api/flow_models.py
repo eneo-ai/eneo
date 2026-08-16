@@ -352,6 +352,14 @@ FLOW_RUN_WEBHOOK_DELIVERY_EXAMPLE: dict[str, Any] = {
     "updated_at": "2026-03-17T10:05:31Z",
 }
 
+# The GET run endpoint answers with FlowRunDetailPublic, which is FlowRunPublic plus an
+# always-present webhook_deliveries array. Documenting the two shapes from one constant each
+# keeps the create example and the poll example from drifting apart.
+FLOW_RUN_DETAIL_PUBLIC_EXAMPLE: dict[str, Any] = {
+    **FLOW_RUN_PUBLIC_EXAMPLE,
+    "webhook_deliveries": [],
+}
+
 FLOW_RUN_QUEUED_AFTER_DISPATCH_EXAMPLE: dict[str, object] = {
     **FLOW_RUN_PUBLIC_EXAMPLE,
     "dispatch_attempt_count": 1,
@@ -433,27 +441,29 @@ FLOW_RUN_STEP_RERUN_RESPONSE_EXAMPLE: dict[str, Any] = {
     "status": "queued",
 }
 
+# Step identity here matches the review step in FLOW_RUN_CONTRACT_PUBLIC_EXAMPLE, so a
+# reader who follows the documented journey sees one consistent flow across every example.
 FLOW_RUN_REVIEW_CHECKPOINT_PUBLIC_EXAMPLE: dict[str, Any] = {
     "id": "00000000-0000-0000-0000-000000000901",
     "tenant_id": "00000000-0000-0000-0000-000000000010",
     "flow_id": "00000000-0000-0000-0000-000000000001",
     "flow_run_id": "00000000-0000-0000-0000-000000000301",
-    "step_id": "00000000-0000-0000-0000-000000000101",
-    "step_order": 1,
+    "step_id": "00000000-0000-0000-0000-000000000103",
+    "step_order": 2,
     "attempt_no": 1,
     "state": "awaiting_review",
     "revision": 1,
     "schema_version": 1,
     "original_payload_json": {"text": "Draft answer."},
     "current_payload_json": {"text": "Draft answer."},
-    "step_label": "Review draft answer",
+    "step_label": "Review transcription",
     "review_mode": "edit",
     "output_type": "json",
     "output_contract": {
         "type": "object",
         "properties": {"text": {"type": "string"}},
     },
-    "next_step_ids": ["00000000-0000-0000-0000-000000000102"],
+    "next_step_ids": ["00000000-0000-0000-0000-000000000104"],
     "requester_user_id": "00000000-0000-0000-0000-000000000030",
     "requester_service_principal": None,
     "requester_principal_type": "user",
@@ -930,19 +940,50 @@ class FlowRunPublic(BaseModel):
         from_attributes=True, json_schema_extra={"example": FLOW_RUN_PUBLIC_EXAMPLE}
     )
 
-    id: UUID
-    flow_id: UUID
-    flow_version: int
-    principal_type: PrincipalType | None = None
-    tenant_id: UUID
-    trace_id: UUID
+    id: UUID = Field(
+        description=(
+            "Durable run identifier. Use it as the `{run_id}` path segment for "
+            "polling, review, cancel, rerun, and artifact requests."
+        ),
+    )
+    flow_id: UUID = Field(description="Identifier of the flow that owns this run.")
+    flow_version: int = Field(
+        description=(
+            "Published flow version this run is pinned to. It is the version the "
+            "run executes against even after the flow is republished."
+        ),
+    )
+    principal_type: PrincipalType | None = Field(
+        default=None,
+        description=(
+            "Principal kind that created the run, once resolved. Service-key "
+            "callers only see runs their own key created."
+        ),
+    )
+    tenant_id: UUID = Field(description="Tenant that owns the run and its data.")
+    trace_id: UUID = Field(
+        description=(
+            "Correlation id shared by this run's audit and evidence records. Quote "
+            "it in support requests."
+        ),
+    )
     revision: int = Field(
         description=(
             "Monotonic run lifecycle compare token. Step-rerun requests use this "
             "value as `expected_run_revision`."
         ),
     )
-    status: FlowRunStatus
+    status: FlowRunStatus = Field(
+        description=(
+            "Current lifecycle status. `queued` and `running` are active, "
+            "`awaiting_review` means a human review checkpoint is open and the run "
+            "will not advance until it is approved and resumed, and `completed`, "
+            "`failed`, and `cancelled` are terminal. Call "
+            "`GET {api_prefix}/flows/runs/status-capabilities/` for the machine-readable "
+            "matrix that says which statuses to keep polling, cancel, redispatch, "
+            "or rerun."
+        ),
+    )
     dispatch_pending_since: datetime | None = Field(
         default=None,
         description=(
@@ -990,10 +1031,26 @@ class FlowRunPublic(BaseModel):
             "Timestamp when bounded attempts were exhausted for this dispatch epoch."
         ),
     )
-    cancelled_at: datetime | None = None
-    started_at: datetime | None = None
-    finished_at: datetime | None = None
-    input_payload_json: dict[str, Any] | None = None
+    cancelled_at: datetime | None = Field(
+        default=None,
+        description="When the run was cancelled. Null unless `status` is `cancelled`.",
+    )
+    started_at: datetime | None = Field(
+        default=None,
+        description="When a worker began executing the first step. Null while queued.",
+    )
+    finished_at: datetime | None = Field(
+        default=None,
+        description="When the run reached a terminal status. Null while non-terminal.",
+    )
+    input_payload_json: dict[str, Any] | None = Field(
+        default=None,
+        description=(
+            "Structured run input as accepted at creation, echoed back for display. "
+            "It holds the published form-field values; uploaded files are referenced "
+            "from step results, not from here."
+        ),
+    )
     result: FlowRunResultPublic | None = Field(
         default=None,
         description=(
@@ -1002,7 +1059,13 @@ class FlowRunPublic(BaseModel):
         ),
     )
     result_files: list[FlowRunStepResultFile] = Field(
-        default_factory=lambda: cast(list[FlowRunStepResultFile], [])
+        default_factory=lambda: cast(list[FlowRunStepResultFile], []),
+        description=(
+            "Every downloadable file produced by the current attempt of any step, "
+            "including files the final result does not carry. Download one with "
+            "`POST {api_prefix}/flows/{id}/runs/{run_id}/artifacts/{file_id}/signed-url/` "
+            "using its `file_id`, and only when its `availability` is `available`."
+        ),
     )
     token_usage: FlowRunTokenUsagePublic | None = Field(
         default=None,
@@ -1019,9 +1082,17 @@ class FlowRunPublic(BaseModel):
             "`error.code`; null means the run has no terminal run-level error."
         ),
     )
-    job_id: UUID | None = None
-    created_at: datetime
-    updated_at: datetime
+    job_id: UUID | None = Field(
+        default=None,
+        description=(
+            "Background job that owns the current execution attempt. Diagnostic "
+            "only; it is not addressable through the public API."
+        ),
+    )
+    created_at: datetime = Field(description="When the run row was created.")
+    updated_at: datetime = Field(
+        description="When the run row last changed. It moves on every status change."
+    )
 
 
 class FlowRunWebhookDeliveryPublic(BaseModel):
@@ -1058,7 +1129,15 @@ class FlowRunDetailPublic(FlowRunPublic):
         },
     )
 
-    webhook_deliveries: list[FlowRunWebhookDeliveryPublic]
+    webhook_deliveries: list[FlowRunWebhookDeliveryPublic] = Field(
+        description=(
+            "Secret-free outbound HTTP delivery attempts for this run. The field is always "
+            "present and is empty unless the flow's final step was authored with outbound "
+            "HTTP delivery. Eneo has no inbound webhook subscription surface, so this "
+            "reports deliveries the flow author configured, never callbacks a client "
+            "registered."
+        ),
+    )
 
 
 class FlowRunReviewCheckpointPublic(BaseModel):
@@ -1180,12 +1259,18 @@ class FlowRunReviewCheckpointEditRequest(BaseModel):
     current_payload_json: dict[str, Any] = Field(
         description=(
             "Full corrected payload for the reviewed step. Send the complete payload, "
-            "not a JSON Patch document. `text` is required, must be a string, and must "
-            "fit the ordinary inline UTF-8 output limit. Preserve every runtime-owned "
-            "key unchanged. `text_overflow` cannot be created or changed and is accepted "
-            "only when its existing generated-output file still belongs to this exact "
-            "run step attempt. `structured`, when present, must satisfy the checkpoint "
-            "output contract. PDF and DOCX artifact steps cannot use edit review."
+            "not a JSON Patch document: start from the checkpoint's own "
+            "`current_payload_json` and change only the editable keys, because every "
+            "other key is runtime-owned and a missing or altered one returns `400` "
+            "with code `typed_io_validation_failed`. `text` is required, must be a "
+            "string, and must fit the ordinary inline UTF-8 output limit. "
+            "`text_overflow` cannot be created or changed and is accepted only when "
+            "its existing generated-output file still belongs to this exact run step "
+            "attempt; while it is present the payload is overflow-backed and `text` is a "
+            "frozen preview that must be resent unchanged, although `structured` on such "
+            "a checkpoint can still be edited. `structured`, when present, must satisfy "
+            "the checkpoint output contract. PDF and DOCX artifact steps cannot use edit "
+            "review."
         )
     )
 
@@ -2161,7 +2246,7 @@ class FlowRunEvidenceExportResponse(BaseModel):
             "example": {
                 "schema_version": "flow-evidence-export.v16",
                 "generated_at": "2026-03-31T12:00:00Z",
-                "content_hash": "5ff9c2925588426dc669df439fd12a7aeaa1d3a5f977c6cc29b43fcca747bb73",
+                "content_hash": "a5528f6f25955d3238a267dcaef5ac807d50444ccbffc6562a28b04cf4ae0b30",
                 "manifest": {
                     "schema_version": "flow-evidence-export.v16",
                     "app_version": "DEV",
@@ -2173,7 +2258,7 @@ class FlowRunEvidenceExportResponse(BaseModel):
                     "flow_id": "f6f2d8fa-2d47-4d08-a7a9-2fef0b37c5ec",
                     "trace_id": "52907745-7678-40a8-9d1c-18af6b1a9fd8",
                     "flow_version": 3,
-                    "content_hash": "5ff9c2925588426dc669df439fd12a7aeaa1d3a5f977c6cc29b43fcca747bb73",
+                    "content_hash": "a5528f6f25955d3238a267dcaef5ac807d50444ccbffc6562a28b04cf4ae0b30",
                     "content_hash_input": "redacted",
                     "exported_at": "2026-03-31T12:00:00Z",
                     "actor": {

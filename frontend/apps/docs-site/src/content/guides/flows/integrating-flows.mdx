@@ -2,15 +2,23 @@ import { Callout } from "nextra/components";
 
 # Integrating Flows
 
-This page is for teams wiring Eneo Flows into an application, and it shows the endpoint order for creating, reviewing, rerunning, and finishing a run.
+This page is the authoritative guide for building an application on the Eneo Flows runtime API. It covers the whole runtime surface in the order a client calls it: discover a published flow, upload input files, create and start a run, poll it, handle a human review checkpoint, cancel or retry, and download outputs.
 
 You are in the integration step of the consumer journey, where the published design becomes runtime calls and user-facing states.
 
-Use this page for flow runtime journeys. Use the reference for full schemas: [Flow Runtime API Reference](/guides/flows-api-guide).
+It is written to be complete on its own. Everything a client needs is stated explicitly: exact paths including trailing slashes, exact header names, exact request bodies, exact status values, and the error codes to branch on. Where a value is deployment-configurable, the page says so and names the endpoint that reports the effective value.
+
+Flows themselves are authored by people in the Eneo Builder. This page never asks you to create or edit a flow; it assumes someone has already published one.
+
+Use the reference for the full field catalog: [Flow Runtime API Reference](/guides/flows-api-guide). Use the [Flow error reference](/guides/flows/reference/errors) for the complete code catalog.
 
 ## Before you start
 
-Use your Eneo deployment origin as the base URL. Authenticate every request with exactly one credential:
+Use your Eneo deployment origin as the base URL. Eneo does not publish a shared hosted origin; every installation has its own, and it is given to you out of band. The live contract for the deployment you target is served by that same origin at `/openapi.json`, with interactive documentation at `/docs`.
+
+Paths in this guide are written under `/api/v1/`, which is the prefix the reference configuration ships. It is an operator setting (`API_PREFIX`), not a constant, so read the prefix once from the paths in that deployment's `/openapi.json`, build your base URL from it, and treat every path below as relative to that base.
+
+Authenticate every request with exactly one credential:
 
 ```text
 Authorization: Bearer <user-access-token>
@@ -23,6 +31,73 @@ X-API-Key: <service-key>
 ```
 
 Keep service keys in server-side code; a browser frontend should use a user access token or call through your own backend. Do not put a service key in the bearer-token header. See [Authentication & OIDC](/guides/authentication) for token setup.
+
+### Rules that break clients when you miss them
+
+These are the parts of the contract that are easy to get subtly wrong. Read them before you write the client.
+
+1. **Trailing slashes are load-bearing.** Every Flow runtime path ends with `/`, with one exception: `GET .../runs/{run_id}/evidence/export` has none. Requesting `/api/v1/flows/{id}/runs` without the slash returns `307 Temporary Redirect` to the slashed path. Some HTTP clients drop the request body or the authentication header when they follow a redirect, so send the exact path.
+2. **One credential per request.** `Authorization: Bearer` for a user token, `X-API-Key` for an API key. Never put an API key in the bearer header.
+3. **The active-checkpoint endpoint returns `200` with a body of literal `null`** when no checkpoint is open. It is not a `404` and not `{}`. Check for `null` before dereferencing.
+4. **Reject requires a `reason`.** `POST .../reject/` takes `expected_checkpoint_revision` and a non-empty `reason` of 1 to 1024 characters. Sending only the revision returns `400 flow_review_reject_reason_required`.
+5. **`Idempotency-Key` is required on resume and optional everywhere else.** `POST .../review-checkpoints/{checkpoint_id}/resume/` rejects a request without it (`400 flow_review_idempotency_key_required`). `POST /runs/` accepts it and it is strongly recommended. Edit, approve, and reject do not accept it at all; they use `expected_checkpoint_revision` for concurrency instead. Both accepted keys must be 1 to 255 characters after trimming, or the request returns `400 flow_run_invalid_idempotency_key`. That bound is enforced as a typed error rather than as a JSON Schema `maxLength`, so a validator generated from the OpenAPI document will not catch it for you.
+6. **Approve does not resume.** Approving records the decision; the run stays at `awaiting_review` until you call resume.
+7. **Edit replaces the whole payload.** `current_payload_json` is a full replacement, not a JSON Patch. Start from the payload the checkpoint returned, change only `text` and, when the step's `output_type` is `json`, `structured`, and resend every other key unchanged. Rebuilding the object from scratch drops runtime-owned keys and returns `400 typed_io_validation_failed`. When the payload carries `text_overflow` the `text` is a frozen preview that must be resent exactly as received; `structured` on that same checkpoint can still be edited.
+8. **`GET .../steps/` returns a bare JSON array**, not a pagination envelope. `GET /flows/` and `GET .../runs/` do return envelopes with `items` and `has_more`.
+9. **The upload's declared type must be right, and so must its bytes.** The multipart field is named `upload_file`, and that part's own `Content-Type` must be one of the step's `accepted_mimetypes` from the run contract. The server also sniffs the content and rejects a mismatch. Either failure returns `415`, and the response lists every accepted type.
+10. **Artifact downloads are two calls.** Ask for a signed URL, then `GET` that URL **without** an authentication header; the tenant is bound into the signature.
+11. **Cancel is a no-op on a terminal run.** `POST .../cancel/` on a run that already finished returns `200` with the run unchanged and still `completed` or `failed`. Read `status` from the response instead of assuming it is now `cancelled`. On a live run the status flips before the response returns, but the worker stops asynchronously: a completion-model call in flight is aborted within seconds, while a transcription or outbound HTTP call runs to completion and is honored only at the next step boundary.
+12. **An out-of-scope resource returns `403`, not `404`.** Scope is checked before the resource is looked up, so a flow in another space is indistinguishable from one that does not exist. Both give `403 insufficient_scope` with `context.auth_layer: "api_key_scope"`.
+13. **`eneo_error_code` is not an identifier.** It is a legacy numeric category derived from the exception class, so unrelated failures share a value and it cannot tell two of them apart. The string `code` is the only field to branch on.
+
+## The run state machine
+
+A run has exactly six statuses. `queued` and `running` are active work, `awaiting_review` means a human review checkpoint is open and nothing advances until it is approved and resumed, and `completed`, `failed`, and `cancelled` are terminal.
+
+<div className="flow-docs-mermaid-figure">
+
+```mermaid
+stateDiagram-v2
+  [*] --> queued
+  queued --> running: worker starts
+  running --> awaiting_review: checkpoint opens
+  awaiting_review --> queued: approved checkpoint resumes
+  running --> completed: all steps complete
+  running --> failed: step or runtime failure
+  queued --> cancelled: user cancel or deleted flow
+  running --> cancelled: user cancel or deleted flow
+  awaiting_review --> cancelled: review rejected
+  awaiting_review --> cancelled: review expired
+  awaiting_review --> cancelled: user cancel or deleted flow
+  completed --> queued: rerun accepted
+  failed --> queued: rerun accepted
+```
+
+</div>
+
+_Run status transitions. `completed` and `failed` are terminal for the original execution but can re-enter `queued` through an explicit step rerun; `cancelled` cannot._
+
+Do not hardcode this table: `GET /api/v1/flows/runs/status-capabilities/` returns the same matrix as JSON, so a client can drive its UI from the live contract.
+
+| Status            | Active | Keep polling | Terminal | Can cancel | Awaiting review | Can redispatch | Can rerun a step |
+| ----------------- | ------ | ------------ | -------- | ---------- | --------------- | -------------- | ---------------- |
+| `queued`          | yes    | yes          | no       | yes        | no              | yes            | no               |
+| `running`         | yes    | yes          | no       | yes        | no              | no             | no               |
+| `awaiting_review` | no     | yes          | no       | yes        | yes             | no             | no               |
+| `completed`       | no     | no           | yes      | no         | no              | no             | yes              |
+| `failed`          | no     | no           | yes      | no         | no              | no             | yes              |
+| `cancelled`       | no     | no           | yes      | no         | no              | no             | no               |
+
+The full state map, including review-checkpoint and rerun-operation states, is on [The run lifecycle](/docs/flows-for-developers/run-lifecycle).
+
+### How to wait for a run
+
+Polling is the only mechanism a caller controls for observing run status, because there is no client-registered subscription, server-sent events stream, or WebSocket. A flow author can design a terminal step that delivers its result over outbound HTTP, and that does signal successful completion to whatever receiver they configured, but it is not something the caller registers and it does not report failure or review states. A workable cadence:
+
+- poll `GET /api/v1/flows/{id}/runs/{run_id}/` every **2 seconds** for the first 30 seconds, then every **5 seconds**, then every **15 seconds** after two minutes
+- stop as soon as `should_poll` is false for the current status, meaning the run is `completed`, `failed`, or `cancelled`
+- keep polling while the status is `awaiting_review`; a reviewer may act at any time, and the checkpoint can also expire
+- cap the total wait with your own deadline. Long audio transcription is minutes, not seconds
 
 ### Choose a published Flow
 
@@ -304,7 +379,7 @@ Response:
 
 ### 5. Find active review
 
-Fetch the active checkpoint before showing the review screen.
+Fetch the active checkpoint before showing the review screen. This endpoint always answers `200 OK`, and the body is the literal JSON `null` when no checkpoint is open, so check for that before reading any field.
 
 Request:
 
@@ -312,7 +387,7 @@ Request:
 GET /api/v1/flows/{id}/runs/{run_id}/review-checkpoints/active/
 ```
 
-The response includes the checkpoint id, current payload, and revision.
+`review_mode` decides which controls to render: `edit` allows the full edit, approve, reject, resume path, while `view` allows approve, reject, and resume only. DOCX and PDF artifact steps can only ever use `view`.
 
 Response:
 
@@ -454,7 +529,7 @@ Response:
 
 ### 7. Approve review
 
-Approve the edited checkpoint with the latest revision.
+Approve the edited checkpoint with the latest revision. Approve carries no payload, and it does not restart the run; hop 8 does. To reject instead, post the same revision plus a required `reason` of 1 to 1024 characters, which cancels the run.
 
 Request:
 
@@ -530,7 +605,7 @@ Response:
 
 ### 8. Resume run
 
-Resume the run after approval so the worker can continue.
+Resume the run after approval so the worker can continue. `Idempotency-Key` is required here and nowhere else; send the same value on every retry of this one resume, because a different key against an already-resumed checkpoint returns `400 flow_review_already_resumed`.
 
 Request:
 
@@ -552,7 +627,7 @@ Body:
 }
 ```
 
-The response returns the resumed checkpoint and the queued run.
+The response is `202 Accepted` and returns the resumed checkpoint and the requeued run; the later steps have not run yet, so go back to polling.
 
 Response:
 
@@ -1094,6 +1169,498 @@ Common errors in this sequence: `flow_run_access_denied`, `flow_run_evidence_for
 
 Use the [Flow error reference](/guides/flows/reference/errors) for the complete code catalog and recovery actions.
 
+## A complete minimal client
+
+The two listings below are the same journey twice: once as copy-pasteable `curl`, once as a self-contained TypeScript module. Both cover discovery, upload, create, poll, review, resume, and download. Neither needs a library.
+
+### curl
+
+```bash
+# API is the deployment origin plus its API prefix. The prefix is an operator
+# setting, so read it from the paths in that deployment's /openapi.json.
+API="https://eneo.example.se/api/v1"
+KEY="sk_live_example"
+FLOW="00000000-0000-0000-0000-000000000001"
+
+# 1. Discover what the published flow expects.
+curl -s -H "X-API-Key: $KEY" "$API/flows/$FLOW/run-contract/"
+# -> published_flow_version, form_fields, steps_requiring_input[] (step_id,
+#    accepted_mimetypes, max_files, max_file_size_bytes), steps_requiring_review[]
+
+STEP="00000000-0000-0000-0000-000000000101"   # steps_requiring_input[0].step_id
+
+# 2. Upload the audio. The part name is upload_file and its Content-Type must be
+#    one of that step's accepted_mimetypes.
+FILE_ID=$(curl -s -H "X-API-Key: $KEY" \
+  -F "upload_file=@meeting.mp3;type=audio/mpeg" \
+  "$API/flows/$FLOW/steps/$STEP/runtime-files/" | jq -r .id)
+
+# 3. Create the run. Creating it also starts it; there is no separate start call.
+RUN_ID=$(curl -s -H "X-API-Key: $KEY" -H "Content-Type: application/json" \
+  -H "Idempotency-Key: meeting-2026-03-17-001" \
+  -d "{\"expected_flow_version\":3,\"input_payload_json\":{},\"step_inputs\":{\"$STEP\":{\"file_ids\":[\"$FILE_ID\"]}}}" \
+  "$API/flows/$FLOW/runs/" | jq -r .id)
+
+# 4. Poll until terminal or awaiting_review.
+curl -s -H "X-API-Key: $KEY" "$API/flows/$FLOW/runs/$RUN_ID/" | jq .status
+
+# 5. When status is awaiting_review, read the open checkpoint. A 200 body of
+#    literal null means nothing is open, so branch before using any field.
+CP=$(curl -s -H "X-API-Key: $KEY" \
+  "$API/flows/$FLOW/runs/$RUN_ID/review-checkpoints/active/")
+if [ "$CP" = "null" ]; then
+  echo "no checkpoint open yet; keep polling"
+  exit 0
+fi
+CP_ID=$(jq -r .id <<<"$CP"); REV=$(jq -r .revision <<<"$CP")
+
+# 6. Correct the transcript. The edit is a full replacement, so start from the
+#    payload the checkpoint returned and change only text. Every other key is
+#    runtime-owned and must come back unchanged.
+#    When the payload carries text_overflow the text lives in a result file and
+#    the payload holds a frozen preview, so text cannot be changed. Only
+#    structured is still editable on such a checkpoint.
+if jq -e '.current_payload_json | has("text_overflow")' <<<"$CP" >/dev/null; then
+  echo "overflow-backed transcript: text is frozen, edit structured instead"
+  exit 0
+fi
+BODY=$(jq -n \
+  --argjson revision "$REV" \
+  --argjson payload "$(jq -c .current_payload_json <<<"$CP")" \
+  --arg text "Corrected transcript." \
+  '{expected_checkpoint_revision: $revision,
+    current_payload_json: ($payload + {text: $text})}')
+REV=$(curl -s -X PATCH -H "X-API-Key: $KEY" -H "Content-Type: application/json" \
+  -d "$BODY" \
+  "$API/flows/$FLOW/runs/$RUN_ID/review-checkpoints/$CP_ID/" | jq -r .revision)
+
+# 7. Approve. Approve carries no payload and does not resume the run.
+REV=$(curl -s -X POST -H "X-API-Key: $KEY" -H "Content-Type: application/json" \
+  -d "{\"expected_checkpoint_revision\":$REV}" \
+  "$API/flows/$FLOW/runs/$RUN_ID/review-checkpoints/$CP_ID/approve/" | jq -r .revision)
+
+# 8. Resume. Idempotency-Key is required here. Reuse the same key on every retry.
+curl -s -X POST -H "X-API-Key: $KEY" -H "Content-Type: application/json" \
+  -H "Idempotency-Key: resume-$CP_ID" \
+  -d "{\"expected_checkpoint_revision\":$REV}" \
+  "$API/flows/$FLOW/runs/$RUN_ID/review-checkpoints/$CP_ID/resume/"
+# -> 202 Accepted; keep polling the run
+
+# 9. When the run is completed, download the artifact. Two calls: sign, then GET.
+FID=$(curl -s -H "X-API-Key: $KEY" "$API/flows/$FLOW/runs/$RUN_ID/" \
+  | jq -r '.result.files[0].file_id')
+URL=$(curl -s -X POST -H "X-API-Key: $KEY" -H "Content-Type: application/json" \
+  -d '{"expires_in":3600,"content_disposition":"attachment"}' \
+  "$API/flows/$FLOW/runs/$RUN_ID/artifacts/$FID/signed-url/" | jq -r .url)
+curl -s -o protocol.docx "$URL"     # no auth header on the signed URL
+
+# Optional: stop a run the user abandoned.
+curl -s -X POST -H "X-API-Key: $KEY" "$API/flows/$FLOW/runs/$RUN_ID/cancel/"
+
+```
+
+### TypeScript
+
+```ts
+/** Minimal Eneo Flows runtime client. No dependencies. */
+export type RunStatus =
+  | "queued"
+  | "running"
+  | "awaiting_review"
+  | "completed"
+  | "failed"
+  | "cancelled";
+
+export type ReviewCheckpointState =
+  | "awaiting_review"
+  | "edited"
+  | "approved"
+  | "rejected"
+  | "resumed"
+  | "cancelled"
+  | "expired";
+
+export type OutputType = "text" | "json" | "pdf" | "docx";
+export type FileAvailability = "available" | "content_purged";
+
+export interface ResultFile {
+  file_id: string;
+  step_id: string;
+  step_order: number;
+  name: string;
+  size: number;
+  mimetype: string | null;
+  file_type: "text" | "image" | "audio" | "document";
+  source: "generated_output" | "declared_artifact";
+  availability: FileAvailability;
+}
+
+/** Discriminated by `kind`; the union is closed. Field names come from the schemas. */
+export type RunResult =
+  | { kind: "inline_text"; text: string }
+  | { kind: "file_backed_text"; file: ResultFile; preview: string }
+  | { kind: "structured"; value: unknown; output_contract: unknown | null }
+  | { kind: "artifact"; files: ResultFile[] }
+  | { kind: "outbound_http"; delivery_status: "delivered" };
+
+export interface FlowRun {
+  id: string;
+  flow_id: string;
+  flow_version: number;
+  revision: number;
+  status: RunStatus;
+  result: RunResult | null;
+  result_files: ResultFile[];
+  error: { code: string; message: string } | null;
+  started_at: string | null;
+  finished_at: string | null;
+  /** Present on GET (FlowRunDetailPublic); empty unless the flow posts outbound. */
+  webhook_deliveries?: unknown[];
+}
+
+/**
+ * Only `text` and `structured` may be edited. Every other key is runtime-owned
+ * and must be sent back unchanged, which is why the index signature is here:
+ * the payload is not a closed shape a client may rebuild from scratch.
+ */
+export interface ReviewPayload {
+  text: string;
+  structured?: unknown;
+  /** Present when the text was too large to inline. Its presence freezes `text`. */
+  text_overflow?: unknown;
+  [runtimeOwned: string]: unknown;
+}
+
+export interface ReviewCheckpoint {
+  id: string;
+  step_id: string;
+  step_order: number;
+  state: ReviewCheckpointState;
+  revision: number;
+  schema_version: number;
+  review_mode: "view" | "edit";
+  output_type: OutputType;
+  output_contract: unknown | null;
+  current_payload_json: ReviewPayload;
+  expires_at: string;
+}
+
+/** The JSON body of every 4xx and 5xx response. Branch on `code`, never `message`. */
+export interface EneoErrorBody {
+  message: string;
+  code: string;
+  eneo_error_code?: number;
+  context?: Record<string, unknown> | null;
+  request_id?: string | null;
+}
+
+export class EneoApiError extends Error {
+  constructor(
+    readonly status: number,
+    readonly body: EneoErrorBody,
+  ) {
+    super(body.message);
+  }
+  get code(): string {
+    return this.body.code;
+  }
+}
+
+export class EneoFlows {
+  /**
+   * @param apiBase the deployment origin plus its API prefix, with no trailing
+   *   slash, for example `https://eneo.example.se/api/v1`. The prefix is an
+   *   operator setting, so read it from the paths in that deployment's
+   *   `/openapi.json` instead of hardcoding one.
+   */
+  constructor(
+    private readonly apiBase: string,
+    private readonly apiKey: string,
+  ) {}
+
+  private async call<T>(
+    method: string,
+    path: string,
+    init: { body?: unknown; form?: FormData; idempotencyKey?: string } = {},
+  ): Promise<T> {
+    const headers: Record<string, string> = { "X-API-Key": this.apiKey };
+    if (init.idempotencyKey) headers["Idempotency-Key"] = init.idempotencyKey;
+    let body: BodyInit | undefined;
+    if (init.form) {
+      body = init.form; // never set Content-Type by hand for multipart
+    } else if (init.body !== undefined) {
+      headers["Content-Type"] = "application/json";
+      body = JSON.stringify(init.body);
+    }
+    // Trailing slashes are load-bearing: without them the API answers 307.
+    const res = await fetch(`${this.apiBase}${path}`, { method, headers, body });
+    const text = await res.text();
+    const parsed: unknown = text ? JSON.parse(text) : null;
+    if (!res.ok) {
+      throw new EneoApiError(
+        res.status,
+        (parsed ?? { message: res.statusText, code: "unknown" }) as EneoErrorBody,
+      );
+    }
+    return parsed as T;
+  }
+
+  /** Take the exact shape from FlowRunContractPublic in the deployment's /openapi.json. */
+  runContract(flowId: string): Promise<unknown> {
+    return this.call("GET", `/flows/${flowId}/run-contract/`);
+  }
+
+  /** The part name is `upload_file`; its Content-Type must match the step contract. */
+  upload(flowId: string, stepId: string, file: File): Promise<{ id: string }> {
+    const form = new FormData();
+    form.append("upload_file", file, file.name);
+    return this.call("POST", `/flows/${flowId}/steps/${stepId}/runtime-files/`, { form });
+  }
+
+  /** Creating a run also starts it. There is no separate start call. */
+  createRun(
+    flowId: string,
+    payload: {
+      expected_flow_version: number;
+      input_payload_json?: Record<string, unknown> | null;
+      step_inputs?: Record<string, { file_ids: string[] }>;
+    },
+    idempotencyKey: string,
+  ): Promise<FlowRun> {
+    return this.call("POST", `/flows/${flowId}/runs/`, { body: payload, idempotencyKey });
+  }
+
+  getRun(flowId: string, runId: string): Promise<FlowRun> {
+    return this.call("GET", `/flows/${flowId}/runs/${runId}/`);
+  }
+
+  /** Returns a bare array, not a pagination envelope. */
+  listSteps(flowId: string, runId: string): Promise<unknown[]> {
+    return this.call("GET", `/flows/${flowId}/runs/${runId}/steps/`);
+  }
+
+  /** Answers 200 with a literal null body when no checkpoint is open. */
+  activeCheckpoint(flowId: string, runId: string): Promise<ReviewCheckpoint | null> {
+    return this.call("GET", `/flows/${flowId}/runs/${runId}/review-checkpoints/active/`);
+  }
+
+  /**
+   * The edit is a full replacement, so it takes the checkpoint the server
+   * returned and merges the reviewer's changes onto its payload. Rebuilding the
+   * payload from scratch drops runtime-owned keys and fails validation with
+   * `typed_io_validation_failed`.
+   */
+  editCheckpoint(
+    flowId: string,
+    runId: string,
+    checkpoint: ReviewCheckpoint,
+    changes: { text?: string; structured?: unknown },
+  ): Promise<ReviewCheckpoint> {
+    const current = checkpoint.current_payload_json;
+    const changesText = changes.text !== undefined && changes.text !== current.text;
+    if (changesText && current.text_overflow !== undefined) {
+      // The text lives in a result file and the payload only carries a frozen
+      // preview of it. `structured` on the same checkpoint is still editable.
+      throw new Error("overflow-backed text cannot be changed; edit structured instead");
+    }
+    return this.call(
+      "PATCH",
+      `/flows/${flowId}/runs/${runId}/review-checkpoints/${checkpoint.id}/`,
+      {
+        body: {
+          expected_checkpoint_revision: checkpoint.revision,
+          current_payload_json: { ...current, ...changes },
+        },
+      },
+    );
+  }
+
+  approveCheckpoint(
+    flowId: string,
+    runId: string,
+    checkpointId: string,
+    expectedRevision: number,
+  ): Promise<ReviewCheckpoint> {
+    return this.call(
+      "POST",
+      `/flows/${flowId}/runs/${runId}/review-checkpoints/${checkpointId}/approve/`,
+      { body: { expected_checkpoint_revision: expectedRevision } },
+    );
+  }
+
+  /** `reason` is required, 1 to 1024 characters. Rejecting cancels the run. */
+  rejectCheckpoint(
+    flowId: string,
+    runId: string,
+    checkpointId: string,
+    expectedRevision: number,
+    reason: string,
+  ): Promise<ReviewCheckpoint> {
+    return this.call(
+      "POST",
+      `/flows/${flowId}/runs/${runId}/review-checkpoints/${checkpointId}/reject/`,
+      { body: { expected_checkpoint_revision: expectedRevision, reason } },
+    );
+  }
+
+  /**
+   * Approve does not resume; this does. `Idempotency-Key` is required, and the
+   * SAME key must be reused for every retry of this one logical resume.
+   */
+  resumeCheckpoint(
+    flowId: string,
+    runId: string,
+    checkpointId: string,
+    expectedRevision: number,
+    idempotencyKey: string,
+  ): Promise<{ checkpoint: ReviewCheckpoint; run: FlowRun }> {
+    return this.call(
+      "POST",
+      `/flows/${flowId}/runs/${runId}/review-checkpoints/${checkpointId}/resume/`,
+      { body: { expected_checkpoint_revision: expectedRevision }, idempotencyKey },
+    );
+  }
+
+  /** Cancelling an already-terminal run is a 200 no-op, not an error. */
+  cancelRun(flowId: string, runId: string): Promise<FlowRun> {
+    return this.call("POST", `/flows/${flowId}/runs/${runId}/cancel/`);
+  }
+
+  /** Then GET the returned url with NO authentication header. */
+  async artifactUrl(
+    flowId: string,
+    runId: string,
+    fileId: string,
+    expiresIn = 3600,
+  ): Promise<string> {
+    const res = await this.call<{ url: string; expires_at: number }>(
+      "POST",
+      `/flows/${flowId}/runs/${runId}/artifacts/${fileId}/signed-url/`,
+      { body: { expires_in: expiresIn, content_disposition: "attachment" } },
+    );
+    return res.url;
+  }
+
+  /** Poll with a widening interval until the run stops needing attention. */
+  async waitForRun(
+    flowId: string,
+    runId: string,
+    opts: { deadlineMs?: number; onUpdate?: (run: FlowRun) => void } = {},
+  ): Promise<FlowRun> {
+    const deadline = Date.now() + (opts.deadlineMs ?? 30 * 60_000);
+    const interval = (elapsed: number) =>
+      elapsed < 30_000 ? 2_000 : elapsed < 120_000 ? 5_000 : 15_000;
+    const start = Date.now();
+    for (;;) {
+      const run = await this.getRun(flowId, runId);
+      opts.onUpdate?.(run);
+      if (run.status === "completed" || run.status === "failed" || run.status === "cancelled") {
+        return run;
+      }
+      if (run.status === "awaiting_review") return run; // hand control to the reviewer
+      if (Date.now() > deadline) throw new Error(`run ${runId} still ${run.status} at deadline`);
+      await new Promise((resolve) => setTimeout(resolve, interval(Date.now() - start)));
+    }
+  }
+}
+```
+
+## Reading outputs by type
+
+A finished run exposes its output in two places, and which one you use depends on the shape the flow was designed to produce.
+
+`run.result` is the typed final result and is the value to render. It is a closed discriminated union on `kind`:
+
+| `result.kind`      | What it means                                                          | How to consume it                                                                                                                                                             |
+| ------------------ | ---------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `inline_text`      | Plain text small enough to be returned in the response                 | Read `text` directly                                                                                                                                                          |
+| `file_backed_text` | Plain text too large to inline; it was written to a file instead       | `preview` is a bounded prefix, never the whole text. Check `file.availability`, then download `file` through the signed-URL endpoint                                          |
+| `structured`       | JSON matching the final step's output contract                         | Read `value`. `output_contract` is the schema that value satisfies, interpreted with the run's pinned `flow_version`                                                          |
+| `artifact`         | One or more generated files, typically DOCX or PDF                     | For each entry in `files`, check `availability`, then request a signed URL and `GET` it with no auth header                                                                   |
+| `outbound_http`    | The flow posted the result to a destination the flow author configured | Nothing to download. `delivery_status` is always `delivered`, because the result only exists once delivery succeeded; use `webhook_deliveries` on the run for attempt history |
+
+`result.kind` is predictable before the run starts: the run contract's `final_output.output_type` (`text`, `json`, `pdf`, `docx`) and `final_output.delivery` tell you which branch to build the UI for.
+
+`GET .../runs/{run_id}/steps/` is the per-step view and is where intermediate output lives. Two things about it repeatedly surprise integrators:
+
+- A transcription step's text arrives in that step's `output_payload_json.text`, not in the run's `input_payload_json`. When the audio was long the transcription model chunked it, and the text carries per-chunk headers such as `### 0:00 - 0:50`. Strip them if you display raw transcript.
+- More than one step can emit a `structured` payload, because an early source-reader step often emits one too. Take the **last** structured step output before the rendering step, ordered by `step_order`, not the first.
+
+There is no fifth output type for other files. Any generated file that is not the typed final result still appears in `run.result_files` and in the owning step's `result_files`, with its own `mimetype` and a `file_type` of `text`, `image`, `audio`, or `document`. Download it through the same signed-URL endpoint.
+
+Every downloadable file carries `availability`. When retention has purged the bytes it reads `content_purged`, the metadata row remains, and requesting a signed URL for it returns `410` with code `flow_run_artifact_content_unavailable`.
+
+## Limits, timings, and quotas
+
+Read effective per-flow values from `GET /api/v1/flows/{id}/run-contract/`. The numbers below are the platform behavior behind those values, so a client knows what it is looking at and what it can never exceed.
+
+### Uploads
+
+| What                        | Value                                                                                                                                                                                                                   |
+| --------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Effective per-file size     | `steps_requiring_input[].max_file_size_bytes` in the run contract. It resolves to the smallest of the tenant admin limit, the deployment's storage ceiling, and a hard platform maximum of 2 GiB                        |
+| Effective files per step    | `steps_requiring_input[].max_files`. The platform caps audio at 100 files and other types at 1000, and the default audio allowance is 10 per run                                                                        |
+| Accepted types              | `steps_requiring_input[].accepted_mimetypes`. The step's own list wins if the flow author narrowed it                                                                                                                   |
+| Audio and video types today | `audio/wav`, `audio/mpeg`, `audio/mp3`, `audio/mp4`, `audio/x-m4a`, `audio/ogg`, `audio/webm`, `video/mp4`, `video/webm`. Always read the contract rather than hardcoding this list                                     |
+| Upload timeout budget       | `runtime_upload_policy` in the run contract: minimum 120 s, 8 s per MiB, maximum 600 s, idle timeout 120 s                                                                                                              |
+| Oversize handling           | The size is checked after the request body has been received, so an oversized upload still spends the full transfer before returning `413`. Compare the file against `max_file_size_bytes` client-side before you start |
+| Audio duration              | No cap. Long audio is split into five-minute segments automatically                                                                                                                                                     |
+
+The deployment ceiling is the value that surprises teams: a deployment that keeps file bytes inside PostgreSQL can cap audio far below the tenant policy. The run contract always reports the resolved number, so trust it over any figure written down elsewhere.
+
+### Text and payload sizes
+
+A single limit governs both: **1 MiB of UTF-8 bytes**, deployment-configurable through the `FLOW_MAX_INLINE_TEXT_BYTES` environment variable and not exposed as a tenant setting.
+
+- A step's text output above it is written to a file, and the run result arrives as `file_backed_text` instead of `inline_text`.
+- `input_payload_json` above it is rejected at run creation with `flow_run_input_payload_too_large`.
+- A review edit whose `text` is above it is rejected with `typed_io_validation_failed`, and the response's `context.max_inline_text_bytes` reports the limit in force.
+- A transcript above it fails the step with `typed_io_transcript_too_large` rather than overflowing to a file.
+
+### Review checkpoints
+
+| What                   | Value                                                                                                                                                                            |
+| ---------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Deadline               | `steps_requiring_review[].expires_after_seconds` in the run contract, and `expires_at` on the checkpoint                                                                         |
+| Allowed range          | 60 seconds to 90 days, default 14 days. It is set per step when the flow is authored, and no runtime endpoint changes it                                                         |
+| What expiry does       | A background reconciler runs every 60 seconds and, for a checkpoint still open past `expires_at`, marks it `expired` and cancels the run with `error.code` `flow_review_expired` |
+| Timing you can promise | The run flips to `cancelled` within roughly a minute of the deadline, not at the instant it passes                                                                               |
+| Late approval          | Resume still works after `expires_at` if the approval was persisted before it. An already-expired checkpoint returns `400 flow_review_expired`                                   |
+
+### Retries and recovery
+
+- **The runtime does not retry a failed provider call.** A model or transcription failure fails the step directly. The one exception is a single reissue when a provider rejects an unsupported response format, and it shares the original step deadline.
+- **Dispatch to the worker is retried up to 5 times**, with fixed delays of 30, 120, 300, and 900 seconds. A sweep looks for stale queued runs every 30 seconds. `dispatch_attempt_count`, `dispatch_next_attempt_at`, and `dispatch_exhausted_at` on the run report where that budget stands.
+- **`redispatch` is for a stale queued run only**, and needs the observed `dispatch_exhausted_at` echoed back as `expected_dispatch_exhausted_at`. A `redispatched_count` of `0` means nothing was eligible.
+- **`rerun` is for a completed or failed run**, re-executes one completed step, invalidates everything downstream, and requires a `reason`.
+- Never auto-retry a step whose provider work may have started. A rerun repeats every provider call in that step, including calls that already succeeded, and spends again.
+
+### Concurrency and rate
+
+- A tenant may have a limited number of active runs at once; the deployment default is 4. `GET /api/v1/flows/runs/capacity/` reports `active_runs`, `max_concurrent_runs`, and `available_slots` for the caller's tenant. It is a snapshot, not a reservation.
+- Exceeding it returns `429` with `Retry-After: 60` and code `flow_run_concurrency_limit_reached`.
+- API keys are separately rate-limited per hour by scope. No endpoint reports remaining quota, so treat a `429` without `flow_run_concurrency_limit_reached` as a request-rate rejection and back off.
+
+### Retention
+
+Run history retention is a tenant setting and is off by default, so runs and their files persist until an administrator configures a window. Once a window is configured, expiry deletes the run and step history outright; artifact bytes purged earlier leave metadata behind with `availability: "content_purged"`. Because create-run idempotency replay is tied to the retained run row, the practical replay window is the run's retention window.
+
+Abandoned uploads that were never attached to a run are not swept automatically. Delete them yourself with `DELETE /api/v1/flows/{id}/runtime-files/{file_id}/`; a file already bound to a run returns `409 flow_runtime_file_attached`.
+
+Once retention has removed a run row, its create-run `Idempotency-Key` no longer matches anything, so replaying that key creates a new run instead of returning the old one. Keep the run id, not the key, as your durable handle.
+
+## What this API does not offer
+
+These are product limits, not documentation gaps. Design around them rather than looking for an endpoint that does not exist.
+
+- **No client-registered run-status subscription.** No webhook you can register, no server-sent events, no WebSocket. Polling is the contract for a client. A flow author can separately configure a terminal step to POST its result to a destination, but that is designed into the flow, not requested by the caller.
+- **No resumable or chunked upload.** A runtime file is one `multipart/form-data` request. A failed upload restarts from the beginning, which is why the run contract publishes an upload timeout budget scaled to file size.
+- **No global machine-readable catalogue of accepted media types.** The accepted list is per flow and per step, and `GET /api/v1/flows/{id}/run-contract/` is the only authoritative source. Do not hardcode one.
+- **No rate-limit introspection.** Nothing reports an API key's remaining hourly quota; you discover exhaustion from a `429`.
+- **No stable format for transcription chunk markers.** The per-chunk headers a long transcript carries are a rendering detail of the transcription step, not a contract. Strip them defensively rather than parsing them.
+- **No mid-run file injection.** A review checkpoint edit changes only `text` and `structured`; it cannot attach a file. The one way to rebind uploaded files after a run starts is a step rerun with explicit `step_inputs` overrides.
+- **CORS is deployment configuration, not an API contract.** A browser app calling Eneo directly depends on the operator's allowed origins; a server-side proxy avoids the question entirely, and is the right place to keep a service key anyway.
+
 <Callout type="warning">
 
 **Not supported: Arbitrary mid-run pause.**
@@ -1114,4 +1681,4 @@ Closest supported alternative: Poll the run and step endpoints and use status ca
 
 </Callout>
 
-Next: [Flows FAQ](/guides/flows/flows-faq).
+Next: [Designing Flows](/guides/flows/designing-flows).

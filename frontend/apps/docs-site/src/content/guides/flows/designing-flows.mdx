@@ -124,8 +124,6 @@ Goal: Turn an audio upload into structured sections and a filled DOCX template.
 
 The flow keeps speech, structure, prose, and template rendering in separate steps so each failure is visible and rerunnable.
 
-Build coverage: This scenario is covered by the Flow AI Builder golden matrix.
-
 ### Document intake with human gate
 
 Goal: Extract uploaded documents, pause for review, and produce a final artifact.
@@ -137,8 +135,6 @@ Goal: Extract uploaded documents, pause for review, and produce a final artifact
 | Create artifact | Approved JSON           | DOCX artifact           | `{{reviewed_fields}}`           | Template asset    |
 
 The review checkpoint freezes the extracted fields before the artifact step consumes them.
-
-Build coverage: This scenario is covered by the Flow AI Builder golden matrix.
 
 ### Compare and decide
 
@@ -152,8 +148,6 @@ Goal: Compare two uploads against caller-supplied criteria and return a recommen
 
 The comparison step receives both structured extractions and a clear weighting field instead of prose-only chaining.
 
-Build coverage: This scenario is covered by the Flow AI Builder golden matrix.
-
 ### Form intake to artifact
 
 Goal: Use form fields to compose sections and generate a DOCX artifact.
@@ -166,6 +160,4 @@ Goal: Use form fields to compose sections and generate a DOCX artifact.
 
 The form-only path avoids fake uploads and makes every caller-provided value explicit in the run payload.
 
-Build coverage: This scenario is covered by the Flow AI Builder golden matrix.
-
-Next: [Integrating Flows](/guides/flows/integrating-flows).
+Next: [Flows FAQ](/guides/flows/flows-faq).

@@ -74,11 +74,16 @@ from eneo.server.exception_handlers import extract_request_id
 router = APIRouter()
 
 _FLOW_RUN_IDEMPOTENCY_HEADER_DESCRIPTION = (
-    "Optional caller-supplied idempotency key. Reusing the same key with the same "
-    "request payload returns the existing run payload. Reusing the same key with a "
-    "different payload returns `400` with code `flow_run_idempotency_conflict`. "
-    "Replay is available while the matching run row is retained; clients should keep "
-    "the returned run id as the durable polling handle."
+    "Optional caller-supplied idempotency key of 1 to 255 characters after trimming; "
+    "a longer or blank key returns `400` with code `flow_run_invalid_idempotency_key`. "
+    "That bound is enforced as a typed error rather than as a schema `maxLength`, so a "
+    "validator generated from this document will not catch it. Reusing the same key "
+    "with the same request payload returns the existing run payload. Reusing the same "
+    "key with a different payload returns `400` with code "
+    "`flow_run_idempotency_conflict`. Replay is available while the matching run row is "
+    "retained; once retention removes the row the key no longer matches and the same "
+    "request creates a new run, so keep the returned run id as the durable polling "
+    "handle."
 )
 
 _FLOW_RUN_CONCURRENCY_RETRY_AFTER_SECONDS: Final[int] = 60
@@ -160,6 +165,21 @@ _FLOW_RUN_STATUS_DESCRIPTION = """
     `result` is null until the run completes successfully, then discriminates inline text,
     authored structured JSON, current artifact metadata, or successful outbound delivery.
     Structured values and contracts are interpreted with this run's pinned `flow_version`.
+
+    This response model is `FlowRunDetailPublic`: it is the run-create model plus an
+    always-present `webhook_deliveries` array, which stays empty unless the flow's final step
+    was authored with outbound HTTP delivery.
+
+    Polling is the only mechanism a caller controls for observing run status: there is no
+    client-registered run-status subscription, server-sent event, or WebSocket surface. A
+    flow author can separately configure a terminal step to deliver its result over outbound
+    HTTP, which is what `webhook_deliveries` reports; that does signal successful completion
+    to the receiver they configured, but it is designed into the flow rather than requested
+    by the caller and it reports neither failure nor review states. Poll this endpoint about
+    every 2 seconds for the first 30 seconds, then every 5 seconds, then every 15 seconds,
+    and stop when the status capability `should_poll` is false. Keep polling while the status
+    is `awaiting_review`, because a reviewer can act at any time and the checkpoint can also
+    expire.
     Current runtime visibility is policy-based: callers always see their own runs, tenant admins
     can inspect runs across the tenant, same-space admins and owners can inspect run metadata for
     flows in their space, and service-key principals can inspect only their own runs.
@@ -185,6 +205,19 @@ _FLOW_RUN_LIST_DESCRIPTION = """
 _FLOW_RUN_CANCEL_DESCRIPTION = (
     """
 Cancel a flow run if it is not already terminal.
+
+Cancelling is idempotent and never fails on state. Calling it on a run that is already
+`completed`, `failed`, or `cancelled` returns `200` with that run unchanged, still in its
+existing terminal status. Do not assume the response status is `cancelled`; read
+`status` from the response body.
+
+The run status changes before the response returns, but the worker stops asynchronously.
+An in-flight completion-model call is aborted within a few seconds; an in-flight
+transcription or outbound HTTP call runs to completion and is honored only at the next
+step boundary. Provider work can therefore still be billed after this endpoint returns,
+and a step result can settle shortly after the run already reads `cancelled`.
+
+A cancelled run cannot be resumed or rerun. Create a new run instead.
 
 This is the canonical run control endpoint for flow consumers. Current runtime lifecycle control
 is policy-based: callers can cancel their own runs, tenant admins can cancel runs across the
