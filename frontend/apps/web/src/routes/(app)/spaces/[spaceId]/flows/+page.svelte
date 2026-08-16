@@ -1,21 +1,23 @@
 <script lang="ts">
   import { untrack } from "svelte";
   import type { FlowSparse, Eneo } from "@eneo/eneo-js";
+  import { EneoError } from "@eneo/eneo-js";
   import type { RecoverableAIBuilderDraftSession } from "$lib/features/flows/ai-builder/protocol";
   import { Page } from "$lib/components/layout";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
   import { initFlowsManager } from "$lib/features/flows/FlowsManager";
   import { getAppContext } from "$lib/core/AppContext";
+  import { toast } from "$lib/components/toast";
   import { m } from "$lib/paraglide/messages";
   import FlowsTable from "./FlowsTable.svelte";
-  import FlowDraftsResumeStrip from "./FlowDraftsResumeStrip.svelte";
   import CreateFlowDialog from "./CreateFlowDialog.svelte";
   import FlowPackageImportDialog from "$lib/features/flows/components/FlowPackageImportDialog.svelte";
+  import { discardAIBuilderDraft, type AIBuilderDraftsLoad } from "./aiBuilderDrafts";
 
   let {
     data
   }: {
-    data: { flows: FlowSparse[]; eneo: Eneo; aiDrafts: RecoverableAIBuilderDraftSession[] };
+    data: { flows: FlowSparse[]; eneo: Eneo; aiDrafts: AIBuilderDraftsLoad };
   } = $props();
 
   const {
@@ -35,12 +37,24 @@
     })
   );
 
-  const countLabel = $derived.by(() => {
-    const count = $flows.length;
-    if (count === 0) return m.flow_list_count_zero();
-    if (count === 1) return m.flow_list_count_singular();
-    return m.flow_list_count_plural({ count: String(count) });
-  });
+  const canManage = user.hasPermission("flows_manage");
+  let createOpen = $state(false);
+  // Drafts are page-local after load: discarding one removes its row without a reload.
+  // svelte-ignore state_referenced_locally
+  let drafts = $state<RecoverableAIBuilderDraftSession[]>(
+    data.aiDrafts.status === "loaded" ? data.aiDrafts.drafts : []
+  );
+
+  async function discardDraft(sessionId: string) {
+    try {
+      await discardAIBuilderDraft(data.eneo, sessionId);
+      drafts = drafts.filter((draft) => draft.session_id !== sessionId);
+    } catch (error) {
+      toast.error(
+        error instanceof EneoError ? error.getReadableMessage() : m.flow_list_discard_draft_failed()
+      );
+    }
+  }
 </script>
 
 <svelte:head>
@@ -50,25 +64,28 @@
 
 <Page.Root>
   <Page.Header>
-    <Page.Title title={m.flows()}></Page.Title>
-    {#if user.hasPermission("flows_manage")}
+    <Page.Title title={m.flows()} description={m.flow_list_page_description()}></Page.Title>
+    {#if canManage}
       <div class="flex items-center gap-2">
         <FlowPackageImportDialog
           eneo={data.eneo}
           spaceId={$currentSpace.id}
           spaceRouteId={$currentSpace.routeId}
         />
-        <CreateFlowDialog />
+        <CreateFlowDialog bind:open={createOpen} />
       </div>
     {/if}
   </Page.Header>
   <Page.Main>
-    <div class="mx-auto flex w-full max-w-[1400px] flex-col gap-4 px-3 py-4 sm:px-6 sm:py-6">
-      <FlowDraftsResumeStrip drafts={data.aiDrafts} spaceRouteId={$currentSpace.routeId} />
-      <p class="text-muted text-xs font-medium tracking-wide uppercase" aria-live="polite">
-        {countLabel}
-      </p>
-      <FlowsTable flows={$flows} />
+    <div class="mx-auto flex w-full max-w-[1100px] flex-col gap-4 px-3 py-4 sm:px-6 sm:py-6">
+      <FlowsTable
+        flows={$flows}
+        {drafts}
+        draftsUnavailable={data.aiDrafts.status === "unavailable"}
+        canCreate={canManage}
+        oncreate={() => (createOpen = true)}
+        ondiscarddraft={discardDraft}
+      />
     </div>
   </Page.Main>
 </Page.Root>

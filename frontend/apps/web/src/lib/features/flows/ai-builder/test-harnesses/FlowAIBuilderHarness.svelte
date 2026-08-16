@@ -14,7 +14,7 @@
     transport: AIBuilderClientTransport;
     targetKind?: TargetKind;
     flowId?: string | null;
-    initialPrompt?: string | null;
+    resumeSessionId?: string | null;
     /** Test hook: receive the service instance to drive live session changes. */
     onservice?: (service: FlowAIBuilderService) => void;
     /** Test hook: receive the mounted shell to exercise its public launch actions. */
@@ -25,7 +25,7 @@
     transport,
     targetKind = "create",
     flowId = null,
-    initialPrompt = null,
+    resumeSessionId = null,
     onservice,
     onbuilder
   }: Props = $props();
@@ -67,4 +67,4 @@
   });
 </script>
 
-<FlowAIBuilder bind:this={builder} {targetKind} {initialPrompt} />
+<FlowAIBuilder bind:this={builder} {targetKind} {resumeSessionId} />

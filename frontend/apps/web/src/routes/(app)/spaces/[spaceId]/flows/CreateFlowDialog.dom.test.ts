@@ -4,7 +4,10 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { m } from "$lib/paraglide/messages";
 import CreateFlowDialog from "./CreateFlowDialog.svelte";
 
-vi.mock("$app/navigation", () => ({ goto: vi.fn() }));
+const goto = vi.fn();
+const createFlow = vi.fn(async (name: string) => ({ id: "flow-9", name }));
+
+vi.mock("$app/navigation", () => ({ goto: (...args: unknown[]) => goto(...args) }));
 vi.mock("$app/paths", () => ({ resolve: (path: string) => path }));
 vi.mock("$lib/core/AppContext", () => ({
   getAppContext: () => ({
@@ -24,39 +27,44 @@ vi.mock("$lib/features/spaces/SpacesManager", () => ({
   })
 }));
 vi.mock("$lib/features/flows/FlowsManager", () => ({
-  getFlowsManager: () => ({ createFlow: vi.fn() })
-}));
-vi.mock("$lib/features/flows/ai-builder/flowAIBuilderSeed", () => ({
-  writeAIBuilderSeed: vi.fn()
+  getFlowsManager: () => ({ createFlow })
 }));
 
 afterEach(() => {
   cleanup();
+  goto.mockClear();
+  createFlow.mockClear();
 });
 
 describe("CreateFlowDialog", () => {
-  it("keeps a long prompt inside a scrollable dialog with reachable actions", async () => {
+  it("offers the AI path first and sends the task to the builder page", async () => {
     render(CreateFlowDialog);
-    await fireEvent.click(screen.getByRole("button", { name: m.flow_create() }));
+    await fireEvent.click(screen.getByRole("button", { name: m.flow_create_button() }));
 
-    const dialog = screen.getByRole("dialog");
-    expect(dialog.className).toContain("max-h-[calc(100dvh-1.5rem)]");
-    expect(dialog.className).toContain("overflow-hidden");
+    // The dialog chooses a path; the task text is written on the builder page.
+    expect(screen.queryByRole("textbox")).toBeNull();
+    await fireEvent.click(
+      screen.getByRole("button", { name: new RegExp(m.flow_create_path_ai_title()) })
+    );
+    expect(goto).toHaveBeenCalledWith("/spaces/space-1/flows/ai-builder");
+  });
 
-    const scrollableBody = dialog.firstElementChild;
-    expect(scrollableBody?.className).toContain("overflow-y-auto");
+  it("creates a named flow on the manual path and opens its editor", async () => {
+    render(CreateFlowDialog);
+    await fireEvent.click(screen.getByRole("button", { name: m.flow_create_button() }));
+    await fireEvent.click(
+      screen.getByRole("button", { name: new RegExp(m.flow_create_path_manual_title()) })
+    );
 
-    const prompt = screen.getByLabelText(m.flow_create_prompt_label()) as HTMLTextAreaElement;
-    const longPrompt = "Beskriv ett långt flöde. ".repeat(500);
-    await fireEvent.input(prompt, { target: { value: longPrompt } });
-    expect(prompt.value).toBe(longPrompt);
-    expect(prompt.className).toContain("field-sizing-fixed");
-    expect(prompt.className).toContain("max-h-[min(20rem,40dvh)]");
+    const action = screen.getByRole("button", { name: m.flow_create_path_manual_action() });
+    expect(action.hasAttribute("disabled")).toBe(true);
+    await fireEvent.input(screen.getByLabelText(m.name()), {
+      target: { value: "  Diarieföring " }
+    });
+    expect(action.hasAttribute("disabled")).toBe(false);
+    await fireEvent.click(action);
 
-    const footer = dialog.querySelector('[data-slot="dialog-footer"]');
-    expect(footer?.className).toContain("shrink-0");
-    const continueButton = screen.getByRole("button", { name: m.flow_create_continue_ai() });
-    expect(continueButton.hasAttribute("disabled")).toBe(false);
-    expect(continueButton.className).toContain("w-full");
+    expect(createFlow).toHaveBeenCalledWith("Diarieföring");
+    await vi.waitFor(() => expect(goto).toHaveBeenCalledWith("/spaces/space-1/flows/flow-9"));
   });
 });

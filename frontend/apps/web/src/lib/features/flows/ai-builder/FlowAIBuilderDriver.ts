@@ -383,7 +383,10 @@ export class FlowAIBuilderDriver {
     const draftLoadSequence = ++this.#draftLoadSequence;
     try {
       const result = (await this.#transport.fetch(FLOW_AI_BUILDER_ROUTES.sessions, {
-        method: "get"
+        method: "get",
+        params: {
+          query: { space_id: this.#spaceId, target_kind: "create", drafts_only: true, limit: 100 }
+        }
       })) as { sessions: AIBuilderDraftSession[] };
       if (
         expectedGeneration !== this.#sessionGeneration ||

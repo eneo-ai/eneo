@@ -371,8 +371,13 @@ describe("FlowAIBuilderDriver", () => {
     expect(driver.state.session).toBeNull();
     expect(driver.state.draftSessions).toEqual([draft]);
     expect(fetch).toHaveBeenCalledTimes(1);
+    // The server owns the draft definition: the client asks only for this
+    // space's unfinished create drafts instead of filtering a capped list.
     expect(fetch).toHaveBeenCalledWith("/api/v1/flows/ai-builder/sessions", {
-      method: "get"
+      method: "get",
+      params: {
+        query: { space_id: "space-1", target_kind: "create", drafts_only: true, limit: 100 }
+      }
     });
   });
 

@@ -285,9 +285,17 @@ class AIBuilderService:
             raise_persisted_flow_mcp_plan_error(exc)
             raise
 
-    async def list_sessions(self) -> list[SessionListItemResponse]:
+    async def list_sessions(
+        self,
+        *,
+        space_id: UUID | None = None,
+        target_kind: TargetKind | None = None,
+        drafts_only: bool = False,
+        limit: int = 20,
+    ) -> list[SessionListItemResponse]:
         active_api_key = self.user.active_api_key
-        scoped_space_id: UUID | None = None
+        # A caller-requested space only narrows; an API key scope can never widen it.
+        scoped_space_id: UUID | None = space_id
         if active_api_key is not None:
             if active_api_key.permission not in {
                 ApiKeyPermission.WRITE,
@@ -300,6 +308,8 @@ class AIBuilderService:
             if scope_type != ApiKeyScopeType.TENANT and scope_id is None:
                 return []
             if scope_type == ApiKeyScopeType.SPACE:
+                if scoped_space_id is not None and scoped_space_id != scope_id:
+                    return []
                 scoped_space_id = scope_id
             elif scope_type in {ApiKeyScopeType.ASSISTANT, ApiKeyScopeType.APP}:
                 if scope_id is None:
@@ -313,6 +323,8 @@ class AIBuilderService:
                         space = await self.space_service.get_space_by_app(scope_id)
                 except NotFoundException:
                     return []
+                if scoped_space_id is not None and scoped_space_id != space.id:
+                    return []
                 scoped_space_id = space.id
             elif scope_type != ApiKeyScopeType.TENANT:
                 return []
@@ -322,6 +334,9 @@ class AIBuilderService:
             actor_user_id=self.user.id,
             actor_user_group_ids=self.user.user_groups_ids,
             scoped_space_id=scoped_space_id,
+            target_kind=target_kind,
+            drafts_only=drafts_only,
+            limit=limit,
         )
         return [
             (

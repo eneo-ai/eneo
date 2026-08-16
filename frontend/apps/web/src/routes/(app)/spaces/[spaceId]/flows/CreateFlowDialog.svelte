@@ -4,202 +4,166 @@
   import { getAppContext } from "$lib/core/AppContext";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
   import { getFlowsManager } from "$lib/features/flows/FlowsManager";
-  import { writeAIBuilderSeed } from "$lib/features/flows/ai-builder/flowAIBuilderSeed";
-  import { IconWorkflow } from "@eneo/icons/workflow";
   import { EneoError } from "@eneo/eneo-js";
   import { Button } from "$lib/components/ui/button/index.js";
   import * as Dialog from "$lib/components/ui/dialog/index.js";
   import { Input } from "$lib/components/ui/input/index.js";
-  import { Textarea } from "$lib/components/ui/textarea/index.js";
-  import { Switch } from "$lib/components/ui/switch/index.js";
-  import { Separator } from "$lib/components/ui/separator/index.js";
   import { m } from "$lib/paraglide/messages";
+
+  interface Props {
+    open?: boolean;
+  }
+
+  let { open = $bindable(false) }: Props = $props();
 
   const {
     state: { currentSpace }
   } = getSpacesManager();
   const { user } = getAppContext();
-
   const flowsManager = getFlowsManager();
-  let showDialog = $state(false);
-  const canCreateFlowManually = user.hasPermission("flows_manage");
-  const canUseAIBuilder = user.hasPermission({
-    allOf: ["flows_manage", "flows_ai_builder"]
-  });
 
-  let mode = $state<"prompt" | "manual">("prompt");
-  let taskDescription = $state("");
+  const canUseAIBuilder = user.hasPermission({ allOf: ["flows_manage", "flows_ai_builder"] });
+
+  // The dialog only chooses the path. The task itself is written on the
+  // builder page, so there is exactly one place that owns that text.
+  let path = $state<"choose" | "manual">("choose");
   let newFlowName = $state("");
-  let openAfterCreation = $state(true);
   let createError = $state<string | null>(null);
-
-  const taskExamples = [
-    m.flow_create_example_summarize,
-    m.flow_create_example_review,
-    m.flow_create_example_translate,
-    m.flow_create_example_decision
-  ];
+  let isCreating = $state(false);
 
   function reset() {
-    mode = canUseAIBuilder ? "prompt" : "manual";
-    taskDescription = "";
+    path = canUseAIBuilder ? "choose" : "manual";
     newFlowName = "";
     createError = null;
+    isCreating = false;
   }
 
-  function openCreateDialog() {
+  function openDialog() {
     reset();
-    showDialog = true;
+    open = true;
   }
 
-  function continueToAIBuilder() {
-    writeAIBuilderSeed($currentSpace.id, taskDescription);
-    showDialog = false;
-    reset();
+  function startWithAI() {
+    open = false;
     goto(resolve(`/spaces/${$currentSpace.routeId}/flows/ai-builder`));
   }
 
-  async function createFlow() {
+  async function createManually() {
+    const name = newFlowName.trim();
+    if (!name || isCreating) return;
+    isCreating = true;
+    createError = null;
     try {
-      const created = await flowsManager.createFlow(newFlowName);
-      if (openAfterCreation && created.id) {
+      const created = await flowsManager.createFlow(name);
+      open = false;
+      if (created.id) {
         goto(resolve(`/spaces/${$currentSpace.routeId}/flows/${created.id}`));
       }
-      newFlowName = "";
-      showDialog = false;
-      reset();
     } catch (error) {
       createError = error instanceof EneoError ? error.getReadableMessage() : String(error);
+    } finally {
+      isCreating = false;
     }
   }
 </script>
 
-<Button variant="default" onclick={openCreateDialog}>
-  <IconWorkflow class="size-4" />
-  {m.flow_create()}
+<Button variant="default" onclick={openDialog}>
+  {m.flow_create_button()}
 </Button>
 
-<Dialog.Root bind:open={showDialog}>
-  <Dialog.Content
-    class="flex max-h-[calc(100dvh-1.5rem)] w-[calc(100%-1.5rem)] !max-w-2xl flex-col gap-0 overflow-hidden !p-0 sm:max-h-[min(48rem,calc(100dvh-3rem))]"
-  >
-    <div class="min-h-0 flex-1 overflow-y-auto px-5 pt-8 pb-6 sm:px-10 sm:pt-10 sm:pb-8">
-      <Dialog.Title class="pb-1 text-xl font-semibold">{m.flow_create_dialog_title()}</Dialog.Title>
-      <Dialog.Description class="text-secondary max-w-[60ch]">
-        {mode === "prompt"
-          ? m.flow_create_dialog_description()
-          : m.flow_create_manual_description()}
+<Dialog.Root
+  bind:open
+  onOpenChange={(next) => {
+    if (next) reset();
+  }}
+>
+  <Dialog.Content class="w-[calc(100%-1.5rem)] !max-w-[33rem] gap-0 overflow-hidden !p-0">
+    <div class="px-6 pt-6">
+      <Dialog.Title class="text-lg font-bold tracking-tight">
+        {m.flow_create_dialog_title()}
+      </Dialog.Title>
+      <Dialog.Description class="text-secondary mt-1.5 text-sm text-pretty">
+        {m.flow_create_dialog_description()}
       </Dialog.Description>
-
-      {#if mode === "prompt"}
-        <div class="mt-8 flex flex-col gap-2">
-          <label for="flow-task-input" class="text-sm font-medium">
-            {m.flow_create_prompt_label()}
-          </label>
-          <Textarea
-            id="flow-task-input"
-            bind:value={taskDescription}
-            rows={5}
-            class="field-sizing-fixed h-32 max-h-[min(20rem,40dvh)] resize-y overflow-y-auto"
-            placeholder={m.flow_create_prompt_placeholder()}
-          />
-          <div class="mt-1 flex flex-wrap items-center gap-2">
-            <span class="text-muted text-xs">{m.flow_create_examples_label()}</span>
-            {#each taskExamples as example (example)}
-              <Button
-                variant="outline"
-                size="xs"
-                class="h-auto rounded-full px-3 py-1 whitespace-normal"
-                onclick={() => {
-                  taskDescription = example();
-                }}
-              >
-                {example()}
-              </Button>
-            {/each}
-          </div>
-        </div>
-
-        {#if canCreateFlowManually}
-          <Separator class="mt-8 mb-4" />
-          <p class="text-secondary text-sm">
-            {m.flow_create_manual_more_control()}
-            <Button
-              variant="link"
-              class="h-auto p-0 align-baseline"
-              onclick={() => {
-                mode = "manual";
-              }}
-            >
-              {m.flow_create_configure_manually()}
-            </Button>
-          </p>
-        {/if}
-      {:else}
-        <div class="mt-8 flex flex-col gap-2">
-          <label for="flow-name-input" class="text-sm font-medium">{m.name()}</label>
-          <Input
-            id="flow-name-input"
-            bind:value={newFlowName}
-            placeholder={m.flow_create_name_placeholder()}
-            required
-          />
-        </div>
-      {/if}
-      {#if createError}
-        <p class="text-negative-stronger bg-negative-dimmer rounded-lg px-3 py-2 text-sm">
-          {createError}
-        </p>
-      {/if}
     </div>
 
-    <Dialog.Footer
-      class="border-default bg-background !mx-0 !mb-0 shrink-0 rounded-b-xl border-t px-4 py-3 sm:px-6 sm:py-4"
-    >
-      {#if mode === "manual"}
-        <label class="flex items-center gap-2 text-sm">
-          <Switch bind:checked={openAfterCreation} size="sm" />
-          {m.flow_create_open_editor_after()}
-        </label>
-        <div class="flex-grow"></div>
-        {#if canUseAIBuilder}
-          <Button
-            variant="ghost"
-            onclick={() => {
-              mode = "prompt";
-            }}>{m.go_back()}</Button
-          >
+    {#if path === "choose"}
+      <div class="flex flex-col gap-2.5 px-6 pt-4">
+        <button
+          type="button"
+          class="border-accent-default bg-accent-default/5 hover:bg-accent-default/10 focus-visible:ring-ring/50 w-full rounded-[10px] border px-4 py-3.5 text-left outline-none focus-visible:ring-[3px]"
+          onclick={startWithAI}
+        >
+          <span class="flex flex-wrap items-center gap-2">
+            <span class="text-primary text-[0.9375rem] font-semibold tracking-tight">
+              {m.flow_create_path_ai_title()}
+            </span>
+            <span
+              class="text-accent-stronger bg-accent-dimmer inline-flex h-[1.375rem] items-center rounded-full px-2.5 text-xs font-semibold"
+            >
+              {m.flow_create_path_ai_recommended()}
+            </span>
+          </span>
+          <span class="text-secondary mt-1 block text-sm leading-relaxed text-pretty">
+            {m.flow_create_path_ai_description()}
+          </span>
+        </button>
+        <button
+          type="button"
+          class="border-default bg-primary hover:bg-secondary focus-visible:ring-ring/50 w-full rounded-[10px] border px-4 py-3.5 text-left outline-none focus-visible:ring-[3px]"
+          onclick={() => (path = "manual")}
+        >
+          <span class="text-primary text-[0.9375rem] font-semibold tracking-tight">
+            {m.flow_create_path_manual_title()}
+          </span>
+          <span class="text-secondary mt-1 block text-sm leading-relaxed text-pretty">
+            {m.flow_create_path_manual_description()}
+          </span>
+        </button>
+      </div>
+    {:else}
+      <form
+        class="flex flex-col gap-2 px-6 pt-4"
+        onsubmit={(event) => {
+          event.preventDefault();
+          void createManually();
+        }}
+      >
+        <label for="flow-name-input" class="text-sm font-medium">{m.name()}</label>
+        <Input
+          id="flow-name-input"
+          bind:value={newFlowName}
+          placeholder={m.flow_create_name_placeholder()}
+          required
+        />
+        <p class="text-secondary text-xs">{m.flow_create_path_manual_hint()}</p>
+        {#if createError}
+          <p class="text-negative-stronger bg-negative-dimmer rounded-lg px-3 py-2 text-sm">
+            {createError}
+          </p>
         {/if}
-        <Button
-          variant="outline"
-          class="w-full sm:w-auto"
-          onclick={() => {
-            showDialog = false;
-            reset();
-          }}>{m.cancel()}</Button
-        >
-        <Button class="w-full sm:w-auto" variant="default" onclick={createFlow}>
-          {m.flow_create()}
-        </Button>
-      {:else}
-        <div class="flex-grow"></div>
-        <Button
-          variant="outline"
-          class="w-full sm:w-auto"
-          onclick={() => {
-            showDialog = false;
-            reset();
-          }}>{m.cancel()}</Button
-        >
-        <Button
-          class="w-full sm:w-auto"
-          variant="default"
-          disabled={!taskDescription.trim()}
-          onclick={continueToAIBuilder}
-        >
-          {m.flow_create_continue_ai()}
-        </Button>
-      {/if}
+      </form>
+    {/if}
+
+    <Dialog.Footer
+      class="border-dimmer mx-0 mt-4 mb-0 flex-row flex-wrap items-center gap-2.5 border-t bg-transparent px-6 py-3.5 sm:justify-start"
+    >
+      <span class="text-secondary text-sm">{m.flow_create_dialog_footnote()}</span>
+      <div class="ml-auto flex items-center gap-2">
+        {#if path === "manual" && canUseAIBuilder}
+          <Button variant="ghost" onclick={() => (path = "choose")}>{m.go_back()}</Button>
+        {/if}
+        <Button variant="outline" onclick={() => (open = false)}>{m.cancel()}</Button>
+        {#if path === "manual"}
+          <Button
+            variant="default"
+            disabled={!newFlowName.trim() || isCreating}
+            onclick={createManually}
+          >
+            {isCreating ? m.flow_create_path_manual_creating() : m.flow_create_path_manual_action()}
+          </Button>
+        {/if}
+      </div>
     </Dialog.Footer>
   </Dialog.Content>
 </Dialog.Root>

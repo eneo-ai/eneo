@@ -8,7 +8,7 @@ from types import SimpleNamespace
 from typing import TYPE_CHECKING, Annotated, Any, NoReturn, cast
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Path, Request, status
+from fastapi import APIRouter, Depends, Path, Query, Request, status
 from fastapi.responses import JSONResponse, Response
 from fastapi.routing import APIRoute
 from pydantic import ValidationError
@@ -64,6 +64,7 @@ from eneo.flows.ai_builder.ai_builder_domain_models import (
     BuilderSession,
     BuilderTurnState,
     ConversationMessage,
+    TargetKind,
 )
 from eneo.flows.ai_builder.ai_builder_error_contract import (
     AI_BUILDER_ERROR_REGISTRY,
@@ -779,6 +780,24 @@ async def create_session(
 async def list_sessions(
     request: Request,
     container: ContainerWithUserDep,
+    space_id: Annotated[
+        UUID | None,
+        Query(description="Only sessions in this space."),
+    ] = None,
+    target_kind: Annotated[
+        TargetKind | None,
+        Query(description="Only sessions creating a new Flow, or only edits."),
+    ] = None,
+    drafts_only: Annotated[
+        bool,
+        Query(
+            description=(
+                "Only unfinished sessions the user has started: chatting or "
+                "awaiting approval, with an opening message."
+            )
+        ),
+    ] = False,
+    limit: Annotated[int, Query(ge=1, le=100)] = 20,
 ) -> SessionListResponse:
     await _authorize_ai_builder_request(
         request,
@@ -787,7 +806,12 @@ async def list_sessions(
         filter_mode=FlowAccessFilterMode.VISIBLE,
     )
     service = _get_ai_builder_service(container)
-    sessions: list[SessionListItemResponse] = await service.list_sessions()
+    sessions: list[SessionListItemResponse] = await service.list_sessions(
+        space_id=space_id,
+        target_kind=target_kind,
+        drafts_only=drafts_only,
+        limit=limit,
+    )
     return SessionListResponse(sessions=sessions)
 
 

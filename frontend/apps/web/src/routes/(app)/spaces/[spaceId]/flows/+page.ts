@@ -1,6 +1,6 @@
 import { error } from "@sveltejs/kit";
 import { hasPermission } from "$lib/core/hasPermission";
-import { loadRecoverableDrafts } from "./loadRecoverableDrafts";
+import { loadAIBuilderDrafts } from "./aiBuilderDrafts";
 
 export const load = async (event) => {
   const { eneo, currentSpace, user } = await event.parent();
@@ -16,7 +16,7 @@ export const load = async (event) => {
 
   const [flowsData, aiDrafts] = await Promise.all([
     eneo.flows.list({ spaceId: currentSpace.id }),
-    loadRecoverableDrafts({ eneo, currentSpace, user })
+    loadAIBuilderDrafts({ eneo, currentSpace, user })
   ]);
   const flows = flowsData.items ?? flowsData;
 

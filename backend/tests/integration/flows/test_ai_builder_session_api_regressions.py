@@ -1488,12 +1488,35 @@ async def test_ai_builder_repo_list_sessions_with_draft_titles_reads_title_and_n
             actor_user_group_ids=admin_user.user_groups_ids,
             scoped_space_id=None,
         )
+        # The Flöden list asks for drafts only: a session the user never
+        # typed into is not a draft, and a session in another space is not
+        # this list's business.
+        drafts = await repo.list_sessions_with_draft_titles(
+            tenant_id=tenant_id,
+            actor_user_id=admin_user.id,
+            actor_user_group_ids=admin_user.user_groups_ids,
+            scoped_space_id=space_id,
+            target_kind=TargetKind.CREATE,
+            drafts_only=True,
+        )
+        drafts_elsewhere = await repo.list_sessions_with_draft_titles(
+            tenant_id=tenant_id,
+            actor_user_id=admin_user.id,
+            actor_user_group_ids=admin_user.user_groups_ids,
+            scoped_space_id=uuid4(),
+            drafts_only=True,
+        )
 
     assert [(session.id, title) for session, title in sessions] == [
         (empty_session_id, None),
         (planless_session_id, "Sammanfatta veckans inkomna rapporter"),
         (session_id, "Testplan"),
     ]
+    assert [(session.id, title) for session, title in drafts] == [
+        (planless_session_id, "Sammanfatta veckans inkomna rapporter"),
+        (session_id, "Testplan"),
+    ]
+    assert drafts_elsewhere == []
 
 
 @pytest.mark.integration

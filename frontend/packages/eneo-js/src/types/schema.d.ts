@@ -47891,7 +47891,15 @@ export interface operations {
   };
   list_ai_builder_sessions: {
     parameters: {
-      query?: never;
+      query?: {
+        /** @description Only sessions in this space. */
+        space_id?: string | null;
+        /** @description Only sessions creating a new Flow, or only edits. */
+        target_kind?: components["schemas"]["TargetKind"] | null;
+        /** @description Only unfinished sessions the user has started: chatting or awaiting approval, with an opening message. */
+        drafts_only?: boolean;
+        limit?: number;
+      };
       header?: never;
       path?: never;
       cookie?: never;
@@ -47934,6 +47942,15 @@ export interface operations {
            *     }
            */
           "application/json": components["schemas"]["AIBuilderPublicError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
     };

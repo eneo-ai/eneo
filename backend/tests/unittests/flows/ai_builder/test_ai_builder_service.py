@@ -846,8 +846,52 @@ class TestSessionRecovery:
             actor_user_id=user.id,
             actor_user_group_ids=user.user_groups_ids,
             scoped_space_id=None,
+            target_kind=None,
+            drafts_only=False,
+            limit=20,
         )
         repo.get_plan.assert_not_called()
+
+    @pytest.mark.anyio
+    async def test_list_sessions_passes_draft_filters_to_the_repository(self):
+        user = _make_user()
+        repo = AsyncMock()
+        repo.list_sessions_with_draft_titles.return_value = []
+        service = _make_service(user=user, repo=repo)
+        space_id = uuid4()
+
+        await service.list_sessions(
+            space_id=space_id,
+            target_kind=TargetKind.CREATE,
+            drafts_only=True,
+            limit=100,
+        )
+
+        repo.list_sessions_with_draft_titles.assert_awaited_once_with(
+            tenant_id=user.tenant_id,
+            actor_user_id=user.id,
+            actor_user_group_ids=user.user_groups_ids,
+            scoped_space_id=space_id,
+            target_kind=TargetKind.CREATE,
+            drafts_only=True,
+            limit=100,
+        )
+
+    @pytest.mark.anyio
+    async def test_list_sessions_space_filter_cannot_widen_a_space_scoped_api_key(self):
+        user = _make_user()
+        key_space_id = uuid4()
+        user.active_api_key = MagicMock(
+            permission=ApiKeyPermission.WRITE,
+            scope_type=ApiKeyScopeType.SPACE,
+            scope_id=key_space_id,
+        )
+        repo = AsyncMock()
+        repo.list_sessions_with_draft_titles.return_value = []
+        service = _make_service(user=user, repo=repo)
+
+        assert await service.list_sessions(space_id=uuid4()) == []
+        repo.list_sessions_with_draft_titles.assert_not_awaited()
 
     @pytest.mark.anyio
     async def test_list_sessions_preserves_read_only_api_key_edit_constraint(self):
@@ -895,6 +939,9 @@ class TestSessionRecovery:
             actor_user_id=user.id,
             actor_user_group_ids=user.user_groups_ids,
             scoped_space_id=scoped_space_id,
+            target_kind=None,
+            drafts_only=False,
+            limit=20,
         )
         lookup.assert_awaited_once_with(resource_id)
 
@@ -927,6 +974,9 @@ class TestSessionRecovery:
             actor_user_id=user.id,
             actor_user_group_ids=user.user_groups_ids,
             scoped_space_id=scope_id,
+            target_kind=None,
+            drafts_only=False,
+            limit=20,
         )
 
     @pytest.mark.anyio

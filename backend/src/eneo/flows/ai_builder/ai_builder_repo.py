@@ -303,8 +303,17 @@ class AIBuilderRepository:
         actor_user_id: UUID,
         actor_user_group_ids: set[UUID],
         scoped_space_id: UUID | None,
+        target_kind: TargetKind | None = None,
+        drafts_only: bool = False,
         limit: int = 20,
     ) -> list[tuple[BuilderSession, str | None]]:
+        """List the caller's sessions, newest first.
+
+        ``drafts_only`` keeps only unfinished sessions the user has actually
+        started (chatting or awaiting approval, with an opening user message),
+        so the Flöden list can show every resumable draft without a finished,
+        cancelled or never-typed-in session consuming the row budget.
+        """
         async with self._transaction():
             plan_flow_name = BuilderPlans.proposal_json["content"]["spec"][
                 _FLOW_DRAFT_SPEC_FLOW_NAME_JSON_KEY
@@ -378,6 +387,24 @@ class AIBuilderRepository:
                     (
                         BuilderSessions.space_id == scoped_space_id
                         if scoped_space_id is not None
+                        else sa.true()
+                    ),
+                    (
+                        BuilderSessions.target_kind == target_kind.value
+                        if target_kind is not None
+                        else sa.true()
+                    ),
+                    (
+                        sa.and_(
+                            BuilderSessions.status.in_(
+                                [
+                                    SessionStatus.CHATTING.value,
+                                    SessionStatus.AWAITING_APPROVAL.value,
+                                ]
+                            ),
+                            first_user_message.is_not(None),
+                        )
+                        if drafts_only
                         else sa.true()
                     ),
                 )

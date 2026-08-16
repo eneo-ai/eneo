@@ -1,11 +1,11 @@
 <script lang="ts">
   import { goto } from "$app/navigation";
   import { resolve } from "$app/paths";
+  import { page } from "$app/state";
   import { Page } from "$lib/components/layout";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
   import FlowAIBuilder from "$lib/features/flows/ai-builder/FlowAIBuilder.svelte";
   import { initAIBuilderService } from "$lib/features/flows/ai-builder/FlowAIBuilderService.svelte.ts";
-  import { consumeAIBuilderSeed } from "$lib/features/flows/ai-builder/flowAIBuilderSeed";
   import { m } from "$lib/paraglide/messages";
   import { onDestroy, untrack } from "svelte";
 
@@ -17,8 +17,8 @@
 
   const aiBuilderService = untrack(() => initAIBuilderService(data.eneo, $currentSpace.id, null));
 
-  // Task description handed over from the create dialog, if any.
-  const seedPrompt = untrack(() => consumeAIBuilderSeed($currentSpace.id));
+  // A draft chosen in the Flöden list arrives as ?session=<id>; read once at mount.
+  const resumeSessionId = untrack(() => page.url.searchParams.get("session"));
 
   onDestroy(() => {
     aiBuilderService.destroy();
@@ -44,7 +44,7 @@
     <div class="flex flex-1 flex-col overflow-hidden">
       <FlowAIBuilder
         targetKind="create"
-        initialPrompt={seedPrompt}
+        {resumeSessionId}
         onapplied={async (detail) => {
           goto(resolve(`/spaces/${$currentSpace.routeId}/flows/${detail.flow_id}`));
         }}

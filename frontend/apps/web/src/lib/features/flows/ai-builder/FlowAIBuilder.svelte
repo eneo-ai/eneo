@@ -18,10 +18,11 @@
   interface Props {
     targetKind?: "create" | "edit";
     onapplied?: (detail: { flow_id: string; focusStepIndex: number | null }) => void;
-    initialPrompt?: string | null;
+    /** A draft chosen in the Flöden list; the page opens that session instead of a new one. */
+    resumeSessionId?: string | null;
   }
 
-  let { targetKind = "edit", onapplied, initialPrompt = null }: Props = $props();
+  let { targetKind = "edit", onapplied, resumeSessionId = null }: Props = $props();
 
   const service = getAIBuilderService();
 
@@ -30,9 +31,6 @@
   // The attempted ID prevents repeat auto-resume; the failed ID owns the selected recovery target.
   let autoResumeAttemptedDraftId = $state<string | null>(null);
   let failedResumeDraftId = $state<string | null>(null);
-  // One-shot seed: only the value present at mount matters, by design.
-  // svelte-ignore state_referenced_locally
-  let pendingPrefill = $state(initialPrompt);
   let pendingSavedFlowStepScope = $state<AIBuilderSavedFlowStepScope | null>(null);
   let showReplaceEditSessionDialog = $state(false);
 
@@ -167,21 +165,12 @@
 
   onMount(() => {
     if (!service.hasSession) {
-      // A seeded prompt from the create dialog always starts a fresh session:
-      // initialize() would otherwise defer to draft recovery and the seed
-      // could silently attach to (or be ignored by) an old draft.
-      if (targetKind === "create" && pendingPrefill) {
-        void service.startFreshSession("create");
+      if (targetKind === "create" && resumeSessionId) {
+        autoResumeAttemptedDraftId = resumeSessionId;
+        void resumeDraft(resumeSessionId);
       } else {
         void service.initialize(targetKind);
       }
-    }
-  });
-
-  $effect(() => {
-    if (pendingPrefill && service.hasSession && !service.isInitializing && chatRef) {
-      chatRef.focusInput({ prefill: pendingPrefill });
-      pendingPrefill = null;
     }
   });
 
