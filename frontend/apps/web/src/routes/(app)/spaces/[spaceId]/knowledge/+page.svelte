@@ -153,7 +153,6 @@
         <Page.TabTrigger tab="integrations">{m.integrations()}</Page.TabTrigger>
       {/if}
     </Page.Tabbar>
-    <div class="flex-grow"></div>
     <Page.Flex>
       {#if $selectedTab === "collections" && $currentSpace.hasPermission("create", "collection")}
         <CollectionEditor mode="create" collection={undefined}></CollectionEditor>

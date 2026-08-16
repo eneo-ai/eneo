@@ -42,10 +42,16 @@
 
 <svelte:window on:resize={setThreshold} />
 
+<!--
+  In a tight header row this block yields width before tabs and buttons do, because
+  the heading and description truncate while a tab or a button cannot shrink without
+  hiding a target. `overflow-hidden` alone would let it collapse to nothing, hence
+  the explicit floor.
+-->
 <div
   bind:this={titleContainer}
   class:max-w-[40%]={isOverflowing}
-  class="grid translate-y-[0.02rem] flex-col overflow-hidden transition-all"
+  class="grid min-w-[10rem] shrink-[999] translate-y-[0.02rem] flex-col overflow-hidden transition-all"
 >
   <div class="overflow-hidden pl-2 text-[1.4rem]">
     <div class="flex w-full items-baseline gap-2">
