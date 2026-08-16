@@ -1451,6 +1451,11 @@
           ]
         ]
       },
+      "question_answer_overrides": {
+        "flow_input_architecture": {
+          "selected_option_id": "audio_primary_input"
+        }
+      },
       "cohorts": [
         "audio",
         "foundation",
@@ -1668,6 +1673,11 @@
             "tidsfrister"
           ]
         ]
+      },
+      "question_answer_overrides": {
+        "flow_input_architecture": {
+          "selected_option_id": "audio_primary_input"
+        }
       },
       "cohorts": [
         "audio",
@@ -2118,6 +2128,11 @@
             "risks"
           ]
         ]
+      },
+      "question_answer_overrides": {
+        "flow_input_architecture": {
+          "selected_option_id": "audio_primary_input"
+        }
       },
       "cohorts": [
         "foundation",
