@@ -366,6 +366,11 @@ def _reconcile_report_disposition_after_classifier_replay(
 _MODEL_PROTECTED_SOURCES: frozenset[SlotSource] = frozenset(
     {"structured_answer", "flow_default", "attachment_structure"}
 )
+# Most flow defaults state a structural fact of the existing flow that the user
+# has not contradicted. The purpose is different: read off the flow it describes
+# what the flow does today, so an edit asking for something else must be able to
+# replace it with cited, high-confidence evidence from the current turn.
+_FLOW_OBSERVED_SLOT_NAMES: frozenset[str] = frozenset({"post_processing_goal"})
 
 
 def carry_forward_persisted_planner_state(
@@ -1434,6 +1439,11 @@ def _model_slot_can_replace(
     """Protect authoritative sources while permitting cited model corrections."""
     if existing_slot is None:
         return model_confidence in {"high", "medium"}
+    if (
+        existing_slot.source == "flow_default"
+        and existing_slot.name in _FLOW_OBSERVED_SLOT_NAMES
+    ):
+        return model_confidence == "high"
     if existing_slot.source in _MODEL_PROTECTED_SOURCES:
         return False
     if existing_slot.source == "requirements_summary":

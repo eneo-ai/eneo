@@ -21,6 +21,7 @@ from eneo.flows.ai_builder.planning_state import (
 )
 from eneo.flows.ai_builder.planning_state_builder import (
     build_planning_state_from_conversation,
+    llm_resolvable_slot_values_for_state,
 )
 from eneo.flows.domain.flow import Flow, FlowStep
 from eneo.flows.enums import FlowAuthoringOutputMode, FlowOutputMode
@@ -678,6 +679,45 @@ def test_editing_a_transcription_only_flow_keeps_the_transcribe_only_architectur
     assert draft is not None
     assert draft.tuples_chain[0].output_mode is FlowAuthoringOutputMode.TRANSCRIBE_ONLY
     assert draft.chosen_patterns == ["audio_transcription"]
+
+
+def test_editing_a_transcription_only_flow_can_add_work_after_the_transcript() -> None:
+    flow = _audio_flow(
+        _audio_flow_step(
+            step_order=1,
+            user_description="Transkribera mötesljudet",
+            input_source="flow_input",
+            input_type="audio",
+            output_mode="transcribe_only",
+        )
+    )
+    state = build_planning_state_from_conversation(
+        [
+            ConversationMessage(
+                role="user",
+                content="Lägg till en sammanfattning efter transkriberingen.",
+            )
+        ],
+        flow=flow,
+    )
+
+    # The flow's own shape is only a fallback: it says what the flow does today,
+    # not what this edit asks for, so a cited classification must reach it.
+    assert "post_processing_goal" in llm_resolvable_slot_values_for_state(state)
+    state.resolved_slots["post_processing_goal"] = ResolvedSlot(
+        name="post_processing_goal",
+        value="summarize_or_overview",
+        source="model",
+        evidence=["quote:user_message:test:sammanfattning"],
+        confidence="high",
+        evidence_level="explicit",
+    )
+
+    draft = derive_architecture_commit_draft(state)
+
+    assert draft is not None
+    assert draft.tuples_chain[0].output_mode is FlowAuthoringOutputMode.PASS_THROUGH
+    assert draft.chosen_patterns == ["audio_to_artifact_report"]
 
 
 def test_editing_an_audio_flow_with_downstream_work_keeps_the_semantic_architecture() -> (
