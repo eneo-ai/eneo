@@ -1003,6 +1003,38 @@ FLOW_ERROR_TAXONOMY: dict[FlowApiErrorCode, FlowErrorTaxonomyEntry] = {
         consumer_action="Reload evidence and avoid editing or approving a missing result.",
         user_action="Reload the run and try again.",
     ),
+    FlowApiErrorCode.REVIEW_EDIT_NOT_ALLOWED: _entry(
+        category="Review checkpoint",
+        surfaced_through="API error response",
+        cause=(
+            "The reviewed step was opened for viewing, or produces a PDF or DOCX "
+            "artifact, so its output cannot be edited."
+        ),
+        consumer_action=(
+            "Read `review_mode` and `output_type` from the checkpoint and offer "
+            "approve or reject instead of edit."
+        ),
+        user_action="Approve or reject this step; its output cannot be edited.",
+    ),
+    FlowApiErrorCode.REVIEW_EDIT_FILE_BACKED_UNSUPPORTED: _entry(
+        category="Review checkpoint",
+        surfaced_through="API error response",
+        cause="The reviewed output exceeded inline storage and lives in a generated file.",
+        consumer_action=(
+            "Offer approve or reject; a file-backed output cannot be replaced "
+            "through the review edit endpoint."
+        ),
+        user_action="Approve or reject this step; the output is too large to edit here.",
+    ),
+    FlowApiErrorCode.REVIEW_EDIT_OUTPUT_TOO_LARGE: _entry(
+        category="Review checkpoint",
+        surfaced_through="API error response",
+        cause="The edited value renders to text larger than the inline output limit.",
+        consumer_action=(
+            "Shorten the edited value below the reported inline byte limit and retry."
+        ),
+        user_action="Shorten the edited output and try again.",
+    ),
     FlowApiErrorCode.REVIEW_CHECKPOINT_NOT_FOUND: _entry(
         category="Review checkpoint",
         surfaced_through="API error response",

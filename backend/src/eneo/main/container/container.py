@@ -1561,7 +1561,6 @@ class Container(containers.DeclarativeContainer):
         FlowRunReviewCheckpointService,
         user=user,
         flow_run_review_checkpoint_repo=flow_run_review_checkpoint_repo,
-        flow_run_repo=flow_run_repo,
         access_policy=flow_run_access_policy,
         flow_run_terminalizer=flow_run_terminalizer,
     )

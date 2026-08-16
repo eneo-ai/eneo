@@ -42,7 +42,7 @@ These are the parts of the contract that are easy to get subtly wrong. Read them
 4. **Reject requires a `reason`.** `POST .../reject/` takes `expected_checkpoint_revision` and a non-empty `reason` of 1 to 1024 characters. Sending only the revision returns `400 flow_review_reject_reason_required`.
 5. **`Idempotency-Key` is required on resume and optional everywhere else.** `POST .../review-checkpoints/{checkpoint_id}/resume/` rejects a request without it (`400 flow_review_idempotency_key_required`). `POST /runs/` accepts it and it is strongly recommended. Edit, approve, and reject do not accept it at all; they use `expected_checkpoint_revision` for concurrency instead. Both accepted keys must be 1 to 255 characters after trimming, or the request returns `400 flow_run_invalid_idempotency_key`. That bound is enforced as a typed error rather than as a JSON Schema `maxLength`, so a validator generated from the OpenAPI document will not catch it for you.
 6. **Approve does not resume.** Approving records the decision; the run stays at `awaiting_review` until you call resume.
-7. **Edit replaces the whole payload.** `current_payload_json` is a full replacement, not a JSON Patch. Start from the payload the checkpoint returned, change only `text` and, when the step's `output_type` is `json`, `structured`, and resend every other key unchanged. Rebuilding the object from scratch drops runtime-owned keys and returns `400 typed_io_validation_failed`. When the payload carries `text_overflow` the `text` is a frozen preview that must be resent exactly as received; `structured` on that same checkpoint can still be edited.
+7. **Edit sends the value, not the payload.** `edited_value` is the corrected step output itself: a string when the step's `output_type` is `text`, a JSON object or array when it is `json`. The other shape returns `400 typed_io_validation_failed`. Do not send the checkpoint's `current_payload_json` back; the server rebuilds it, deriving a JSON step's `text` from the value so the two encodings cannot disagree, and carrying every runtime-owned key over from the stored checkpoint. Only a checkpoint whose `review_mode` is `edit` accepts the request (`400 flow_review_edit_not_allowed`), and an output whose text overflowed into a generated file cannot be edited at all (`400 flow_review_edit_file_backed_unsupported`) — approve or reject it instead.
 8. **`GET .../steps/` returns a bare JSON array**, not a pagination envelope. `GET /flows/` and `GET .../runs/` do return envelopes with `items` and `has_more`.
 9. **The upload's declared type must be right, and so must its bytes.** The multipart field is named `upload_file`, and that part's own `Content-Type` must be one of the step's `accepted_mimetypes` from the run contract. The server also sniffs the content and rejects a mismatch. Either failure returns `415`, and the response lists every accepted type.
 10. **Artifact downloads are two calls.** Ask for a signed URL, then `GET` that URL **without** an authentication header; the tenant is bound into the signature.
@@ -404,13 +404,13 @@ Response:
   "revision": 1,
   "schema_version": 1,
   "original_payload_json": {
-    "text": "Hello and welcome to the annual review...",
+    "text": "{\"transcription\": \"Hello and welcome to the annual review...\"}",
     "structured": {
       "transcription": "Hello and welcome to the annual review..."
     }
   },
   "current_payload_json": {
-    "text": "Hello and welcome to the annual review...",
+    "text": "{\"transcription\": \"Hello and welcome to the annual review...\"}",
     "structured": {
       "transcription": "Hello and welcome to the annual review..."
     }
@@ -447,7 +447,7 @@ Response:
 
 ### 6. Edit review payload
 
-Submit the full corrected payload with the revision the reviewer saw.
+Submit the corrected step output value with the revision the reviewer saw. This step is `json`, so the value is the structured object; a `text` step takes a plain string.
 
 Request:
 
@@ -460,11 +460,8 @@ Body:
 ```json
 {
   "expected_checkpoint_revision": 1,
-  "current_payload_json": {
-    "text": "Corrected transcription for the annual review.",
-    "structured": {
-      "transcription": "Corrected transcription for the annual review."
-    }
+  "edited_value": {
+    "transcription": "Corrected transcription for the annual review."
   }
 }
 ```
@@ -486,13 +483,13 @@ Response:
   "revision": 2,
   "schema_version": 1,
   "original_payload_json": {
-    "text": "Hello and welcome to the annual review...",
+    "text": "{\"transcription\": \"Hello and welcome to the annual review...\"}",
     "structured": {
       "transcription": "Hello and welcome to the annual review..."
     }
   },
   "current_payload_json": {
-    "text": "Corrected transcription for the annual review.",
+    "text": "{\"transcription\": \"Corrected transcription for the annual review.\"}",
     "structured": {
       "transcription": "Corrected transcription for the annual review."
     }
@@ -562,13 +559,13 @@ Response:
   "revision": 3,
   "schema_version": 1,
   "original_payload_json": {
-    "text": "Hello and welcome to the annual review...",
+    "text": "{\"transcription\": \"Hello and welcome to the annual review...\"}",
     "structured": {
       "transcription": "Hello and welcome to the annual review..."
     }
   },
   "current_payload_json": {
-    "text": "Corrected transcription for the annual review.",
+    "text": "{\"transcription\": \"Corrected transcription for the annual review.\"}",
     "structured": {
       "transcription": "Corrected transcription for the annual review."
     }
@@ -645,13 +642,13 @@ Response:
     "revision": 4,
     "schema_version": 1,
     "original_payload_json": {
-      "text": "Hello and welcome to the annual review...",
+      "text": "{\"transcription\": \"Hello and welcome to the annual review...\"}",
       "structured": {
         "transcription": "Hello and welcome to the annual review..."
       }
     },
     "current_payload_json": {
-      "text": "Corrected transcription for the annual review.",
+      "text": "{\"transcription\": \"Corrected transcription for the annual review.\"}",
       "structured": {
         "transcription": "Corrected transcription for the annual review."
       }
@@ -988,9 +985,9 @@ Runs pause only at review-marked steps and resume through review checkpoint endp
 2. Poll `runtime_paths.get_run_template`; when status is `awaiting_review`, show the review UI.
 3. Call `review_checkpoints.active_template` to get the open checkpoint and revision.
 4. Read checkpoint `schema_version`; treat an unsupported version as non-editable and refresh or upgrade the client.
-5. For edit review, send the full payload with canonical string `text`; keep it within the ordinary inline UTF-8 limit and validate `structured` against `output_contract`.
-6. Preserve runtime-owned payload keys unchanged. Never create or change `text_overflow`; an existing value is accepted only while its generated-output file belongs to the same run, step, and attempt.
-7. Offer edit review only for editable text or structured outputs. PDF and DOCX artifact steps support view review, not edit review.
+5. For edit review, send `edited_value`: the corrected step output itself, a string for a `text` output step or a JSON object or array for a `json` one, satisfying `output_contract` and staying within the inline UTF-8 limit.
+6. Send nothing else. Runtime-owned payload keys carry over from the stored checkpoint, and the server derives a JSON step's `text` from the edited value so the two encodings cannot disagree.
+7. Offer edit review only when `review_mode` is `edit`, and expect `flow_review_edit_file_backed_unsupported` for an output already stored as a generated file. PDF and DOCX artifact steps support view review, not edit review.
 8. Call `edit_template`, `approve_template`, or `reject_template`; the response returns the updated checkpoint.
 9. Call `resume_template` after approval so the worker continues the run.
 
@@ -1214,22 +1211,22 @@ if [ "$CP" = "null" ]; then
 fi
 CP_ID=$(jq -r .id <<<"$CP"); REV=$(jq -r .revision <<<"$CP")
 
-# 6. Correct the transcript. The edit is a full replacement, so start from the
-#    payload the checkpoint returned and change only text. Every other key is
-#    runtime-owned and must come back unchanged.
-#    When the payload carries text_overflow the text lives in a result file and
-#    the payload holds a frozen preview, so text cannot be changed. Only
-#    structured is still editable on such a checkpoint.
+# 6. Correct the transcript. The edit sends the step's value, not the payload:
+#    the server rebuilds the payload around it and keeps the runtime-owned keys.
+#    This step is json, so the value is the structured object; a text step would
+#    take a plain string instead.
+#    An output whose text overflowed into a generated file cannot be edited at
+#    all — approve or reject it instead.
 if jq -e '.current_payload_json | has("text_overflow")' <<<"$CP" >/dev/null; then
-  echo "overflow-backed transcript: text is frozen, edit structured instead"
+  echo "overflow-backed transcript: not editable, approve or reject it instead"
   exit 0
 fi
 BODY=$(jq -n \
   --argjson revision "$REV" \
-  --argjson payload "$(jq -c .current_payload_json <<<"$CP")" \
+  --argjson structured "$(jq -c .current_payload_json.structured <<<"$CP")" \
   --arg text "Corrected transcript." \
   '{expected_checkpoint_revision: $revision,
-    current_payload_json: ($payload + {text: $text})}')
+    edited_value: ($structured + {transcription: $text})}')
 REV=$(curl -s -X PATCH -H "X-API-Key: $KEY" -H "Content-Type: application/json" \
   -d "$BODY" \
   "$API/flows/$FLOW/runs/$RUN_ID/review-checkpoints/$CP_ID/" | jq -r .revision)
@@ -1319,14 +1316,15 @@ export interface FlowRun {
 }
 
 /**
- * Only `text` and `structured` may be edited. Every other key is runtime-owned
- * and must be sent back unchanged, which is why the index signature is here:
- * the payload is not a closed shape a client may rebuild from scratch.
+ * The persisted step output as the server reports it. This envelope is
+ * response-only: an edit submits `edited_value` alone and the server rebuilds
+ * this object around it, so a client never sends it back. The index signature
+ * is here because the runtime owns keys a client is not meant to enumerate.
  */
 export interface ReviewPayload {
   text: string;
   structured?: unknown;
-  /** Present when the text was too large to inline. Its presence freezes `text`. */
+  /** Present when the output was too large to inline; the output is then not editable at all. */
   text_overflow?: unknown;
   [runtimeOwned: string]: unknown;
 }
@@ -1445,23 +1443,24 @@ export class EneoFlows {
   }
 
   /**
-   * The edit is a full replacement, so it takes the checkpoint the server
-   * returned and merges the reviewer's changes onto its payload. Rebuilding the
-   * payload from scratch drops runtime-owned keys and fails validation with
-   * `typed_io_validation_failed`.
+   * The edit sends the step's own value, not the payload the checkpoint
+   * returned: a string for a `text` step, a JSON object or array for a `json`
+   * one. The server rebuilds the payload around it, so runtime-owned keys are
+   * never the client's to resend.
    */
   editCheckpoint(
     flowId: string,
     runId: string,
     checkpoint: ReviewCheckpoint,
-    changes: { text?: string; structured?: unknown },
+    editedValue: string | Record<string, unknown> | unknown[],
   ): Promise<ReviewCheckpoint> {
-    const current = checkpoint.current_payload_json;
-    const changesText = changes.text !== undefined && changes.text !== current.text;
-    if (changesText && current.text_overflow !== undefined) {
-      // The text lives in a result file and the payload only carries a frozen
-      // preview of it. `structured` on the same checkpoint is still editable.
-      throw new Error("overflow-backed text cannot be changed; edit structured instead");
+    if (checkpoint.review_mode !== "edit") {
+      // The flow author opened this step for viewing; approve or reject it.
+      throw new Error("checkpoint is view-only: flow_review_edit_not_allowed");
+    }
+    if (checkpoint.current_payload_json.text_overflow !== undefined) {
+      // The output lives in a generated file this endpoint cannot replace.
+      throw new Error("file-backed output: flow_review_edit_file_backed_unsupported");
     }
     return this.call(
       "PATCH",
@@ -1469,7 +1468,7 @@ export class EneoFlows {
       {
         body: {
           expected_checkpoint_revision: checkpoint.revision,
-          current_payload_json: { ...current, ...changes },
+          edited_value: editedValue,
         },
       },
     );

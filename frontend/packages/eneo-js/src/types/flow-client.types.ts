@@ -62,13 +62,17 @@ async function compilePublishedFlowWebAppJourney(runtimeFile: File) {
 
   if (status?.is_awaiting_review) {
     const checkpoint = await flows.runs.reviewCheckpoints.active({ flowId, runId: run.id });
-    if (checkpoint) {
+    // Only a checkpoint the flow author opened for editing accepts a new value.
+    if (checkpoint && checkpoint.review_mode === "edit") {
       const edited = await flows.runs.reviewCheckpoints.edit({
         flowId,
         runId: run.id,
         checkpointId: checkpoint.id,
         expectedCheckpointRevision: checkpoint.revision,
-        currentPayloadJson: checkpoint.current_payload_json ?? {}
+        editedValue:
+          checkpoint.output_type === "json"
+            ? ((checkpoint.current_payload_json?.structured as Record<string, unknown>) ?? {})
+            : ((checkpoint.current_payload_json?.text as string) ?? "")
       });
       const approved = await flows.runs.reviewCheckpoints.approve({
         flowId,

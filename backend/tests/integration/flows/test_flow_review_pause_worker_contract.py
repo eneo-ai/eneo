@@ -58,7 +58,7 @@ from eneo.flows.runtime.flow_run_actor import FlowRunActor
 from eneo.flows.runtime.tasks import enable_autobegin_for_flow_task_session
 from eneo.main.config import get_settings
 from eneo.main.container.container import Container
-from eneo.main.exceptions import TypedIOValidationException
+from eneo.main.exceptions import BadRequestException, TypedIOValidationException
 
 pytestmark = pytest.mark.usefixtures("object_content_runtime_ready")
 
@@ -114,6 +114,7 @@ def _build_review_pause_flow(
     include_downstream_steps: bool = True,
     first_step_output_type: str = "text",
     first_step_output_contract: dict[str, object] | None = None,
+    first_step_review_mode: FlowStepReviewMode = FlowStepReviewMode.VIEW,
 ) -> Flow:
     steps = [
         FlowStep(
@@ -133,7 +134,7 @@ def _build_review_pause_flow(
             output_classification_override=None,
             input_config=None,
             output_config=None,
-            review_policy=FlowStepReviewPolicy(mode=FlowStepReviewMode.VIEW),
+            review_policy=FlowStepReviewPolicy(mode=first_step_review_mode),
         )
     ]
     if include_downstream_steps:
@@ -232,6 +233,7 @@ async def _create_review_pause_runtime_context(
     include_downstream_steps: bool = True,
     first_step_output_type: str = "text",
     first_step_output_contract: dict[str, object] | None = None,
+    first_step_review_mode: FlowStepReviewMode = FlowStepReviewMode.VIEW,
 ) -> _ReviewPauseRuntimeContext:
     enable_autobegin_for_flow_task_session(session)
     setup_container = Container(
@@ -258,6 +260,7 @@ async def _create_review_pause_runtime_context(
             include_downstream_steps=include_downstream_steps,
             first_step_output_type=first_step_output_type,
             first_step_output_contract=first_step_output_contract,
+            first_step_review_mode=first_step_review_mode,
         ),
         tenant_id=admin_user.tenant_id,
     )
@@ -918,15 +921,9 @@ async def test_review_checkpoint_edit_validates_output_contract_before_persistin
         "text": '{"summary":"This answer needs review."}',
         "structured": {"summary": "This answer needs review."},
     }
-    invalid_payload: FlowPersistedJsonObject = {
-        "text": '{"wrong":"shape"}',
-        "structured": {"wrong": "shape"},
-    }
-    missing_structured_payload: FlowPersistedJsonObject = {
-        "text": '{"summary":"Missing structured slot."}',
-    }
-    valid_payload: FlowPersistedJsonObject = {
-        "text": '{"summary":"Edited answer."}',
+    edited_value: FlowPersistedJsonObject = {"summary": "Edited answer."}
+    expected_edited_payload: FlowPersistedJsonObject = {
+        "text": '{"summary": "Edited answer."}',
         "structured": {"summary": "Edited answer."},
     }
     completion_service = SimpleNamespace(
@@ -950,6 +947,7 @@ async def test_review_checkpoint_edit_validates_output_contract_before_persistin
             include_downstream_steps=False,
             first_step_output_type="json",
             first_step_output_contract=output_contract,
+            first_step_review_mode=FlowStepReviewMode.EDIT,
         )
         await context.executor.execute(
             run_id=context.run_id,
@@ -982,45 +980,28 @@ async def test_review_checkpoint_edit_validates_output_contract_before_persistin
                 run_id=context.run_id,
                 checkpoint_id=checkpoint.id,
                 expected_checkpoint_revision=checkpoint.revision,
-                current_payload_json=invalid_payload,
+                edited_value={"wrong": "shape"},
             )
 
-        with pytest.raises(TypedIOValidationException) as missing_structured_exc:
+        with pytest.raises(TypedIOValidationException) as wrong_kind_exc:
             await review_service.edit_review_checkpoint(
                 flow_id=context.flow_id,
                 run_id=context.run_id,
                 checkpoint_id=checkpoint.id,
                 expected_checkpoint_revision=checkpoint.revision,
-                current_payload_json=missing_structured_payload,
+                edited_value='{"summary": "A JSON step does not take a string."}',
             )
 
-        rejected_payloads: list[FlowPersistedJsonObject] = [
-            {},
-            {"structured": {"summary": "Missing canonical text."}},
-            {"text": "x" * (get_settings().flow_max_inline_text_bytes + 1)},
-            {**original_payload, "template_provenance": {"forged": True}},
-            {
-                **original_payload,
-                "text_overflow": {
-                    "schema_version": 1,
-                    "storage": "result_file",
-                    "generated_file_ids": [str(uuid4())],
-                    "preview_utf8_bytes": 1,
-                    "full_utf8_bytes": 2,
+        with pytest.raises(BadRequestException) as too_large_exc:
+            await review_service.edit_review_checkpoint(
+                flow_id=context.flow_id,
+                run_id=context.run_id,
+                checkpoint_id=checkpoint.id,
+                expected_checkpoint_revision=checkpoint.revision,
+                edited_value={
+                    "summary": "x" * (get_settings().flow_max_inline_text_bytes + 1)
                 },
-            },
-        ]
-        rejected_exceptions: list[TypedIOValidationException] = []
-        for rejected_payload in rejected_payloads:
-            with pytest.raises(TypedIOValidationException) as rejected_exc:
-                await review_service.edit_review_checkpoint(
-                    flow_id=context.flow_id,
-                    run_id=context.run_id,
-                    checkpoint_id=checkpoint.id,
-                    expected_checkpoint_revision=checkpoint.revision,
-                    current_payload_json=rejected_payload,
-                )
-            rejected_exceptions.append(rejected_exc.value)
+            )
 
         await session.execute(
             sa.update(FlowRunReviewCheckpoints)
@@ -1033,7 +1014,7 @@ async def test_review_checkpoint_edit_validates_output_contract_before_persistin
                 run_id=context.run_id,
                 checkpoint_id=checkpoint.id,
                 expected_checkpoint_revision=checkpoint.revision,
-                current_payload_json=valid_payload,
+                edited_value=edited_value,
             )
         await session.execute(
             sa.update(FlowRunReviewCheckpoints)
@@ -1084,7 +1065,7 @@ async def test_review_checkpoint_edit_validates_output_contract_before_persistin
             run_id=context.run_id,
             checkpoint_id=checkpoint.id,
             expected_checkpoint_revision=checkpoint.revision,
-            current_payload_json=valid_payload,
+            edited_value=edited_value,
         )
         step_result_after_valid = await session.scalar(
             sa.select(FlowStepResults).where(
@@ -1112,17 +1093,14 @@ async def test_review_checkpoint_edit_validates_output_contract_before_persistin
         "step_order": 1,
         "payload_field": "structured",
     }
-    assert missing_structured_exc.value.code == "typed_io_contract_violation"
-    assert "field `structured` is required" in str(missing_structured_exc.value)
-    assert missing_structured_exc.value.context == exc_info.value.context
-    assert [exc.code for exc in rejected_exceptions] == [
-        "typed_io_validation_failed"
-    ] * len(rejected_payloads)
+    assert wrong_kind_exc.value.code == "typed_io_validation_failed"
+    assert "expects a JSON object or array" in str(wrong_kind_exc.value)
+    assert too_large_exc.value.code == "flow_review_edit_output_too_large"
     assert schema_version_exc.value.code == "typed_io_validation_failed"
     assert edited.revision == checkpoint.revision + 1
-    assert edited.current_payload_json == valid_payload
+    assert edited.current_payload_json == expected_edited_payload
     assert step_result_after_valid is not None
-    assert step_result_after_valid.output_payload_json == valid_payload
+    assert step_result_after_valid.output_payload_json == expected_edited_payload
     assert outbox_actions_after_valid == [
         "flow_run_review_checkpoint_opened",
         "flow_run_review_checkpoint_edited",
@@ -1157,9 +1135,8 @@ async def test_edit_approve_resume_uses_edited_payload_for_downstream_steps(
             ]
         )
     )
-    edited_payload = {
-        "text": "Edited answer for resume.",
-    }
+    edited_value = "Edited answer for resume."
+    edited_payload = {"text": edited_value}
 
     async with sessionmanager.session() as session:
         context = await _create_review_pause_runtime_context(
@@ -1170,6 +1147,7 @@ async def test_edit_approve_resume_uses_edited_payload_for_downstream_steps(
             space_factory=space_factory,
             assistant_factory=assistant_factory,
             completion_service=completion_service,
+            first_step_review_mode=FlowStepReviewMode.EDIT,
         )
 
         pause_result = await context.executor.execute(
@@ -1191,7 +1169,7 @@ async def test_edit_approve_resume_uses_edited_payload_for_downstream_steps(
             run_id=context.run_id,
             checkpoint_id=checkpoint.id,
             expected_checkpoint_revision=checkpoint.revision,
-            current_payload_json=edited_payload,
+            edited_value=edited_value,
         )
         approved = await review_service.approve_review_checkpoint(
             flow_id=context.flow_id,
@@ -1332,9 +1310,8 @@ async def test_resume_last_step_review_terminalizes_completed_run(
             )
         )
     )
-    edited_payload = {
-        "text": "Approved final answer.",
-    }
+    edited_value = "Approved final answer."
+    edited_payload = {"text": edited_value}
 
     async with sessionmanager.session() as session:
         context = await _create_review_pause_runtime_context(
@@ -1346,6 +1323,7 @@ async def test_resume_last_step_review_terminalizes_completed_run(
             assistant_factory=assistant_factory,
             completion_service=completion_service,
             include_downstream_steps=False,
+            first_step_review_mode=FlowStepReviewMode.EDIT,
         )
 
         pause_result = await context.executor.execute(
@@ -1367,7 +1345,7 @@ async def test_resume_last_step_review_terminalizes_completed_run(
             run_id=context.run_id,
             checkpoint_id=checkpoint.id,
             expected_checkpoint_revision=checkpoint.revision,
-            current_payload_json=edited_payload,
+            edited_value=edited_value,
         )
         approved = await review_service.approve_review_checkpoint(
             flow_id=context.flow_id,

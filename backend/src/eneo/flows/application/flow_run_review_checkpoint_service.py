@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+import json
 from datetime import datetime, timezone
-from typing import Awaitable, TypeVar, assert_never
+from typing import Awaitable, TypeAlias, TypeVar, assert_never
 from uuid import UUID
 
 from eneo.flows.application.flow_run_access_policy import FlowRunAccessPolicy
@@ -32,20 +33,23 @@ from eneo.flows.domain.review_checkpoint_exceptions import (
     FlowReviewRunNotAwaitingReviewError,
 )
 from eneo.flows.domain.step_output import (
-    InlineStepText,
+    FileBackedStepText,
     StepOutputMetadataError,
     interpret_step_text,
 )
-from eneo.flows.enums import FlowRunLifecycleSource
+from eneo.flows.enums import FlowOutputType, FlowRunLifecycleSource
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_api_exceptions import FlowBadRequestException
+from eneo.flows.flow_review_policy import FlowStepReviewMode
 from eneo.flows.flow_run_error import FlowRunError
-from eneo.flows.infrastructure.flow_run_repo import FlowRunRepository
 from eneo.flows.infrastructure.flow_run_review_checkpoint_repo import (
     FlowRunReviewCheckpointRepository,
     FlowRunReviewCheckpointResumeResult,
 )
-from eneo.flows.output_processing import validate_against_contract
+from eneo.flows.output_processing import (
+    StructuredOutputValue,
+    validate_against_contract,
+)
 from eneo.flows.principal import FlowPrincipal
 from eneo.main.config import get_settings
 from eneo.main.exceptions import (
@@ -58,7 +62,13 @@ _ReviewOperationResult = TypeVar("_ReviewOperationResult")
 _REVIEW_REJECT_REASON_MAX_LENGTH = 1024
 _REVIEW_RESUME_IDEMPOTENCY_KEY_MAX_LENGTH = 255
 _REVIEW_CHECKPOINT_SCHEMA_VERSION = 1
-_REVIEW_EDITABLE_PAYLOAD_KEYS = frozenset({"text", "structured"})
+# The reviewer edits the step's value; both persisted encodings of that value are
+# rebuilt from it, so neither is accepted from the client.
+_REVIEW_DERIVED_PAYLOAD_KEYS = frozenset({"text", "structured"})
+
+# The authoritative value a reviewer submits: the text of a text step, or the
+# structured value of a JSON step.
+FlowReviewEditedValue: TypeAlias = str | StructuredOutputValue
 
 
 def review_open_terminal_invariant_error(
@@ -175,19 +185,214 @@ def _review_lifecycle_failure_to_api_exception(
             assert_never(exc)
 
 
+def _review_edit_not_allowed(
+    *, message: str, context: dict[str, object]
+) -> FlowBadRequestException:
+    return FlowBadRequestException(
+        message,
+        code=FlowApiErrorCode.REVIEW_EDIT_NOT_ALLOWED,
+        context=context,
+    )
+
+
+def _review_edit_value_kind_error(
+    *, checkpoint: FlowRunReviewCheckpoint, expected: str
+) -> TypedIOValidationException:
+    return TypedIOValidationException(
+        f"Review checkpoint step {checkpoint.step_order} edit expects {expected} "
+        f"for a {checkpoint.output_type.value} output step.",
+        code=FlowApiErrorCode.TYPED_IO_VALIDATION_FAILED,
+        context={
+            "checkpoint_id": str(checkpoint.id),
+            "step_id": str(checkpoint.step_id),
+            "step_order": checkpoint.step_order,
+            "output_type": checkpoint.output_type.value,
+        },
+    )
+
+
+def _structured_value(
+    *, checkpoint: FlowRunReviewCheckpoint, edited_value: FlowReviewEditedValue
+) -> StructuredOutputValue:
+    if isinstance(edited_value, str):
+        raise _review_edit_value_kind_error(
+            checkpoint=checkpoint, expected="a JSON object or array"
+        )
+    return edited_value
+
+
+def _text_value(
+    *, checkpoint: FlowRunReviewCheckpoint, edited_value: FlowReviewEditedValue
+) -> str:
+    if not isinstance(edited_value, str):
+        raise _review_edit_value_kind_error(checkpoint=checkpoint, expected="a string")
+    return edited_value
+
+
+def _rendered_json_text(
+    *, checkpoint: FlowRunReviewCheckpoint, structured: StructuredOutputValue
+) -> str:
+    # `allow_nan` would emit NaN and Infinity, which no JSON reader downstream
+    # of this payload is obliged to accept.
+    try:
+        return json.dumps(structured, ensure_ascii=False, allow_nan=False)
+    except ValueError as exc:
+        raise TypedIOValidationException(
+            f"Review checkpoint step {checkpoint.step_order} edit is not "
+            f"representable as JSON: {exc}",
+            code=FlowApiErrorCode.TYPED_IO_VALIDATION_FAILED,
+            context={
+                "checkpoint_id": str(checkpoint.id),
+                "step_id": str(checkpoint.step_id),
+                "step_order": checkpoint.step_order,
+                "output_type": checkpoint.output_type.value,
+            },
+        ) from exc
+
+
+def _validate_against_output_contract(
+    *, checkpoint: FlowRunReviewCheckpoint, structured: StructuredOutputValue
+) -> None:
+    if checkpoint.output_contract_json is None:
+        return
+    context: dict[str, object] = {
+        "checkpoint_id": str(checkpoint.id),
+        "step_id": str(checkpoint.step_id),
+        "step_order": checkpoint.step_order,
+        "payload_field": "structured",
+    }
+    try:
+        validate_against_contract(
+            structured,
+            checkpoint.output_contract_json,
+            label=f"Review checkpoint step {checkpoint.step_order} output",
+        )
+    except TypedIOValidationException as exc:
+        exc.context = context
+        raise
+
+
+def build_edited_review_payload(
+    *,
+    checkpoint: FlowRunReviewCheckpoint,
+    edited_value: FlowReviewEditedValue,
+) -> FlowPersistedJsonObject:
+    """Rebuild the reviewed step's payload from the one value the reviewer owns.
+
+    Both persisted encodings of a JSON step output — the structured value and its
+    text rendering — are derived here, so an edit cannot leave them disagreeing.
+    """
+    if checkpoint.schema_version != _REVIEW_CHECKPOINT_SCHEMA_VERSION:
+        raise TypedIOValidationException(
+            "Review checkpoint schema_version is unsupported.",
+            code=FlowApiErrorCode.TYPED_IO_VALIDATION_FAILED,
+            context={
+                "schema_version": checkpoint.schema_version,
+                "supported_schema_version": _REVIEW_CHECKPOINT_SCHEMA_VERSION,
+            },
+        )
+    if checkpoint.review_mode is not FlowStepReviewMode.EDIT:
+        raise _review_edit_not_allowed(
+            message="Review checkpoint was opened for viewing, not editing.",
+            context={"review_mode": checkpoint.review_mode.value},
+        )
+    previous_payload = checkpoint.current_payload_json
+    if previous_payload is None:
+        raise TypedIOValidationException(
+            "Review checkpoint current payload is missing.",
+            code=FlowApiErrorCode.TYPED_IO_VALIDATION_FAILED,
+        )
+    try:
+        previous_text = interpret_step_text(previous_payload)
+    except StepOutputMetadataError as exc:
+        raise TypedIOValidationException(
+            f"Review checkpoint payload is invalid: {exc}",
+            code=FlowApiErrorCode.TYPED_IO_VALIDATION_FAILED,
+        ) from exc
+    if isinstance(previous_text, FileBackedStepText):
+        # The full output lives in a generated file this path cannot replace, so
+        # an edit here would leave the file describing a superseded output.
+        raise FlowBadRequestException(
+            "Review edit is not supported for a step output stored as a generated file.",
+            code=FlowApiErrorCode.REVIEW_EDIT_FILE_BACKED_UNSUPPORTED,
+            context={"file_id": str(previous_text.file_id)},
+        )
+
+    structured: StructuredOutputValue | None = None
+    match checkpoint.output_type:
+        case FlowOutputType.TEXT:
+            text = _text_value(checkpoint=checkpoint, edited_value=edited_value)
+        case FlowOutputType.JSON:
+            structured = _structured_value(
+                checkpoint=checkpoint, edited_value=edited_value
+            )
+            text = _rendered_json_text(checkpoint=checkpoint, structured=structured)
+        case FlowOutputType.PDF | FlowOutputType.DOCX:
+            raise _review_edit_not_allowed(
+                message=(
+                    "Review edit is not supported for artifact-producing "
+                    "PDF or DOCX steps."
+                ),
+                context={"output_type": checkpoint.output_type.value},
+            )
+        case _:
+            assert_never(checkpoint.output_type)
+
+    # Size is settled before schema validation so an oversized value cannot buy
+    # unbounded validation work.
+    max_inline_text_bytes = get_settings().flow_max_inline_text_bytes
+    try:
+        text_bytes = len(text.encode("utf-8"))
+    except UnicodeEncodeError as exc:
+        # A JSON request can carry an escaped lone surrogate, which is a valid
+        # Python string and not encodable text.
+        raise TypedIOValidationException(
+            f"Review checkpoint step {checkpoint.step_order} edit contains text "
+            "that is not valid UTF-8.",
+            code=FlowApiErrorCode.TYPED_IO_VALIDATION_FAILED,
+            context={
+                "checkpoint_id": str(checkpoint.id),
+                "step_id": str(checkpoint.step_id),
+                "step_order": checkpoint.step_order,
+                "output_type": checkpoint.output_type.value,
+            },
+        ) from exc
+    if text_bytes > max_inline_text_bytes:
+        raise FlowBadRequestException(
+            "Review checkpoint output exceeds the inline output size limit.",
+            code=FlowApiErrorCode.REVIEW_EDIT_OUTPUT_TOO_LARGE,
+            context={
+                "max_inline_text_bytes": max_inline_text_bytes,
+                "text_bytes": text_bytes,
+            },
+        )
+    if structured is not None:
+        _validate_against_output_contract(checkpoint=checkpoint, structured=structured)
+
+    payload: FlowPersistedJsonObject = {"text": text}
+    if structured is not None:
+        payload["structured"] = structured
+    payload.update(
+        {
+            key: value
+            for key, value in previous_payload.items()
+            if key not in _REVIEW_DERIVED_PAYLOAD_KEYS
+        }
+    )
+    return payload
+
+
 class FlowRunReviewCheckpointService:
     def __init__(
         self,
         *,
         user: UserInDB,
         flow_run_review_checkpoint_repo: FlowRunReviewCheckpointRepository,
-        flow_run_repo: FlowRunRepository,
         access_policy: FlowRunAccessPolicy,
         flow_run_terminalizer: FlowRunTerminalizer,
     ):
         self.user = user
         self.flow_run_review_checkpoint_repo = flow_run_review_checkpoint_repo
-        self.flow_run_repo = flow_run_repo
         self.access_policy = access_policy
         self.flow_run_terminalizer = flow_run_terminalizer
 
@@ -228,7 +433,7 @@ class FlowRunReviewCheckpointService:
         run_id: UUID,
         checkpoint_id: UUID,
         expected_checkpoint_revision: int,
-        current_payload_json: FlowPersistedJsonObject,
+        edited_value: FlowReviewEditedValue,
     ) -> FlowRunReviewCheckpoint:
         principal = self._principal()
         run = await self.access_policy.load_run(
@@ -245,10 +450,9 @@ class FlowRunReviewCheckpointService:
                 expected_revision=expected_checkpoint_revision,
             )
         )
-        await self._validate_review_checkpoint_edit_payload(
+        current_payload_json = build_edited_review_payload(
             checkpoint=checkpoint,
-            run_id=run.id,
-            current_payload_json=current_payload_json,
+            edited_value=edited_value,
         )
         return await self._with_review_lifecycle_translation(
             self.flow_run_review_checkpoint_repo.edit_review_checkpoint_payload(
@@ -261,109 +465,6 @@ class FlowRunReviewCheckpointService:
                 principal=principal,
             )
         )
-
-    async def _validate_review_checkpoint_edit_payload(
-        self,
-        *,
-        checkpoint: FlowRunReviewCheckpoint,
-        run_id: UUID,
-        current_payload_json: FlowPersistedJsonObject,
-    ) -> None:
-        if checkpoint.schema_version != _REVIEW_CHECKPOINT_SCHEMA_VERSION:
-            raise TypedIOValidationException(
-                "Review checkpoint schema_version is unsupported.",
-                code=FlowApiErrorCode.TYPED_IO_VALIDATION_FAILED,
-                context={
-                    "schema_version": checkpoint.schema_version,
-                    "supported_schema_version": _REVIEW_CHECKPOINT_SCHEMA_VERSION,
-                },
-            )
-
-        try:
-            step_text = interpret_step_text(current_payload_json)
-        except StepOutputMetadataError as exc:
-            raise TypedIOValidationException(
-                f"Review checkpoint payload is invalid: {exc}",
-                code=FlowApiErrorCode.TYPED_IO_VALIDATION_FAILED,
-            ) from exc
-
-        previous_payload = checkpoint.current_payload_json
-        if previous_payload is None:
-            raise TypedIOValidationException(
-                "Review checkpoint current payload is missing.",
-                code=FlowApiErrorCode.TYPED_IO_VALIDATION_FAILED,
-            )
-        runtime_owned_keys = set(previous_payload) - _REVIEW_EDITABLE_PAYLOAD_KEYS
-        if any(
-            key not in current_payload_json
-            or current_payload_json[key] != previous_payload[key]
-            for key in runtime_owned_keys
-        ) or any(
-            key not in previous_payload and key not in _REVIEW_EDITABLE_PAYLOAD_KEYS
-            for key in current_payload_json
-        ):
-            raise TypedIOValidationException(
-                "Review checkpoint runtime-owned payload fields must be preserved unchanged.",
-                code=FlowApiErrorCode.TYPED_IO_VALIDATION_FAILED,
-            )
-
-        if isinstance(step_text, InlineStepText):
-            max_inline_text_bytes = get_settings().flow_max_inline_text_bytes
-            if len(step_text.text.encode("utf-8")) > max_inline_text_bytes:
-                raise TypedIOValidationException(
-                    "Review checkpoint text exceeds the inline output size limit.",
-                    code=FlowApiErrorCode.TYPED_IO_VALIDATION_FAILED,
-                    context={"max_inline_text_bytes": max_inline_text_bytes},
-                )
-        else:
-            if previous_payload.get("text") != current_payload_json.get("text"):
-                raise TypedIOValidationException(
-                    "Review checkpoint overflow-backed text preview cannot be changed.",
-                    code=FlowApiErrorCode.TYPED_IO_VALIDATION_FAILED,
-                )
-            result_file = await self.flow_run_repo.get_result_file(
-                run_id=run_id,
-                tenant_id=self.user.tenant_id,
-                file_id=step_text.file_id,
-            )
-            if result_file is None or (
-                result_file.flow_run_id != run_id
-                or result_file.flow_id != checkpoint.flow_id
-                or result_file.tenant_id != self.user.tenant_id
-                or result_file.step_id != checkpoint.step_id
-                or result_file.attempt_no != checkpoint.attempt_no
-                or result_file.file_id != step_text.file_id
-                or result_file.source != "generated_output"
-            ):
-                raise TypedIOValidationException(
-                    "Review checkpoint text_overflow reference is missing or has invalid ownership.",
-                    code=FlowApiErrorCode.TYPED_IO_VALIDATION_FAILED,
-                )
-
-        if checkpoint.output_contract_json is None:
-            return
-        context: dict[str, object] = {
-            "checkpoint_id": str(checkpoint.id),
-            "step_id": str(checkpoint.step_id),
-            "step_order": checkpoint.step_order,
-            "payload_field": "structured",
-        }
-        if "structured" not in current_payload_json:
-            raise TypedIOValidationException(
-                f"Review checkpoint step {checkpoint.step_order} output: "
-                "field `structured` is required for contract validation.",
-                code=FlowApiErrorCode.TYPED_IO_CONTRACT_VIOLATION,
-                context=context,
-            )
-        try:
-            validate_against_contract(
-                current_payload_json["structured"],
-                checkpoint.output_contract_json,
-                label=f"Review checkpoint step {checkpoint.step_order} output",
-            )
-        except TypedIOValidationException as exc:
-            exc.context = context
-            raise
 
     async def approve_review_checkpoint(
         self,

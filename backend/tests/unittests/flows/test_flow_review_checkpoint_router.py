@@ -150,7 +150,7 @@ async def test_edit_review_checkpoint_builds_response_inside_transaction(monkeyp
         request=SimpleNamespace(state=SimpleNamespace()),
         review_in=FlowRunReviewCheckpointEditRequest(
             expected_checkpoint_revision=ctx.checkpoint.revision,
-            current_payload_json={"text": "reviewed"},
+            edited_value="reviewed",
         ),
         container=container,
     )
@@ -167,7 +167,7 @@ async def test_edit_review_checkpoint_builds_response_inside_transaction(monkeyp
         run_id=ctx.run.id,
         checkpoint_id=ctx.checkpoint.id,
         expected_checkpoint_revision=ctx.checkpoint.revision,
-        current_payload_json={"text": "reviewed"},
+        edited_value="reviewed",
     )
 
 

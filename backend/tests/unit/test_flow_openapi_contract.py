@@ -1787,7 +1787,7 @@ def test_openapi_runtime_paths_expose_review_checkpoint_templates(
     assert "{checkpoint_id}" in review_properties["approve_template"]["description"]
     assert "{checkpoint_id}" in review_properties["reject_template"]["description"]
     assert "{checkpoint_id}" in review_properties["resume_template"]["description"]
-    assert "current_payload_json" in review_properties["edit_template"]["description"]
+    assert "`edited_value`" in review_properties["edit_template"]["description"]
     assert (
         "expected_checkpoint_revision"
         in review_properties["approve_template"]["description"]
@@ -1967,7 +1967,10 @@ def test_openapi_review_checkpoint_endpoint_docs_guide_human_in_loop_clients(
     assert "flow_review_expired" in active_description
     assert "background reconciler" in active_description
     assert "approval happens before `expires_at`" in active_description
-    assert "full corrected `current_payload_json`, not a patch" in edit_description
+    assert (
+        "the corrected step output itself, not the payload envelope" in edit_description
+    )
+    assert "flow_review_edit_not_allowed" in edit_description
     assert "typed_io_contract_violation" in edit_description
     assert "payload_field" in edit_description
     assert "flow_review_stale_revision" in edit_description
@@ -2016,7 +2019,10 @@ def test_openapi_review_checkpoint_endpoint_docs_guide_human_in_loop_clients(
     assert edit_200_example["state"] == "edited"
     assert edit_200_example["revision"] == 2
     assert edit_200_example["edited_at"] is not None
-    assert edit_200_example["current_payload_json"] == {"text": "Edited answer."}
+    assert edit_200_example["current_payload_json"] == {
+        "text": '{"answer": "Edited answer."}',
+        "structured": {"answer": "Edited answer."},
+    }
 
     approve_200_example = approve_operation["responses"]["200"]["content"][
         "application/json"
@@ -2979,6 +2985,9 @@ def test_openapi_flow_run_step_rerun_contract(openapi_spec: dict) -> None:
                     FlowApiErrorCode.REVIEW_STALE_REVISION.value,
                     FlowApiErrorCode.REVIEW_EXPIRED.value,
                     FlowApiErrorCode.REVIEW_NOT_ACTIVE.value,
+                    FlowApiErrorCode.REVIEW_EDIT_NOT_ALLOWED.value,
+                    FlowApiErrorCode.REVIEW_EDIT_FILE_BACKED_UNSUPPORTED.value,
+                    FlowApiErrorCode.REVIEW_EDIT_OUTPUT_TOO_LARGE.value,
                     FlowApiErrorCode.REVIEW_STEP_RESULT_NOT_FOUND.value,
                 }
             ),

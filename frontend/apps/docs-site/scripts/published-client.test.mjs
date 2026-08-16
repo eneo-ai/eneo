@@ -2,9 +2,9 @@
  * Executes the TypeScript client the Flow integration guide publishes.
  *
  * The guide advertises this listing as copy-pasteable, so the parts that are
- * easy to get subtly wrong — preserving runtime-owned review payload keys, and
- * the rules around an overflow-backed transcript — are exercised here against a
- * stubbed `fetch` rather than merely parsed.
+ * easy to get subtly wrong — sending the reviewed step's own value rather than
+ * its payload, and refusing the checkpoints that cannot take an edit — are
+ * exercised here against a stubbed `fetch` rather than merely parsed.
  */
 import { test, expect, afterEach } from "bun:test";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
@@ -63,9 +63,18 @@ function stubFetch(recorded) {
   };
 }
 
-const overflowCheckpoint = {
+const editableCheckpoint = {
   id: "cp-1",
   revision: 3,
+  review_mode: "edit",
+  current_payload_json: {
+    text: '{"decisions": "old"}',
+    structured: { decisions: "old" },
+  },
+};
+
+const fileBackedCheckpoint = {
+  ...editableCheckpoint,
   current_payload_json: {
     text: "Frozen preview of a long transcript",
     structured: { decisions: "old" },
@@ -73,46 +82,31 @@ const overflowCheckpoint = {
   },
 };
 
-test("editCheckpoint preserves runtime-owned payload keys", async () => {
+const viewOnlyCheckpoint = { ...editableCheckpoint, review_mode: "view" };
+
+test("editCheckpoint sends the step's value and nothing else", async () => {
   const { EneoFlows } = await loadPublishedClient();
   const recorded = {};
   globalThis.fetch = stubFetch(recorded);
 
   const client = new EneoFlows("https://eneo.example.se/api/v1", "sk_test");
-  await client.editCheckpoint("flow-1", "run-1", overflowCheckpoint, {
-    structured: { decisions: "new" },
+  await client.editCheckpoint("flow-1", "run-1", editableCheckpoint, {
+    decisions: "new",
   });
 
   const body = JSON.parse(recorded.init.body);
   expect(body.expected_checkpoint_revision).toBe(3);
-  expect(body.current_payload_json.text_overflow).toEqual({
-    generated_file_ids: ["file-1"],
-  });
-  expect(body.current_payload_json.text).toBe(
-    "Frozen preview of a long transcript",
-  );
-  expect(body.current_payload_json.structured).toEqual({ decisions: "new" });
-});
-
-test("editCheckpoint allows a structured edit on an overflow-backed checkpoint", async () => {
-  const { EneoFlows } = await loadPublishedClient();
-  const recorded = {};
-  globalThis.fetch = stubFetch(recorded);
-
-  const client = new EneoFlows("https://eneo.example.se/api/v1", "sk_test");
-  // Resending the frozen preview verbatim alongside a structured change is legal.
-  await client.editCheckpoint("flow-1", "run-1", overflowCheckpoint, {
-    text: overflowCheckpoint.current_payload_json.text,
-    structured: { decisions: "new" },
-  });
-
+  expect(body.edited_value).toEqual({ decisions: "new" });
+  // The server owns the payload envelope; resending it is what the old
+  // contract required and what this one refuses to do.
+  expect(body.current_payload_json).toBeUndefined();
   expect(recorded.url).toBe(
     "https://eneo.example.se/api/v1/flows/flow-1/runs/run-1/review-checkpoints/cp-1/",
   );
   expect(recorded.init.method).toBe("PATCH");
 });
 
-test("editCheckpoint refuses to change overflow-backed text", async () => {
+test("editCheckpoint refuses a checkpoint opened for viewing", async () => {
   const { EneoFlows } = await loadPublishedClient();
   let called = false;
   globalThis.fetch = async () => {
@@ -122,10 +116,27 @@ test("editCheckpoint refuses to change overflow-backed text", async () => {
 
   const client = new EneoFlows("https://eneo.example.se/api/v1", "sk_test");
   expect(() =>
-    client.editCheckpoint("flow-1", "run-1", overflowCheckpoint, {
-      text: "a different transcript",
+    client.editCheckpoint("flow-1", "run-1", viewOnlyCheckpoint, {
+      decisions: "new",
     }),
-  ).toThrow(/overflow-backed text/);
+  ).toThrow(/flow_review_edit_not_allowed/);
+  expect(called).toBe(false);
+});
+
+test("editCheckpoint refuses a file-backed output", async () => {
+  const { EneoFlows } = await loadPublishedClient();
+  let called = false;
+  globalThis.fetch = async () => {
+    called = true;
+    return new Response("{}", { status: 200 });
+  };
+
+  const client = new EneoFlows("https://eneo.example.se/api/v1", "sk_test");
+  expect(() =>
+    client.editCheckpoint("flow-1", "run-1", fileBackedCheckpoint, {
+      decisions: "new",
+    }),
+  ).toThrow(/flow_review_edit_file_backed_unsupported/);
   expect(called).toBe(false);
 });
 

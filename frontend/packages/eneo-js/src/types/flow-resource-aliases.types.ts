@@ -566,12 +566,18 @@ const validReviewCheckpoint: FlowRunReviewCheckpoint = {
   state: "resumed",
   revision: 3,
   schema_version: 1,
-  original_payload_json: { text: "Draft answer." },
-  current_payload_json: { text: "Reviewed answer." },
+  original_payload_json: {
+    text: '{"answer": "Draft answer."}',
+    structured: { answer: "Draft answer." }
+  },
+  current_payload_json: {
+    text: '{"answer": "Reviewed answer."}',
+    structured: { answer: "Reviewed answer." }
+  },
   step_label: "Review answer",
   review_mode: "edit",
   output_type: "json",
-  output_contract: { type: "object", properties: { text: { type: "string" } } },
+  output_contract: { type: "object", properties: { answer: { type: "string" } } },
   next_step_ids: ["00000000-0000-0000-0000-000000000102"],
   requester_user_id: "00000000-0000-0000-0000-000000000030",
   requester_principal_type: "user",

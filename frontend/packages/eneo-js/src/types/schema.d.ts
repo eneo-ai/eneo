@@ -4798,9 +4798,19 @@ export interface paths {
      *     revision returned from the active-checkpoint response; if another reviewer changed the checkpoint
      *     first, the API returns `400` with code `flow_review_stale_revision` and the client should refetch.
      *
-     *     Send the full corrected `current_payload_json`, not a patch. For structured steps, keep the same
-     *     top-level payload shape returned by the active checkpoint unless the UI deliberately changes it.
-     *     When the checkpoint has an `output_contract`, edited structured payloads are validated before any
+     *     Send `edited_value`: the corrected step output itself, not the payload envelope and not a patch.
+     *     A `text` output step takes a string; a `json` output step takes a JSON object or array. The
+     *     server rebuilds the payload around that value, deriving the JSON step's `text` rendering from
+     *     `structured` so the two encodings can never disagree, and preserving runtime-owned payload
+     *     metadata from the stored checkpoint.
+     *
+     *     Only a checkpoint whose `review_mode` is `edit` accepts this request; `view` checkpoints and
+     *     artifact-producing PDF or DOCX steps return `400` with code `flow_review_edit_not_allowed`. An
+     *     output already stored as a generated file returns `flow_review_edit_file_backed_unsupported`,
+     *     and an edited value whose text rendering exceeds the inline output limit returns
+     *     `flow_review_edit_output_too_large`.
+     *
+     *     When the checkpoint has an `output_contract`, the edited JSON value is validated before any
      *     checkpoint, step-result projection, or audit state is persisted. Contract failures return `400`
      *     with code `typed_io_contract_violation` and context fields `checkpoint_id`, `step_id`,
      *     `step_order`, and `payload_field`.
@@ -15448,6 +15458,9 @@ export interface components {
       | "flow_review_expired"
       | "flow_review_not_active"
       | "flow_review_step_result_not_found"
+      | "flow_review_edit_not_allowed"
+      | "flow_review_edit_file_backed_unsupported"
+      | "flow_review_edit_output_too_large"
       | "flow_review_checkpoint_not_found"
       | "flow_review_reject_reason_required"
       | "flow_review_reject_reason_too_long"
@@ -17530,7 +17543,7 @@ export interface components {
       approve_template: string;
       /**
        * Edit Template
-       * @description PATCH template for submitting a full corrected checkpoint payload. Replace `{run_id}` and `{checkpoint_id}` with values returned by create_run and active checkpoint polling. Send `expected_checkpoint_revision` plus the full corrected `current_payload_json` field from the active checkpoint response.
+       * @description PATCH template for replacing a reviewed step's output. Replace `{run_id}` and `{checkpoint_id}` with values returned by create_run and active checkpoint polling. Send `expected_checkpoint_revision` plus `edited_value`: the corrected output itself, a string for a `text` output step or a JSON object or array for a `json` one.
        */
       edit_template: string;
       /**
@@ -18901,7 +18914,10 @@ export interface components {
      *             "attempt_no": 1,
      *             "created_at": "2026-03-17T10:05:30Z",
      *             "current_payload_json": {
-     *               "text": "Edited answer."
+     *               "structured": {
+     *                 "answer": "Edited answer."
+     *               },
+     *               "text": "{\"answer\": \"Edited answer.\"}"
      *             },
      *             "decision": "approved",
      *             "edited_at": "2026-03-17T10:06:30Z",
@@ -18913,11 +18929,14 @@ export interface components {
      *               "00000000-0000-0000-0000-000000000104"
      *             ],
      *             "original_payload_json": {
-     *               "text": "Draft answer."
+     *               "structured": {
+     *                 "answer": "Draft answer."
+     *               },
+     *               "text": "{\"answer\": \"Draft answer.\"}"
      *             },
      *             "output_contract": {
      *               "properties": {
-     *                 "text": {
+     *                 "answer": {
      *                   "type": "string"
      *                 }
      *               },
@@ -19015,7 +19034,7 @@ export interface components {
      *           }
      *         ]
      *       },
-     *       "content_hash": "a5528f6f25955d3238a267dcaef5ac807d50444ccbffc6562a28b04cf4ae0b30",
+     *       "content_hash": "6a232dd68de214d44e0c6ea43f90a665f93c1d9370f16e9e41caa812641a5d29",
      *       "generated_at": "2026-03-31T12:00:00Z",
      *       "manifest": {
      *         "actor": {
@@ -19051,7 +19070,7 @@ export interface components {
      *           "total_size_bytes": 14012,
      *           "tracking_state": "tracked"
      *         },
-     *         "content_hash": "a5528f6f25955d3238a267dcaef5ac807d50444ccbffc6562a28b04cf4ae0b30",
+     *         "content_hash": "6a232dd68de214d44e0c6ea43f90a665f93c1d9370f16e9e41caa812641a5d29",
      *         "content_hash_input": "redacted",
      *         "detail_mode": "redacted",
      *         "export_reason": "support_debug",
@@ -19621,7 +19640,10 @@ export interface components {
      *           "attempt_no": 1,
      *           "created_at": "2026-03-17T10:05:30Z",
      *           "current_payload_json": {
-     *             "text": "Edited answer."
+     *             "structured": {
+     *               "answer": "Edited answer."
+     *             },
+     *             "text": "{\"answer\": \"Edited answer.\"}"
      *           },
      *           "decision": "approved",
      *           "edited_at": "2026-03-17T10:06:30Z",
@@ -19633,11 +19655,14 @@ export interface components {
      *             "00000000-0000-0000-0000-000000000104"
      *           ],
      *           "original_payload_json": {
-     *             "text": "Draft answer."
+     *             "structured": {
+     *               "answer": "Draft answer."
+     *             },
+     *             "text": "{\"answer\": \"Draft answer.\"}"
      *           },
      *           "output_contract": {
      *             "properties": {
-     *               "text": {
+     *               "answer": {
      *                 "type": "string"
      *               }
      *             },
@@ -20427,20 +20452,23 @@ export interface components {
     /**
      * FlowRunReviewCheckpointEditRequest
      * @example {
-     *       "current_payload_json": {
-     *         "text": "Edited answer."
+     *       "edited_value": {
+     *         "answer": "Edited answer."
      *       },
      *       "expected_checkpoint_revision": 1
      *     }
      */
     FlowRunReviewCheckpointEditRequest: {
       /**
-       * Current Payload Json
-       * @description Full corrected payload for the reviewed step. Send the complete payload, not a JSON Patch document: start from the checkpoint's own `current_payload_json` and change only the editable keys, because every other key is runtime-owned and a missing or altered one returns `400` with code `typed_io_validation_failed`. `text` is required, must be a string, and must fit the ordinary inline UTF-8 output limit. `text_overflow` cannot be created or changed and is accepted only when its existing generated-output file still belongs to this exact run step attempt; while it is present the payload is overflow-backed and `text` is a frozen preview that must be resent unchanged, although `structured` on such a checkpoint can still be edited. `structured`, when present, must satisfy the checkpoint output contract. PDF and DOCX artifact steps cannot use edit review.
+       * Edited Value
+       * @description The corrected step output itself, not a payload envelope and not a JSON Patch document. Send a string for a `text` output step and a JSON object or array for a `json` output step; the other shape returns `400` with code `typed_io_validation_failed`. For a JSON step the value must satisfy the checkpoint `output_contract` when one exists, and the persisted `text` rendering is derived from it, so the two can never disagree. Runtime-owned payload metadata is preserved from the stored checkpoint and is never accepted from the client. Only checkpoints whose `review_mode` is `edit` accept this request, and an output already stored as a generated file cannot be edited: both return `400` with code `flow_review_edit_not_allowed` and `flow_review_edit_file_backed_unsupported` respectively. A value whose text rendering exceeds the inline UTF-8 output limit returns `flow_review_edit_output_too_large`.
        */
-      current_payload_json: {
-        [key: string]: unknown;
-      };
+      edited_value:
+        | string
+        | {
+            [key: string]: components["schemas"]["JsonValue"];
+          }
+        | components["schemas"]["JsonValue"][];
       /**
        * Expected Checkpoint Revision
        * @description Checkpoint revision observed by the reviewer. Stale values return `400` with code `flow_review_stale_revision`.
@@ -20454,7 +20482,10 @@ export interface components {
      *       "attempt_no": 1,
      *       "created_at": "2026-03-17T10:05:30Z",
      *       "current_payload_json": {
-     *         "text": "Edited answer."
+     *         "structured": {
+     *           "answer": "Edited answer."
+     *         },
+     *         "text": "{\"answer\": \"Edited answer.\"}"
      *       },
      *       "decision": "approved",
      *       "edited_at": "2026-03-17T10:06:30Z",
@@ -20466,11 +20497,14 @@ export interface components {
      *         "00000000-0000-0000-0000-000000000104"
      *       ],
      *       "original_payload_json": {
-     *         "text": "Draft answer."
+     *         "structured": {
+     *           "answer": "Draft answer."
+     *         },
+     *         "text": "{\"answer\": \"Draft answer.\"}"
      *       },
      *       "output_contract": {
      *         "properties": {
-     *           "text": {
+     *           "answer": {
      *             "type": "string"
      *           }
      *         },
@@ -20597,7 +20631,10 @@ export interface components {
      *       "attempt_no": 1,
      *       "created_at": "2026-03-17T10:05:30Z",
      *       "current_payload_json": {
-     *         "text": "Draft answer."
+     *         "structured": {
+     *           "answer": "Draft answer."
+     *         },
+     *         "text": "{\"answer\": \"Draft answer.\"}"
      *       },
      *       "expires_at": "2026-03-31T10:05:30Z",
      *       "flow_id": "00000000-0000-0000-0000-000000000001",
@@ -20607,11 +20644,14 @@ export interface components {
      *         "00000000-0000-0000-0000-000000000104"
      *       ],
      *       "original_payload_json": {
-     *         "text": "Draft answer."
+     *         "structured": {
+     *           "answer": "Draft answer."
+     *         },
+     *         "text": "{\"answer\": \"Draft answer.\"}"
      *       },
      *       "output_contract": {
      *         "properties": {
-     *           "text": {
+     *           "answer": {
      *             "type": "string"
      *           }
      *         },
@@ -20645,7 +20685,7 @@ export interface components {
       created_at: string;
       /**
        * Current Payload Json
-       * @description Current reviewed step payload. `text` is the canonical string form; `structured`, when present, conforms to `output_contract`. Other keys are runtime-owned metadata and are not independently editable.
+       * @description Current reviewed step output as it is persisted. For a `text` step `text` is the output itself; for a `json` step `structured` is the output and conforms to `output_contract`, while `text` is the server-derived rendering of it. Other keys are runtime-owned metadata. Edits submit the output value alone, never this object.
        */
       current_payload_json?: {
         [key: string]: unknown;
@@ -20778,7 +20818,10 @@ export interface components {
      *         "attempt_no": 1,
      *         "created_at": "2026-03-17T10:05:30Z",
      *         "current_payload_json": {
-     *           "text": "Edited answer."
+     *           "structured": {
+     *             "answer": "Edited answer."
+     *           },
+     *           "text": "{\"answer\": \"Edited answer.\"}"
      *         },
      *         "decided_by_principal_type": "user",
      *         "decided_by_user_id": "00000000-0000-0000-0000-000000000030",
@@ -20791,11 +20834,14 @@ export interface components {
      *           "00000000-0000-0000-0000-000000000104"
      *         ],
      *         "original_payload_json": {
-     *           "text": "Draft answer."
+     *           "structured": {
+     *             "answer": "Draft answer."
+     *           },
+     *           "text": "{\"answer\": \"Draft answer.\"}"
      *         },
      *         "output_contract": {
      *           "properties": {
-     *             "text": {
+     *             "answer": {
      *               "type": "string"
      *             }
      *           },
@@ -50553,7 +50599,10 @@ export interface operations {
            *       "attempt_no": 1,
            *       "created_at": "2026-03-17T10:05:30Z",
            *       "current_payload_json": {
-           *         "text": "Edited answer."
+           *         "structured": {
+           *           "answer": "Edited answer."
+           *         },
+           *         "text": "{\"answer\": \"Edited answer.\"}"
            *       },
            *       "decided_by_principal_type": "user",
            *       "decided_by_user_id": "00000000-0000-0000-0000-000000000030",
@@ -50566,11 +50615,14 @@ export interface operations {
            *         "00000000-0000-0000-0000-000000000104"
            *       ],
            *       "original_payload_json": {
-           *         "text": "Draft answer."
+           *         "structured": {
+           *           "answer": "Draft answer."
+           *         },
+           *         "text": "{\"answer\": \"Draft answer.\"}"
            *       },
            *       "output_contract": {
            *         "properties": {
-           *           "text": {
+           *           "answer": {
            *             "type": "string"
            *           }
            *         },
@@ -50593,7 +50645,7 @@ export interface operations {
           "application/json": components["schemas"]["FlowRunReviewCheckpointPublic"];
         };
       };
-      /** @description Review edit failed. Representative machine-readable codes include `typed_io_contract_violation`, `flow_review_stale_revision`, `flow_review_expired`, `flow_review_not_active`, and `flow_review_step_result_not_found`. Contract validation errors include context.checkpoint_id, context.step_id, context.step_order, and context.payload_field. */
+      /** @description Review edit failed. Representative machine-readable codes include `typed_io_validation_failed`, `typed_io_contract_violation`, `flow_review_stale_revision`, `flow_review_expired`, `flow_review_not_active`, `flow_review_edit_not_allowed`, `flow_review_edit_file_backed_unsupported`, `flow_review_edit_output_too_large`, and `flow_review_step_result_not_found`. Contract validation errors include context.checkpoint_id, context.step_id, context.step_order, and context.payload_field. */
       400: {
         headers: {
           [name: string]: unknown;
@@ -50680,7 +50732,10 @@ export interface operations {
            *       "attempt_no": 1,
            *       "created_at": "2026-03-17T10:05:30Z",
            *       "current_payload_json": {
-           *         "text": "Edited answer."
+           *         "structured": {
+           *           "answer": "Edited answer."
+           *         },
+           *         "text": "{\"answer\": \"Edited answer.\"}"
            *       },
            *       "decided_by_principal_type": "user",
            *       "decided_by_user_id": "00000000-0000-0000-0000-000000000030",
@@ -50693,11 +50748,14 @@ export interface operations {
            *         "00000000-0000-0000-0000-000000000104"
            *       ],
            *       "original_payload_json": {
-           *         "text": "Draft answer."
+           *         "structured": {
+           *           "answer": "Draft answer."
+           *         },
+           *         "text": "{\"answer\": \"Draft answer.\"}"
            *       },
            *       "output_contract": {
            *         "properties": {
-           *           "text": {
+           *           "answer": {
            *             "type": "string"
            *           }
            *         },
@@ -50806,7 +50864,10 @@ export interface operations {
            *       "attempt_no": 1,
            *       "created_at": "2026-03-17T10:05:30Z",
            *       "current_payload_json": {
-           *         "text": "Edited answer."
+           *         "structured": {
+           *           "answer": "Edited answer."
+           *         },
+           *         "text": "{\"answer\": \"Edited answer.\"}"
            *       },
            *       "decided_by_principal_type": "user",
            *       "decided_by_user_id": "00000000-0000-0000-0000-000000000030",
@@ -50819,11 +50880,14 @@ export interface operations {
            *         "00000000-0000-0000-0000-000000000104"
            *       ],
            *       "original_payload_json": {
-           *         "text": "Draft answer."
+           *         "structured": {
+           *           "answer": "Draft answer."
+           *         },
+           *         "text": "{\"answer\": \"Draft answer.\"}"
            *       },
            *       "output_contract": {
            *         "properties": {
-           *           "text": {
+           *           "answer": {
            *             "type": "string"
            *           }
            *         },
@@ -50938,7 +51002,10 @@ export interface operations {
            *         "attempt_no": 1,
            *         "created_at": "2026-03-17T10:05:30Z",
            *         "current_payload_json": {
-           *           "text": "Edited answer."
+           *           "structured": {
+           *             "answer": "Edited answer."
+           *           },
+           *           "text": "{\"answer\": \"Edited answer.\"}"
            *         },
            *         "decided_by_principal_type": "user",
            *         "decided_by_user_id": "00000000-0000-0000-0000-000000000030",
@@ -50951,11 +51018,14 @@ export interface operations {
            *           "00000000-0000-0000-0000-000000000104"
            *         ],
            *         "original_payload_json": {
-           *           "text": "Draft answer."
+           *           "structured": {
+           *             "answer": "Draft answer."
+           *           },
+           *           "text": "{\"answer\": \"Draft answer.\"}"
            *         },
            *         "output_contract": {
            *           "properties": {
-           *             "text": {
+           *             "answer": {
            *               "type": "string"
            *             }
            *           },

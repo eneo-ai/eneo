@@ -621,7 +621,7 @@ describe("flows templates endpoint", () => {
       runId: "run-1",
       checkpointId: "checkpoint-1",
       expectedCheckpointRevision: 1,
-      currentPayloadJson: { z: 2, a: 1 }
+      editedValue: { z: 2, a: 1 }
     });
     await flows.runs.reviewCheckpoints.approve({
       flowId: "flow-1",
@@ -659,7 +659,7 @@ describe("flows templates endpoint", () => {
       requestBody: {
         "application/json": {
           expected_checkpoint_revision: 1,
-          current_payload_json: { a: 1, z: 2 }
+          edited_value: { a: 1, z: 2 }
         }
       }
     });

@@ -115,6 +115,7 @@ from eneo.flows.published_definition import (
     published_definition_checksum,
 )
 from eneo.integration.presentation.models import IntegrationKnowledgePublic
+from eneo.json_types import JsonValue
 from eneo.main.exceptions import BadRequestException, ErrorCodes
 from eneo.main.models import (
     NOT_PROVIDED,
@@ -454,14 +455,20 @@ FLOW_RUN_REVIEW_CHECKPOINT_PUBLIC_EXAMPLE: dict[str, Any] = {
     "state": "awaiting_review",
     "revision": 1,
     "schema_version": 1,
-    "original_payload_json": {"text": "Draft answer."},
-    "current_payload_json": {"text": "Draft answer."},
+    "original_payload_json": {
+        "text": '{"answer": "Draft answer."}',
+        "structured": {"answer": "Draft answer."},
+    },
+    "current_payload_json": {
+        "text": '{"answer": "Draft answer."}',
+        "structured": {"answer": "Draft answer."},
+    },
     "step_label": "Review transcription",
     "review_mode": "edit",
     "output_type": "json",
     "output_contract": {
         "type": "object",
-        "properties": {"text": {"type": "string"}},
+        "properties": {"answer": {"type": "string"}},
     },
     "next_step_ids": ["00000000-0000-0000-0000-000000000104"],
     "requester_user_id": "00000000-0000-0000-0000-000000000030",
@@ -486,7 +493,10 @@ FLOW_RUN_REVIEW_CHECKPOINT_EVIDENCE_EXAMPLE: dict[str, Any] = {
     "state": "resumed",
     "revision": 4,
     "decision": "approved",
-    "current_payload_json": {"text": "Edited answer."},
+    "current_payload_json": {
+        "text": '{"answer": "Edited answer."}',
+        "structured": {"answer": "Edited answer."},
+    },
     "resume_key_present": True,
     "edited_at": "2026-03-17T10:06:30Z",
     "approved_at": "2026-03-17T10:07:30Z",
@@ -495,7 +505,7 @@ FLOW_RUN_REVIEW_CHECKPOINT_EVIDENCE_EXAMPLE: dict[str, Any] = {
 
 FLOW_RUN_REVIEW_CHECKPOINT_EDIT_REQUEST_EXAMPLE: dict[str, Any] = {
     "expected_checkpoint_revision": 1,
-    "current_payload_json": {"text": "Edited answer."},
+    "edited_value": {"answer": "Edited answer."},
 }
 
 FLOW_RUN_REVIEW_CHECKPOINT_APPROVE_REQUEST_EXAMPLE: dict[str, Any] = {
@@ -515,7 +525,10 @@ FLOW_RUN_REVIEW_CHECKPOINT_EDITED_RESPONSE_EXAMPLE: dict[str, Any] = {
     **FLOW_RUN_REVIEW_CHECKPOINT_PUBLIC_EXAMPLE,
     "state": "edited",
     "revision": 2,
-    "current_payload_json": {"text": "Edited answer."},
+    "current_payload_json": {
+        "text": '{"answer": "Edited answer."}',
+        "structured": {"answer": "Edited answer."},
+    },
     "decided_by_user_id": "00000000-0000-0000-0000-000000000030",
     "decided_by_service_principal": None,
     "decided_by_principal_type": "user",
@@ -1164,9 +1177,11 @@ class FlowRunReviewCheckpointPublic(BaseModel):
     current_payload_json: dict[str, Any] | None = Field(
         default=None,
         description=(
-            "Current reviewed step payload. `text` is the canonical string form; "
-            "`structured`, when present, conforms to `output_contract`. Other keys "
-            "are runtime-owned metadata and are not independently editable."
+            "Current reviewed step output as it is persisted. For a `text` step "
+            "`text` is the output itself; for a `json` step `structured` is the "
+            "output and conforms to `output_contract`, while `text` is the "
+            "server-derived rendering of it. Other keys are runtime-owned "
+            "metadata. Edits submit the output value alone, never this object."
         ),
     )
     step_label: str | None = Field(
@@ -1256,21 +1271,22 @@ class FlowRunReviewCheckpointEditRequest(BaseModel):
             "`400` with code `flow_review_stale_revision`."
         ),
     )
-    current_payload_json: dict[str, Any] = Field(
+    edited_value: str | dict[str, JsonValue] | list[JsonValue] = Field(
         description=(
-            "Full corrected payload for the reviewed step. Send the complete payload, "
-            "not a JSON Patch document: start from the checkpoint's own "
-            "`current_payload_json` and change only the editable keys, because every "
-            "other key is runtime-owned and a missing or altered one returns `400` "
-            "with code `typed_io_validation_failed`. `text` is required, must be a "
-            "string, and must fit the ordinary inline UTF-8 output limit. "
-            "`text_overflow` cannot be created or changed and is accepted only when "
-            "its existing generated-output file still belongs to this exact run step "
-            "attempt; while it is present the payload is overflow-backed and `text` is a "
-            "frozen preview that must be resent unchanged, although `structured` on such "
-            "a checkpoint can still be edited. `structured`, when present, must satisfy "
-            "the checkpoint output contract. PDF and DOCX artifact steps cannot use edit "
-            "review."
+            "The corrected step output itself, not a payload envelope and not a JSON "
+            "Patch document. Send a string for a `text` output step and a JSON object "
+            "or array for a `json` output step; the other shape returns `400` with code "
+            "`typed_io_validation_failed`. For a JSON step the value must satisfy the "
+            "checkpoint `output_contract` when one exists, and the persisted `text` "
+            "rendering is derived from it, so the two can never disagree. Runtime-owned "
+            "payload metadata is preserved from the stored checkpoint and is never "
+            "accepted from the client. Only checkpoints whose `review_mode` is `edit` "
+            "accept this request, and an output already stored as a generated file "
+            "cannot be edited: both return `400` with code "
+            "`flow_review_edit_not_allowed` and "
+            "`flow_review_edit_file_backed_unsupported` respectively. A value whose "
+            "text rendering exceeds the inline UTF-8 output limit returns "
+            "`flow_review_edit_output_too_large`."
         )
     )
 
@@ -2246,7 +2262,7 @@ class FlowRunEvidenceExportResponse(BaseModel):
             "example": {
                 "schema_version": "flow-evidence-export.v16",
                 "generated_at": "2026-03-31T12:00:00Z",
-                "content_hash": "a5528f6f25955d3238a267dcaef5ac807d50444ccbffc6562a28b04cf4ae0b30",
+                "content_hash": "6a232dd68de214d44e0c6ea43f90a665f93c1d9370f16e9e41caa812641a5d29",
                 "manifest": {
                     "schema_version": "flow-evidence-export.v16",
                     "app_version": "DEV",
@@ -2258,7 +2274,7 @@ class FlowRunEvidenceExportResponse(BaseModel):
                     "flow_id": "f6f2d8fa-2d47-4d08-a7a9-2fef0b37c5ec",
                     "trace_id": "52907745-7678-40a8-9d1c-18af6b1a9fd8",
                     "flow_version": 3,
-                    "content_hash": "a5528f6f25955d3238a267dcaef5ac807d50444ccbffc6562a28b04cf4ae0b30",
+                    "content_hash": "6a232dd68de214d44e0c6ea43f90a665f93c1d9370f16e9e41caa812641a5d29",
                     "content_hash_input": "redacted",
                     "exported_at": "2026-03-31T12:00:00Z",
                     "actor": {

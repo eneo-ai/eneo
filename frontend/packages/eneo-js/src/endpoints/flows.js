@@ -873,23 +873,20 @@ export function initFlows(client) {
         },
 
         /**
-         * @param {{flowId: string, runId: string, checkpointId: string, expectedCheckpointRevision: number, currentPayloadJson: Record<string, unknown>}} params
+         * Submit the corrected step output itself: a string for a `text` output
+         * step, or a JSON object or array for a `json` output step.
+         *
+         * @param {{flowId: string, runId: string, checkpointId: string, expectedCheckpointRevision: number, editedValue: string | Record<string, unknown> | unknown[]}} params
          * @returns {Promise<import('../types/resources').FlowRunReviewCheckpoint>}
          */
-        edit: async ({
-          flowId,
-          runId,
-          checkpointId,
-          expectedCheckpointRevision,
-          currentPayloadJson
-        }) => {
+        edit: async ({ flowId, runId, checkpointId, expectedCheckpointRevision, editedValue }) => {
           return _fetch("/api/v1/flows/{id}/runs/{run_id}/review-checkpoints/{checkpoint_id}/", {
             method: "patch",
             params: { path: { id: flowId, run_id: runId, checkpoint_id: checkpointId } },
             requestBody: {
               "application/json": {
                 expected_checkpoint_revision: expectedCheckpointRevision,
-                current_payload_json: _stableSortObjectKeys(currentPayloadJson)
+                edited_value: _stableSortObjectKeys(editedValue)
               }
             }
           });

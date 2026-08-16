@@ -67,11 +67,11 @@ class FlowReviewCheckpointRuntimePathsPublic(BaseModel):
     )
     edit_template: str = Field(
         description=(
-            "PATCH template for submitting a full corrected checkpoint payload. "
-            "Replace `{run_id}` and `{checkpoint_id}` with values returned by "
-            "create_run and active checkpoint polling. Send "
-            "`expected_checkpoint_revision` plus the full corrected "
-            "`current_payload_json` field from the active checkpoint response."
+            "PATCH template for replacing a reviewed step's output. Replace "
+            "`{run_id}` and `{checkpoint_id}` with values returned by create_run "
+            "and active checkpoint polling. Send `expected_checkpoint_revision` "
+            "plus `edited_value`: the corrected output itself, a string for a "
+            "`text` output step or a JSON object or array for a `json` one."
         )
     )
     approve_template: str = Field(

@@ -113,10 +113,14 @@ def test_review_checkpoint_edit_schema_documents_payload_integrity_contract() ->
     edit_schema = FlowRunReviewCheckpointEditRequest.model_json_schema()
     checkpoint_schema = FlowRunReviewCheckpointPublic.model_json_schema()
 
-    edit_description = edit_schema["properties"]["current_payload_json"]["description"]
-    assert "`text` is required" in edit_description
-    assert "`text_overflow` cannot be created or changed" in edit_description
-    assert "PDF and DOCX artifact steps cannot use edit review" in edit_description
+    edit_description = edit_schema["properties"]["edited_value"]["description"]
+    assert "not a payload envelope" in edit_description
+    assert "the persisted `text` rendering is derived from it" in edit_description
+    assert (
+        "Runtime-owned payload metadata is preserved from the stored checkpoint"
+        in edit_description
+    )
+    assert "`review_mode` is `edit`" in edit_description
     assert (
         "unsupported versions as non-editable"
         in checkpoint_schema["properties"]["schema_version"]["description"]

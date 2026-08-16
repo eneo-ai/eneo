@@ -631,6 +631,7 @@ async def _open_first_step_review_checkpoint(
     flow: dict,
     output_contract: dict[str, object],
     current_payload_json: dict[str, object],
+    review_mode: str = "view",
 ) -> str:
     step = flow["steps"][0]
     async with db_container() as container:
@@ -697,7 +698,7 @@ async def _open_first_step_review_checkpoint(
             original_payload_json=current_payload_json,
             current_payload_json=current_payload_json,
             step_label=step["user_description"],
-            review_mode="view",
+            review_mode=review_mode,
             output_type="json",
             output_contract_json=output_contract,
             requester_principal_type=run_row.principal_type,
@@ -2323,16 +2324,14 @@ async def test_flow_review_edit_returns_typed_contract_error_for_invalid_payload
             "text": '{"summary":"Original."}',
             "structured": {"summary": "Original."},
         },
+        review_mode="edit",
     )
 
     response = await client.patch(
         f"/api/v1/flows/{flow['id']}/runs/{run['id']}/review-checkpoints/{checkpoint_id}/",
         json={
             "expected_checkpoint_revision": 1,
-            "current_payload_json": {
-                "text": '{"wrong":"shape"}',
-                "structured": {"wrong": "shape"},
-            },
+            "edited_value": {"wrong": "shape"},
         },
         headers={"Authorization": f"Bearer {admin_token}"},
     )
@@ -2347,6 +2346,90 @@ async def test_flow_review_edit_returns_typed_contract_error_for_invalid_payload
         "step_order": 1,
         "payload_field": "structured",
     }
+
+    non_finite_response = await client.patch(
+        f"/api/v1/flows/{flow['id']}/runs/{run['id']}/review-checkpoints/{checkpoint_id}/",
+        content=b'{"expected_checkpoint_revision": 1, "edited_value": {"summary": NaN}}',
+        headers={
+            "Authorization": f"Bearer {admin_token}",
+            "Content-Type": "application/json",
+        },
+    )
+
+    assert non_finite_response.status_code == 400, non_finite_response.text
+    assert non_finite_response.json()["code"] == "typed_io_validation_failed"
+
+    lone_surrogate_response = await client.patch(
+        f"/api/v1/flows/{flow['id']}/runs/{run['id']}/review-checkpoints/{checkpoint_id}/",
+        content=(
+            b'{"expected_checkpoint_revision": 1, '
+            b'"edited_value": {"summary": "\\ud800"}}'
+        ),
+        headers={
+            "Authorization": f"Bearer {admin_token}",
+            "Content-Type": "application/json",
+        },
+    )
+
+    assert lone_surrogate_response.status_code == 400, lone_surrogate_response.text
+    assert lone_surrogate_response.json()["code"] == "typed_io_validation_failed"
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_flow_review_edit_refuses_a_checkpoint_opened_for_viewing(
+    client,
+    db_container,
+    admin_token,
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        flow_run_lifecycle_router,
+        "dispatch_flow_run_recoverably_after_commit",
+        _noop_dispatch_flow_run_recoverably_after_commit,
+    )
+
+    space_id = await _create_space(client, token=admin_token)
+    flow = await _create_published_flow(client, token=admin_token, space_id=space_id)
+    run_response = await client.post(
+        f"/api/v1/flows/{flow['id']}/runs/",
+        json={
+            "expected_flow_version": flow["published_version"],
+            "input_payload_json": {"text": "hello"},
+        },
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert run_response.status_code == 201, run_response.text
+    run = run_response.json()
+    checkpoint_id = await _open_first_step_review_checkpoint(
+        db_container=db_container,
+        run=run,
+        flow=flow,
+        output_contract={
+            "type": "object",
+            "required": ["summary"],
+            "properties": {"summary": {"type": "string"}},
+            "additionalProperties": False,
+        },
+        current_payload_json={
+            "text": '{"summary":"Original."}',
+            "structured": {"summary": "Original."},
+        },
+    )
+
+    response = await client.patch(
+        f"/api/v1/flows/{flow['id']}/runs/{run['id']}/review-checkpoints/{checkpoint_id}/",
+        json={
+            "expected_checkpoint_revision": 1,
+            "edited_value": {"summary": "Not mine to change."},
+        },
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+
+    assert response.status_code == 400, response.text
+    payload = response.json()
+    assert payload["code"] == "flow_review_edit_not_allowed"
+    assert payload["context"] == {"review_mode": "view"}
 
 
 @pytest.mark.asyncio
@@ -2427,6 +2510,7 @@ async def test_flow_consumer_golden_journey_uses_review_runtime_paths(
             "text": '{"summary":"Original."}',
             "structured": {"summary": "Original."},
         },
+        review_mode="edit",
     )
     active_path = _runtime_path(review_paths["active_template"], run_id=run["id"])
     active_response = await client.get(
@@ -2447,10 +2531,7 @@ async def test_flow_consumer_golden_journey_uses_review_runtime_paths(
         edit_path,
         json={
             "expected_checkpoint_revision": active_checkpoint["revision"],
-            "current_payload_json": {
-                "text": '{"wrong":"shape"}',
-                "structured": {"wrong": "shape"},
-            },
+            "edited_value": {"wrong": "shape"},
         },
         headers={"Authorization": f"Bearer {admin_token}"},
     )
@@ -2461,15 +2542,17 @@ async def test_flow_consumer_golden_journey_uses_review_runtime_paths(
         edit_path,
         json={
             "expected_checkpoint_revision": active_checkpoint["revision"],
-            "current_payload_json": {
-                "text": '{"summary":"Approved."}',
-                "structured": {"summary": "Approved."},
-            },
+            "edited_value": {"summary": "Approved."},
         },
         headers={"Authorization": f"Bearer {admin_token}"},
     )
     assert valid_edit_response.status_code == 200, valid_edit_response.text
     edited_checkpoint = valid_edit_response.json()
+    # The server owns both encodings, so they cannot leave the edit disagreeing.
+    assert edited_checkpoint["current_payload_json"] == {
+        "text": '{"summary": "Approved."}',
+        "structured": {"summary": "Approved."},
+    }
 
     approve_response = await client.post(
         _runtime_path(
@@ -2617,6 +2700,7 @@ async def test_flow_service_key_can_drive_human_review_runtime_paths(
             "text": '{"summary":"Original service-key result."}',
             "structured": {"summary": "Original service-key result."},
         },
+        review_mode="edit",
     )
     active_response = await client.get(active_path, headers=service_headers)
     assert active_response.status_code == 200, active_response.text
@@ -2640,15 +2724,16 @@ async def test_flow_service_key_can_drive_human_review_runtime_paths(
         edit_path,
         json={
             "expected_checkpoint_revision": active_checkpoint["revision"],
-            "current_payload_json": {
-                "text": '{"summary":"Reviewed by service integration."}',
-                "structured": {"summary": "Reviewed by service integration."},
-            },
+            "edited_value": {"summary": "Reviewed by service integration."},
         },
         headers=service_headers,
     )
     assert edit_response.status_code == 200, edit_response.text
     edited_checkpoint = edit_response.json()
+    assert edited_checkpoint["current_payload_json"] == {
+        "text": '{"summary": "Reviewed by service integration."}',
+        "structured": {"summary": "Reviewed by service integration."},
+    }
     assert edited_checkpoint["decided_by_principal_type"] == "service_key"
 
     approve_response = await client.post(

@@ -679,13 +679,14 @@ erDiagram
 </div>
 
 `flow_run_review_checkpoints.schema_version` versions the persisted review payload
-contract. For edit review, `current_payload_json.text` is the required canonical
-string and `structured`, when present, is checked against the snapshotted
-`output_contract_json`. Other payload keys are runtime-owned and must survive an
-edit unchanged. Existing `text_overflow` metadata remains usable only when its
-single `generated_output` result-file row belongs to the checkpoint's tenant,
-run, step, and attempt; clients cannot create or alter overflow metadata. PDF and
-DOCX artifact-producing steps may persist view checkpoints but cannot publish an
+contract. An edit submits only the step's own value: a string for a `text` output
+step, or a JSON object or array for a `json` output step, checked against the
+snapshotted `output_contract_json`. The server rebuilds `current_payload_json`
+around that value, deriving a JSON step's `text` from `structured` so the two
+encodings cannot disagree, and carrying every runtime-owned key over from the
+stored payload. A checkpoint whose `review_mode` is `view`, and an output whose
+text overflowed into a generated file, refuse the edit; PDF and DOCX
+artifact-producing steps may persist view checkpoints but cannot publish an
 edit review policy.
 
 ### Retention and classification

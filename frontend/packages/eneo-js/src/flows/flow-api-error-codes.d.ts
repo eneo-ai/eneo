@@ -121,6 +121,9 @@ export declare const FLOW_API_ERROR_CODE: Readonly<{
   REVIEW_EXPIRED: "flow_review_expired";
   REVIEW_NOT_ACTIVE: "flow_review_not_active";
   REVIEW_STEP_RESULT_NOT_FOUND: "flow_review_step_result_not_found";
+  REVIEW_EDIT_NOT_ALLOWED: "flow_review_edit_not_allowed";
+  REVIEW_EDIT_FILE_BACKED_UNSUPPORTED: "flow_review_edit_file_backed_unsupported";
+  REVIEW_EDIT_OUTPUT_TOO_LARGE: "flow_review_edit_output_too_large";
   REVIEW_CHECKPOINT_NOT_FOUND: "flow_review_checkpoint_not_found";
   REVIEW_REJECT_REASON_REQUIRED: "flow_review_reject_reason_required";
   REVIEW_REJECT_REASON_TOO_LONG: "flow_review_reject_reason_too_long";
@@ -273,6 +276,9 @@ export type FlowApiErrorCode =
   | "flow_review_expired"
   | "flow_review_not_active"
   | "flow_review_step_result_not_found"
+  | "flow_review_edit_not_allowed"
+  | "flow_review_edit_file_backed_unsupported"
+  | "flow_review_edit_output_too_large"
   | "flow_review_checkpoint_not_found"
   | "flow_review_reject_reason_required"
   | "flow_review_reject_reason_too_long"

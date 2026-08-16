@@ -31,7 +31,7 @@
   let loading = $state(true);
   let loadError: string | null = $state(null);
   let actionError: string | null = $state(null);
-  let draftPayloadText = $state("{}");
+  let draftValueText = $state("");
   let rejectReason = $state("");
   let activeAction: ReviewAction | null = $state(null);
   let nowMs = $state(Date.now());
@@ -41,12 +41,14 @@
     deadlineHasPassed && (checkpoint?.state === "awaiting_review" || checkpoint?.state === "edited")
   );
   const checkpointExpired = $derived(checkpoint?.state === "expired");
-  const canEdit = $derived(
+  const canDecide = $derived(
     !reviewDecisionExpired &&
       (checkpoint?.state === "awaiting_review" || checkpoint?.state === "edited")
   );
-  const canApprove = $derived(canEdit);
-  const canReject = $derived(canEdit);
+  // The flow author decides whether this step's output may be replaced at all.
+  const canEdit = $derived(canDecide && checkpoint?.review_mode === "edit");
+  const canApprove = $derived(canDecide);
+  const canReject = $derived(canDecide);
   const canResume = $derived(checkpoint?.state === "approved");
   const checkpointStateLabel = $derived(
     checkpoint ? getCheckpointStateLabel(checkpoint.state) : null
@@ -59,8 +61,15 @@
     reviewDecisionExpired || checkpointExpired ? ("destructive" as const) : ("secondary" as const)
   );
 
-  function renderJson(payload: Record<string, unknown> | null | undefined): string {
-    return JSON.stringify(payload ?? {}, null, 2);
+  /** The reviewer edits the step's own output, not the persisted payload envelope. */
+  function renderEditableValue(
+    payload: Record<string, unknown> | null | undefined,
+    outputType: FlowRunReviewCheckpoint["output_type"]
+  ): string {
+    if (outputType === "json") {
+      return JSON.stringify(payload?.structured ?? {}, null, 2);
+    }
+    return typeof payload?.text === "string" ? payload.text : "";
   }
 
   function parseTimestampMs(value: string | null | undefined): number | null {
@@ -92,7 +101,10 @@
   function applyCheckpoint(nextCheckpoint: FlowRunReviewCheckpoint | null) {
     checkpoint = nextCheckpoint;
     if (nextCheckpoint) {
-      draftPayloadText = renderJson(nextCheckpoint.current_payload_json);
+      draftValueText = renderEditableValue(
+        nextCheckpoint.current_payload_json,
+        nextCheckpoint.output_type
+      );
     }
   }
 
@@ -110,14 +122,19 @@
     }
   }
 
-  function parseDraftPayload(): Record<string, unknown> | null {
+  function parseDraftValue(
+    outputType: FlowRunReviewCheckpoint["output_type"]
+  ): string | Record<string, unknown> | unknown[] | null {
+    if (outputType !== "json") {
+      return draftValueText;
+    }
     try {
-      const parsed = JSON.parse(draftPayloadText);
-      if (!parsed || Array.isArray(parsed) || typeof parsed !== "object") {
+      const parsed: unknown = JSON.parse(draftValueText);
+      if (!parsed || typeof parsed !== "object") {
         actionError = m.flow_run_review_payload_invalid();
         return null;
       }
-      return parsed as Record<string, unknown>;
+      return parsed as Record<string, unknown> | unknown[];
     } catch {
       actionError = m.flow_run_review_payload_invalid();
       return null;
@@ -145,8 +162,8 @@
 
   async function saveEdit() {
     if (!checkpoint || !canEdit) return;
-    const currentPayloadJson = parseDraftPayload();
-    if (!currentPayloadJson) return;
+    const editedValue = parseDraftValue(checkpoint.output_type);
+    if (editedValue === null) return;
     activeAction = "edit";
     actionError = null;
     try {
@@ -156,7 +173,7 @@
           runId,
           checkpointId: checkpoint.id,
           expectedCheckpointRevision: checkpoint.revision,
-          currentPayloadJson
+          editedValue
         })
       );
       toast.success(m.flow_run_review_saved());
@@ -314,6 +331,10 @@
         <Alert.Title>{m.flow_run_review_deadline()}</Alert.Title>
         <Alert.Description>{m.flow_run_review_deadline_expired()}</Alert.Description>
       </Alert.Root>
+    {:else if checkpoint.review_mode !== "edit" && canDecide}
+      <Alert.Root>
+        <Alert.Description>{m.flow_run_review_view_only()}</Alert.Description>
+      </Alert.Root>
     {:else if checkpoint.state === "approved" && deadlineHasPassed}
       <Alert.Root>
         <Alert.Title>{m.flow_run_review_deadline()}</Alert.Title>
@@ -328,7 +349,7 @@
         </Field.Label>
         <Textarea
           id="flow-review-current-payload"
-          bind:value={draftPayloadText}
+          bind:value={draftValueText}
           disabled={!canEdit || activeAction !== null}
           aria-invalid={reviewDecisionExpired || checkpointExpired}
           class="min-h-72 resize-y font-mono text-xs leading-relaxed lg:min-h-80"
@@ -340,8 +361,9 @@
           {m.flow_run_review_original_payload()}
         </Field.Label>
         <pre
-          class="border-default bg-hover-dimmer min-h-72 overflow-auto rounded-lg border p-3 font-mono text-xs leading-relaxed whitespace-pre-wrap lg:min-h-80">{renderJson(
-            checkpoint.original_payload_json
+          class="border-default bg-hover-dimmer min-h-72 overflow-auto rounded-lg border p-3 font-mono text-xs leading-relaxed whitespace-pre-wrap lg:min-h-80">{renderEditableValue(
+            checkpoint.original_payload_json,
+            checkpoint.output_type
           )}</pre>
       </Field.Field>
     </Field.Group>

@@ -2881,15 +2881,26 @@ def test_flow_review_edit_docs_define_the_payload_integrity_contract() -> None:
     data_schema = _read(FLOW_DEVELOPER_DOCS_DATA_SCHEMA)
 
     for phrase in (
-        "canonical string `text`",
-        "Never create or change `text_overflow`",
+        "`edited_value`",
         "PDF and DOCX artifact",
         "schema_version",
     ):
         assert phrase in integrating_guide
         assert phrase in api_guide
-    assert "runtime-owned and must survive an\nedit unchanged" in data_schema
-    assert "single `generated_output` result-file row" in data_schema
+    assert "flow_review_edit_file_backed_unsupported" in integrating_guide
+    assert "flow_review_edit_not_allowed" in api_guide
+    assert "deriving a JSON step's `text` from `structured`" in data_schema
+    # The edit contract was rewritten; prose that survives from the payload-
+    # envelope era would tell a consumer to send a body the API now refuses.
+    for retired in (
+        "full corrected payload",
+        "full corrected `current_payload_json`",
+        "must be sent back unchanged",
+        "Only `text` and `structured` may be edited",
+    ):
+        assert retired not in integrating_guide, retired
+        assert retired not in api_guide, retired
+    assert "carrying every runtime-owned key over from the" in data_schema
 
 
 def test_flow_consumer_section_index_is_generated_from_nav_catalog() -> None:
@@ -3507,7 +3518,7 @@ def test_flow_api_guide_pins_canonical_review_checkpoint_examples() -> None:
     assert (
         _find_json_object(
             FLOW_API_GUIDE,
-            required_keys={"expected_checkpoint_revision", "current_payload_json"},
+            required_keys={"expected_checkpoint_revision", "edited_value"},
         )
         == FLOW_RUN_REVIEW_CHECKPOINT_EDIT_REQUEST_EXAMPLE
     )
@@ -3537,17 +3548,18 @@ def test_flow_consumer_guides_pin_create_and_review_edit_examples() -> None:
     assert (
         _find_json_object(
             FLOW_CONSUMER_INTEGRATING_GUIDE,
-            required_keys={"expected_checkpoint_revision", "current_payload_json"},
+            required_keys={"expected_checkpoint_revision", "edited_value"},
         )
         == generator.WORKED_EXAMPLE_CHECKPOINT_EDIT_REQUEST
     )
-    edit_payload = cast(
+    edited_value = cast(
         dict[str, object],
-        generator.WORKED_EXAMPLE_CHECKPOINT_EDIT_REQUEST["current_payload_json"],
+        generator.WORKED_EXAMPLE_CHECKPOINT_EDIT_REQUEST["edited_value"],
     )
-    assert "text" in edit_payload
-    assert "structured" in edit_payload
-    assert "transcription" not in edit_payload
+    # The request carries the step's own value, never the payload envelope.
+    assert "text" not in edited_value
+    assert "structured" not in edited_value
+    assert "transcription" in edited_value
     assert "edited_output" not in integrating
     assert "run-level `error_code`" not in integrating
     assert "run-level `error.code`" in integrating

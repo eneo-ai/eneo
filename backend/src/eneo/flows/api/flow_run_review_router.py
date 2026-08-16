@@ -116,9 +116,19 @@ the checkpoint payload and the current step-result projection are updated togeth
 revision returned from the active-checkpoint response; if another reviewer changed the checkpoint
 first, the API returns `400` with code `flow_review_stale_revision` and the client should refetch.
 
-Send the full corrected `current_payload_json`, not a patch. For structured steps, keep the same
-top-level payload shape returned by the active checkpoint unless the UI deliberately changes it.
-When the checkpoint has an `output_contract`, edited structured payloads are validated before any
+Send `edited_value`: the corrected step output itself, not the payload envelope and not a patch.
+A `text` output step takes a string; a `json` output step takes a JSON object or array. The
+server rebuilds the payload around that value, deriving the JSON step's `text` rendering from
+`structured` so the two encodings can never disagree, and preserving runtime-owned payload
+metadata from the stored checkpoint.
+
+Only a checkpoint whose `review_mode` is `edit` accepts this request; `view` checkpoints and
+artifact-producing PDF or DOCX steps return `400` with code `flow_review_edit_not_allowed`. An
+output already stored as a generated file returns `flow_review_edit_file_backed_unsupported`,
+and an edited value whose text rendering exceeds the inline output limit returns
+`flow_review_edit_output_too_large`.
+
+When the checkpoint has an `output_contract`, the edited JSON value is validated before any
 checkpoint, step-result projection, or audit state is persisted. Contract failures return `400`
 with code `typed_io_contract_violation` and context fields `checkpoint_id`, `step_id`,
 `step_order`, and `payload_field`.
@@ -190,6 +200,29 @@ _FLOW_RUN_REVIEW_STEP_RESULT_NOT_FOUND_ERROR_EXAMPLE: dict[str, object] = {
     "code": FlowApiErrorCode.REVIEW_STEP_RESULT_NOT_FOUND.value,
 }
 
+_FLOW_RUN_REVIEW_EDIT_NOT_ALLOWED_ERROR_EXAMPLE: dict[str, object] = {
+    "message": "Review checkpoint was opened for viewing, not editing.",
+    "eneo_error_code": int(ErrorCodes.BAD_REQUEST),
+    "code": FlowApiErrorCode.REVIEW_EDIT_NOT_ALLOWED.value,
+    "context": {"review_mode": "view"},
+}
+
+_FLOW_RUN_REVIEW_EDIT_FILE_BACKED_ERROR_EXAMPLE: dict[str, object] = {
+    "message": (
+        "Review edit is not supported for a step output stored as a generated file."
+    ),
+    "eneo_error_code": int(ErrorCodes.BAD_REQUEST),
+    "code": FlowApiErrorCode.REVIEW_EDIT_FILE_BACKED_UNSUPPORTED.value,
+    "context": {"file_id": "9b2b1f2c-4a51-4f0e-9d0b-2f3f1b6b6c11"},
+}
+
+_FLOW_RUN_REVIEW_EDIT_OUTPUT_TOO_LARGE_ERROR_EXAMPLE: dict[str, object] = {
+    "message": "Review checkpoint output exceeds the inline output size limit.",
+    "eneo_error_code": int(ErrorCodes.BAD_REQUEST),
+    "code": FlowApiErrorCode.REVIEW_EDIT_OUTPUT_TOO_LARGE.value,
+    "context": {"max_inline_text_bytes": 1048576, "text_bytes": 2097152},
+}
+
 _FLOW_RUN_REVIEW_REJECT_REASON_REQUIRED_ERROR_EXAMPLE: dict[str, object] = {
     "message": "Review rejection reason is required.",
     "eneo_error_code": int(ErrorCodes.BAD_REQUEST),
@@ -253,13 +286,25 @@ _FLOW_RUN_REVIEW_STALE_AND_EXPIRED_ERROR_EXAMPLES: dict[str, dict[str, object]] 
 
 _FLOW_RUN_REVIEW_EDIT_ERROR_EXAMPLES: dict[str, dict[str, object]] = {
     FlowApiErrorCode.TYPED_IO_CONTRACT_VIOLATION.value: {
-        "summary": "Edited payload violates the step output contract.",
+        "summary": "Edited value violates the step output contract.",
         "value": _FLOW_RUN_REVIEW_EDIT_CONTRACT_ERROR_EXAMPLE,
     },
     **_FLOW_RUN_REVIEW_STALE_AND_EXPIRED_ERROR_EXAMPLES,
     FlowApiErrorCode.REVIEW_NOT_ACTIVE.value: {
         "summary": "Checkpoint state no longer accepts edits.",
         "value": _FLOW_RUN_REVIEW_NOT_ACTIVE_ERROR_EXAMPLE,
+    },
+    FlowApiErrorCode.REVIEW_EDIT_NOT_ALLOWED.value: {
+        "summary": "Checkpoint was opened for viewing, not editing.",
+        "value": _FLOW_RUN_REVIEW_EDIT_NOT_ALLOWED_ERROR_EXAMPLE,
+    },
+    FlowApiErrorCode.REVIEW_EDIT_FILE_BACKED_UNSUPPORTED.value: {
+        "summary": "Reviewed output is stored as a generated file.",
+        "value": _FLOW_RUN_REVIEW_EDIT_FILE_BACKED_ERROR_EXAMPLE,
+    },
+    FlowApiErrorCode.REVIEW_EDIT_OUTPUT_TOO_LARGE.value: {
+        "summary": "Edited value exceeds the inline output limit.",
+        "value": _FLOW_RUN_REVIEW_EDIT_OUTPUT_TOO_LARGE_ERROR_EXAMPLE,
     },
     FlowApiErrorCode.REVIEW_STEP_RESULT_NOT_FOUND.value: {
         "summary": "Reviewed step output is no longer available.",
@@ -453,8 +498,11 @@ async def get_active_flow_run_review_checkpoint(
         400: error_response(
             description=(
                 "Review edit failed. Representative machine-readable codes include "
-                "`typed_io_contract_violation`, `flow_review_stale_revision`, "
-                "`flow_review_expired`, `flow_review_not_active`, and "
+                "`typed_io_validation_failed`, `typed_io_contract_violation`, "
+                "`flow_review_stale_revision`, `flow_review_expired`, "
+                "`flow_review_not_active`, `flow_review_edit_not_allowed`, "
+                "`flow_review_edit_file_backed_unsupported`, "
+                "`flow_review_edit_output_too_large`, and "
                 "`flow_review_step_result_not_found`. Contract validation errors "
                 "include context.checkpoint_id, context.step_id, "
                 "context.step_order, and context.payload_field."
@@ -502,7 +550,7 @@ async def edit_flow_run_review_checkpoint(
                 run_id=run_id,
                 checkpoint_id=checkpoint_id,
                 expected_checkpoint_revision=review_in.expected_checkpoint_revision,
-                current_payload_json=review_in.current_payload_json,
+                edited_value=review_in.edited_value,
             )
         )
         response = await _present_review_checkpoint(

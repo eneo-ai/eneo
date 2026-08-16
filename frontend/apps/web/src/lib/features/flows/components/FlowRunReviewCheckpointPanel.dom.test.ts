@@ -38,12 +38,18 @@ function buildCheckpoint(
     state,
     revision,
     schema_version: 1,
-    original_payload_json: { text: "Draft answer." },
-    current_payload_json: { text: "Reviewed answer." },
+    original_payload_json: {
+      text: '{"answer": "Draft answer."}',
+      structured: { answer: "Draft answer." }
+    },
+    current_payload_json: {
+      text: '{"answer": "Reviewed answer."}',
+      structured: { answer: "Reviewed answer." }
+    },
     step_label: "Review answer",
     review_mode: "edit",
     output_type: "json",
-    output_contract: { type: "object", properties: { text: { type: "string" } } },
+    output_contract: { type: "object", properties: { answer: { type: "string" } } },
     next_step_ids: ["step-2"],
     requester_user_id: "user-1",
     requester_principal_type: "user",
@@ -154,9 +160,9 @@ describe("FlowRunReviewCheckpointPanel", () => {
       props: { flowId: "flow-1", runId: "run-1", eneo: eneo as unknown as Eneo }
     });
 
-    const payloadEditor = await screen.findByLabelText(m.flow_run_review_current_payload());
-    await fireEvent.input(payloadEditor, {
-      target: { value: JSON.stringify({ text: "Edited answer." }, null, 2) }
+    const valueEditor = await screen.findByLabelText(m.flow_run_review_current_payload());
+    await fireEvent.input(valueEditor, {
+      target: { value: JSON.stringify({ answer: "Edited answer." }, null, 2) }
     });
     await fireEvent.click(screen.getByRole("button", { name: m.flow_run_review_save_edit() }));
 
@@ -166,7 +172,7 @@ describe("FlowRunReviewCheckpointPanel", () => {
       runId: "run-1",
       checkpointId: "checkpoint-1",
       expectedCheckpointRevision: 1,
-      currentPayloadJson: { text: "Edited answer." }
+      editedValue: { answer: "Edited answer." }
     });
   });
 
@@ -227,9 +233,9 @@ describe("FlowRunReviewCheckpointPanel", () => {
       props: { flowId: "flow-1", runId: "run-1", eneo: eneo as unknown as Eneo }
     });
 
-    const payloadEditor = await screen.findByLabelText(m.flow_run_review_current_payload());
-    await fireEvent.input(payloadEditor, {
-      target: { value: JSON.stringify({ text: "Edited answer." }, null, 2) }
+    const valueEditor = await screen.findByLabelText(m.flow_run_review_current_payload());
+    await fireEvent.input(valueEditor, {
+      target: { value: JSON.stringify({ answer: "Edited answer." }, null, 2) }
     });
     await fireEvent.click(screen.getByRole("button", { name: m.flow_run_review_save_edit() }));
 
@@ -237,7 +243,7 @@ describe("FlowRunReviewCheckpointPanel", () => {
     expect(screen.queryByText("backend readable fallback")).toBeNull();
   });
 
-  it("keeps invalid and non-object payloads out of edit requests", async () => {
+  it("keeps malformed JSON values out of edit requests", async () => {
     const edit = vi.fn();
     const eneo = buildEneo({ activeCheckpoint: buildCheckpoint("awaiting_review", 1), edit });
 
@@ -245,8 +251,8 @@ describe("FlowRunReviewCheckpointPanel", () => {
       props: { flowId: "flow-1", runId: "run-1", eneo: eneo as unknown as Eneo }
     });
 
-    const payloadEditor = await screen.findByLabelText(m.flow_run_review_current_payload());
-    await fireEvent.input(payloadEditor, {
+    const valueEditor = await screen.findByLabelText(m.flow_run_review_current_payload());
+    await fireEvent.input(valueEditor, {
       target: { value: "{bad" }
     });
     await fireEvent.click(screen.getByRole("button", { name: m.flow_run_review_save_edit() }));
@@ -254,11 +260,64 @@ describe("FlowRunReviewCheckpointPanel", () => {
     await screen.findByText(m.flow_run_review_payload_invalid());
     expect(edit).not.toHaveBeenCalled();
 
-    await fireEvent.input(payloadEditor, {
-      target: { value: "[]" }
+    await fireEvent.input(valueEditor, {
+      target: { value: '"a bare string is not a JSON step output"' }
     });
     await fireEvent.click(screen.getByRole("button", { name: m.flow_run_review_save_edit() }));
 
+    expect(edit).not.toHaveBeenCalled();
+  });
+
+  it("sends a text step's edited string without a JSON envelope", async () => {
+    const edit = vi.fn(async () => buildCheckpoint("edited", 2));
+    const textCheckpoint = {
+      ...buildCheckpoint("awaiting_review", 1),
+      output_type: "text" as const,
+      output_contract: null,
+      original_payload_json: { text: "Draft answer." },
+      current_payload_json: { text: "Draft answer." }
+    };
+    const eneo = buildEneo({ activeCheckpoint: textCheckpoint, edit });
+
+    render(FlowRunReviewCheckpointPanel, {
+      props: { flowId: "flow-1", runId: "run-1", eneo: eneo as unknown as Eneo }
+    });
+
+    const valueEditor = await screen.findByLabelText(m.flow_run_review_current_payload());
+    expect((valueEditor as HTMLTextAreaElement).value).toBe("Draft answer.");
+    await fireEvent.input(valueEditor, { target: { value: "Reviewed answer." } });
+    await fireEvent.click(screen.getByRole("button", { name: m.flow_run_review_save_edit() }));
+
+    await waitFor(() => expect(edit).toHaveBeenCalledTimes(1));
+    expect(edit).toHaveBeenCalledWith({
+      flowId: "flow-1",
+      runId: "run-1",
+      checkpointId: "checkpoint-1",
+      expectedCheckpointRevision: 1,
+      editedValue: "Reviewed answer."
+    });
+  });
+
+  it("offers approve and reject but not editing on a view-only checkpoint", async () => {
+    const edit = vi.fn();
+    const viewCheckpoint = {
+      ...buildCheckpoint("awaiting_review", 1),
+      review_mode: "view" as const
+    };
+    const eneo = buildEneo({ activeCheckpoint: viewCheckpoint, edit });
+
+    render(FlowRunReviewCheckpointPanel, {
+      props: { flowId: "flow-1", runId: "run-1", eneo: eneo as unknown as Eneo }
+    });
+
+    await screen.findByText(m.flow_run_review_view_only());
+    expect(
+      (screen.getByRole("button", { name: m.flow_run_review_save_edit() }) as HTMLButtonElement)
+        .disabled
+    ).toBe(true);
+    expect((screen.getByRole("button", { name: m.approve() }) as HTMLButtonElement).disabled).toBe(
+      false
+    );
     expect(edit).not.toHaveBeenCalled();
   });
 
