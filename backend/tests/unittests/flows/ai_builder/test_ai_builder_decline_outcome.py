@@ -11,10 +11,13 @@ from eneo.flows.ai_builder.ai_builder_decline_outcome import (
     decline_message,
     decline_reason_from_arguments,
 )
+from eneo.flows.ai_builder.ai_builder_domain_models import TargetKind
 from eneo.flows.ai_builder.ai_builder_events import encode_ai_builder_stream_event
+from eneo.flows.ai_builder.ai_builder_proposal_telemetry import ProposalTurnTelemetry
 from eneo.flows.ai_builder.ai_builder_proposal_tool_contracts import (
     forced_tool_choice,
 )
+from eneo.flows.ai_builder.ai_builder_telemetry import PLANNER_TELEMETRY_KEY
 from eneo.flows.ai_builder.ai_builder_tool_names import (
     DECLINE_FLOW_CHANGE_TOOL_NAME,
     PROPOSE_FLOW_TOOL_NAME,
@@ -24,7 +27,21 @@ from tests.unittests.flows.ai_builder.proposal_turn_builders import _make_contex
 from tests.unittests.flows.ai_builder.proposal_turn_test_doubles import (
     _make_submission,
     _make_tool_call,
+    _make_usage,
 )
+
+
+def _usage_tracker() -> ProposalTurnTelemetry:
+    tracker = ProposalTurnTelemetry(
+        request_id="r" * 64,
+        model="openai/gpt-5.4",
+        target_kind=TargetKind.CREATE,
+    )
+    tracker.record_response(
+        finish_reason="tool_calls",
+        usage=_make_usage(prompt_tokens=20, completion_tokens=10, total_tokens=30),
+    )
+    return tracker
 
 
 def _decline_context(repo: AsyncMock, **overrides: object):
@@ -32,6 +49,7 @@ def _decline_context(repo: AsyncMock, **overrides: object):
         "decline_tool_schema": build_decline_flow_change_tool_schema(),
         "compile_context": CreateCompileContext(ui_language="sv"),
         "request_id": "r" * 64,
+        "usage_tracker": _usage_tracker(),
     }
     defaults.update(overrides)
     return _make_context(**defaults)
@@ -106,6 +124,11 @@ async def test_a_model_change_request_is_declined_without_a_plan() -> None:
     repo.commit_turn.assert_awaited_once()
     stored = repo.commit_turn.await_args.kwargs["new_messages"]
     assert [message.role for message in stored] == ["assistant", "tool"]
+    # A declined turn costs a provider call, and the session's durable
+    # telemetry has to show it like any other committed turn.
+    telemetry = (stored[0].metadata or {})[PLANNER_TELEMETRY_KEY]
+    assert telemetry["total_tokens"] == 30
+    assert telemetry["tool_call_count"] == 1
     assert stored[0].tool_calls[0]["name"] == DECLINE_FLOW_CHANGE_TOOL_NAME
     assert stored[0].tool_calls[0]["arguments"] == {
         "reason": "model_choice_belongs_to_step_editor"
