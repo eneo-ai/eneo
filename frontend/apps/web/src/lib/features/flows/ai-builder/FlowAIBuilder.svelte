@@ -3,7 +3,7 @@
   import { getLocale } from "$lib/paraglide/runtime";
   import { resolve } from "$app/paths";
   import { onMount, tick } from "svelte";
-  import { SvelteSet } from "svelte/reactivity";
+  import { SvelteMap, SvelteSet } from "svelte/reactivity";
   import * as AlertDialog from "$lib/components/ui/alert-dialog/index.js";
   import { Button } from "$lib/components/ui/button/index.js";
   import { Skeleton } from "$lib/components/ui/skeleton/index.js";
@@ -138,11 +138,24 @@
     }
     return found;
   });
+  // The purpose is a value like "interpret_input"; its words belong to the
+  // question that offered it, so they come from there and are never invented.
+  const purposeLabels = $derived.by(() => {
+    const labels = new SvelteMap<string, string>();
+    const question = runtimeFieldsQuestionId ? newestQuestion(runtimeFieldsQuestionId) : null;
+    for (const option of question?.options ?? []) {
+      if (option.value != null) labels.set(String(option.value), option.label);
+      if (option.id) labels.set(option.id, option.label);
+    }
+    return labels;
+  });
   const runtimeFields = $derived(
     (confirmedFieldAnswer?.fields ?? []).map((field) => ({
       label: field.value.label,
       type: String(field.value.type),
-      required: field.value.required === true
+      required: field.value.required === true,
+      purpose: purposeLabels.get(String(field.purpose)) ?? null,
+      options: field.value.options ?? []
     }))
   );
   const runtimeFieldsQuestionId = $derived(confirmedFieldAnswer?.questionId ?? null);

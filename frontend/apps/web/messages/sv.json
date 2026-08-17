@@ -6347,5 +6347,8 @@
   "ai_builder_requirements_field_required_count_one": "1 obligatoriskt",
   "ai_builder_requirements_fields_more": "+{count} till",
   "ai_builder_requirements_show_all_fields": "Visa alla {count}",
-  "ai_builder_question_confirm_fields": "Bekräfta {count} fält · {required} obligatoriska"
+  "ai_builder_question_confirm_fields": "Bekräfta {count} fält · {required} obligatoriska",
+  "ai_builder_requirements_fields_show_detail": "Visa detaljer",
+  "ai_builder_requirements_fields_hide_detail": "Dölj detaljer",
+  "ai_builder_requirements_field_options": "Val: {options}"
 }

@@ -1140,6 +1140,62 @@ describe("FlowAIBuilder confirm, build and review", () => {
     expect(screen.queryByText(m.ai_builder_confirm_change_pending())).toBeNull();
   });
 
+  it("can show exactly what each runtime field does before it is signed", async () => {
+    const fieldQuestion = question(
+      "runtime_metadata_field_details",
+      "Vad ska den som kör flödet fylla i?",
+      [{ id: "interpret_input", label: "Använd för att förstå indata" }],
+      { input_field_collection: true }
+    );
+    const { fetch } = makeFetch({
+      sessions: [
+        makeSession({
+          conversation: [
+            userMessage("u1", "Sammanfatta rapporter"),
+            assistantMessage("a1", "", { question: fieldQuestion }),
+            userMessage("u2", "Ort (ort)", {
+              question_answer: {
+                kind: "structured_question_answer",
+                question_id: "runtime_metadata_field_details",
+                input_fields: [
+                  {
+                    value: {
+                      name: "ort",
+                      label: "Ort",
+                      type: "select",
+                      required: true,
+                      options: ["Sundsvall", "Washington, D.C."]
+                    },
+                    purpose: "interpret_input"
+                  }
+                ]
+              }
+            }),
+            assistantMessage("a2", "", { requirements_summary: SUMMARY })
+          ]
+        })
+      ]
+    });
+    renderShell({ fetch, stream: makeStream().stream, resumeSessionId: "s-1" });
+
+    await screen.findByRole("heading", { name: m.ai_builder_requirements_title() });
+    // The chip stays short; what the field actually does is one click away on
+    // the card itself, not behind a screen change.
+    expect(screen.getByText(m.ai_builder_requirements_runtime_fields())).toBeTruthy();
+    await fireEvent.click(
+      screen.getByRole("button", { name: m.ai_builder_requirements_fields_show_detail() })
+    );
+
+    // The purpose is worded by the question that offered it, never invented,
+    // and an option containing a comma survives as one option.
+    expect(await screen.findByText(/Använd för att förstå indata/)).toBeTruthy();
+    expect(
+      screen.getByText(
+        m.ai_builder_requirements_field_options({ options: "Sundsvall · Washington, D.C." })
+      )
+    ).toBeTruthy();
+  });
+
   it("does not claim answers on a run where nothing was asked", async () => {
     // The common live case: the description settles every slot, so the server
     // asks nothing and every row is derived.

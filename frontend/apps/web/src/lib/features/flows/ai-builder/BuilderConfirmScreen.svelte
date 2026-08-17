@@ -49,7 +49,13 @@
     /** What the person running the flow fills in before each run. Not what
      *  Eneo produces — that is the content list — and not something the card
      *  can read off a decision row, which only names the option chosen. */
-    runtimeFields?: { label: string; type: string; required: boolean }[];
+    runtimeFields?: {
+      label: string;
+      type: string;
+      required: boolean;
+      purpose?: string | null;
+      options?: string[];
+    }[];
     runtimeFieldsQuestionId?: string | null;
     /** No structured question was asked before this summary. */
     noQuestions: boolean;
@@ -183,6 +189,13 @@
   const RUNTIME_FIELD_CHIP_CAP = 6;
   const CONTENT_FIELD_CHIP_CAP = 10;
   let allRuntimeFieldsShown = $state(false);
+  // Simple by default, complete on demand: the chips answer "which fields",
+  // this answers "and exactly what will they do", without a wall of detail on
+  // a card whose job is to be readable.
+  let runtimeFieldDetails = $state(false);
+  const hasRuntimeFieldDetail = $derived(
+    runtimeFields.some((field) => field.purpose || (field.options?.length ?? 0) > 0)
+  );
   const shownRuntimeFields = $derived(
     allRuntimeFieldsShown ? runtimeFields : runtimeFields.slice(0, RUNTIME_FIELD_CHIP_CAP)
   );
@@ -490,39 +503,76 @@
             </div>
             <p class="text-secondary mt-0.5 text-xs text-pretty">
               {m.ai_builder_requirements_runtime_fields_lead()}
-            </p>
-            <ul class="mt-2 flex list-none flex-wrap gap-1.5 p-0">
-              {#each shownRuntimeFields as field, fieldIndex (fieldIndex)}
-                <li
-                  class="border-default inline-flex h-[1.625rem] items-center gap-1.5 rounded-full border px-2.5 text-[0.78125rem]"
-                  class:bg-secondary={!field.required}
-                  class:text-primary={!field.required}
-                  class:bg-accent-dimmer={field.required}
-                  class:text-accent-stronger={field.required}
+              {#if hasRuntimeFieldDetail}
+                <button
+                  type="button"
+                  class="text-accent-stronger ml-1 font-semibold"
+                  aria-expanded={runtimeFieldDetails}
+                  onclick={() => (runtimeFieldDetails = !runtimeFieldDetails)}
                 >
-                  <span class="font-medium">{field.label}</span>
-                  <span class="opacity-45" aria-hidden="true">·</span>
-                  <span class="opacity-70">{fieldTypeLabel(field.type)}</span>
-                  {#if field.required}
-                    <span class="opacity-45" aria-hidden="true">·</span>
-                    <span class="opacity-70">{m.ai_builder_requirements_field_required()}</span>
-                  {/if}
-                </li>
-              {/each}
-              {#if runtimeFields.length > shownRuntimeFields.length}
-                <li>
-                  <button
-                    type="button"
-                    class="text-accent-stronger inline-flex h-[1.625rem] items-center text-[0.78125rem] font-semibold"
-                    onclick={() => (allRuntimeFieldsShown = true)}
-                  >
-                    {m.ai_builder_requirements_show_all_fields({
-                      count: String(runtimeFields.length)
-                    })}
-                  </button>
-                </li>
+                  {runtimeFieldDetails
+                    ? m.ai_builder_requirements_fields_hide_detail()
+                    : m.ai_builder_requirements_fields_show_detail()}
+                </button>
               {/if}
-            </ul>
+            </p>
+            {#if runtimeFieldDetails}
+              <dl
+                class="border-dimmer mt-2 flex flex-col divide-y divide-[var(--border-dimmer)] border-t border-b"
+                transition:slide={{ duration: reducedMotion ? 0 : 180, easing: cubicOut }}
+              >
+                {#each runtimeFields as field, detailIndex (detailIndex)}
+                  <div class="grid gap-x-4 gap-y-0.5 py-2 sm:grid-cols-[12.5rem_1fr]">
+                    <dt class="text-primary text-[0.8125rem] font-medium">{field.label}</dt>
+                    <dd class="text-secondary text-[0.8125rem]">
+                      {fieldTypeLabel(field.type)}{field.required
+                        ? ` · ${m.ai_builder_requirements_field_required()}`
+                        : ""}{field.purpose ? ` · ${field.purpose}` : ""}
+                      {#if field.options?.length}
+                        <span class="mt-0.5 block text-xs">
+                          {m.ai_builder_requirements_field_options({
+                            options: field.options.join(" · ")
+                          })}
+                        </span>
+                      {/if}
+                    </dd>
+                  </div>
+                {/each}
+              </dl>
+            {:else}
+              <ul class="mt-2 flex list-none flex-wrap gap-1.5 p-0">
+                {#each shownRuntimeFields as field, fieldIndex (fieldIndex)}
+                  <li
+                    class="border-default inline-flex h-[1.625rem] items-center gap-1.5 rounded-full border px-2.5 text-[0.78125rem]"
+                    class:bg-secondary={!field.required}
+                    class:text-primary={!field.required}
+                    class:bg-accent-dimmer={field.required}
+                    class:text-accent-stronger={field.required}
+                  >
+                    <span class="font-medium">{field.label}</span>
+                    <span class="opacity-45" aria-hidden="true">·</span>
+                    <span class="opacity-70">{fieldTypeLabel(field.type)}</span>
+                    {#if field.required}
+                      <span class="opacity-45" aria-hidden="true">·</span>
+                      <span class="opacity-70">{m.ai_builder_requirements_field_required()}</span>
+                    {/if}
+                  </li>
+                {/each}
+                {#if runtimeFields.length > shownRuntimeFields.length}
+                  <li>
+                    <button
+                      type="button"
+                      class="text-accent-stronger inline-flex h-[1.625rem] items-center text-[0.78125rem] font-semibold"
+                      onclick={() => (allRuntimeFieldsShown = true)}
+                    >
+                      {m.ai_builder_requirements_show_all_fields({
+                        count: String(runtimeFields.length)
+                      })}
+                    </button>
+                  </li>
+                {/if}
+              </ul>
+            {/if}
           </section>
         {/if}
 
