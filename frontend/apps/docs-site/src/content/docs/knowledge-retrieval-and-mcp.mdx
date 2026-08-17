@@ -157,8 +157,16 @@ tool names are `search_knowledge`, `read_source`, `describe_source`, and
 
 | Strategy | Behavior | Typical question |
 | --- | --- | --- |
-| `specific` | Fetch a small candidate set, apply an autocut, and keep a high-precision result set. | "When does the recycling center open?" |
+| `specific` | Fetch a small candidate set, apply an autocut, keep a high-precision result set, and expand the best match with its neighboring document chunks. | "When does the recycling center open?" |
 | `overview` | Over-fetch, diversify results across documents, and cap passages per document so one document does not dominate. | "Explain the municipality's approach to continuity planning." |
+
+A specific search additionally returns the chunks immediately before and after
+the highest-ranked match, read from the same active document version. These
+neighbors restore context that chunking removed, such as the table header above
+a matched row or the sentence that introduces a matched list. Semantic matches
+keep their similarity `score`; a contextual neighbor instead carries a
+`context_for_chunk` marker naming the anchor chunk it supports, so the model
+never sees an artificial relevance score. Overview searches are not expanded.
 
 The model can pass `within` with a source ID from
 `list_knowledge_sources` or a document ID from an earlier result. This narrows
@@ -216,8 +224,10 @@ sequenceDiagram
 
 The knowledge tools are deliberately paged and capped:
 
-- a search call cannot return more than 20 chunks;
-- specific search normally returns at most 6 chunks;
+- a search call cannot return more than 20 semantically ranked chunks;
+- specific search normally returns at most 6 semantic matches, plus up to two
+  adjacent context chunks around the best match, bounding default output at 8
+  chunks;
 - overview search normally returns at most 15 diversified chunks;
 - full documents, source descriptions, and attached files use offsets for
   continuation;
