@@ -2,8 +2,10 @@ import base64
 import hashlib
 import hmac
 import json
+import re
 import time
 from typing import Any
+from urllib.parse import parse_qs, urlsplit
 from uuid import UUID
 
 from eneo.files.file_models import (
@@ -144,6 +146,50 @@ def verify_file_original_download_token(token: str) -> dict[str, Any] | None:
     if payload is None or payload.get("aud") != FILE_ORIGINAL_DOWNLOAD_AUDIENCE:
         return None
     return payload
+
+
+# Path suffix of a signed original-download URL (the shape minted by
+# build_signed_original_download_url); matched host-agnostically because the
+# HMAC token is the sole authorizer.
+_FILE_ORIGINAL_DOWNLOAD_PATH = re.compile(
+    r"/api/v1/files/(?P<file_id>[0-9a-fA-F-]{36})/original/download/?$"
+)
+
+
+def parse_file_reference_url(url: str) -> tuple[UUID, str] | None:
+    """Extract ``(file_id, token)`` from a signed original-download URL.
+
+    Host-agnostic on purpose: the signed token is the sole authorizer, so
+    links minted against either the public origin or the tool-facing
+    reference base URL both resolve. The inverse of
+    :func:`build_signed_original_download_url`; the token is not verified
+    here.
+    """
+    try:
+        parts = urlsplit(url)
+    except ValueError:
+        return None
+    match = _FILE_ORIGINAL_DOWNLOAD_PATH.search(parts.path)
+    if match is None:
+        return None
+    tokens = parse_qs(parts.query).get("token")
+    if not tokens or not tokens[0]:
+        return None
+    try:
+        file_id = UUID(match.group("file_id"))
+    except ValueError:
+        return None
+    return file_id, tokens[0]
+
+
+def looks_like_reference_url(url: str) -> bool:
+    """Whether ``url`` has the shape of a signed attachment reference.
+
+    Shape only, no verification: lets infrastructure recognize a reference in
+    tool arguments (e.g. to hint at the built-in reader when an external tool
+    fails) without authorizing anything.
+    """
+    return parse_file_reference_url(url) is not None
 
 
 def build_signed_original_download_url(

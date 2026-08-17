@@ -47,14 +47,7 @@ from eneo.object_content.runtime import (
     StorageCapability,
 )
 from eneo.tenants.tenant import TenantState
-from eneo.users.user import (
-    UserAdd,
-    UserAddAdmin,
-    UserPublic,
-    UserState,
-    UserUpdate,
-    UserUpdatePublic,
-)
+from eneo.users.user import UserState
 from tests.fixtures import TEST_USER
 
 
@@ -196,7 +189,7 @@ def test_policy_put_boundary_accepts_json_safe_maximum_and_rejects_next_value(
             yield
 
     session = Session()
-    user = TEST_USER.model_copy(update={"is_platform_admin": True})
+    user = TEST_USER
 
     class Container:
         @staticmethod
@@ -286,26 +279,10 @@ def test_policy_conflicts_have_stable_machine_readable_codes() -> None:
     assert ObjectStoreTargetNotSelectable.code == "object_store_target_not_selectable"
 
 
-def test_tenant_user_write_schema_cannot_escalate_platform_authority() -> None:
-    for schema in (UserAdd, UserAddAdmin, UserUpdate, UserUpdatePublic):
-        assert "is_platform_admin" not in schema.model_fields
-    assert "is_platform_admin" in UserPublic.model_fields
-    projected = UserPublic(
-        **TEST_USER.model_copy(update={"is_platform_admin": True}).model_dump()
-    )
-    assert projected.is_platform_admin is True
-
-
 @pytest.mark.asyncio
 async def test_storage_authority_requires_current_active_eligibility() -> None:
-    eligible = TEST_USER.model_copy(update={"is_platform_admin": True})
+    eligible = TEST_USER
     await require_storage_administration(eligible)
-
-    # The separate platform flag is not what grants storage administration:
-    # the storage permission is, and the Owner role carries it by default.
-    await require_storage_administration(
-        TEST_USER.model_copy(update={"is_platform_admin": False})
-    )
 
     ineligible = (
         eligible.model_copy(update={"state": UserState.INACTIVE}),
@@ -341,7 +318,7 @@ def test_policy_mutation_composes_existing_session_and_identity_fences() -> None
     assert route.responses[409]["model"].__name__ == "GeneralError"
 
 
-def test_inventory_read_composes_existing_platform_authority_fences() -> None:
+def test_inventory_read_composes_existing_storage_authority_fences() -> None:
     endpoint = getattr(
         deployment_policy_router,
         "get_object_content_inventory",
@@ -470,7 +447,7 @@ def test_policy_put_resolves_shared_container_once_before_readiness(
             assert session.in_transaction()
             return policy
 
-    user = TEST_USER.model_copy(update={"is_platform_admin": True})
+    user = TEST_USER
     container = SimpleNamespace(session=lambda: session, user=lambda: user)
 
     async def resolve_container():
@@ -692,7 +669,7 @@ async def test_policy_put_projects_after_its_compare_and_swap_transaction(
         ),
         SimpleNamespace(
             session=lambda: session,
-            user=lambda: TEST_USER.model_copy(update={"is_platform_admin": True}),
+            user=lambda: TEST_USER,
         ),
     )
 

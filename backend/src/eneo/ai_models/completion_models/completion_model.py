@@ -417,7 +417,8 @@ class ModelKwargs(BaseModel):
             "top_k",
         ):
             capability = getattr(supported, field_name)
-            if not capability.supported and getattr(self, field_name) is not None:
+            value = getattr(self, field_name)
+            if not capability.accepts(value):
                 updates[field_name] = None
         if not updates:
             return self

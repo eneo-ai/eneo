@@ -37,6 +37,7 @@ from eneo.files.file_reference import url_only_file_ids
 from eneo.files.file_service import FileService
 from eneo.governance_policy.domain.policy_resolver import (
     select_effective_completion_model,
+    select_effective_reasoning_effort,
 )
 from eneo.help_assistants.application.ask_guard import assert_not_helper_assistant
 from eneo.help_assistants.infrastructure.help_assistant_assignment_history_repo import (  # noqa: E501
@@ -921,9 +922,16 @@ class AssistantService:
 
     @staticmethod
     def _context_model(
-        assistant: Assistant, *, effective_config: "EffectiveConfig | None"
+        assistant: Assistant,
+        *,
+        effective_config: "EffectiveConfig | None",
+        current_model: "CompletionModel | None | NotProvided" = NOT_PROVIDED,
     ) -> "CompletionModel | None":
-        model = assistant.completion_model
+        model = (
+            assistant.completion_model
+            if isinstance(current_model, NotProvided)
+            else current_model
+        )
         if effective_config is None or not effective_config.models_enforced:
             return model
         resolved_model = select_effective_completion_model(
@@ -1258,8 +1266,8 @@ class AssistantService:
         assistant = space.get_assistant(assistant_id=assistant_id)
 
         # Access to the personal default assistant requires PERSONAL_CHAT.
-        # That permission permits model selection only; broader configuration
-        # changes additionally require ASSISTANTS below.
+        # That permission permits model selection and, when policy allows it,
+        # reasoning effort. Broader changes require ASSISTANTS below.
         is_personal_default = (
             space.is_personal()
             and space.default_assistant is not None
@@ -1281,12 +1289,21 @@ class AssistantService:
                 },
             )
 
+        # Personal-chat clients must send only this field. A wider kwargs object
+        # deliberately falls back to the protected assistant-settings path.
+        reasoning_effort_only_update = (
+            completion_model_kwargs is not None
+            and completion_model_kwargs.model_fields_set == {"reasoning_effort"}
+        )
+        protected_completion_model_kwargs = (
+            None if reasoning_effort_only_update else completion_model_kwargs
+        )
         extended_update_requested = any(
             value is not None
             for value in (
                 name,
                 prompt,
-                completion_model_kwargs,
+                protected_completion_model_kwargs,
                 logging_enabled,
                 groups,
                 websites,
@@ -1315,7 +1332,8 @@ class AssistantService:
         ):
             raise UnauthorizedException(
                 "The personal_chat permission only allows changing the "
-                "personal assistant's completion model.",
+                "personal assistant's completion model or policy-permitted "
+                "reasoning effort.",
                 code="forbidden_action",
                 context={
                     "resource_type": "assistant",
@@ -1325,6 +1343,17 @@ class AssistantService:
             )
 
         update_effective_config: "EffectiveConfig | None | NotProvided" = NOT_PROVIDED
+        if is_personal_default and reasoning_effort_only_update:
+            update_effective_config = await self._resolve_effective_config(
+                space=space, assistant=assistant
+            )
+            if not can_edit_assistants and (
+                update_effective_config is None
+                or not update_effective_config.reasoning_effort_user_configurable
+            ):
+                raise BadRequestException(
+                    "Reasoning effort is managed by the personal assistant policy"
+                )
         if prompt is not None:
             update_effective_config = await self._resolve_effective_config(
                 space=space, assistant=assistant
@@ -1369,6 +1398,42 @@ class AssistantService:
                     "The completion model is not enabled in the space."
                 )
             completion_model = space.get_completion_model(completion_model_id)
+
+        if completion_model_kwargs is not None:
+            kwargs_model = completion_model
+            if (
+                is_personal_default
+                and reasoning_effort_only_update
+                and not isinstance(update_effective_config, NotProvided)
+            ):
+                kwargs_model = self._context_model(
+                    assistant,
+                    effective_config=update_effective_config,
+                    current_model=(
+                        completion_model
+                        if completion_model is not None
+                        else assistant.completion_model
+                    ),
+                )
+            if kwargs_model is None:
+                kwargs_model = assistant.completion_model
+            if kwargs_model is None:
+                raise BadRequestException(
+                    "Select a completion model before configuring model settings"
+                )
+            filtered_kwargs = completion_model_kwargs.filter_unsupported(
+                kwargs_model.get_supported_model_kwargs()
+            )
+            if filtered_kwargs != completion_model_kwargs:
+                raise BadRequestException(
+                    "Model settings contain a value unsupported by the selected model"
+                )
+            if is_personal_default and reasoning_effort_only_update:
+                completion_model_kwargs = assistant.completion_model_kwargs.model_copy(
+                    update={
+                        "reasoning_effort": completion_model_kwargs.reasoning_effort
+                    }
+                )
 
         attachments = None
         if attachment_ids is not None:
@@ -2643,6 +2708,7 @@ class AssistantService:
         completion_model_override: "CompletionModel | None" = None
         mcp_servers_override: "list[MCPServer] | None" = None
         prompt_override: str | None = None
+        model_kwargs_override: ModelKwargs | None = None
         effective_config = await self._resolve_effective_config(
             space=space, assistant=assistant_to_ask
         )
@@ -2677,6 +2743,24 @@ class AssistantService:
                 and effective_config.enforced_prompt_text
             ):
                 prompt_override = effective_config.enforced_prompt_text
+
+            if effective_config.reasoning_policy_configured:
+                selected_model = (
+                    completion_model_override or assistant_to_ask.completion_model
+                )
+                if selected_model is not None:
+                    effective_reasoning_effort = select_effective_reasoning_effort(
+                        selected_model=selected_model,
+                        stored_effort=(
+                            assistant_to_ask.completion_model_kwargs.reasoning_effort
+                        ),
+                        effective_config=effective_config,
+                    )
+                    model_kwargs_override = (
+                        assistant_to_ask.completion_model_kwargs.model_copy(
+                            update={"reasoning_effort": effective_reasoning_effort}
+                        )
+                    )
 
         effective_completion_model = (
             completion_model_override or assistant_to_ask.completion_model
@@ -2863,19 +2947,32 @@ class AssistantService:
                 source_labels=assistant_to_ask.knowledge_source_labels(),
             )
 
-        # URL-only attachments: when file text is withheld from the prompt in
-        # favor of signed reference URLs, attach the loopback files server so
-        # the model always has at least one tool that can read them. External
-        # servers coexist; tool descriptions steer the choice.
+        # Referenced attachments: whenever signed reference URLs render in the
+        # prompt, attach the loopback files server so the model always has at
+        # least one tool that can read them (URL-only files depend on it; for
+        # inlined files it still pages into text the window truncated).
+        # External servers coexist; tool descriptions steer the choice.
         files_mcp_server = None
         if internal_mcp.files:
+            seen_labels: set[str] = set()
+            attachment_labels: list[str] = []
+            for file in [*files, *history_files]:
+                if file.id not in internal_mcp.referenced_file_ids:
+                    continue
+                if file.name in seen_labels:
+                    continue
+                seen_labels.add(file.name)
+                attachment_labels.append(file.name)
             files_mcp_server = await build_files_mcp_server(
                 token=mint_scoped_token(),
                 tenant_id=self.user.tenant_id,
+                attachment_labels=attachment_labels,
             )
             logger.info(
-                "[FILES] assistant=%s files tool attached (%d url-only attachments)",
+                "[FILES] assistant=%s files tool attached "
+                "(%d referenced attachments, %d url-only)",
                 assistant_to_ask.id,
+                len(internal_mcp.referenced_file_ids),
                 len(internal_mcp.url_only_file_ids),
             )
         logger.info(
@@ -2909,6 +3006,7 @@ class AssistantService:
                 web_search_results=web_search_results,
                 require_tool_approval=require_tool_approval,
                 completion_model_override=completion_model_override,
+                model_kwargs_override=model_kwargs_override,
                 mcp_servers_override=mcp_servers_override,
                 prompt_override=prompt_override,
                 completion_prompt_files=completion_file_inputs.completion_prompt_files,

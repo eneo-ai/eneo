@@ -8,6 +8,7 @@ behavior.
 from __future__ import annotations
 
 import logging
+from collections.abc import Mapping
 from typing import Literal
 from uuid import UUID
 
@@ -23,6 +24,16 @@ class ModelKwargCapability(BaseModel):
     maximum: float | None = None
     step: float | None = None
     options: list[str] | None = None
+
+    def accepts(self, value: object | None) -> bool:
+        """Whether a typed model-setting value is allowed by this capability."""
+        if value is None:
+            return True
+        if not self.supported:
+            return False
+        if self.control == "select":
+            return self.options is not None and value in self.options
+        return True
 
 
 class SupportedModelKwargs(BaseModel):
@@ -57,6 +68,28 @@ def _reasoning_effort_select() -> ModelKwargCapability:
     )
 
 
+def reasoning_effort_options_from_model_info(
+    model_info: Mapping[str, object],
+) -> list[str]:
+    """Project LiteLLM reasoning levels, using its standard levels as fallback."""
+    if model_info.get("supports_reasoning") is not True:
+        return []
+
+    options: list[str] = []
+    if model_info.get("supports_none_reasoning_effort") is True:
+        options.append("none")
+    if model_info.get("supports_minimal_reasoning_effort") is True:
+        options.append("minimal")
+    if model_info.get("supports_low_reasoning_effort") is not False:
+        options.append("low")
+    options.extend(("medium", "high"))
+    if model_info.get("supports_xhigh_reasoning_effort") is True:
+        options.append("xhigh")
+    if model_info.get("supports_max_reasoning_effort") is True:
+        options.append("max")
+    return options
+
+
 def _default_supported_model_kwargs(*, reasoning: bool) -> SupportedModelKwargs:
     if reasoning:
         return SupportedModelKwargs(reasoning_effort=_reasoning_effort_select())
@@ -86,6 +119,7 @@ def snapshot_supported_model_kwargs(
     supported_params: list[str] | None,
     *,
     reasoning: bool,
+    reasoning_effort_options: list[str] | None = None,
 ) -> SupportedModelKwargs:
     """Convert LiteLLM discovery data into persisted Eneo capabilities.
 
@@ -102,6 +136,11 @@ def snapshot_supported_model_kwargs(
         return _default_supported_model_kwargs(reasoning=reasoning)
 
     supported = set(supported_params)
+    reasoning_options = (
+        reasoning_effort_options
+        if reasoning_effort_options is not None
+        else ["low", "medium", "high"]
+    )
     snapshot = SupportedModelKwargs(
         temperature=(
             _slider_capability(minimum=0, maximum=2, step=0.01)
@@ -117,9 +156,9 @@ def snapshot_supported_model_kwargs(
             ModelKwargCapability(
                 supported=True,
                 control="select",
-                options=["none", "low", "medium", "high"],
+                options=reasoning_options,
             )
-            if "reasoning_effort" in supported
+            if "reasoning_effort" in supported and reasoning_options
             else ModelKwargCapability()
         ),
         verbosity=(

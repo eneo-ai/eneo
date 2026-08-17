@@ -24,7 +24,7 @@ _POSTGRES_13_IMAGE = (
     "pgvector/pgvector:pg13@"
     "sha256:751a89c96f7c32cb8133472f711c274853378fb5f8b55dd9fa0e9d3f1471bfc3"
 )
-_PREVIOUS_REVISION = "202608101300"
+_PREVIOUS_REVISION = "202608121500"
 _CHUNK_REVISION = "202607311121"
 _INDEX = "ix_info_blobs_integration_knowledge_chunking"
 

@@ -1,6 +1,7 @@
 <script lang="ts">
   import { Page, Settings } from "$lib/components/layout";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager.js";
+  import { hasPermission } from "$lib/core/hasPermission.js";
 
   import { Button, Input, Tooltip } from "@eneo/ui";
   import { IconSparkles } from "@eneo/icons/sparkles";
@@ -53,9 +54,9 @@
   // connected store file text is always inlined, so the toggle is locked and
   // says why, with a link on to the setup page for those who can act on it.
   const objectStorageMissing = $derived(!data.settings.object_store_configured);
-  // Only platform admins can connect a store — the storage page disables every
-  // control for anyone else — so nobody else is pointed at it.
-  const canConfigureStorage = $derived(data.user.is_platform_admin === true);
+  // The storage controls require the storage permission and live inside the
+  // admin area, so only users who can reach and use that page are pointed at it.
+  const canConfigureStorage = $derived(hasPermission(data.user)({ allOf: ["admin", "storage"] }));
 
   const {
     state: { currentSpace },

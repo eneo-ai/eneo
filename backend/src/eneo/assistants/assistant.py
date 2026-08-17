@@ -460,6 +460,7 @@ class Assistant(Entity):
         web_search_results: Sequence["WebSearchResult"] | None = None,
         require_tool_approval: bool = False,
         completion_model_override: Optional[CompletionModel] = None,
+        model_kwargs_override: ModelKwargs | None = None,
         mcp_servers_override: Optional[list["MCPServer"]] = None,
         prompt_override: str | None = None,
         completion_prompt_files: list["File"] | None = None,
@@ -550,7 +551,11 @@ class Assistant(Entity):
             session=session,
             stream=stream,
             extended_logging=self.logging_enabled,
-            model_kwargs=self.completion_model_kwargs,
+            model_kwargs=(
+                model_kwargs_override
+                if model_kwargs_override is not None
+                else self.completion_model_kwargs
+            ),
             version=version,
             use_image_generation=self.is_default,
             web_search_results=list(web_search_results or []),

@@ -4,6 +4,7 @@ import type {
   ModelKwargs,
   SupportedModelKwargs
 } from "@eneo/eneo-js";
+import { m } from "$lib/paraglide/messages";
 
 export type { ModelKwargCapability, SupportedModelKwargs };
 
@@ -72,6 +73,27 @@ export function shouldShowModelSpecificParametersInfo(
   model: CompletionModelWithSupportedKwargs | null | undefined
 ): boolean {
   return !supportsBehaviorPresets(model) && hasModelSpecificSettings(model);
+}
+
+export function getModelKwargOptionLabel(option: string): string {
+  switch (option) {
+    case "none":
+      return m.none();
+    case "minimal":
+      return m.parameter_option_minimal();
+    case "low":
+      return m.parameter_option_low();
+    case "medium":
+      return m.parameter_option_medium();
+    case "high":
+      return m.parameter_option_high();
+    case "xhigh":
+      return m.parameter_option_extra_high();
+    case "max":
+      return m.parameter_option_maximum();
+    default:
+      return option.replaceAll("_", " ");
+  }
 }
 
 export function filterSupportedModelKwargs(

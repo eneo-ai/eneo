@@ -12,7 +12,7 @@ a foreign key, so without this the common no-drift case has to prove the absence
 differing row across all active blobs.
 
 Revision ID: 202607311121
-Revises: 202608101300
+Revises: 202608121500
 Create Date: 2026-07-31 11:21:00.000000
 """
 
@@ -21,7 +21,7 @@ from collections.abc import Sequence
 from alembic import op
 
 revision: str = "202607311121"
-down_revision: str | None = "202608101300"
+down_revision: str | None = "202608121500"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

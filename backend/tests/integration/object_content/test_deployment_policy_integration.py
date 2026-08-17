@@ -10,7 +10,6 @@ from eneo.database.tables.object_content_policy_table import (
     ObjectContentDeploymentPolicy,
 )
 from eneo.database.tables.roles_table import Roles
-from eneo.database.tables.users_table import Users
 from eneo.main.container.container import Container, SessionProxy
 from eneo.object_content.content import StorageKind
 from eneo.object_content.deployment_policy import (
@@ -50,10 +49,6 @@ async def test_policy_put_returns_the_committed_projection(
 ) -> None:
     await _seed_policy()
     async with db_container() as container:
-        session = container.session()
-        stored_user = await session.get(Users, admin_user.id)
-        assert stored_user is not None
-        stored_user.is_platform_admin = True
         token = container.auth_service().create_access_token_for_user(admin_user)
 
     response = await client.put(
@@ -213,12 +208,20 @@ async def test_global_inventory_requires_the_storage_permission(
         headers=headers,
     )
     assert permitted.status_code == 200, permitted.text
-    inventory = permitted.json()["inventory"]
-    assert len(inventory) <= 12
+    body = permitted.json()
+    inventory = body["inventory"]
+    assert len(inventory) <= 48
     assert all(
-        set(fact) == {"target", "state", "count", "bytes", "oldest_created_at"}
+        set(fact) == {"owner", "target", "state", "count", "bytes", "oldest_created_at"}
         for fact in inventory
     )
+    allocation = body["postgresql_allocation"]
+    assert allocation is None or set(allocation) == {
+        "total_bytes",
+        "inline_content_bytes",
+        "searchable_knowledge_bytes",
+        "other_bytes",
+    }
 
 
 @pytest.mark.integration

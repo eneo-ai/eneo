@@ -7,11 +7,14 @@ from uuid import UUID, uuid4
 
 from sqlalchemy import (
     and_,
+    case,
     delete,
     exists,
     func,
+    literal,
     or_,
     select,
+    text,
     union_all,
     update,
 )
@@ -33,6 +36,7 @@ from eneo.database.tables.object_content_table import (
 )
 from eneo.object_content.content import (
     ContentFailureCode,
+    ContentOwner,
     ContentState,
     ObjectContentBusyError,
     ObjectContentStateError,
@@ -97,6 +101,24 @@ class ContentStateFacts:
 
 
 @dataclass(frozen=True, slots=True)
+class ContentInventoryFacts:
+    owner: ContentOwner
+    storage_kind: StorageKind
+    state: ContentState
+    count: int
+    size_bytes: int
+    oldest_created_at: datetime | None
+
+
+@dataclass(frozen=True, slots=True)
+class PostgresqlAllocationFacts:
+    total_bytes: int
+    inline_content_bytes: int
+    searchable_knowledge_bytes: int
+    other_bytes: int
+
+
+@dataclass(frozen=True, slots=True)
 class ObjectContentHealthFacts:
     states: tuple[ContentStateFacts, ...]
     integrity_failures: int
@@ -106,28 +128,24 @@ class ObjectContentHealthFacts:
     last_object_cycle_completed_at: datetime | None
 
 
+CONTENT_REFERENCE_OWNER_COLUMNS = (
+    (ContentOwner.FILE_CONTENT, FileContentReferences.content_id),
+    (ContentOwner.KNOWLEDGE_FILE, InfoBlobContentReferences.content_id),
+    (ContentOwner.ICON, IconContentReferences.content_id),
+)
+
+
 def _no_concrete_references() -> ColumnElement[bool]:
     return and_(
-        ~exists(
-            select(FileContentReferences.content_id).where(
-                FileContentReferences.content_id == ObjectContents.id
-            )
-        ),
-        ~exists(
-            select(InfoBlobContentReferences.content_id).where(
-                InfoBlobContentReferences.content_id == ObjectContents.id
-            )
-        ),
-        ~exists(
-            select(IconContentReferences.content_id).where(
-                IconContentReferences.content_id == ObjectContents.id
-            )
-        ),
+        *(
+            ~exists(select(content_id).where(content_id == ObjectContents.id))
+            for _owner, content_id in CONTENT_REFERENCE_OWNER_COLUMNS
+        )
     )
 
 
 class ObjectContentReconciliationRepository:
-    """Private batched SQL used only by the object-content reconciler."""
+    """Batched SQL for object-content lifecycle and administrative read models."""
 
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
@@ -358,15 +376,12 @@ class ObjectContentReconciliationRepository:
 
         content_ids = tuple(row.id for row in rows)
         reference_ids = union_all(
-            select(FileContentReferences.content_id.label("content_id")).where(
-                FileContentReferences.content_id.in_(content_ids)
-            ),
-            select(InfoBlobContentReferences.content_id.label("content_id")).where(
-                InfoBlobContentReferences.content_id.in_(content_ids)
-            ),
-            select(IconContentReferences.content_id.label("content_id")).where(
-                IconContentReferences.content_id.in_(content_ids)
-            ),
+            *(
+                select(content_id.label("content_id")).where(
+                    content_id.in_(content_ids)
+                )
+                for _owner, content_id in CONTENT_REFERENCE_OWNER_COLUMNS
+            )
         ).subquery()
         counted = await self._session.execute(
             select(reference_ids.c.content_id, func.count())
@@ -1276,7 +1291,7 @@ class ObjectContentReconciliationRepository:
         await self._session.flush()
 
     async def health_facts(self) -> ObjectContentHealthFacts:
-        states = await self.inventory_facts()
+        states = await self._content_state_facts()
         integrity_failures = await self._session.scalar(
             select(func.count()).where(
                 ObjectContents.failure_code.in_(
@@ -1315,7 +1330,7 @@ class ObjectContentReconciliationRepository:
             last_object_cycle_completed_at=last_cycle,
         )
 
-    async def inventory_facts(self) -> tuple[ContentStateFacts, ...]:
+    async def _content_state_facts(self) -> tuple[ContentStateFacts, ...]:
         grouped = await self._session.execute(
             select(
                 ObjectContents.storage_kind,
@@ -1334,6 +1349,93 @@ class ObjectContentReconciliationRepository:
                 oldest_created_at=oldest,
             )
             for storage_kind, state, count, size_bytes, oldest in grouped.all()
+        )
+
+    async def inventory_facts(self) -> tuple[ContentInventoryFacts, ...]:
+        reference_owners = union_all(
+            *(
+                select(
+                    content_id.label("content_id"),
+                    literal(owner.value).label("owner"),
+                )
+                for owner, content_id in CONTENT_REFERENCE_OWNER_COLUMNS
+            )
+        ).subquery()
+        owners = (
+            select(
+                reference_owners.c.content_id,
+                case(
+                    (
+                        func.count(func.distinct(reference_owners.c.owner)) == 1,
+                        func.min(reference_owners.c.owner),
+                    ),
+                    else_=ContentOwner.OTHER.value,
+                ).label("owner"),
+            )
+            .group_by(reference_owners.c.content_id)
+            .subquery()
+        )
+        owner = func.coalesce(owners.c.owner, ContentOwner.OTHER.value)
+        grouped = await self._session.execute(
+            select(
+                owner,
+                ObjectContents.storage_kind,
+                ObjectContents.state,
+                func.count(),
+                func.coalesce(func.sum(ObjectContents.size_bytes), 0),
+                func.min(ObjectContents.created_at),
+            )
+            .outerjoin(owners, owners.c.content_id == ObjectContents.id)
+            .group_by(owner, ObjectContents.storage_kind, ObjectContents.state)
+            .order_by(owner, ObjectContents.storage_kind, ObjectContents.state)
+        )
+        return tuple(
+            ContentInventoryFacts(
+                owner=ContentOwner(owner_value),
+                storage_kind=StorageKind(storage_kind),
+                state=ContentState(state),
+                count=int(count),
+                size_bytes=int(size_bytes),
+                oldest_created_at=oldest,
+            )
+            for owner_value, storage_kind, state, count, size_bytes, oldest in grouped.all()
+        )
+
+    async def postgresql_allocation_facts(
+        self,
+    ) -> PostgresqlAllocationFacts | None:
+        total, inline_content, info_blobs, info_blob_chunks = (
+            await self._session.execute(
+                text(
+                    """
+                    SELECT
+                        pg_database_size(current_database()),
+                        pg_total_relation_size(
+                            to_regclass('inline_content_payloads')
+                        ),
+                        pg_total_relation_size(to_regclass('info_blobs')),
+                        pg_total_relation_size(to_regclass('info_blob_chunks'))
+                    """
+                )
+            )
+        ).one()
+        if any(
+            value is None
+            for value in (total, inline_content, info_blobs, info_blob_chunks)
+        ):
+            return None
+
+        total_bytes = int(total)
+        inline_content_bytes = int(inline_content)
+        searchable_knowledge_bytes = int(info_blobs) + int(info_blob_chunks)
+        return PostgresqlAllocationFacts(
+            total_bytes=total_bytes,
+            inline_content_bytes=inline_content_bytes,
+            searchable_knowledge_bytes=searchable_knowledge_bytes,
+            other_bytes=max(
+                total_bytes - inline_content_bytes - searchable_knowledge_bytes,
+                0,
+            ),
         )
 
     async def reset_remote_inventory(self) -> None:

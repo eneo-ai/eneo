@@ -3,6 +3,7 @@ from typing import Annotated, cast
 
 from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel, Field
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from eneo.authentication.auth_dependencies import (
@@ -15,6 +16,7 @@ from eneo.main.logging import get_logger
 from eneo.object_content.content import (
     ContentMoveFailureCode,
     ContentMoveState,
+    ContentOwner,
     ContentState,
     ObjectContentUnavailableError,
     StorageKind,
@@ -81,11 +83,19 @@ class CapabilityPublic(BaseModel):
 
 
 class InventoryPublic(BaseModel):
+    owner: ContentOwner
     target: StorageKind
     state: ContentState
     count: int
     bytes: int
     oldest_created_at: datetime | None
+
+
+class PostgresqlAllocationPublic(BaseModel):
+    total_bytes: int
+    inline_content_bytes: int
+    searchable_knowledge_bytes: int
+    other_bytes: int
 
 
 class DeploymentPolicyPublicValues(BaseModel):
@@ -109,6 +119,7 @@ class DeploymentPolicyPublic(BaseModel):
 
 class ObjectContentInventoryPublic(BaseModel):
     inventory: tuple[InventoryPublic, ...]
+    postgresql_allocation: PostgresqlAllocationPublic | None
 
 
 class MoveStatePublic(BaseModel):
@@ -192,9 +203,22 @@ async def _read_inventory(session: AsyncSession) -> ObjectContentInventoryPublic
             session
         ).inventory_facts()
 
+    allocation_facts = None
+    try:
+        async with session.begin():
+            allocation_facts = await ObjectContentReconciliationRepository(
+                session
+            ).postgresql_allocation_facts()
+    except SQLAlchemyError as exc:
+        logger.warning(
+            "PostgreSQL storage allocation is unavailable",
+            extra={"error_type": type(exc).__name__},
+        )
+
     return ObjectContentInventoryPublic(
         inventory=tuple(
             InventoryPublic(
+                owner=fact.owner,
                 target=fact.storage_kind,
                 state=fact.state,
                 count=fact.count,
@@ -202,7 +226,19 @@ async def _read_inventory(session: AsyncSession) -> ObjectContentInventoryPublic
                 oldest_created_at=fact.oldest_created_at,
             )
             for fact in inventory_facts
-        )
+        ),
+        postgresql_allocation=(
+            None
+            if allocation_facts is None
+            else PostgresqlAllocationPublic(
+                total_bytes=allocation_facts.total_bytes,
+                inline_content_bytes=allocation_facts.inline_content_bytes,
+                searchable_knowledge_bytes=(
+                    allocation_facts.searchable_knowledge_bytes
+                ),
+                other_bytes=allocation_facts.other_bytes,
+            )
+        ),
     )
 
 
