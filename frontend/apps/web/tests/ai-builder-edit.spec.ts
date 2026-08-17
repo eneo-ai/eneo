@@ -469,10 +469,7 @@ test.describe("AI builder edit journeys", () => {
     });
   });
 
-  test("an earlier answer can be changed from the conversation sheet", async ({
-    page,
-    request
-  }) => {
+  test("an earlier answer can be changed from the conversation", async ({ page, request }) => {
     test.setTimeout(120_000);
     await page.goto("/");
     const spaceId = await personalSpaceId(page, request);
@@ -534,17 +531,15 @@ test.describe("AI builder edit journeys", () => {
       timeout: 20_000
     });
 
-    // The sheet separates what is settled from what is still being asked.
+    // The transcript separates what is settled from what is still being asked.
     await page.getByRole("button", { name: new RegExp(`^${CONVERSATION_BUTTON}`) }).click();
-    const sheet = page.getByRole("dialog");
-    const changeAnswer = sheet.getByRole("button", { name: EDIT_ANSWER });
+    const changeAnswer = page.getByRole("button", { name: EDIT_ANSWER });
     await expect(changeAnswer).toBeVisible();
-    await expect(sheet.locator("p", { hasText: ANSWER_IN_VIEW })).toContainText(
+    await expect(page.locator("p", { hasText: ANSWER_IN_VIEW })).toContainText(
       secondQuestion.question
     );
 
     await changeAnswer.click();
-    await expect(sheet).toBeHidden();
     await expect(page.getByRole("heading", { name: firstQuestion.question })).toBeVisible();
     await expect(page.getByText(EDITING_NOTE)).toBeVisible();
 

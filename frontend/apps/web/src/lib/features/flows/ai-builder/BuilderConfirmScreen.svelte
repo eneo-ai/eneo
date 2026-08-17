@@ -1,5 +1,6 @@
 <script lang="ts">
   import { m } from "$lib/paraglide/messages";
+  import { SvelteMap } from "svelte/reactivity";
   import { slide } from "svelte/transition";
   import { cubicOut } from "svelte/easing";
   import { prefersReducedMotion } from "$lib/core/prefersReducedMotion";
@@ -77,6 +78,20 @@
     onchange,
     oneditanswer
   }: Props = $props();
+
+  // A row the user answered can be corrected where it is read. The link is the
+  // answer text itself: the server names decisions in the user's own words.
+  const questionIdByAnswerLabel = $derived.by(() => {
+    const byLabel = new SvelteMap<string, string>();
+    for (const item of answered) {
+      const label = item.answerLabel.trim().toLocaleLowerCase();
+      if (label) byLabel.set(label, item.questionId);
+    }
+    return byLabel;
+  });
+  function questionForDecision(decision: string): string | null {
+    return questionIdByAnswerLabel.get(decision.trim().toLocaleLowerCase()) ?? null;
+  }
 
   const reducedMotion = prefersReducedMotion();
   // The change box lives under the card it rewrites, never in a side panel:
@@ -209,11 +224,27 @@
             </h3>
             <dl class="mt-1.5 flex flex-col">
               {#each summary.key_decisions as decision (decision.topic)}
+                {@const decisionQuestionId = questionForDecision(decision.decision)}
                 <div
-                  class="border-dimmer grid gap-x-4 gap-y-0.5 border-t py-2.5 sm:grid-cols-[12.5rem_1fr]"
+                  class="border-dimmer grid items-baseline gap-x-4 gap-y-0.5 border-t py-2.5 sm:grid-cols-[12.5rem_1fr_auto]"
                 >
                   <dt class="text-secondary text-[0.8125rem]">{decision.topic}</dt>
                   <dd class="text-primary text-[0.85rem] font-medium">{decision.decision}</dd>
+                  {#if decisionQuestionId && !readOnly && !confirmed}
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      class="justify-self-start sm:justify-self-end"
+                      {disabled}
+                      onclick={() => oneditanswer(decisionQuestionId)}
+                    >
+                      {m.ai_builder_question_change()}
+                    </Button>
+                  {:else}
+                    <span class="text-secondary text-xs sm:justify-self-end">
+                      {m.ai_builder_requirements_derived()}
+                    </span>
+                  {/if}
                 </div>
               {/each}
               <div

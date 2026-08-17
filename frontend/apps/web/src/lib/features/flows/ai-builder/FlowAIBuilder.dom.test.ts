@@ -874,40 +874,39 @@ describe("FlowAIBuilder confirm, build and review", () => {
 
 // ---- Conversation sheet ------------------------------------------------------------
 
-describe("FlowAIBuilder conversation sheet", () => {
-  const openSheet = async () => {
+describe("FlowAIBuilder conversation screen", () => {
+  const openConversation = async () => {
     await fireEvent.click(button(new RegExp(escape(m.ai_builder_conversation_button()))));
-    return await screen.findByRole("dialog");
+    return await screen.findByRole("heading", { name: m.ai_builder_conversation_title() });
   };
 
-  it("shows the transcript without a composer while the task screen owns one", async () => {
+  it("replaces the phase screen with the transcript and goes back again", async () => {
     const { fetch } = makeFetch();
     renderShell({ fetch, stream: makeStream().stream });
     await screen.findByRole("heading", { name: m.ai_builder_task_title() });
 
-    const dialog = await openSheet();
+    await openConversation();
 
-    expect(within(dialog).getByText(m.ai_builder_conversation_title())).toBeTruthy();
-    expect(within(dialog).getByText(m.ai_builder_conversation_empty())).toBeTruthy();
-    expect(within(dialog).queryByRole("textbox")).toBeNull();
+    // The transcript is a screen, not a layer over one.
+    expect(screen.queryByRole("heading", { name: m.ai_builder_task_title() })).toBeNull();
+    expect(screen.getByText(m.ai_builder_conversation_empty())).toBeTruthy();
+
+    await fireEvent.click(button(m.ai_builder_conversation_back()));
+    expect(await screen.findByRole("heading", { name: m.ai_builder_task_title() })).toBeTruthy();
   });
 
-  it("keeps the pending question read-only and reopens an answered one from the sheet", async () => {
+  it("keeps the pending question read-only and reopens an answered one from the transcript", async () => {
     const { fetch } = makeFetch({ sessions: [answeredThenPendingSession()] });
     renderShell({ fetch, stream: makeStream().stream, resumeSessionId: "s-1" });
     await screen.findByRole("heading", { name: SOURCES_QUESTION.question });
 
-    const dialog = await openSheet();
+    await openConversation();
 
-    expect(within(dialog).getByText("Sammanfatta rapporter till en PDF")).toBeTruthy();
-    expect(within(dialog).getByText(m.ai_builder_question_answer_in_view())).toBeTruthy();
-    expect(within(dialog).getByRole("textbox")).toBeTruthy();
+    expect(screen.getByText("Sammanfatta rapporter till en PDF")).toBeTruthy();
+    expect(screen.getByText(m.ai_builder_question_answer_in_view())).toBeTruthy();
 
-    await fireEvent.click(
-      within(dialog).getByRole("button", { name: m.ai_builder_conversation_edit_answer() })
-    );
+    await fireEvent.click(button(m.ai_builder_conversation_edit_answer()));
 
-    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
     expect(await screen.findByText(m.ai_builder_question_editing_note())).toBeTruthy();
     expect(screen.getByRole("heading", { name: FORMAT_QUESTION.question })).toBeTruthy();
   });

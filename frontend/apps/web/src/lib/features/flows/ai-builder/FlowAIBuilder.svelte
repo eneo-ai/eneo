@@ -18,7 +18,7 @@
   import BuilderConfirmScreen from "./BuilderConfirmScreen.svelte";
   import BuilderBuildScreen from "./BuilderBuildScreen.svelte";
   import BuilderTurnAlert from "./BuilderTurnAlert.svelte";
-  import BuilderConversationSheet from "./BuilderConversationSheet.svelte";
+  import BuilderConversationScreen from "./BuilderConversationScreen.svelte";
   import BuilderReviewScreen from "./BuilderReviewScreen.svelte";
   import { getAIBuilderService } from "./FlowAIBuilderService.svelte.ts";
   import type {
@@ -47,8 +47,8 @@
   } = getSpacesManager();
 
   let taskScreenRef = $state<BuilderTaskScreen | undefined>();
-  let sheetRef = $state<BuilderConversationSheet | undefined>();
-  let sheetOpen = $state(false);
+  let conversationRef = $state<BuilderConversationScreen | undefined>();
+  let conversationOpen = $state(false);
   let pendingSavedFlowStepScope = $state<AIBuilderSavedFlowStepScope | null>(null);
   let showReplaceEditSessionDialog = $state(false);
   let resumeFailed = $state(false);
@@ -199,9 +199,12 @@
     return null;
   });
 
-  type Screen = "task" | "question" | "reply" | "confirm" | "build" | "review";
+  type Screen = "task" | "question" | "reply" | "confirm" | "build" | "review" | "conversation";
   const screen = $derived<Screen>(
     (() => {
+      // The transcript is a screen of its own; it replaces the phase screen
+      // instead of covering it.
+      if (conversationOpen) return "conversation";
       if (viewingPhase === 2) return "review";
       if (viewingPhase === 1) return "build";
       // Changing an earlier answer happens on the confirmation, above the card
@@ -214,9 +217,6 @@
       if (latestSummary && phaseIndex > 0) return "confirm";
       return "reply";
     })()
-  );
-  const screenOwnsComposer = $derived(
-    screen === "task" || (screen === "reply" && !service.isStreaming)
   );
 
   // ---- Screen change: announce it, then hand focus to the new heading -------
@@ -270,7 +270,7 @@
   async function focusScreenHeading() {
     await tick();
     const active = document.activeElement;
-    // Never yank the caret out of the sheet composer mid-sentence.
+    // Never yank the caret out of a composer mid-sentence.
     if (
       active instanceof HTMLElement &&
       (active.tagName === "TEXTAREA" || active.tagName === "INPUT" || active.isContentEditable)
@@ -334,7 +334,7 @@
   function handleEditAnswer(questionId: string) {
     editingQuestionId = questionId;
     peekPhase = 0;
-    sheetOpen = false;
+    conversationOpen = false;
   }
 
   function handleRequirementsConfirm() {
@@ -363,7 +363,8 @@
   }
 
   function handleSuggestChange(intent: AIBuilderSuggestChangeIntent) {
-    void sheetRef?.focusComposer(intent);
+    conversationOpen = true;
+    void conversationRef?.focusComposer(intent);
   }
 
   function handleRailSelect(phase: BuilderPhaseIndex) {
@@ -453,7 +454,7 @@
   async function confirmSavedFlowStepReplacement() {
     const scope = pendingSavedFlowStepScope;
     if (scope === null) return;
-    sheetRef?.resetComposerContext();
+    conversationRef?.resetComposerContext();
     await service.startFreshSession("edit");
     pendingSavedFlowStepScope = null;
     await activateSavedFlowStep(scope);
@@ -467,7 +468,7 @@
   );
 
   function handleStartOver() {
-    sheetRef?.resetComposerContext();
+    conversationRef?.resetComposerContext();
     void service.startFreshSession("edit");
   }
 </script>
@@ -552,12 +553,12 @@
             variant="outline"
             size="sm"
             class="gap-1.5"
-            aria-expanded={sheetOpen}
+            aria-pressed={conversationOpen}
             aria-label={m.ai_builder_conversation_button_aria({
               count: String(visibleMessageCount)
             })}
             title={m.ai_builder_conversation_button_title()}
-            onclick={() => (sheetOpen = true)}
+            onclick={() => (conversationOpen = !conversationOpen)}
           >
             <IconMessageSquare class="size-3.5" />
             {m.ai_builder_conversation_button()}
@@ -578,10 +579,16 @@
       <BuilderTurnAlert
         {targetKind}
         suppressStreamError={generationFailedWithoutPlan}
-        onbeforestartfresh={() => sheetRef?.resetComposerContext()}
+        onbeforestartfresh={() => conversationRef?.resetComposerContext()}
       />
 
-      {#if screen === "task"}
+      {#if screen === "conversation"}
+        <BuilderConversationScreen
+          bind:this={conversationRef}
+          oneditanswer={handleEditAnswer}
+          onclose={() => (conversationOpen = false)}
+        />
+      {:else if screen === "task"}
         <BuilderTaskScreen
           bind:this={taskScreenRef}
           {targetKind}
@@ -631,7 +638,7 @@
             showGenerationFailure={true}
             onapplied={(detail) => onapplied?.(detail)}
             onsuggestchange={handleSuggestChange}
-            onshowconversation={() => (sheetOpen = true)}
+            onshowconversation={() => (conversationOpen = true)}
           />
         </div>
       {:else if screen === "build"}
@@ -647,7 +654,7 @@
             showGenerationFailure={generationFailedWithoutPlan}
             onapplied={(detail) => onapplied?.(detail)}
             onsuggestchange={handleSuggestChange}
-            onshowconversation={() => (sheetOpen = true)}
+            onshowconversation={() => (conversationOpen = true)}
           />
         </div>
       {:else}
@@ -661,13 +668,6 @@
       {/if}
     </div>
   </div>
-
-  <BuilderConversationSheet
-    bind:this={sheetRef}
-    bind:open={sheetOpen}
-    showComposer={!screenOwnsComposer}
-    oneditanswer={handleEditAnswer}
-  />
 {/if}
 
 <AlertDialog.Root bind:open={showReplaceEditSessionDialog}>

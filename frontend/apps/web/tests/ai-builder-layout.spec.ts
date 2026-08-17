@@ -139,6 +139,7 @@ const RAIL_REVIEWING = "Du granskar innan det skapas";
 const HOW_FLOW_WORKS = "Så fungerar flödet";
 const CONVERSATION_BUTTON = "Samtal";
 const CONVERSATION_TITLE = "Samtalet";
+const CONVERSATION_BACK = "Tillbaka";
 const CONFIRM_TITLE = "Så här har Eneo förstått uppgiften";
 const TASK_TITLE = "Vad ska flödet göra?";
 const PLAN_CARD = PLAN.proposal.spec.flow_name;
@@ -173,14 +174,23 @@ test.describe("AI builder phase shell", () => {
     await expect(page.getByRole("heading", { name: HOW_FLOW_WORKS })).toBeVisible();
   });
 
-  test("the conversation is one gesture away", async ({ page, request }) => {
+  test("the conversation is one gesture away and gives the phase back", async ({
+    page,
+    request
+  }) => {
     await openBuilder(page, request, "?session=plan-session");
-    await page.getByRole("button", { name: new RegExp(`^${CONVERSATION_BUTTON}`) }).click();
-    const sheet = page.getByRole("dialog");
-    await expect(sheet.getByText(CONVERSATION_TITLE)).toBeVisible();
-    await expect(sheet.getByText("Sammanfatta rapporter till en PDF")).toBeVisible();
-    await page.keyboard.press("Escape");
-    await expect(sheet).toBeHidden();
+    const conversationButton = page.getByRole("button", {
+      name: new RegExp(`^${CONVERSATION_BUTTON}`)
+    });
+    await conversationButton.click();
+
+    // A screen of its own: the plan is gone while the transcript is read.
+    await expect(page.getByRole("heading", { name: CONVERSATION_TITLE })).toBeVisible();
+    await expect(page.getByText("Sammanfatta rapporter till en PDF")).toBeVisible();
+    await expect(page.getByRole("heading", { name: HOW_FLOW_WORKS })).toBeHidden();
+
+    await page.getByRole("button", { name: CONVERSATION_BACK }).click();
+    await expect(page.getByRole("heading", { name: HOW_FLOW_WORKS })).toBeVisible();
   });
 
   test("a new task starts on the task screen with the composer", async ({ page, request }) => {

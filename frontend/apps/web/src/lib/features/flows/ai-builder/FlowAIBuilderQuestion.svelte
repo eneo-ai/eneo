@@ -584,6 +584,12 @@
     color: var(--text-secondary);
   }
 
+  /* The heading takes focus when a screen replaces another; that is a
+     programmatic move, not a keyboard one, so it must not draw a box. */
+  .question-title:focus:not(:focus-visible) {
+    outline: none;
+  }
+
   .question-title {
     @apply mt-2 text-[1.1875rem] leading-snug font-bold tracking-[-0.02em] text-pretty;
     color: var(--text-primary);
