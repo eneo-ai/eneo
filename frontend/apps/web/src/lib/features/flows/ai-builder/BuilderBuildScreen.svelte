@@ -38,7 +38,9 @@
   });
 </script>
 
-<div class="flex min-h-full justify-center px-7 pt-6 pb-10 max-lg:px-5 max-md:px-4 max-sm:pt-4">
+<div
+  class="flex min-h-full shrink-0 justify-center px-7 pt-6 pb-12 max-lg:px-5 max-md:px-4 max-sm:pt-4"
+>
   <div class="my-auto w-full max-w-[43.75rem] 2xl:max-w-[48.125rem]">
     {#if confirmedLine}
       <div

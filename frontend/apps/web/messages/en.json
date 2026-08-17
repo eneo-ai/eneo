@@ -4330,6 +4330,7 @@
   "ai_builder_confirm_note": "Nothing is created when you confirm.",
   "ai_builder_confirm_note_after": "You can still change the plan afterwards.",
   "ai_builder_confirm_change_answers": "Describe what should change",
+  "ai_builder_confirm_change_pending": "Eneo is working out the summary again …",
   "ai_builder_confirm_action": "Correct — draft the plan",
   "ai_builder_confirm_change_hint": "Describe what should change and Eneo recalculates the summary.",
   "ai_builder_confirm_change_example": "e.g. \"the result should be a Word document\"",

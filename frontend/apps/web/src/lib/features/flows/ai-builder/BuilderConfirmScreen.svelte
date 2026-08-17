@@ -5,6 +5,7 @@
   import { cubicOut } from "svelte/easing";
   import { prefersReducedMotion } from "$lib/core/prefersReducedMotion";
   import { Button } from "$lib/components/ui/button/index.js";
+  import { Skeleton } from "$lib/components/ui/skeleton/index.js";
   import * as Tooltip from "$lib/components/ui/tooltip/index.js";
   import IconInfo from "@lucide/svelte/icons/info";
   import BuilderChangeRequest from "./BuilderChangeRequest.svelte";
@@ -47,6 +48,9 @@
     confirmed: boolean;
     /** An earlier version was confirmed; this one replaced it and needs a fresh confirmation. */
     stale: boolean;
+    /** A turn is running: the card is waiting for Eneo to answer, and the user
+     *  needs to see that their correction went somewhere. */
+    pending?: boolean;
     /** The build phase (or later) already started from this confirmation. */
     readOnly?: boolean;
     /** Changing a published flow, so a reopened question must not propose
@@ -75,6 +79,7 @@
     noQuestions,
     confirmed,
     stale,
+    pending = false,
     readOnly = false,
     isEdit = false,
     disabled = false,
@@ -162,7 +167,9 @@
   const manualNotes = $derived(summary.manual_setup_notes ?? []);
 </script>
 
-<div class="flex min-h-full justify-center px-7 pt-6 pb-10 max-lg:px-5 max-md:px-4 max-sm:pt-4">
+<div
+  class="flex min-h-full shrink-0 justify-center px-7 pt-6 pb-16 max-lg:px-5 max-md:px-4 max-sm:pt-4 max-sm:pb-12"
+>
   <div class="confirm-screen my-auto w-full max-w-[43.75rem] 2xl:max-w-[48.125rem]">
     {#if unlistedAnswers.length > 0 && !readOnly}
       <div class="mb-4 flex flex-wrap items-center gap-2">
@@ -487,7 +494,17 @@
       </footer>
     </section>
 
-    {#if !readOnly && !confirmed}
+    {#if pending && !readOnly && !confirmed}
+      <div class="border-default bg-primary mt-3 rounded-xl border p-[1.125rem] max-sm:p-4">
+        <p class="text-secondary text-[0.8125rem]" role="status" aria-live="polite">
+          {m.ai_builder_confirm_change_pending()}
+        </p>
+        <div class="mt-3 flex flex-col gap-[0.4375rem]" aria-hidden="true">
+          <Skeleton class="bg-tertiary h-[0.6875rem] w-[74%] rounded" />
+          <Skeleton class="bg-tertiary h-[0.5625rem] w-[44%] rounded" />
+        </div>
+      </div>
+    {:else if !readOnly && !confirmed}
       <div class="mt-3">
         <BuilderChangeRequest
           bind:this={changeRequestRef}

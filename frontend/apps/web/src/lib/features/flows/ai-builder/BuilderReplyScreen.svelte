@@ -26,7 +26,9 @@
   }: Props = $props();
 </script>
 
-<div class="flex min-h-full justify-center px-7 pt-6 pb-10 max-lg:px-5 max-md:px-4 max-sm:pt-4">
+<div
+  class="flex min-h-full shrink-0 justify-center px-7 pt-6 pb-12 max-lg:px-5 max-md:px-4 max-sm:pt-4"
+>
   <div class="my-auto w-full max-w-[41.25rem] 2xl:max-w-[45.625rem]">
     <!-- With nothing to read and nothing to wait for there is no card: an
          empty box reads as something that failed to load. -->

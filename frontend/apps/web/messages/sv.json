@@ -4330,6 +4330,7 @@
   "ai_builder_confirm_note": "Inget skapas när du bekräftar.",
   "ai_builder_confirm_note_after": "Du kan fortfarande ändra planen efteråt.",
   "ai_builder_confirm_change_answers": "Beskriv vad som ska ändras",
+  "ai_builder_confirm_change_pending": "Eneo räknar om sammanfattningen …",
   "ai_builder_confirm_action": "Stämmer — utforma planen",
   "ai_builder_confirm_change_hint": "Beskriv vad som ska ändras, så räknar Eneo om sammanfattningen.",
   "ai_builder_confirm_change_example": "t.ex. «resultatet ska bli ett Word-dokument»",

@@ -614,6 +614,7 @@
           confirmed={service.isRequirementsSummaryConfirmed(latestSummary)}
           stale={summaryIsStale}
           readOnly={phaseIndex > 0}
+          pending={service.isStreaming}
           isEdit={targetKind === "edit"}
           disabled={service.isCreating || service.isStreaming}
           editingQuestion={editingQuestionMessage}
