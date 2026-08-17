@@ -43,6 +43,10 @@
     savedFlowStepScope: AIBuilderStepScopePresentation | null;
     attachments: AIBuilderAttachmentFile[];
     answered: AnsweredQuestion[];
+    /** The fields the user said they will fill in at run time. A decision can
+     *  only name the option that was chosen ("Lägg till rikare metadatafält"),
+     *  so without these the card never shows what the user actually defined. */
+    runtimeFields?: string[];
     /** No structured question was asked before this summary. */
     noQuestions: boolean;
     confirmed: boolean;
@@ -76,6 +80,7 @@
     savedFlowStepScope,
     attachments,
     answered,
+    runtimeFields = [],
     noQuestions,
     confirmed,
     stale,
@@ -403,6 +408,26 @@
             <ul class="divide-dimmer mt-1 flex flex-col divide-y">
               {#each manualNotes as note (note)}
                 <li class="text-secondary py-2 text-[0.8125rem] leading-relaxed">{note}</li>
+              {/each}
+            </ul>
+          </section>
+        {/if}
+
+        {#if runtimeFields.length > 0 && !savedFlowStepScope}
+          <section class="mt-[1.125rem]">
+            <h3 class="text-primary text-[0.8125rem] font-bold">
+              {m.ai_builder_requirements_runtime_fields({ count: String(runtimeFields.length) })}
+            </h3>
+            <p class="text-secondary mt-0.5 text-xs text-pretty">
+              {m.ai_builder_requirements_runtime_fields_lead()}
+            </p>
+            <ul class="mt-2 flex list-none flex-wrap gap-1.5 p-0">
+              {#each runtimeFields as field (field)}
+                <li
+                  class="border-default bg-secondary text-primary inline-flex h-[1.625rem] items-center rounded-full border px-2.5 text-[0.78125rem]"
+                >
+                  {field}
+                </li>
               {/each}
             </ul>
           </section>

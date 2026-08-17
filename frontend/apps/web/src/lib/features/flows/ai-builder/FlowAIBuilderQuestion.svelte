@@ -3,6 +3,7 @@
      from theme tokens via relative oklch() syntax, which the rule cannot see
      through */
   import { m } from "$lib/paraglide/messages";
+  import { getSuggestedFlowFormFieldRuntimeKey } from "$lib/features/flows/flowFormSchema";
   import { slide } from "svelte/transition";
   import { cubicOut } from "svelte/easing";
   import { prefersReducedMotion } from "$lib/core/prefersReducedMotion";
@@ -74,9 +75,22 @@
   let customSelected = $state(false);
   let customText = $state("");
   let textareaRef = $state<HTMLTextAreaElement | null>(null);
+  // The technical name follows the label the way the flow's own field editor
+  // suggests it — same helper, so a field named here and a field named there
+  // end up with the same key — until the user types one themselves.
+  function suggestFieldName(index: number) {
+    const field = inputFields[index];
+    if (!field || field.nameEdited) return;
+    field.variableName = getSuggestedFlowFormFieldRuntimeKey(
+      field.label,
+      inputFields.filter((_, i) => i !== index).map((other) => other.variableName)
+    );
+  }
+
   let inputFields = $state([
     {
       variableName: "",
+      nameEdited: false,
       label: "",
       fieldType: "text" as StructuredInputFieldType,
       required: false,
@@ -325,6 +339,7 @@
     if (inputFields.length >= 20) return;
     inputFields.push({
       variableName: "",
+      nameEdited: false,
       label: "",
       fieldType: "text",
       required: false,
@@ -381,11 +396,15 @@
           <div class="field-row">
             <label>
               <span>{m.ai_builder_question_field_label()}</span>
-              <input bind:value={field.label} {disabled} />
+              <input bind:value={field.label} oninput={() => suggestFieldName(index)} {disabled} />
             </label>
             <label>
               <span>{m.ai_builder_question_field_name()}</span>
-              <input bind:value={field.variableName} {disabled} />
+              <input
+                bind:value={field.variableName}
+                oninput={() => (field.nameEdited = true)}
+                {disabled}
+              />
             </label>
             <label>
               <span>{m.ai_builder_question_field_type()}</span>

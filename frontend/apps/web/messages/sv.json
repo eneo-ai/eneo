@@ -4283,6 +4283,8 @@
   "ai_builder_requirements_input": "Indata",
   "ai_builder_requirements_manual_notes": "Manuell konfiguration",
   "ai_builder_requirements_output": "Utdata",
+  "ai_builder_requirements_runtime_fields": "Fält användaren fyller i ({count})",
+  "ai_builder_requirements_runtime_fields_lead": "Från ditt svar. Fälten visas när flödet körs.",
   "ai_builder_requirements_superseded": "Ersatt av en nyare sammanfattning av kraven.",
   "ai_builder_requirements_title": "Så här har Eneo förstått uppgiften",
   "ai_builder_requirements_user_request": "Du bad om",

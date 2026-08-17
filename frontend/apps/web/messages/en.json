@@ -4283,6 +4283,8 @@
   "ai_builder_requirements_input": "Input",
   "ai_builder_requirements_manual_notes": "Manual setup",
   "ai_builder_requirements_output": "Output",
+  "ai_builder_requirements_runtime_fields": "Fields the user fills in ({count})",
+  "ai_builder_requirements_runtime_fields_lead": "From your answer. These appear when the flow runs.",
   "ai_builder_requirements_superseded": "Superseded by a newer requirements summary.",
   "ai_builder_requirements_title": "This is how Eneo understood the task",
   "ai_builder_requirements_user_request": "You asked for",
