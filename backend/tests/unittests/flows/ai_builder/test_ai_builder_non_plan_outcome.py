@@ -122,6 +122,18 @@ async def test_a_model_change_request_is_declined_without_a_plan() -> None:
     }
     repo.create_plan.assert_not_awaited()
     repo.commit_turn.assert_awaited_once()
+    # The plan this turn did not replace has to stay approvable, and the
+    # session leaves `awaiting_approval` only when a send starts.
+    repo.restore_awaiting_approval_after_answered_turn.assert_awaited_once()
+    assert repo.method_calls.index(
+        next(
+            call
+            for call in repo.method_calls
+            if call[0] == "restore_awaiting_approval_after_answered_turn"
+        )
+    ) < repo.method_calls.index(
+        next(call for call in repo.method_calls if call[0] == "commit_turn")
+    )
     stored = repo.commit_turn.await_args.kwargs["new_messages"]
     assert [message.role for message in stored] == ["assistant", "tool"]
     # A declined turn costs a provider call, and the session's durable

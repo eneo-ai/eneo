@@ -594,6 +594,36 @@ class AIBuilderRepository:
             lease=lease,
         )
 
+    async def restore_awaiting_approval_after_answered_turn(
+        self,
+        *,
+        turn: SessionSendTurn,
+    ) -> None:
+        """Give the plan back after a turn that answered instead of replacing it.
+
+        A send leaves `awaiting_approval` before anyone knows whether it will
+        produce a new plan. When it produced an answer — the Builder declining
+        a change, or naming the scope that can carry it — the plan the user is
+        looking at is still the current one and must stay approvable. A session
+        without a plan, or one another writer already moved, is left alone.
+        """
+
+        async with self._transaction():
+            await self.session.execute(
+                update(BuilderSessions)
+                .where(
+                    BuilderSessions.id == turn.session_id,
+                    BuilderSessions.tenant_id == turn.tenant_id,
+                    BuilderSessions.status == SessionStatus.CHATTING.value,
+                    BuilderSessions.latest_plan_id.isnot(None),
+                    *_lease_filters(turn.lease),
+                )
+                .values(
+                    status=SessionStatus.AWAITING_APPROVAL.value,
+                    updated_at=datetime.now(timezone.utc),
+                )
+            )
+
     async def update_session_status_without_send_lease(
         self,
         *,

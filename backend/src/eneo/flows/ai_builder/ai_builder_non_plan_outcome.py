@@ -171,6 +171,9 @@ async def persist_non_plan_turn(
             tool_call_id=tool_call_id,
         )
     )
+    # Before the turn is closed, while this send still holds the lease: the
+    # plan this turn did not replace goes back to being approvable.
+    await repo.restore_awaiting_approval_after_answered_turn(turn=turn)
     await repo.commit_turn(
         turn=turn,
         new_messages=conversation[new_messages_start:],
