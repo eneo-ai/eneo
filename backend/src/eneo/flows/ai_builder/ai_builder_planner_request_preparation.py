@@ -35,6 +35,7 @@ from eneo.flows.ai_builder.ai_builder_discovery_profile_builder import (
 )
 from eneo.flows.ai_builder.ai_builder_discovery_runtime import (
     build_discovery_runtime_result,
+    build_runtime_discovery_context,
 )
 from eneo.flows.ai_builder.ai_builder_domain_models import (
     BuilderPlan,
@@ -118,7 +119,9 @@ from eneo.flows.ai_builder.ai_builder_turn_controller import (
     resolve_turn_control,
 )
 from eneo.flows.ai_builder.planning_state import PlanningState
-from eneo.flows.ai_builder.planning_state_builder import apply_attested_requirements
+from eneo.flows.ai_builder.planning_state_builder import (
+    carry_forward_persisted_planner_state,
+)
 from eneo.flows.application.flow_authoring_snapshot import current_flow_authoring_spec
 from eneo.flows.assistant_authoring_snapshot import AssistantAuthoringSnapshots
 from eneo.flows.domain.mapped_execution_policy import (
@@ -250,17 +253,47 @@ async def prepare_planner_request(
         attachment_context=attachment_context_result,
     )
     if acknowledged_disclosure is not None:
-        # Nothing new was said, so nothing is re-read: the turn resolves from
-        # the very state whose disclosure the user just confirmed. That state
-        # was persisted before the user answered it, so the acceptance itself
-        # still has to be applied — deterministically, from the disclosure
-        # that was confirmed, not by re-reading the evidence behind it.
+        # Nothing new was said, so nothing is re-read — but the turn still
+        # reconstructs, because reconstruction is what the acceptance means.
+        # Regrading a copy of the persisted state was a second rule for what a
+        # confirmation settles, and the two disagreed the moment the session no
+        # longer held the value its disclosure had named: the copy could only
+        # confirm a value that already matched, while the reconstruction reads
+        # the accepted value as the answer. One confirmation turn then derived
+        # two architectures and the commit refused the one it had proposed. The
+        # reconstruction is deterministic and makes no provider call, and it is
+        # the state this turn's own `commit_turn` will persist.
         assert request.persisted_planning_state is not None
         discovery_analysis = DiscoveryAnalysis(issues=())
-        rebuilt_planning_state = request.persisted_planning_state.model_copy(deep=True)
-        apply_attested_requirements(rebuilt_planning_state, acknowledged_disclosure)
-        schema_direction_pending = False
-        control_schema_candidates: tuple[DeclaredSchemaCandidate, ...] = ()
+        acknowledged_context = await build_runtime_discovery_context(
+            request.conversation,
+            flow=request.flow,
+            tenant_id=request.tenant_id,
+            allow_classification=False,
+            attachment_context=attachment_context_result,
+            mapped_execution_policy=request.mapped_execution_policy,
+            prepared_schema_candidates=schema_candidates,
+            max_input_tokens=request.max_input_tokens,
+            max_output_tokens=request.max_output_tokens,
+            safety_buffer_tokens=(
+                request.budget_policy.conversation_safety_buffer_tokens
+            ),
+            minimum_conversation_tokens=(
+                request.budget_policy.minimum_conversation_budget_tokens
+            ),
+        )
+        rebuilt_planning_state = acknowledged_context.planning_state
+        carry_forward_persisted_planner_state(
+            rebuilt_planning_state,
+            request.persisted_planning_state,
+            attached_file_ids={file.id for file in request.attachment_files},
+        )
+        # A schema the user assigned is replayed from their own answer, never
+        # assumed settled: carry-forward cannot restore a declared schema, so
+        # asserting that nothing is pending here would deliver a proposal built
+        # without the input or output contract the user had chosen.
+        schema_direction_pending = acknowledged_context.schema_direction_pending
+        control_schema_candidates = acknowledged_context.schema_candidates
         slot_classification_metadata = None
         requirements_disclosure = acknowledged_disclosure
     else:
@@ -385,8 +418,9 @@ def _acknowledged_disclosure(
     re-interpret unchanged attachments and re-issue a summary the user had
     already confirmed, until the interaction limit.
 
-    The fast path reuses the persisted state that produced the confirmed
-    disclosure, so it may only run while that state still describes this turn.
+    Eligibility is what makes the turn reconstructable without reading anything
+    new: the confirmed conversation, this turn's attachments and the current
+    server policy must all still describe the disclosure being answered.
     Anything that could genuinely be new evidence — a missing or stale version,
     changed attachments or changed server policy — falls through to the
     ordinary path and earns a new disclosure. `resolve_requirements_state`

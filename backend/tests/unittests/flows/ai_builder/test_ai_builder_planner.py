@@ -3722,6 +3722,185 @@ async def test_a_first_create_turn_is_offered_no_way_to_decline() -> None:
     assert DECLINE_FLOW_CHANGE_TOOL_NAME not in system_prompt
 
 
+@pytest.mark.asyncio
+async def test_an_acknowledgment_resolves_the_requirements_it_confirms() -> None:
+    """A confirmation turn resolves from the state its own commit will persist.
+
+    The session can move between showing a disclosure and being answered: storing
+    the disclosure lets the next deterministic pass read its own prose, resolve
+    the runtime input for the first time, and apply the document-scope policy
+    default — which a medium-confidence reading can no longer displace. The
+    acknowledgment used to start from that persisted copy and could only confirm
+    a value that already matched, so it dropped the scope the user had just
+    accepted, kept the report disposition below commit grade, and derived an
+    architecture without it. `commit_turn` reconstructs the session from its
+    conversation, where the accepted value is the answer, so it derived the
+    disposition the user accepted and refused the architecture the same turn had
+    proposed — one confirmation, two architectures, and an internal error instead
+    of a plan.
+    """
+
+    planner = _make_planner()
+    disclosed_state = _document_architecture_state()
+    disclosed_state.resolved_slots["terminal_output"] = ResolvedSlot(
+        name="terminal_output",
+        value="pdf_document",
+        source="structured_answer",
+        confidence="high",
+        evidence=["question_answer:terminal_output"],
+    )
+    disclosed_state.resolved_slots["document_material_scope"] = ResolvedSlot(
+        name="document_material_scope",
+        value="multiple_documents_case",
+        source="model",
+        confidence="medium",
+        evidence=["quote:user_message:user-1:flera ansökningar"],
+        evidence_level="explicit",
+    )
+    disclosed_state.resolved_slots["report_disposition"] = ResolvedSlot(
+        name="report_disposition",
+        value="synthesized_overview",
+        source="model",
+        confidence="medium",
+        evidence=["quote:user_message:user-1:en samlad överblick"],
+        evidence_level="inferred",
+    )
+    disclosure = build_requirements_disclosure(disclosed_state, ui_language="en")
+
+    # What the session actually persisted once the disclosure was stored.
+    persisted = disclosed_state.model_copy(deep=True)
+    persisted.resolved_slots["document_material_scope"] = ResolvedSlot(
+        name="document_material_scope",
+        value="flexible_document_case",
+        source="policy_default",
+        confidence="medium",
+        evidence=["policy_default:document_material_scope=flexible_document_case"],
+    )
+    assert persisted.commit_grade_slot_value("report_disposition") is None
+
+    prepared = await _prepare_planner_request_for_test(
+        planner,
+        conversation=_confirmation_conversation(disclosure),
+        completion_model_route=_route(),
+        persisted_planning_state=persisted,
+    )
+
+    resolved = prepared.planning_state
+    assert (
+        resolved.commit_grade_slot_value("document_material_scope")
+        == "multiple_documents_case"
+    )
+    draft = derive_architecture_commit_draft(resolved)
+    assert draft is not None
+    assert draft.report_disposition == "synthesized_overview"
+
+
+@pytest.mark.asyncio
+async def test_an_acknowledgment_keeps_the_schema_the_user_assigned() -> None:
+    """A declared schema survives the confirmation that approved it.
+
+    Nothing carries a declared schema forward: persisted state is not reused
+    across a rebuild, and carry-forward deliberately refuses declared evidence
+    because the attachment it came from may be gone. The assignment is recovered
+    by replaying the user's own direction answer, so the acknowledgment has to
+    reconstruct through the owner that replays it. Reconstructing the slot
+    surface alone and calling the direction settled would hand the proposal a
+    flow with no input contract, and suppress the question that would have shown
+    it.
+    """
+
+    planner = _make_planner()
+    schema_file = _make_file(
+        '{"type":"object","properties":{"decision":{"type":"string"}}}',
+        name="ansokan.schema.json",
+        mimetype="application/json",
+    )
+    asked = await _prepare_planner_request_for_test(
+        planner,
+        conversation=[ConversationMessage(role="user", content="Build a flow")],
+        completion_model_route=_route(),
+        attachment_files=[schema_file],
+        max_input_tokens=100_000,
+    )
+    assert isinstance(asked, ServerOutputPrepared)
+    assert isinstance(asked.server_decision, AskCanonicalQuestion)
+    assert asked.server_decision.question is not None
+    input_option = next(
+        option.value
+        for option in asked.server_decision.question.question_data.options
+        if option.value.startswith("input:")
+    )
+
+    answered = [
+        ConversationMessage(role="user", content="Build a flow"),
+        ConversationMessage(
+            role="assistant",
+            content="Assign the schema.",
+            tool_calls=[
+                {
+                    "id": "schema-direction",
+                    "name": "ask_structured_question",
+                    "arguments": asked.server_decision.question.question_data.model_dump(
+                        mode="json"
+                    ),
+                }
+            ],
+        ),
+        ConversationMessage(
+            role="user",
+            content="",
+            metadata={
+                "question_answer": {
+                    "question_id": "schema_direction",
+                    "selected_values": [input_option],
+                }
+            },
+        ),
+    ]
+    assigned = await _prepare_planner_request_for_test(
+        planner,
+        conversation=answered,
+        completion_model_route=_route(),
+        attachment_files=[schema_file],
+        max_input_tokens=100_000,
+    )
+    assigned_state = assigned.planning_state
+    assert assigned_state.input_schema_evidence is not None
+    disclosure = build_requirements_disclosure(assigned_state, ui_language="en")
+
+    acknowledged = await _prepare_planner_request_for_test(
+        planner,
+        conversation=[
+            *answered,
+            ConversationMessage(
+                role="assistant",
+                content=disclosure.summary,
+                metadata={
+                    "requirements_summary": disclosure.model_dump(mode="json"),
+                    "requirements_version": disclosure.requirements_version,
+                },
+            ),
+            ConversationMessage(
+                role="user",
+                content="",
+                metadata={
+                    "requirements_confirmed": True,
+                    "requirements_version": disclosure.requirements_version,
+                },
+            ),
+        ],
+        completion_model_route=_route(),
+        attachment_files=[schema_file],
+        persisted_planning_state=assigned_state,
+        max_input_tokens=100_000,
+    )
+
+    assert (
+        acknowledged.planning_state.input_schema_evidence
+        == assigned_state.input_schema_evidence
+    )
+
+
 def _proposal_prepared_for_test(
     *,
     planning_state: PlanningState,
