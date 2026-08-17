@@ -799,8 +799,17 @@ export class FlowAIBuilderDriver {
         reviewTurnWithoutPlanEvent ||
         (requestBody.file_ids && requestBody.file_ids.length > 0) ||
         (!receivedUsageEvent && this.#state.currentPlan !== null) ||
+        // A question we refused to append has to be settled against the
+        // server, whatever the turn was: a free-text correction can reopen a
+        // question just as an answer can, and the transcript we judged it
+        // against still ends at the older answer.
+        // A question we refused to append has to be settled against the
+        // server, whatever the turn was: a free-text correction can reopen a
+        // question just as an answer can, and the transcript we judged it
+        // against still ends at the older answer.
+        receivedStaleQuestionEvent ||
         (requestBody.question_answer?.kind === "structured_question_answer" &&
-          (!receivedDurableStreamEvent || receivedStaleQuestionEvent));
+          !receivedDurableStreamEvent);
       if (shouldRefreshAfterStream && !abortController.signal.aborted) {
         await this.#refreshSession(owner);
       }

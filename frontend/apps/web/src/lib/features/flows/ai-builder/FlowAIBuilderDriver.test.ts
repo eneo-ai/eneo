@@ -2184,6 +2184,111 @@ describe("FlowAIBuilderDriver", () => {
     );
   });
 
+  it("refreshes when a free-text correction reopens an answered question", async () => {
+    // A correction is an ordinary message with no question_answer, and the
+    // server may answer it by asking an earlier question again. The stream
+    // event looks stale against a transcript that still ends at the old
+    // answer, so only the authoritative session can show the re-ask.
+    const reasked = {
+      question_id: "source_traceability",
+      question: "Ska källorna visas i rapporten i stället?",
+      options: [
+        { id: "none", label: "Inga källhänvisningar", value: "none" },
+        { id: "inline", label: "Källa per påstående", value: "inline" }
+      ],
+      selection_mode: "single" as const,
+      allow_custom: false,
+      requires_confirm: false
+    };
+    const refreshedSession = makeSession({
+      conversation: [
+        {
+          message_id: "assistant-source-question",
+          role: "assistant",
+          content: "Hur ska källor visas?",
+          timestamp: "2026-03-15T10:00:00Z",
+          question: {
+            question_id: "source_traceability",
+            question: "Hur ska källor visas i slutresultatet?",
+            options: [{ id: "none", label: "Inga källhänvisningar", value: "none" }],
+            selection_mode: "single",
+            allow_custom: true,
+            requires_confirm: false
+          }
+        },
+        {
+          message_id: "user-source-answer",
+          role: "user",
+          content: "Inga källhänvisningar",
+          timestamp: "2026-03-15T10:00:05Z",
+          question_answer: {
+            kind: "structured_question_answer",
+            question_id: "source_traceability",
+            selected_option_ids: ["none"],
+            selected_values: ["none"]
+          }
+        },
+        {
+          message_id: "user-correction",
+          role: "user",
+          content: "Jag vill ändra: källorna ska synas",
+          timestamp: "2026-03-15T10:00:10Z"
+        },
+        {
+          message_id: "assistant-reask",
+          role: "assistant",
+          content: "Då behöver jag veta hur.",
+          timestamp: "2026-03-15T10:00:15Z",
+          question: reasked
+        }
+      ]
+    });
+    const fetch = vi.fn().mockResolvedValueOnce(refreshedSession);
+    const { driver } = makeDriver({
+      fetchImpl: fetch,
+      streamImpl: vi.fn(async (_path, _init, handlers) => {
+        handlers.onMessage({ event: "question", data: JSON.stringify(reasked) });
+        completeStream(handlers);
+      })
+    });
+    driver.seedState({
+      session: makeSession(),
+      messages: [
+        {
+          role: "assistant",
+          content: "Hur ska källor visas?",
+          timestamp: 1,
+          question: {
+            question_id: "source_traceability",
+            question: "Hur ska källor visas i slutresultatet?",
+            options: [{ id: "none", label: "Inga källhänvisningar", value: "none" }],
+            selection_mode: "single",
+            allow_custom: true,
+            requires_confirm: false
+          }
+        },
+        {
+          role: "user",
+          content: "Inga källhänvisningar",
+          timestamp: 2,
+          questionAnswer: {
+            question_id: "source_traceability",
+            selected_option_ids: ["none"],
+            selected_values: ["none"]
+          }
+        }
+      ]
+    });
+
+    await driver.sendMessage("Jag vill ändra: källorna ska synas");
+
+    expect(fetch).toHaveBeenCalledOnce();
+    const newest = driver.state.messages.at(-1)?.question;
+    expect(newest?.question_id).toBe("source_traceability");
+    expect(newest?.question).toBe(reasked.question);
+    expect(driver.isQuestionAnswered("source_traceability")).toBe(false);
+  });
+
   it("forwards file_ids with AI Builder messages", async () => {
     const { driver, stream } = makeDriver({
       streamImpl: vi.fn(async (_path, init, handlers) => {
