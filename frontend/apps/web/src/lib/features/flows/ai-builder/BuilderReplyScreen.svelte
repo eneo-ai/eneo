@@ -36,9 +36,9 @@
           <p class="text-secondary text-[0.8125rem]" role="status" aria-live="polite">
             {m.ai_builder_reply_reading()}
           </p>
-          <div class="mt-3 flex flex-col gap-2" aria-hidden="true">
-            <Skeleton class="h-3 w-3/4 rounded" />
-            <Skeleton class="h-3 w-1/2 rounded" />
+          <div class="mt-3 flex flex-col gap-[0.4375rem]" aria-hidden="true">
+            <Skeleton class="bg-tertiary h-[0.6875rem] w-[74%] rounded" />
+            <Skeleton class="bg-tertiary h-[0.5625rem] w-[44%] rounded" />
           </div>
         {:else if assistantText}
           <p class="text-secondary text-[0.72rem] font-semibold">
