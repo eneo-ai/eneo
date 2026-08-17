@@ -137,12 +137,10 @@
         delegated: delegatedQuestionIds.has(id)
       }))
   );
-  const questionNumber = $derived.by(() => {
-    const id = questionMessage?.question?.question_id;
-    if (!id) return 1;
-    const index = askedQuestionIds.indexOf(id);
-    return index === -1 ? askedQuestionIds.length + 1 : index + 1;
-  });
+  // Only the server can number the questions it put to the user: a re-asked
+  // question keeps its number, and position in the transcript does not survive
+  // compaction. A record from before the field simply has no number.
+  const questionNumber = $derived(questionMessage?.question?.question_index ?? null);
 
   const latestSummaryMessageIndex = $derived.by(() => {
     for (let i = service.messages.length - 1; i >= 0; i -= 1) {
@@ -219,13 +217,17 @@
   );
   const screenAnnouncement = $derived.by(() => {
     switch (screen) {
-      case "question":
-        return questionMessage?.question
-          ? m.ai_builder_announce_question({
+      case "question": {
+        const question = questionMessage?.question;
+        if (!question) return "";
+        // An unnumbered question is announced by its words alone.
+        return questionNumber === null
+          ? question.question
+          : m.ai_builder_announce_question({
               number: String(questionNumber),
-              question: questionMessage.question.question
-            })
-          : "";
+              question: question.question
+            });
+      }
       case "confirm":
         return m.ai_builder_requirements_title();
       case "build":
@@ -634,7 +636,9 @@
         </div>
       {:else}
         <BuilderReplyScreen
-          waiting={service.isStreaming}
+          waiting={service.isStreaming ||
+            service.latestTurnState === "open" ||
+            service.latestTurnState === "processing"}
           assistantText={lastAssistantText}
           editContext={activeEditContext}
           editContextLabel={savedFlowStepScopeLabel}

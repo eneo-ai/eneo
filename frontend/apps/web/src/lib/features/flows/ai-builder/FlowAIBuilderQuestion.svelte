@@ -483,6 +483,15 @@
                   <span class="option-recommendation">{m.ai_builder_question_recommended()}</span>
                 {/if}
               </span>
+              {#if optionKey === recommendedKey && question.recommended_option_evidence}
+                <!-- The user's own words, so the recommendation is traceable
+                     rather than asserted. -->
+                <span class="option-evidence">
+                  {m.ai_builder_question_evidence({
+                    quote: question.recommended_option_evidence
+                  })}
+                </span>
+              {/if}
               {#if option.description}
                 <span class="option-description">{option.description}</span>
               {/if}
@@ -674,6 +683,12 @@
 
   .option-label-row {
     @apply flex flex-wrap items-center gap-1.5;
+  }
+
+  .option-evidence {
+    @apply mt-1 inline-flex self-start rounded-md px-2 py-1 text-xs;
+    color: var(--text-secondary);
+    background: var(--background-tertiary);
   }
 
   .option-recommendation {

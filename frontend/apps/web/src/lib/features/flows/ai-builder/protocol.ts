@@ -416,6 +416,12 @@ const questionEventDataSchema = z.object({
   // The option Eneo would settle on if the user hands the question back. Its
   // absence is the only signal that delegation is not offered here.
   recommended_option_id: z.string().nullable().optional(),
+  // The user's own words behind that recommendation — never Eneo's, never a
+  // policy default, and only ever alongside recommended_option_id.
+  recommended_option_evidence: z.string().nullable().optional(),
+  // 1-based place among the questions actually put to the user. There is no
+  // total: a re-asked question keeps its number and some slots never queue.
+  question_index: z.int().min(1).nullable().optional(),
   requires_confirm: z.boolean().optional(),
   input_field_collection: z.boolean().optional()
 }) satisfies z.ZodType<AIBuilderQuestionEventData>;
@@ -428,11 +434,17 @@ const requirementsSummaryEventDataSchema = z.object({
   key_decisions: z.array(
     z.object({
       topic: z.string(),
-      decision: z.string()
+      decision: z.string(),
+      // Set only when the user's own answer settled this row, and only while
+      // that question is still the one to reopen.
+      question_id: z.string().nullable().optional(),
+      is_derived: z.boolean().optional()
     })
   ),
   input_description: z.string(),
   output_description: z.string(),
+  // What the prose promises the result will keep, in the same order and words.
+  named_content_fields: z.array(z.object({ id: z.string(), label: z.string() })).optional(),
   assumptions: stringArraySchema.optional(),
   manual_setup_notes: stringArraySchema.optional(),
   resolved_requirements: z
@@ -644,7 +656,6 @@ type _ExactTypePreservesTupleArity = AssertFalse<IsExactType<[string, string], s
 type _RuntimeEventSchemasMatchGeneratedContract = AssertTrue<
   IsExactType<RuntimeEventDataByName, GeneratedEventDataByName>
 >;
-
 export function parseAIBuilderPublicErrorPayload(
   payload: unknown
 ): AIBuilderPublicErrorPayload | null {

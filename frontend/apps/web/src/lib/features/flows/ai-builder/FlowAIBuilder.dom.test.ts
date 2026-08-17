@@ -106,10 +106,15 @@ function question(
   };
 }
 
-const FORMAT_QUESTION = question("output_format", "Hur ska resultatet levereras?", [
-  { id: "pdf", label: "Som PDF" },
-  { id: "text", label: "Som text" }
-]);
+const FORMAT_QUESTION = question(
+  "output_format",
+  "Hur ska resultatet levereras?",
+  [
+    { id: "pdf", label: "Som PDF" },
+    { id: "text", label: "Som text" }
+  ],
+  { question_index: 1 }
+);
 const SOURCES_QUESTION = question(
   "sources",
   "Vilka källor ska ingå?",
@@ -118,7 +123,7 @@ const SOURCES_QUESTION = question(
     { id: "web", label: "Webbsidor" },
     { id: "mail", label: "E-post" }
   ],
-  { selection_mode: "multi" }
+  { selection_mode: "multi", question_index: 2 }
 );
 const CUSTOM_QUESTION = question(
   "audience",
@@ -665,6 +670,38 @@ describe("FlowAIBuilder discovery screens", () => {
     expect(screen.queryByText(m.ai_builder_question_delegate())).toBeNull();
   });
 
+  it("shows the user's own words behind Eneo's recommendation", async () => {
+    const recommended = question("output_format", "Hur ska resultatet levereras?", [
+      { id: "pdf", label: "Som PDF" },
+      { id: "text", label: "Som text" }
+    ]);
+    recommended.recommended_option_id = "pdf";
+    recommended.recommended_option_evidence = "en tydlig PDF-rapport";
+    recommended.question_index = 2;
+    const { fetch } = makeFetch({ sessions: [questionSession(recommended)] });
+    renderShell({ fetch, stream: makeStream().stream, resumeSessionId: "s-1" });
+
+    // The number is the server's, not a client count.
+    expect(await screen.findByText(m.ai_builder_question_number({ number: "2" }))).toBeTruthy();
+    expect(
+      screen.getByText(m.ai_builder_question_evidence({ quote: "en tydlig PDF-rapport" }))
+    ).toBeTruthy();
+  });
+
+  it("leaves a question from before the server numbered them unnumbered", async () => {
+    // Position in the transcript does not survive compaction, so a missing
+    // index must stay missing rather than become a plausible number.
+    const legacy = question("output_format", "Hur ska resultatet levereras?", [
+      { id: "pdf", label: "Som PDF" },
+      { id: "text", label: "Som text" }
+    ]);
+    const { fetch } = makeFetch({ sessions: [questionSession(legacy)] });
+    renderShell({ fetch, stream: makeStream().stream, resumeSessionId: "s-1" });
+
+    await screen.findByRole("heading", { name: legacy.question });
+    expect(screen.queryByText(/^Fråga /)).toBeNull();
+  });
+
   it("does not offer to hand back a question Eneo has no recommendation for", async () => {
     const { fetch } = makeFetch({ sessions: [questionSession()] });
     const { stream } = makeStream();
@@ -820,6 +857,100 @@ describe("FlowAIBuilder confirm, build and review", () => {
     expect(calls[0]!.body).toMatchObject({
       question_answer: { question_id: "output_format", selected_option_ids: ["text"] }
     });
+  });
+
+  it("reopens the question that settled a decision, and lists the named content", async () => {
+    const summary = {
+      ...SUMMARY,
+      key_decisions: [
+        { topic: "Slutresultat", decision: "PDF-dokument", question_id: "output_format" },
+        { topic: "Planerad bearbetning", decision: "Skapa PDF", is_derived: true }
+      ],
+      named_content_fields: [
+        { id: "titel", label: "titel" },
+        { id: "slutsatser", label: "slutsatser" }
+      ]
+    };
+    const { fetch } = makeFetch({
+      sessions: [
+        makeSession({
+          conversation: [
+            userMessage("u1", "Sammanfatta rapporter till en PDF"),
+            assistantMessage("a1", "Jag behöver veta formatet.", { question: FORMAT_QUESTION }),
+            userMessage("u2", "Som PDF", {
+              question_answer: {
+                kind: "structured_question_answer",
+                question_id: "output_format",
+                selected_option_ids: ["pdf"]
+              }
+            }),
+            assistantMessage("a2", "", { requirements_summary: summary })
+          ]
+        })
+      ]
+    });
+    renderShell({ fetch, stream: makeStream().stream, resumeSessionId: "s-1" });
+
+    await screen.findByRole("heading", { name: m.ai_builder_requirements_title() });
+    expect(screen.getByText(m.ai_builder_requirements_named_content({ count: "2" }))).toBeTruthy();
+    expect(screen.getByText("slutsatser")).toBeTruthy();
+
+    // Only the row the user answered offers a way back into its question.
+    const rows = screen.getAllByRole("button", { name: m.ai_builder_question_change() });
+    expect(rows).toHaveLength(1);
+    await fireEvent.click(rows[0]!);
+
+    expect(await screen.findByText(m.ai_builder_question_editing_note())).toBeTruthy();
+    expect(screen.getByRole("heading", { name: FORMAT_QUESTION.question })).toBeTruthy();
+  });
+
+  it("reopens the newest wording when a question was asked twice", async () => {
+    const first = question("output_format", "Hur ska resultatet levereras?", [
+      { id: "pdf", label: "Som PDF" },
+      { id: "text", label: "Som text" }
+    ]);
+    const reasked = question("output_format", "Vill du hellre ha en annan leverans?", [
+      { id: "pdf", label: "Som PDF" },
+      { id: "docx", label: "Som Word" }
+    ]);
+    const summary = {
+      ...SUMMARY,
+      key_decisions: [
+        { topic: "Slutresultat", decision: "PDF-dokument", question_id: "output_format" }
+      ]
+    };
+    const { fetch } = makeFetch({
+      sessions: [
+        makeSession({
+          conversation: [
+            userMessage("u1", "Sammanfatta rapporter till en PDF"),
+            assistantMessage("a1", "Första gången.", { question: first }),
+            userMessage("u2", "Som PDF", {
+              question_answer: {
+                kind: "structured_question_answer",
+                question_id: "output_format",
+                selected_option_ids: ["pdf"]
+              }
+            }),
+            assistantMessage("a2", "Jag frågar igen.", { question: reasked }),
+            userMessage("u3", "Som PDF", {
+              question_answer: {
+                kind: "structured_question_answer",
+                question_id: "output_format",
+                selected_option_ids: ["pdf"]
+              }
+            }),
+            assistantMessage("a3", "", { requirements_summary: summary })
+          ]
+        })
+      ]
+    });
+    renderShell({ fetch, stream: makeStream().stream, resumeSessionId: "s-1" });
+
+    await screen.findByRole("heading", { name: m.ai_builder_requirements_title() });
+    await fireEvent.click(screen.getByRole("button", { name: m.ai_builder_question_change() }));
+
+    expect(await screen.findByRole("heading", { name: reasked.question })).toBeTruthy();
   });
 
   it("re-arms the confirmation when a newer requirements version replaces a confirmed one", async () => {
@@ -1238,7 +1369,10 @@ describe("FlowAIBuilder turn recovery", () => {
     renderShell({ fetch, stream, resumeSessionId: "s-turn" });
 
     expect(await screen.findByText(m.ai_builder_turn_active_title())).toBeTruthy();
-    expect(textbox().disabled).toBe(true);
+    // A turn the server is still working on is a wait: the screen reads as
+    // waiting rather than offering a composer that refuses what is typed.
+    expect(screen.getByText(m.ai_builder_reply_reading())).toBeTruthy();
+    expect(screen.queryByRole("textbox")).toBeNull();
 
     await fireEvent.click(button(m.refresh()));
 

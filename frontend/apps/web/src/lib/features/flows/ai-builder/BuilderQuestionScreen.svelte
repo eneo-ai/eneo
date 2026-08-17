@@ -15,7 +15,8 @@
   interface Props {
     /** The message carrying the question to answer now (pending, or one being changed). */
     questionMessage: ChatMessage;
-    questionNumber: number;
+    /** The server's own ordinal; null for a record from before it existed. */
+    questionNumber: number | null;
     answered: AnsweredQuestion[];
     /** The question being re-answered, if any; the card then shows that one. */
     editingQuestionId?: string | null;

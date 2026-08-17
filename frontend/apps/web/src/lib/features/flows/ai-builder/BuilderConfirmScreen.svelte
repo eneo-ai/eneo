@@ -4,6 +4,8 @@
   import { cubicOut } from "svelte/easing";
   import { prefersReducedMotion } from "$lib/core/prefersReducedMotion";
   import { Button } from "$lib/components/ui/button/index.js";
+  import * as Tooltip from "$lib/components/ui/tooltip/index.js";
+  import IconInfo from "@lucide/svelte/icons/info";
   import BuilderChangeRequest from "./BuilderChangeRequest.svelte";
   import { summaryTerm } from "./aiBuilderSummaryText";
   import FlowAIBuilderQuestion from "./FlowAIBuilderQuestion.svelte";
@@ -47,7 +49,7 @@
     /** The answer being changed, edited here instead of walking back through
      *  the questions; the card below it stays visible the whole time. */
     editingQuestion?: ChatMessage | null;
-    editingQuestionNumber?: number;
+    editingQuestionNumber?: number | null;
     onanswer?: (payload: StructuredQuestionAnswerPayload) => void;
     oncanceledit?: () => void;
     onconfirm: () => void;
@@ -69,13 +71,20 @@
     readOnly = false,
     disabled = false,
     editingQuestion = null,
-    editingQuestionNumber = 1,
+    editingQuestionNumber = null,
     onanswer,
     oncanceledit,
     onconfirm,
     onchange,
     oneditanswer
   }: Props = $props();
+
+  // Naming what Eneo derived only means something beside rows the user can
+  // correct; on a run with no questions every row would carry it.
+  const hasCorrectableDecision = $derived(
+    summary.key_decisions.some((decision) => decision.question_id != null)
+  );
+  const namedContentFields = $derived(summary.named_content_fields ?? []);
 
   const reducedMotion = prefersReducedMotion();
   // The change box lives under the card it rewrites, never in a side panel:
@@ -207,11 +216,48 @@
             </h3>
             <dl class="mt-1.5 flex flex-col">
               {#each summary.key_decisions as decision (decision.topic)}
+                {@const settledBy = decision.question_id ?? null}
                 <div
-                  class="border-dimmer grid gap-x-4 gap-y-0.5 border-t py-2.5 sm:grid-cols-[12.5rem_1fr]"
+                  class="border-dimmer grid items-baseline gap-x-4 gap-y-0.5 border-t py-2.5 sm:grid-cols-[12.5rem_1fr_auto]"
                 >
                   <dt class="text-secondary text-[0.8125rem]">{decision.topic}</dt>
                   <dd class="text-primary text-[0.85rem] font-medium">{decision.decision}</dd>
+                  {#if settledBy && !readOnly && !confirmed}
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      class="justify-self-start sm:justify-self-end"
+                      {disabled}
+                      onclick={() => oneditanswer(settledBy)}
+                    >
+                      {m.ai_builder_question_change()}
+                    </Button>
+                  {:else if !readOnly && !confirmed && hasCorrectableDecision}
+                    <span
+                      class="text-secondary inline-flex items-center gap-1 text-xs sm:justify-self-end"
+                    >
+                      {m.ai_builder_requirements_derived()}
+                      <Tooltip.Provider delayDuration={250}>
+                        <Tooltip.Root>
+                          <Tooltip.Trigger>
+                            {#snippet child({ props })}
+                              <button
+                                {...props}
+                                type="button"
+                                class="focus-visible:ring-accent-stronger/40 rounded-full focus-visible:ring-2 focus-visible:outline-none"
+                                aria-label={m.ai_builder_requirements_derived_explained()}
+                              >
+                                <IconInfo class="size-3.5" aria-hidden="true" />
+                              </button>
+                            {/snippet}
+                          </Tooltip.Trigger>
+                          <Tooltip.Content class="max-w-64 text-xs">
+                            {m.ai_builder_requirements_derived_explained()}
+                          </Tooltip.Content>
+                        </Tooltip.Root>
+                      </Tooltip.Provider>
+                    </span>
+                  {/if}
                 </div>
               {/each}
               <!-- The contract names its input and its result in their own
@@ -266,6 +312,28 @@
             <ul class="divide-dimmer mt-1 flex flex-col divide-y">
               {#each manualNotes as note (note)}
                 <li class="text-secondary py-2 text-[0.8125rem] leading-relaxed">{note}</li>
+              {/each}
+            </ul>
+          </section>
+        {/if}
+
+        {#if namedContentFields.length > 0}
+          <section class="mt-[1.125rem]">
+            <h3 class="text-primary text-[0.8125rem] font-bold">
+              {m.ai_builder_requirements_named_content({
+                count: String(namedContentFields.length)
+              })}
+            </h3>
+            <p class="text-secondary mt-0.5 text-xs text-pretty">
+              {m.ai_builder_requirements_named_content_lead()}
+            </p>
+            <ul class="mt-2 flex list-none flex-wrap gap-1.5 p-0">
+              {#each namedContentFields as field (field.id)}
+                <li
+                  class="border-default bg-secondary text-primary inline-flex items-center rounded-full border px-2.5 py-1 text-[0.8125rem]"
+                >
+                  {field.label}
+                </li>
               {/each}
             </ul>
           </section>
