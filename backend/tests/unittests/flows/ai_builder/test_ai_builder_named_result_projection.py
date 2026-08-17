@@ -85,6 +85,7 @@ from eneo.flows.ai_builder.planning_state import (
     NamedResultEvidence,
     PlanningState,
     ResolvedSlot,
+    named_content_fields_edit_evidence_reference,
 )
 from eneo.flows.flow_authoring_spec import FlowDraftSpecCore
 from eneo.flows.output_processing import (
@@ -1281,3 +1282,39 @@ def test_naming_content_differently_is_a_different_disclosure(
     assert [field.label for field in first.named_content_fields] != [
         field.label for field in second.named_content_fields
     ]
+
+
+def test_a_field_the_user_typed_into_the_card_is_marked_as_theirs() -> None:
+    # The list is also an edit surface, so a reader has to be able to tell a
+    # name Eneo heard from a name they added themselves.
+    state = _state((("agenda_items", "array"),), primary_runtime_input="audio")
+    state.named_result_evidence = [
+        *state.named_result_evidence,
+        NamedResultEvidence(
+            name="Beslutsdatum",
+            confidence="high",
+            evidence=[named_content_fields_edit_evidence_reference("edit-1")],
+        ),
+    ]
+
+    disclosure = build_requirements_disclosure(state, ui_language="sv")
+
+    assert [(field.id, field.origin) for field in disclosure.named_content_fields] == [
+        ("agenda_items", "described"),
+        ("Beslutsdatum", "card_edit"),
+    ]
+    for field in disclosure.named_content_fields:
+        assert field.label in disclosure.summary
+
+
+def test_editing_the_field_list_is_a_disclosure_the_user_has_not_confirmed() -> None:
+    before = _state(
+        (("agenda_items", "array"), ("farhagor", None)),
+        primary_runtime_input="audio",
+    )
+    after = _state((("agenda_items", "array"),), primary_runtime_input="audio")
+
+    assert (
+        build_requirements_disclosure(before, ui_language="sv").requirements_version
+        != build_requirements_disclosure(after, ui_language="sv").requirements_version
+    )

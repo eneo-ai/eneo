@@ -21,6 +21,7 @@ from eneo.flows.ai_builder.ai_builder_slot_vocabulary import (
 from eneo.flows.ai_builder.ai_builder_telemetry_models import (
     SessionTelemetrySummary,
 )
+from eneo.flows.ai_builder.planning_state import NamedResultOrigin
 
 JsonScalar: TypeAlias = str | int | float | bool | None
 
@@ -206,10 +207,16 @@ class NamedContentFieldPayload(BaseModel):
     output mode, the presence of a declared schema, and the confidence the name
     was admitted with. `label` is what the summary sentence says about the same
     obligation, rendered by the same owner, so list and prose cannot disagree.
+
+    `origin` says how the name got here — read out of the user's own writing,
+    or typed into this card. It is display provenance, not a requirement: both
+    origins oblige the result to exactly the same content, which is why it
+    stays outside the confirmed disclosure identity.
     """
 
     id: str
     label: str
+    origin: NamedResultOrigin = "described"
 
 
 def _resolved_requirements_are_empty(
@@ -292,9 +299,9 @@ class RequirementsSummaryPayload(RequirementsDisclosureContent):
     # cannot confirm: the confirmation request carries this exact version back.
     requirements_version: str = Field(pattern=r"^[0-9a-f]{64}$")
     # The content obligations the user named, as items beside the sentence
-    # that already states them. Read-only: naming content is admitted from
-    # cited user evidence, and adding or removing an obligation has no
-    # contract yet, so this list is for reading and not an edit surface.
+    # that already states them. This is also the edit surface: the user sends
+    # the ids they leave standing back as a `named_content_fields_edit`, and
+    # the disclosure is rebuilt from the resulting set.
     #
     # It deliberately sits outside `RequirementsDisclosureContent`, so it does
     # not enter the version hash. The same names already reach identity

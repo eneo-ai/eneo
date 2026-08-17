@@ -25,7 +25,9 @@ from eneo.flows.ai_builder.ai_builder_architecture_derivation import (
 from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
     SlotClassificationMetadata,
     SlotClassificationNamedResultEvidenceMetadata,
+    SlotClassificationSourceMetadata,
     metadata_with_slot_classification,
+    slot_classification_from_metadata,
     slot_classification_metadata_from_attempt,
 )
 from eneo.flows.ai_builder.ai_builder_domain_models import (
@@ -88,6 +90,8 @@ from eneo.flows.ai_builder.planning_state import (
     SlotConfidence,
     SlotSource,
     StepTriple,
+    is_named_content_fields_edit_reference,
+    named_content_fields_edit_evidence_reference,
 )
 from eneo.flows.ai_builder.planning_state_builder import (
     apply_policy_defaults_from_resolved_slots,
@@ -5687,3 +5691,318 @@ class TestMixedRuntimeMaterialChoice:
         slot = state.resolved_slots["primary_runtime_input"]
         assert slot.value == "documents"
         assert slot.source == "structured_answer"
+
+
+def _source_inventory(
+    message: ConversationMessage,
+) -> tuple[SlotClassificationSourceMetadata, ...]:
+    classification = slot_classification_from_metadata(message.metadata)
+    assert classification is not None
+    return tuple(classification.source_inventory)
+
+
+class TestNamedContentFieldsEdit:
+    """Editing the confirmation card's field list, and what that settles."""
+
+    QUOTE = "JSON-resultatet ska innehålla case_id[] och status."
+
+    def _described_fields_message(self) -> ConversationMessage:
+        """A turn where Eneo read two field names out of the user's own words."""
+
+        state = _state()
+        state.resolved_slots["terminal_output"] = _slot(
+            name="terminal_output",
+            value="structured_json",
+            source="structured_answer",
+        )
+        source = SlotClassificationSource(
+            source_id="user_message:test-source",
+            kind="user_message",
+            text=self.QUOTE,
+            message_id="described",
+        )
+        classification_input = SlotClassificationInput(
+            sources=(source,),
+            current_user_message_id="described",
+        )
+        parsed = _parse_named_result_delta(
+            names=("case_id", "status"),
+            classification_input=classification_input,
+        )
+        merge_llm_resolved_slots(
+            state,
+            parsed,
+            prompt_hash="a" * 64,
+            freeform_text=self.QUOTE,
+        )
+        snapshot = (
+            SlotClassificationNamedResultEvidenceMetadata.from_materialized_state(
+                operation="replace",
+                named_results=state.named_result_evidence,
+                confidence="high",
+                reason="The current complete user-named field snapshot.",
+                evidence=_model_evidence(self.QUOTE),
+            )
+        )
+        metadata = metadata_with_slot_classification(
+            None,
+            slot_classification_metadata_from_attempt(
+                SlotClassificationAttempt(
+                    outcome="resolved",
+                    result=SlotClassificationResult(),
+                ),
+                prompt_hash="b" * 64,
+                classification_input=classification_input,
+                model="openai/gpt-test",
+                provider="openai",
+                named_result_evidence_snapshot=snapshot,
+            ),
+        )
+        assert metadata is not None
+        return ConversationMessage(
+            message_id="described",
+            role="user",
+            content=self.QUOTE,
+            metadata=metadata,
+        )
+
+    def _edit_message(
+        self,
+        *field_names: str,
+        message_id: str = "edited",
+        added: tuple[str, ...] = (),
+    ) -> ConversationMessage:
+        return ConversationMessage(
+            message_id=message_id,
+            role="user",
+            content="",
+            metadata={
+                "named_content_fields_edit": {
+                    "requirements_version": "c" * 64,
+                    "field_names": list(field_names),
+                    "added_field_names": list(added),
+                }
+            },
+        )
+
+    def test_the_card_edit_becomes_the_field_set_every_later_turn_rebuilds(
+        self,
+    ) -> None:
+        rebuilt = build_planning_state_from_conversation(
+            [
+                self._described_fields_message(),
+                self._edit_message("case_id", "Beslutsdatum", added=("Beslutsdatum",)),
+            ]
+        )
+
+        assert [item.name for item in rebuilt.named_result_evidence] == [
+            "case_id",
+            "Beslutsdatum",
+        ]
+
+    def test_keeping_a_field_keeps_what_was_already_known_about_it(self) -> None:
+        # Leaving a chip alone is not restating it, so the shape the user
+        # declared and the words they were quoted on survive the edit.
+        described = self._described_fields_message()
+        before = build_planning_state_from_conversation([described])
+        case_id = next(
+            item for item in before.named_result_evidence if item.name == "case_id"
+        )
+
+        rebuilt = build_planning_state_from_conversation(
+            [
+                described,
+                self._edit_message("case_id", "Beslutsdatum", added=("Beslutsdatum",)),
+            ]
+        )
+
+        assert rebuilt.named_result_evidence[0] == case_id
+        assert case_id.declared_shape == "array"
+        assert case_id.origin == "described"
+
+    def test_a_field_the_user_typed_reads_as_theirs(self) -> None:
+        rebuilt = build_planning_state_from_conversation(
+            [
+                self._described_fields_message(),
+                self._edit_message("case_id", "Beslutsdatum", added=("Beslutsdatum",)),
+            ]
+        )
+
+        added = rebuilt.named_result_evidence[1]
+        assert added.origin == "card_edit"
+        assert added.confidence == "high"
+        assert added.evidence == [
+            named_content_fields_edit_evidence_reference("edited")
+        ]
+
+    def test_a_removed_field_is_not_restored_by_the_reading_that_named_it(self) -> None:
+        # The reading that first found "status" is still in the conversation and
+        # is replayed on every later turn. It comes before the edit, so the edit
+        # is simply the later answer about the same set. A later reading cannot
+        # bring it back either, because a delta may only cite the message being
+        # read (`test_parser_rejects_field_delta_reconstructed_from_prior_user_sources`).
+        rebuilt = build_planning_state_from_conversation(
+            [
+                self._described_fields_message(),
+                self._edit_message("case_id"),
+            ]
+        )
+
+        assert [item.name for item in rebuilt.named_result_evidence] == ["case_id"]
+
+    def test_naming_a_removed_field_again_brings_it_back(self) -> None:
+        # The user is never locked out of their own set: a later reading of
+        # what they say next owns it again, exactly as before the edit. That
+        # reading persists the whole set, so its snapshot has to be able to
+        # carry the field the user typed into the card as well — the reading
+        # simply does not account for provenance it never produced.
+        described = self._described_fields_message()
+        edit = self._edit_message("case_id", "Beslutsdatum", added=("Beslutsdatum",))
+        state = build_planning_state_from_conversation([described, edit])
+        source = SlotClassificationSource(
+            source_id="user_message:again",
+            kind="user_message",
+            text="Ta med status igen.",
+            message_id="again",
+        )
+        classification_input = SlotClassificationInput(
+            sources=(source,),
+            current_user_message_id="again",
+        )
+        parsed = _parse_named_result_delta(
+            names=("status",),
+            classification_input=classification_input,
+        )
+        merge_llm_resolved_slots(
+            state,
+            parsed,
+            prompt_hash="d" * 64,
+            freeform_text=source.text,
+        )
+        snapshot = (
+            SlotClassificationNamedResultEvidenceMetadata.from_materialized_state(
+                operation="replace",
+                named_results=state.named_result_evidence,
+                confidence="high",
+                reason="The current complete user-named field snapshot.",
+                evidence=(
+                    *_model_evidence(self.QUOTE),
+                    *_model_evidence(source.text, source_id=source.source_id),
+                ),
+            )
+        )
+        metadata = metadata_with_slot_classification(
+            None,
+            slot_classification_metadata_from_attempt(
+                SlotClassificationAttempt(
+                    outcome="resolved",
+                    result=SlotClassificationResult(),
+                ),
+                prompt_hash="e" * 64,
+                classification_input=classification_input,
+                model="openai/gpt-test",
+                provider="openai",
+                retained_source_inventory=_source_inventory(described),
+                named_result_evidence_snapshot=snapshot,
+            ),
+        )
+        assert metadata is not None
+
+        rebuilt = build_planning_state_from_conversation(
+            [
+                described,
+                edit,
+                ConversationMessage(
+                    message_id="again",
+                    role="user",
+                    content=source.text,
+                    metadata=metadata,
+                ),
+            ]
+        )
+
+        assert [item.name for item in rebuilt.named_result_evidence] == [
+            "case_id",
+            "Beslutsdatum",
+            "status",
+        ]
+        assert rebuilt.named_result_evidence[1].origin == "card_edit"
+
+    def test_a_second_edit_makes_the_first_one_disposable(self) -> None:
+        # Compaction keeps only the latest edit, so the latest edit has to be
+        # able to stand alone: a field that only ever existed on the card cites
+        # the edit that last kept it, never one that may be pruned.
+        described = self._described_fields_message()
+        first = self._edit_message("case_id", "Beslutsdatum", added=("Beslutsdatum",))
+        second = self._edit_message(
+            "case_id", "Beslutsdatum", message_id="edited-again"
+        )
+
+        rebuilt = build_planning_state_from_conversation([described, first, second])
+
+        assert rebuilt.named_result_evidence[1].evidence == [
+            named_content_fields_edit_evidence_reference("edited-again")
+        ]
+        assert build_planning_state_from_conversation([described, second]) == rebuilt
+
+    def test_removing_a_field_and_adding_it_back_starts_it_over(self) -> None:
+        # The two edits are not "keep it": between them the field was gone, so
+        # the second one states a fresh name that happens to be spelled the
+        # same. Reading it as a retention would quietly restore the shape and
+        # the quotes the removal threw away — and compaction, which keeps only
+        # the latest edit, would be the thing that decided which reading won.
+        described = self._described_fields_message()
+        removed = self._edit_message("status", message_id="removed")
+        re_added = self._edit_message(
+            "status",
+            "case_id",
+            message_id="re-added",
+            added=("case_id",),
+        )
+
+        rebuilt = build_planning_state_from_conversation([described, removed, re_added])
+
+        case_id = rebuilt.named_result_evidence[1]
+        assert case_id.declared_shape is None
+        assert case_id.origin == "card_edit"
+        assert build_planning_state_from_conversation([described, re_added]) == rebuilt
+
+    def test_a_kept_field_the_user_described_still_cites_their_words(self) -> None:
+        described = self._described_fields_message()
+
+        rebuilt = build_planning_state_from_conversation(
+            [
+                described,
+                self._edit_message("case_id", "Beslutsdatum", added=("Beslutsdatum",)),
+            ]
+        )
+
+        assert rebuilt.named_result_evidence[0].evidence == [
+            f"quote:user_message:test-source:{self.QUOTE}"
+        ]
+
+
+@pytest.mark.parametrize(
+    "reference",
+    [
+        pytest.param("question_answer:named_content_fields_edit", id="bare-prefix"),
+        pytest.param("question_answer:named_content_fields_edit:", id="no-message"),
+        pytest.param(
+            "question_answer:named_content_fields_edit_draft:m1",
+            id="prefix-collision",
+        ),
+        pytest.param("quote:user_message:m1:beslut", id="a-quote"),
+    ],
+)
+def test_only_a_complete_card_edit_reference_carries_card_provenance(
+    reference: str,
+) -> None:
+    assert not is_named_content_fields_edit_reference(reference)
+    assert (
+        NamedResultEvidence(
+            name="beslut",
+            confidence="high",
+            evidence=[reference],
+        ).origin
+        == "described"
+    )

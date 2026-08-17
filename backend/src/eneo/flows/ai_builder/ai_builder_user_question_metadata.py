@@ -11,9 +11,11 @@ from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
     UI_LANGUAGE_METADATA_KEY,
     AIBuilderQuestionAnswerInput,
     DelegatedQuestionAnswerRequest,
+    NamedContentFieldsEditRequest,
     StructuredQuestionAnswerMetadata,
     delegated_question_answer_from_input,
     metadata_for_user_message,
+    named_content_fields_edit_from_input,
     question_answer_has_real_payload,
     question_answer_question_id,
     question_answer_values,
@@ -27,9 +29,13 @@ from eneo.flows.ai_builder.ai_builder_error_contract import (
     AIBuilderBadRequestException,
     AIBuilderErrorCode,
 )
+from eneo.flows.ai_builder.ai_builder_field_identity import fold_result_field_name
 from eneo.flows.ai_builder.ai_builder_question_state import (
     pending_user_requirement_question,
     pending_user_requirement_question_id,
+)
+from eneo.flows.ai_builder.ai_builder_requirements_state import (
+    resolve_requirements_state,
 )
 from eneo.flows.ai_builder.question_catalog import (
     QUESTION_CATALOG,
@@ -59,9 +65,17 @@ def prepare_user_question_metadata(
     )
     is_requirements_confirmation = requirements_confirmation is not None
     delegation = delegated_question_answer_from_input(question_answer)
+    field_edit = named_content_fields_edit_from_input(question_answer)
     metadata: FlowPersistedJsonObject | None = None
     if requirements_confirmation is not None:
         metadata = metadata_for_user_message(question_answer=requirements_confirmation)
+    elif field_edit is not None:
+        metadata = metadata_for_user_message(
+            question_answer=_validated_named_content_fields_edit(
+                conversation=conversation,
+                edit=field_edit,
+            )
+        )
     elif delegation is not None:
         metadata = metadata_for_user_message(
             question_answer=_validated_structured_question_answer(
@@ -138,6 +152,66 @@ def _delegated_answer(
         selected_value=recommended.value,
         delegated=True,
         ui_language=delegation.ui_language,
+    )
+
+
+def _validated_named_content_fields_edit(
+    *,
+    conversation: list[ConversationMessage],
+    edit: NamedContentFieldsEditRequest,
+) -> NamedContentFieldsEditRequest:
+    """Normalize the submitted set, or refuse it in terms the card can act on.
+
+    The two refusals are different user problems and stay separate: a stale
+    version means the requirements moved under the user and the card has to be
+    reloaded, while an unusable name means this one chip has to be renamed.
+
+    A name is only refused for having no identity at all — blank, or nothing
+    left after folding. Punctuation is not a server judgment: names reach the
+    card exactly as the user wrote them, brackets and dots included, and the
+    edit is mostly the card echoing them back.
+
+    Which names the card did not already show is read here, against that same
+    card, because this is the only point where the disclosure being answered is
+    unambiguous. A later replay cannot re-derive it: the turns that shaped the
+    card may have been compacted by then.
+    """
+
+    disclosure = resolve_requirements_state(conversation).latest_summary
+    if (
+        disclosure is None
+        or edit.requirements_version != disclosure.requirements_version
+    ):
+        _raise_invalid_question_payload("requirements_version_stale")
+
+    shown = {
+        fold_result_field_name(field.id) for field in disclosure.named_content_fields
+    }
+    field_names: list[str] = []
+    added_field_names: list[str] = []
+    seen: set[str] = set()
+    for raw_name in edit.field_names:
+        name = raw_name.strip()
+        folded = fold_result_field_name(name)
+        if not name or not folded:
+            raise AIBuilderBadRequestException(
+                "Structured question answer could not be applied.",
+                code=AIBuilderErrorCode.INVALID_QUESTION_PAYLOAD,
+                context={"reason": "invalid_field_name", "field_name": raw_name},
+            )
+        if folded in seen:
+            # Two chips for one field is the same field said twice, not a
+            # conflict the user has to resolve.
+            continue
+        seen.add(folded)
+        field_names.append(name)
+        if folded not in shown:
+            added_field_names.append(name)
+    return edit.model_copy(
+        update={
+            "field_names": field_names,
+            "added_field_names": added_field_names,
+        }
     )
 
 

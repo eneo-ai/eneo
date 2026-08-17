@@ -7,7 +7,7 @@ from collections.abc import AsyncGenerator, AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, replace
 from datetime import datetime, timedelta, timezone
-from typing import cast
+from typing import Any, cast
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import UUID, uuid4
 
@@ -81,6 +81,7 @@ from eneo.flows.ai_builder.ai_builder_architecture_derivation import (
 )
 from eneo.flows.ai_builder.ai_builder_commit_invariance import CommitDriftError
 from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
+    SlotClassificationNamedResultEvidenceMetadata,
     metadata_with_slot_classification,
     slot_classification_metadata_from_attempt,
 )
@@ -141,6 +142,7 @@ from eneo.flows.ai_builder.planning_state import (
     ArchitectureCommit,
     FileRoleEvidence,
     MappedFileLimit,
+    NamedResultEvidence,
     PlanningState,
     ResolvedSlot,
     StepTriple,
@@ -10019,3 +10021,222 @@ async def test_plan_transitions_reject_while_refinement_turn_is_active(
     )
     assert persisted_plan_status == expected_status
     assert flow_count == 0
+
+
+def _named_fields_classification_message() -> ConversationMessage:
+    """A turn where the classifier read two field names out of the request."""
+
+    quote = "Rapporten ska bevara beslut och farhagor."
+    source_id = "user_message:named-fields-request"
+    named_results = tuple(
+        NamedResultEvidence(
+            name=name,
+            confidence="high",
+            evidence=[f"quote:{source_id}:{quote}"],
+        )
+        for name in ("beslut", "farhagor")
+    )
+    classification = slot_classification_metadata_from_attempt(
+        SlotClassificationAttempt(
+            outcome="resolved",
+            result=SlotClassificationResult(),
+        ),
+        prompt_hash="d" * 64,
+        classification_input=SlotClassificationInput(
+            sources=(
+                SlotClassificationSource(
+                    source_id=source_id,
+                    kind="user_message",
+                    text=quote,
+                    message_id="named-fields-request",
+                    file_id=None,
+                    coverage=None,
+                ),
+            ),
+            current_user_message_id="named-fields-request",
+        ),
+        model="openai/gpt-4o-mini",
+        provider="openai",
+        named_result_evidence_snapshot=(
+            SlotClassificationNamedResultEvidenceMetadata.from_materialized_state(
+                operation="replace",
+                named_results=named_results,
+                confidence="high",
+                reason="The user named the fields the report must preserve.",
+                evidence=(ClassifiedEvidence(source_id=source_id, quote=quote),),
+            )
+        ),
+    )
+    metadata = metadata_with_slot_classification(None, classification)
+    assert metadata is not None
+    return ConversationMessage(
+        message_id="named-fields-request",
+        role="user",
+        content=quote,
+        metadata=metadata,
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_ai_builder_api_named_content_fields_can_be_edited_on_the_card(
+    client,
+    bearer_token,
+    completion_model_factory,
+    db_container,
+):
+    """The card's field list is an edit surface, end to end over the API.
+
+    Removing a field that does not apply and adding one Eneo missed is a
+    checkbox-grade correction: it costs no provider turn, and it comes back as
+    a disclosure the user has not confirmed yet, because the requirements it
+    describes have changed.
+    """
+
+    space_id = await _create_space_with_planner_model(
+        client=client,
+        bearer_token=bearer_token,
+        db_container=db_container,
+        completion_model_factory=completion_model_factory,
+        space_name="AI Builder API named content fields",
+    )
+
+    with (
+        patch(
+            "eneo.completion_models.infrastructure.completion_service.CompletionService.resolve_model_route",
+            new=AsyncMock(return_value=_route(kwargs={"api_key": "sk-test"})),
+        ),
+        patch(
+            "eneo.flows.ai_builder.ai_builder_discovery_runtime.classify_slots",
+            new=AsyncMock(return_value=SlotClassificationAttempt(outcome="skipped")),
+        ),
+    ):
+        session_id = await _create_ai_builder_session(
+            client=client,
+            bearer_token=bearer_token,
+            space_id=space_id,
+        )
+        async with db_container() as container:
+            repo = AIBuilderRepository(container.session())
+            session = await repo.get_session(
+                session_id=UUID(session_id),
+                tenant_id=container.user().tenant_id,
+            )
+            turn = await _claim_session_send_turn(
+                repo=repo,
+                session_id=session.id,
+                tenant_id=session.tenant_id,
+            )
+            await repo.append_session_messages(
+                session_id=session.id,
+                tenant_id=session.tenant_id,
+                conversation=[
+                    _named_fields_classification_message(),
+                    *[
+                        ConversationMessage(
+                            role="user",
+                            content=answer,
+                            metadata={
+                                "question_answer": {
+                                    "question_id": question_id,
+                                    "selected_option_id": value,
+                                    "answer": value,
+                                },
+                                "ui_language": "sv",
+                            },
+                        )
+                        for question_id, value, answer in (
+                            ("primary_runtime_input", "documents", "Dokument"),
+                            (
+                                "document_material_scope",
+                                "single_document_case",
+                                "Ett huvuddokument per ärende",
+                            ),
+                            ("terminal_output", "pdf_document", "PDF-dokument"),
+                            (
+                                "pdf_generation_mode",
+                                "generated_pdf",
+                                "Vanlig genererad PDF",
+                            ),
+                            ("output_reader", "mixed_reader", "Blandad målgrupp"),
+                            (
+                                "post_processing_goal",
+                                "summarize_or_overview",
+                                "Sammanfatta underlaget",
+                            ),
+                            (
+                                "runtime_metadata_fields",
+                                "no_extra_metadata",
+                                "Inga extra fält",
+                            ),
+                        )
+                    ],
+                ],
+                lease=turn.lease,
+            )
+            await repo.complete_session_turn(turn=turn)
+            await repo.release_session_send(
+                session_id=session.id,
+                tenant_id=session.tenant_id,
+                lease=turn.lease,
+            )
+
+        disclosed_events = await _send_builder_message(
+            client=client,
+            bearer_token=bearer_token,
+            session_id=session_id,
+            message="Bygg vidare",
+        )
+        disclosed = next(
+            event
+            for event in disclosed_events
+            if event["event"] == "requirements_summary"
+        )
+        disclosed_data = cast(dict[str, Any], disclosed["data"])
+        assert [field["id"] for field in disclosed_data["named_content_fields"]] == [
+            "beslut",
+            "farhagor",
+        ]
+
+        stale_events = await _send_builder_message(
+            client=client,
+            bearer_token=bearer_token,
+            session_id=session_id,
+            message="",
+            question_answer={
+                "kind": "named_content_fields_edit",
+                "requirements_version": "b" * 64,
+                "field_names": ["beslut"],
+            },
+        )
+
+        edited_events = await _send_builder_message(
+            client=client,
+            bearer_token=bearer_token,
+            session_id=session_id,
+            message="",
+            question_answer={
+                "kind": "named_content_fields_edit",
+                "requirements_version": disclosed_data["requirements_version"],
+                "field_names": ["beslut", "Beslutsdatum"],
+            },
+        )
+
+    stale_error = cast(
+        dict[str, Any],
+        next(event for event in stale_events if event["event"] == "error")["data"],
+    )
+    assert stale_error["code"] == "invalid_question_payload"
+    assert stale_error["details"] == {"reason": "requirements_version_stale"}
+
+    assert not any(event["event"] == "error" for event in edited_events), (
+        _builder_event_outline(edited_events)
+    )
+    edited = next(
+        event for event in edited_events if event["event"] == "requirements_summary"
+    )
+    edited_data = cast(dict[str, Any], edited["data"])
+    assert [
+        (field["id"], field["origin"]) for field in edited_data["named_content_fields"]
+    ] == [("beslut", "described"), ("Beslutsdatum", "card_edit")]
+    assert edited_data["requirements_version"] != disclosed_data["requirements_version"]

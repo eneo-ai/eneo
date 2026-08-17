@@ -52,6 +52,7 @@ from eneo.flows.ai_builder.ai_builder_api_models import (
     ApplyResultResponse as ApplyResult,
 )
 from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
+    named_content_fields_edit_from_metadata,
     question_answer_from_metadata,
     requirements_confirmation_from_metadata,
     requirements_summary_from_metadata,
@@ -526,6 +527,9 @@ def _to_public_user_message(
         timestamp=message.timestamp,
         question_answer=question_answer_from_metadata(message.metadata),
         requirements_confirmation=requirements_confirmation_from_metadata(
+            message.metadata
+        ),
+        named_content_fields_edit=named_content_fields_edit_from_metadata(
             message.metadata
         ),
     )

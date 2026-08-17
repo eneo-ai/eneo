@@ -144,14 +144,16 @@ def _named_content_fields(
 
     Order and membership follow `_named_result_summary_line` exactly, weak
     names included: a reader who compares the list with the sentence must not
-    find a name in one and not the other. Only the display rendering exists
-    here, because this projection is outside the hashed disclosure content.
+    find a name in one and not the other. Only the display rendering and the
+    origin marker exist here, because this projection is outside the hashed
+    disclosure content — what the result must carry is the same either way.
     """
 
     return [
         NamedContentFieldPayload(
             id=obligation.name,
             label=_named_result_text(obligation, locale, render_value=render_value),
+            origin=obligation.origin,
         )
         for obligation in session_state.named_result_evidence
     ]

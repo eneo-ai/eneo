@@ -719,6 +719,7 @@ class MappedFileLimit(_PlanningModel):
 
 
 NAMED_RESULT_EVIDENCE_MAX_ITEMS = 100
+NAMED_RESULT_FIELD_NAME_MAX_LENGTH = 240
 NAMED_RESULT_PROVENANCE_MAX_ITEMS = 200
 NAMED_RESULT_EVIDENCE_MAX_CITATIONS = (
     NAMED_RESULT_PROVENANCE_MAX_ITEMS // NAMED_RESULT_EVIDENCE_MAX_ITEMS
@@ -729,9 +730,39 @@ NAMED_RESULT_EVIDENCE_MAX_CITATIONS = (
 # and `None` means the user declared no shape.
 NamedResultDeclaredShape = Literal["array", "object"]
 
+# How the name reached the set. Both origins are the user's — the difference is
+# whether Eneo read the name out of their writing or they typed it into the
+# confirmation card, which is why neither value is called "user". It is read off
+# the evidence the name already carries rather than stored beside it, so a name
+# the user later writes about becomes "described" with nothing maintaining it.
+NamedResultOrigin = Literal["described", "card_edit"]
+
+NAMED_CONTENT_FIELDS_EDIT_EVIDENCE_PREFIX = "question_answer:named_content_fields_edit"
+
+
+def named_content_fields_edit_evidence_reference(message_id: str) -> str:
+    """The provenance reference for a name typed into the confirmation card."""
+
+    if not message_id:
+        raise ValueError("card-edit evidence must name the message it came from")
+    return f"{NAMED_CONTENT_FIELDS_EDIT_EVIDENCE_PREFIX}:{message_id}"
+
+
+def is_named_content_fields_edit_reference(reference: str) -> bool:
+    """Whether this is a well-formed confirmation-card edit reference.
+
+    The one reader of the encoding, so a bare prefix, a longer prefix that
+    merely starts the same way, or a reference naming no message cannot pass
+    for card provenance anywhere. Whether the message it names is still in the
+    conversation is a separate question, and not one a leaf can answer.
+    """
+
+    prefix = f"{NAMED_CONTENT_FIELDS_EDIT_EVIDENCE_PREFIX}:"
+    return reference.startswith(prefix) and bool(reference[len(prefix) :])
+
 
 class NamedResultEvidence(_PlanningModel):
-    name: str = Field(min_length=1, max_length=240)
+    name: str = Field(min_length=1, max_length=NAMED_RESULT_FIELD_NAME_MAX_LENGTH)
     evidence: list[str] = Field(
         min_length=1,
         max_length=NAMED_RESULT_EVIDENCE_MAX_CITATIONS,
@@ -751,12 +782,32 @@ class NamedResultEvidence(_PlanningModel):
         """Whether this name can drive irreversible planner decisions.
 
         Explicitness is not a separate claim here, unlike `ResolvedSlot`:
-        admission already required the user to write the name literally in
-        the current user-owned message, so every persisted name is explicit
-        by construction. Confidence is the only remaining question.
+        every persisted name is explicit by construction, whether admission
+        required the user to write it literally in the current user-owned
+        message or they typed it into the confirmation card. Confidence is the
+        only remaining question.
         """
 
         return self.confidence in ("high", "medium")
+
+    @property
+    def origin(self) -> NamedResultOrigin:
+        """How this name reached the set.
+
+        Read off the evidence rather than stored beside it, so there is one
+        account of where a name came from. A card-typed name that the user
+        later describes in prose is re-cited by the classifier, which replaces
+        the evidence, and the name reads as described from then on.
+        """
+
+        return (
+            "card_edit"
+            if any(
+                is_named_content_fields_edit_reference(reference)
+                for reference in self.evidence
+            )
+            else "described"
+        )
 
 
 class PlanningState(_PlanningModel):

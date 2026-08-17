@@ -9,6 +9,7 @@ from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
     ClassifierRetentionIdentity,
     metadata_has_requirements_summary,
     metadata_with_slot_classification,
+    named_content_fields_edit_from_metadata,
     question_interaction_id_from_metadata,
     requirements_confirmation_from_metadata,
     requirements_summary_from_metadata,
@@ -283,10 +284,27 @@ def _required_message_indices(
     if attested is not None:
         required_indices.add(attested.summary_index)
         required_indices.add(attested.confirmation_index)
+    # The card's field list is rebuilt by folding the messages that state it,
+    # and the user's own edit is the last word among them. Pruning it would
+    # hand the next turn the classifier's reading of fields the user has
+    # already corrected. Only the latest edit is needed: it states the whole
+    # set, so every earlier one is already answered by it.
+    latest_field_edit_index = _latest_named_content_fields_edit_index(conversation)
+    if latest_field_edit_index is not None:
+        required_indices.add(latest_field_edit_index)
     required_indices.update(_latest_question_interaction_indices(conversation))
     required_indices.update(_latest_tool_trace_indices(conversation))
     required_indices.update(_classifier_semantic_indices(conversation))
     return required_indices
+
+
+def _latest_named_content_fields_edit_index(
+    conversation: list[ConversationMessage],
+) -> int | None:
+    for index in range(len(conversation) - 1, -1, -1):
+        if named_content_fields_edit_from_metadata(conversation[index].metadata):
+            return index
+    return None
 
 
 def _retain_latest_classifier_semantics(

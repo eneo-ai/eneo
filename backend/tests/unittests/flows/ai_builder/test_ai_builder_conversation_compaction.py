@@ -1873,3 +1873,78 @@ def test_compaction_enforces_utf8_bytes_instead_of_character_count() -> None:
 
     with pytest.raises(ValueError, match="serialized byte limit"):
         compact_ai_builder_conversation([oversized])
+
+
+def test_compaction_keeps_the_field_list_the_user_edited() -> None:
+    # The card's list is rebuilt by folding the messages that state it, and
+    # the user's own edit is the last word among them. Pruning it would hand
+    # the next turn the reading of fields the user has already corrected.
+    source = "user_message:json-fields"
+    quote = "Create a machine-readable report containing case_id and status."
+    described = _classifier_result_msg(
+        "json-fields",
+        SlotClassificationResult(
+            slots=(
+                ClassifiedSlot(
+                    slot_name="terminal_output",
+                    value="structured_json",
+                    confidence="high",
+                    reason="typed test classification",
+                    evidence=(ClassifiedEvidence(source_id=source, quote=quote),),
+                ),
+            ),
+        ),
+        named_result_evidence_snapshot=(
+            SlotClassificationNamedResultEvidenceMetadata.from_materialized_state(
+                operation="replace",
+                named_results=tuple(
+                    NamedResultEvidence(
+                        name=name,
+                        confidence="high",
+                        evidence=[f"quote:{source}:{quote}"],
+                    )
+                    for name in ("case_id", "status")
+                ),
+                confidence="high",
+                reason="Initial complete field snapshot.",
+                evidence=(ClassifiedEvidence(source_id=source, quote=quote),),
+            )
+        ),
+    )
+    conversation = [
+        ConversationMessage(
+            message_id=described.message_id,
+            role="user",
+            content=quote,
+            metadata=described.metadata,
+        ),
+        # Two edits, because compaction keeps only the latest one: a field that
+        # exists solely because the user typed it must not end up citing an
+        # earlier edit that is no longer in the conversation.
+        *[
+            ConversationMessage(
+                message_id=message_id,
+                role="user",
+                content="",
+                metadata={
+                    "named_content_fields_edit": {
+                        "requirements_version": "c" * 64,
+                        "field_names": ["case_id", "Beslutsdatum"],
+                    }
+                },
+            )
+            for message_id in ("field-edit", "field-edit-again")
+        ],
+        *[_msg("assistant", content=f"filler {index}") for index in range(10)],
+        _msg("user", content="continue"),
+    ]
+    expected = build_planning_state_from_conversation(conversation)
+
+    compacted = compact_ai_builder_conversation(
+        conversation,
+        max_messages=4,
+        tail_messages=2,
+    )
+
+    assert expected.named_result_obligations == ("case_id", "Beslutsdatum")
+    assert build_planning_state_from_conversation(compacted) == expected

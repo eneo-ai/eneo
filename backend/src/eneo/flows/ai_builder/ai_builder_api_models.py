@@ -21,6 +21,7 @@ from eneo.flows.ai_builder.ai_builder_attachment_context import (
 )
 from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
     AIBuilderQuestionAnswerRequest,
+    NamedContentFieldsEditRequest,
     RequirementsConfirmationMetadata,
     SlotClassificationMetadata,
     StructuredQuestionAnswerMetadata,
@@ -262,6 +263,7 @@ class AIBuilderConversationMessage(BaseModel):
     requirements_summary: RequirementsSummaryPayload | None = None
     question_answer: StructuredQuestionAnswerMetadata | None = None
     requirements_confirmation: RequirementsConfirmationMetadata | None = None
+    named_content_fields_edit: NamedContentFieldsEditRequest | None = None
 
 
 class AIBuilderProposalAttemptDiagnostic(BaseModel):

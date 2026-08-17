@@ -74,6 +74,7 @@ from eneo.flows.ai_builder.ai_builder_slot_vocabulary import (
 )
 from eneo.flows.ai_builder.planning_state import (
     NAMED_RESULT_EVIDENCE_MAX_ITEMS,
+    NAMED_RESULT_FIELD_NAME_MAX_LENGTH,
     NAMED_RESULT_PROVENANCE_MAX_ITEMS,
     AttachmentCoverage,
     CheckpointProducerKind,
@@ -81,6 +82,7 @@ from eneo.flows.ai_builder.planning_state import (
     FileRole,
     NamedResultEvidence,
     RuntimeMetadataFieldPurpose,
+    is_named_content_fields_edit_reference,
 )
 from eneo.flows.ai_builder.question_catalog import legal_slot_values
 from eneo.flows.domain.flow import FlowPersistedJsonObject
@@ -104,6 +106,7 @@ EDIT_CONTEXT_METADATA_KEY = "edit_context"
 ASSISTANT_QUESTION_ID_METADATA_KEY = "question_id"
 ASSISTANT_QUESTION_INDEX_METADATA_KEY = "question_index"
 SLOT_CLASSIFICATION_METADATA_KEY = "slot_classification"
+NAMED_CONTENT_FIELDS_EDIT_METADATA_KEY = "named_content_fields_edit"
 PROVIDER_TOOL_CALL_ID_MAX_LENGTH = 64
 
 JsonScalar: TypeAlias = str | int | float | bool | None
@@ -367,6 +370,11 @@ class SlotClassificationNamedResultEvidenceMetadata(BaseModel):
         }
         if any(
             reference not in planning_references
+            # A name the user typed into the confirmation card cites that
+            # edit, not a quote this reading found. The snapshot still has to
+            # carry the name — it states the whole set — but it cannot account
+            # for provenance that was never the classifier's to begin with.
+            and not is_named_content_fields_edit_reference(reference)
             for item in self.named_results
             for reference in item.evidence
         ):
@@ -1079,10 +1087,67 @@ class DelegatedQuestionAnswerRequest(BaseModel):
         return canonical_question_id(question_id)
 
 
+class NamedContentFieldsEditRequest(BaseModel):
+    """The names the user leaves standing on the confirmation card.
+
+    The payload is the resulting full set, not a delta: the user is answering
+    a disclosure they can see in front of them, so what they submit is simply
+    what the card should say. That also makes the edit idempotent and makes
+    `requirements_version` mean something — it names the exact disclosure
+    whose fields these are, and an edit against an older one is refused rather
+    than merged.
+
+    Names only. The label the card shows is prose the disclosure owner renders
+    from the name and the shape the user declared, so a client-supplied label
+    could only disagree with it.
+
+    `added_field_names` is the server's own reading of the same submission, not
+    something a client states: which of these names the card did not already
+    show. Keeping a chip and re-adding a chip look identical in the resulting
+    set but mean different things — the first carries the shape and quotes the
+    name already had, the second starts over — and the difference is only
+    visible against the disclosure being answered. Recorded here so the edit
+    still means the same thing on a later replay, when earlier turns may have
+    been compacted away.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    kind: Literal["named_content_fields_edit"] = "named_content_fields_edit"
+    requirements_version: str = Field(pattern=r"^[0-9a-f]{64}$")
+    field_names: list[
+        Annotated[str, Field(max_length=NAMED_RESULT_FIELD_NAME_MAX_LENGTH)]
+    ] = Field(max_length=NAMED_RESULT_EVIDENCE_MAX_ITEMS)
+    added_field_names: list[
+        Annotated[str, Field(max_length=NAMED_RESULT_FIELD_NAME_MAX_LENGTH)]
+    ] = Field(default_factory=list[str], max_length=NAMED_RESULT_EVIDENCE_MAX_ITEMS)
+    ui_language: str | None = Field(
+        default=None,
+        max_length=_MAX_UI_LANGUAGE_LENGTH,
+    )
+
+    @model_validator(mode="after")
+    def require_added_names_among_the_set(self) -> "NamedContentFieldsEditRequest":
+        submitted = {fold_result_field_name(name) for name in self.field_names}
+        if any(
+            fold_result_field_name(name) not in submitted
+            for name in self.added_field_names
+        ):
+            raise ValueError("added named-result fields must be part of the edited set")
+        return self
+
+    @property
+    def added_field_folds(self) -> frozenset[str]:
+        return frozenset(
+            fold_result_field_name(name) for name in self.added_field_names
+        )
+
+
 AIBuilderQuestionAnswerRequest: TypeAlias = Annotated[
     StructuredQuestionAnswerRequest
     | DelegatedQuestionAnswerRequest
-    | RequirementsConfirmationMetadata,
+    | RequirementsConfirmationMetadata
+    | NamedContentFieldsEditRequest,
     Field(discriminator="kind"),
 ]
 
@@ -1090,8 +1155,55 @@ AIBuilderQuestionAnswerInput: TypeAlias = (
     StructuredQuestionAnswerRequest
     | DelegatedQuestionAnswerRequest
     | RequirementsConfirmationMetadata
+    | NamedContentFieldsEditRequest
     | Mapping[str, Any]
 )
+
+
+def named_content_fields_edit_from_input(
+    value: AIBuilderQuestionAnswerInput | None,
+) -> NamedContentFieldsEditRequest | None:
+    if value is None:
+        return None
+    data = _model_or_mapping_data(value)
+    if data.get("kind") != "named_content_fields_edit":
+        return None
+    try:
+        return NamedContentFieldsEditRequest.model_validate(data)
+    except ValidationError:
+        return None
+
+
+def named_content_fields_edit_from_metadata(
+    metadata: object,
+) -> NamedContentFieldsEditRequest | None:
+    metadata_map = _metadata_mapping(metadata)
+    if metadata_map is None:
+        return None
+    edit = _mapping_value(metadata_map.get(NAMED_CONTENT_FIELDS_EDIT_METADATA_KEY))
+    if edit is None:
+        return None
+    data = dict(edit)
+    data.setdefault("kind", "named_content_fields_edit")
+    try:
+        return NamedContentFieldsEditRequest.model_validate(data)
+    except ValidationError as error:
+        _warn_invalid_persisted_metadata(
+            NAMED_CONTENT_FIELDS_EDIT_METADATA_KEY,
+            error,
+        )
+        return None
+
+
+def named_content_fields_edit_to_metadata(
+    edit: NamedContentFieldsEditRequest,
+) -> FlowPersistedJsonObject:
+    return {
+        NAMED_CONTENT_FIELDS_EDIT_METADATA_KEY: edit.model_dump(
+            mode="json",
+            exclude={"kind", "ui_language"},
+        )
+    }
 
 
 def delegated_question_answer_from_input(
@@ -1881,9 +1993,12 @@ def metadata_for_user_message(
 ) -> FlowPersistedJsonObject | None:
     metadata: FlowPersistedJsonObject = {}
     if question_answer is not None:
+        field_edit = named_content_fields_edit_from_input(question_answer)
         confirmation_metadata = requirements_confirmation_to_metadata(question_answer)
         metadata.update(
-            confirmation_metadata or question_answer_to_metadata(question_answer)
+            named_content_fields_edit_to_metadata(field_edit)
+            if field_edit is not None
+            else confirmation_metadata or question_answer_to_metadata(question_answer)
         )
     if ui_language is not None:
         metadata[UI_LANGUAGE_METADATA_KEY] = ui_language

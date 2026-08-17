@@ -4497,3 +4497,164 @@ def test_example_output_headings_never_become_requested_output_sections() -> Non
     compile_context = prepared.compile_context
     assert compile_context is not None
     assert compile_context.requested_output_sections.sections == ()
+
+
+def _named_fields_interview() -> list[ConversationMessage]:
+    """A create session whose answers resolve the slots the disclosure needs."""
+
+    return [
+        ConversationMessage(role="user", content="Build a document report flow"),
+        *[
+            ConversationMessage(
+                role="user",
+                content="",
+                metadata={
+                    "question_answer": {
+                        "question_id": question_id,
+                        "selected_values": [value],
+                    }
+                },
+            )
+            for question_id, value in (
+                ("primary_runtime_input", "documents"),
+                ("terminal_output", "structured_text"),
+                ("document_material_scope", "single_document_case"),
+                ("post_processing_goal", "summarize_or_overview"),
+            )
+        ],
+    ]
+
+
+def _field_edit_conversation(
+    disclosure: RequirementsSummaryPayload,
+    *field_names: str,
+) -> list[ConversationMessage]:
+    """The disclosure the user saw, followed by their edit of its field list."""
+
+    return [
+        *_named_fields_interview(),
+        ConversationMessage(
+            role="assistant",
+            content=disclosure.summary,
+            metadata={
+                "requirements_summary": disclosure.model_dump(mode="json"),
+                "requirements_version": disclosure.requirements_version,
+            },
+        ),
+        ConversationMessage(
+            message_id="field-edit",
+            role="user",
+            content="",
+            metadata={
+                "named_content_fields_edit": {
+                    "requirements_version": disclosure.requirements_version,
+                    "field_names": list(field_names),
+                }
+            },
+        ),
+    ]
+
+
+def _named_fields_state() -> PlanningState:
+    state = _document_architecture_state()
+    state.named_result_evidence = [
+        NamedResultEvidence(
+            name=name,
+            confidence="high",
+            evidence=["quote:user_message:user-1:beslut och farhagor"],
+        )
+        for name in ("beslut", "farhagor")
+    ]
+    return state
+
+
+@pytest.mark.asyncio
+async def test_editing_the_field_list_makes_no_understanding_call() -> None:
+    """The edit states the whole set, so there is nothing left to read.
+
+    Classifying this turn could only re-read sentences the user has already
+    been shown a reading of, and would charge them a provider call for the
+    privilege of maybe disagreeing with the list they just corrected.
+    """
+
+    planner = _make_planner()
+    state = _named_fields_state()
+    conversation = _field_edit_conversation(
+        build_requirements_disclosure(state, ui_language="sv"),
+        "beslut",
+        "Beslutsdatum",
+    )
+
+    prepared = await _prepare_planner_request_for_test(
+        planner,
+        conversation=conversation,
+        completion_model_route=_route(),
+        persisted_planning_state=state,
+    )
+
+    planner.litellm_client.assert_not_awaited()
+    assert isinstance(prepared, ServerOutputPrepared)
+    assert isinstance(prepared.server_decision, ConfirmRequirements)
+    assert [
+        field.id for field in prepared.server_decision.payload.named_content_fields
+    ] == ["beslut", "Beslutsdatum"]
+
+
+@pytest.mark.asyncio
+async def test_editing_the_field_list_asks_the_user_to_confirm_the_new_summary() -> (
+    None
+):
+    planner = _make_planner()
+    state = _named_fields_state()
+    shown = build_requirements_disclosure(state, ui_language="sv")
+
+    prepared = await _prepare_planner_request_for_test(
+        planner,
+        conversation=_field_edit_conversation(shown, "beslut"),
+        completion_model_route=_route(),
+        persisted_planning_state=state,
+    )
+
+    assert isinstance(prepared, ServerOutputPrepared)
+    assert isinstance(prepared.server_decision, ConfirmRequirements)
+    assert (
+        prepared.server_decision.payload.requirements_version
+        != shown.requirements_version
+    )
+
+
+@pytest.mark.asyncio
+async def test_an_unchanged_field_list_leaves_the_requirements_alone() -> None:
+    """A no-op edit has to be a no-op.
+
+    Submitting the list back unchanged must not manufacture a second version of
+    the same requirements and ask the user to confirm what they already read.
+    Both disclosures are derived through the turn itself, because that is the
+    path a re-submitted list actually travels.
+    """
+
+    planner = _make_planner()
+    state = _named_fields_state()
+    disclosed = await _prepare_planner_request_for_test(
+        planner,
+        conversation=_named_fields_interview(),
+        completion_model_route=_route(),
+        persisted_planning_state=state,
+    )
+    assert isinstance(disclosed, ServerOutputPrepared)
+    assert isinstance(disclosed.server_decision, ConfirmRequirements)
+    shown = disclosed.server_decision.payload
+
+    prepared = await _prepare_planner_request_for_test(
+        planner,
+        conversation=_field_edit_conversation(
+            shown,
+            *[field.id for field in shown.named_content_fields],
+        ),
+        completion_model_route=_route(),
+        persisted_planning_state=state,
+    )
+
+    assert isinstance(prepared, ServerOutputPrepared)
+    assert isinstance(prepared.server_decision, ConfirmRequirements)
+    assert prepared.server_decision.payload == shown

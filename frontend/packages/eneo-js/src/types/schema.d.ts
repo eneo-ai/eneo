@@ -9712,6 +9712,7 @@ export interface components {
       content?: string | null;
       /** Message Id */
       message_id: string;
+      named_content_fields_edit?: components["schemas"]["NamedContentFieldsEditRequest"] | null;
       question?: components["schemas"]["StructuredQuestionPayload"] | null;
       question_answer?: components["schemas"]["StructuredQuestionAnswerMetadata"] | null;
       requirements_confirmation?: components["schemas"]["RequirementsConfirmationMetadata"] | null;
@@ -25066,12 +25067,62 @@ export interface components {
      *     output mode, the presence of a declared schema, and the confidence the name
      *     was admitted with. `label` is what the summary sentence says about the same
      *     obligation, rendered by the same owner, so list and prose cannot disagree.
+     *
+     *     `origin` says how the name got here — read out of the user's own writing,
+     *     or typed into this card. It is display provenance, not a requirement: both
+     *     origins oblige the result to exactly the same content, which is why it
+     *     stays outside the confirmed disclosure identity.
      */
     NamedContentFieldPayload: {
       /** Id */
       id: string;
       /** Label */
       label: string;
+      /**
+       * Origin
+       * @default described
+       * @enum {string}
+       */
+      origin?: "described" | "card_edit";
+    };
+    /**
+     * NamedContentFieldsEditRequest
+     * @description The names the user leaves standing on the confirmation card.
+     *
+     *     The payload is the resulting full set, not a delta: the user is answering
+     *     a disclosure they can see in front of them, so what they submit is simply
+     *     what the card should say. That also makes the edit idempotent and makes
+     *     `requirements_version` mean something — it names the exact disclosure
+     *     whose fields these are, and an edit against an older one is refused rather
+     *     than merged.
+     *
+     *     Names only. The label the card shows is prose the disclosure owner renders
+     *     from the name and the shape the user declared, so a client-supplied label
+     *     could only disagree with it.
+     *
+     *     `added_field_names` is the server's own reading of the same submission, not
+     *     something a client states: which of these names the card did not already
+     *     show. Keeping a chip and re-adding a chip look identical in the resulting
+     *     set but mean different things — the first carries the shape and quotes the
+     *     name already had, the second starts over — and the difference is only
+     *     visible against the disclosure being answered. Recorded here so the edit
+     *     still means the same thing on a later replay, when earlier turns may have
+     *     been compacted away.
+     */
+    NamedContentFieldsEditRequest: {
+      /** Added Field Names */
+      added_field_names?: string[];
+      /** Field Names */
+      field_names: string[];
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      kind: "named_content_fields_edit";
+      /** Requirements Version */
+      requirements_version: string;
+      /** Ui Language */
+      ui_language?: string | null;
     };
     /** OIDCDebugToggleRequest */
     OIDCDebugToggleRequest: {
@@ -28344,6 +28395,7 @@ export interface components {
             | components["schemas"]["StructuredQuestionAnswerRequest"]
             | components["schemas"]["DelegatedQuestionAnswerRequest"]
             | components["schemas"]["RequirementsConfirmationMetadata"]
+            | components["schemas"]["NamedContentFieldsEditRequest"]
           )
         | null;
       /**

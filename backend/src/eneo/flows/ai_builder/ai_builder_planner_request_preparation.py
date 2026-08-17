@@ -18,6 +18,7 @@ from eneo.flows.ai_builder.ai_builder_attachment_context import (
 )
 from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
     SlotClassificationMetadata,
+    named_content_fields_edit_from_metadata,
     provider_safe_tool_call_id,
     question_answer_from_metadata,
     tool_calls_from_message,
@@ -304,6 +305,12 @@ async def prepare_planner_request(
             completion_model_route=request.completion_model_route,
             ui_language=ui_language,
             tenant_id=request.tenant_id,
+            # Editing the card's field list says nothing new to read. The set
+            # is stated outright, so classifying the turn could only re-read
+            # older sentences and charge the user a provider call for it.
+            allow_classification=not _turn_edits_named_content_fields(
+                request.conversation
+            ),
             attachment_context=attachment_context_result,
             usage_tracker=request.usage_tracker,
             before_provider_call=request.before_provider_call,
@@ -448,6 +455,26 @@ def _acknowledged_disclosure(
     ):
         return None
     return requirements_state.latest_summary
+
+
+def _turn_edits_named_content_fields(
+    conversation: list[ConversationMessage],
+) -> bool:
+    """Whether this turn is the field edit and nothing else.
+
+    Editing the list is a structured action that states the whole set, so
+    there is nothing left to read. A sentence sent beside it is something to
+    read, and it is classified normally — the edit still applies, first.
+    """
+
+    latest = conversation[-1] if conversation else None
+    if latest is None or latest.role != "user":
+        return False
+    content = latest.content if isinstance(latest.content, str) else ""
+    return (
+        not content.strip()
+        and named_content_fields_edit_from_metadata(latest.metadata) is not None
+    )
 
 
 def _turn_is_the_acknowledgment(conversation: list[ConversationMessage]) -> bool:

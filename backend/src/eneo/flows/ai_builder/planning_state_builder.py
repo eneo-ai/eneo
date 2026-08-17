@@ -19,7 +19,9 @@ from eneo.flows.ai_builder.ai_builder_aggregation_intent import (
 from eneo.flows.ai_builder.ai_builder_canonicalization import canonical_question_id
 from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
     ClassifierRetentionClass,
+    NamedContentFieldsEditRequest,
     SlotClassificationNamedResultEvidenceMetadata,
+    named_content_fields_edit_from_metadata,
     question_answer_from_metadata,
     question_answer_question_id,
     question_answer_values,
@@ -115,6 +117,7 @@ from eneo.flows.ai_builder.planning_state import (
     SchemaEvidence,
     SlotConfidence,
     SlotSource,
+    named_content_fields_edit_evidence_reference,
 )
 from eneo.flows.ai_builder.question_catalog import legal_slot_values
 from eneo.flows.domain.flow import Flow
@@ -190,7 +193,7 @@ def build_planning_state_from_conversation(
             mapped_execution_policy=mapped_execution_policy,
         ),
     )
-    _replay_slot_classification_metadata(state, conversation, flow=flow)
+    _replay_persisted_turn_evidence(state, conversation, flow=flow)
     _reconcile_report_disposition_after_classifier_replay(state, conversation)
     resolve_docx_mode_from_template_evidence(state)
     _reconcile_dependent_slot_relevance(state)
@@ -308,13 +311,20 @@ def _confirmed_input_fields(
     return []
 
 
-def _replay_slot_classification_metadata(
+def _replay_persisted_turn_evidence(
     state: PlanningState,
     conversation: list[ConversationMessage],
     *,
     flow: Flow | None,
 ) -> None:
-    """Replay persisted classifier facts and only then apply derived defaults."""
+    """Replay persisted classifier facts and only then apply derived defaults.
+
+    Two kinds of persisted message state the named-result set: a classifier
+    snapshot, and a confirmation-card edit. Both state the whole set, so the
+    fold is ordered by conversation position and the later message is the later
+    answer. Only what a kept name already carries survives the edit, and
+    `_apply_named_content_fields_edit` owns that.
+    """
     freeform_text = aggregate_unprompted_user_text(conversation)
     model_blocked_slots = slot_names_blocked_by_explicit_uncertainty(
         conversation,
@@ -322,6 +332,16 @@ def _replay_slot_classification_metadata(
     )
     replayed = False
     for index, message in enumerate(conversation):
+        field_edit = named_content_fields_edit_from_metadata(message.metadata)
+        if field_edit is not None:
+            _apply_named_content_fields_edit(
+                state,
+                edit=field_edit,
+                message_id=message.message_id,
+            )
+        # A turn's classification is persisted on the message that prompted it,
+        # so an edit sent together with a sentence is applied before that
+        # sentence is read — which is the order the user said them in.
         classification = slot_classification_from_metadata(message.metadata)
         if classification is None or classification.outcome != "resolved":
             continue
@@ -1018,6 +1038,52 @@ def _merge_model_named_result_evidence(
             },
         )
     state.named_result_evidence = named_results
+
+
+def _apply_named_content_fields_edit(
+    state: PlanningState,
+    *,
+    edit: NamedContentFieldsEditRequest,
+    message_id: str,
+) -> None:
+    """Make the card's field list say exactly what the user left standing.
+
+    A chip the user left alone keeps everything already known about it — the
+    shape they declared and the words they were quoted on — because leaving a
+    chip alone is not restating it.
+
+    Everything else cites this edit: a name the card did not show, and a name
+    whose only provenance was an earlier edit. Both would otherwise leave the
+    set depending on a turn that is no longer the last word about it, and
+    compaction keeps only the last word.
+    """
+
+    known = {
+        fold_result_field_name(item.name): item for item in state.named_result_evidence
+    }
+    added = edit.added_field_folds
+    state.named_result_evidence = [
+        _kept_named_result(known.get(folded), is_added=folded in added)
+        or NamedResultEvidence(
+            name=name,
+            confidence="high",
+            evidence=[named_content_fields_edit_evidence_reference(message_id)],
+        )
+        for name in edit.field_names
+        for folded in (fold_result_field_name(name),)
+    ]
+
+
+def _kept_named_result(
+    known: NamedResultEvidence | None,
+    *,
+    is_added: bool,
+) -> NamedResultEvidence | None:
+    """What the edit leaves alone, as opposed to what it states afresh."""
+
+    if known is None or is_added or known.origin == "card_edit":
+        return None
+    return known
 
 
 def _apply_replayed_named_result_evidence(

@@ -4,6 +4,7 @@ import pytest
 
 from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
     metadata_for_assistant_question,
+    requirements_summary_to_metadata,
 )
 from eneo.flows.ai_builder.ai_builder_domain_models import ConversationMessage
 from eneo.flows.ai_builder.ai_builder_error_contract import (
@@ -11,6 +12,8 @@ from eneo.flows.ai_builder.ai_builder_error_contract import (
     AIBuilderErrorCode,
 )
 from eneo.flows.ai_builder.ai_builder_event_models import (
+    NamedContentFieldPayload,
+    RequirementsSummaryPayload,
     StructuredQuestionOptionPayload,
     StructuredQuestionPayload,
 )
@@ -497,3 +500,138 @@ def test_delegation_is_refused_when_the_recorded_question_disagrees_with_itself(
 
     assert exc_info.value.code is AIBuilderErrorCode.INVALID_QUESTION_PAYLOAD
     assert exc_info.value.context == {"reason": "delegation_without_pending_question"}
+
+
+def _disclosed_fields_conversation(
+    version: str = "a" * 64,
+) -> list[ConversationMessage]:
+    """A session that has shown one disclosure naming two content fields."""
+
+    summary = RequirementsSummaryPayload(
+        summary="Rapporten ska bevara namngett innehåll: beslut, farhågor.",
+        key_decisions=[],
+        input_description="Ett mötesprotokoll.",
+        output_description="En rapport.",
+        requirements_version=version,
+        named_content_fields=[
+            NamedContentFieldPayload(id="beslut", label="beslut"),
+            NamedContentFieldPayload(id="farhågor", label="farhågor"),
+        ],
+    )
+    return [
+        ConversationMessage(
+            role="assistant",
+            content="Granska sammanfattningen.",
+            metadata=requirements_summary_to_metadata(summary),
+        )
+    ]
+
+
+def test_editing_the_field_list_records_the_set_the_user_left_standing() -> None:
+    prepared = prepare_user_question_metadata(
+        conversation=_disclosed_fields_conversation(),
+        message="",
+        question_answer={
+            "kind": "named_content_fields_edit",
+            "requirements_version": "a" * 64,
+            "field_names": ["beslut", "Beslutsdatum"],
+            "ui_language": "sv",
+        },
+    )
+
+    assert prepared.metadata == {
+        "named_content_fields_edit": {
+            "requirements_version": "a" * 64,
+            "field_names": ["beslut", "Beslutsdatum"],
+            # The card showed "beslut" and "farhågor", so only the third name
+            # is new. Keeping a chip and re-adding one look identical in the
+            # resulting set, and only this card can tell them apart.
+            "added_field_names": ["Beslutsdatum"],
+        },
+        "ui_language": "sv",
+    }
+    assert not prepared.is_requirements_confirmation
+
+
+def test_editing_the_field_list_is_refused_against_an_older_disclosure() -> None:
+    # The user is answering a list they can see. If the requirements have moved
+    # since, their set describes fields that are no longer the ones on offer.
+    with pytest.raises(AIBuilderBadRequestException) as exc_info:
+        prepare_user_question_metadata(
+            conversation=_disclosed_fields_conversation(),
+            message="",
+            question_answer={
+                "kind": "named_content_fields_edit",
+                "requirements_version": "b" * 64,
+                "field_names": ["beslut"],
+            },
+        )
+
+    assert exc_info.value.code is AIBuilderErrorCode.INVALID_QUESTION_PAYLOAD
+    assert exc_info.value.context == {"reason": "requirements_version_stale"}
+
+
+@pytest.mark.parametrize(
+    "field_name",
+    [
+        pytest.param("   ", id="blank"),
+        pytest.param("!!!", id="nothing-left-after-folding"),
+    ],
+)
+def test_a_field_name_with_no_identity_is_refused_by_name(field_name: str) -> None:
+    with pytest.raises(AIBuilderBadRequestException) as exc_info:
+        prepare_user_question_metadata(
+            conversation=_disclosed_fields_conversation(),
+            message="",
+            question_answer={
+                "kind": "named_content_fields_edit",
+                "requirements_version": "a" * 64,
+                "field_names": ["beslut", field_name],
+            },
+        )
+
+    assert exc_info.value.code is AIBuilderErrorCode.INVALID_QUESTION_PAYLOAD
+    assert exc_info.value.context == {
+        "reason": "invalid_field_name",
+        "field_name": field_name,
+    }
+
+
+def test_a_field_name_keeps_the_punctuation_the_card_showed_it_with() -> None:
+    # Names reach the card exactly as the user wrote them, and the edit is
+    # mostly the card echoing them back. Reading one as a path or a shape
+    # declaration would make an existing chip impossible to keep.
+    prepared = prepare_user_question_metadata(
+        conversation=_disclosed_fields_conversation(),
+        message="",
+        question_answer={
+            "kind": "named_content_fields_edit",
+            "requirements_version": "a" * 64,
+            "field_names": ["attachment_inventory[]", "ärende.id"],
+        },
+    )
+
+    assert prepared.metadata is not None
+    assert prepared.metadata["named_content_fields_edit"] == {
+        "requirements_version": "a" * 64,
+        "field_names": ["attachment_inventory[]", "ärende.id"],
+        "added_field_names": ["attachment_inventory[]", "ärende.id"],
+    }
+
+
+def test_the_same_field_named_twice_is_recorded_once() -> None:
+    prepared = prepare_user_question_metadata(
+        conversation=_disclosed_fields_conversation(),
+        message="",
+        question_answer={
+            "kind": "named_content_fields_edit",
+            "requirements_version": "a" * 64,
+            "field_names": ["Beslut", " beslut ", "farhågor"],
+        },
+    )
+
+    assert prepared.metadata is not None
+    assert prepared.metadata["named_content_fields_edit"]["field_names"] == [
+        "Beslut",
+        "farhågor",
+    ]
