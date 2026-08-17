@@ -101,7 +101,9 @@
     );
     return option ? getStructuredQuestionOptionKey(option) : null;
   });
-  const canDelegate = $derived(recommendedKey !== null && !answered && !disabled);
+  const canDelegate = $derived(
+    recommendedKey !== null && ondelegate !== undefined && !answered && !disabled
+  );
 
   const isSingle = $derived(question.selection_mode === "single");
   const isSchemaDirection = $derived(question.question_id === "schema_direction");

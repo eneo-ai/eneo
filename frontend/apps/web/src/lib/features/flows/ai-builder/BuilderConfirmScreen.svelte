@@ -1,11 +1,11 @@
 <script lang="ts">
   import { m } from "$lib/paraglide/messages";
-  import { SvelteMap } from "svelte/reactivity";
   import { slide } from "svelte/transition";
   import { cubicOut } from "svelte/easing";
   import { prefersReducedMotion } from "$lib/core/prefersReducedMotion";
   import { Button } from "$lib/components/ui/button/index.js";
   import BuilderChangeRequest from "./BuilderChangeRequest.svelte";
+  import { summaryTerm } from "./aiBuilderSummaryText";
   import FlowAIBuilderQuestion from "./FlowAIBuilderQuestion.svelte";
   import IconCheck from "@lucide/svelte/icons/check";
   import IconChevronDown from "@lucide/svelte/icons/chevron-down";
@@ -49,7 +49,6 @@
     editingQuestion?: ChatMessage | null;
     editingQuestionNumber?: number;
     onanswer?: (payload: StructuredQuestionAnswerPayload) => void;
-    ondelegate?: (questionId: string) => void;
     oncanceledit?: () => void;
     onconfirm: () => void;
     /** A change request in the user's own words; the server answers with a
@@ -72,31 +71,11 @@
     editingQuestion = null,
     editingQuestionNumber = 1,
     onanswer,
-    ondelegate,
     oncanceledit,
     onconfirm,
     onchange,
     oneditanswer
   }: Props = $props();
-
-  // A row the user answered can be corrected where it is read. The link is the
-  // answer text itself: the server names decisions in the user's own words.
-  const questionIdByAnswerLabel = $derived.by(() => {
-    const byLabel = new SvelteMap<string, string>();
-    for (const item of answered) {
-      const label = item.answerLabel.trim().toLocaleLowerCase();
-      if (label) byLabel.set(label, item.questionId);
-    }
-    return byLabel;
-  });
-  function questionForDecision(decision: string): string | null {
-    return questionIdByAnswerLabel.get(decision.trim().toLocaleLowerCase()) ?? null;
-  }
-  // Saying "follows from your answers" on every row says nothing; it only
-  // means something next to rows the user can correct.
-  const hasCorrectableDecision = $derived(
-    summary.key_decisions.some((decision) => questionForDecision(decision.decision) !== null)
-  );
 
   const reducedMotion = prefersReducedMotion();
   // The change box lives under the card it rewrites, never in a side panel:
@@ -159,7 +138,6 @@
             why={editingQuestion.content.trim() || null}
             {disabled}
             onanswer={(payload) => onanswer?.(payload)}
-            ondelegate={() => ondelegate?.(editingQuestion.question!.question_id)}
           />
         {/key}
       </div>
@@ -229,29 +207,34 @@
             </h3>
             <dl class="mt-1.5 flex flex-col">
               {#each summary.key_decisions as decision (decision.topic)}
-                {@const decisionQuestionId = questionForDecision(decision.decision)}
                 <div
-                  class="border-dimmer grid items-baseline gap-x-4 gap-y-0.5 border-t py-2.5 sm:grid-cols-[12.5rem_1fr_auto]"
+                  class="border-dimmer grid gap-x-4 gap-y-0.5 border-t py-2.5 sm:grid-cols-[12.5rem_1fr]"
                 >
                   <dt class="text-secondary text-[0.8125rem]">{decision.topic}</dt>
                   <dd class="text-primary text-[0.85rem] font-medium">{decision.decision}</dd>
-                  {#if decisionQuestionId && !readOnly && !confirmed}
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      class="justify-self-start sm:justify-self-end"
-                      {disabled}
-                      onclick={() => oneditanswer(decisionQuestionId)}
-                    >
-                      {m.ai_builder_question_change()}
-                    </Button>
-                  {:else if hasCorrectableDecision && !readOnly && !confirmed}
-                    <span class="text-secondary text-xs sm:justify-self-end">
-                      {m.ai_builder_requirements_derived()}
-                    </span>
-                  {/if}
                 </div>
               {/each}
+              <!-- The contract names its input and its result in their own
+                   fields; a key decision is not guaranteed to repeat them, so
+                   the user always sees both before confirming. -->
+              <div
+                class="border-dimmer grid gap-x-4 gap-y-0.5 border-t py-2.5 sm:grid-cols-[12.5rem_1fr]"
+              >
+                <dt class="text-secondary text-[0.8125rem]">{m.ai_builder_requirements_input()}</dt>
+                <dd class="text-primary text-[0.85rem] font-medium">
+                  {summaryTerm(summary.input_description)}
+                </dd>
+              </div>
+              <div
+                class="border-dimmer grid gap-x-4 gap-y-0.5 border-t py-2.5 sm:grid-cols-[12.5rem_1fr]"
+              >
+                <dt class="text-secondary text-[0.8125rem]">
+                  {m.ai_builder_requirements_output()}
+                </dt>
+                <dd class="text-primary text-[0.85rem] font-medium">
+                  {summaryTerm(summary.output_description)}
+                </dd>
+              </div>
               {#if attachments.length > 0}
                 <div
                   class="border-dimmer grid gap-x-4 gap-y-0.5 border-t py-2.5 sm:grid-cols-[12.5rem_1fr]"

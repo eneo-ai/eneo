@@ -601,6 +601,70 @@ describe("FlowAIBuilder discovery screens", () => {
     });
   });
 
+  it("reads a delegated answer back by the option Eneo chose", async () => {
+    // A delegation sends no words, so the label can only come from the option
+    // the server names on the replayed answer.
+    const { fetch } = makeFetch({
+      sessions: [
+        makeSession({
+          conversation: [
+            userMessage("u1", "Sammanfatta rapporter till en PDF"),
+            assistantMessage("a1", "Jag behöver veta formatet.", { question: FORMAT_QUESTION }),
+            userMessage("u2", "", {
+              question_answer: {
+                kind: "structured_question_answer",
+                question_id: "output_format",
+                selected_option_id: "pdf",
+                selected_value: "pdf",
+                delegated: true
+              }
+            }),
+            assistantMessage("a2", "Och källorna?", { question: SOURCES_QUESTION })
+          ]
+        })
+      ]
+    });
+    renderShell({ fetch, stream: makeStream().stream, resumeSessionId: "s-1" });
+
+    await screen.findByRole("heading", { name: SOURCES_QUESTION.question });
+    const chip = screen.getByText("Som PDF").closest("button")!;
+    expect(within(chip).getByText(m.ai_builder_question_delegated_badge())).toBeTruthy();
+  });
+
+  it("does not offer to hand back an answered question that is reopened", async () => {
+    const recommended = question("output_format", "Hur ska resultatet levereras?", [
+      { id: "pdf", label: "Som PDF" },
+      { id: "text", label: "Som text" }
+    ]);
+    recommended.recommended_option_id = "text";
+    const { fetch } = makeFetch({
+      sessions: [
+        makeSession({
+          conversation: [
+            userMessage("u1", "Sammanfatta rapporter till en PDF"),
+            assistantMessage("a1", "Jag behöver veta formatet.", { question: recommended }),
+            userMessage("u2", "Som PDF", {
+              question_answer: {
+                kind: "structured_question_answer",
+                question_id: "output_format",
+                selected_option_ids: ["pdf"]
+              }
+            }),
+            assistantMessage("a2", "Och källorna?", { question: SOURCES_QUESTION })
+          ]
+        })
+      ]
+    });
+    renderShell({ fetch, stream: makeStream().stream, resumeSessionId: "s-1" });
+
+    await screen.findByRole("heading", { name: SOURCES_QUESTION.question });
+    await fireEvent.click(screen.getByText("Som PDF").closest("button")!);
+
+    // The server only accepts a delegation for the question it waits on.
+    await screen.findByText(m.ai_builder_question_editing_note());
+    expect(screen.queryByText(m.ai_builder_question_delegate())).toBeNull();
+  });
+
   it("does not offer to hand back a question Eneo has no recommendation for", async () => {
     const { fetch } = makeFetch({ sessions: [questionSession()] });
     const { stream } = makeStream();
@@ -890,6 +954,13 @@ describe("FlowAIBuilder conversation screen", () => {
     // The transcript is a screen, not a layer over one.
     expect(screen.queryByRole("heading", { name: m.ai_builder_task_title() })).toBeNull();
     expect(screen.getByText(m.ai_builder_conversation_empty())).toBeTruthy();
+
+    // The screen change moves the caret with it, like every other screen.
+    await waitFor(() =>
+      expect(document.activeElement).toBe(
+        screen.getByRole("heading", { name: m.ai_builder_conversation_title() })
+      )
+    );
 
     await fireEvent.click(button(m.ai_builder_conversation_back()));
     expect(await screen.findByRole("heading", { name: m.ai_builder_task_title() })).toBeTruthy();

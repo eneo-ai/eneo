@@ -3,7 +3,7 @@
   import { getLocale } from "$lib/paraglide/runtime";
   import { resolve } from "$app/paths";
   import { onMount, tick } from "svelte";
-  import { SvelteMap, SvelteSet } from "svelte/reactivity";
+  import { SvelteSet } from "svelte/reactivity";
   import * as AlertDialog from "$lib/components/ui/alert-dialog/index.js";
   import { Button } from "$lib/components/ui/button/index.js";
   import { Skeleton } from "$lib/components/ui/skeleton/index.js";
@@ -21,12 +21,9 @@
   import BuilderConversationScreen from "./BuilderConversationScreen.svelte";
   import BuilderReviewScreen from "./BuilderReviewScreen.svelte";
   import { getAIBuilderService } from "./FlowAIBuilderService.svelte.ts";
-  import type {
-    AIBuilderSavedFlowStepScope,
-    AIBuilderSuggestChangeIntent,
-    ChatMessage,
-    RequirementsSummary
-  } from "./protocol";
+  import { summaryTerm } from "./aiBuilderSummaryText";
+  import { buildAnswerLabels } from "./aiBuilderAnswerLabel";
+  import type { AIBuilderSavedFlowStepScope, ChatMessage, RequirementsSummary } from "./protocol";
   import {
     delegatedQuestionAnswer,
     type StructuredQuestionAnswerPayload
@@ -118,14 +115,7 @@
     }
     return ids;
   });
-  const answerLabelByQuestionId = $derived.by(() => {
-    const labels = new SvelteMap<string, string>();
-    for (const message of service.messages) {
-      const id = message.questionAnswer?.question_id;
-      if (id && message.content.trim()) labels.set(id, message.content.trim());
-    }
-    return labels;
-  });
+  const answerLabelByQuestionId = $derived(buildAnswerLabels(service.messages));
   const delegatedQuestionIds = $derived.by(() => {
     const ids = new SvelteSet<string>();
     for (const message of service.messages) {
@@ -242,6 +232,8 @@
         return m.ai_builder_rail_planning();
       case "review":
         return m.ai_builder_announce_review();
+      case "conversation":
+        return m.ai_builder_conversation_title();
       default:
         return "";
     }
@@ -341,15 +333,6 @@
     void service.confirmRequirements(activeEditContext);
   }
 
-  /** "Ljud → PDF-dokument": the recap is a glance, so the server's full
-   *  sentences ("Primär indata vid körning: Dokument.") are reduced to the
-   *  thing named after the colon. */
-  function summaryTerm(sentence: string | null | undefined): string {
-    const text = (sentence ?? "").trim();
-    const named = text.includes(":") ? text.slice(text.indexOf(":") + 1) : text;
-    return named.trim().replace(/[.\s]+$/, "");
-  }
-
   function buildConfirmedLine(summary: RequirementsSummary | null): string | null {
     if (!summary) return null;
     const input = summaryTerm(summary.input_description);
@@ -360,11 +343,6 @@
 
   function handleRequirementsChange(text: string) {
     void service.changeRequirements(text);
-  }
-
-  function handleSuggestChange(intent: AIBuilderSuggestChangeIntent) {
-    conversationOpen = true;
-    void conversationRef?.focusComposer(intent);
   }
 
   function handleRailSelect(phase: BuilderPhaseIndex) {
@@ -503,7 +481,7 @@
 {:else}
   <div
     bind:this={builderRootEl}
-    class="bg-secondary @container/builder flex min-h-0 w-full flex-1 flex-col"
+    class="bg-secondary @container/builder -ml-6 flex min-h-0 w-[calc(100%+1.5rem)] flex-1 flex-col"
   >
     <p class="sr-only" role="status" aria-live="polite" data-builder-announcer>
       {screenAnnouncementText}
@@ -625,7 +603,6 @@
           editingQuestion={editingQuestionMessage}
           editingQuestionNumber={questionNumber}
           onanswer={handleQuestionAnswer}
-          ondelegate={handleDelegateQuestion}
           oncanceledit={() => (editingQuestionId = null)}
           onconfirm={handleRequirementsConfirm}
           onchange={handleRequirementsChange}
@@ -637,7 +614,6 @@
           <BuilderReviewScreen
             showGenerationFailure={true}
             onapplied={(detail) => onapplied?.(detail)}
-            onsuggestchange={handleSuggestChange}
             onshowconversation={() => (conversationOpen = true)}
           />
         </div>
@@ -653,7 +629,6 @@
           <BuilderReviewScreen
             showGenerationFailure={generationFailedWithoutPlan}
             onapplied={(detail) => onapplied?.(detail)}
-            onsuggestchange={handleSuggestChange}
             onshowconversation={() => (conversationOpen = true)}
           />
         </div>

@@ -12,13 +12,11 @@
    * visible while they do.
    */
   interface Props {
-    /** A phase screen owns the composer while it shows one, so only one draft is live. */
-    showComposer?: boolean;
     oneditanswer?: (questionId: string) => void;
     onclose?: () => void;
   }
 
-  let { showComposer = true, oneditanswer, onclose }: Props = $props();
+  let { oneditanswer, onclose }: Props = $props();
 
   let chatRef = $state<FlowAIBuilderChat | undefined>();
 
@@ -52,7 +50,7 @@
     </div>
 
     <div class="border-default bg-primary flex min-h-0 flex-col overflow-hidden rounded-xl border">
-      <FlowAIBuilderChat bind:this={chatRef} {showComposer} {oneditanswer} />
+      <FlowAIBuilderChat bind:this={chatRef} {oneditanswer} />
       <p class="border-default text-secondary border-t px-4 py-3 text-xs text-pretty">
         {m.ai_builder_conversation_footnote()}
       </p>

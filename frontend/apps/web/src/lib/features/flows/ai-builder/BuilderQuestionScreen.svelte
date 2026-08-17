@@ -102,7 +102,7 @@
           {why}
           {disabled}
           {onanswer}
-          ondelegate={() => ondelegate?.(question.question_id)}
+          ondelegate={editingQuestionId ? undefined : () => ondelegate?.(question.question_id)}
         />
       {/key}
     </div>

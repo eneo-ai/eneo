@@ -2,34 +2,22 @@
   import { m } from "$lib/paraglide/messages";
   import FlowAIBuilderMessage from "./FlowAIBuilderMessage.svelte";
   import FlowAIBuilderInput from "./FlowAIBuilderInput.svelte";
-  import { SvelteMap } from "svelte/reactivity";
   import { getAIBuilderService } from "./FlowAIBuilderService.svelte.ts";
+  import { buildAnswerLabels } from "./aiBuilderAnswerLabel";
   import type { AIBuilderPlanEditContext, AIBuilderSuggestChangeIntent } from "./protocol";
 
   interface Props {
-    /** Show the free-text composer under the transcript. The phase screens
-     *  own the composer while they show one, so only one draft is live. */
-    showComposer?: boolean;
     /** Reopen an answered question on the phase screen. */
     oneditanswer?: (questionId: string) => void;
   }
 
-  let { showComposer = true, oneditanswer }: Props = $props();
+  let { oneditanswer }: Props = $props();
 
   const service = getAIBuilderService();
 
-  // One O(n) projection: question id -> the user's answer text. Later answers
-  // to the same question overwrite earlier ones — the latest is authoritative.
-  const answerLabelByQuestionId = $derived.by(() => {
-    const labels = new SvelteMap<string, string>();
-    for (const message of service.messages) {
-      const questionId = message.questionAnswer?.question_id;
-      if (!questionId) continue;
-      const content = message.content.trim();
-      if (content.length > 0) labels.set(questionId, content);
-    }
-    return labels;
-  });
+  // Question id -> the answer as the user reads it back; the same projection
+  // the phase screens use, so a delegated answer reads the same in both.
+  const answerLabelByQuestionId = $derived(buildAnswerLabels(service.messages));
 
   let inputRef = $state<FlowAIBuilderInput | undefined>();
   let pendingEditContext = $state<AIBuilderPlanEditContext | null>(null);
@@ -162,7 +150,7 @@
     {/if}
   </div>
 
-  {#if showComposer}
+  {#if service.hasSession}
     <div class="border-default bg-primary shrink-0 border-t px-3 pt-3 pb-3">
       <FlowAIBuilderInput
         bind:this={inputRef}
@@ -170,6 +158,9 @@
         editContextLabel={savedFlowStepScopeLabel}
         oncleareditcontext={clearActiveEditContext}
         refinement={service.currentPlan !== null}
+        placeholder={service.currentPlan === null && service.messages.length > 0
+          ? m.ai_builder_conversation_placeholder()
+          : null}
       />
     </div>
   {/if}

@@ -146,6 +146,14 @@ function toPersistedQuestionAnswerMetadata(
   if (questionAnswer.question_id !== undefined) {
     metadata.question_id = questionAnswer.question_id;
   }
+  // The server answers a delegation with one option, named in the singular
+  // fields; without them the chip has nothing to show after a reload.
+  if (questionAnswer.selected_option_id != null) {
+    metadata.selected_option_id = questionAnswer.selected_option_id;
+  }
+  if (questionAnswer.selected_value != null) {
+    metadata.selected_value = questionAnswer.selected_value;
+  }
   if (questionAnswer.selected_option_ids != null) {
     metadata.selected_option_ids = questionAnswer.selected_option_ids;
   }

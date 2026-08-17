@@ -4337,6 +4337,7 @@
   "ai_builder_conversation_button_title": "Open the whole conversation — change an answer without starting over",
   "ai_builder_conversation_title": "The conversation",
   "ai_builder_conversation_back": "Back",
+  "ai_builder_conversation_placeholder": "Write to Eneo …",
   "ai_builder_conversation_subtitle": "Change an answer without starting over",
   "ai_builder_conversation_footnote": "Your answers are saved. If you go back a phase, Eneo keeps everything you have already answered.",
   "ai_builder_conversation_empty": "No messages yet.",

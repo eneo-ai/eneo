@@ -18,7 +18,6 @@
   import type {
     AIBuilderPlanEditContext,
     AIBuilderStatus,
-    AIBuilderSuggestChangeIntent,
     EditAdvisory,
     FlowDraftSpecCore,
     StepSpec
@@ -48,7 +47,6 @@
     onapplied?: (detail: { flow_id: string; focusStepIndex: number | null }) => void;
     /** The shell's composer route for a change request. This screen asks for
      *  changes in place, so the prop stays part of the contract but unused. */
-    onsuggestchange?: (intent: AIBuilderSuggestChangeIntent) => void;
     /** A generation attempt failed before a plan became available. */
     showGenerationFailure?: boolean;
     /** Narrow layouts: bring the conversation back into view. */

@@ -4337,6 +4337,7 @@
   "ai_builder_conversation_button_title": "Öppna hela samtalet — ändra ett svar utan att börja om",
   "ai_builder_conversation_title": "Samtalet",
   "ai_builder_conversation_back": "Tillbaka",
+  "ai_builder_conversation_placeholder": "Skriv till Eneo …",
   "ai_builder_conversation_subtitle": "Ändra ett svar utan att börja om",
   "ai_builder_conversation_footnote": "Dina svar sparas. Går du tillbaka en fas behåller Eneo allt du redan har svarat.",
   "ai_builder_conversation_empty": "Inga meddelanden än.",
