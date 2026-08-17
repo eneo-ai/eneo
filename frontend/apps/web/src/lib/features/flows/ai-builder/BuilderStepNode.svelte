@@ -7,6 +7,8 @@
     /** "Ljud → Text" — what the step takes in and hands on. */
     ioLabel: string;
     modelLabel: string;
+    /** An unchanged step in a diff: present for context, not for reading. */
+    quiet?: boolean;
     /** "PDF-dokument" when the step writes a file the run keeps. */
     artifactLabel?: string | null;
     /** The run stops here until a person approves. */
@@ -21,6 +23,7 @@
     name,
     ioLabel,
     modelLabel,
+    quiet = false,
     artifactLabel = null,
     pausesForReview = false,
     perFile = false,
@@ -29,7 +32,9 @@
 </script>
 
 <div
-  class="border-default bg-primary flex items-start gap-3 rounded-[10px] border px-3.5 py-3 shadow-sm"
+  class="flex items-start gap-3 rounded-[10px] border px-3.5 py-3 {quiet
+    ? 'border-dimmer bg-secondary'
+    : 'border-default bg-primary shadow-sm'}"
 >
   <span
     class="mt-px inline-flex size-[1.625rem] shrink-0 items-center justify-center rounded-[7px] text-xs font-bold tabular-nums

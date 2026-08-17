@@ -13,6 +13,7 @@
   import BuilderChangeRequest from "./BuilderChangeRequest.svelte";
   import BuilderStepDetails from "./BuilderStepDetails.svelte";
   import BuilderStepNode from "./BuilderStepNode.svelte";
+  import { Checkbox } from "$lib/components/ui/checkbox/index.js";
   import FlowAIBuilderDiagnosticCopyButton from "./FlowAIBuilderDiagnosticCopyButton.svelte";
   import { getAIBuilderService } from "./FlowAIBuilderService.svelte.ts";
   import type {
@@ -148,6 +149,24 @@
   const activeStepScope = $derived(service.activeStepScope);
 
   const indexedSteps = $derived(steps.map((step, index) => ({ step, index })));
+
+  const stepChangeCounts = $derived.by(() => {
+    if (isCreateMode) return null;
+    const counts = { added: 0, modified: 0, unchanged: 0, removed: removedStepChanges.length };
+    for (const step of steps) {
+      const kind = getStepChangeKind(step, plan?.proposal.edit?.diff ?? null);
+      if (kind === "added") counts.added += 1;
+      else if (kind === "modified") counts.modified += 1;
+      else counts.unchanged += 1;
+    }
+    return counts;
+  });
+  let onlyChanges = $state(false);
+  const visibleSteps = $derived(
+    onlyChanges && !isCreateMode
+      ? indexedSteps.filter(({ step }) => changeBadge(step) !== null)
+      : indexedSteps
+  );
   const detailSteps = $derived(
     isScopedStepReview
       ? [
@@ -942,6 +961,37 @@
                   ? m.ai_builder_step_change_review_title()
                   : m.ai_builder_how_flow_works()}
               </h3>
+              {#if stepChangeCounts}
+                <!-- Byggspec §9: four counters, so the size of the change is
+                     read before any step is. -->
+                <ul class="flex list-none flex-wrap items-center gap-1.5 p-0">
+                  {#each [{ key: "added", count: stepChangeCounts.added, tone: "bg-positive-default" }, { key: "modified", count: stepChangeCounts.modified, tone: "bg-accent-default" }, { key: "unchanged", count: stepChangeCounts.unchanged, tone: "bg-border-stronger" }, { key: "removed", count: stepChangeCounts.removed, tone: "bg-border-stronger" }] as counter (counter.key)}
+                    {#if counter.count > 0}
+                      <li
+                        class="border-default bg-primary text-secondary inline-flex h-[1.625rem] items-center gap-1.5 rounded-full border px-2.5 text-xs"
+                      >
+                        <span
+                          class="size-[0.4375rem] rounded-full {counter.tone}"
+                          aria-hidden="true"
+                        ></span>
+                        {counter.key === "added"
+                          ? m.ai_builder_diff_added({ count: String(counter.count) })
+                          : counter.key === "modified"
+                            ? m.ai_builder_diff_modified({ count: String(counter.count) })
+                            : counter.key === "unchanged"
+                              ? m.ai_builder_diff_unchanged({ count: String(counter.count) })
+                              : m.ai_builder_diff_removed({ count: String(counter.count) })}
+                      </li>
+                    {/if}
+                  {/each}
+                </ul>
+                {#if stepChangeCounts.unchanged > 0 && (stepChangeCounts.added > 0 || stepChangeCounts.modified > 0)}
+                  <label class="text-secondary flex cursor-pointer items-center gap-1.5 text-xs">
+                    <Checkbox bind:checked={onlyChanges} class="size-3.5" />
+                    {m.ai_builder_diff_only_changes()}
+                  </label>
+                {/if}
+              {/if}
               <Tabs.List class="ml-auto h-8">
                 <Tabs.Trigger value="diagram" class="px-3 py-1 text-xs">
                   {m.ai_builder_canvas_tab_diagram()}
@@ -985,7 +1035,7 @@
                     </span>
                   </li>
                 {/if}
-                {#each indexedSteps as { step, index } (step.plan_step_ref)}
+                {#each visibleSteps as { step, index } (step.plan_step_ref)}
                   <li>
                     <div
                       class="border-stronger mx-auto h-3.5 w-px border-l"
@@ -1000,6 +1050,7 @@
                       pausesForReview={pausesForReview(step)}
                       perFile={perFileStepRefs.has(step.plan_step_ref)}
                       changeBadge={changeBadge(step)}
+                      quiet={!isCreateMode && changeBadge(step) === null}
                     />
                   </li>
                 {/each}
