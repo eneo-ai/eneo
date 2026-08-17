@@ -692,7 +692,8 @@
   }
 
   .option-recommendation {
-    @apply inline-flex h-[1.3125rem] shrink-0 items-center rounded-full px-2 text-[0.6875rem] font-semibold;
+    @apply inline-flex h-5 shrink-0 items-center rounded-full px-2 text-[0.65625rem] font-bold;
+    letter-spacing: 0.03em;
     color: var(--accent-stronger);
     background: var(--accent-dimmer);
   }

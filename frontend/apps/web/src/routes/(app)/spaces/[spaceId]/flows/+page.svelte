@@ -79,7 +79,7 @@
     {/if}
   </Page.Header>
   <Page.Main>
-    <div class="mx-auto flex w-full max-w-[1100px] flex-col gap-4 px-3 py-4 sm:px-6 sm:py-6">
+    <div class="mx-auto flex w-full max-w-[66.25rem] flex-col gap-4 px-3 py-4 sm:px-6 sm:py-6">
       <FlowsTable
         flows={$flows}
         {drafts}

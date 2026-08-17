@@ -30,7 +30,9 @@
   }
 </script>
 
-<div class="conversation-screen flex justify-center px-7 pt-6 pb-10 max-sm:px-3 max-sm:pt-4">
+<div
+  class="conversation-screen flex min-h-full justify-center px-7 pt-6 pb-10 max-lg:px-5 max-md:px-4 max-sm:pt-4"
+>
   <div class="flex w-full max-w-[43.75rem] flex-col 2xl:max-w-[48.125rem]">
     <div class="mb-3 flex flex-wrap items-center gap-3">
       <div class="min-w-0">

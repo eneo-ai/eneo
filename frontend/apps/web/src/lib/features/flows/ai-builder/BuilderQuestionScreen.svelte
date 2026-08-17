@@ -44,8 +44,10 @@
   const why = $derived(questionMessage.content.trim() || null);
 </script>
 
-<div class="flex justify-center px-7 pt-6 pb-10 max-sm:px-3 max-sm:pt-4 max-sm:pb-0">
-  <div class="flex w-full max-w-[41.25rem] flex-col 2xl:max-w-[45.625rem]">
+<div
+  class="flex min-h-full justify-center px-7 pt-6 pb-10 max-lg:px-5 max-md:px-4 max-sm:pt-4 max-sm:pb-0"
+>
+  <div class="my-auto flex w-full max-w-[41.25rem] flex-col 2xl:max-w-[45.625rem]">
     {#if answered.length > 0}
       <!-- On a phone the answered chips stay on one line and scroll sideways;
            wrapping them would push the question itself below the fold. -->

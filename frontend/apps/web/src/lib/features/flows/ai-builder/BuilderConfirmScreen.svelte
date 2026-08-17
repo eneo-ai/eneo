@@ -1,5 +1,6 @@
 <script lang="ts">
   import { m } from "$lib/paraglide/messages";
+  import { SvelteSet } from "svelte/reactivity";
   import { slide } from "svelte/transition";
   import { cubicOut } from "svelte/easing";
   import { prefersReducedMotion } from "$lib/core/prefersReducedMotion";
@@ -85,6 +86,13 @@
     summary.key_decisions.some((decision) => decision.question_id != null)
   );
   const namedContentFields = $derived(summary.named_content_fields ?? []);
+  // What the decisions already say, so the input and result rows do not repeat
+  // a value the user has just read one line above.
+  const inputTerm = $derived(summaryTerm(summary.input_description));
+  const outputTerm = $derived(summaryTerm(summary.output_description));
+  const decisionsState = $derived(
+    new SvelteSet(summary.key_decisions.map((decision) => decision.decision.trim()))
+  );
 
   const reducedMotion = prefersReducedMotion();
   // The change box lives under the card it rewrites, never in a side panel:
@@ -96,8 +104,8 @@
   const manualNotes = $derived(summary.manual_setup_notes ?? []);
 </script>
 
-<div class="flex justify-center px-7 pt-6 pb-10 max-sm:px-3 max-sm:pt-4">
-  <div class="confirm-screen w-full max-w-[43.75rem] 2xl:max-w-[48.125rem]">
+<div class="flex min-h-full justify-center px-7 pt-6 pb-10 max-lg:px-5 max-md:px-4 max-sm:pt-4">
+  <div class="confirm-screen my-auto w-full max-w-[43.75rem] 2xl:max-w-[48.125rem]">
     {#if answered.length > 0 && !readOnly}
       <div class="mb-4 flex flex-wrap items-center gap-2">
         <span class="text-secondary text-xs">{m.ai_builder_question_answers_label()}</span>
@@ -260,27 +268,30 @@
                   {/if}
                 </div>
               {/each}
-              <!-- The contract names its input and its result in their own
-                   fields; a key decision is not guaranteed to repeat them, so
-                   the user always sees both before confirming. -->
-              <div
-                class="border-dimmer grid gap-x-4 gap-y-0.5 border-t py-2.5 sm:grid-cols-[12.5rem_1fr]"
-              >
-                <dt class="text-secondary text-[0.8125rem]">{m.ai_builder_requirements_input()}</dt>
-                <dd class="text-primary text-[0.85rem] font-medium">
-                  {summaryTerm(summary.input_description)}
-                </dd>
-              </div>
-              <div
-                class="border-dimmer grid gap-x-4 gap-y-0.5 border-t py-2.5 sm:grid-cols-[12.5rem_1fr]"
-              >
-                <dt class="text-secondary text-[0.8125rem]">
-                  {m.ai_builder_requirements_output()}
-                </dt>
-                <dd class="text-primary text-[0.85rem] font-medium">
-                  {summaryTerm(summary.output_description)}
-                </dd>
-              </div>
+              <!-- The contract keeps the input and the result in their own
+                   fields, and a key decision is not guaranteed to repeat them.
+                   Shown only when nothing above already said it, so the card
+                   never states the same thing twice. -->
+              {#if !decisionsState.has(inputTerm)}
+                <div
+                  class="border-dimmer grid gap-x-4 gap-y-0.5 border-t py-2.5 sm:grid-cols-[12.5rem_1fr]"
+                >
+                  <dt class="text-secondary text-[0.8125rem]">
+                    {m.ai_builder_requirements_input()}
+                  </dt>
+                  <dd class="text-primary text-[0.85rem] font-medium">{inputTerm}</dd>
+                </div>
+              {/if}
+              {#if !decisionsState.has(outputTerm)}
+                <div
+                  class="border-dimmer grid gap-x-4 gap-y-0.5 border-t py-2.5 sm:grid-cols-[12.5rem_1fr]"
+                >
+                  <dt class="text-secondary text-[0.8125rem]">
+                    {m.ai_builder_requirements_output()}
+                  </dt>
+                  <dd class="text-primary text-[0.85rem] font-medium">{outputTerm}</dd>
+                </div>
+              {/if}
               {#if attachments.length > 0}
                 <div
                   class="border-dimmer grid gap-x-4 gap-y-0.5 border-t py-2.5 sm:grid-cols-[12.5rem_1fr]"

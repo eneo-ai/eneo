@@ -42,7 +42,7 @@
 </script>
 
 <div class="flex flex-1 items-center justify-center px-7 py-8 max-sm:px-3 max-sm:py-5">
-  <div class="task-screen w-full max-w-[40.625rem] 2xl:max-w-[45rem]">
+  <div class="task-screen my-auto w-full max-w-[40.625rem] 2xl:max-w-[45rem]">
     <h2
       class="text-primary text-[1.6875rem] leading-tight font-extrabold tracking-[-0.03em] text-pretty"
     >

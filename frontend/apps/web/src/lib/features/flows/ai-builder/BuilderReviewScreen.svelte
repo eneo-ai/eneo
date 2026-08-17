@@ -556,7 +556,9 @@
   <div class="bg-secondary flex min-h-0 flex-1 flex-col">
     <!-- Bottom padding clears the sticky action bar so it never covers the
          change box or the last step. -->
-    <div class="flex flex-1 justify-center px-7 pt-6 pb-28 max-sm:px-3 max-sm:pt-4 max-sm:pb-40">
+    <div
+      class="flex flex-1 justify-center px-7 pt-6 pb-28 max-lg:px-5 max-md:px-4 max-sm:pt-4 max-sm:pb-40"
+    >
       <div class="w-full max-w-[53.75rem] 2xl:max-w-[62.5rem]">
         <!-- Turn receipts and blockers, above the plan they describe -->
         {#if justUpdated}
@@ -1322,11 +1324,15 @@
     onconfirm={() => void handlePrimaryAction()}
   />
 {:else if service.conflict}
-  <div class="bg-secondary flex flex-1 justify-center px-7 pt-6 pb-10 max-sm:px-3 max-sm:pt-4">
+  <div
+    class="bg-secondary flex flex-1 justify-center px-7 pt-6 pb-10 max-lg:px-5 max-md:px-4 max-sm:pt-4"
+  >
     <div class="w-full max-w-[43.75rem]">{@render conflictCard()}</div>
   </div>
 {:else if showGenerationFailure}
-  <div class="bg-secondary flex flex-1 justify-center px-7 pt-6 pb-10 max-sm:px-3 max-sm:pt-4">
+  <div
+    class="bg-secondary flex flex-1 justify-center px-7 pt-6 pb-10 max-lg:px-5 max-md:px-4 max-sm:pt-4"
+  >
     <div class="w-full max-w-[43.75rem]">
       <div class="border-default bg-primary rounded-xl border p-5" role="status" aria-live="polite">
         <div class="flex items-start gap-3">
