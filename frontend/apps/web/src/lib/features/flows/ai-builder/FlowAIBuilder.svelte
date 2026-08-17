@@ -170,6 +170,13 @@
   // "Uppdaterad — bekräfta igen": an earlier version of the requirements was
   // confirmed and this newer version replaced it, so the old confirmation
   // cannot carry over.
+  const summaryRevisionPending = $derived(
+    service.isStreaming &&
+      latestSummaryMessageIndex !== -1 &&
+      service.messages.some(
+        (message, index) => index > latestSummaryMessageIndex && message.role === "user"
+      )
+  );
   const summaryIsStale = $derived.by(() => {
     const latest = latestSummary;
     if (!latest || service.isRequirementsSummaryConfirmed(latest)) return false;
@@ -614,7 +621,7 @@
           confirmed={service.isRequirementsSummaryConfirmed(latestSummary)}
           stale={summaryIsStale}
           readOnly={phaseIndex > 0}
-          pending={service.isStreaming}
+          pending={summaryRevisionPending}
           isEdit={targetKind === "edit"}
           disabled={service.isCreating || service.isStreaming}
           editingQuestion={editingQuestionMessage}

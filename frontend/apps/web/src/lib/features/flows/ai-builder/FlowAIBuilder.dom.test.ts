@@ -1070,6 +1070,61 @@ describe("FlowAIBuilder confirm, build and review", () => {
     });
   });
 
+  it("shows a correction going somewhere, and stops when the answer lands", async () => {
+    const { fetch } = makeFetch({
+      sessions: [
+        makeSession({
+          conversation: [
+            userMessage("u1", "Sammanfatta rapporter till en PDF"),
+            assistantMessage("a1", "", { requirements_summary: SUMMARY })
+          ]
+        })
+      ]
+    });
+    const { stream, calls } = makeStream(() => "hold");
+    renderShell({ fetch, stream, resumeSessionId: "s-1" });
+
+    await screen.findByRole("heading", { name: m.ai_builder_requirements_title() });
+    await fireEvent.click(button(m.ai_builder_confirm_change_answers()));
+    const box = await screen.findByRole("textbox", {
+      name: m.ai_builder_change_request_textarea_label()
+    });
+    await fireEvent.input(box, { target: { value: "en PDF i stället" } });
+    await fireEvent.click(button(m.ai_builder_send()));
+
+    // The editor closed, so the waiting state has to take its place: without
+    // it, sending looks like nothing happened at all.
+    expect(await screen.findByText(m.ai_builder_confirm_change_pending())).toBeTruthy();
+    expect(
+      screen.queryByRole("textbox", { name: m.ai_builder_change_request_textarea_label() })
+    ).toBeNull();
+
+    const replacement = { ...SUMMARY, requirements_version: "b".repeat(64) };
+    calls[0]!.emit([{ event: "requirements_summary", data: JSON.stringify(replacement) }]);
+    calls[0]!.finish();
+
+    await waitFor(() =>
+      expect(screen.queryByText(m.ai_builder_confirm_change_pending())).toBeNull()
+    );
+  });
+
+  it("does not say it is working out the summary again while the first one arrives", async () => {
+    const { fetch } = makeFetch({ sessions: [makeSession({ conversation: [] })] });
+    const { stream, calls } = makeStream(() => "hold");
+    renderShell({ fetch, stream });
+
+    await waitFor(() => expect(screen.getByRole("textbox")).toBeTruthy());
+    await fireEvent.input(textbox(), { target: { value: "Sammanfatta rapporter till en PDF" } });
+    await fireEvent.click(button(m.ai_builder_send()));
+
+    // The stream is still open when the first summary lands. There is nothing
+    // to recalculate yet, so the card must not claim there is.
+    calls[0]!.emit([{ event: "requirements_summary", data: JSON.stringify(SUMMARY) }]);
+
+    await screen.findByRole("heading", { name: m.ai_builder_requirements_title() });
+    expect(screen.queryByText(m.ai_builder_confirm_change_pending())).toBeNull();
+  });
+
   it("does not claim answers on a run where nothing was asked", async () => {
     // The common live case: the description settles every slot, so the server
     // asks nothing and every row is derived.
