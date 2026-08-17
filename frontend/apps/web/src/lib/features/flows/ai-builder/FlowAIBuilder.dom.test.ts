@@ -1171,7 +1171,21 @@ describe("FlowAIBuilder confirm, build and review", () => {
                 ]
               }
             }),
-            assistantMessage("a2", "", { requirements_summary: SUMMARY })
+            assistantMessage("a2", "", {
+              requirements_summary: {
+                ...SUMMARY,
+                runtime_input_fields: [
+                  {
+                    key: "ort",
+                    label: "Ort",
+                    type: "select",
+                    required: true,
+                    purpose: "Använd för att förstå indata",
+                    options: ["Sundsvall", "Washington, D.C."]
+                  }
+                ]
+              }
+            })
           ]
         })
       ]
@@ -1196,10 +1210,10 @@ describe("FlowAIBuilder confirm, build and review", () => {
     ).toBeTruthy();
   });
 
-  it("keeps a card and the form it opens on the same revision", async () => {
-    // A turn that answered again but never produced a new summary: the newer
-    // answer belongs to a version the user is not looking at, so neither the
-    // chips nor the editor may show it.
+  it("opens the form on the answer that produced the summary being shown", async () => {
+    // A turn that answered again without producing a new summary: the newer
+    // answer belongs to a version the user is not looking at, so the editor
+    // must not start from it.
     const fieldQuestion = question(
       "runtime_metadata_field_details",
       "Vad ska den som kör flödet fylla i?",
@@ -1226,7 +1240,20 @@ describe("FlowAIBuilder confirm, build and review", () => {
             userMessage("u1", "Sammanfatta rapporter"),
             assistantMessage("a1", "", { question: fieldQuestion }),
             answerWith("u2", "Ort", "ort"),
-            assistantMessage("a2", "", { requirements_summary: SUMMARY }),
+            assistantMessage("a2", "", {
+              requirements_summary: {
+                ...SUMMARY,
+                runtime_input_fields: [
+                  {
+                    key: "ort",
+                    label: "Ort",
+                    type: "text",
+                    required: false,
+                    purpose: "Använd för att förstå indata"
+                  }
+                ]
+              }
+            }),
             assistantMessage("a3", "", { question: fieldQuestion }),
             answerWith("u3", "Handläggare", "handlaggare")
           ]

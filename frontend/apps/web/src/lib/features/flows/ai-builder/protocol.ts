@@ -463,7 +463,29 @@ const requirementsSummaryEventDataSchema = z.object({
   input_description: nonBlankString,
   output_description: nonBlankString,
   // What the prose promises the result will keep, in the same order and words.
-  named_content_fields: z.array(z.object({ id: z.string(), label: z.string() })).optional(),
+  runtime_input_fields: z
+    .array(
+      z.object({
+        key: z.string(),
+        label: z.string(),
+        type: z.enum(["text", "number", "date", "select", "multiselect"]),
+        required: z.boolean(),
+        // Already localized by the server, from the same owner as the
+        // question's own option labels.
+        purpose: z.string(),
+        options: stringArraySchema.optional()
+      })
+    )
+    .optional(),
+  named_content_fields: z
+    .array(
+      z.object({
+        id: z.string(),
+        label: z.string(),
+        origin: z.enum(["described", "card_edit"]).optional()
+      })
+    )
+    .optional(),
   assumptions: stringArraySchema.optional(),
   manual_setup_notes: stringArraySchema.optional(),
   resolved_requirements: z

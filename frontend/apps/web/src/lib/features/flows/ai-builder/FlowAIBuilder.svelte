@@ -3,7 +3,7 @@
   import { getLocale } from "$lib/paraglide/runtime";
   import { resolve } from "$app/paths";
   import { onMount, tick } from "svelte";
-  import { SvelteMap, SvelteSet } from "svelte/reactivity";
+  import { SvelteSet } from "svelte/reactivity";
   import * as AlertDialog from "$lib/components/ui/alert-dialog/index.js";
   import { Button } from "$lib/components/ui/button/index.js";
   import { Skeleton } from "$lib/components/ui/skeleton/index.js";
@@ -121,56 +121,6 @@
     return ids;
   });
   const answerLabelByQuestionId = $derived(buildAnswerLabels(service.messages));
-  /** The newest asking of a question at or before a point in the transcript.
-   *  Wording read beside a summary has to come from the same revision. */
-  function questionAtOrBefore(questionId: string, limit: number) {
-    const end = limit === -1 ? service.messages.length - 1 : limit;
-    for (let i = end; i >= 0; i -= 1) {
-      const question = service.messages[i]?.question;
-      if (question?.question_id === questionId) return question;
-    }
-    return null;
-  }
-  /** The newest field answer at or before the summary on screen. Everything
-   *  the card says about fields, and the form it opens, comes from this one
-   *  value — a newer answer belongs to a version the user is not looking at. */
-  const confirmedFieldAnswer = $derived.by(() => {
-    let found: { questionId: string; fields: StructuredInputFieldAnswer[] } | null = null;
-    for (const [index, message] of service.messages.entries()) {
-      if (latestSummaryMessageIndex !== -1 && index > latestSummaryMessageIndex) break;
-      const answer = message.questionAnswer;
-      if (answer?.question_id && answer.input_fields?.length) {
-        found = {
-          questionId: answer.question_id,
-          fields: answer.input_fields as StructuredInputFieldAnswer[]
-        };
-      }
-    }
-    return found;
-  });
-  // The purpose is a value like "interpret_input"; its words belong to the
-  // question that offered it, so they come from there and are never invented.
-  const purposeLabels = $derived.by(() => {
-    const labels = new SvelteMap<string, string>();
-    const question = runtimeFieldsQuestionId
-      ? questionAtOrBefore(runtimeFieldsQuestionId, latestSummaryMessageIndex)
-      : null;
-    for (const option of question?.options ?? []) {
-      if (option.value != null) labels.set(String(option.value), option.label);
-      if (option.id) labels.set(option.id, option.label);
-    }
-    return labels;
-  });
-  const runtimeFields = $derived(
-    (confirmedFieldAnswer?.fields ?? []).map((field) => ({
-      label: field.value.label,
-      type: String(field.value.type),
-      required: field.value.required === true,
-      purpose: purposeLabels.get(String(field.purpose)) ?? null,
-      options: field.value.options ?? []
-    }))
-  );
-  const runtimeFieldsQuestionId = $derived(confirmedFieldAnswer?.questionId ?? null);
   /** A question still open is answered by whatever the user last sent for it,
    *  which is deliberately not bounded by the summary. */
   const pendingFieldAnswer = $derived.by(() => {
@@ -230,6 +180,30 @@
     latestSummaryMessageIndex === -1
       ? null
       : (service.messages[latestSummaryMessageIndex]?.requirementsSummary ?? null)
+  );
+  const confirmedFieldAnswer = $derived.by(() => {
+    let found: { questionId: string; fields: StructuredInputFieldAnswer[] } | null = null;
+    for (const [index, message] of service.messages.entries()) {
+      if (latestSummaryMessageIndex !== -1 && index > latestSummaryMessageIndex) break;
+      const answer = message.questionAnswer;
+      if (answer?.question_id && answer.input_fields?.length) {
+        found = {
+          questionId: answer.question_id,
+          fields: answer.input_fields as StructuredInputFieldAnswer[]
+        };
+      }
+    }
+    return found;
+  });
+  const runtimeFieldsQuestionId = $derived(confirmedFieldAnswer?.questionId ?? null);
+  const runtimeFields = $derived(
+    (latestSummary?.runtime_input_fields ?? []).map((field) => ({
+      label: field.label,
+      type: field.type,
+      required: field.required,
+      purpose: field.purpose,
+      options: field.options ?? []
+    }))
   );
   const summaryRevisionPending = $derived(
     service.isStreaming &&
