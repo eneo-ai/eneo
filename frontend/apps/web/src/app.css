@@ -254,6 +254,31 @@ html.dark {
   color-scheme: dark;
 }
 
+/* ------------------------------------------------------------------ */
+/* Surfaces the browser draws for us                                  */
+/* ------------------------------------------------------------------ */
+/* Selection, the caret and scrollbars ship with the browser's own     */
+/* colours, which belong to no design system: a pure-black caret and   */
+/* a system-blue selection read as unfinished next to themed controls, */
+/* and on Windows the default scrollbar is a wide grey slab. Taking    */
+/* them from the accent and border tokens costs nothing and keeps the  */
+/* whole surface in one palette, in both themes.                       */
+::selection {
+  background: oklch(from var(--accent-default) l c h / 0.22);
+  color: var(--text-primary);
+}
+
+:where(input, textarea, [contenteditable]) {
+  caret-color: var(--accent-default);
+}
+
+@supports (scrollbar-color: auto) {
+  :where(html) {
+    scrollbar-color: var(--border-stronger) transparent;
+    scrollbar-width: thin;
+  }
+}
+
 /* Placeholder contrast: the raw `--text-muted` shade fails at ~2.7:1; the
    dedicated `--text-placeholder` token (packages/ui themes) meets ~4.5:1 in
    both themes while staying visibly lighter than entered text. Placeholders

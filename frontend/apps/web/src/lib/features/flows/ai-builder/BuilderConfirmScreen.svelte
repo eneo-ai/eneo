@@ -665,11 +665,11 @@
 
 <style lang="postcss">
   .confirm-screen {
-    animation: confirm-fade-up 0.2s ease-out;
+    animation: builder-screen-in 0.22s cubic-bezier(0.16, 1, 0.3, 1);
   }
-  @keyframes confirm-fade-up {
+  @keyframes builder-screen-in {
     from {
-      opacity: 0;
+      opacity: 0.4;
       transform: translateY(6px);
     }
     to {

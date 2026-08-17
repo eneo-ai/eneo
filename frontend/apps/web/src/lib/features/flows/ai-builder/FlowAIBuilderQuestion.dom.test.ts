@@ -265,6 +265,36 @@ describe("FlowAIBuilderQuestion runtime metadata fields", () => {
     ).toBe("true");
   });
 
+  it("keeps a comma inside an option instead of splitting it in two", async () => {
+    const onanswer = vi.fn();
+    render(FlowAIBuilderQuestion, {
+      question: metadataQuestion(),
+      onanswer,
+      answeredFields: [
+        {
+          value: {
+            name: "ort",
+            label: "Ort",
+            type: "select" as const,
+            required: false,
+            options: ["Washington, D.C.", "Sundsvall"]
+          },
+          purpose: "interpret_input" as const
+        }
+      ]
+    });
+
+    await fireEvent.change(screen.getByLabelText(m.ai_builder_question_field_purpose()), {
+      target: { value: "interpret_input" }
+    });
+    await fireEvent.click(screen.getByRole("button", { name: m.ai_builder_question_confirm() }));
+
+    expect(onanswer.mock.calls[0]?.[0].questionAnswer.input_fields[0].value.options).toEqual([
+      "Washington, D.C.",
+      "Sundsvall"
+    ]);
+  });
+
   it("edits the fields already answered instead of starting from an empty form", async () => {
     // Reopening used to mount a blank row, so confirming replaced every field
     // the user had defined with the one they happened to type.

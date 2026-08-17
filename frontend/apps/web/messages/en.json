@@ -4261,7 +4261,7 @@
   "ai_builder_question_show_technical": "Show technical names",
   "ai_builder_question_field_copy": "Copy {token}",
   "ai_builder_question_field_copied": "Copied",
-  "ai_builder_question_field_options": "Options, separated by commas",
+  "ai_builder_question_field_options": "Options, one per line",
   "ai_builder_question_field_remove": "Remove field",
   "ai_builder_question_field_required": "Required",
   "ai_builder_question_field_type": "Type",

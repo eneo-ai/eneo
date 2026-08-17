@@ -3,7 +3,7 @@
   import { getLocale } from "$lib/paraglide/runtime";
   import { resolve } from "$app/paths";
   import { onMount, tick } from "svelte";
-  import { SvelteMap, SvelteSet } from "svelte/reactivity";
+  import { SvelteSet } from "svelte/reactivity";
   import * as AlertDialog from "$lib/components/ui/alert-dialog/index.js";
   import { Button } from "$lib/components/ui/button/index.js";
   import { Skeleton } from "$lib/components/ui/skeleton/index.js";
@@ -121,38 +121,43 @@
     return ids;
   });
   const answerLabelByQuestionId = $derived(buildAnswerLabels(service.messages));
-  const runtimeFields = $derived.by(() => {
-    let fields: { label: string; type: string; required: boolean }[] = [];
+  /** The newest field answer at or before the summary on screen. Everything
+   *  the card says about fields, and the form it opens, comes from this one
+   *  value — a newer answer belongs to a version the user is not looking at. */
+  const confirmedFieldAnswer = $derived.by(() => {
+    let found: { questionId: string; fields: StructuredInputFieldAnswer[] } | null = null;
     for (const [index, message] of service.messages.entries()) {
       if (latestSummaryMessageIndex !== -1 && index > latestSummaryMessageIndex) break;
-      const answered = message.questionAnswer?.input_fields;
-      if (!answered?.length) continue;
-      fields = answered.map((field) => ({
-        label: field.value.label,
-        type: String(field.value.type),
-        required: field.value.required === true
-      }));
-    }
-    return fields;
-  });
-  const answeredFieldsByQuestionId = $derived.by(() => {
-    const byQuestion = new SvelteMap<string, StructuredInputFieldAnswer[]>();
-    for (const message of service.messages) {
       const answer = message.questionAnswer;
       if (answer?.question_id && answer.input_fields?.length) {
-        byQuestion.set(answer.question_id, answer.input_fields as StructuredInputFieldAnswer[]);
+        found = {
+          questionId: answer.question_id,
+          fields: answer.input_fields as StructuredInputFieldAnswer[]
+        };
       }
     }
-    return byQuestion;
+    return found;
   });
-  const runtimeFieldsQuestionId = $derived.by(() => {
-    let questionId: string | null = null;
-    for (const [index, message] of service.messages.entries()) {
-      if (latestSummaryMessageIndex !== -1 && index > latestSummaryMessageIndex) break;
-      const answer = message.questionAnswer;
-      if (answer?.input_fields?.length && answer.question_id) questionId = answer.question_id;
+  const runtimeFields = $derived(
+    (confirmedFieldAnswer?.fields ?? []).map((field) => ({
+      label: field.value.label,
+      type: String(field.value.type),
+      required: field.value.required === true
+    }))
+  );
+  const runtimeFieldsQuestionId = $derived(confirmedFieldAnswer?.questionId ?? null);
+  /** A question still open is answered by whatever the user last sent for it,
+   *  which is deliberately not bounded by the summary. */
+  const pendingFieldAnswer = $derived.by(() => {
+    const id = questionMessage?.question?.question_id;
+    if (!id) return null;
+    for (let i = service.messages.length - 1; i >= 0; i -= 1) {
+      const answer = service.messages[i]?.questionAnswer;
+      if (answer?.question_id === id && answer.input_fields?.length) {
+        return answer.input_fields as StructuredInputFieldAnswer[];
+      }
     }
-    return questionId;
+    return null;
   });
   const delegatedQuestionIds = $derived.by(() => {
     const ids = new SvelteSet<string>();
@@ -635,9 +640,7 @@
         <BuilderQuestionScreen
           {questionMessage}
           {questionNumber}
-          answeredFields={questionMessage?.question
-            ? (answeredFieldsByQuestionId.get(questionMessage.question.question_id) ?? null)
-            : null}
+          answeredFields={pendingFieldAnswer}
           answered={answeredQuestions}
           isEdit={targetKind === "edit"}
           {editingQuestionId}
@@ -664,8 +667,9 @@
           isEdit={targetKind === "edit"}
           disabled={service.isCreating || service.isStreaming}
           editingQuestion={editingQuestionMessage}
-          editingFields={editingQuestionMessage?.question
-            ? (answeredFieldsByQuestionId.get(editingQuestionMessage.question.question_id) ?? null)
+          editingFields={editingQuestionMessage?.question?.question_id ===
+          confirmedFieldAnswer?.questionId
+            ? (confirmedFieldAnswer?.fields ?? null)
             : null}
           editingQuestionNumber={questionNumber}
           onanswer={handleQuestionAnswer}

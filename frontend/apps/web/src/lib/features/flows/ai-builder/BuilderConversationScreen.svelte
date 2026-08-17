@@ -62,14 +62,16 @@
 
 <style lang="postcss">
   .conversation-screen {
-    animation: conversation-fade 0.16s ease-out;
+    animation: builder-screen-in 0.22s cubic-bezier(0.16, 1, 0.3, 1);
   }
-  @keyframes conversation-fade {
+  @keyframes builder-screen-in {
     from {
-      opacity: 0;
+      opacity: 0.4;
+      transform: translateY(6px);
     }
     to {
       opacity: 1;
+      transform: none;
     }
   }
   @media (prefers-reduced-motion: reduce) {

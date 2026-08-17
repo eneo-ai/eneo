@@ -104,11 +104,11 @@
 
 <style lang="postcss">
   .task-screen {
-    animation: task-fade-up 0.22s ease-out;
+    animation: builder-screen-in 0.22s cubic-bezier(0.16, 1, 0.3, 1);
   }
-  @keyframes task-fade-up {
+  @keyframes builder-screen-in {
     from {
-      opacity: 0;
+      opacity: 0.4;
       transform: translateY(6px);
     }
     to {

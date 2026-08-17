@@ -4259,7 +4259,7 @@
   "ai_builder_question_show_technical": "Visa tekniska namn",
   "ai_builder_question_field_copy": "Kopiera {token}",
   "ai_builder_question_field_copied": "Kopierat",
-  "ai_builder_question_field_options": "Alternativ, separerade med komma",
+  "ai_builder_question_field_options": "Val, ett per rad",
   "ai_builder_question_field_remove": "Ta bort fält",
   "ai_builder_question_field_required": "Obligatoriskt",
   "ai_builder_question_field_type": "Typ",

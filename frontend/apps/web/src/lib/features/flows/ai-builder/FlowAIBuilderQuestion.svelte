@@ -168,7 +168,7 @@
             label: field.value.label,
             fieldType: field.value.type,
             required: field.value.required === true,
-            optionsText: (field.value.options ?? []).join(", "),
+            optionsText: (field.value.options ?? []).join("\n"),
             purpose: field.purpose as StructuredInputFieldPurpose | ""
           }))
         : [blankField()]
@@ -394,7 +394,7 @@
             label: field.label,
             type: field.fieldType,
             required: field.required,
-            options: field.optionsText.split(",")
+            options: field.optionsText.split("\n")
           },
           purpose: field.purpose
         });
@@ -539,7 +539,7 @@
             {#if field.fieldType === "select" || field.fieldType === "multiselect"}
               <label class="field-options">
                 <span>{m.ai_builder_question_field_options()}</span>
-                <input bind:value={field.optionsText} {disabled} />
+                <textarea bind:value={field.optionsText} rows="2" {disabled}></textarea>
               </label>
             {/if}
             <label class="field-required">
@@ -753,7 +753,7 @@
     @apply flex flex-col overflow-hidden rounded-xl border;
     border-color: var(--border-default);
     background: var(--background-primary);
-    animation: questionReveal 200ms ease-out;
+    animation: builder-screen-in 0.22s cubic-bezier(0.16, 1, 0.3, 1);
   }
 
   .question-panel.answered {
@@ -836,7 +836,13 @@
   }
 
   .option-row:not(:disabled):hover {
+    border-color: var(--border-stronger);
+    background: var(--background-secondary);
+  }
+
+  .option-row.is-selected:not(:disabled):hover {
     border-color: var(--accent-default);
+    background: oklch(from var(--accent-default) l c h / 0.1);
   }
 
   .option-label-row {
@@ -844,14 +850,15 @@
   }
 
   .option-example {
-    @apply text-[0.8125rem];
+    @apply text-[0.78125rem];
     color: var(--text-secondary);
+    opacity: 0.85;
   }
 
   .option-evidence {
-    @apply mt-1 inline-flex self-start rounded-md px-2 py-1 text-xs;
+    @apply mt-1.5 self-start border-l-2 pl-2.5 text-xs italic;
+    border-color: oklch(from var(--accent-default) l c h / 0.35);
     color: var(--text-secondary);
-    background: var(--background-tertiary);
   }
 
   .option-current {
@@ -922,7 +929,7 @@
   }
 
   .option-row:not(:disabled):hover .option-indicator {
-    border-color: var(--accent-default);
+    border-color: var(--border-stronger);
   }
 
   .option-indicator.is-selected {
@@ -1091,12 +1098,14 @@
     }
   }
 
-  @keyframes questionReveal {
+  @keyframes builder-screen-in {
     from {
-      opacity: 0;
+      opacity: 0.4;
+      transform: translateY(6px);
     }
     to {
       opacity: 1;
+      transform: none;
     }
   }
 
