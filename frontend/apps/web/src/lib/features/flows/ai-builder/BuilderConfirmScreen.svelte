@@ -60,8 +60,8 @@
     onanswer?: (payload: StructuredQuestionAnswerPayload) => void;
     oncanceledit?: () => void;
     onconfirm: () => void;
-    /** A change request in the user's own words; the server answers with a
-     *  new requirements version, which re-arms this card. */
+    /** A change request in the user's own words, optionally about one row; the
+     *  server answers with a new requirements version, which re-arms this card. */
     onchange: (text: string, topic?: string | null) => void;
     oneditanswer: (questionId: string) => void;
   }
@@ -117,18 +117,23 @@
     [
       { label: m.ai_builder_requirements_input(), value: inputTerm },
       { label: m.ai_builder_requirements_output(), value: outputTerm }
-    ].filter((row) => row.value.length > 0 && !decisionsState.has(row.value))
+    ].filter((row) => row.value.length === 0 || !decisionsState.has(row.value))
   );
+  // The card is a contract. A required fact the server left blank cannot be
+  // confirmed away by hiding the row it belongs on.
+  const incomplete = $derived(contractRows.some((row) => row.value.length === 0));
 
-  // Every row on this card is correctable, which is what the lead promises.
-  // A row the user answered reopens its question; a row Eneo derived has no
-  // question to reopen, so it opens the change box with the topic already
-  // written in — the correction still travels as the user's own words.
-  function changeRow(topic: string) {
+  // One owner for the whole correction: which row it is about, whether the box
+  // is open, and the words in it. A draft belongs to the scope it was written
+  // under, so moving to another row (or to the card as a whole) never carries
+  // it along relabelled as something the user did not say.
+  function openChange(topic: string | null) {
+    const next = topic?.trim() ?? null;
+    if (next !== changeTopic) changeDraft = "";
     // Two open editors would leave the user correcting one thing while looking
     // at another.
     oncanceledit?.();
-    changeTopic = topic.trim();
+    changeTopic = next;
     changeOpen = true;
     void changeRequestRef?.focusInput();
   }
@@ -136,6 +141,7 @@
   function reopenQuestion(questionId: string) {
     changeOpen = false;
     changeTopic = null;
+    changeDraft = "";
     oneditanswer(questionId);
   }
 
@@ -145,6 +151,7 @@
   let changeOpen = $state(false);
   /** Which row the open change box is correcting; cleared with its chip. */
   let changeTopic = $state<string | null>(null);
+  let changeDraft = $state("");
   let changeRequestRef = $state<BuilderChangeRequest | undefined>();
   let assumptionsOpen = $state(false);
   const assumptions = $derived(summary.assumptions ?? []);
@@ -240,6 +247,14 @@
             <span>{m.ai_builder_confirm_stale_body()}</span>
           </div>
         {/if}
+        {#if incomplete && !savedFlowStepScope}
+          <p
+            class="bg-warning-dimmer border-warning-default/45 text-warning-stronger mb-3.5 rounded-[9px] border px-3 py-2.5 text-[0.8125rem]"
+            role="status"
+          >
+            {m.ai_builder_confirm_blocked_incomplete()}
+          </p>
+        {/if}
         {#if noQuestions && !savedFlowStepScope}
           <p class="text-secondary mb-3 text-[0.8125rem]">{m.ai_builder_confirm_no_questions()}</p>
         {/if}
@@ -323,7 +338,7 @@
                       aria-label={m.ai_builder_confirm_change_row_aria({ topic: decision.topic })}
                       {disabled}
                       onclick={() =>
-                        settledBy ? reopenQuestion(settledBy) : changeRow(decision.topic)}
+                        settledBy ? reopenQuestion(settledBy) : openChange(decision.topic)}
                     >
                       {m.ai_builder_question_change()}
                     </Button>
@@ -339,7 +354,13 @@
                   class="border-dimmer grid items-baseline gap-x-4 gap-y-0.5 border-t py-2.5 sm:grid-cols-[12.5rem_1fr_auto]"
                 >
                   <dt class="text-secondary text-[0.8125rem]">{row.label}</dt>
-                  <dd class="text-primary text-[0.85rem] font-medium">{row.value}</dd>
+                  <dd
+                    class="text-[0.85rem] font-medium"
+                    class:text-primary={row.value.length > 0}
+                    class:text-warning-stronger={row.value.length === 0}
+                  >
+                    {row.value.length > 0 ? row.value : m.ai_builder_requirements_missing()}
+                  </dd>
                   {#if !readOnly && !confirmed}
                     <Button
                       variant="outline"
@@ -347,7 +368,7 @@
                       class="justify-self-start sm:justify-self-end"
                       aria-label={m.ai_builder_confirm_change_row_aria({ topic: row.label })}
                       {disabled}
-                      onclick={() => changeRow(row.label)}
+                      onclick={() => openChange(row.label)}
                     >
                       {m.ai_builder_question_change()}
                     </Button>
@@ -464,17 +485,15 @@
           </span>
           {#if !readOnly}
             <div class="ml-auto flex flex-wrap gap-2">
-              <Button
-                variant="outline"
-                onclick={() => {
-                  changeOpen = true;
-                  changeRequestRef?.focusInput();
-                }}
-                {disabled}
-              >
+              <Button variant="outline" onclick={() => openChange(null)} {disabled}>
                 {m.ai_builder_confirm_change_answers()}
               </Button>
-              <Button variant="default" onclick={onconfirm} {disabled}>
+              <Button
+                variant="default"
+                onclick={onconfirm}
+                disabled={disabled || incomplete}
+                title={incomplete ? m.ai_builder_confirm_blocked_incomplete() : undefined}
+              >
                 {m.ai_builder_confirm_action()}
               </Button>
             </div>
@@ -488,6 +507,8 @@
         <BuilderChangeRequest
           bind:this={changeRequestRef}
           bind:open={changeOpen}
+          bind:text={changeDraft}
+          onopen={() => openChange(null)}
           scopeLabel={changeTopic}
           onclearscope={() => (changeTopic = null)}
           {disabled}
@@ -499,6 +520,7 @@
             changeOpen = false;
             const topic = changeTopic;
             changeTopic = null;
+            changeDraft = "";
             onchange(text, topic);
           }}
         />

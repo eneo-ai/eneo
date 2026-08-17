@@ -958,9 +958,28 @@ describe("FlowAIBuilder confirm, build and review", () => {
       name: m.ai_builder_change_request_textarea_label()
     });
     expect((box as HTMLTextAreaElement).value).toBe("");
+    expect(document.activeElement).toBe(box);
     expect(button(m.ai_builder_send()).disabled).toBe(true);
 
-    await fireEvent.input(box, { target: { value: "en PDF i stället" } });
+    // Moving to another scope with words already typed must not relabel them
+    // as something the user never said about that row.
+    await fireEvent.input(box, { target: { value: "något helt annat" } });
+    await fireEvent.click(
+      screen.getByRole("button", {
+        name: m.ai_builder_confirm_change_row_aria({ topic: m.ai_builder_requirements_output() })
+      })
+    );
+    const reopened = await screen.findByRole("textbox", {
+      name: m.ai_builder_change_request_textarea_label()
+    });
+    expect((reopened as HTMLTextAreaElement).value).toBe("");
+    await fireEvent.click(
+      screen.getByRole("button", {
+        name: m.ai_builder_confirm_change_row_aria({ topic: "Planerad bearbetning" })
+      })
+    );
+
+    await fireEvent.input(reopened, { target: { value: "en PDF i stället" } });
     await fireEvent.click(button(m.ai_builder_send()));
 
     await waitFor(() => expect(calls).toHaveLength(1));
@@ -972,10 +991,47 @@ describe("FlowAIBuilder confirm, build and review", () => {
     });
   });
 
+  it("does not claim answers on a run where nothing was asked", async () => {
+    // The common live case: the description settles every slot, so the server
+    // asks nothing and every row is derived.
+    const summary = {
+      ...SUMMARY,
+      key_decisions: [
+        { topic: "Syfte med bearbetningen", decision: "Strukturera materialet" },
+        { topic: "Slutresultat", decision: "PDF-dokument" }
+      ]
+    };
+    const { fetch } = makeFetch({
+      sessions: [
+        makeSession({
+          conversation: [
+            userMessage("u1", "Sammanfatta rapporter till en PDF"),
+            assistantMessage("a1", "", { requirements_summary: summary })
+          ]
+        })
+      ]
+    });
+    renderShell({ fetch, stream: makeStream().stream, resumeSessionId: "s-1" });
+
+    await screen.findByRole("heading", { name: m.ai_builder_requirements_title() });
+    expect(screen.getByText(m.ai_builder_requirements_decisions_derived())).toBeTruthy();
+    expect(screen.queryByText(m.ai_builder_requirements_decisions())).toBeNull();
+    // Nothing was answered, so nothing carries a note about following from
+    // answers — and every row still offers a way to correct it.
+    expect(screen.queryByText(m.ai_builder_requirements_derived())).toBeNull();
+    for (const topic of ["Syfte med bearbetningen", "Slutresultat"]) {
+      expect(
+        screen.getByRole("button", { name: m.ai_builder_confirm_change_row_aria({ topic }) })
+      ).toBeTruthy();
+    }
+  });
+
   it("keeps the option an edited flow runs on today when a question is reopened here", async () => {
     const editQuestion = {
       ...FORMAT_QUESTION,
-      recommended_option_id: "pdf",
+      // The server never recommends away from what an edited flow runs on, so
+      // the running option is the only thing that can drive the preselection.
+      recommended_option_id: null,
       current_option_id: "text"
     };
     const summary = {

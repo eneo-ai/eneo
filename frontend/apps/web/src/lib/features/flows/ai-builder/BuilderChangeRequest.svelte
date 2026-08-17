@@ -7,6 +7,7 @@
 
   interface Props {
     open: boolean;
+    text?: string;
     /** "Steg 3: Rendera PDF" when the request is scoped to one step. */
     scopeLabel?: string | null;
     disabled?: boolean;
@@ -17,11 +18,17 @@
     placeholder?: string;
     hint?: string;
     onclearscope?: () => void;
+    /** The collapsed opener asks to be opened rather than opening itself: the
+     *  owner decides what else has to close first. */
+    onopen?: () => void;
     onsend: (text: string) => void;
   }
 
   let {
     open = $bindable(false),
+    /** Owned by the caller, because the caller owns the scope this text is
+     *  labelled with; a draft must never survive into a different scope. */
+    text = $bindable(""),
     scopeLabel = null,
     disabled = false,
     title = m.ai_builder_change_request_title(),
@@ -29,10 +36,10 @@
     placeholder = m.ai_builder_change_request_placeholder(),
     hint = m.ai_builder_change_request_hint(),
     onclearscope,
+    onopen,
     onsend
   }: Props = $props();
 
-  let text = $state("");
   let textarea = $state<HTMLTextAreaElement | null>(null);
 
   const canSend = $derived(!disabled && text.trim().length > 0);
@@ -111,7 +118,8 @@
       type="button"
       class="hover:bg-secondary focus-visible:ring-accent-default/40 flex w-full flex-wrap items-center gap-2.5 px-[1.125rem] py-3.5 text-left transition-colors focus-visible:ring-2 focus-visible:outline-none"
       onclick={() => {
-        open = true;
+        if (onopen) onopen();
+        else open = true;
       }}
     >
       <span class="text-primary text-[0.84375rem] font-semibold">{title}</span>

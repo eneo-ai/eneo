@@ -449,7 +449,7 @@
   function scopeChangeToStep(step: StepSpec, stepNumber: number) {
     changeScope = { step, stepNumber };
     changeOpen = true;
-    void Promise.resolve().then(() => changeRequestRef?.focusInput());
+    void changeRequestRef?.focusInput();
   }
 
   function editContextForChange(): AIBuilderPlanEditContext | null {
