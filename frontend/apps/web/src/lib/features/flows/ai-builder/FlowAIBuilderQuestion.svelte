@@ -278,6 +278,16 @@
     );
   }
 
+  const confirmLabel = $derived.by(() => {
+    if (!isInputFieldCollection) return m.ai_builder_question_confirm();
+    const required = inputFields.filter((field) => field.required).length;
+    if (inputFields.length < 4) return m.ai_builder_question_confirm();
+    return m.ai_builder_question_confirm_fields({
+      count: String(inputFields.length),
+      required: String(required)
+    });
+  });
+
   const canConfirm = $derived.by(() => {
     if (answered) return false;
     if (isInputFieldCollection) {
@@ -691,7 +701,7 @@
         aria-disabled={!canConfirm || disabled}
         aria-describedby={!canConfirm && !disabled ? `${questionLabelId}-confirm-hint` : undefined}
       >
-        {m.ai_builder_question_confirm()}
+        {confirmLabel}
       </Button>
       {#if !canConfirm && !disabled}
         <span id="{questionLabelId}-confirm-hint" class="sr-only">

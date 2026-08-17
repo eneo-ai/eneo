@@ -48,6 +48,10 @@
      *  can read off a decision row, which only names the option chosen. */
     runtimeFields?: { label: string; type: string; required: boolean }[];
     runtimeFieldsQuestionId?: string | null;
+    /** The question that settled each topic, for rows the server did not link.
+     *  Both strings are the same server-owned slot label, so this is one
+     *  identity read twice rather than a guessed connection. */
+    questionIdByTopic?: ReadonlyMap<string, string>;
     /** No structured question was asked before this summary. */
     noQuestions: boolean;
     confirmed: boolean;
@@ -83,6 +87,7 @@
     answered,
     runtimeFields = [],
     runtimeFieldsQuestionId = null,
+    questionIdByTopic,
     noQuestions,
     confirmed,
     stale,
@@ -160,6 +165,13 @@
 
   // Swedish and English both break on "1 obligatoriska" / "1 fields", and the
   // required half says nothing when none are.
+  let allContentFieldsShown = $state(false);
+  const RUNTIME_FIELD_CHIP_CAP = 6;
+  const CONTENT_FIELD_CHIP_CAP = 10;
+  const shownRuntimeFields = $derived(runtimeFields.slice(0, RUNTIME_FIELD_CHIP_CAP));
+  const shownContentFields = $derived(
+    allContentFieldsShown ? namedContentFields : namedContentFields.slice(0, CONTENT_FIELD_CHIP_CAP)
+  );
   const runtimeFieldsCount = $derived.by(() => {
     const total =
       runtimeFields.length === 1
@@ -326,7 +338,8 @@
             </h3>
             <dl class="mt-1.5 flex flex-col">
               {#each summary.key_decisions as decision (decision.topic)}
-                {@const settledBy = decision.question_id ?? null}
+                {@const settledBy =
+                  decision.question_id ?? questionIdByTopic?.get(decision.topic.trim()) ?? null}
                 <div
                   class="border-dimmer grid items-baseline gap-x-4 gap-y-0.5 border-t py-2.5 sm:grid-cols-[12.5rem_1fr_auto]"
                 >
@@ -462,7 +475,7 @@
               {m.ai_builder_requirements_runtime_fields_lead()}
             </p>
             <ul class="mt-2 flex list-none flex-wrap gap-1.5 p-0">
-              {#each runtimeFields as field (field.label)}
+              {#each shownRuntimeFields as field (field.label)}
                 <li
                   class="border-default inline-flex h-[1.625rem] items-center gap-1.5 rounded-full border px-2.5 text-[0.78125rem]"
                   class:bg-secondary={!field.required}
@@ -477,6 +490,13 @@
                   {/if}
                 </li>
               {/each}
+              {#if runtimeFields.length > shownRuntimeFields.length}
+                <li class="text-secondary inline-flex h-[1.625rem] items-center text-[0.78125rem]">
+                  {m.ai_builder_requirements_fields_more({
+                    count: String(runtimeFields.length - shownRuntimeFields.length)
+                  })}
+                </li>
+              {/if}
             </ul>
           </section>
         {/if}
@@ -492,13 +512,26 @@
               {m.ai_builder_requirements_named_content_lead()}
             </p>
             <ul class="mt-2 flex list-none flex-wrap gap-1.5 p-0">
-              {#each namedContentFields as field (field.id)}
+              {#each shownContentFields as field (field.id)}
                 <li
                   class="border-default bg-secondary text-primary inline-flex h-[1.625rem] items-center rounded-full border px-2.5 text-[0.78125rem]"
                 >
                   {field.label}
                 </li>
               {/each}
+              {#if namedContentFields.length > shownContentFields.length}
+                <li>
+                  <button
+                    type="button"
+                    class="text-accent-stronger inline-flex h-[1.625rem] items-center text-[0.78125rem] font-semibold"
+                    onclick={() => (allContentFieldsShown = true)}
+                  >
+                    {m.ai_builder_requirements_show_all_fields({
+                      count: String(namedContentFields.length)
+                    })}
+                  </button>
+                </li>
+              {/if}
             </ul>
           </section>
         {/if}

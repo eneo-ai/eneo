@@ -6344,5 +6344,8 @@
   "ai_builder_applied_counts": "{created} created, {updated} updated, {removed} removed steps.",
   "ai_builder_requirements_runtime_fields_count_one": "1 field",
   "ai_builder_requirements_field_required_count": "{required} required",
-  "ai_builder_requirements_field_required_count_one": "1 required"
+  "ai_builder_requirements_field_required_count_one": "1 required",
+  "ai_builder_requirements_fields_more": "+{count} more",
+  "ai_builder_requirements_show_all_fields": "Show all {count}",
+  "ai_builder_question_confirm_fields": "Confirm {count} fields · {required} required"
 }

@@ -3,7 +3,7 @@
   import { getLocale } from "$lib/paraglide/runtime";
   import { resolve } from "$app/paths";
   import { onMount, tick } from "svelte";
-  import { SvelteSet } from "svelte/reactivity";
+  import { SvelteMap, SvelteSet } from "svelte/reactivity";
   import * as AlertDialog from "$lib/components/ui/alert-dialog/index.js";
   import { Button } from "$lib/components/ui/button/index.js";
   import { Skeleton } from "$lib/components/ui/skeleton/index.js";
@@ -142,6 +142,14 @@
       if (answer?.input_fields?.length && answer.question_id) questionId = answer.question_id;
     }
     return questionId;
+  });
+  const questionIdByTopic = $derived.by(() => {
+    const byTopic = new SvelteMap<string, string>();
+    for (const id of askedQuestionIds) {
+      const topic = newestQuestion(id)?.topic?.trim();
+      if (topic && service.isQuestionAnswered(id)) byTopic.set(topic, id);
+    }
+    return byTopic;
   });
   const delegatedQuestionIds = $derived.by(() => {
     const ids = new SvelteSet<string>();
@@ -642,6 +650,7 @@
           answered={answeredQuestions}
           {runtimeFields}
           {runtimeFieldsQuestionId}
+          {questionIdByTopic}
           noQuestions={askedQuestionIds.length === 0}
           confirmed={service.isRequirementsSummaryConfirmed(latestSummary)}
           stale={summaryIsStale}

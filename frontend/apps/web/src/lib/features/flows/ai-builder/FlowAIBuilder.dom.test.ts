@@ -1140,6 +1140,53 @@ describe("FlowAIBuilder confirm, build and review", () => {
     expect(screen.queryByText(m.ai_builder_confirm_change_pending())).toBeNull();
   });
 
+  it("opens the question behind a row the server did not link", async () => {
+    // The question and the decision carry the same server-owned slot label, so
+    // a row can still find its question when question_id is missing — which is
+    // most of them today.
+    const topical = question(
+      "runtime_metadata_field_details",
+      "Vad ska den som kör flödet fylla i?",
+      [{ id: "pdf", label: "Som PDF" }],
+      { topic: "Metadata vid körning" }
+    );
+    const summary = {
+      ...SUMMARY,
+      key_decisions: [{ topic: "Metadata vid körning", decision: "Lägg till rikare metadatafält" }]
+    };
+    const { fetch } = makeFetch({
+      sessions: [
+        makeSession({
+          conversation: [
+            userMessage("u1", "Sammanfatta rapporter"),
+            assistantMessage("a1", "", { question: topical }),
+            userMessage("u2", "Som PDF", {
+              question_answer: {
+                kind: "structured_question_answer",
+                question_id: "runtime_metadata_field_details",
+                selected_option_ids: ["pdf"]
+              }
+            }),
+            assistantMessage("a2", "", { requirements_summary: summary })
+          ]
+        })
+      ]
+    });
+    renderShell({ fetch, stream: makeStream().stream, resumeSessionId: "s-1" });
+
+    await screen.findByRole("heading", { name: m.ai_builder_requirements_title() });
+    await fireEvent.click(
+      screen.getByRole("button", {
+        name: m.ai_builder_confirm_change_row_aria({ topic: "Metadata vid körning" })
+      })
+    );
+
+    // The question opens, rather than the free-text box a row without a link
+    // would fall back to.
+    expect(await screen.findByText(m.ai_builder_question_editing_note())).toBeTruthy();
+    expect(screen.getByRole("heading", { name: topical.question })).toBeTruthy();
+  });
+
   it("does not claim answers on a run where nothing was asked", async () => {
     // The common live case: the description settles every slot, so the server
     // asks nothing and every row is derived.

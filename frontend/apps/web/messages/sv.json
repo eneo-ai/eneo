@@ -6344,5 +6344,8 @@
   "ai_builder_applied_counts": "{created} skapade, {updated} uppdaterade, {removed} borttagna steg.",
   "ai_builder_requirements_runtime_fields_count_one": "1 fält",
   "ai_builder_requirements_field_required_count": "{required} obligatoriska",
-  "ai_builder_requirements_field_required_count_one": "1 obligatoriskt"
+  "ai_builder_requirements_field_required_count_one": "1 obligatoriskt",
+  "ai_builder_requirements_fields_more": "+{count} till",
+  "ai_builder_requirements_show_all_fields": "Visa alla {count}",
+  "ai_builder_question_confirm_fields": "Bekräfta {count} fält · {required} obligatoriska"
 }
