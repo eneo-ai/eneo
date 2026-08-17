@@ -42,6 +42,19 @@
   const isUnsupportedArchitectureError = $derived(
     service.error?.code === "unsupported_architecture"
   );
+  // A refused delegation is about this one question, so it is named in the
+  // user's terms rather than shown as a payload error.
+  const delegationRefusal = $derived.by(() => {
+    if (service.error?.code !== "invalid_question_payload") return null;
+    const reason = service.error.details?.reason;
+    if (reason === "delegation_without_recommendation") {
+      return m.ai_builder_question_delegation_unavailable();
+    }
+    if (reason === "delegation_without_pending_question") {
+      return m.ai_builder_question_delegation_stale();
+    }
+    return null;
+  });
   const turnAlertCopy = $derived.by(() => {
     if (turnRecoveryState === "failed_before_provider") {
       return {
@@ -53,6 +66,12 @@
       return {
         title: m.ai_builder_turn_provider_outcome_unknown_title(),
         description: m.ai_builder_turn_provider_outcome_unknown_description()
+      };
+    }
+    if (delegationRefusal) {
+      return {
+        title: m.ai_builder_question_delegate(),
+        description: delegationRefusal
       };
     }
     if (isUnsupportedArchitectureError) {

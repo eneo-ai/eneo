@@ -8,6 +8,8 @@
     questionId: string;
     question: string;
     answerLabel: string;
+    /** Eneo settled this one after the user handed it back. */
+    delegated?: boolean;
   }
 
   interface Props {
@@ -19,6 +21,8 @@
     editingQuestionId?: string | null;
     disabled?: boolean;
     onanswer: (payload: StructuredQuestionAnswerPayload) => void;
+    /** Hand this question back to Eneo; only offered with a recommendation. */
+    ondelegate?: (questionId: string) => void;
     onedit: (questionId: string) => void;
     oncanceledit?: () => void;
   }
@@ -30,6 +34,7 @@
     editingQuestionId = null,
     disabled = false,
     onanswer,
+    ondelegate,
     onedit,
     oncanceledit
   }: Props = $props();
@@ -61,6 +66,11 @@
             {disabled}
           >
             <span class="text-primary truncate font-semibold">{item.answerLabel}</span>
+            {#if item.delegated}
+              <span class="text-secondary shrink-0 text-[0.6875rem]">
+                {m.ai_builder_question_delegated_badge()}
+              </span>
+            {/if}
             <span class="text-accent-stronger shrink-0 font-semibold"
               >{m.ai_builder_question_change()}</span
             >
@@ -86,7 +96,14 @@
          the bottom of the screen; the reassurance moves above it. -->
     <div class="max-sm:order-last">
       {#key question.question_id}
-        <FlowAIBuilderQuestion {question} {questionNumber} {why} {disabled} {onanswer} />
+        <FlowAIBuilderQuestion
+          {question}
+          {questionNumber}
+          {why}
+          {disabled}
+          {onanswer}
+          ondelegate={() => ondelegate?.(question.question_id)}
+        />
       {/key}
     </div>
 

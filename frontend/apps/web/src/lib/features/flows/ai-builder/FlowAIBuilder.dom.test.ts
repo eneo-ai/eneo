@@ -573,6 +573,43 @@ describe("FlowAIBuilder discovery screens", () => {
     });
   });
 
+  it("preselects Eneo's recommendation and can hand the question back", async () => {
+    const recommended = question("output_format", "Hur ska resultatet levereras?", [
+      { id: "pdf", label: "Som PDF" },
+      { id: "text", label: "Som text" }
+    ]);
+    recommended.recommended_option_id = "text";
+    const { fetch } = makeFetch({ sessions: [questionSession(recommended)] });
+    const { stream, calls } = makeStream();
+    renderShell({ fetch, stream, resumeSessionId: "s-1" });
+
+    // The recommendation is named on its option and already chosen, so
+    // confirming is one click.
+    expect(await screen.findByText(m.ai_builder_question_recommended())).toBeTruthy();
+    await waitFor(() =>
+      expect(screen.getByRole("radio", { name: /Som text/ }).getAttribute("aria-checked")).toBe(
+        "true"
+      )
+    );
+
+    await fireEvent.click(button(m.ai_builder_question_delegate()));
+
+    await waitFor(() => expect(calls).toHaveLength(1));
+    expect(calls[0]!.body).toMatchObject({
+      message: "",
+      question_answer: { kind: "delegated_question_answer", question_id: "output_format" }
+    });
+  });
+
+  it("does not offer to hand back a question Eneo has no recommendation for", async () => {
+    const { fetch } = makeFetch({ sessions: [questionSession()] });
+    const { stream } = makeStream();
+    renderShell({ fetch, stream, resumeSessionId: "s-1" });
+
+    await screen.findByRole("button", { name: m.ai_builder_question_confirm() });
+    expect(screen.queryByText(m.ai_builder_question_delegate())).toBeNull();
+  });
+
   it("sends every selected option of a multi-select question", async () => {
     const { fetch } = makeFetch({ sessions: [questionSession(SOURCES_QUESTION)] });
     const { stream, calls } = makeStream();

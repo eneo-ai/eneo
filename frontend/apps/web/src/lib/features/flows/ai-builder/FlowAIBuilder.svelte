@@ -1,8 +1,9 @@
 <script lang="ts">
   import { m } from "$lib/paraglide/messages";
+  import { getLocale } from "$lib/paraglide/runtime";
   import { resolve } from "$app/paths";
   import { onMount, tick } from "svelte";
-  import { SvelteMap } from "svelte/reactivity";
+  import { SvelteMap, SvelteSet } from "svelte/reactivity";
   import * as AlertDialog from "$lib/components/ui/alert-dialog/index.js";
   import { Button } from "$lib/components/ui/button/index.js";
   import { Skeleton } from "$lib/components/ui/skeleton/index.js";
@@ -26,7 +27,10 @@
     ChatMessage,
     RequirementsSummary
   } from "./protocol";
-  import type { StructuredQuestionAnswerPayload } from "./structuredQuestionAnswer";
+  import {
+    delegatedQuestionAnswer,
+    type StructuredQuestionAnswerPayload
+  } from "./structuredQuestionAnswer";
 
   interface Props {
     targetKind?: "create" | "edit";
@@ -122,6 +126,14 @@
     }
     return labels;
   });
+  const delegatedQuestionIds = $derived.by(() => {
+    const ids = new SvelteSet<string>();
+    for (const message of service.messages) {
+      const answer = message.questionAnswer;
+      if (answer?.question_id && answer.delegated === true) ids.add(answer.question_id);
+    }
+    return ids;
+  });
   const answeredQuestions = $derived(
     askedQuestionIds
       .filter((id) => service.isQuestionAnswered(id))
@@ -130,7 +142,9 @@
         question:
           service.messages.find((message) => message.question?.question_id === id)?.question
             ?.question ?? "",
-        answerLabel: answerLabelByQuestionId.get(id) ?? ""
+        answerLabel: answerLabelByQuestionId.get(id) ?? "",
+        // Eneo settled this one; the answer is still the user's to change.
+        delegated: delegatedQuestionIds.has(id)
       }))
   );
   const questionNumber = $derived.by(() => {
@@ -305,6 +319,16 @@
   function handleQuestionAnswer(payload: StructuredQuestionAnswerPayload) {
     editingQuestionId = null;
     void service.sendMessage(payload.text, payload.questionAnswer, undefined, activeEditContext);
+  }
+
+  function handleDelegateQuestion(questionId: string) {
+    editingQuestionId = null;
+    void service.sendMessage(
+      "",
+      delegatedQuestionAnswer(questionId, getLocale()),
+      undefined,
+      activeEditContext
+    );
   }
 
   function handleEditAnswer(questionId: string) {
@@ -575,6 +599,7 @@
           {editingQuestionId}
           disabled={service.isCreating || service.isStreaming}
           onanswer={handleQuestionAnswer}
+          ondelegate={handleDelegateQuestion}
           onedit={handleEditAnswer}
           oncanceledit={() => (editingQuestionId = null)}
         />
@@ -593,6 +618,7 @@
           editingQuestion={editingQuestionMessage}
           editingQuestionNumber={questionNumber}
           onanswer={handleQuestionAnswer}
+          ondelegate={handleDelegateQuestion}
           oncanceledit={() => (editingQuestionId = null)}
           onconfirm={handleRequirementsConfirm}
           onchange={handleRequirementsChange}

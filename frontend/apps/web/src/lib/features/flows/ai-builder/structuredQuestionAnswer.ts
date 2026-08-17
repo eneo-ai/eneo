@@ -36,9 +36,24 @@ export type PersistedStructuredQuestionAnswerMetadata = Omit<
   "kind" | "selected_values"
 > & { selected_values?: StructuredQuestionOptionValue[] | null };
 
+/** What the client sends. The replay shape (`…Metadata`) carries the server's
+ *  own provenance, so it is read, never sent. */
 export type StructuredQuestionAnswerMetadata =
-  | components["schemas"]["StructuredQuestionAnswerMetadata"]
-  | components["schemas"]["RequirementsConfirmationMetadata"];
+  | components["schemas"]["StructuredQuestionAnswerRequest"]
+  | components["schemas"]["RequirementsConfirmationMetadata"]
+  | components["schemas"]["DelegatedQuestionAnswerRequest"];
+
+/** The user handing this question back to Eneo, naming no option. */
+export function delegatedQuestionAnswer(
+  questionId: string,
+  uiLanguage: string
+): components["schemas"]["DelegatedQuestionAnswerRequest"] {
+  return {
+    kind: "delegated_question_answer",
+    question_id: questionId,
+    ui_language: uiLanguage
+  };
+}
 
 export interface StructuredQuestionAnswerPayload {
   text: string;

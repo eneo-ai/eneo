@@ -39,6 +39,8 @@
     /** The assistant's sentence that came with the question: "Därför frågar jag". */
     why?: string | null;
     onanswer?: (payload: StructuredQuestionAnswerPayload) => void;
+    /** The user hands this question back; only offered with a recommendation. */
+    ondelegate?: () => void;
   }
 
   let {
@@ -48,7 +50,8 @@
     disabled = false,
     questionNumber = null,
     why = null,
-    onanswer
+    onanswer,
+    ondelegate
   }: Props = $props();
 
   // Generated once per instance so radiogroup + its label can link without colliding.
@@ -73,9 +76,32 @@
     }
   ]);
 
+  let preselectedQuestionId: string | null = null;
+  $effect(() => {
+    const key = recommendedKey;
+    if (preselectedQuestionId === question.question_id) return;
+    preselectedQuestionId = question.question_id;
+    if (key && question.selection_mode === "single" && selectedOptionKeys.size === 0) {
+      selectedOptionKeys.add(key);
+    }
+  });
+
   // The custom-answer row is the last radio in a single-choice group; this
   // sentinel keeps it addressable next to the real option keys.
   const CUSTOM_RADIO_KEY = "__ai_builder_custom__";
+
+  // Eneo names the option it would settle on. It is preselected, so confirming
+  // is one click, and it is the only thing a delegation can produce — without
+  // one there is nothing to hand back.
+  const recommendedKey = $derived.by(() => {
+    const id = question.recommended_option_id;
+    if (!id) return null;
+    const option = question.options.find(
+      (candidate) => getStructuredQuestionOptionKey(candidate) === id
+    );
+    return option ? getStructuredQuestionOptionKey(option) : null;
+  });
+  const canDelegate = $derived(recommendedKey !== null && !answered && !disabled);
 
   const isSingle = $derived(question.selection_mode === "single");
   const isSchemaDirection = $derived(question.question_id === "schema_direction");
@@ -444,7 +470,12 @@
               {/if}
             </span>
             <span class="option-body">
-              <span class="option-label">{option.label}</span>
+              <span class="option-label-row">
+                <span class="option-label">{option.label}</span>
+                {#if optionKey === recommendedKey}
+                  <span class="option-recommendation">{m.ai_builder_question_recommended()}</span>
+                {/if}
+              </span>
               {#if option.description}
                 <span class="option-description">{option.description}</span>
               {/if}
@@ -511,6 +542,11 @@
     {/if}
 
     <div class="actions-row">
+      {#if canDelegate}
+        <button type="button" class="delegate-action" onclick={() => ondelegate?.()}>
+          {m.ai_builder_question_delegate()}
+        </button>
+      {/if}
       <Button
         variant="default"
         class="ml-auto max-sm:ml-0 max-sm:h-[44px] max-sm:w-full max-sm:text-sm"
@@ -609,6 +645,30 @@
 
   .option-row:not(:disabled):hover {
     border-color: var(--accent-default);
+  }
+
+  .option-label-row {
+    @apply flex flex-wrap items-center gap-1.5;
+  }
+
+  .option-recommendation {
+    @apply inline-flex h-[1.3125rem] shrink-0 items-center rounded-full px-2 text-[0.6875rem] font-semibold;
+    color: var(--accent-stronger);
+    background: var(--accent-dimmer);
+  }
+
+  .delegate-action {
+    @apply rounded text-[0.8125rem] font-semibold;
+    color: var(--accent-stronger);
+  }
+
+  .delegate-action:hover {
+    @apply underline;
+  }
+
+  .delegate-action:focus-visible {
+    outline: 2px solid var(--accent-stronger);
+    outline-offset: 2px;
   }
 
   .option-row:focus-visible {

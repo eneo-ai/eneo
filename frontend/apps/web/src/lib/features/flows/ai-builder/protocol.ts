@@ -413,6 +413,9 @@ const questionEventDataSchema = z.object({
   options: z.array(questionOptionSchema),
   selection_mode: z.enum(["single", "multi"]),
   allow_custom: z.boolean(),
+  // The option Eneo would settle on if the user hands the question back. Its
+  // absence is the only signal that delegation is not offered here.
+  recommended_option_id: z.string().nullable().optional(),
   requires_confirm: z.boolean().optional(),
   input_field_collection: z.boolean().optional()
 }) satisfies z.ZodType<AIBuilderQuestionEventData>;

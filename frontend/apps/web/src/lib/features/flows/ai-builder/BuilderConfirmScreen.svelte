@@ -20,6 +20,8 @@
     questionId: string;
     question: string;
     answerLabel: string;
+    /** Eneo settled this one after the user handed it back. */
+    delegated?: boolean;
   }
 
   /**
@@ -46,6 +48,7 @@
     editingQuestion?: ChatMessage | null;
     editingQuestionNumber?: number;
     onanswer?: (payload: StructuredQuestionAnswerPayload) => void;
+    ondelegate?: (questionId: string) => void;
     oncanceledit?: () => void;
     onconfirm: () => void;
     /** A change request in the user's own words; the server answers with a
@@ -68,6 +71,7 @@
     editingQuestion = null,
     editingQuestionNumber = 1,
     onanswer,
+    ondelegate,
     oncanceledit,
     onconfirm,
     onchange,
@@ -103,6 +107,11 @@
             {disabled}
           >
             <span class="text-primary truncate font-semibold">{item.answerLabel}</span>
+            {#if item.delegated}
+              <span class="text-secondary shrink-0 text-[0.6875rem]">
+                {m.ai_builder_question_delegated_badge()}
+              </span>
+            {/if}
             <span class="text-accent-stronger shrink-0 font-semibold">
               {m.ai_builder_question_change()}
             </span>
@@ -130,6 +139,7 @@
             why={editingQuestion.content.trim() || null}
             {disabled}
             onanswer={(payload) => onanswer?.(payload)}
+            ondelegate={() => ondelegate?.(editingQuestion.question!.question_id)}
           />
         {/key}
       </div>

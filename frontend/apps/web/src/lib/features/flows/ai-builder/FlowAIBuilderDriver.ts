@@ -136,6 +136,9 @@ function toPersistedQuestionAnswerMetadata(
   questionAnswer:
     StructuredQuestionAnswerMetadata | NonNullable<AIBuilderConversationMessage["question_answer"]>
 ): PersistedStructuredQuestionAnswerMetadata | null {
+  if (questionAnswer.kind === "delegated_question_answer") {
+    return { question_id: questionAnswer.question_id, delegated: true };
+  }
   if (questionAnswer.kind !== "structured_question_answer") {
     return null;
   }
@@ -154,6 +157,10 @@ function toPersistedQuestionAnswerMetadata(
   }
   if (questionAnswer.input_fields != null) {
     metadata.input_fields = questionAnswer.input_fields;
+  }
+  // Provenance exists only on the server's replay of the answer.
+  if ("delegated" in questionAnswer && questionAnswer.delegated === true) {
+    metadata.delegated = true;
   }
   return metadata;
 }
