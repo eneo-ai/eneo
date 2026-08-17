@@ -93,6 +93,7 @@ from eneo.flows.ai_builder.planning_state_builder import (
     apply_policy_defaults_from_resolved_slots,
     build_planning_state_from_conversation,
     carry_forward_persisted_planner_state,
+    carry_forward_turn_resolved_planner_state,
     llm_resolvable_slot_values_for_state,
     merge_llm_resolved_slots,
     resolve_docx_mode_from_template_evidence,
@@ -277,6 +278,37 @@ def _output_schema_evidence() -> SchemaEvidence:
         confidence="high",
         evidence=["message:msg_schema", "fenced_json_schema"],
     )
+
+
+def _input_schema_evidence() -> SchemaEvidence:
+    return build_schema_evidence(
+        json_schema={
+            "type": "object",
+            "properties": {"arendenummer": {"type": "string"}},
+            "required": ["arendenummer"],
+            "additionalProperties": False,
+        },
+        source="declared_schema",
+        confidence="high",
+        evidence=["message:msg_input_schema", "fenced_json_schema"],
+    )
+
+
+def _pasted_schema_conversation() -> list[ConversationMessage]:
+    """The user's own message offering both schemas as fenced JSON."""
+
+    return [
+        ConversationMessage(
+            role="user",
+            content=(
+                "Indata:\n```json\n"
+                f"{json.dumps(_input_schema_evidence().json_schema)}"
+                "\n```\nUtdata:\n```json\n"
+                f"{json.dumps(_output_schema_evidence().json_schema)}"
+                "\n```"
+            ),
+        )
+    ]
 
 
 def _example_output_constraints(
@@ -1164,6 +1196,84 @@ class TestOutputSchemaEvidencePreservation:
         carry_forward_persisted_planner_state(
             rebuilt,
             persisted,
+            attached_file_ids=set(),
+        )
+
+        assert rebuilt.output_schema_evidence is None
+
+    def test_turn_resolved_declared_input_and_output_assignments_survive(self) -> None:
+        # The turn resolved both assignments against the candidate set its own
+        # conversation produced; the conversation rebuild carries no
+        # candidates, so without this the save drops the schema the user
+        # assigned and a later turn works without it.
+        resolved = _state()
+        resolved.replace_schema_resolution(
+            input_evidence=_input_schema_evidence(),
+            output_evidence=_output_schema_evidence(),
+            example_inference=None,
+        )
+        rebuilt = _state()
+
+        carry_forward_turn_resolved_planner_state(
+            rebuilt,
+            resolved,
+            conversation=_pasted_schema_conversation(),
+            attached_file_ids=set(),
+        )
+
+        assert rebuilt.input_schema_evidence == _input_schema_evidence()
+        assert rebuilt.output_schema_evidence == _output_schema_evidence()
+
+    def test_turn_resolved_declared_assignment_needs_its_paste_to_survive(self) -> None:
+        # The save persists the compacted conversation, which can be shorter
+        # than the one the turn resolved against. A pasted schema whose
+        # message compaction dropped is no longer offered, and persisting the
+        # assignment anyway would record a contract the session cannot show.
+        resolved = _state()
+        resolved.replace_schema_resolution(
+            input_evidence=_input_schema_evidence(),
+            output_evidence=_output_schema_evidence(),
+            example_inference=None,
+        )
+        rebuilt = _state()
+
+        carry_forward_turn_resolved_planner_state(
+            rebuilt,
+            resolved,
+            conversation=[
+                ConversationMessage(
+                    role="user",
+                    content="Fortsätt med planen.",
+                )
+            ],
+            attached_file_ids=set(),
+        )
+
+        assert rebuilt.input_schema_evidence is None
+        assert rebuilt.output_schema_evidence is None
+
+    def test_turn_resolved_declared_assignment_needs_its_file_attached(self) -> None:
+        # Session membership is read inside the save, after the turn resolved
+        # the assignment: a schema read from bytes that are no longer attached
+        # cannot be persisted as the user's contract.
+        file_id = UUID("00000000-0000-0000-0000-000000000731")
+        resolved = _state()
+        resolved.output_schema_evidence = build_schema_evidence(
+            json_schema={
+                "type": "object",
+                "properties": {"decision": {"type": "string"}},
+            },
+            source="declared_schema",
+            source_file_ids=(file_id,),
+            confidence="high",
+            evidence=[f"file:{file_id}:json_schema_attachment"],
+        )
+        rebuilt = _state()
+
+        carry_forward_turn_resolved_planner_state(
+            rebuilt,
+            resolved,
+            conversation=[],
             attached_file_ids=set(),
         )
 

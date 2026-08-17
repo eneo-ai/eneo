@@ -78,6 +78,7 @@ from eneo.flows.ai_builder.planning_state import (
 from eneo.flows.ai_builder.planning_state_builder import (
     build_planning_state_from_conversation,
     carry_forward_persisted_planner_state,
+    carry_forward_turn_resolved_planner_state,
 )
 from eneo.flows.domain.flow import FlowPersistedJsonObject
 from eneo.flows.flow_authoring_spec import (
@@ -1713,18 +1714,12 @@ class AIBuilderRepository:
             state = build_planning_state_from_conversation(persisted, flow=flow)
             if architecture_commit is not None:
                 state.architecture_commit = architecture_commit
-            # The proposed file ceiling comes from the organization's
-            # mapped-execution policy, which no conversation states, so this
-            # rebuild proposes none and drops the acceptance derived from it.
-            # The current turn resolved the whole value and speaks for the
-            # current policy; carry-forward cannot, because it cannot tell a
-            # rebuild that had no policy from an organization that opted out.
-            state.mapped_file_limit = planning_state.mapped_file_limit
             # The current turn must run before prior state: carry-forward only
             # fills missing planner-owned fields, so the current upload role wins.
-            carry_forward_persisted_planner_state(
+            carry_forward_turn_resolved_planner_state(
                 state,
                 planning_state,
+                conversation=persisted,
                 attached_file_ids=attached_file_ids,
             )
             carry_forward_persisted_planner_state(

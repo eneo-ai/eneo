@@ -77,6 +77,7 @@ from eneo.flows.ai_builder.ai_builder_runtime_input_fields import (
 )
 from eneo.flows.ai_builder.ai_builder_schema_evidence import (
     build_schema_evidence,
+    derive_freeform_schema_candidates,
 )
 from eneo.flows.ai_builder.ai_builder_slot_classification_contract import (
     UNKNOWN_SLOT_VALUE,
@@ -393,6 +394,50 @@ _MODEL_PROTECTED_SOURCES: frozenset[SlotSource] = frozenset(
 _FLOW_OBSERVED_SLOT_NAMES: frozenset[str] = frozenset({"post_processing_goal"})
 
 
+def carry_forward_turn_resolved_planner_state(
+    rebuilt: PlanningState,
+    resolved: PlanningState,
+    *,
+    conversation: list[ConversationMessage],
+    attached_file_ids: Collection[UUID],
+) -> None:
+    """Restore what the current turn resolved onto its own rebuilt state.
+
+    `build_planning_state_from_conversation` reseeds only the deterministic
+    slot surface, so a value the turn derived from inputs the conversation
+    does not carry — the organization's mapped-execution policy, the schema
+    candidates offered with a direction question — is absent from the
+    rebuild. `resolved` is that turn's own state, and the save path must
+    persist what it resolved rather than a poorer replay of it.
+
+    `conversation` is the conversation the rebuild was made from, which is
+    the one being persisted. It is not always the one the turn resolved
+    against: compaction may drop a pasted schema before the save. Passing it
+    here keeps a restored assignment to what this conversation can still
+    offer, so the saved state never claims evidence the session no longer
+    holds.
+
+    Everything an earlier turn may also supply is shared with
+    `carry_forward_persisted_planner_state`; only currency differs.
+    """
+    # The proposed file ceiling comes from the organization's mapped-execution
+    # policy, which no conversation states, so the rebuild proposes none and
+    # drops the acceptance derived from it. The current turn resolved the whole
+    # value and speaks for the current policy; an earlier turn cannot, because
+    # it cannot tell a rebuild that had no policy from an organization that
+    # opted out.
+    rebuilt.mapped_file_limit = resolved.mapped_file_limit
+    _carry_forward_planner_state(
+        rebuilt,
+        resolved,
+        attached_file_ids=attached_file_ids,
+        declared_schema_fingerprints=frozenset(
+            candidate.fingerprint
+            for candidate in derive_freeform_schema_candidates(conversation)
+        ),
+    )
+
+
 def carry_forward_persisted_planner_state(
     rebuilt: PlanningState,
     persisted: PlanningState | None,
@@ -415,6 +460,21 @@ def carry_forward_persisted_planner_state(
     """
     if persisted is None:
         return
+    _carry_forward_planner_state(
+        rebuilt,
+        persisted,
+        attached_file_ids=attached_file_ids,
+        declared_schema_fingerprints=None,
+    )
+
+
+def _carry_forward_planner_state(
+    rebuilt: PlanningState,
+    persisted: PlanningState,
+    *,
+    attached_file_ids: Collection[UUID],
+    declared_schema_fingerprints: frozenset[str] | None,
+) -> None:
     if rebuilt.mapped_file_limit.accepted_value is None:
         prior_limit = persisted.mapped_file_limit
         # A missing proposal means the current policy blocks new mapped
@@ -452,6 +512,14 @@ def carry_forward_persisted_planner_state(
         carried_evidence = _carryable_output_schema_evidence(
             persisted.output_schema_evidence,
             attached_file_ids=attached_file_ids,
+            declared_schema_fingerprints=declared_schema_fingerprints,
+        )
+    carried_input_evidence = rebuilt.input_schema_evidence
+    if carried_input_evidence is None and persisted.input_schema_evidence is not None:
+        carried_input_evidence = _carryable_declared_schema_evidence(
+            persisted.input_schema_evidence,
+            attached_file_ids=attached_file_ids,
+            declared_schema_fingerprints=declared_schema_fingerprints,
         )
     carried_inference = rebuilt.example_output_schema_inference
     if carried_inference is None:
@@ -467,9 +535,13 @@ def carry_forward_persisted_planner_state(
         and carried_inference is None
     ):
         carried_evidence = None
-    if carried_evidence is not None or carried_inference is not None:
+    if (
+        carried_evidence is not None
+        or carried_input_evidence is not None
+        or carried_inference is not None
+    ):
         rebuilt.replace_schema_resolution(
-            input_evidence=rebuilt.input_schema_evidence,
+            input_evidence=carried_input_evidence,
             output_evidence=carried_evidence,
             example_inference=carried_inference,
         )
@@ -530,13 +602,53 @@ def _slot_evidence_file_ids(slot: ResolvedSlot) -> set[UUID]:
     return file_ids
 
 
+def _carryable_declared_schema_evidence(
+    evidence: SchemaEvidence,
+    *,
+    attached_file_ids: Collection[UUID],
+    declared_schema_fingerprints: frozenset[str] | None,
+) -> SchemaEvidence | None:
+    """Decide whether an explicit schema assignment still holds.
+
+    A declared schema is only assigned as input or output against the exact
+    candidate set the direction question offered, and that set is derived
+    fresh from the conversation and the attached files every turn. An earlier
+    turn cannot vouch for the set it was offered — `declared_schema_fingerprints`
+    is `None` there — so its assignment is re-derived from the conversation
+    instead and cannot resurrect a schema the user is no longer being asked
+    about.
+
+    The current turn can, but only for a candidate the state being saved still
+    offers: an assignment read from attached bytes needs its files, and one
+    pasted into the conversation needs that message to have survived
+    compaction. Otherwise the save would record a contract the session can no
+    longer show the user.
+    """
+
+    if declared_schema_fingerprints is None:
+        return None
+    if not set(evidence.source_file_ids) <= set(attached_file_ids):
+        return None
+    if (
+        not evidence.source_file_ids
+        and evidence.fingerprint not in declared_schema_fingerprints
+    ):
+        return None
+    return evidence
+
+
 def _carryable_output_schema_evidence(
     evidence: SchemaEvidence,
     *,
     attached_file_ids: Collection[UUID],
+    declared_schema_fingerprints: frozenset[str] | None,
 ) -> SchemaEvidence | None:
     if evidence.source == "declared_schema":
-        return None
+        return _carryable_declared_schema_evidence(
+            evidence,
+            attached_file_ids=attached_file_ids,
+            declared_schema_fingerprints=declared_schema_fingerprints,
+        )
 
     attached = set(attached_file_ids)
     source_file_ids = set(evidence.source_file_ids)

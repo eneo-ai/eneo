@@ -111,6 +111,9 @@ from eneo.flows.ai_builder.ai_builder_proposal_tool_contracts import (
 )
 from eneo.flows.ai_builder.ai_builder_repo import AIBuilderRepository
 from eneo.flows.ai_builder.ai_builder_router import send_message
+from eneo.flows.ai_builder.ai_builder_schema_evidence import (
+    build_schema_evidence,
+)
 from eneo.flows.ai_builder.ai_builder_server_decision_dispatch import (
     ServerDecisionTelemetry,
 )
@@ -6267,6 +6270,115 @@ async def test_ai_builder_repo_commit_turn_preserves_previously_persisted_archit
     assert loaded is not None
     assert loaded.architecture_commit is not None
     assert loaded.architecture_commit.architecture_hash == commit.architecture_hash
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_ai_builder_repo_commit_turn_persists_the_schema_resolution_it_is_given(
+    client,
+    bearer_token,
+    completion_model_factory,
+    db_container,
+):
+    """`commit_turn` must save the schema resolution the turn hands it.
+
+    The turn resolves an assignment against the schema candidates its own
+    conversation and attachments offer, but `commit_turn` rebuilds
+    `PlanningState` from the conversation alone, which carries no
+    candidates. Dropping it here left the session's canonical state without
+    the contract the user approved, so a later edit or revision could reopen
+    the schema question or plan without it.
+
+    This exercises the repository boundary: the schemas are really pasted in
+    the committed conversation, and the turn state is built directly rather
+    than driven through a provider turn, which the discovery tests own.
+    """
+    space_id = await _create_space_with_planner_model(
+        client=client,
+        bearer_token=bearer_token,
+        db_container=db_container,
+        completion_model_factory=completion_model_factory,
+        space_name="AI Builder Commit Turn Declared Schema",
+    )
+    input_schema = {
+        "type": "object",
+        "properties": {"arendenummer": {"type": "string"}},
+        "required": ["arendenummer"],
+        "additionalProperties": False,
+    }
+    output_schema = {
+        "type": "object",
+        "properties": {"beslut": {"type": "string"}},
+        "required": ["beslut"],
+        "additionalProperties": False,
+    }
+    schema_message = ConversationMessage(
+        role="user",
+        content=(
+            "Indata ser ut så här:\n"
+            f"```json\n{json.dumps(input_schema)}\n```\n"
+            "och svaret ska följa:\n"
+            f"```json\n{json.dumps(output_schema)}\n```"
+        ),
+    )
+    input_evidence = build_schema_evidence(
+        json_schema=input_schema,
+        source="declared_schema",
+        confidence="high",
+        evidence=(
+            f"message:{schema_message.message_id}",
+            "fenced_json_schema",
+        ),
+    )
+    output_evidence = build_schema_evidence(
+        json_schema=output_schema,
+        source="declared_schema",
+        confidence="high",
+        evidence=(
+            f"message:{schema_message.message_id}",
+            "fenced_json_schema",
+        ),
+    )
+    turn_state = PlanningState.empty()
+    turn_state.replace_schema_resolution(
+        input_evidence=input_evidence,
+        output_evidence=output_evidence,
+        example_inference=None,
+    )
+    async with db_container() as container:
+        repo = AIBuilderRepository(container.session())
+        user = container.user()
+        session = await repo.create_session(
+            tenant_id=user.tenant_id,
+            space_id=UUID(space_id),
+            actor_user_id=user.id,
+            target_kind=TargetKind.CREATE,
+            flow_id=None,
+        )
+        turn = await _claim_session_send_turn(
+            repo=repo,
+            session_id=session.id,
+            tenant_id=user.tenant_id,
+        )
+        await repo.commit_turn(
+            turn=turn,
+            new_messages=[
+                schema_message,
+                ConversationMessage(role="assistant", content="Schemat är valt."),
+            ],
+            planning_state=turn_state,
+        )
+
+    async with db_container() as container:
+        repo = AIBuilderRepository(container.session())
+        user = container.user()
+        loaded = await repo.load_planning_state(
+            session_id=session.id, tenant_id=user.tenant_id
+        )
+
+    assert loaded is not None
+    assert loaded.input_schema_evidence == input_evidence
+    assert loaded.output_schema_evidence == output_evidence
 
 
 @pytest.mark.integration
