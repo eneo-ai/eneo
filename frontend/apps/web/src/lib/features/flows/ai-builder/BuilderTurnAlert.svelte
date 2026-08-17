@@ -113,7 +113,7 @@
   >
     <Alert.Root
       variant={turnIsActive && !service.error ? "default" : "destructive"}
-      class="mx-auto grid max-w-[47.5rem] grid-cols-[auto_minmax(0,1fr)] items-start gap-x-3 rounded-lg px-3.5 py-3"
+      class="mx-auto grid max-w-[43.75rem] grid-cols-[auto_minmax(0,1fr)] items-start gap-x-3 rounded-lg px-3.5 py-3"
     >
       <svg
         xmlns="http://www.w3.org/2000/svg"

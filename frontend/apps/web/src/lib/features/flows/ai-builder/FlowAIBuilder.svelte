@@ -23,7 +23,8 @@
   import type {
     AIBuilderSavedFlowStepScope,
     AIBuilderSuggestChangeIntent,
-    ChatMessage
+    ChatMessage,
+    RequirementsSummary
   } from "./protocol";
   import type { StructuredQuestionAnswerPayload } from "./structuredQuestionAnswer";
 
@@ -316,6 +317,23 @@
     void service.confirmRequirements(activeEditContext);
   }
 
+  /** "Ljud → PDF-dokument": the recap is a glance, so the server's full
+   *  sentences ("Primär indata vid körning: Dokument.") are reduced to the
+   *  thing named after the colon. */
+  function summaryTerm(sentence: string | null | undefined): string {
+    const text = (sentence ?? "").trim();
+    const named = text.includes(":") ? text.slice(text.indexOf(":") + 1) : text;
+    return named.trim().replace(/[.\s]+$/, "");
+  }
+
+  function buildConfirmedLine(summary: RequirementsSummary | null): string | null {
+    if (!summary) return null;
+    const input = summaryTerm(summary.input_description);
+    const output = summaryTerm(summary.output_description);
+    if (!input && !output) return null;
+    return input && output ? `${input} → ${output}` : input || output;
+  }
+
   function handleRequirementsChange(text: string) {
     void service.changeRequirements(text);
   }
@@ -594,9 +612,7 @@
         <BuilderBuildScreen
           status={service.statusMessage}
           stepCount={service.currentPlan?.proposal.spec.steps.length ?? 5}
-          confirmedLine={latestSummary
-            ? `${latestSummary.input_description} → ${latestSummary.output_description}`
-            : null}
+          confirmedLine={buildConfirmedLine(latestSummary)}
           onshowconfirmation={() => (peekPhase = 0)}
         />
       {:else if screen === "review"}

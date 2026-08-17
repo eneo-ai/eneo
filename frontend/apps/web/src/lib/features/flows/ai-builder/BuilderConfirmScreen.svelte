@@ -85,7 +85,7 @@
 </script>
 
 <div class="flex justify-center px-7 pt-6 pb-10 max-sm:px-3 max-sm:pt-4">
-  <div class="confirm-screen w-full max-w-[47.5rem] 2xl:max-w-[53.75rem]">
+  <div class="confirm-screen w-full max-w-[43.75rem] 2xl:max-w-[48.125rem]">
     {#if answered.length > 0 && !readOnly}
       <div class="mb-4 flex flex-wrap items-center gap-2">
         <span class="text-secondary text-xs">{m.ai_builder_question_answers_label()}</span>

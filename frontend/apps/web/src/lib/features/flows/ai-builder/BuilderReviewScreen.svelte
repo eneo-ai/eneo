@@ -972,7 +972,7 @@
                 </div>
               {/if}
 
-              <ol class="mx-auto my-0 flex max-w-[47.5rem] list-none flex-col p-0">
+              <ol class="mx-auto my-0 flex max-w-[43.75rem] list-none flex-col p-0">
                 {#if flowInputLabel}
                   <li
                     class="border-dimmer bg-secondary flex items-center gap-2.5 rounded-[9px] border px-3 py-2.5"
@@ -1325,11 +1325,11 @@
   />
 {:else if service.conflict}
   <div class="bg-secondary flex flex-1 justify-center px-7 pt-6 pb-10 max-sm:px-3 max-sm:pt-4">
-    <div class="w-full max-w-[47.5rem]">{@render conflictCard()}</div>
+    <div class="w-full max-w-[43.75rem]">{@render conflictCard()}</div>
   </div>
 {:else if showGenerationFailure}
   <div class="bg-secondary flex flex-1 justify-center px-7 pt-6 pb-10 max-sm:px-3 max-sm:pt-4">
-    <div class="w-full max-w-[47.5rem]">
+    <div class="w-full max-w-[43.75rem]">
       <div class="border-default bg-primary rounded-xl border p-5" role="status" aria-live="polite">
         <div class="flex items-start gap-3">
           <IconAlertTriangle
