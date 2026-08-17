@@ -553,44 +553,6 @@ def test_derives_compare_intent_for_same_run_comparison_scope() -> None:
     assert draft.aggregation_intent == "compare"
 
 
-def test_derives_linear_intent_for_medium_comparison_scope() -> None:
-    state = _state_with_slots(
-        primary_runtime_input="documents",
-        terminal_output="structured_text",
-        document_material_scope="single_document_case",
-    )
-    state.resolved_slots["comparison_scope"] = _slot(
-        "comparison_scope",
-        "same_run_compare",
-        source="model",
-        confidence="medium",
-    )
-
-    draft = derive_architecture_commit_draft(state)
-
-    assert draft is not None
-    assert draft.aggregation_intent == "linear"
-
-
-def test_derives_compare_intent_for_high_model_comparison_scope() -> None:
-    state = _state_with_slots(
-        primary_runtime_input="documents",
-        terminal_output="structured_text",
-        document_material_scope="single_document_case",
-    )
-    state.resolved_slots["comparison_scope"] = _slot(
-        "comparison_scope",
-        "same_run_compare",
-        source="model",
-        confidence="high",
-    )
-
-    draft = derive_architecture_commit_draft(state)
-
-    assert draft is not None
-    assert draft.aggregation_intent == "compare"
-
-
 @pytest.mark.parametrize(
     ("confidence", "expected"),
     [

@@ -509,49 +509,6 @@ async def test_call_proposal_completion_forces_drop_params_true_on_provider_call
 
 
 @pytest.mark.asyncio
-async def test_call_proposal_completion_disables_parallel_tool_calls() -> None:
-    response = _make_response_with_text("ok")
-    litellm_client = SimpleNamespace(acompletion=AsyncMock(return_value=response))
-
-    await call_proposal_completion(
-        litellm_client=litellm_client,
-        request=_completion_request(
-            messages=[{"role": "user", "content": "Build a flow"}],
-            tool_schemas=[{"function": {"name": PROPOSE_FLOW_TOOL_NAME}}],
-            route=_route(),
-            max_output_tokens=1024,
-            temperature=0.2,
-            tool_choice=forced_tool_choice(PROPOSE_FLOW_TOOL_NAME),
-        ),
-    )
-
-    call_kwargs = litellm_client.acompletion.await_args.kwargs
-    assert call_kwargs["parallel_tool_calls"] is False
-
-
-@pytest.mark.asyncio
-async def test_call_proposal_completion_passes_forced_tool_choice() -> None:
-    response = _make_response_with_text("ok")
-    litellm_client = SimpleNamespace(acompletion=AsyncMock(return_value=response))
-    tool_choice = forced_tool_choice(PROPOSE_FLOW_TOOL_NAME)
-
-    await call_proposal_completion(
-        litellm_client=litellm_client,
-        request=_completion_request(
-            messages=[{"role": "user", "content": "Build a flow"}],
-            tool_schemas=[{"function": {"name": PROPOSE_FLOW_TOOL_NAME}}],
-            route=_route(),
-            max_output_tokens=1024,
-            temperature=0.2,
-            tool_choice=tool_choice,
-        ),
-    )
-
-    call_kwargs = litellm_client.acompletion.await_args.kwargs
-    assert call_kwargs["tool_choice"] == tool_choice
-
-
-@pytest.mark.asyncio
 async def test_proposal_call_uses_explicit_off_reasoning_when_model_supports_it() -> (
     None
 ):

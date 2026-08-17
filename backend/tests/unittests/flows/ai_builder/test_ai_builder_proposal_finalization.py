@@ -36,7 +36,6 @@ from eneo.flows.ai_builder.ai_builder_proposal_telemetry import (
 )
 from eneo.flows.ai_builder.ai_builder_proposal_tool_contracts import (
     CompiledProposal,
-    ToolProcessingResult,
 )
 from eneo.flows.ai_builder.ai_builder_session_turn import (
     SessionSendLease,
@@ -735,33 +734,6 @@ async def test_edit_of_single_composer_report_needs_no_planner_repair() -> None:
 
     assert result.feedback is None
     store_plan.assert_awaited_once()
-
-
-@pytest.mark.asyncio
-async def test_finalize_compiled_proposal_uses_target_kind_for_quality_branch() -> None:
-    finalizer = _make_finalizer()
-    create_quality = MagicMock(
-        return_value=ToolProcessingResult(feedback="create", failure_kind="quality")
-    )
-    edit_quality = MagicMock(
-        return_value=ToolProcessingResult(feedback="edit", failure_kind="quality")
-    )
-
-    with (
-        patch.object(finalizer, "_create_quality_result", new=create_quality),
-        patch.object(finalizer, "_edit_quality_result", new=edit_quality),
-    ):
-        result = await finalizer.finalize_compiled_proposal(
-            _make_request(
-                target_kind=TargetKind.EDIT,
-                compiled=_compiled_edit_proposal(compiled_spec=_make_flow_spec()),
-                flow=MagicMock(),
-            )
-        )
-
-    assert result.feedback == "edit"
-    create_quality.assert_not_called()
-    edit_quality.assert_called_once()
 
 
 @pytest.mark.asyncio

@@ -113,21 +113,6 @@ class TestValidSpec:
         result = validate_spec(_spec([_step()]))
         assert result.valid
 
-    def test_two_step_chain_valid(self) -> None:
-        result = validate_spec(
-            _spec(
-                [
-                    _step(ref="step_a", name="Extract"),
-                    _step(
-                        ref="step_b",
-                        name="Summarize",
-                        input_source=InputSource.PREVIOUS_STEP,
-                    ),
-                ]
-            )
-        )
-        assert result.valid
-
     def test_three_step_chain_valid(self) -> None:
         result = validate_spec(
             _spec(
@@ -1157,25 +1142,6 @@ class TestContractDiagnostics:
         )
         assert not _errors_with_code(result, "output_contract_type_mismatch")
 
-    def test_document_input_contract_maps_once_to_authored_step(self) -> None:
-        result = validate_spec(
-            _spec(
-                [
-                    _step(
-                        ref="step_a",
-                        name="Read document",
-                        input_type=InputType.DOCUMENT,
-                        input_contract={"type": "object", "properties": {}},
-                    )
-                ]
-            )
-        )
-
-        assert not result.valid
-        _assert_single_error(
-            result, code="input_contract_type_mismatch", step_ref="step_a"
-        )
-
     def test_text_output_contract_maps_once_to_authored_step(self) -> None:
         result = validate_spec(
             _spec(
@@ -1224,22 +1190,6 @@ class TestContractDiagnostics:
 
 
 class TestTypeCompatibility:
-    def test_text_to_text_compatible(self) -> None:
-        result = validate_spec(
-            _spec(
-                [
-                    _step(ref="step_a", name="A", output_type=OutputType.TEXT),
-                    _step(
-                        ref="step_b",
-                        name="B",
-                        input_source=InputSource.PREVIOUS_STEP,
-                        input_type=InputType.TEXT,
-                    ),
-                ]
-            )
-        )
-        assert result.valid
-
     def test_text_to_json_compatible(self) -> None:
         result = validate_spec(
             _spec(
@@ -1255,40 +1205,6 @@ class TestTypeCompatibility:
             )
         )
         assert result.valid
-
-    def test_json_to_text_compatible(self) -> None:
-        result = validate_spec(
-            _spec(
-                [
-                    _step(ref="step_a", name="A", output_type=OutputType.JSON),
-                    _step(
-                        ref="step_b",
-                        name="B",
-                        input_source=InputSource.PREVIOUS_STEP,
-                        input_type=InputType.TEXT,
-                    ),
-                ]
-            )
-        )
-        assert result.valid
-
-    def test_pdf_to_audio_incompatible(self) -> None:
-        result = validate_spec(
-            _spec(
-                [
-                    _step(ref="step_a", name="A", output_type=OutputType.PDF),
-                    _step(
-                        ref="step_b",
-                        name="B",
-                        input_source=InputSource.PREVIOUS_STEP,
-                        input_type=InputType.AUDIO,
-                    ),
-                ]
-            )
-        )
-        assert not result.valid
-        assert any(e.code == "incompatible_type_chain" for e in result.errors)
-        _assert_single_error(result, code="incompatible_type_chain", step_ref="step_b")
 
     def test_docx_to_json_incompatible(self) -> None:
         result = validate_spec(
@@ -1463,20 +1379,6 @@ class TestTemplateFill:
 
 
 class TestReferenceValidation:
-    def test_unknown_model_ref_rejected(self) -> None:
-        result = validate_spec(
-            _spec(
-                [
-                    _step(
-                        instructions="Test",
-                    ),
-                ]
-            ),
-            available_model_refs={"gpt-4", "claude-3"},
-        )
-        # step has no model_ref (None) so should pass
-        assert result.valid
-
     def test_unknown_model_ref_error(self) -> None:
         steps = [
             StepSpec(

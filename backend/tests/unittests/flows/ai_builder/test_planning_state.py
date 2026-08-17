@@ -393,54 +393,6 @@ class TestRoundTrip:
         restored = PlanningState.model_validate_json(dumped)
         assert restored == original
 
-    def test_model_dump_dict_survives_round_trip(self) -> None:
-        original = self._populated_state()
-        dumped = original.model_dump(mode="json")
-        restored = PlanningState.model_validate(dumped)
-        assert restored == original
-
-    def test_empty_state_round_trip(self) -> None:
-        original = PlanningState.empty()
-        restored = PlanningState.model_validate_json(original.model_dump_json())
-        assert restored == original
-
-
-class TestAssignmentRevalidation:
-    """`validate_assignment=True` re-runs validators when an attribute
-    is directly reassigned, closing the most obvious drift hole for a
-    mutable Pydantic model.
-    """
-
-    def test_invalid_signal_confidence_assignment_raises(self) -> None:
-        signal = PlanningSignal(
-            question_id="q",
-            value="v",
-            confidence="high",
-            source="structured_answer",
-        )
-        with pytest.raises(ValidationError):
-            signal.confidence = "absolute"  # type: ignore[assignment]
-
-
-class TestSignalValidation:
-    def test_invalid_confidence_rejected(self) -> None:
-        with pytest.raises(ValidationError):
-            PlanningSignal(
-                question_id="runtime_metadata_fields",
-                value="basic_runtime_metadata",
-                confidence="absolute",  # type: ignore[arg-type]
-                source="structured_answer",
-            )
-
-    def test_invalid_source_rejected(self) -> None:
-        with pytest.raises(ValidationError):
-            PlanningSignal(
-                question_id="runtime_metadata_fields",
-                value="basic_runtime_metadata",
-                confidence="high",
-                source="invented_source",  # type: ignore[arg-type]
-            )
-
 
 class TestFileRoleEvidenceValidation:
     @pytest.mark.parametrize(

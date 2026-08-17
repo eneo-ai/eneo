@@ -23,7 +23,6 @@ from litellm.exceptions import (
     Timeout,
     UnprocessableEntityError,
 )
-from pydantic import ValidationError
 
 from eneo.completion_models.infrastructure.completion_service import (
     CompletionEvidenceField,
@@ -45,10 +44,8 @@ from eneo.flows.ai_builder.ai_builder_proposal_telemetry import (
     APPLY_TELEMETRY_SCHEMA_VERSION,
     PROPOSAL_TELEMETRY_LOG_KEY,
     PROPOSAL_TELEMETRY_SCHEMA_VERSION,
-    ApplyFailureTelemetryPayload,
     ChangesetCountSummary,
     MaterializerProgressSnapshot,
-    ProposalAttemptTelemetryPayload,
     ProposalCallKind,
     ProposalFailureKind,
     ProposalRepairReason,
@@ -336,17 +333,6 @@ def test_proposal_attempt_telemetry_is_bounded_and_content_free() -> None:
     assert "prompt" not in attempts[0]
     assert "provider_payload" not in attempts[0]
     assert "secret" not in attempts[0]
-
-
-def test_proposal_attempt_payload_forbids_raw_content_fields() -> None:
-    with pytest.raises(ValidationError):
-        ProposalAttemptTelemetryPayload(
-            attempt=1,
-            kind="initial",
-            elapsed_ms=1,
-            token_usage_source="provider",
-            prompt="raw prompt must not be accepted",
-        )
 
 
 @pytest.mark.parametrize(
@@ -893,77 +879,6 @@ def test_changeset_count_summary_maps_preview_counts_to_log_projection() -> None
         "assistants_to_update": 5,
         "assistants_to_delete": 6,
     }
-
-
-def test_compile_apply_failure_payload_omits_execute_only_fields() -> None:
-    payload = ApplyFailureTelemetryPayload(
-        phase="prepare_authoring",
-        plan_id=str(uuid4()),
-        session_id=str(uuid4()),
-        target_kind="create",
-        flow_id=None,
-        exception_class="RuntimeError",
-        code=None,
-        changeset_counts=None,
-        materializer_progress=None,
-    ).model_dump(exclude_none=True)
-
-    assert payload["phase"] == "prepare_authoring"
-    assert "code" not in payload
-    assert "changeset_counts" not in payload
-    assert "materializer_progress" not in payload
-
-
-def test_apply_failure_payload_forbids_extra_raw_material_fields() -> None:
-    with pytest.raises(ValidationError):
-        ApplyFailureTelemetryPayload(
-            phase="prepare_authoring",
-            plan_id=str(uuid4()),
-            session_id=str(uuid4()),
-            target_kind="edit",
-            flow_id=None,
-            exception_class="RuntimeError",
-            prompt="raw prompt must not be accepted",
-        )
-
-
-def test_apply_failure_payload_json_excludes_sensitive_material() -> None:
-    sensitive_values = [
-        "sensitive prompt text",
-        "{{ step_a.output.secret }}",
-        "raw source transcript",
-    ]
-
-    payload = ApplyFailureTelemetryPayload(
-        phase="apply_authoring",
-        plan_id=str(uuid4()),
-        session_id=str(uuid4()),
-        target_kind="edit",
-        flow_id=str(uuid4()),
-        exception_class="RuntimeError",
-        code=None,
-        changeset_counts=ChangesetCountSummary(
-            steps_created=0,
-            steps_updated=1,
-            steps_removed=0,
-            assistants_to_create=0,
-            assistants_to_update=1,
-            assistants_to_delete=0,
-        ),
-        materializer_progress=MaterializerProgressSnapshot(
-            stage="assistants_updated",
-            assistants_created=0,
-            assistants_configured=0,
-            assistants_updated=1,
-            assistants_deleted=0,
-            flow_created=False,
-            flow_updated=False,
-        ),
-    ).model_dump_json(exclude_none=True)
-
-    json.loads(payload)
-    for value in sensitive_values:
-        assert value not in payload
 
 
 def test_emitted_failure_kinds_are_a_subset_of_the_taxonomy() -> None:

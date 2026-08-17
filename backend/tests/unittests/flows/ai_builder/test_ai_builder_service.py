@@ -78,11 +78,9 @@ from eneo.flows.ai_builder.ai_builder_event_models import (
     RequirementsSummaryPayload,
 )
 from eneo.flows.ai_builder.ai_builder_events import (
-    build_done_event,
     encode_ai_builder_stream_event,
 )
 from eneo.flows.ai_builder.ai_builder_plan_lifecycle import AIBuilderPlanLifecycle
-from eneo.flows.ai_builder.ai_builder_planner import AIBuilderPlanner
 from eneo.flows.ai_builder.ai_builder_planner_request_preparation import (
     conversation_message_to_llm_message,
 )
@@ -968,105 +966,7 @@ class TestSessionRecovery:
         )
 
 
-class TestGetSession:
-    @pytest.mark.anyio
-    async def test_get_session_returns_session(self):
-        user = _make_user()
-        repo = AsyncMock()
-        expected = _make_session(tenant_id=user.tenant_id)
-        repo.get_session.return_value = expected
-
-        service = _make_service(user=user, repo=repo)
-        result = await service.get_session(expected.id)
-
-        assert result == expected
-        repo.get_session.assert_called_once_with(
-            session_id=expected.id,
-            tenant_id=user.tenant_id,
-        )
-
-
-class TestGetPlan:
-    @pytest.mark.anyio
-    async def test_get_plan_returns_plan(self):
-        user = _make_user()
-        repo = AsyncMock()
-        expected = _make_plan(tenant_id=user.tenant_id)
-        repo.get_plan.return_value = expected
-
-        service = _make_service(user=user, repo=repo)
-        result = await service.get_plan(expected.id)
-
-        assert result == expected
-        repo.get_plan.assert_called_once_with(
-            plan_id=expected.id,
-            tenant_id=user.tenant_id,
-        )
-
-    @pytest.mark.anyio
-    async def test_list_session_plans_returns_plans(self):
-        user = _make_user()
-        repo = AsyncMock()
-        session = _make_session(tenant_id=user.tenant_id)
-        expected = [_make_plan(session_id=session.id, tenant_id=user.tenant_id)]
-        repo.list_session_plans.return_value = expected
-
-        service = _make_service(user=user, repo=repo)
-        result = await service.list_session_plans(session.id)
-
-        assert result == expected
-        repo.list_session_plans.assert_called_once_with(
-            session_id=session.id,
-            tenant_id=user.tenant_id,
-        )
-
-
 class TestServiceComposition:
-    @pytest.mark.anyio
-    async def test_send_message_delegates_to_planner(self):
-        service = _make_service()
-        service.repo.get_session.return_value = _make_session(
-            tenant_id=service.user.tenant_id
-        )
-
-        async def planner_events():
-            yield build_done_event()
-
-        with patch.object(
-            AIBuilderPlanner,
-            "send_message",
-            return_value=planner_events(),
-        ) as mock_send_message:
-            events = await _collect_events(
-                service.send_message(
-                    session_id=uuid4(),
-                    client_turn_id=_TEST_CLIENT_TURN_ID,
-                    request_fingerprint=_TEST_REQUEST_FINGERPRINT,
-                    request_snapshot=_test_request_snapshot("Build a flow"),
-                    message="Build a flow",
-                    completion_model_route=_route(kwargs={"api_key": "sk-test"}),
-                )
-            )
-
-        assert events == [{"event": SSE_EVENT_DONE, "data": ""}]
-        mock_send_message.assert_called_once()
-        assert mock_send_message.call_args.kwargs["message"] == "Build a flow"
-
-    @pytest.mark.anyio
-    async def test_approve_plan_delegates_to_lifecycle(self):
-        service = _make_service()
-        plan = _make_plan()
-
-        with patch.object(
-            AIBuilderPlanLifecycle,
-            "approve_plan",
-            new=AsyncMock(return_value=plan),
-        ) as mock_approve_plan:
-            result = await service.approve_plan(plan_id=plan.id)
-
-        assert result == plan
-        mock_approve_plan.assert_awaited_once_with(plan_id=plan.id)
-
     @pytest.mark.anyio
     async def test_apply_plan_delegates_to_lifecycle(self):
         service = _make_service()

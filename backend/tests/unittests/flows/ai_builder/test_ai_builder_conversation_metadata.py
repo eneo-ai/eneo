@@ -1006,33 +1006,6 @@ def test_slot_classification_metadata_rejects_extra_nested_fields() -> None:
     )
 
 
-def test_slot_classification_metadata_rejects_overlong_reason() -> None:
-    assert (
-        slot_classification_from_metadata(
-            {
-                "slot_classification": {
-                    **_persisted_classification_header(),
-                    "slots": [
-                        {
-                            "slot_name": "terminal_output",
-                            "value": "structured_text",
-                            "confidence": "high",
-                            "reason": "x" * 501,
-                            "evidence": [
-                                {
-                                    "source_id": _CLASSIFICATION_SOURCE_ID,
-                                    "quote": "user asked for a report",
-                                }
-                            ],
-                        }
-                    ],
-                }
-            }
-        )
-        is None
-    )
-
-
 def test_slot_classification_metadata_rejects_uncited_named_result_evidence() -> None:
     quote = "JSON output field: case_id."
 

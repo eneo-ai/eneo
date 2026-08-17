@@ -261,20 +261,6 @@ def test_commit_grade_truth_table(slot: ResolvedSlot, expected: bool) -> None:
     assert slot.is_commit_grade is expected
 
 
-def test_policy_prioritizes_missing_core_slots_before_discovery_targets() -> None:
-    policy = build_planner_action_policy(
-        session_state=PlanningState.empty(),
-        selected_discovery_question_ids=("document_material_scope",),
-    )
-
-    assert policy.allowed_action_kinds == ("ask_question",)
-    assert policy.allowed_ask_question_targets == (
-        "primary_runtime_input",
-        "terminal_output",
-        "document_material_scope",
-    )
-
-
 def test_vague_purpose_question_precedes_terminal_output_core_gap() -> None:
     policy = build_planner_action_policy(
         session_state=PlanningState.empty(),

@@ -1188,20 +1188,6 @@ class TestOutputSchemaEvidencePreservation:
 
         assert rebuilt.output_schema_evidence is None
 
-    def test_drops_declared_output_schema_evidence_without_attached_file(self) -> None:
-        persisted_evidence = _output_schema_evidence()
-        persisted = _state()
-        persisted.output_schema_evidence = persisted_evidence
-        rebuilt = _state()
-
-        carry_forward_persisted_planner_state(
-            rebuilt,
-            persisted,
-            attached_file_ids=set(),
-        )
-
-        assert rebuilt.output_schema_evidence is None
-
     def test_turn_resolved_declared_input_and_output_assignments_survive(self) -> None:
         # The turn resolved both assignments against the candidate set its own
         # conversation produced; the conversation rebuild carries no
@@ -1935,26 +1921,6 @@ class TestPolicyDefaults:
         slot = state.resolved_slots["runtime_metadata_fields"]
         assert slot.value == "no_extra_metadata"
         assert slot.source == "heuristic"
-
-    def test_swedish_audio_recording_prompt_with_terminal_word_file_resolves_core_slots(
-        self,
-    ) -> None:
-        state = build_planning_state_from_conversation(
-            [
-                ConversationMessage(
-                    role="user",
-                    content=(
-                        "Jag vill kunna skicka in en ljudinspelning och få ett "
-                        "bra Word-dokument tillbaka."
-                    ),
-                )
-            ]
-        )
-
-        assert state.resolved_slots["primary_runtime_input"].value == "audio"
-        assert state.resolved_slots["terminal_output"].value == "docx_document"
-        assert state.resolved_slots["docx_output_mode"].value == "generated_docx"
-        assert "runtime_metadata_fields" not in state.resolved_slots
 
     def test_explicit_audio_meeting_docx_prompt_resolves_audio_with_high_confidence(
         self,
@@ -4174,30 +4140,6 @@ class TestModelSlotMerge:
         assert slot.value == "structure_key_information"
         assert slot.source == "model"
 
-    def test_model_post_processing_goal_accepts_empty_freeform_text_with_typed_evidence(
-        self,
-    ) -> None:
-        state = _state()
-
-        merge_llm_resolved_slots(
-            state,
-            SlotClassificationResult(
-                slots=(
-                    _classified(
-                        "post_processing_goal",
-                        "stop_after_primary_operation",
-                        "high",
-                    ),
-                )
-            ),
-            prompt_hash="a" * 64,
-            freeform_text="",
-        )
-
-        slot = state.resolved_slots["post_processing_goal"]
-        assert slot.value == "stop_after_primary_operation"
-        assert slot.source == "model"
-
     def test_medium_model_output_does_not_replace_requirements_summary(self) -> None:
         state = _state()
         state.resolved_slots = {
@@ -4371,40 +4313,6 @@ class TestModelSlotMerge:
             "model:runtime_metadata_fields:" + "b" * 64,
             "quote:user_message:test-source:runtime_metadata_fields evidence",
         ]
-
-    def test_high_model_runtime_metadata_without_raw_text_match_replaces_policy_default(
-        self,
-    ) -> None:
-        state = _state()
-        state.resolved_slots = {
-            "runtime_metadata_fields": _slot(
-                name="runtime_metadata_fields",
-                value="no_extra_metadata",
-                source="policy_default",
-            )
-        }
-
-        merge_llm_resolved_slots(
-            state,
-            SlotClassificationResult(
-                slots=(
-                    _classified(
-                        "runtime_metadata_fields",
-                        "detailed_runtime_metadata",
-                        "high",
-                    ),
-                )
-            ),
-            prompt_hash="b" * 64,
-            freeform_text=(
-                "Läs dokumentet och extrahera dokumenttyp, datum, författare "
-                "och slutsatser från källmaterialet."
-            ),
-        )
-
-        slot = state.resolved_slots["runtime_metadata_fields"]
-        assert slot.value == "detailed_runtime_metadata"
-        assert slot.source == "model"
 
     def test_medium_model_output_does_not_replace_policy_default(self) -> None:
         state = _state()

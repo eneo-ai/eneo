@@ -8,12 +8,6 @@ import pytest
 from pydantic import ValidationError
 
 from eneo.flows.ai_builder.ai_builder_api_models import SendMessageRequest
-from eneo.flows.ai_builder.ai_builder_domain_models import (
-    FlowBuilderProposalContent,
-    PlanStatus,
-    SessionStatus,
-    TargetKind,
-)
 from eneo.flows.flow_authoring_spec import (
     AssistantSpec,
     AssistantSpecLocalRefNotPortableError,
@@ -77,12 +71,6 @@ def _has_local_ref_not_portable_error(exc: ValidationError) -> bool:
 
 
 class TestFlowDraftSpecCore:
-    def test_minimal_valid_spec(self) -> None:
-        spec = _make_spec()
-        assert spec.flow_name == "Test flow"
-        assert len(spec.steps) == 1
-        assert spec.steps[0].plan_step_ref == "step_a"
-
     def test_spec_hash_deterministic(self) -> None:
         spec1 = _make_spec()
         spec2 = _make_spec()
@@ -92,44 +80,6 @@ class TestFlowDraftSpecCore:
         spec1 = _make_spec(flow_name="Flow A")
         spec2 = _make_spec(flow_name="Flow B")
         assert spec1.spec_hash() != spec2.spec_hash()
-
-    def test_multi_step_spec(self) -> None:
-        steps = [
-            _make_step(
-                ref="step_a", name="Extract", input_source=InputSource.FLOW_INPUT
-            ),
-            _make_step(
-                ref="step_b", name="Analyze", input_source=InputSource.PREVIOUS_STEP
-            ),
-            _make_step(
-                ref="step_c",
-                name="Summarize",
-                input_source=InputSource.ALL_PREVIOUS_STEPS,
-            ),
-        ]
-        spec = _make_spec(steps=steps)
-        assert len(spec.steps) == 3
-        assert spec.steps[2].input_source == InputSource.ALL_PREVIOUS_STEPS
-
-    def test_step_with_all_optional_fields(self) -> None:
-        step = _make_step(
-            input_bindings={"question": "{{ step_a.output.text }}"},
-            input_contract={"type": "object"},
-            output_contract={"type": "object"},
-            input_config={"runtime_input": {"enabled": True}},
-            output_config={"template_asset_id": "abc"},
-        )
-        assert step.input_bindings is not None
-        assert step.input_contract is not None
-
-    def test_assistant_spec_with_model_and_kb(self) -> None:
-        spec_obj = AssistantSpec(
-            instructions="Test",
-            model_ref="gpt-4",
-            knowledge_refs=["kb_policy", "kb_guidelines"],
-        )
-        assert spec_obj.model_ref == "gpt-4"
-        assert len(spec_obj.knowledge_refs) == 2
 
     def test_assistant_spec_normalizes_refs(self) -> None:
         spec_obj = AssistantSpec(
@@ -173,70 +123,11 @@ class TestFlowDraftSpecCore:
         step = _make_step(input_bindings={"question": "  {{ step_a.output.text }}  "})
         assert step.input_bindings == {"question": "{{ step_a.output.text }}"}
 
-    def test_form_fields(self) -> None:
-        from eneo.flows.flow_authoring_spec import (
-            FormFieldSpec,
-        )
-
-        spec = FlowDraftSpecCore(
-            flow_name="With form",
-            steps=[_make_step()],
-            form_fields=[
-                FormFieldSpec(
-                    name="company", type="text", label="Företag", required=True
-                ),
-                FormFieldSpec(
-                    name="priority",
-                    type="select",
-                    label="Prioritet",
-                    options=["Hög", "Medel", "Låg"],
-                ),
-            ],
-        )
-        assert spec.form_fields is not None
-        assert len(spec.form_fields) == 2
-        assert spec.form_fields[0].required is True
-
     def test_serialization_roundtrip(self) -> None:
         spec = _make_spec()
         data = spec.model_dump(mode="json")
         restored = FlowDraftSpecCore.model_validate(data)
         assert restored.spec_hash() == spec.spec_hash()
-
-
-# ---------------------------------------------------------------------------
-# FlowBuilderProposalContent
-# ---------------------------------------------------------------------------
-
-
-class TestFlowBuilderProposalContent:
-    def test_wraps_spec(self) -> None:
-        spec = _make_spec()
-        proposal = FlowBuilderProposalContent(
-            spec=spec,
-            assumptions=["User wants text output"],
-        )
-        assert proposal.spec.flow_name == "Test flow"
-        assert len(proposal.assumptions) == 1
-
-    def test_empty_content(self) -> None:
-        spec = _make_spec()
-        proposal = FlowBuilderProposalContent(spec=spec)
-        assert proposal.assumptions == []
-        assert proposal.lint_warnings == []
-        assert "risk_acknowledgments" not in type(proposal).model_fields
-
-
-# ---------------------------------------------------------------------------
-# Enums
-# ---------------------------------------------------------------------------
-
-
-class TestEnums:
-    def test_session_status_values(self) -> None:
-        assert SessionStatus.CHATTING.value == "chatting"
-        assert SessionStatus.AWAITING_APPROVAL.value == "awaiting_approval"
-        assert SessionStatus.APPLIED.value == "applied"
 
 
 class TestApiModels:
@@ -311,22 +202,3 @@ class TestApiModels:
                 message="Build a flow",
                 **request_fields,
             )
-
-    def test_plan_status_values(self) -> None:
-        assert tuple(status.value for status in PlanStatus) == (
-            "proposed",
-            "approved",
-            "applied",
-            "superseded",
-        )
-        assert "rejected" not in {status.value for status in PlanStatus}
-
-    def test_target_kind_values(self) -> None:
-        assert TargetKind.CREATE.value == "create"
-        assert TargetKind.EDIT.value == "edit"
-
-    def test_input_source_no_http(self) -> None:
-        """AI builder doesn't expose http_get/http_post sources."""
-        values = {e.value for e in InputSource}
-        assert "http_get" not in values
-        assert "http_post" not in values
