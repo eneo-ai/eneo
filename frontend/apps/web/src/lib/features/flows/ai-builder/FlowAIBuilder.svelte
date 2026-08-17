@@ -271,7 +271,12 @@
     ) {
       return;
     }
-    builderRootEl?.querySelector<HTMLElement>("[data-builder-screen-heading]")?.focus();
+    // Focus alone, never a scroll: a browser may scroll the nearest scrollable
+    // ancestor to reveal the heading, which drags a horizontally scrollable row
+    // (the answer chips on a phone) out of place.
+    builderRootEl
+      ?.querySelector<HTMLElement>("[data-builder-screen-heading]")
+      ?.focus({ preventScroll: true });
   }
 
   // The server records the message before it works on it, so a recorded turn
@@ -483,7 +488,7 @@
 {:else}
   <div
     bind:this={builderRootEl}
-    class="bg-secondary @container/builder -ml-6 flex min-h-0 w-[calc(100%+1.5rem)] flex-1 flex-col"
+    class="bg-secondary @container/builder flex min-h-0 w-full flex-1 flex-col sm:-ml-6 sm:w-[calc(100%+1.5rem)]"
   >
     <p class="sr-only" role="status" aria-live="polite" data-builder-announcer>
       {screenAnnouncementText}

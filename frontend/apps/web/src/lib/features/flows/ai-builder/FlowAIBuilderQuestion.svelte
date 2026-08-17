@@ -483,6 +483,9 @@
                   <span class="option-recommendation">{m.ai_builder_question_recommended()}</span>
                 {/if}
               </span>
+              {#if option.description}
+                <span class="option-description">{option.description}</span>
+              {/if}
               {#if optionKey === recommendedKey && question.recommended_option_evidence}
                 <!-- The user's own words, so the recommendation is traceable
                      rather than asserted. -->
@@ -491,9 +494,6 @@
                     quote: question.recommended_option_evidence
                   })}
                 </span>
-              {/if}
-              {#if option.description}
-                <span class="option-description">{option.description}</span>
               {/if}
             </span>
           </button>
