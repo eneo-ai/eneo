@@ -651,3 +651,14 @@
     </AlertDialog.Footer>
   </AlertDialog.Content>
 </AlertDialog.Root>
+
+<style lang="postcss">
+  /* A screen change hands the caret to the new heading so a screen reader
+     announces where it landed. The heading is not tabbable, so the only focus
+     it can ever take is that programmatic one — and a ring around a heading
+     nobody can reach reads as a text field. Chromium still treats some of
+     these as focus-visible, so the rule is unconditional. */
+  :global([data-builder-screen-heading]:focus) {
+    outline: none;
+  }
+</style>
