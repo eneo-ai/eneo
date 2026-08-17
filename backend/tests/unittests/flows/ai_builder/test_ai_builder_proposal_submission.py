@@ -78,6 +78,7 @@ from eneo.flows.ai_builder.ai_builder_proposal_tool_contracts import (
 from eneo.flows.ai_builder.ai_builder_resource_catalog import (
     build_ai_builder_resource_catalog,
 )
+from eneo.flows.ai_builder.ai_builder_telemetry import PLANNER_TELEMETRY_KEY
 from eneo.flows.ai_builder.ai_builder_tool_names import PROPOSE_FLOW_TOOL_NAME
 from eneo.flows.ai_builder.ai_builder_tools import (
     ProposalToolSchema,
@@ -107,6 +108,7 @@ from tests.unittests.flows.ai_builder.proposal_turn_test_doubles import (
     _make_response_with_tool_calls,
     _make_submission,
     _make_tool_call,
+    _make_usage,
     _store_compiled_plan,
 )
 
@@ -880,6 +882,15 @@ async def test_a_repaired_terminal_answer_is_committed_like_the_first_one() -> N
     repo = AsyncMock()
     repo.commit_turn = AsyncMock(return_value=4)
     submission = _make_submission(repo=repo)
+    usage_tracker = ProposalTurnTelemetry(
+        request_id="req-repaired-answer",
+        model="openai/gpt-5.4",
+        target_kind=TargetKind.CREATE,
+    )
+    usage_tracker.record_response(
+        finish_reason="tool_calls",
+        usage=_make_usage(prompt_tokens=40, completion_tokens=8, total_tokens=48),
+    )
     process_outline = AsyncMock(
         return_value=ToolProcessingResult(terminal_answer="Redigera hela planen.")
     )
@@ -890,7 +901,7 @@ async def test_a_repaired_terminal_answer_is_committed_like_the_first_one() -> N
         planning_state=_committed_text_planning_state(),
         plan_edit_context=None,
         prior_spec_for_revision=None,
-        usage_tracker=None,
+        usage_tracker=usage_tracker,
         proposal_tool_schema=_proposal_tool_schema_double(),
         compile_context=None,
     )
@@ -915,6 +926,10 @@ async def test_a_repaired_terminal_answer_is_committed_like_the_first_one() -> N
     assert [message.role for message in stored] == ["assistant", "tool"]
     # The stored call carries what the provider actually sent, not a summary.
     assert stored[0].tool_calls[0]["arguments"] == invocation.arguments
+    # A repaired answer still reports the call and the tokens it cost.
+    telemetry = (stored[0].metadata or {})[PLANNER_TELEMETRY_KEY]
+    assert telemetry["total_tokens"] == 48
+    assert telemetry["tool_call_count"] == 1
 
 
 @pytest.mark.asyncio

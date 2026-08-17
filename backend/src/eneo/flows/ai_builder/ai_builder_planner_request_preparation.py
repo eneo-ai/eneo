@@ -501,22 +501,6 @@ def build_proposal_prepared(
         assistant_snapshots=assistant_snapshots,
         resource_catalog=resource_catalog,
     )
-    # A first create turn has nothing to decline yet: the decline outcome only
-    # answers a request against a plan or Flow that already exists. A turn that
-    # just revised the committed architecture cannot be model-only either, and
-    # that revision is already persisted, so declining it would leave the
-    # session holding a change it told the user it did not make.
-    decline_tool_schema = (
-        build_decline_flow_change_tool_schema()
-        if (is_edit_mode or plan_edit_context is not None)
-        and not architecture_revised_this_turn
-        else None
-    )
-    plan_revision_context = build_plan_revision_prompt_block(
-        context=plan_edit_context,
-        prior_spec=prior_spec_for_revision,
-        can_decline=decline_tool_schema is not None,
-    )
     compile_context = create_compile_context_from_planning_state(
         planning_state,
         ui_language=ui_language,
@@ -526,6 +510,26 @@ def build_proposal_prepared(
         not is_edit_mode
         and compile_context is not None
         and compile_context.is_pure_audio_transcription
+    )
+    # A first create turn has nothing to decline yet: the decline outcome only
+    # answers a request against a plan or Flow that already exists. A turn that
+    # revised the committed architecture cannot be model-only either — that
+    # revision is persisted before the proposal runs, and declining would leave
+    # the session holding a change it told the user it did not make.
+    decline_tool_schema = (
+        build_decline_flow_change_tool_schema()
+        if (is_edit_mode or plan_edit_context is not None)
+        and not architecture_revised_this_turn
+        and not _committed_change_is_still_unbuilt(
+            compile_context=compile_context,
+            prior_spec=prior_spec_for_revision,
+        )
+        else None
+    )
+    plan_revision_context = build_plan_revision_prompt_block(
+        context=plan_edit_context,
+        prior_spec=prior_spec_for_revision,
+        can_decline=decline_tool_schema is not None,
     )
     obligation_projection = named_result_projection(
         planning_state,
@@ -706,6 +710,27 @@ def _prior_spec_for_revision(
         assistant_snapshot_projector=resource_catalog.assistant_spec_from_snapshot,
         form_fields=extract_form_fields_from_metadata(flow.metadata_json),
     )
+
+
+def _committed_change_is_still_unbuilt(
+    *,
+    compile_context: CreateCompileContext | None,
+    prior_spec: FlowDraftSpecCore | None,
+) -> bool:
+    """Does the committed architecture already differ from the shown plan?
+
+    A decline says the turn asked for nothing this Builder can carry out. That
+    cannot be true while the committed terminal artifact and the plan disagree:
+    something in the same message moved it, and only a proposal materializes
+    that. Without this the model can answer a mixed "make it a PDF and change
+    the model" request with the model sentence alone and drop the PDF.
+    """
+
+    if compile_context is None or compile_context.final_output_type is None:
+        return False
+    if prior_spec is None or not prior_spec.steps:
+        return False
+    return prior_spec.steps[-1].output_type is not compile_context.final_output_type
 
 
 def _proposal_system_prompt_token_limit(

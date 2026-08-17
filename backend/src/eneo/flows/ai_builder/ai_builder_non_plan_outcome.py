@@ -17,6 +17,10 @@ from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
 from eneo.flows.ai_builder.ai_builder_domain_models import ConversationMessage
 from eneo.flows.ai_builder.ai_builder_event_models import AIBuilderStreamEvent
 from eneo.flows.ai_builder.ai_builder_events import build_text_event
+from eneo.flows.ai_builder.ai_builder_proposal_telemetry import (
+    ProposalTurnTelemetry,
+    assistant_metadata_with_usage,
+)
 from eneo.flows.ai_builder.ai_builder_repo import AIBuilderRepository
 from eneo.flows.ai_builder.ai_builder_session_turn import SessionSendTurn
 from eneo.flows.ai_builder.ai_builder_tool_names import DECLINE_FLOW_CHANGE_TOOL_NAME
@@ -128,7 +132,8 @@ async def persist_non_plan_turn(
     tool_content: str,
     message: str,
     tool_call_id: str,
-    assistant_metadata: dict[str, Any] | None,
+    base_assistant_metadata: dict[str, Any] | None,
+    usage_tracker: ProposalTurnTelemetry | None,
     planning_state: PlanningState,
     flow: "Flow | None",
 ) -> tuple[AIBuilderStreamEvent, ...]:
@@ -148,7 +153,14 @@ async def persist_non_plan_turn(
         ConversationMessage(
             role="assistant",
             content=message,
-            metadata=assistant_metadata,
+            # The turn reports the call it actually made, whether the answer was
+            # decided on the first attempt or after a repair.
+            metadata=assistant_metadata_with_usage(
+                conversation=conversation,
+                base_metadata=base_assistant_metadata,
+                usage_tracker=usage_tracker,
+                tool_calls=[tool_call],
+            ),
             tool_calls=[tool_call.model_dump(mode="json")],
         )
     )

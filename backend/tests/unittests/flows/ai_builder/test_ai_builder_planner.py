@@ -3727,6 +3727,7 @@ def _proposal_prepared_for_test(
     planning_state: PlanningState,
     conversation: list[ConversationMessage],
     architecture_revised_this_turn: bool,
+    prior_terminal_output_type: OutputType = OutputType.TEXT,
 ) -> ProposalPrepared:
     return build_proposal_prepared(
         requirements_state=_requirements_state_confirmed(),
@@ -3766,7 +3767,7 @@ def _proposal_prepared_for_test(
                             input_source=InputSource.FLOW_INPUT,
                             input_type=InputType.TEXT,
                             output_mode=OutputMode.PASS_THROUGH,
-                            output_type=OutputType.TEXT,
+                            output_type=prior_terminal_output_type,
                         )
                     ],
                 )
@@ -3783,6 +3784,39 @@ def _proposal_prepared_for_test(
         current_turn_start=0,
         architecture_revised_this_turn=architecture_revised_this_turn,
     )
+
+
+def test_a_turn_holding_an_unbuilt_committed_change_cannot_decline() -> None:
+    """A mixed request must not be answered by the model sentence alone.
+
+    "gör slutfilen till pdf och byt modell" commits a PDF terminal the shown
+    plan does not have yet. Declining the whole turn would drop the half the
+    server already committed, so the tool is not offered while the two
+    disagree.
+    """
+
+    state = _document_architecture_state()
+    conversation = _confirmation_conversation(
+        build_requirements_disclosure(state, ui_language="en")
+    )
+
+    matching = _proposal_prepared_for_test(
+        planning_state=state,
+        conversation=conversation,
+        architecture_revised_this_turn=False,
+    )
+    prior_terminal = matching.prior_spec_for_revision
+    assert prior_terminal is not None
+
+    diverged = _proposal_prepared_for_test(
+        planning_state=state,
+        conversation=conversation,
+        architecture_revised_this_turn=False,
+        prior_terminal_output_type=OutputType.PDF,
+    )
+
+    assert matching.decline_tool_schema is not None
+    assert diverged.decline_tool_schema is None
 
 
 def test_a_turn_that_just_revised_the_architecture_cannot_decline() -> None:

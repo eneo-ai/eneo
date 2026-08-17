@@ -74,7 +74,6 @@ from eneo.flows.ai_builder.ai_builder_proposal_telemetry import (
     ProposalRepairReason,
     ProposalTurnTelemetry,
     ToolProcessingFailureKind,
-    assistant_metadata_with_usage,
     log_proposal_failed_turn,
     log_proposal_repair_invoked,
     proposal_repair_reason_from_tool_failure,
@@ -489,7 +488,6 @@ class ProposalSubmissionOwner:
             return await self._persist_invocation_answer(
                 invocation=invocation,
                 answer=result.terminal_answer,
-                metadata_tool_call=metadata_tool_call,
                 usage_tracker=usage_tracker,
                 planning_state=planning_state,
             )
@@ -512,7 +510,6 @@ class ProposalSubmissionOwner:
         *,
         invocation: ToolRetryInvocation,
         answer: str,
-        metadata_tool_call: RuntimeToolCall | None,
         usage_tracker: ProposalTurnTelemetry | None,
         planning_state: PlanningState,
     ) -> ToolProcessingResult:
@@ -533,14 +530,8 @@ class ProposalSubmissionOwner:
             tool_content="No plan was proposed; the user was answered.",
             message=answer,
             tool_call_id=invocation.tool_call_id,
-            assistant_metadata=assistant_metadata_with_usage(
-                conversation=invocation.conversation,
-                base_metadata=invocation.assistant_metadata,
-                usage_tracker=usage_tracker,
-                tool_calls=(
-                    [metadata_tool_call] if metadata_tool_call is not None else None
-                ),
-            ),
+            base_assistant_metadata=invocation.assistant_metadata,
+            usage_tracker=usage_tracker,
             planning_state=planning_state,
             flow=invocation.flow,
         )
@@ -711,12 +702,8 @@ class ProposalSubmissionOwner:
                 kind="decline_flow_change",
                 stable_key=ctx.request_id,
             ),
-            assistant_metadata=assistant_metadata_with_usage(
-                conversation=ctx.conversation,
-                base_metadata=ctx.assistant_metadata,
-                usage_tracker=ctx.usage_tracker,
-                tool_calls=[tool_call],
-            ),
+            base_assistant_metadata=ctx.assistant_metadata,
+            usage_tracker=ctx.usage_tracker,
             planning_state=ctx.planning_state,
             flow=ctx.flow,
         )
