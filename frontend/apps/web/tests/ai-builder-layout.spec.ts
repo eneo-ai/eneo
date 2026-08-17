@@ -193,9 +193,10 @@ test.describe("AI builder phase shell", () => {
     await expect(page.getByRole("button", { name: "Skicka" })).toBeEnabled();
   });
 
-  // The header column is sized to the review card, so the rail starts on the
-  // same line as the plan — the surface the user spends the most time on.
-  test("the rail starts on the same line as the plan", async ({ page, request }) => {
+  // Per the design, the header column is wider than the content column and
+  // both are centred on the same axis: the rail frames the plan rather than
+  // hugging it.
+  test("the rail frames the plan on the same centre line", async ({ page, request }) => {
     await openBuilder(page, request, "?session=plan-session");
     const rail = page.getByRole("navigation", { name: RAIL_LABEL });
     const planCard = page.getByRole("article", { name: PLAN_CARD });
@@ -207,7 +208,10 @@ test.describe("AI builder phase shell", () => {
       const planBox = await planCard.boundingBox();
       expect(railBox, `rail at ${width}px`).not.toBeNull();
       expect(planBox, `plan card at ${width}px`).not.toBeNull();
-      expect(Math.abs(railBox!.x - planBox!.x), `alignment at ${width}px`).toBeLessThanOrEqual(2);
+      const railCentre = railBox!.x + railBox!.width / 2;
+      const planCentre = planBox!.x + planBox!.width / 2;
+      expect(Math.abs(railCentre - planCentre), `centre at ${width}px`).toBeLessThanOrEqual(2);
+      expect(railBox!.width, `rail wider than plan at ${width}px`).toBeGreaterThan(planBox!.width);
     }
   });
 

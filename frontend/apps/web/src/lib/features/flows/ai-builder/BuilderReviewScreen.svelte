@@ -559,7 +559,7 @@
     <!-- Bottom padding clears the sticky action bar so it never covers the
          change box or the last step. -->
     <div class="flex flex-1 justify-center px-7 pt-6 pb-28 max-sm:px-3 max-sm:pt-4 max-sm:pb-40">
-      <div class="w-full max-w-[53.75rem]">
+      <div class="w-full max-w-[53.75rem] 2xl:max-w-[62.5rem]">
         <!-- Turn receipts and blockers, above the plan they describe -->
         {#if justUpdated}
           <div
@@ -1230,7 +1230,7 @@
     <div
       class="border-default bg-primary/95 sticky bottom-0 z-20 shrink-0 border-t px-7 py-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] backdrop-blur max-sm:px-3"
     >
-      <div class="mx-auto flex max-w-[53.75rem] flex-wrap items-center gap-2.5">
+      <div class="mx-auto flex max-w-[53.75rem] flex-wrap items-center gap-2.5 2xl:max-w-[62.5rem]">
         <div class="flex flex-col max-sm:w-full">
           <span class="text-secondary text-xs">
             {m.ai_builder_footer_steps_nothing_created({ count: stepCount })}
@@ -1325,11 +1325,11 @@
   />
 {:else if service.conflict}
   <div class="bg-secondary flex flex-1 justify-center px-7 pt-6 pb-10 max-sm:px-3 max-sm:pt-4">
-    <div class="w-full max-w-[43.75rem]">{@render conflictCard()}</div>
+    <div class="w-full max-w-[47.5rem]">{@render conflictCard()}</div>
   </div>
 {:else if showGenerationFailure}
   <div class="bg-secondary flex flex-1 justify-center px-7 pt-6 pb-10 max-sm:px-3 max-sm:pt-4">
-    <div class="w-full max-w-[43.75rem]">
+    <div class="w-full max-w-[47.5rem]">
       <div class="border-default bg-primary rounded-xl border p-5" role="status" aria-live="polite">
         <div class="flex items-start gap-3">
           <IconAlertTriangle

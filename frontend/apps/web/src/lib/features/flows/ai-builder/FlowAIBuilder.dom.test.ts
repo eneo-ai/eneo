@@ -684,6 +684,43 @@ describe("FlowAIBuilder confirm, build and review", () => {
     calls[1]!.finish();
   });
 
+  it("changes an answer from the confirmation without leaving the card", async () => {
+    const { fetch } = makeFetch({
+      sessions: [
+        makeSession({
+          conversation: [
+            userMessage("u1", "Sammanfatta rapporter till en PDF"),
+            assistantMessage("a1", "Jag behöver veta formatet.", { question: FORMAT_QUESTION }),
+            userMessage("u2", "Som PDF", {
+              question_answer: {
+                kind: "structured_question_answer",
+                question_id: "output_format",
+                selected_option_ids: ["pdf"]
+              }
+            }),
+            assistantMessage("a2", "", { requirements_summary: SUMMARY })
+          ]
+        })
+      ]
+    });
+    const { stream, calls } = makeStream();
+    renderShell({ fetch, stream, resumeSessionId: "s-1" });
+
+    await screen.findByRole("heading", { name: m.ai_builder_requirements_title() });
+    await fireEvent.click(screen.getByText("Som PDF").closest("button")!);
+
+    // The question opens above the summary; the contract stays on screen.
+    expect(await screen.findByText(m.ai_builder_question_editing_note())).toBeTruthy();
+    expect(screen.getByRole("heading", { name: m.ai_builder_requirements_title() })).toBeTruthy();
+    await fireEvent.click(screen.getByRole("radio", { name: "Som text" }));
+    await fireEvent.click(button(m.ai_builder_question_confirm()));
+
+    await waitFor(() => expect(calls).toHaveLength(1));
+    expect(calls[0]!.body).toMatchObject({
+      question_answer: { question_id: "output_format", selected_option_ids: ["text"] }
+    });
+  });
+
   it("re-arms the confirmation when a newer requirements version replaces a confirmed one", async () => {
     const rearmed = makeSession({
       session_id: "s-rearm",

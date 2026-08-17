@@ -5,8 +5,11 @@
   import { prefersReducedMotion } from "$lib/core/prefersReducedMotion";
   import { Button } from "$lib/components/ui/button/index.js";
   import BuilderChangeRequest from "./BuilderChangeRequest.svelte";
+  import FlowAIBuilderQuestion from "./FlowAIBuilderQuestion.svelte";
   import IconCheck from "@lucide/svelte/icons/check";
   import IconChevronDown from "@lucide/svelte/icons/chevron-down";
+  import type { StructuredQuestionAnswerPayload } from "./structuredQuestionAnswer";
+  import type { ChatMessage } from "./protocol";
   import type {
     AIBuilderAttachmentFile,
     AIBuilderStepScopePresentation,
@@ -38,6 +41,12 @@
     /** The build phase (or later) already started from this confirmation. */
     readOnly?: boolean;
     disabled?: boolean;
+    /** The answer being changed, edited here instead of walking back through
+     *  the questions; the card below it stays visible the whole time. */
+    editingQuestion?: ChatMessage | null;
+    editingQuestionNumber?: number;
+    onanswer?: (payload: StructuredQuestionAnswerPayload) => void;
+    oncanceledit?: () => void;
     onconfirm: () => void;
     /** A change request in the user's own words; the server answers with a
      *  new requirements version, which re-arms this card. */
@@ -56,6 +65,10 @@
     stale,
     readOnly = false,
     disabled = false,
+    editingQuestion = null,
+    editingQuestionNumber = 1,
+    onanswer,
+    oncanceledit,
     onconfirm,
     onchange,
     oneditanswer
@@ -72,7 +85,7 @@
 </script>
 
 <div class="flex justify-center px-7 pt-6 pb-10 max-sm:px-3 max-sm:pt-4">
-  <div class="confirm-screen w-full max-w-[43.75rem]">
+  <div class="confirm-screen w-full max-w-[47.5rem] 2xl:max-w-[53.75rem]">
     {#if answered.length > 0 && !readOnly}
       <div class="mb-4 flex flex-wrap items-center gap-2">
         <span class="text-secondary text-xs">{m.ai_builder_question_answers_label()}</span>
@@ -85,6 +98,7 @@
               question: item.question,
               answer: item.answerLabel
             })}
+            class:opacity-60={editingQuestion?.question?.question_id === item.questionId}
             onclick={() => oneditanswer(item.questionId)}
             {disabled}
           >
@@ -94,6 +108,30 @@
             </span>
           </button>
         {/each}
+      </div>
+    {/if}
+
+    {#if editingQuestion?.question}
+      <div class="mb-4">
+        <p class="text-secondary mb-2 flex items-center gap-2 text-xs">
+          {m.ai_builder_question_editing_note()}
+          <button
+            type="button"
+            class="text-accent-stronger font-semibold hover:underline"
+            onclick={() => oncanceledit?.()}
+          >
+            {m.cancel()}
+          </button>
+        </p>
+        {#key editingQuestion.question.question_id}
+          <FlowAIBuilderQuestion
+            question={editingQuestion.question}
+            questionNumber={editingQuestionNumber}
+            why={editingQuestion.content.trim() || null}
+            {disabled}
+            onanswer={(payload) => onanswer?.(payload)}
+          />
+        {/key}
       </div>
     {/if}
 

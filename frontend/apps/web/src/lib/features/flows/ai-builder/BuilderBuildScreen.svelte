@@ -39,7 +39,7 @@
 </script>
 
 <div class="flex justify-center px-7 pt-6 pb-10 max-sm:px-3 max-sm:pt-4">
-  <div class="w-full max-w-[43.75rem]">
+  <div class="w-full max-w-[47.5rem] 2xl:max-w-[53.75rem]">
     {#if confirmedLine}
       <div
         class="border-default bg-primary mb-4 flex flex-wrap items-center gap-2.5 rounded-[10px] border px-3.5 py-2.5"

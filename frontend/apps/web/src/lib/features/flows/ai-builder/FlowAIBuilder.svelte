@@ -189,7 +189,11 @@
     (() => {
       if (viewingPhase === 2) return "review";
       if (viewingPhase === 1) return "build";
-      if (questionMessage) return "question";
+      // Changing an earlier answer happens on the confirmation, above the card
+      // it rewrites. Before any summary exists there is no card, so the
+      // question still owns the screen.
+      if (editingQuestionMessage) return latestSummary ? "confirm" : "question";
+      if (pendingQuestionMessage) return "question";
       if (service.phase === "confirming" && latestSummary && peekPhase === null) return "confirm";
       if (service.messages.length === 0 && !service.isStreaming) return "task";
       if (latestSummary && phaseIndex > 0) return "confirm";
@@ -465,7 +469,7 @@
          The header column is as wide as the review card and centred with it,
          so the rail starts on the same line as the plan the user reads most. -->
     <div class="bg-primary border-default sticky top-0 z-20 shrink-0 border-b px-7 max-sm:px-3">
-      <div class="mx-auto flex max-w-[53.75rem] items-center gap-3 pt-3">
+      <div class="mx-auto flex max-w-[63.75rem] items-center gap-3 pt-3 2xl:max-w-[75rem]">
         {#if savingProblem}
           <span
             class="text-warning-stronger inline-flex items-center gap-1.5 text-xs font-semibold"
@@ -523,7 +527,7 @@
           </Button>
         </div>
       </div>
-      <div class="mx-auto max-w-[53.75rem] py-3">
+      <div class="mx-auto max-w-[63.75rem] py-3 2xl:max-w-[75rem]">
         <BuilderPhaseRail current={phaseIndex} viewing={viewingPhase} onselect={handleRailSelect} />
       </div>
     </div>
@@ -568,6 +572,10 @@
           stale={summaryIsStale}
           readOnly={phaseIndex > 0}
           disabled={service.isCreating || service.isStreaming}
+          editingQuestion={editingQuestionMessage}
+          editingQuestionNumber={questionNumber}
+          onanswer={handleQuestionAnswer}
+          oncanceledit={() => (editingQuestionId = null)}
           onconfirm={handleRequirementsConfirm}
           onchange={handleRequirementsChange}
           oneditanswer={handleEditAnswer}
