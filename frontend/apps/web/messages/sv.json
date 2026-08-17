@@ -32,6 +32,7 @@
   "governance_mcp_default_aria": "Starta {name} påslagen i användarnas chatt",
   "governance_mcp_allow_aria": "Tillåt {name}",
   "governance_mcp_show_tools": "Visa verktyg",
+  "hide_top_bar": "Dölj toppraden",
   "governance_mcp_hide_tools": "Dölj verktyg",
   "governance_mcp_tools_disabled_note": "Verktyg du stänger av här blir otillgängliga i den personliga assistenten. Nya verktyg som läggs till på servern tillåts automatiskt.",
   "governance_confirm_prompt_forced": "Användarnas egna prompts döljs och den valda prompten används istället.",

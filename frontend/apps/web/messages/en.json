@@ -32,6 +32,7 @@
   "governance_mcp_default_aria": "Start {name} switched on in users' chat",
   "governance_mcp_allow_aria": "Allow {name}",
   "governance_mcp_show_tools": "Show tools",
+  "hide_top_bar": "Hide the top bar",
   "governance_mcp_hide_tools": "Hide tools",
   "governance_mcp_tools_disabled_note": "Tools you switch off here are unavailable in the personal assistant. New tools added to the server are allowed automatically.",
   "governance_confirm_prompt_forced": "Users' own prompts will be hidden and the selected prompt used instead.",

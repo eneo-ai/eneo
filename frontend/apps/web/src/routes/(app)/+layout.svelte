@@ -101,6 +101,8 @@
       <!-- eslint-enable svelte/no-navigation-without-resolve -->
       <Button
         unstyled
+        aria-label={m.hide_top_bar()}
+        title={m.hide_top_bar()}
         class="text-accent-stronger hover:bg-hover-default hidden h-9 w-9 items-center justify-center rounded-lg text-lg md:group-hover:flex"
         on:click={() => {
           $showHeader = false;
