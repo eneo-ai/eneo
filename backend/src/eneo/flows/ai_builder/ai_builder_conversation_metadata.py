@@ -102,6 +102,7 @@ UI_LANGUAGE_METADATA_KEY = "ui_language"
 FILE_IDS_METADATA_KEY = "file_ids"
 EDIT_CONTEXT_METADATA_KEY = "edit_context"
 ASSISTANT_QUESTION_ID_METADATA_KEY = "question_id"
+ASSISTANT_QUESTION_INDEX_METADATA_KEY = "question_index"
 SLOT_CLASSIFICATION_METADATA_KEY = "slot_classification"
 PROVIDER_TOOL_CALL_ID_MAX_LENGTH = 64
 
@@ -1802,6 +1803,23 @@ def assistant_question_id_from_metadata(metadata: object) -> str | None:
     return question_id if isinstance(question_id, str) and question_id else None
 
 
+def assistant_question_index_from_metadata(metadata: object) -> int | None:
+    """The number this question was shown with, as persisted when it was asked.
+
+    Stored beside the question id so the number survives every later reading of
+    the conversation. `bool` is excluded because it is an `int` in Python and a
+    persisted `true` is corrupt metadata, not the first question.
+    """
+
+    metadata_map = _metadata_mapping(metadata)
+    if metadata_map is None:
+        return None
+    question_index = metadata_map.get(ASSISTANT_QUESTION_INDEX_METADATA_KEY)
+    if isinstance(question_index, bool) or not isinstance(question_index, int):
+        return None
+    return question_index if question_index >= 1 else None
+
+
 def file_ids_from_metadata(metadata: object) -> list[UUID]:
     metadata_map = _metadata_mapping(metadata)
     if metadata_map is None:
@@ -1879,10 +1897,23 @@ def metadata_for_user_message(
 def metadata_for_assistant_question(
     question_data: StructuredQuestionPayload,
 ) -> FlowPersistedJsonObject | None:
+    """What the message must carry so the question can be recognised later.
+
+    The number goes down with the id because it is part of what the user was
+    shown. Recomputing it from message order would let compaction — which keeps
+    the latest interaction of a re-asked question, not its first — hand the same
+    question a different number afterwards.
+    """
+
     question_id = canonical_question_id(question_data.question_id)
     if not question_id:
         return None
-    return {ASSISTANT_QUESTION_ID_METADATA_KEY: question_id}
+    metadata: FlowPersistedJsonObject = {
+        ASSISTANT_QUESTION_ID_METADATA_KEY: question_id
+    }
+    if question_data.question_index is not None:
+        metadata[ASSISTANT_QUESTION_INDEX_METADATA_KEY] = question_data.question_index
+    return metadata
 
 
 def structured_question_payload_from_tool_arguments(

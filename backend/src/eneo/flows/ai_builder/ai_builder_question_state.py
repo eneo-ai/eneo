@@ -20,6 +20,7 @@ from eneo.flows.ai_builder.ai_builder_canonicalization import (
 )
 from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
     assistant_question_id_from_metadata,
+    assistant_question_index_from_metadata,
     file_ids_from_metadata,
     metadata_has_question_answer,
     question_response_from_metadata,
@@ -41,6 +42,12 @@ from eneo.flows.ai_builder.ai_builder_tool_names import (
 )
 
 
+def _message_metadata(message: ConversationMessage | Mapping[str, Any]) -> object:
+    if isinstance(message, ConversationMessage):
+        return message.metadata
+    return message.get("metadata")
+
+
 def assistant_question_id(
     message: ConversationMessage | Mapping[str, Any],
 ) -> str | None:
@@ -52,12 +59,7 @@ def assistant_question_id(
     if role != "assistant":
         return None
 
-    metadata = (
-        message.metadata
-        if isinstance(message, ConversationMessage)
-        else message.get("metadata")
-    )
-    question_id = assistant_question_id_from_metadata(metadata)
+    question_id = assistant_question_id_from_metadata(_message_metadata(message))
     if question_id is not None:
         return canonical_question_id(question_id)
 
@@ -76,11 +78,7 @@ def _is_user_evidence(message: ConversationMessage | Mapping[str, Any]) -> bool:
     if role != "user":
         return False
 
-    metadata = (
-        message.metadata
-        if isinstance(message, ConversationMessage)
-        else message.get("metadata")
-    )
+    metadata = _message_metadata(message)
     if metadata_has_question_answer(metadata):
         return True
     if question_response_from_metadata(metadata) is not None:
@@ -132,12 +130,7 @@ def last_answered_question(
             last_question_id = question_id
             latest_answer = None
             continue
-        metadata = (
-            message.metadata
-            if isinstance(message, ConversationMessage)
-            else message.get("metadata")
-        )
-        response = question_response_from_metadata(metadata)
+        response = question_response_from_metadata(_message_metadata(message))
         if response is not None:
             last_question_id = response.question_id
             content = (
@@ -176,18 +169,31 @@ def question_ordinal_in_session(
     answered, because the number they read has to match what they have seen. A
     question asked again keeps the place it already had, so re-asking a
     question never makes the sequence appear to grow.
+
+    A number the user has already seen is read back off the message it was
+    stamped on rather than recounted, because message order is not stable:
+    compaction keeps the latest interaction of a re-asked question, which moves
+    that question behind ones it was asked before. Counting positions is the
+    fallback for questions persisted before the number travelled with them.
     """
 
-    asked: list[str] = []
+    numbered: dict[str, int] = {}
     for message in conversation:
         asked_id = assistant_question_id(message)
-        if asked_id is None or asked_id in asked:
+        if asked_id is None or asked_id in numbered:
             continue
-        asked.append(asked_id)
-    canonical = canonical_question_id(question_id)
-    if canonical in asked:
-        return asked.index(canonical) + 1
-    return len(asked) + 1
+        persisted = assistant_question_index_from_metadata(_message_metadata(message))
+        numbered[asked_id] = (
+            persisted if persisted is not None else _next_question_ordinal(numbered)
+        )
+    already_seen = numbered.get(canonical_question_id(question_id))
+    if already_seen is not None:
+        return already_seen
+    return _next_question_ordinal(numbered)
+
+
+def _next_question_ordinal(numbered: Mapping[str, int]) -> int:
+    return max(numbered.values(), default=0) + 1
 
 
 def pending_user_requirement_question_id(
