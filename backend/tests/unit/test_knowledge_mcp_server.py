@@ -30,6 +30,7 @@ from eneo.internal_mcp.knowledge import (
     _excerpts_per_document,
     _fit_titles,
     _matching_sources,
+    _merge_adjacent_chunks,
     _overview_content,
     _pick_embedding_model,
     _resolve_search_params,
@@ -273,6 +274,40 @@ class TestDiversify:
         assert len(_diversify(chunks, per_doc=2, cap=2)) == 2
 
 
+class TestMergeAdjacentChunks:
+    def test_neighbors_are_added_and_existing_anchors_are_not_duplicated(self):
+        blob_id = uuid4()
+        anchors = [
+            _chunk(info_blob_id=blob_id, chunk_no=12, score=0.95),
+            _chunk(info_blob_id=blob_id, chunk_no=13, score=0.85),
+        ]
+        neighbors = [
+            SimpleNamespace(info_blob_id=blob_id, chunk_no=11, text="Previous"),
+            SimpleNamespace(info_blob_id=blob_id, chunk_no=13, text="Next"),
+            SimpleNamespace(info_blob_id=uuid4(), chunk_no=11, text="Foreign"),
+        ]
+
+        merged = _merge_adjacent_chunks(anchors, neighbors)
+
+        assert [chunk.chunk_no for chunk in merged] == [12, 13, 11]
+        assert [chunk.score for chunk in merged] == [0.95, 0.85, None]
+        assert merged[-1].context_for_chunk == 12
+
+    def test_neighbor_resources_have_context_metadata_without_fake_scores(self):
+        blob_id = uuid4()
+        merged = _merge_adjacent_chunks(
+            [_chunk(info_blob_id=blob_id, chunk_no=5, score=0.91)],
+            [SimpleNamespace(info_blob_id=blob_id, chunk_no=4, text="Context")],
+        )
+
+        resources = _search_result_content("query", merged)[1:]
+
+        assert resources[0].resource.meta["score"] == 0.91
+        assert "context_for_chunk" not in resources[0].resource.meta
+        assert "score" not in resources[1].resource.meta
+        assert resources[1].resource.meta["context_for_chunk"] == 5
+
+
 class TestBlobInScope:
     def _assistant(self, collections=(), websites=(), integrations=()):
         return SimpleNamespace(
@@ -440,13 +475,19 @@ class TestMatchingSources:
         assert _matching_sources(assistant, "https://kommun.se")[0].source_id == wid
 
 
-def _patch_search_context(monkeypatch, assistant, *, blob=None, chunks=()):
+def _patch_search_context(
+    monkeypatch, assistant, *, blob=None, chunks=(), neighbors=()
+):
     """Patch the tool context with a datastore that records its scope kwargs."""
     calls: list[dict] = []
 
     async def semantic_search(query, **kwargs):
-        calls.append({"query": query, **kwargs})
+        calls.append({"kind": "semantic", "query": query, **kwargs})
         return list(chunks)
+
+    async def get_adjacent_chunks(**kwargs):
+        calls.append({"kind": "adjacent", **kwargs})
+        return list(neighbors)
 
     @asynccontextmanager
     async def fake_context(_ctx):
@@ -461,6 +502,9 @@ def _patch_search_context(monkeypatch, assistant, *, blob=None, chunks=()):
         container = SimpleNamespace(
             assistant_service=lambda: SimpleNamespace(get_assistant=get_assistant),
             info_blob_repo=lambda: SimpleNamespace(get=get_blob),
+            info_blob_chunk_repo=lambda: SimpleNamespace(
+                get_adjacent_chunks=get_adjacent_chunks
+            ),
             datastore=lambda: SimpleNamespace(semantic_search=semantic_search),
         )
         yield container, SimpleNamespace(), uuid4()
@@ -472,6 +516,58 @@ def _patch_search_context(monkeypatch, assistant, *, blob=None, chunks=()):
 
 
 class TestSearchScoping:
+    async def test_specific_search_expands_the_best_anchor_with_both_neighbors(
+        self, monkeypatch
+    ):
+        cid, blob_id = uuid4(), uuid4()
+        assistant = _assistant_with_sources(collections=[(cid, "Waste FAQ")])
+        anchor = _chunk(info_blob_id=blob_id, chunk_no=12, score=0.9)
+        neighbors = [
+            SimpleNamespace(info_blob_id=blob_id, chunk_no=11, text="Previous"),
+            SimpleNamespace(info_blob_id=blob_id, chunk_no=13, text="Next"),
+        ]
+        calls = _patch_search_context(
+            monkeypatch, assistant, chunks=[anchor], neighbors=neighbors
+        )
+
+        content = await search_knowledge("garden waste", ctx=None)
+
+        assert [str(item.resource.uri).rsplit("-", 1)[-1] for item in content[1:]] == [
+            "12",
+            "11",
+            "13",
+        ]
+        assert calls[1] == {
+            "kind": "adjacent",
+            "info_blob_id": blob_id,
+            "chunk_no": 12,
+        }
+
+    async def test_default_specific_search_never_returns_more_than_eight_chunks(
+        self, monkeypatch
+    ):
+        cid, best_blob_id = uuid4(), uuid4()
+        assistant = _assistant_with_sources(collections=[(cid, "Waste FAQ")])
+        anchors = [
+            _chunk(
+                info_blob_id=best_blob_id if index == 0 else uuid4(),
+                chunk_no=10 + index,
+                score=0.9 - index / 100,
+            )
+            for index in range(10)
+        ]
+        neighbors = [
+            SimpleNamespace(info_blob_id=best_blob_id, chunk_no=9, text="Previous"),
+            SimpleNamespace(info_blob_id=best_blob_id, chunk_no=11, text="Next"),
+        ]
+        _patch_search_context(
+            monkeypatch, assistant, chunks=anchors, neighbors=neighbors
+        )
+
+        content = await search_knowledge("garden waste", ctx=None)
+
+        assert len(content[1:]) == 8
+
     async def test_unscoped_search_spans_every_attached_source(self, monkeypatch):
         cid, wid = uuid4(), uuid4()
         assistant = _assistant_with_sources(
@@ -534,11 +630,26 @@ class TestSearchScoping:
             _chunk(info_blob_id=blob_id, chunk_no=7, score=0.9),
             _chunk(info_blob_id=blob_id, chunk_no=2, score=0.8),
         ]
-        _patch_search_context(monkeypatch, assistant, blob=blob, chunks=chunks)
+        neighbors = [
+            SimpleNamespace(info_blob_id=blob_id, chunk_no=6, text="Previous"),
+            SimpleNamespace(info_blob_id=blob_id, chunk_no=8, text="Next"),
+        ]
+        _patch_search_context(
+            monkeypatch, assistant, blob=blob, chunks=chunks, neighbors=neighbors
+        )
 
         content = await search_knowledge("waste", ctx=None, within=str(blob_id))
 
-        assert [c.resource.meta["score"] for c in content[1:]] == [0.8, 0.9]
+        assert [str(c.resource.uri).rsplit("-", 1)[-1] for c in content[1:]] == [
+            "2",
+            "6",
+            "7",
+            "8",
+        ]
+        assert content[1].resource.meta["score"] == 0.8
+        assert content[3].resource.meta["score"] == 0.9
+        assert "score" not in content[2].resource.meta
+        assert "score" not in content[4].resource.meta
 
     async def test_document_overview_uses_the_full_result_cap(self, monkeypatch):
         cid, blob_id = uuid4(), uuid4()
@@ -557,7 +668,7 @@ class TestSearchScoping:
             _chunk(info_blob_id=blob_id, chunk_no=1, score=0.6),
             _chunk(info_blob_id=blob_id, chunk_no=4, score=0.5),
         ]
-        _patch_search_context(monkeypatch, assistant, blob=blob, chunks=chunks)
+        calls = _patch_search_context(monkeypatch, assistant, blob=blob, chunks=chunks)
 
         content = await search_knowledge(
             "waste", ctx=None, within=str(blob_id), mode="overview", max_results=4
@@ -569,6 +680,19 @@ class TestSearchScoping:
             "5",
             "8",
         ]
+        assert [call["kind"] for call in calls] == ["semantic"]
+
+    async def test_no_results_skips_neighbor_query_and_keeps_existing_message(
+        self, monkeypatch
+    ):
+        assistant = _assistant_with_sources(collections=[(uuid4(), "Waste FAQ")])
+        calls = _patch_search_context(monkeypatch, assistant)
+
+        content = await search_knowledge("obscure query", ctx=None)
+
+        assert [call["kind"] for call in calls] == ["semantic"]
+        assert len(content) == 1
+        assert "No results" in content[0].text
 
     async def test_out_of_scope_within_is_indistinguishable_from_missing(
         self, monkeypatch
