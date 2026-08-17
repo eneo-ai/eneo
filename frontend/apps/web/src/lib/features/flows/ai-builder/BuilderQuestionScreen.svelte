@@ -24,6 +24,7 @@
     onanswer: (payload: StructuredQuestionAnswerPayload) => void;
     /** Hand this question back to Eneo; only offered with a recommendation. */
     ondelegate?: (questionId: string) => void;
+    isEdit?: boolean;
     onedit: (questionId: string) => void;
     oncanceledit?: () => void;
   }
@@ -36,6 +37,7 @@
     disabled = false,
     onanswer,
     ondelegate,
+    isEdit = false,
     onedit,
     oncanceledit
   }: Props = $props();
@@ -105,6 +107,7 @@
           {why}
           {disabled}
           {onanswer}
+          {isEdit}
           ondelegate={editingQuestionId ? undefined : () => ondelegate?.(question.question_id)}
         />
       {/key}

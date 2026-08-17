@@ -10,15 +10,25 @@
     /** The phase whose screen is shown; a completed phase can be revisited. */
     viewing: BuilderPhaseIndex;
     onselect?: (phase: BuilderPhaseIndex) => void;
+    /** Changing a published flow: nothing is created, so nothing says so. */
+    isEdit?: boolean;
   }
 
-  let { current, viewing, onselect }: Props = $props();
+  let { current, viewing, onselect, isEdit = false }: Props = $props();
 
-  const phases: { index: BuilderPhaseIndex; label: () => string }[] = [
-    { index: 0, label: m.ai_builder_rail_understanding },
-    { index: 1, label: m.ai_builder_rail_planning },
-    { index: 2, label: m.ai_builder_rail_reviewing }
-  ];
+  const phases: { index: BuilderPhaseIndex; label: () => string }[] = $derived(
+    isEdit
+      ? [
+          { index: 0, label: m.ai_builder_rail_understanding_edit },
+          { index: 1, label: m.ai_builder_rail_planning_edit },
+          { index: 2, label: m.ai_builder_rail_reviewing_edit }
+        ]
+      : [
+          { index: 0, label: m.ai_builder_rail_understanding },
+          { index: 1, label: m.ai_builder_rail_planning },
+          { index: 2, label: m.ai_builder_rail_reviewing }
+        ]
+  );
 
   function stateFor(index: BuilderPhaseIndex): "done" | "active" | "upcoming" {
     if (index < current) return "done";

@@ -533,7 +533,12 @@
         class="mx-auto w-full py-3 {columnClass}"
         class:pt-3={statusInPageHeader && !canStartOver}
       >
-        <BuilderPhaseRail current={phaseIndex} viewing={viewingPhase} onselect={handleRailSelect} />
+        <BuilderPhaseRail
+          current={phaseIndex}
+          viewing={viewingPhase}
+          isEdit={targetKind === "edit"}
+          onselect={handleRailSelect}
+        />
       </div>
     </div>
 
@@ -565,6 +570,7 @@
           {questionMessage}
           {questionNumber}
           answered={answeredQuestions}
+          isEdit={targetKind === "edit"}
           {editingQuestionId}
           disabled={service.isCreating || service.isStreaming}
           onanswer={handleQuestionAnswer}

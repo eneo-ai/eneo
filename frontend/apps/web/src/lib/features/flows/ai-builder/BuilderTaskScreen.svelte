@@ -49,7 +49,7 @@
       {isEdit ? m.ai_builder_task_title_edit() : m.ai_builder_task_title()}
     </h2>
     <p class="text-secondary mt-2 max-w-[54ch] text-[0.9rem] leading-relaxed text-pretty">
-      {isEdit ? m.ai_builder_task_intro_edit() : m.ai_builder_task_intro()}
+      {isEdit ? m.ai_builder_edit_promise() : m.ai_builder_task_intro()}
     </p>
 
     <div class="mt-5">

@@ -41,6 +41,9 @@
     onanswer?: (payload: StructuredQuestionAnswerPayload) => void;
     /** The user hands this question back; only offered with a recommendation. */
     ondelegate?: () => void;
+    /** Changing a published flow: a recommendation here would propose changing
+     *  a value the flow already runs on, so nothing is chosen for the user. */
+    isEdit?: boolean;
   }
 
   let {
@@ -51,7 +54,8 @@
     questionNumber = null,
     why = null,
     onanswer,
-    ondelegate
+    ondelegate,
+    isEdit = false
   }: Props = $props();
 
   // Generated once per instance so radiogroup + its label can link without colliding.
@@ -94,7 +98,7 @@
   // is one click, and it is the only thing a delegation can produce — without
   // one there is nothing to hand back.
   const recommendedKey = $derived.by(() => {
-    const id = question.recommended_option_id;
+    const id = isEdit ? null : question.recommended_option_id;
     if (!id) return null;
     const option = question.options.find(
       (candidate) => getStructuredQuestionOptionKey(candidate) === id
@@ -340,6 +344,9 @@
       <h2 id={questionLabelId} class="question-title" tabindex="-1" data-builder-screen-heading>
         {question.question}
       </h2>
+      {#if isEdit && question.recommended_option_id}
+        <p class="question-edit-note">{m.ai_builder_question_edit_no_preselect()}</p>
+      {/if}
       {#if why}
         <p class="question-why">
           <span class="question-why-lead">{m.ai_builder_question_why_lead()}</span>
@@ -615,6 +622,12 @@
   .question-title {
     @apply mt-2 text-[1.1875rem] leading-snug font-bold tracking-[-0.02em] text-pretty;
     color: var(--text-primary);
+  }
+
+  .question-edit-note {
+    @apply mt-2 rounded-lg px-3 py-2 text-[0.8125rem];
+    color: var(--text-secondary);
+    background: var(--background-secondary);
   }
 
   .question-why {
