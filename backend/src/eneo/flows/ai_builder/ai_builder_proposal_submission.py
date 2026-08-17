@@ -485,6 +485,14 @@ class ProposalSubmissionOwner:
                 prior_spec_for_revision=prior_spec_for_revision,
                 compile_context=compile_context,
             )
+        if result.terminal_answer is not None:
+            return await self._persist_invocation_answer(
+                invocation=invocation,
+                answer=result.terminal_answer,
+                metadata_tool_call=metadata_tool_call,
+                usage_tracker=usage_tracker,
+                planning_state=planning_state,
+            )
         if result.compiled_proposal is None:
             return result
         return await self._finalize_invocation_proposal(
@@ -498,6 +506,45 @@ class ProposalSubmissionOwner:
             planning_state=planning_state,
             compile_context=compile_context,
         )
+
+    async def _persist_invocation_answer(
+        self,
+        *,
+        invocation: ToolRetryInvocation,
+        answer: str,
+        metadata_tool_call: RuntimeToolCall | None,
+        usage_tracker: ProposalTurnTelemetry | None,
+        planning_state: PlanningState,
+    ) -> ToolProcessingResult:
+        """Commit a turn that answers the user instead of proposing a plan.
+
+        Both the first attempt and every repair reach this seam, so an answer
+        is stored the same way wherever it is decided, with the arguments the
+        provider actually sent.
+        """
+
+        answered = await persist_non_plan_turn(
+            repo=self.repo,
+            turn=invocation.turn,
+            conversation=invocation.conversation,
+            new_messages_start=invocation.new_messages_start,
+            tool_name=PROPOSE_FLOW_TOOL_NAME,
+            arguments=invocation.arguments,
+            tool_content="No plan was proposed; the user was answered.",
+            message=answer,
+            tool_call_id=invocation.tool_call_id,
+            assistant_metadata=assistant_metadata_with_usage(
+                conversation=invocation.conversation,
+                base_metadata=invocation.assistant_metadata,
+                usage_tracker=usage_tracker,
+                tool_calls=(
+                    [metadata_tool_call] if metadata_tool_call is not None else None
+                ),
+            ),
+            planning_state=planning_state,
+            flow=invocation.flow,
+        )
+        return ToolProcessingResult(events=answered)
 
     async def _finalize_invocation_proposal(
         self,
@@ -644,7 +691,7 @@ class ProposalSubmissionOwner:
             tool_name=DECLINE_FLOW_CHANGE_TOOL_NAME,
             success=True,
         )
-        result = await persist_non_plan_turn(
+        events = await persist_non_plan_turn(
             repo=self.repo,
             turn=ctx.turn,
             conversation=ctx.conversation,
@@ -673,7 +720,7 @@ class ProposalSubmissionOwner:
             planning_state=ctx.planning_state,
             flow=ctx.flow,
         )
-        for event in result.events:
+        for event in events:
             yield event
 
     async def _handle_propose_flow_tool_call(
@@ -742,29 +789,6 @@ class ProposalSubmissionOwner:
                 compile_context=ctx.compile_context,
                 metadata_tool_call=tool_call,
             )
-            if is_create and result.terminal_answer is not None:
-                answered = await persist_non_plan_turn(
-                    repo=self.repo,
-                    turn=ctx.turn,
-                    conversation=ctx.conversation,
-                    new_messages_start=ctx.new_messages_start,
-                    tool_name=PROPOSE_FLOW_TOOL_NAME,
-                    arguments={"plan_rationale": arguments.get("plan_rationale", "")},
-                    tool_content="No plan was proposed; the user was answered.",
-                    message=result.terminal_answer,
-                    tool_call_id=tool_call.id,
-                    assistant_metadata=assistant_metadata_with_usage(
-                        conversation=ctx.conversation,
-                        base_metadata=ctx.assistant_metadata,
-                        usage_tracker=ctx.usage_tracker,
-                        tool_calls=[tool_call],
-                    ),
-                    planning_state=planning_state,
-                    flow=ctx.flow,
-                )
-                for event in answered.events:
-                    yield event
-                return
             if not result.events:
                 proposal_repair_reason = proposal_repair_reason_from_tool_failure(
                     result.failure_kind

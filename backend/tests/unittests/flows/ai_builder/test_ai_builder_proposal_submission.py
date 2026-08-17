@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 from time import perf_counter_ns
 from types import SimpleNamespace
+from typing import cast
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
@@ -78,7 +79,10 @@ from eneo.flows.ai_builder.ai_builder_resource_catalog import (
     build_ai_builder_resource_catalog,
 )
 from eneo.flows.ai_builder.ai_builder_tool_names import PROPOSE_FLOW_TOOL_NAME
-from eneo.flows.ai_builder.ai_builder_tools import build_propose_flow_tool_schema
+from eneo.flows.ai_builder.ai_builder_tools import (
+    ProposalToolSchema,
+    build_propose_flow_tool_schema,
+)
 from eneo.flows.ai_builder.planning_state import (
     ArchitectureCommitDraft,
     CheckpointIntent,
@@ -105,6 +109,19 @@ from tests.unittests.flows.ai_builder.proposal_turn_test_doubles import (
     _make_tool_call,
     _store_compiled_plan,
 )
+
+
+def _proposal_tool_schema_double() -> ProposalToolSchema:
+    return cast(
+        ProposalToolSchema,
+        {
+            "type": "function",
+            "function": {
+                "name": PROPOSE_FLOW_TOOL_NAME,
+                "parameters": {"type": "object"},
+            },
+        },
+    )
 
 
 def _route() -> ResolvedCompletionModelRoute:
@@ -858,43 +875,46 @@ async def test_edit_propose_flow_plural_events_emit_in_order() -> None:
 
 
 @pytest.mark.asyncio
-async def test_edit_propose_flow_user_message_routes_to_self_correction() -> None:
-    submission = _make_submission()
-    tool_call = _make_tool_call(
-        PROPOSE_FLOW_TOOL_NAME,
-        {"plan_rationale": "Edit", "operations": []},
-        tool_call_id="call-edit-user-message",
+async def test_a_repaired_terminal_answer_is_committed_like_the_first_one() -> None:
+    """A repair reaches the same seam, so its answer is stored the same way."""
+    repo = AsyncMock()
+    repo.commit_turn = AsyncMock(return_value=4)
+    submission = _make_submission(repo=repo)
+    process_outline = AsyncMock(
+        return_value=ToolProcessingResult(terminal_answer="Redigera hela planen.")
     )
-    process_edit = AsyncMock(
-        return_value=ToolProcessingResult(
-            terminal_answer="I need one more detail.",
-            failure_kind="validation",
-        )
+    retry_config = submission._proposal_retry_config(
+        target_kind=TargetKind.CREATE,
+        assistant_snapshots=None,
+        request_id="req-repaired-answer",
+        planning_state=_committed_text_planning_state(),
+        plan_edit_context=None,
+        prior_spec_for_revision=None,
+        usage_tracker=None,
+        proposal_tool_schema=_proposal_tool_schema_double(),
+        compile_context=None,
+    )
+    invocation = _make_retry_invocation(
+        arguments={"flow_name": "Repaired", "plan_rationale": "R", "steps": []},
+        tool_call_id="call-repaired-answer",
     )
 
-    async def _repair_events(_request):
-        yield build_status_event(AIBuilderStatus.REPAIRING)
-
-    with (
-        patch(
-            "eneo.flows.ai_builder.ai_builder_proposal_submission.process_edit_arguments",
-            new=process_edit,
-        ),
-        patch(
-            "eneo.flows.ai_builder.ai_builder_proposal_submission."
-            "run_tool_self_correction",
-            side_effect=_repair_events,
-        ) as repair,
+    with patch(
+        "eneo.flows.ai_builder.ai_builder_proposal_submission."
+        "process_create_intent_arguments",
+        new=process_outline,
     ):
-        dispatched = submission.dispatch_submission_tool_call(
-            ctx=_make_context(flow=_flow_with_description("Old description")),
-            tool_call=tool_call,
-        )
-        assert dispatched is not None
-        events = _wire_events([event async for event in dispatched])
+        result = await retry_config.process_tool_invocation(invocation)
 
-    assert events == [{"event": "status", "data": '{"status":"repairing"}'}]
-    repair.assert_called_once()
+    assert _wire_events(result.events) == [
+        {"event": "text", "data": '{"text":"Redigera hela planen."}'}
+    ]
+    repo.create_plan.assert_not_awaited()
+    repo.commit_turn.assert_awaited_once()
+    stored = repo.commit_turn.await_args.kwargs["new_messages"]
+    assert [message.role for message in stored] == ["assistant", "tool"]
+    # The stored call carries what the provider actually sent, not a summary.
+    assert stored[0].tool_calls[0]["arguments"] == invocation.arguments
 
 
 @pytest.mark.asyncio

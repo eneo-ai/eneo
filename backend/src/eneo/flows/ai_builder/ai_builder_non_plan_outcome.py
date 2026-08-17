@@ -9,7 +9,6 @@ proposal, so the conversation records what was asked and what was answered.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Final, Literal, cast, get_args
 
 from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
@@ -118,12 +117,6 @@ def scoped_revision_out_of_reach_message(*, ui_language: str | None) -> str:
     ]
 
 
-@dataclass(frozen=True, slots=True)
-class NonPlanTurnResult:
-    events: tuple[AIBuilderStreamEvent, ...]
-    new_planning_state_version: int
-
-
 async def persist_non_plan_turn(
     *,
     repo: AIBuilderRepository,
@@ -138,7 +131,7 @@ async def persist_non_plan_turn(
     assistant_metadata: dict[str, Any] | None,
     planning_state: PlanningState,
     flow: "Flow | None",
-) -> NonPlanTurnResult:
+) -> tuple[AIBuilderStreamEvent, ...]:
     """Store an answered turn the same way an accepted proposal is stored.
 
     The answer the user reads is part of the conversation, so the next turn
@@ -166,13 +159,10 @@ async def persist_non_plan_turn(
             tool_call_id=tool_call_id,
         )
     )
-    new_version = await repo.commit_turn(
+    await repo.commit_turn(
         turn=turn,
         new_messages=conversation[new_messages_start:],
         flow=flow,
         planning_state=planning_state,
     )
-    return NonPlanTurnResult(
-        events=(build_text_event(message),),
-        new_planning_state_version=new_version,
-    )
+    return (build_text_event(message),)

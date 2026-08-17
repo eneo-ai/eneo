@@ -492,43 +492,6 @@ async def test_run_forced_tool_retry_after_text_builds_typed_invocation() -> Non
 
 
 @pytest.mark.asyncio
-async def test_run_forced_tool_retry_after_text_surfaces_tool_user_message() -> None:
-    async def process_invocation(
-        _: ToolRetryInvocation,
-    ) -> ToolProcessingResult:
-        return ToolProcessingResult(
-            terminal_answer="Det markerade steget använder ingen chattmodell."
-        )
-
-    result = await run_forced_tool_retry_after_text(
-        _make_forced_tool_after_text_request(
-            assistant_text="Här är mitt förslag.",
-            forced_proposal_temperature=0.1,
-            repair_completion=AsyncMock(
-                return_value=_tool_response(
-                    tool_name=PROPOSE_FLOW_TOOL_NAME,
-                    arguments={
-                        "flow_name": "Test",
-                        "plan_rationale": "R",
-                        "steps": [],
-                    },
-                )
-            ),
-            process_tool_invocation=process_invocation,
-            target_kind=TargetKind.CREATE,
-        )
-    )
-
-    assert result.events is not None
-    assert _wire_events(result.events) == [
-        {
-            "event": "text",
-            "data": '{"text":"Det markerade steget använder ingen chattmodell."}',
-        },
-    ]
-
-
-@pytest.mark.asyncio
 async def test_run_forced_tool_retry_after_text_repairs_json_text_through_provider() -> (
     None
 ):

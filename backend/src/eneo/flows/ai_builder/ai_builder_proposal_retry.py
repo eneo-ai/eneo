@@ -54,7 +54,6 @@ from eneo.flows.ai_builder.ai_builder_proposal_tool_contracts import (
     ProposalCompletionFn,
     ProposalMessageGroup,
     ProposalTurnContext,
-    ToolProcessingResult,
     ToolRetryConfig,
     ToolRetryInvocation,
     append_protected_repair_group,
@@ -383,17 +382,6 @@ def _self_correction_user_message(
     )
 
 
-def _repair_terminal_events(
-    result: ToolProcessingResult,
-) -> tuple[AIBuilderStreamEvent, ...]:
-    terminal_answer_events = (
-        (build_text_event(result.terminal_answer),)
-        if result.terminal_answer is not None
-        else tuple()
-    )
-    return (*result.events, *terminal_answer_events)
-
-
 def _proposal_failure_fingerprint(
     candidate: object,
     *,
@@ -427,9 +415,8 @@ async def _classify_processed_repair_attempt(
     invocation: ToolRetryInvocation,
 ) -> ForcedToolRetryOutcome:
     tool_result = await retry_config.process_tool_invocation(invocation)
-    terminal_events = _repair_terminal_events(tool_result)
-    if terminal_events:
-        return ForcedToolRetryOutcome(events=terminal_events)
+    if tool_result.events:
+        return ForcedToolRetryOutcome(events=tool_result.events)
     failure_kind = tool_result.failure_kind or "validation"
     return ForcedToolRetryOutcome(
         feedback=tool_result.feedback,
