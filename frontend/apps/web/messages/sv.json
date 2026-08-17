@@ -4289,8 +4289,11 @@
   "ai_builder_requirements_input": "Indata",
   "ai_builder_requirements_manual_notes": "Manuell konfiguration",
   "ai_builder_requirements_output": "Utdata",
-  "ai_builder_requirements_runtime_fields": "Fält användaren fyller i ({count})",
-  "ai_builder_requirements_runtime_fields_lead": "Från ditt svar. Fälten visas när flödet körs.",
+  "ai_builder_requirements_runtime_fields": "Fält som fylls i före varje körning",
+  "ai_builder_requirements_runtime_fields_count": "{count} fält",
+  "ai_builder_requirements_runtime_fields_lead": "Det som personen som kör flödet fyller i. Det är inte något Eneo tar fram.",
+  "ai_builder_requirements_runtime_fields_change": "Ändra fälten",
+  "ai_builder_requirements_field_required": "obligatoriskt",
   "ai_builder_requirements_superseded": "Ersatt av en nyare sammanfattning av kraven.",
   "ai_builder_requirements_title": "Så här har Eneo förstått uppgiften",
   "ai_builder_requirements_user_request": "Du bad om",
@@ -6338,5 +6341,8 @@
   "ai_builder_conflict_send_in_progress": "En begäran för det här utkastet håller redan på. Vänta tills den är klar och hämta sedan det senaste.",
   "ai_builder_conflict_refresh": "Uppdatera",
   "ai_builder_conflict_start_over": "Börja om",
-  "ai_builder_applied_counts": "{created} skapade, {updated} uppdaterade, {removed} borttagna steg."
+  "ai_builder_applied_counts": "{created} skapade, {updated} uppdaterade, {removed} borttagna steg.",
+  "ai_builder_requirements_runtime_fields_count_one": "1 fält",
+  "ai_builder_requirements_field_required_count": "{required} obligatoriska",
+  "ai_builder_requirements_field_required_count_one": "1 obligatoriskt"
 }

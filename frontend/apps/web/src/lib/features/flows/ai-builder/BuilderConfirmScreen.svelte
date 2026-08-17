@@ -43,6 +43,11 @@
     savedFlowStepScope: AIBuilderStepScopePresentation | null;
     attachments: AIBuilderAttachmentFile[];
     answered: AnsweredQuestion[];
+    /** What the person running the flow fills in before each run. Not what
+     *  Eneo produces — that is the content list — and not something the card
+     *  can read off a decision row, which only names the option chosen. */
+    runtimeFields?: { label: string; type: string; required: boolean }[];
+    runtimeFieldsQuestionId?: string | null;
     /** No structured question was asked before this summary. */
     noQuestions: boolean;
     confirmed: boolean;
@@ -76,6 +81,8 @@
     savedFlowStepScope,
     attachments,
     answered,
+    runtimeFields = [],
+    runtimeFieldsQuestionId = null,
     noQuestions,
     confirmed,
     stale,
@@ -149,6 +156,30 @@
     changeTopic = null;
     changeDraft = "";
     oneditanswer(questionId);
+  }
+
+  // Swedish and English both break on "1 obligatoriska" / "1 fields", and the
+  // required half says nothing when none are.
+  const runtimeFieldsCount = $derived.by(() => {
+    const total =
+      runtimeFields.length === 1
+        ? m.ai_builder_requirements_runtime_fields_count_one()
+        : m.ai_builder_requirements_runtime_fields_count({ count: String(runtimeFields.length) });
+    const required = runtimeFields.filter((field) => field.required).length;
+    if (required === 0) return total;
+    const requiredText =
+      required === 1
+        ? m.ai_builder_requirements_field_required_count_one()
+        : m.ai_builder_requirements_field_required_count({ required: String(required) });
+    return `${total} · ${requiredText}`;
+  });
+
+  function fieldTypeLabel(type: string): string {
+    if (type === "number") return m.flow_form_field_type_number();
+    if (type === "date") return m.flow_form_field_type_date();
+    if (type === "select") return m.flow_form_field_type_select();
+    if (type === "multiselect") return m.flow_form_field_type_multiselect();
+    return m.flow_form_field_type_text();
   }
 
   const reducedMotion = prefersReducedMotion();
@@ -403,6 +434,48 @@
             <ul class="divide-dimmer mt-1 flex flex-col divide-y">
               {#each manualNotes as note (note)}
                 <li class="text-secondary py-2 text-[0.8125rem] leading-relaxed">{note}</li>
+              {/each}
+            </ul>
+          </section>
+        {/if}
+
+        {#if runtimeFields.length > 0 && !savedFlowStepScope}
+          <section class="mt-[1.125rem]">
+            <div class="flex flex-wrap items-baseline gap-x-2.5 gap-y-1">
+              <h3 class="text-primary text-[0.8125rem] font-bold">
+                {m.ai_builder_requirements_runtime_fields()}
+              </h3>
+              <span class="text-secondary text-xs">{runtimeFieldsCount}</span>
+              {#if runtimeFieldsQuestionId && !readOnly && !confirmed}
+                <Button
+                  variant="outline"
+                  size="sm"
+                  class="ml-auto"
+                  {disabled}
+                  onclick={() => reopenQuestion(runtimeFieldsQuestionId)}
+                >
+                  {m.ai_builder_requirements_runtime_fields_change()}
+                </Button>
+              {/if}
+            </div>
+            <p class="text-secondary mt-0.5 text-xs text-pretty">
+              {m.ai_builder_requirements_runtime_fields_lead()}
+            </p>
+            <ul class="mt-2 flex list-none flex-wrap gap-1.5 p-0">
+              {#each runtimeFields as field (field.label)}
+                <li
+                  class="border-default inline-flex h-[1.625rem] items-center gap-1.5 rounded-full border px-2.5 text-[0.78125rem]"
+                  class:bg-secondary={!field.required}
+                  class:text-primary={!field.required}
+                  class:bg-accent-dimmer={field.required}
+                  class:text-accent-stronger={field.required}
+                >
+                  <span class="font-medium">{field.label}</span>
+                  <span class="opacity-70">{fieldTypeLabel(field.type)}</span>
+                  {#if field.required}
+                    <span class="opacity-70">{m.ai_builder_requirements_field_required()}</span>
+                  {/if}
+                </li>
               {/each}
             </ul>
           </section>

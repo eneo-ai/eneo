@@ -4289,8 +4289,11 @@
   "ai_builder_requirements_input": "Input",
   "ai_builder_requirements_manual_notes": "Manual setup",
   "ai_builder_requirements_output": "Output",
-  "ai_builder_requirements_runtime_fields": "Fields the user fills in ({count})",
-  "ai_builder_requirements_runtime_fields_lead": "From your answer. These appear when the flow runs.",
+  "ai_builder_requirements_runtime_fields": "Filled in before every run",
+  "ai_builder_requirements_runtime_fields_count": "{count} fields",
+  "ai_builder_requirements_runtime_fields_lead": "What the person running the flow fills in. Eneo does not produce this.",
+  "ai_builder_requirements_runtime_fields_change": "Change the fields",
+  "ai_builder_requirements_field_required": "required",
   "ai_builder_requirements_superseded": "Superseded by a newer requirements summary.",
   "ai_builder_requirements_title": "This is how Eneo understood the task",
   "ai_builder_requirements_user_request": "You asked for",
@@ -6338,5 +6341,8 @@
   "ai_builder_conflict_send_in_progress": "A request for this draft is already running. Wait for it to finish, then fetch the latest.",
   "ai_builder_conflict_refresh": "Refresh",
   "ai_builder_conflict_start_over": "Start over",
-  "ai_builder_applied_counts": "{created} created, {updated} updated, {removed} removed steps."
+  "ai_builder_applied_counts": "{created} created, {updated} updated, {removed} removed steps.",
+  "ai_builder_requirements_runtime_fields_count_one": "1 field",
+  "ai_builder_requirements_field_required_count": "{required} required",
+  "ai_builder_requirements_field_required_count_one": "1 required"
 }

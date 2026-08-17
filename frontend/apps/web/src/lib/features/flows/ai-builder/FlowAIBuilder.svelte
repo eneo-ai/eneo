@@ -120,6 +120,29 @@
     return ids;
   });
   const answerLabelByQuestionId = $derived(buildAnswerLabels(service.messages));
+  const runtimeFields = $derived.by(() => {
+    let fields: { label: string; type: string; required: boolean }[] = [];
+    for (const [index, message] of service.messages.entries()) {
+      if (latestSummaryMessageIndex !== -1 && index > latestSummaryMessageIndex) break;
+      const answered = message.questionAnswer?.input_fields;
+      if (!answered?.length) continue;
+      fields = answered.map((field) => ({
+        label: field.value.label,
+        type: String(field.value.type),
+        required: field.value.required === true
+      }));
+    }
+    return fields;
+  });
+  const runtimeFieldsQuestionId = $derived.by(() => {
+    let questionId: string | null = null;
+    for (const [index, message] of service.messages.entries()) {
+      if (latestSummaryMessageIndex !== -1 && index > latestSummaryMessageIndex) break;
+      const answer = message.questionAnswer;
+      if (answer?.input_fields?.length && answer.question_id) questionId = answer.question_id;
+    }
+    return questionId;
+  });
   const delegatedQuestionIds = $derived.by(() => {
     const ids = new SvelteSet<string>();
     for (const message of service.messages) {
@@ -617,6 +640,8 @@
           savedFlowStepScope={service.activeStepScope}
           attachments={service.session?.attachments ?? []}
           answered={answeredQuestions}
+          {runtimeFields}
+          {runtimeFieldsQuestionId}
           noQuestions={askedQuestionIds.length === 0}
           confirmed={service.isRequirementsSummaryConfirmed(latestSummary)}
           stale={summaryIsStale}
