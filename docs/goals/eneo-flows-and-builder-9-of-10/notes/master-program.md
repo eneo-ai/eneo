@@ -240,6 +240,51 @@ evidence, read-only named_content_fields), DEPLOY-REHEARSAL (cold bring-up from 
 the go/no-go for the 2026-08-18 test environment), COMMIT-DRIFT #51. Parked: STALL-POLICY re-attempt
 #46 (merge rule + corpus only), SCOPED-CREATE-REVISION #47, producer attribution #45, NESTING #31.
 
+v10.13 (2026-08-17 evening; wrap-up, owner low on weekly usage). Landed on `refactor/flows-clean`,
+head `c5a67d99f`, all pushed, each with head tests + pinned pyright + schema drift clean:
+DEPLOY-REHEARSAL GO with caveats (Traefik+TLS and live transcription only on the real host; env
+templates renamed to FEDERATION_ENABLED `cc5c91c43`+`bd209320a`); BUILDER-UI-CONTRACT `6f315fee0`;
+COMMIT-DRIFT #51 `c9cad3811` (the acknowledgment turn reconstructs the state `commit_turn` will
+persist — one rule for what accepting a disclosure means; the reverse CommitDriftError from the
+sealed ×3 is gone; cohort 15/15); FLOW-SPARSE-SUMMARY #55 `a20eebaeb` (`step_count`/`input_type`/
+`output_type` on the list row, one batched query per page); SCHEMA-PERSISTENCE #57 `759409578`
+(declared schema assignment survives `commit_turn`; residual #58); QUESTION-CONTEXT #59 `5dad07786`
+(`questions_planned_remaining` from the ordered ask queue — snapshot, never a total; per-option
+`example` on 37/40 catalog options); REQUIREMENTS-REOPEN #60 `550de81ce`+`936b662e8` (owner's own
+DOCX→PDF edit bug: the classifier was never asked about `terminal_output` in edit mode because the
+flow-derived value was model-protected — three deletions incl. the nine-phrase re-open list; live
+re-test passed; residual #63); EDIT-CURRENT-VALUE #61 `8694ab341` (`current_option_id`; edit-mode
+recommendations fail closed — Eneo never recommends changing a live flow; root cause of the irrelevant
+question = #64); ORDINAL #56 + `topic` `b3fcc447b`, then `b251b080e` (the ordinal invariant had bricked
+sessions whose questions predate persisted numbers — now such sessions continue unnumbered, nothing is
+ever renumbered); disclosure input/output non-blank `5dacf5682`; TEST-CULL `50b293876` (ai_builder,
+−1,985 lines/−82 tests, coverage −0.03pp) + `c5a67d99f` (runtime/service, −490 lines) — the honest
+finding: ~30 reviewers read every flows test file against source and found ~1.2% deletable under
+"safe/duplicate/low-value"; the volume is per-branch behaviour, per-literal enumeration of finite
+tables, per-call-site authz and incident regressions; Codex proved 10 "obvious" deletions were guards.
+Head 158×1 on `c9cad3811`: first pass 140, accepted 142/145 (97.9%), errors 0, stalls 3 (`smoke-158x1-
+c9cad3811/RECEIPT-NOTES.md`). Ledger figure remains the sealed ×3 on `c974f5cf0` (96.8 / 97.7).
+Closed by evidence: OPEN-REQUIREMENTS #53 (always empty at confirm time by construction — UI renders
+assumptions); run-history/dependents card (owner: apps have no business in the Builder).
+Colleague review (Fable, 2026-08-17) — assessed, not acted on: diagnosis largely right (Celery beside
+ARQ; ~74 migrations; retention control plane, flow-private audit outbox, `.eneopkg` over-built for
+current customers; test volume), prescription ("don't merge, rewrite on develop at ¼") overreaches
+because the measured behaviour is the asset. Convergence phase, to be scheduled AFTER the test env is
+stable and only with owner go: (1) Celery→ARQ port of the run executor + maintenance jobs (design gate
+first), (2) `flow_packages` off the launch surface, (3) audit → central service, (4) retention →
+`data_retention_days` + existing cron, (5) migration squash + test-layout reconcile before a develop
+merge, (6) MCP as per-step policy when the Builder can express it. Test reduction beyond the cull:
+per-test coverage subsumption analysis (machine candidates → one reviewer → one gate) and source
+simplification (typed rules replace literal tables and take their tests with them) — not more manual
+sweeps.
+Open queue in ROI order: #64 input-from-output-words heuristic, #63 post-plan replacement, #62
+`example_edit`, #58 schema-carry residual, #46 STALL-POLICY re-attempt, #47 scoped create revision,
+#45, #30, #49, #23; user decisions pending: R9 #54, harness pepper pin #50, land flow-settings A+B+C
+(`lane/audio-ceiling`), land AI-byggaren UI (`lane/ai-builder-ui`, head `6f95153a0`, Codex green 8)
+after click-through. Lane worktree `/private/tmp/eneo-test-cull-b` holds 8 further reviewer-justified
+test deletions uncommitted (not gated). Tuesday 2026-08-18: deploy head with FEDERATION_ENABLED,
+fresh DB, per `tuesday-readiness/TEST-ENV-RUNBOOK.md`; local dev DB is disposable (owner ruling).
+
 This file owns execution and is the SOLE execution-order owner;
 `cp0-matrix-freeze.md` owns evidence and the gate inventory.
 
