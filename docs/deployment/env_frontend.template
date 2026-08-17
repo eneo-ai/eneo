@@ -68,12 +68,9 @@ PUBLIC_ORIGIN=https://your-domain.com
 
 # FEDERATION MODE
 # ----------------------------------------------------------------------------
-# Must match backend setting. Controls how OIDC/IdP configuration is managed:
-#   FALSE (default): Single-tenant via OIDC_* environment variables
-#   TRUE: Federation via sysadmin API (multi-tenant or single-tenant with API management)
-# See backend env_backend.template for detailed documentation.
+# Federation is backend-owned. Configure FEDERATION_ENABLED in
+# env_backend.env; see env_backend.template for detailed documentation.
 # ----------------------------------------------------------------------------
-FEDERATION_PER_TENANT_ENABLED=false
 
 # ----------------------------------------------------------------------------
 # DEPRECATED: MobilityGuard and Zitadel variables are no longer used.

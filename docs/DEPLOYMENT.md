@@ -418,7 +418,7 @@ Allow each tenant to use their own IdP (Entra ID, Auth0, Okta, etc.):
 
 ```bash
 # 1. Enable federation mode in env_backend.env
-FEDERATION_PER_TENANT_ENABLED=true
+FEDERATION_ENABLED=true
 ENCRYPTION_KEY=<same-key-as-above>
 
 # 2. Configure per-tenant IdP via API
