@@ -51,6 +51,9 @@ from eneo.flows.ai_builder.ai_builder_flow_context import build_flow_context
 from eneo.flows.ai_builder.ai_builder_form_fields import (
     extract_form_fields_from_metadata,
 )
+from eneo.flows.ai_builder.ai_builder_form_intake_signals import (
+    form_intake_signal_values_from_planning_state,
+)
 from eneo.flows.ai_builder.ai_builder_framework_policy import (
     aggregate_unprompted_user_text_preserving_case,
 )
@@ -63,10 +66,6 @@ from eneo.flows.ai_builder.ai_builder_plan_edit_context import (
 )
 from eneo.flows.ai_builder.ai_builder_plan_proposal_task import (
     build_plan_proposal_system_prompt,
-)
-from eneo.flows.ai_builder.ai_builder_planner_pattern_signals import (
-    build_requirements_signal_text,
-    form_intake_signal_values_from_planning_state,
 )
 from eneo.flows.ai_builder.ai_builder_proposal_intent import (
     ProposalObligationProjection,
@@ -479,16 +478,12 @@ def build_proposal_prepared(
     current_turn_start: int,
 ) -> ProposalPrepared:
     confirmed_requirements = latest_confirmed_requirements(conversation)
-    section_signal_text = "\n".join(
-        part
-        for part in (
-            aggregate_unprompted_user_text_preserving_case(conversation),
-            build_requirements_signal_text(confirmed_requirements),
-        )
-        if part
-    )
+    # Only the user's own wording names an output topology. The disclosure
+    # renders evidence back to the user — including headings observed in an
+    # attached example — and reading it here turned that example's layout into
+    # sections the plan had to reproduce.
     requested_output_sections = extract_requested_output_sections(
-        section_signal_text,
+        aggregate_unprompted_user_text_preserving_case(conversation),
         model_form_intake_signals=form_intake_signal_values_from_planning_state(
             planning_state
         ),

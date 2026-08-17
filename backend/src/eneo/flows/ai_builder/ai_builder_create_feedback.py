@@ -19,9 +19,6 @@ CREATE_CRITIC_REMEDIATION: dict[str, str] = {
     "rich_workflow_requires_json_contract_step": (
         'Lägg till ett mellanliggande extraktionssteg med output_type="json" och output_fields med namngivna fält innan analys, rapport eller dokumentleverans.'
     ),
-    "rich_workflow_requires_multiple_steps": (
-        "Dela upp arbetsflödet i tydliga semantiska steg för extraktion, analys eller granskning innan slutleveransen."
-    ),
     "structured_extraction_requires_json_contract_step": (
         'Lägg till ett tydligt extraktionssteg med output_type="json" och output_fields med namngivna fält som senare steg kan återanvända.'
     ),

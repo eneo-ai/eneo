@@ -10,10 +10,14 @@ narrower view can filter the tuple inline and pass `invariants=` to
 `render_critic_issues`.
 
 Layering: this module imports AI Builder types (`FlowDraftSpecCore`,
-`OutputIntentResolution`, `PlannerPatternSignals`) and authored flow specs.
-The Flow Capability Manifest stays engine-truth-only and does not learn
-about conversation signals; those live here with the rest of the AI Builder
-layer.
+`OutputIntentResolution`) and authored flow specs. The Flow Capability Manifest
+stays engine-truth-only and does not learn about conversation signals; those
+live here with the rest of the AI Builder layer.
+
+Invariants read typed planning state and the user's own words. They never read
+the requirements disclosure: that is a localized rendering of the same typed
+state, and scanning it made identical state produce different plans per UI
+language.
 """
 
 from __future__ import annotations
@@ -55,9 +59,6 @@ from eneo.flows.ai_builder.ai_builder_input_architecture_policy import (
 from eneo.flows.ai_builder.ai_builder_json_schema_paths import (
     schema_leaf_property_names,
     schema_property_names_at_any_depth,
-)
-from eneo.flows.ai_builder.ai_builder_planner_pattern_signals import (
-    PlannerPatternSignals,
 )
 from eneo.flows.ai_builder.ai_builder_result_contract import (
     ResultContract,
@@ -116,9 +117,10 @@ class CriticContext:
     flow: "Flow | None"
     answer_signals: dict[str, set[str]]
     text: str
-    requirements_text: str
-    signal_text: str
-    planner_patterns: PlannerPatternSignals
+    sectioned_form_intake: bool
+    runtime_form_fields_requested: bool
+    runtime_form_fields_evidence: tuple[str, ...]
+    simple_text_transform: bool
     output_intent: OutputIntentResolution
     mixed_audio_doc_input: bool
     primary_runtime_input: PrimaryRuntimeInput = "unknown"
@@ -237,11 +239,6 @@ def _has_json_contract_step(spec: FlowDraftSpecCore) -> bool:
 
 def _spec_uses_template_fill(spec: FlowDraftSpecCore) -> bool:
     return any(step.output_mode == OutputMode.TEMPLATE_FILL for step in spec.steps)
-
-
-def _resolved_slot_value(context: CriticContext, slot_name: str) -> str | None:
-    slot = context.resolved_slots.get(slot_name)
-    return slot.value if slot is not None else None
 
 
 def _commit_grade_resolved_slot_value(
@@ -376,8 +373,8 @@ def _runtime_metadata_requires_form_fields_evidence(context: CriticContext) -> b
         return False
     return (
         runtime_metadata_requested(context.answer_signals)
-        and not context.spec.form_fields
-    )
+        or context.runtime_form_fields_requested
+    ) and not (context.spec.form_fields or context.sectioned_form_intake)
 
 
 def _runtime_metadata_requires_form_fields_remediation(
@@ -385,11 +382,12 @@ def _runtime_metadata_requires_form_fields_remediation(
 ) -> str:
     # Naming the requested values is what makes this repairable: a live
     # journey looped four identical proposals on the bare "add form
-    # fields" message (2026-08-06). The classifier already captured the
-    # user's own wording as slot evidence, so quote it.
+    # fields" message (2026-08-06). Either source of the request carries the
+    # user's own wording, so quote whichever one spoke.
     slot = context.resolved_slots.get("runtime_metadata_fields")
-    quotes = (
-        quoted_texts_from_planning_references(slot.evidence) if slot is not None else []
+    quotes = quoted_texts_from_planning_references(
+        list(slot.evidence if slot is not None else [])
+        + list(context.runtime_form_fields_evidence)
     )
     quoted_evidence = (
         " Användarens ord: " + " / ".join(f'"{quote}"' for quote in quotes[:2])
@@ -407,8 +405,10 @@ def _runtime_metadata_requires_form_fields_remediation(
 _RUNTIME_METADATA_REQUIRES_FORM_FIELDS = CriticInvariant(
     id="runtime_metadata_requires_form_fields",
     description=(
-        "When the user asked for reusable runtime metadata, the plan must model "
-        "those values as `form_fields` instead of hiding them in prompt text."
+        "When the user asked for values to fill in per run — as a structured "
+        "answer or as the classifier's typed form-intake verdict — the plan "
+        "must model them as `form_fields`, not hide them in prompt text. "
+        "Sectioned intake has its own rule and is left to it."
     ),
     evidence=_runtime_metadata_requires_form_fields_evidence,
     remediation=_runtime_metadata_requires_form_fields_remediation,
@@ -420,9 +420,7 @@ def _sectioned_form_intake_requires_form_fields_evidence(
 ) -> bool:
     if _is_create_context(context):
         return False
-    return (
-        context.planner_patterns.sectioned_form_intake and not context.spec.form_fields
-    )
+    return context.sectioned_form_intake and not context.spec.form_fields
 
 
 _SECTIONED_FORM_INTAKE_REQUIRES_FORM_FIELDS = CriticInvariant(
@@ -441,43 +439,14 @@ _SECTIONED_FORM_INTAKE_REQUIRES_FORM_FIELDS = CriticInvariant(
 )
 
 
-def _rich_workflow_requires_form_fields_evidence(context: CriticContext) -> bool:
-    if _is_create_context(context):
-        return False
-    patterns = context.planner_patterns
-    return (
-        patterns.rich_document_workflow
-        and patterns.needs_form_fields
-        and not patterns.derive_from_input_only
-        and not context.spec.form_fields
-    )
-
-
-_RICH_WORKFLOW_REQUIRES_FORM_FIELDS = CriticInvariant(
-    id="rich_workflow_requires_form_fields",
-    description=(
-        "A rich document workflow that also needs manual completions must "
-        "declare `form_fields` instead of hiding them in instruction text."
-    ),
-    evidence=_rich_workflow_requires_form_fields_evidence,
-    remediation=(
-        "Behovet beskriver ett dokumentbaserat flöde som också kräver manuella kompletteringar eller "
-        "inmatningsfält, men planen saknar `form_fields`. Modellera dessa värden som form_fields i "
-        "stället för att gömma dem i instruktionstexten."
-    ),
-)
-
-
 def _rich_workflow_requires_json_contract_step_evidence(
     context: CriticContext,
 ) -> bool:
-    # Typed eligibility local to THIS rule: file-material input committed to a
-    # document artifact. Deliberately distinct from the phrase-derived
-    # PlannerPatternSignals.rich_document_workflow that the form-field and
-    # multi-step rules still consume.
+    # Typed eligibility, local to this rule: file material the user committed
+    # to, delivered as a document artifact.
     result_contract = context.result_contract
     typed_document_artifact_workflow = (
-        _resolved_slot_value(context, "primary_runtime_input")
+        _commit_grade_resolved_slot_value(context, "primary_runtime_input")
         in {"audio", "documents", "text_and_documents"}
         and result_contract is not None
         and result_contract.terminal_output in {"docx_document", "pdf_document"}
@@ -500,30 +469,6 @@ _RICH_WORKFLOW_REQUIRES_JSON_CONTRACT_STEP = CriticInvariant(
         "Behovet beskriver ett dokumentflöde som ska återanvända strukturerad analys, men planen saknar "
         'ett tydligt JSON-steg med `output_contract`. Lägg till ett mellanliggande `output_type="json"`-steg '
         "innan slutlig rapport eller dokumentleverans."
-    ),
-)
-
-
-def _rich_workflow_requires_multiple_steps_evidence(context: CriticContext) -> bool:
-    patterns = context.planner_patterns
-    return (
-        patterns.rich_document_workflow
-        and patterns.prefers_quality_step
-        and len(context.spec.steps) < 3
-    )
-
-
-_RICH_WORKFLOW_REQUIRES_MULTIPLE_STEPS = CriticInvariant(
-    id="rich_workflow_requires_multiple_steps",
-    description=(
-        "A rich document workflow that calls for analysis or review must not "
-        "collapse into fewer than three steps."
-    ),
-    evidence=_rich_workflow_requires_multiple_steps_evidence,
-    remediation=(
-        "Behovet beskriver ett mer genomarbetat dokumentflöde med analys, granskning eller kvalitetssäkring, "
-        "men planen kollapsar fortfarande till för få steg. Lägg till minst ett mellanliggande analys- eller "
-        "granskningssteg innan slutleveransen."
     ),
 )
 
@@ -997,7 +942,7 @@ _MULTI_DOCUMENT_COMPARE_REQUIRES_EXPLICIT_FAN_IN = CriticInvariant(
 def _simple_text_transform_must_remain_single_step_evidence(
     context: CriticContext,
 ) -> bool:
-    if not context.planner_patterns.is_simple_text_transform:
+    if not context.simple_text_transform:
         return False
     if context.spec.form_fields:
         return False
@@ -1634,9 +1579,7 @@ CRITIC_INVARIANTS: tuple[CriticInvariant, ...] = (
     _CHECKPOINT_INTENT_MISMATCH,
     _RUNTIME_METADATA_REQUIRES_FORM_FIELDS,
     _SECTIONED_FORM_INTAKE_REQUIRES_FORM_FIELDS,
-    _RICH_WORKFLOW_REQUIRES_FORM_FIELDS,
     _RICH_WORKFLOW_REQUIRES_JSON_CONTRACT_STEP,
-    _RICH_WORKFLOW_REQUIRES_MULTIPLE_STEPS,
     _PDF_TERMINAL_OUTPUT_ALIGNMENT,
     _DOCX_TERMINAL_OUTPUT_ALIGNMENT,
     _NON_TERMINAL_STEP_DOCUMENT_CONVERSION_FORBIDDEN,

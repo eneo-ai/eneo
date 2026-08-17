@@ -16,6 +16,12 @@ from eneo.flows.ai_builder.ai_builder_critic_invariants import (
 from eneo.flows.ai_builder.ai_builder_domain_models import (
     ConversationMessage,
 )
+from eneo.flows.ai_builder.ai_builder_form_intake_signals import (
+    form_field_intake_requested,
+    form_intake_signal_evidence_from_planning_state,
+    form_intake_signal_values_from_planning_state,
+    sectioned_form_intake_requested,
+)
 from eneo.flows.ai_builder.ai_builder_framework_policy import (
     OutputIntentResolution,
     aggregate_unprompted_user_text,
@@ -28,15 +34,15 @@ from eneo.flows.ai_builder.ai_builder_input_architecture_policy import (
 from eneo.flows.ai_builder.ai_builder_json_schema_paths import (
     schema_leaf_property_names,
 )
-from eneo.flows.ai_builder.ai_builder_planner_pattern_signals import (
-    build_requirements_signal_text,
-    detect_planner_pattern_signals,
-    form_intake_signal_values_from_planning_state,
-)
-from eneo.flows.ai_builder.ai_builder_requirements_state import (
-    resolve_requirements_state,
-)
 from eneo.flows.ai_builder.ai_builder_result_contract import derive_result_contract
+from eneo.flows.ai_builder.ai_builder_runtime_input_fields import (
+    normalize_runtime_metadata_state,
+    runtime_input_fields_declared_absent,
+    runtime_metadata_disables_declared_input_fields,
+)
+from eneo.flows.ai_builder.ai_builder_simple_text_transform import (
+    user_requested_simple_text_transform,
+)
 from eneo.flows.ai_builder.planning_state import AggregationIntent, PlanningState
 from eneo.flows.domain.flow import Flow
 from eneo.flows.flow_authoring_spec import (
@@ -74,6 +80,30 @@ def build_conversation_aware_quality_feedback(
         include_architecture=True,
         include_edit_topology_advisories=include_edit_topology_advisories,
     )
+
+
+def _runtime_fields_declared_absent(
+    text: str,
+    planning_state: PlanningState | None,
+) -> bool:
+    """Did the user rule out values to fill in at runtime?
+
+    The committed slot answers this whenever discovery asked; the phrase check
+    covers the user saying so unprompted, before any question was posed.
+    """
+
+    slot = (
+        planning_state.resolved_slots.get("runtime_metadata_fields")
+        if planning_state is not None
+        else None
+    )
+    if slot is not None and runtime_metadata_disables_declared_input_fields(
+        state=normalize_runtime_metadata_state(slot.value),
+        source=slot.source,
+        confidence=slot.confidence,
+    ):
+        return True
+    return runtime_input_fields_declared_absent(text)
 
 
 def _output_intent_with_committed_state(
@@ -128,24 +158,11 @@ def build_conversation_critic_context(
 ) -> CriticContext:
     answer_signals = extract_answer_signals(conversation)
     text = aggregate_unprompted_user_text(conversation)
-    requirements_state = resolve_requirements_state(
-        [
-            item
-            if isinstance(item, ConversationMessage)
-            else ConversationMessage.model_validate(item)
-            for item in conversation
-        ]
-    )
-    requirements_text = build_requirements_signal_text(
-        requirements_state.latest_summary
-    )
-    signal_text = "\n".join(part for part in (text, requirements_text) if part)
     model_form_intake_signals = form_intake_signal_values_from_planning_state(
         planning_state
     )
-    planner_patterns = detect_planner_pattern_signals(
-        signal_text,
-        model_form_intake_signals=model_form_intake_signals,
+    runtime_fields_declared_absent = _runtime_fields_declared_absent(
+        text, planning_state
     )
     output_intent = _output_intent_with_committed_state(
         resolve_output_intent(text, answer_signals),
@@ -157,9 +174,24 @@ def build_conversation_critic_context(
         flow=flow,
         answer_signals=answer_signals,
         text=text,
-        requirements_text=requirements_text,
-        signal_text=signal_text,
-        planner_patterns=planner_patterns,
+        sectioned_form_intake=(
+            sectioned_form_intake_requested(
+                text, model_form_intake_signals=model_form_intake_signals
+            )
+            and not runtime_fields_declared_absent
+        ),
+        runtime_form_fields_requested=(
+            form_field_intake_requested(
+                text, model_form_intake_signals=model_form_intake_signals
+            )
+            and not runtime_fields_declared_absent
+        ),
+        runtime_form_fields_evidence=form_intake_signal_evidence_from_planning_state(
+            planning_state
+        ),
+        simple_text_transform=user_requested_simple_text_transform(
+            text, model_form_intake_signals=model_form_intake_signals
+        ),
         output_intent=output_intent,
         mixed_audio_doc_input=input_intent.needs_architecture_clarification,
         primary_runtime_input=input_intent.primary_runtime_input,

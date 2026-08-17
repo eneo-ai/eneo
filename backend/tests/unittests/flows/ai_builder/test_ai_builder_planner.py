@@ -4154,3 +4154,84 @@ async def test_text_beside_a_confirmation_after_a_plan_is_read_as_a_change() -> 
         )
 
     build_runtime.assert_awaited_once()
+
+
+def test_example_output_headings_never_become_requested_output_sections() -> None:
+    """Headings seen in an attached example are evidence, not a requested outline.
+
+    The disclosure discloses them back to the user as an assumption
+    ("Selected example-output headings: ..."). While that prose was appended
+    to the section-signal text, the extractor's own `headings:` cue turned an
+    uploaded example's layout into an output topology the plan had to
+    reproduce — the exact thing its module contract forbids.
+    """
+
+    from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
+        REQUIREMENTS_SUMMARY_METADATA_KEY,
+    )
+    from eneo.flows.ai_builder.ai_builder_event_models import (
+        RequirementsSummaryPayload,
+    )
+
+    disclosure = RequirementsSummaryPayload.model_validate(
+        {
+            "summary": "Skapa en rapport från underlaget.",
+            "key_decisions": [],
+            "input_description": "Primär indata vid körning: Dokument.",
+            "output_description": "Huvudsakligt slutresultat: DOCX-dokument.",
+            "assumptions": [
+                "Selected example-output headings: Bakgrund, Nuläge, "
+                "Bedömning, Beslut.",
+            ],
+            "requirements_version": "b" * 64,
+        }
+    )
+    conversation = [
+        ConversationMessage(
+            role="user",
+            content="Vi laddar upp underlag och vill ha en rapport som DOCX.",
+        ),
+        ConversationMessage(
+            role="assistant",
+            content="Summary",
+            metadata={
+                REQUIREMENTS_SUMMARY_METADATA_KEY: disclosure.model_dump(mode="json"),
+            },
+        ),
+        ConversationMessage(
+            role="user",
+            content="",
+            metadata={
+                "requirements_confirmed": True,
+                "requirements_version": disclosure.requirements_version,
+            },
+        ),
+    ]
+
+    prepared = build_proposal_prepared(
+        requirements_state=RequirementsState(),
+        ui_language="sv",
+        slot_classification_metadata=None,
+        conversation=conversation,
+        planning_state=PlanningState.empty(),
+        attachment_context=None,
+        flow_context=None,
+        is_edit_mode=False,
+        resource_catalog=build_ai_builder_resource_catalog(
+            available_models=[], available_kbs=[], prior_bindings=()
+        ),
+        flow=None,
+        assistant_snapshots=None,
+        plan_edit_context=None,
+        prior_plan_for_revision=None,
+        litellm_model="openai/gpt-5.4",
+        max_input_tokens=4096,
+        max_output_tokens=1024,
+        budget_policy=_budget_policy(),
+        attachment_file_count=0,
+        current_turn_start=0,
+    )
+
+    compile_context = prepared.compile_context
+    assert compile_context is not None
+    assert compile_context.requested_output_sections.sections == ()

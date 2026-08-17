@@ -119,7 +119,6 @@ def test_create_critic_feedback_covers_every_semantic_invariant() -> None:
     assert covered_ids == semantic_ids - {
         "runtime_metadata_requires_form_fields",
         "sectioned_form_intake_requires_form_fields",
-        "rich_workflow_requires_form_fields",
         "form_fields_declared_must_be_referenced",
     }
 

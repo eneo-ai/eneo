@@ -1,10 +1,15 @@
 from __future__ import annotations
 
+from collections.abc import Collection
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 from eneo.flows.ai_builder.ai_builder_runtime_input_fields import (
     runtime_input_fields_requested,
 )
+
+if TYPE_CHECKING:
+    from eneo.flows.ai_builder.planning_state import PlanningState
 
 _FORM_FIELD_NEED_MARKERS: tuple[str, ...] = (
     "ska kunna ange",
@@ -105,6 +110,65 @@ def mentions_sectioned_form_intake(text: str) -> bool:
 
 def extract_form_intake_recipe_signals(text: str) -> set[str]:
     return detect_form_intake_pattern(text).recipe_signals()
+
+
+def form_intake_signal_values_from_planning_state(
+    planning_state: "PlanningState | None",
+) -> frozenset[str]:
+    """The classifier's own form-intake verdict, as committed to planning state."""
+
+    if planning_state is None:
+        return frozenset()
+    return frozenset(
+        signal.value
+        for signal in planning_state.signals
+        if signal.question_id == FORM_INTAKE_SIGNAL_ID
+    )
+
+
+def form_intake_signal_evidence_from_planning_state(
+    planning_state: "PlanningState | None",
+) -> tuple[str, ...]:
+    """The references the classifier cited for its form-intake verdict.
+
+    Repair feedback has to name the fields the user asked for; a bare "add
+    form fields" message once looped four identical proposals.
+    """
+
+    if planning_state is None:
+        return ()
+    return tuple(
+        reference
+        for signal in planning_state.signals
+        if signal.question_id == FORM_INTAKE_SIGNAL_ID
+        for reference in signal.provenance
+    )
+
+
+def form_field_intake_requested(
+    text: str,
+    *,
+    model_form_intake_signals: Collection[str] = (),
+) -> bool:
+    """Did the user ask for values to fill in at runtime, in words or by answer?"""
+
+    return (
+        FORM_INTAKE_NEEDS_FIELDS_SIGNAL in model_form_intake_signals
+        or SECTIONED_FORM_INTAKE_SIGNAL in model_form_intake_signals
+        or mentions_form_field_needs(text)
+    )
+
+
+def sectioned_form_intake_requested(
+    text: str,
+    *,
+    model_form_intake_signals: Collection[str] = (),
+) -> bool:
+    """Did the user ask to collect one free-text value per rubric or section?"""
+
+    return SECTIONED_FORM_INTAKE_SIGNAL in model_form_intake_signals or (
+        mentions_sectioned_form_intake(text)
+    )
 
 
 def _mentions_generic_form_field_need(text: str) -> bool:

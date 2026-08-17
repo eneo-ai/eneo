@@ -29,7 +29,6 @@ from eneo.flows.ai_builder.ai_builder_plan_quality_critic import (
 from eneo.flows.ai_builder.ai_builder_schema_evidence import build_schema_evidence
 from eneo.flows.ai_builder.planning_state import (
     CheckpointIntent,
-    NamedResultEvidence,
     PlanningSignal,
     PlanningState,
     ResolvedSlot,
@@ -564,9 +563,6 @@ def _create_gated_architecture_context(
     from eneo.flows.ai_builder.ai_builder_framework_policy import (
         OutputIntentResolution,
     )
-    from eneo.flows.ai_builder.ai_builder_planner_pattern_signals import (
-        PlannerPatternSignals,
-    )
 
     terminal_output: str | None = None
     primary_runtime_input = "unknown"
@@ -613,9 +609,10 @@ def _create_gated_architecture_context(
         flow=flow,
         answer_signals={},
         text="",
-        requirements_text="",
-        signal_text="",
-        planner_patterns=PlannerPatternSignals(),
+        sectioned_form_intake=False,
+        runtime_form_fields_requested=False,
+        runtime_form_fields_evidence=(),
+        simple_text_transform=False,
         output_intent=OutputIntentResolution(terminal_output=terminal_output),
         mixed_audio_doc_input=False,
         primary_runtime_input=cast("PrimaryRuntimeInput", primary_runtime_input),
@@ -643,67 +640,6 @@ def test_edit_context_keeps_edit_only_architecture_invariant(
     issue_ids = {issue.id for issue in evaluate_critic_invariants(context)}
 
     assert invariant_id in issue_ids
-
-
-def test_critic_context_renders_typed_confirmed_requirements_signal() -> None:
-    payload = _requirements(requirements_version="d0" * 32)
-    version = payload.requirements_version
-    context = build_conversation_critic_context(
-        [
-            {
-                "role": "assistant",
-                "content": "Summary",
-                "metadata": {
-                    "requirements_summary": payload.model_dump(mode="json"),
-                    "requirements_version": version,
-                },
-            },
-            {
-                "role": "user",
-                "content": "Ja, bygg planen.",
-                "metadata": {
-                    "requirements_confirmed": True,
-                    "requirements_version": version,
-                },
-            },
-        ],
-        FlowDraftSpecCore(
-            flow_name="Mötesprotokoll",
-            steps=[
-                _step(
-                    "step_a",
-                    "Transkribera",
-                    "Transkribera mötesljudet.",
-                    input_type=InputType.AUDIO,
-                )
-            ],
-        ),
-    )
-
-    assert context.requirements_text == "\n".join(
-        (
-            "Skapa ett mötesprotokoll.",
-            "Inga extra fält.",
-            "Indata",
-            "Mötesljud vid körning.",
-            "Utdata",
-            "DOCX-protokoll.",
-            "Koppla transkriberingsmodellen.",
-        )
-    )
-    assert "d0" * 32 not in context.requirements_text
-
-
-def test_critic_context_omits_requirements_signal_without_summary() -> None:
-    context = build_conversation_critic_context(
-        [],
-        FlowDraftSpecCore(
-            flow_name="Tomt flöde",
-            steps=[_step("step_a", "Sammanfatta", "Sammanfatta texten.")],
-        ),
-    )
-
-    assert context.requirements_text == ""
 
 
 def test_critic_invariant_registry_has_stable_kind_map() -> None:
@@ -1019,7 +955,6 @@ def test_no_input_fields_instruction_does_not_request_runtime_form_fields() -> N
     issue_ids = {issue.id for issue in evaluate_critic_invariants(context)}
 
     assert "runtime_metadata_requires_form_fields" not in issue_ids
-    assert "rich_workflow_requires_form_fields" not in issue_ids
 
 
 def test_audio_docx_report_fields_from_transcript_do_not_request_runtime_form_fields() -> (
@@ -2566,9 +2501,6 @@ class TestCriticInvariantLoop:
         from eneo.flows.ai_builder.ai_builder_framework_policy import (
             OutputIntentResolution,
         )
-        from eneo.flows.ai_builder.ai_builder_planner_pattern_signals import (
-            PlannerPatternSignals,
-        )
 
         spec = FlowDraftSpecCore(
             flow_name="Rapport",
@@ -2581,9 +2513,10 @@ class TestCriticInvariantLoop:
             flow=_edit_flow(),
             answer_signals={},
             text="",
-            requirements_text="",
-            signal_text="",
-            planner_patterns=PlannerPatternSignals(),
+            sectioned_form_intake=False,
+            runtime_form_fields_requested=False,
+            runtime_form_fields_evidence=(),
+            simple_text_transform=False,
             output_intent=OutputIntentResolution(terminal_output="pdf_document"),
             mixed_audio_doc_input=False,
         )
@@ -2600,9 +2533,6 @@ class TestCriticInvariantLoop:
         )
         from eneo.flows.ai_builder.ai_builder_framework_policy import (
             OutputIntentResolution,
-        )
-        from eneo.flows.ai_builder.ai_builder_planner_pattern_signals import (
-            PlannerPatternSignals,
         )
 
         spec = FlowDraftSpecCore(
@@ -2621,9 +2551,10 @@ class TestCriticInvariantLoop:
             flow=_edit_flow(),
             answer_signals={},
             text="",
-            requirements_text="",
-            signal_text="",
-            planner_patterns=PlannerPatternSignals(),
+            sectioned_form_intake=False,
+            runtime_form_fields_requested=False,
+            runtime_form_fields_evidence=(),
+            simple_text_transform=False,
             output_intent=OutputIntentResolution(terminal_output="pdf_document"),
             mixed_audio_doc_input=False,
         )
@@ -2639,9 +2570,6 @@ class TestCriticInvariantLoop:
         from eneo.flows.ai_builder.ai_builder_framework_policy import (
             OutputIntentResolution,
         )
-        from eneo.flows.ai_builder.ai_builder_planner_pattern_signals import (
-            PlannerPatternSignals,
-        )
 
         spec = FlowDraftSpecCore(
             flow_name="Rapport",
@@ -2652,9 +2580,10 @@ class TestCriticInvariantLoop:
             flow=_edit_flow(),
             answer_signals={},
             text="",
-            requirements_text="",
-            signal_text="",
-            planner_patterns=PlannerPatternSignals(),
+            sectioned_form_intake=False,
+            runtime_form_fields_requested=False,
+            runtime_form_fields_evidence=(),
+            simple_text_transform=False,
             output_intent=OutputIntentResolution(terminal_output=None),
             mixed_audio_doc_input=False,
         )
@@ -2688,9 +2617,6 @@ def _final_text_step_critic_context(
     from eneo.flows.ai_builder.ai_builder_framework_policy import (
         OutputIntentResolution,
     )
-    from eneo.flows.ai_builder.ai_builder_planner_pattern_signals import (
-        PlannerPatternSignals,
-    )
     from eneo.flows.ai_builder.ai_builder_result_contract import ResultContract
 
     return CriticContext(
@@ -2698,9 +2624,10 @@ def _final_text_step_critic_context(
         flow=flow,
         answer_signals={},
         text=text.casefold(),
-        requirements_text="",
-        signal_text="",
-        planner_patterns=PlannerPatternSignals(),
+        sectioned_form_intake=False,
+        runtime_form_fields_requested=False,
+        runtime_form_fields_evidence=(),
+        simple_text_transform=False,
         output_intent=OutputIntentResolution(terminal_output=terminal_output),
         mixed_audio_doc_input=False,
         aggregation_intent=cast("AggregationIntent", aggregation_intent),
@@ -4577,18 +4504,16 @@ class TestStandaloneAudioInvariant:
         from eneo.flows.ai_builder.ai_builder_framework_policy import (
             OutputIntentResolution,
         )
-        from eneo.flows.ai_builder.ai_builder_planner_pattern_signals import (
-            PlannerPatternSignals,
-        )
 
         return CriticContext(
             spec=spec,
             flow=flow,
             answer_signals={},
             text=text,
-            requirements_text="",
-            signal_text="",
-            planner_patterns=PlannerPatternSignals(),
+            sectioned_form_intake=False,
+            runtime_form_fields_requested=False,
+            runtime_form_fields_evidence=(),
+            simple_text_transform=False,
             output_intent=OutputIntentResolution(terminal_output=None),
             mixed_audio_doc_input=mixed_audio_doc_input,
             primary_runtime_input=cast("PrimaryRuntimeInput", primary_runtime_input),
@@ -4785,9 +4710,7 @@ class TestCriticInvariantRegistry:
             "checkpoint_intent_mismatch",
             "runtime_metadata_requires_form_fields",
             "sectioned_form_intake_requires_form_fields",
-            "rich_workflow_requires_form_fields",
             "rich_workflow_requires_json_contract_step",
-            "rich_workflow_requires_multiple_steps",
             "pdf_terminal_output_alignment",
             "docx_terminal_output_alignment",
             "non_terminal_step_document_conversion_forbidden",
@@ -4813,39 +4736,35 @@ class TestCriticInvariantRegistry:
         ]
 
 
-class TestRichWorkflowInvariants:
-    """Fire/quiet coverage for the rich-workflow invariants declared at
-    `ai_builder_critic_invariants.py:334/358/384`.
+class TestTypedDocumentWorkflowInvariants:
+    """Fire/quiet coverage for the JSON-contract rule on document workflows.
 
-    The id-order lockdown in `TestCriticInvariantRegistry` pins *which*
-    invariants exist; these tests pin their *behavior*. The form-field and
-    multi-step rules consume phrase-derived `PlannerPatternSignals`; the
-    JSON-contract rule instead derives its own typed document-artifact
-    eligibility from resolved slots and the result contract, so the two
-    sources are exercised independently here. The
-    `generated_docx_without_structure` case exists because a user who asks
-    for a plain generated DOCX must not be nagged about JSON steps or
-    quality chains — that is the most common false-positive shape.
+    Eligibility is typed: commit-grade `primary_runtime_input` plus a result
+    contract that delivers a document artefact. The phrase-derived twin that
+    the form-field and multi-step rules once consumed is gone — those rules
+    read display prose, so identical typed state produced different plans per
+    UI language. Runtime fields are owned by
+    `runtime_metadata_requires_form_fields`, and analysis depth by
+    `ResultContract`.
+
+    The `generated_docx_without_structure` case exists because a user who asks
+    for a plain generated DOCX must not be nagged about JSON steps — that is
+    the most common false-positive shape.
     """
 
-    def _context_with_signals(
+    def _typed_document_workflow_context(
         self,
         spec: FlowDraftSpecCore,
         *,
         flow: "Flow | None" = None,
         rich: bool = True,
-        needs_form_fields: bool = False,
-        prefers_structured_intermediate: bool = False,
-        prefers_quality_step: bool = False,
+        structured_result_requested: bool = False,
     ) -> CriticContext:
         from eneo.flows.ai_builder.ai_builder_critic_invariants import (
             CriticContext,
         )
         from eneo.flows.ai_builder.ai_builder_framework_policy import (
             OutputIntentResolution,
-        )
-        from eneo.flows.ai_builder.ai_builder_planner_pattern_signals import (
-            PlannerPatternSignals,
         )
         from eneo.flows.ai_builder.ai_builder_result_contract import ResultContract
 
@@ -4859,7 +4778,7 @@ class TestRichWorkflowInvariants:
                 confidence="high",
                 evidence=("message:test-source",),
             )
-            if rich and prefers_structured_intermediate
+            if rich and structured_result_requested
             else None
         )
 
@@ -4868,14 +4787,10 @@ class TestRichWorkflowInvariants:
             flow=flow,
             answer_signals={},
             text="",
-            requirements_text="",
-            signal_text="",
-            planner_patterns=PlannerPatternSignals(
-                needs_form_fields=needs_form_fields,
-                prefers_structured_intermediate=prefers_structured_intermediate,
-                prefers_quality_step=prefers_quality_step,
-                rich_document_workflow=rich,
-            ),
+            sectioned_form_intake=False,
+            runtime_form_fields_requested=False,
+            runtime_form_fields_evidence=(),
+            simple_text_transform=False,
             output_intent=OutputIntentResolution(terminal_output=None),
             mixed_audio_doc_input=False,
             result_contract=(
@@ -4920,72 +4835,11 @@ class TestRichWorkflowInvariants:
                 )
             ],
         )
-        context = self._context_with_signals(spec, needs_form_fields=True)
+        context = self._typed_document_workflow_context(spec)
 
         issues = render_critic_issues(context)
 
         assert not any("form_fields" in issue for issue in issues)
-
-    def test_edit_rich_workflow_requires_form_fields_when_missing(self) -> None:
-        from eneo.flows.ai_builder.ai_builder_critic_invariants import (
-            render_critic_issues,
-        )
-
-        spec = FlowDraftSpecCore(
-            flow_name="Rapport",
-            steps=[
-                _step(
-                    "step_a",
-                    "Analysera dokument",
-                    "Läs dokumentet och skriv rapport.",
-                    input_type=InputType.DOCUMENT,
-                )
-            ],
-        )
-        context = self._context_with_signals(
-            spec,
-            flow=_edit_flow(),
-            needs_form_fields=True,
-        )
-
-        issues = render_critic_issues(context)
-
-        assert any("form_fields" in issue for issue in issues)
-
-    def test_rich_workflow_requires_form_fields_silent_when_form_fields_declared(
-        self,
-    ) -> None:
-        from eneo.flows.ai_builder.ai_builder_critic_invariants import (
-            render_critic_issues,
-        )
-
-        spec = FlowDraftSpecCore(
-            flow_name="Rapport",
-            form_fields=[
-                FormFieldSpec(
-                    name="ansvarig_enhet", type="text", label="Ansvarig enhet"
-                )
-            ],
-            steps=[
-                _step(
-                    "step_a",
-                    "Analysera dokument",
-                    ("Läs dokumentet och skriv rapport för {{ ansvarig_enhet }}."),
-                    input_type=InputType.DOCUMENT,
-                )
-            ],
-        )
-        context = self._context_with_signals(
-            spec,
-            flow=_edit_flow(),
-            needs_form_fields=True,
-        )
-
-        issues = render_critic_issues(context)
-
-        assert not any(
-            "formulärfält" in issue or "form_fields" in issue for issue in issues
-        )
 
     def test_transcript_derived_headings_do_not_require_form_fields(self) -> None:
         prompt = (
@@ -5065,7 +4919,9 @@ class TestRichWorkflowInvariants:
                 )
             ],
         )
-        context = self._context_with_signals(spec, prefers_structured_intermediate=True)
+        context = self._typed_document_workflow_context(
+            spec, structured_result_requested=True
+        )
 
         issues = render_critic_issues(context)
 
@@ -5195,48 +5051,6 @@ class TestRichWorkflowInvariants:
         issue_ids = {issue.id for issue in issues}
 
         assert "rich_workflow_requires_json_contract_step" not in issue_ids
-        assert "rich_workflow_requires_form_fields" not in issue_ids
-        assert "rich_workflow_requires_multiple_steps" not in issue_ids
-
-    def test_rich_workflow_audio_quality_request_still_requires_multiple_steps(
-        self,
-    ) -> None:
-        conversation = [
-            {
-                "role": "user",
-                "content": (
-                    "Create a flow that transcribes meeting audio, reviews the "
-                    "analysis quality, and produces a DOCX meeting report."
-                ),
-            }
-        ]
-        spec = FlowDraftSpecCore(
-            flow_name="Reviewed meeting report",
-            steps=[
-                _step(
-                    "step_a",
-                    "Transcribe audio",
-                    "Transcribe the meeting audio.",
-                    input_type=InputType.AUDIO,
-                    output_mode=OutputMode.TRANSCRIBE_ONLY,
-                    output_type=OutputType.TEXT,
-                ),
-                _step(
-                    "step_b",
-                    "Write DOCX",
-                    "Write the report.",
-                    input_source=InputSource.PREVIOUS_STEP,
-                    input_type=InputType.TEXT,
-                    output_type=OutputType.DOCX,
-                ),
-            ],
-        )
-
-        issues = evaluate_critic_invariants(
-            build_conversation_critic_context(conversation, spec)
-        )
-
-        assert "rich_workflow_requires_multiple_steps" in {issue.id for issue in issues}
 
     def test_rich_workflow_requires_json_contract_step_silent_for_generated_docx_without_structure(
         self,
@@ -5263,322 +5077,14 @@ class TestRichWorkflowInvariants:
                 )
             ],
         )
-        context = self._context_with_signals(
-            spec, prefers_structured_intermediate=False
+        context = self._typed_document_workflow_context(
+            spec, structured_result_requested=False
         )
 
         issues = render_critic_issues(context)
 
         assert not any("output_contract" in issue for issue in issues)
         assert not any("JSON-steg" in issue for issue in issues)
-
-    def test_rich_workflow_requires_multiple_steps_fires_below_three_steps(
-        self,
-    ) -> None:
-        from eneo.flows.ai_builder.ai_builder_critic_invariants import (
-            render_critic_issues,
-        )
-
-        spec = FlowDraftSpecCore(
-            flow_name="Rapport",
-            steps=[
-                _step(
-                    "step_a",
-                    "Analysera dokument",
-                    "Analysera.",
-                    input_type=InputType.DOCUMENT,
-                ),
-                _step(
-                    "step_b",
-                    "Skriv rapport",
-                    "Skriv.",
-                    input_source=InputSource.PREVIOUS_STEP,
-                    input_type=InputType.TEXT,
-                    output_type=OutputType.DOCX,
-                ),
-            ],
-        )
-        context = self._context_with_signals(spec, prefers_quality_step=True)
-
-        issues = render_critic_issues(context)
-
-        assert any("mellanliggande" in issue.casefold() for issue in issues)
-
-    def test_rich_workflow_requires_multiple_steps_silent_when_three_steps_present(
-        self,
-    ) -> None:
-        from eneo.flows.ai_builder.ai_builder_critic_invariants import (
-            render_critic_issues,
-        )
-
-        spec = FlowDraftSpecCore(
-            flow_name="Rapport",
-            steps=[
-                _step(
-                    "step_a",
-                    "Analysera dokument",
-                    "Analysera.",
-                    input_type=InputType.DOCUMENT,
-                    output_type=OutputType.JSON,
-                    output_contract={"type": "object"},
-                ),
-                _step(
-                    "step_b",
-                    "Granska analysen",
-                    "Granska.",
-                    input_source=InputSource.PREVIOUS_STEP,
-                    input_type=InputType.JSON,
-                    output_type=OutputType.TEXT,
-                ),
-                _step(
-                    "step_c",
-                    "Skriv rapport",
-                    "Skriv.",
-                    input_source=InputSource.PREVIOUS_STEP,
-                    input_type=InputType.TEXT,
-                    output_type=OutputType.DOCX,
-                ),
-            ],
-        )
-        context = self._context_with_signals(spec, prefers_quality_step=True)
-
-        issues = render_critic_issues(context)
-
-        assert not any("mellanliggande" in issue.casefold() for issue in issues)
-
-    def test_rich_workflow_invariants_all_silent_when_not_a_rich_workflow(
-        self,
-    ) -> None:
-        """When `rich_document_workflow` is False, none of the three
-        invariants may fire — even if the underlying sub-signals are set.
-        This guards against a regression where a sub-signal alone (e.g.
-        a stray quality keyword on a non-document flow) re-triggers the
-        nags.
-        """
-        from eneo.flows.ai_builder.ai_builder_critic_invariants import (
-            render_critic_issues,
-        )
-
-        spec = FlowDraftSpecCore(
-            flow_name="Kort sammanfattning",
-            steps=[
-                _step(
-                    "step_a",
-                    "Skriv sammanfattning",
-                    "Sammanfatta texten.",
-                    input_type=InputType.TEXT,
-                    output_type=OutputType.TEXT,
-                )
-            ],
-        )
-        context = self._context_with_signals(
-            spec,
-            rich=False,
-            needs_form_fields=True,
-            prefers_structured_intermediate=True,
-            prefers_quality_step=True,
-        )
-
-        issues = render_critic_issues(context)
-
-        assert not any("rich" in issue.casefold() for issue in issues)
-        assert not any("mellanliggande" in issue.casefold() for issue in issues)
-        assert not any(
-            "återanvända strukturerad" in issue.casefold() for issue in issues
-        )
-
-
-def test_action_followup_critic_accepts_authentic_swedish_field_names() -> None:
-    # The critic's own remediation asks (in Swedish) for beslut, åtgärder,
-    # ansvariga, deadlines och öppna frågor — a contract using exactly those
-    # words must satisfy it. Diacritics and plural forms are the live shapes.
-    planning_state = PlanningState.empty()
-    planning_state.resolved_slots["post_processing_goal"] = ResolvedSlot(
-        name="post_processing_goal",
-        value="action_followup",
-        source="structured_answer",
-        confidence="high",
-        evidence=["question_answer:post_processing_goal"],
-    )
-    spec = FlowDraftSpecCore(
-        flow_name="Mötesuppföljning",
-        steps=[
-            _step(
-                "step_a",
-                "Extrahera uppföljning",
-                "Extrahera uppföljningspunkter ur transkriptet.",
-                output_type=OutputType.JSON,
-                output_contract={
-                    "type": "object",
-                    "properties": {
-                        "beslut": {"type": "array"},
-                        "åtgärder": {"type": "array"},
-                        "ansvariga": {"type": "array"},
-                        "deadlines": {"type": "array"},
-                        "öppna_frågor": {"type": "array"},
-                    },
-                },
-            )
-        ],
-    )
-
-    issues = evaluate_critic_invariants(
-        build_conversation_critic_context(
-            [{"role": "user", "content": "Använd underlaget."}],
-            spec,
-            planning_state=planning_state,
-        )
-    )
-
-    assert "action_followup_requires_followup_fields" not in {
-        issue.id for issue in issues
-    }
-
-
-def test_action_followup_critic_recognizes_roles_nested_in_action_items() -> None:
-    # An explicit nested schema that carries owners and deadlines inside the
-    # action items satisfies those roles; flattened-alias matching must not
-    # misread it as a user-schema conflict.
-    planning_state = PlanningState.empty()
-    planning_state.resolved_slots["post_processing_goal"] = ResolvedSlot(
-        name="post_processing_goal",
-        value="action_followup",
-        source="structured_answer",
-        confidence="high",
-        evidence=["question_answer:post_processing_goal"],
-    )
-    spec = FlowDraftSpecCore(
-        flow_name="Uppföljning",
-        steps=[
-            _step(
-                "step_a",
-                "Extract follow-up",
-                "Extract the follow-up result.",
-                output_type=OutputType.JSON,
-                output_contract={
-                    "type": "object",
-                    "properties": {
-                        "decisions": {"type": "array"},
-                        "actions": {
-                            "type": "array",
-                            "items": {
-                                "type": "object",
-                                "properties": {
-                                    "description": {"type": "string"},
-                                    "named_owner": {"type": "string"},
-                                    "stated_due_date": {"type": "string"},
-                                },
-                            },
-                        },
-                        "open_questions": {"type": "array"},
-                    },
-                },
-            )
-        ],
-    )
-
-    issues = evaluate_critic_invariants(
-        build_conversation_critic_context(
-            [{"role": "user", "content": "Use the material."}],
-            spec,
-            planning_state=planning_state,
-        )
-    )
-
-    assert "action_followup_requires_followup_fields" not in {
-        issue.id for issue in issues
-    }
-
-
-def test_action_followup_critic_rejects_lookalike_field_names() -> None:
-    # Role recognition is a closed exact-folded vocabulary: names that merely
-    # contain an accepted alias must not satisfy the roles, or the quality
-    # contract becomes trivially spoofable.
-    planning_state = PlanningState.empty()
-    planning_state.resolved_slots["post_processing_goal"] = ResolvedSlot(
-        name="post_processing_goal",
-        value="action_followup",
-        source="structured_answer",
-        confidence="high",
-        evidence=["question_answer:post_processing_goal"],
-    )
-    spec = FlowDraftSpecCore(
-        flow_name="Lookalikes",
-        steps=[
-            _step(
-                "step_a",
-                "Extract",
-                "Extract the result.",
-                output_type=OutputType.JSON,
-                output_contract={
-                    "type": "object",
-                    "properties": {
-                        "indecision_reason": {"type": "string"},
-                        "transaction_id": {"type": "string"},
-                        "homeownership_status": {"type": "string"},
-                        "overdue_date": {"type": "string"},
-                        "open_questions_count": {"type": "number"},
-                    },
-                },
-            )
-        ],
-    )
-
-    issues = evaluate_critic_invariants(
-        build_conversation_critic_context(
-            [{"role": "user", "content": "Use the material."}],
-            spec,
-            planning_state=planning_state,
-        )
-    )
-
-    assert "action_followup_requires_followup_fields" in {issue.id for issue in issues}
-
-
-def test_named_result_evidence_does_not_exempt_the_followup_critic() -> None:
-    # Only a user-DECLARED exact schema wins over the follow-up roles. Named
-    # result evidence is not a closed contract, so it must not
-    # silence the obligation.
-    planning_state = PlanningState.empty()
-    planning_state.resolved_slots["post_processing_goal"] = ResolvedSlot(
-        name="post_processing_goal",
-        value="action_followup",
-        source="structured_answer",
-        confidence="high",
-        evidence=["question_answer:post_processing_goal"],
-    )
-    planning_state.named_result_evidence = [
-        NamedResultEvidence(
-            name="beslut",
-            confidence="high",
-            evidence=["quote:user_message:user-1:beslut"],
-        )
-    ]
-    spec = FlowDraftSpecCore(
-        flow_name="Prosahintar",
-        steps=[
-            _step(
-                "step_a",
-                "Extrahera",
-                "Extrahera fälten.",
-                output_type=OutputType.JSON,
-                output_contract={
-                    "type": "object",
-                    "properties": {"beslut": {"type": "array"}},
-                },
-            )
-        ],
-    )
-
-    issues = evaluate_critic_invariants(
-        build_conversation_critic_context(
-            [{"role": "user", "content": "Jag nämnde fälten i texten."}],
-            spec,
-            planning_state=planning_state,
-        )
-    )
-
-    assert "action_followup_requires_followup_fields" in {issue.id for issue in issues}
 
 
 class TestSourceReaderRequiredFieldsCaptured:
@@ -5596,18 +5102,16 @@ class TestSourceReaderRequiredFieldsCaptured:
         from eneo.flows.ai_builder.ai_builder_framework_policy import (
             OutputIntentResolution,
         )
-        from eneo.flows.ai_builder.ai_builder_planner_pattern_signals import (
-            PlannerPatternSignals,
-        )
 
         return CriticContext(
             spec=spec,
             flow=None,
             answer_signals={},
             text="",
-            requirements_text="",
-            signal_text="",
-            planner_patterns=PlannerPatternSignals(),
+            sectioned_form_intake=False,
+            runtime_form_fields_requested=False,
+            runtime_form_fields_evidence=(),
+            simple_text_transform=False,
             output_intent=OutputIntentResolution(terminal_output=None),
             mixed_audio_doc_input=False,
             source_reader_required_field_names=required,
@@ -5672,9 +5176,6 @@ class TestRuntimeMetadataRemediationNamesTheFields:
         from eneo.flows.ai_builder.ai_builder_framework_policy import (
             OutputIntentResolution,
         )
-        from eneo.flows.ai_builder.ai_builder_planner_pattern_signals import (
-            PlannerPatternSignals,
-        )
         from eneo.flows.ai_builder.planning_state import ResolvedSlot
 
         context = CriticContext(
@@ -5698,9 +5199,10 @@ class TestRuntimeMetadataRemediationNamesTheFields:
             flow=_edit_flow(),
             answer_signals={"runtime_metadata_fields": {"wants_input_fields"}},
             text="",
-            requirements_text="",
-            signal_text="",
-            planner_patterns=PlannerPatternSignals(),
+            sectioned_form_intake=False,
+            runtime_form_fields_requested=False,
+            runtime_form_fields_evidence=(),
+            simple_text_transform=False,
             output_intent=OutputIntentResolution(terminal_output=None),
             mixed_audio_doc_input=False,
             resolved_slots={
@@ -5722,3 +5224,241 @@ class TestRuntimeMetadataRemediationNamesTheFields:
         assert '"fyller i område, beräknad klartid och kontaktväg"' in remediation
         assert "user_message:" not in remediation
         assert "input_field" in remediation
+
+
+def _disclosure_conversation(planning_state: PlanningState, ui_language: str) -> list:
+    """A conversation whose assistant turn carries the rendered disclosure."""
+
+    from eneo.flows.ai_builder.ai_builder_requirements_disclosure import (
+        build_requirements_disclosure,
+    )
+
+    payload = build_requirements_disclosure(planning_state, ui_language=ui_language)
+    return [
+        {
+            "role": "user",
+            "content": "Vi laddar upp underlag och vill ha en färdig rapport som DOCX.",
+        },
+        {
+            "role": "assistant",
+            "content": "Summary",
+            "metadata": {
+                "requirements_summary": payload.model_dump(mode="json"),
+                "requirements_version": payload.requirements_version,
+            },
+        },
+        {
+            "role": "user",
+            "content": "",
+            "metadata": {
+                "requirements_confirmed": True,
+                "requirements_version": payload.requirements_version,
+            },
+        },
+    ]
+
+
+def test_ui_language_does_not_change_critic_issues() -> None:
+    """The disclosure is display. Rendering it in English must not change the plan.
+
+    A committed transcript checkpoint renders the English topic "Transcript
+    review"; the Swedish topic is "Granskning av transkribering". While the
+    critic scanned that prose for structural markers, the English rendering of
+    identical typed state invented an extra review step.
+    """
+
+    planning_state = PlanningState.empty()
+    planning_state.resolved_slots = {
+        name: ResolvedSlot(
+            name=name,
+            value=value,
+            source="structured_answer",
+            confidence="high",
+            evidence=[f"question_answer:{name}"],
+        )
+        for name, value in (
+            ("primary_runtime_input", "documents"),
+            ("terminal_output", "docx_document"),
+            ("post_processing_goal", "extract_key_information"),
+        )
+    }
+    planning_state.checkpoint_intents = [
+        CheckpointIntent(
+            evidence_level="explicit",
+            producer_kind="transcript",
+            operation="set",
+            mode=FlowStepReviewMode.VIEW,
+            confidence="high",
+            evidence=["quote:user_message:1:I want to approve the transcript."],
+        )
+    ]
+    spec = FlowDraftSpecCore(
+        flow_name="Mötesprotokoll",
+        steps=[
+            _step(
+                "step_a",
+                "Transkribera",
+                "Transkribera mötesljudet.",
+                input_type=InputType.AUDIO,
+                output_mode=OutputMode.TRANSCRIBE_ONLY,
+            ),
+            _step(
+                "step_b",
+                "Skriv protokoll",
+                "Skriv protokollet.",
+                input_source=InputSource.PREVIOUS_STEP,
+                output_type=OutputType.DOCX,
+            ),
+        ],
+    )
+
+    issues_by_locale = {
+        locale: {
+            issue.id
+            for issue in evaluate_critic_invariants(
+                build_conversation_critic_context(
+                    _disclosure_conversation(planning_state, locale),
+                    spec,
+                    planning_state=planning_state,
+                )
+            )
+        }
+        for locale in ("sv", "en")
+    }
+
+    assert issues_by_locale["sv"] == issues_by_locale["en"]
+
+
+def test_committed_no_extra_fields_answer_silences_sectioned_form_intake() -> None:
+    """The user's own answer outranks a phrase that sounds like form intake.
+
+    "No extra fields" is a committed discovery answer, so it is read from the
+    resolved slot. It used to be recovered by scanning the Swedish sentence the
+    disclosure rendered from that very slot.
+    """
+
+    spec = FlowDraftSpecCore(
+        flow_name="Formulär till rapport",
+        steps=[_step("step_a", "Sammanställ rapport", "Sammanställ svaren.")],
+    )
+    planning_state = PlanningState.empty()
+    planning_state.signals = [
+        PlanningSignal(
+            question_id="form_intake_pattern",
+            value="sectioned_form_intake",
+            confidence="high",
+            source="model",
+            provenance=["quote:fritext under varje rubrik"],
+        )
+    ]
+    planning_state.resolved_slots = {
+        "runtime_metadata_fields": ResolvedSlot(
+            name="runtime_metadata_fields",
+            value="no_extra_metadata",
+            source="structured_answer",
+            confidence="high",
+            evidence=["question_answer:runtime_metadata_fields"],
+        )
+    }
+    conversation = [{"role": "user", "content": "Bygg flödet enligt beskrivningen."}]
+
+    silenced = evaluate_critic_invariants(
+        build_conversation_critic_context(
+            conversation, spec, flow=_edit_flow(), planning_state=planning_state
+        )
+    )
+    planning_state.resolved_slots = {}
+    still_firing = evaluate_critic_invariants(
+        build_conversation_critic_context(
+            conversation, spec, flow=_edit_flow(), planning_state=planning_state
+        )
+    )
+
+    assert "sectioned_form_intake_requires_form_fields" not in {
+        issue.id for issue in silenced
+    }
+    assert "sectioned_form_intake_requires_form_fields" in {
+        issue.id for issue in still_firing
+    }
+
+
+def test_typed_form_intake_verdict_requires_form_fields() -> None:
+    """The classifier's generic form-intake verdict is a first-class request.
+
+    It is not only the sectioned variant: a plan that omits the fields the
+    user asked to fill in per run must still be repaired.
+    """
+
+    spec = FlowDraftSpecCore(
+        flow_name="Rapport",
+        steps=[_step("step_a", "Skriv", "Skriv rapporten.")],
+    )
+    planning_state = PlanningState.empty()
+    planning_state.signals = [
+        PlanningSignal(
+            question_id="form_intake_pattern",
+            value="needs_form_fields",
+            confidence="high",
+            source="model",
+            provenance=[
+                "model:form_intake_pattern:hash",
+                "quote:user_message:msg-1:användaren ska fylla i handläggare och datum",
+            ],
+        )
+    ]
+    conversation = [{"role": "user", "content": "Bygg flödet."}]
+
+    issue_ids = {
+        issue.id
+        for issue in evaluate_critic_invariants(
+            build_conversation_critic_context(
+                conversation, spec, flow=_edit_flow(), planning_state=planning_state
+            )
+        )
+    }
+
+    assert "runtime_metadata_requires_form_fields" in issue_ids
+    remediation = next(
+        issue.remediation
+        for issue in evaluate_critic_invariants(
+            build_conversation_critic_context(
+                conversation, spec, flow=_edit_flow(), planning_state=planning_state
+            )
+        )
+        if issue.id == "runtime_metadata_requires_form_fields"
+    )
+    assert "handläggare och datum" in remediation
+
+
+def test_sectioned_form_intake_reports_one_missing_form_fields_issue() -> None:
+    """One missing contract, one issue: the sectioned rule owns its remediation."""
+
+    spec = FlowDraftSpecCore(
+        flow_name="Formulär till rapport",
+        steps=[_step("step_a", "Sammanställ rapport", "Sammanställ svaren.")],
+    )
+    planning_state = PlanningState.empty()
+    planning_state.signals = [
+        PlanningSignal(
+            question_id="form_intake_pattern",
+            value="sectioned_form_intake",
+            confidence="high",
+            source="model",
+            provenance=["quote:user_message:msg-1:fritext under varje rubrik"],
+        )
+    ]
+
+    issue_ids = [
+        issue.id
+        for issue in evaluate_critic_invariants(
+            build_conversation_critic_context(
+                [{"role": "user", "content": "Bygg flödet."}],
+                spec,
+                flow=_edit_flow(),
+                planning_state=planning_state,
+            )
+        )
+        if "form_fields" in issue.id
+    ]
+
+    assert issue_ids == ["sectioned_form_intake_requires_form_fields"]
