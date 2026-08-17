@@ -39,6 +39,14 @@ function makeFixtures(spaceId: string) {
           assumptions: ["Underlaget är på svenska."],
           manual_setup_notes: []
         }
+      },
+      // A plan only exists against a confirmed disclosure.
+      {
+        message_id: "m-3",
+        role: "user",
+        content: "",
+        timestamp: "2026-07-11T09:06:00Z",
+        requirements_confirmation: { requirements_confirmed: true, requirements_version: "v1" }
       }
     ],
     latest_turn: null

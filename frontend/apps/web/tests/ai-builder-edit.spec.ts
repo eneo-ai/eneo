@@ -26,6 +26,7 @@ const RAIL_LABEL = "AI-byggarens förlopp"; // ai_builder_progress_aria
 const HOW_FLOW_WORKS = "Så fungerar flödet"; // ai_builder_how_flow_works
 const APPROVE = "Godkänn"; // ai_builder_approve
 const APPLY = "Tillämpa"; // ai_builder_apply
+const APPLY_CONFIRM = "Uppdatera flödet"; // ai_builder_approve_dialog_confirm_edit
 const CONVERSATION_BUTTON = "Samtal"; // ai_builder_conversation_button
 const EDIT_ANSWER = "Ändra det här svaret"; // ai_builder_conversation_edit_answer
 const ANSWER_IN_VIEW = "— besvaras i vyn"; // ai_builder_question_answer_in_view
@@ -423,6 +424,8 @@ test.describe("AI builder edit journeys", () => {
     const apply = page.getByRole("button", { name: APPLY });
     await expect(apply).toBeEnabled();
     await apply.click();
+    // Applying is confirmed in a dialog before anything is written.
+    await page.getByRole("alertdialog").getByRole("button", { name: APPLY_CONFIRM }).click();
 
     // Applying hands the user back to the builder tab with the updated flow.
     await expect(flowTab(page, BUILDER_TAB)).toHaveAttribute("aria-selected", "true", {
