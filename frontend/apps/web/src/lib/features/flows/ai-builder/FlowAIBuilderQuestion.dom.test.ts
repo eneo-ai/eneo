@@ -264,4 +264,40 @@ describe("FlowAIBuilderQuestion runtime metadata fields", () => {
         .getAttribute("aria-disabled")
     ).toBe("true");
   });
+
+  it("edits the fields already answered instead of starting from an empty form", async () => {
+    // Reopening used to mount a blank row, so confirming replaced every field
+    // the user had defined with the one they happened to type.
+    render(FlowAIBuilderQuestion, {
+      question: metadataQuestion(),
+      answeredFields: [
+        {
+          value: {
+            name: "personnummer",
+            label: "Personnummer",
+            type: "number" as const,
+            required: true,
+            options: []
+          },
+          purpose: "interpret_input" as const
+        }
+      ]
+    });
+
+    expect(
+      (screen.getByLabelText(m.ai_builder_question_field_label()) as HTMLInputElement).value
+    ).toBe("Personnummer");
+    await fireEvent.click(screen.getByLabelText(m.ai_builder_question_show_technical()));
+    expect(
+      (screen.getByLabelText(m.ai_builder_question_field_name()) as HTMLInputElement).value
+    ).toBe("personnummer");
+    // Already answered, so the name is the user's — a later label edit must not
+    // rewrite what the flow already refers to.
+    await fireEvent.input(screen.getByLabelText(m.ai_builder_question_field_label()), {
+      target: { value: "Sökandes personnummer" }
+    });
+    expect(
+      (screen.getByLabelText(m.ai_builder_question_field_name()) as HTMLInputElement).value
+    ).toBe("personnummer");
+  });
 });

@@ -13,7 +13,10 @@
   import FlowAIBuilderQuestion from "./FlowAIBuilderQuestion.svelte";
   import IconCheck from "@lucide/svelte/icons/check";
   import IconChevronDown from "@lucide/svelte/icons/chevron-down";
-  import type { StructuredQuestionAnswerPayload } from "./structuredQuestionAnswer";
+  import type {
+    StructuredInputFieldAnswer,
+    StructuredQuestionAnswerPayload
+  } from "./structuredQuestionAnswer";
   import type { ChatMessage } from "./protocol";
   import type {
     AIBuilderAttachmentFile,
@@ -48,10 +51,6 @@
      *  can read off a decision row, which only names the option chosen. */
     runtimeFields?: { label: string; type: string; required: boolean }[];
     runtimeFieldsQuestionId?: string | null;
-    /** The question that settled each topic, for rows the server did not link.
-     *  Both strings are the same server-owned slot label, so this is one
-     *  identity read twice rather than a guessed connection. */
-    questionIdByTopic?: ReadonlyMap<string, string>;
     /** No structured question was asked before this summary. */
     noQuestions: boolean;
     confirmed: boolean;
@@ -70,6 +69,9 @@
      *  the questions; the card below it stays visible the whole time. */
     editingQuestion?: ChatMessage | null;
     editingQuestionNumber?: number | null;
+    /** What the user already answered with, so reopening edits those fields
+     *  instead of replacing them with an empty form. */
+    editingFields?: StructuredInputFieldAnswer[] | null;
     onanswer?: (payload: StructuredQuestionAnswerPayload) => void;
     oncanceledit?: () => void;
     onconfirm: () => void;
@@ -87,7 +89,6 @@
     answered,
     runtimeFields = [],
     runtimeFieldsQuestionId = null,
-    questionIdByTopic,
     noQuestions,
     confirmed,
     stale,
@@ -97,6 +98,7 @@
     disabled = false,
     editingQuestion = null,
     editingQuestionNumber = null,
+    editingFields = null,
     onanswer,
     oncanceledit,
     onconfirm,
@@ -155,6 +157,18 @@
     void changeRequestRef?.focusInput();
   }
 
+  let editorRef = $state<HTMLElement | null>(null);
+  // The editor opens above the card, which on a long card is off-screen: from
+  // where the user clicked, nothing appeared to happen at all.
+  $effect(() => {
+    if (editingQuestion?.question && editorRef) {
+      editorRef.scrollIntoView({
+        block: "center",
+        behavior: reducedMotion ? "auto" : "smooth"
+      });
+    }
+  });
+
   function reopenQuestion(questionId: string) {
     changeDrafts.set(changeTopic, changeDraft);
     changeOpen = false;
@@ -168,7 +182,10 @@
   let allContentFieldsShown = $state(false);
   const RUNTIME_FIELD_CHIP_CAP = 6;
   const CONTENT_FIELD_CHIP_CAP = 10;
-  const shownRuntimeFields = $derived(runtimeFields.slice(0, RUNTIME_FIELD_CHIP_CAP));
+  let allRuntimeFieldsShown = $state(false);
+  const shownRuntimeFields = $derived(
+    allRuntimeFieldsShown ? runtimeFields : runtimeFields.slice(0, RUNTIME_FIELD_CHIP_CAP)
+  );
   const shownContentFields = $derived(
     allContentFieldsShown ? namedContentFields : namedContentFields.slice(0, CONTENT_FIELD_CHIP_CAP)
   );
@@ -248,7 +265,7 @@
     {/if}
 
     {#if editingQuestion?.question}
-      <div class="mb-4">
+      <div class="mb-4" bind:this={editorRef}>
         <p class="text-secondary mb-2 flex items-center gap-2 text-xs">
           {m.ai_builder_question_editing_note()}
           <button
@@ -263,6 +280,7 @@
           <FlowAIBuilderQuestion
             question={editingQuestion.question}
             questionNumber={editingQuestionNumber}
+            answeredFields={editingFields}
             {isEdit}
             why={editingQuestion.content.trim() || null}
             {disabled}
@@ -338,8 +356,7 @@
             </h3>
             <dl class="mt-1.5 flex flex-col">
               {#each summary.key_decisions as decision (decision.topic)}
-                {@const settledBy =
-                  decision.question_id ?? questionIdByTopic?.get(decision.topic.trim()) ?? null}
+                {@const settledBy = decision.question_id ?? null}
                 <div
                   class="border-dimmer grid items-baseline gap-x-4 gap-y-0.5 border-t py-2.5 sm:grid-cols-[12.5rem_1fr_auto]"
                 >
@@ -475,7 +492,7 @@
               {m.ai_builder_requirements_runtime_fields_lead()}
             </p>
             <ul class="mt-2 flex list-none flex-wrap gap-1.5 p-0">
-              {#each shownRuntimeFields as field (field.label)}
+              {#each shownRuntimeFields as field, fieldIndex (fieldIndex)}
                 <li
                   class="border-default inline-flex h-[1.625rem] items-center gap-1.5 rounded-full border px-2.5 text-[0.78125rem]"
                   class:bg-secondary={!field.required}
@@ -484,17 +501,25 @@
                   class:text-accent-stronger={field.required}
                 >
                   <span class="font-medium">{field.label}</span>
+                  <span class="opacity-45" aria-hidden="true">·</span>
                   <span class="opacity-70">{fieldTypeLabel(field.type)}</span>
                   {#if field.required}
+                    <span class="opacity-45" aria-hidden="true">·</span>
                     <span class="opacity-70">{m.ai_builder_requirements_field_required()}</span>
                   {/if}
                 </li>
               {/each}
               {#if runtimeFields.length > shownRuntimeFields.length}
-                <li class="text-secondary inline-flex h-[1.625rem] items-center text-[0.78125rem]">
-                  {m.ai_builder_requirements_fields_more({
-                    count: String(runtimeFields.length - shownRuntimeFields.length)
-                  })}
+                <li>
+                  <button
+                    type="button"
+                    class="text-accent-stronger inline-flex h-[1.625rem] items-center text-[0.78125rem] font-semibold"
+                    onclick={() => (allRuntimeFieldsShown = true)}
+                  >
+                    {m.ai_builder_requirements_show_all_fields({
+                      count: String(runtimeFields.length)
+                    })}
+                  </button>
                 </li>
               {/if}
             </ul>

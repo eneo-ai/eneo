@@ -20,6 +20,8 @@
     questionMessage: ChatMessage;
     /** The server's own ordinal; null for a record from before it existed. */
     questionNumber: number | null;
+    /** Fields already answered for this question, so a re-ask edits them. */
+    answeredFields?: import("./structuredQuestionAnswer").StructuredInputFieldAnswer[] | null;
     answered: AnsweredQuestion[];
     /** The question being re-answered, if any; the card then shows that one. */
     editingQuestionId?: string | null;
@@ -35,6 +37,7 @@
   let {
     questionMessage,
     questionNumber,
+    answeredFields = null,
     answered,
     editingQuestionId = null,
     disabled = false,
@@ -110,6 +113,7 @@
         <FlowAIBuilderQuestion
           {question}
           {questionNumber}
+          {answeredFields}
           plannedRemaining={questionMessage.question?.questions_planned_remaining ?? null}
           {why}
           {disabled}

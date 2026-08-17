@@ -2,9 +2,11 @@
   /* eslint-disable eneo/no-raw-color -- the style block derives every colour
      from theme tokens via relative oklch() syntax, which the rule cannot see
      through */
+  import { untrack } from "svelte";
   import { m } from "$lib/paraglide/messages";
   import {
     getFlowFormFieldNameIssue,
+    getFlowFormFieldVariableToken,
     getSuggestedFlowFormFieldRuntimeKey
   } from "$lib/features/flows/flowFormSchema";
   import { slide } from "svelte/transition";
@@ -52,6 +54,9 @@
     /** Further questions the server plans after this one — a snapshot that can
      *  grow, so it is said in words and never drawn as a progress bar. */
     plannedRemaining?: number | null;
+    /** The fields this question was already answered with. Editing starts from
+     *  them: an empty form would let one blank row replace the whole set. */
+    answeredFields?: StructuredInputFieldAnswer[] | null;
   }
 
   let {
@@ -64,7 +69,8 @@
     onanswer,
     ondelegate,
     isEdit = false,
-    plannedRemaining = null
+    plannedRemaining = null,
+    answeredFields = null
   }: Props = $props();
 
   // Generated once per instance so radiogroup + its label can link without colliding.
@@ -112,17 +118,35 @@
   let copiedFieldIndex = $state<number | null>(null);
   let copiedTimer: ReturnType<typeof setTimeout> | null = null;
 
+  function fieldToken(name: string): string {
+    return getFlowFormFieldVariableToken(name.trim());
+  }
+
   async function copyFieldToken(index: number) {
-    const name = inputFields[index]?.variableName.trim();
-    if (!name) return;
-    await navigator.clipboard?.writeText(`{{ ${name} }}`).catch(() => {});
+    const token = fieldToken(inputFields[index]?.variableName ?? "");
+    if (!token) return;
+    try {
+      await navigator.clipboard.writeText(token);
+    } catch {
+      return;
+    }
     copiedFieldIndex = index;
     if (copiedTimer) clearTimeout(copiedTimer);
     copiedTimer = setTimeout(() => (copiedFieldIndex = null), 1500);
   }
 
-  let inputFields = $state([
-    {
+  interface EditableField {
+    variableName: string;
+    nameEdited: boolean;
+    label: string;
+    fieldType: StructuredInputFieldType;
+    required: boolean;
+    optionsText: string;
+    purpose: StructuredInputFieldPurpose | "";
+  }
+
+  function blankField(): EditableField {
+    return {
       variableName: "",
       nameEdited: false,
       label: "",
@@ -130,8 +154,26 @@
       required: false,
       optionsText: "",
       purpose: "" as StructuredInputFieldPurpose | ""
-    }
-  ]);
+    };
+  }
+
+  // Seeded once, on purpose: the editor is re-keyed per question, and after
+  // that the rows belong to the user, not to the answer they started from.
+  let inputFields = $state<EditableField[]>(
+    untrack(() =>
+      (answeredFields ?? []).length > 0
+        ? (answeredFields ?? []).map((field) => ({
+            variableName: field.value.name,
+            nameEdited: true,
+            label: field.value.label,
+            fieldType: field.value.type,
+            required: field.value.required === true,
+            optionsText: (field.value.options ?? []).join(", "),
+            purpose: field.purpose as StructuredInputFieldPurpose | ""
+          }))
+        : [blankField()]
+    )
+  );
 
   let preselectedQuestionId: string | null = null;
   $effect(() => {
@@ -382,15 +424,7 @@
 
   function addInputField() {
     if (inputFields.length >= 20) return;
-    inputFields.push({
-      variableName: "",
-      nameEdited: false,
-      label: "",
-      fieldType: "text",
-      required: false,
-      optionsText: "",
-      purpose: ""
-    });
+    inputFields.push(blankField());
   }
 
   function removeInputField(index: number) {
@@ -449,19 +483,19 @@
             </label>
             <div class="field-name">
               <span class="field-name-label">{m.ai_builder_question_field_name()}</span>
-              {#if field.variableName.trim()}
+              {#if fieldToken(field.variableName)}
                 <button
                   type="button"
                   class="field-name-token"
                   aria-label={m.ai_builder_question_field_copy({
-                    token: `{{ ${field.variableName.trim()} }}`
+                    token: fieldToken(field.variableName)
                   })}
                   onclick={() => copyFieldToken(index)}
                   {disabled}
                 >
                   {copiedFieldIndex === index
                     ? m.ai_builder_question_field_copied()
-                    : `{{ ${field.variableName.trim()} }}`}
+                    : fieldToken(field.variableName)}
                 </button>
               {/if}
               {#if showTechnicalNames}

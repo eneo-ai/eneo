@@ -21,6 +21,7 @@
   import { getAIBuilderService } from "./FlowAIBuilderService.svelte.ts";
   import { summaryTerm } from "./aiBuilderSummaryText";
   import { buildAnswerLabels } from "./aiBuilderAnswerLabel";
+  import type { StructuredInputFieldAnswer } from "./structuredQuestionAnswer";
   import type { AIBuilderSavedFlowStepScope, ChatMessage, RequirementsSummary } from "./protocol";
   import {
     delegatedQuestionAnswer,
@@ -134,6 +135,16 @@
     }
     return fields;
   });
+  const answeredFieldsByQuestionId = $derived.by(() => {
+    const byQuestion = new SvelteMap<string, StructuredInputFieldAnswer[]>();
+    for (const message of service.messages) {
+      const answer = message.questionAnswer;
+      if (answer?.question_id && answer.input_fields?.length) {
+        byQuestion.set(answer.question_id, answer.input_fields as StructuredInputFieldAnswer[]);
+      }
+    }
+    return byQuestion;
+  });
   const runtimeFieldsQuestionId = $derived.by(() => {
     let questionId: string | null = null;
     for (const [index, message] of service.messages.entries()) {
@@ -142,14 +153,6 @@
       if (answer?.input_fields?.length && answer.question_id) questionId = answer.question_id;
     }
     return questionId;
-  });
-  const questionIdByTopic = $derived.by(() => {
-    const byTopic = new SvelteMap<string, string>();
-    for (const id of askedQuestionIds) {
-      const topic = newestQuestion(id)?.topic?.trim();
-      if (topic && service.isQuestionAnswered(id)) byTopic.set(topic, id);
-    }
-    return byTopic;
   });
   const delegatedQuestionIds = $derived.by(() => {
     const ids = new SvelteSet<string>();
@@ -632,6 +635,9 @@
         <BuilderQuestionScreen
           {questionMessage}
           {questionNumber}
+          answeredFields={questionMessage?.question
+            ? (answeredFieldsByQuestionId.get(questionMessage.question.question_id) ?? null)
+            : null}
           answered={answeredQuestions}
           isEdit={targetKind === "edit"}
           {editingQuestionId}
@@ -650,7 +656,6 @@
           answered={answeredQuestions}
           {runtimeFields}
           {runtimeFieldsQuestionId}
-          {questionIdByTopic}
           noQuestions={askedQuestionIds.length === 0}
           confirmed={service.isRequirementsSummaryConfirmed(latestSummary)}
           stale={summaryIsStale}
@@ -659,6 +664,9 @@
           isEdit={targetKind === "edit"}
           disabled={service.isCreating || service.isStreaming}
           editingQuestion={editingQuestionMessage}
+          editingFields={editingQuestionMessage?.question
+            ? (answeredFieldsByQuestionId.get(editingQuestionMessage.question.question_id) ?? null)
+            : null}
           editingQuestionNumber={questionNumber}
           onanswer={handleQuestionAnswer}
           oncanceledit={() => (editingQuestionId = null)}
