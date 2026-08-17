@@ -89,6 +89,19 @@
     summary.key_decisions.some((decision) => decision.question_id != null)
   );
   const namedContentFields = $derived(summary.named_content_fields ?? []);
+  const decisionQuestionIds = $derived(
+    new SvelteSet(
+      summary.key_decisions
+        .map((decision) => decision.question_id)
+        .filter((id): id is string => id != null)
+    )
+  );
+  const unlistedAnswers = $derived(
+    answered.filter((item) => !decisionQuestionIds.has(item.questionId))
+  );
+  const delegatedQuestionIds = $derived(
+    new SvelteSet(answered.filter((item) => item.delegated).map((item) => item.questionId))
+  );
   // What the decisions already say, so the input and result rows do not repeat
   // a value the user has just read one line above.
   const inputTerm = $derived(summaryTerm(summary.input_description));
@@ -124,10 +137,10 @@
 
 <div class="flex min-h-full justify-center px-7 pt-6 pb-10 max-lg:px-5 max-md:px-4 max-sm:pt-4">
   <div class="confirm-screen my-auto w-full max-w-[43.75rem] 2xl:max-w-[48.125rem]">
-    {#if answered.length > 0 && !readOnly}
+    {#if unlistedAnswers.length > 0 && !readOnly}
       <div class="mb-4 flex flex-wrap items-center gap-2">
         <span class="text-secondary text-xs">{m.ai_builder_question_answers_label()}</span>
-        {#each answered as item (item.questionId)}
+        {#each unlistedAnswers as item (item.questionId)}
           <button
             type="button"
             class="border-default bg-primary hover:bg-secondary inline-flex h-[1.875rem] max-w-full items-center gap-1.5 rounded-full border px-2.5 text-[0.8125rem]"
@@ -251,11 +264,13 @@
                 <div
                   class="border-dimmer grid items-baseline gap-x-4 gap-y-0.5 border-t py-2.5 sm:grid-cols-[12.5rem_1fr_auto]"
                 >
-                  <dt class="text-secondary flex items-center gap-1 text-[0.8125rem]">
-                    {decision.topic}
-                    <!-- Only worth saying beside rows the user did settle
-                         themselves; with no questions asked, every row follows
-                         from the description and the note says nothing. -->
+                  <dt class="text-secondary text-[0.8125rem]">{decision.topic}</dt>
+                  <dd class="text-primary text-[0.85rem] font-medium">
+                    {decision.decision}
+                    <!-- Says where the value came from, so it sits with the
+                         value. Only worth saying beside rows the user did
+                         settle themselves: with no questions asked, every row
+                         follows from the description and the note says nothing. -->
                     {#if !settledBy && hasCorrectableDecision}
                       <Tooltip.Provider delayDuration={250}>
                         <Tooltip.Root>
@@ -264,7 +279,7 @@
                               <button
                                 {...props}
                                 type="button"
-                                class="text-secondary focus-visible:ring-accent-stronger/40 inline-flex items-center gap-1 rounded-full text-xs focus-visible:ring-2 focus-visible:outline-none"
+                                class="text-secondary focus-visible:ring-accent-stronger/40 mt-0.5 flex items-center gap-1 rounded-full text-xs font-normal focus-visible:ring-2 focus-visible:outline-none"
                                 aria-label={m.ai_builder_requirements_derived_explained()}
                               >
                                 {m.ai_builder_requirements_derived()}
@@ -277,9 +292,12 @@
                           </Tooltip.Content>
                         </Tooltip.Root>
                       </Tooltip.Provider>
+                    {:else if settledBy && delegatedQuestionIds.has(settledBy)}
+                      <span class="text-secondary mt-0.5 block text-xs font-normal">
+                        {m.ai_builder_question_delegated_badge()}
+                      </span>
                     {/if}
-                  </dt>
-                  <dd class="text-primary text-[0.85rem] font-medium">{decision.decision}</dd>
+                  </dd>
                   {#if !readOnly && !confirmed}
                     <Button
                       variant="outline"
