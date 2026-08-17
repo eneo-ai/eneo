@@ -66,7 +66,9 @@
   <Page.Header>
     <Page.Title title={m.flows()} description={m.flow_list_page_description()}></Page.Title>
     {#if canManage}
-      <div class="flex items-center gap-2">
+      <!-- The header is one fixed row: the actions keep their size and the
+           title gives way, rather than the primary action sliding off a phone. -->
+      <div class="flex shrink-0 items-center gap-2">
         <FlowPackageImportDialog
           eneo={data.eneo}
           spaceId={$currentSpace.id}

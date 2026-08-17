@@ -298,9 +298,15 @@
   }
 </script>
 
-<Button variant="outline" onclick={() => (open = true)}>
+<Button
+  variant="outline"
+  onclick={() => (open = true)}
+  aria-label={m.flow_package_import_button()}
+  title={m.flow_package_import_button()}
+  class="max-sm:aspect-square max-sm:px-0"
+>
   <Upload class="size-4" />
-  {m.flow_package_import_button()}
+  <span class="max-sm:sr-only">{m.flow_package_import_button()}</span>
 </Button>
 
 <Dialog.Root {open} onOpenChange={handleOpenChange}>
