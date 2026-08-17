@@ -1291,11 +1291,17 @@ export class FlowAIBuilderDriver {
     return latestSummary.requirements_version === summary.requirements_version;
   }
 
+  /**
+   * The server may ask the same question again after it was answered — to
+   * reword it, or because a later answer reopened it. Only an answer that
+   * comes after the newest asking answers it; an older one belongs to the
+   * asking before, and treating it as current hides the new question entirely.
+   */
   isQuestionAnswered(questionId: string): boolean {
     for (let index = this.#state.messages.length - 1; index >= 0; index -= 1) {
-      if (this.#state.messages[index]?.questionAnswer?.question_id === questionId) {
-        return true;
-      }
+      const message = this.#state.messages[index];
+      if (message?.questionAnswer?.question_id === questionId) return true;
+      if (message?.question?.question_id === questionId) return false;
     }
     return false;
   }

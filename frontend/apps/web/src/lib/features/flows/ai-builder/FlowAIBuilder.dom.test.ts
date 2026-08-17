@@ -775,6 +775,41 @@ describe("FlowAIBuilder discovery screens", () => {
     });
   });
 
+  it("shows a question asked again after it was answered", async () => {
+    const reasked = question(
+      "output_format",
+      "Vill du hellre ha PDF?",
+      [
+        { id: "pdf", label: "Som PDF" },
+        { id: "text", label: "Som text" }
+      ],
+      { question_index: 2 }
+    );
+    const { fetch } = makeFetch({
+      sessions: [
+        makeSession({
+          conversation: [
+            userMessage("u1", "Sammanfatta rapporter"),
+            assistantMessage("a1", "Jag behöver veta formatet.", { question: FORMAT_QUESTION }),
+            userMessage("u2", "Som text", {
+              question_answer: {
+                kind: "structured_question_answer",
+                question_id: "output_format",
+                selected_option_ids: ["text"]
+              }
+            }),
+            assistantMessage("a2", "Jag frågar igen.", { question: reasked })
+          ]
+        })
+      ]
+    });
+    renderShell({ fetch, stream: makeStream().stream, resumeSessionId: "s-1" });
+
+    // The earlier answer belongs to the earlier asking. Counting it as the
+    // answer to this one would hide the question the server is waiting on.
+    expect(await screen.findByRole("heading", { name: reasked.question })).toBeTruthy();
+  });
+
   it("lets the user change an earlier answer from the answer chips", async () => {
     const reworded = question(
       "output_format",
@@ -791,6 +826,13 @@ describe("FlowAIBuilder discovery screens", () => {
           conversation: [
             userMessage("u1", "Sammanfatta rapporter till en PDF"),
             assistantMessage("a1", "Jag behöver veta formatet.", { question: FORMAT_QUESTION }),
+            userMessage("u2", "Som text", {
+              question_answer: {
+                kind: "structured_question_answer",
+                question_id: "output_format",
+                selected_option_ids: ["text"]
+              }
+            }),
             assistantMessage("a2", "Jag omformulerar.", { question: reworded }),
             userMessage("u3", "Som PDF", {
               question_answer: {
@@ -799,7 +841,7 @@ describe("FlowAIBuilder discovery screens", () => {
                 selected_option_ids: ["pdf"]
               }
             }),
-            assistantMessage("a4", "Och källorna?", { question: SOURCES_QUESTION })
+            assistantMessage("a3", "Och källorna?", { question: SOURCES_QUESTION })
           ]
         })
       ]
