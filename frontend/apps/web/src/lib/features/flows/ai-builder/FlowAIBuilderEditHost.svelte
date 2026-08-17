@@ -19,6 +19,12 @@
   const service = untrack(() => initAIBuilderService(eneo, spaceId, flowId));
   let builder = $state<FlowAIBuilder | undefined>();
 
+  /** A change is being prepared: answers given, or a plan already proposed.
+   *  The flow header uses it to stop competing with the change's own action. */
+  export function hasChangeInProgress(): boolean {
+    return service.messages.length > 0 || service.currentPlan !== null;
+  }
+
   export async function focusSavedFlowStep(scope: AIBuilderSavedFlowStepScope) {
     // The host and its lazily rendered Builder child bind in separate update
     // flushes when the user opens the tab for the first time.

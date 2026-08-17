@@ -267,6 +267,11 @@
   }
 
   let activeTab = $state<FlowPageTab>(resolveInitialTab());
+  // While a change is being prepared in the AI builder, the flow's own primary
+  // action steps back: the only blue button on screen belongs to the change.
+  const changeInProgress = $derived(
+    activeTab === "ai-builder" && (aiBuilderHost?.hasChangeInProgress() ?? false)
+  );
   $effect(() => {
     if (!canUseAIBuilder && activeTab === "ai-builder") {
       setActiveTab("builder");
@@ -450,8 +455,11 @@
         {/if}
       </div>
       {#if $isPublished}
+        <!-- While a change is being prepared, the only primary on screen
+             belongs to the change: running the published version is a
+             different, quieter act. -->
         <Button
-          variant="default"
+          variant={changeInProgress ? "outline" : "default"}
           onclick={() => {
             showRunDialog = true;
           }}

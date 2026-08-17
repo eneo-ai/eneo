@@ -460,7 +460,14 @@
       !service.isStreaming
   );
 
+  let showDiscardChangeDialog = $state(false);
+
   function handleStartOver() {
+    showDiscardChangeDialog = true;
+  }
+
+  function discardChangeAndStartOver() {
+    showDiscardChangeDialog = false;
     conversationRef?.resetComposerContext();
     void service.startFreshSession("edit");
   }
@@ -512,7 +519,7 @@
           <BuilderSessionStatus />
           {#if canStartOver}
             <Button
-              variant="ghost"
+              variant="outline"
               size="sm"
               class="ml-auto"
               onclick={handleStartOver}
@@ -524,7 +531,12 @@
         </div>
       {:else if canStartOver}
         <div class="mx-auto flex w-full justify-end pt-3 {columnClass}">
-          <Button variant="ghost" size="sm" onclick={handleStartOver} disabled={service.isCreating}>
+          <Button
+            variant="outline"
+            size="sm"
+            onclick={handleStartOver}
+            disabled={service.isCreating}
+          >
             {m.ai_builder_start_fresh()}
           </Button>
         </div>
@@ -636,6 +648,24 @@
     </div>
   </div>
 {/if}
+
+<AlertDialog.Root bind:open={showDiscardChangeDialog}>
+  <AlertDialog.Content>
+    <AlertDialog.Header>
+      <AlertDialog.Title>{m.ai_builder_discard_change_title()}</AlertDialog.Title>
+      <AlertDialog.Description>{m.ai_builder_discard_change_body()}</AlertDialog.Description>
+    </AlertDialog.Header>
+    <AlertDialog.Footer>
+      <AlertDialog.Cancel>{m.cancel()}</AlertDialog.Cancel>
+      <AlertDialog.Action
+        class="bg-negative-default text-on-fill hover:bg-negative-stronger"
+        onclick={discardChangeAndStartOver}
+      >
+        {m.ai_builder_discard_change_action()}
+      </AlertDialog.Action>
+    </AlertDialog.Footer>
+  </AlertDialog.Content>
+</AlertDialog.Root>
 
 <AlertDialog.Root bind:open={showReplaceEditSessionDialog}>
   <AlertDialog.Content>
