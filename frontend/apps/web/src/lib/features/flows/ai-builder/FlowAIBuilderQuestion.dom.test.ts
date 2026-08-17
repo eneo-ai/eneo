@@ -230,11 +230,15 @@ describe("FlowAIBuilderQuestion runtime metadata fields", () => {
       (screen.getByLabelText(m.ai_builder_question_field_name()) as HTMLInputElement).value
     ).toBe("user_text");
 
+    // Adding a field opens it and closes the previous one: a list of fields is
+    // a list, not a stack of open forms.
     await fireEvent.click(screen.getByRole("button", { name: m.ai_builder_question_field_add() }));
-    const labels = screen.getAllByLabelText(m.ai_builder_question_field_label());
-    await fireEvent.input(labels[1]!, { target: { value: "Text" } });
-    const names = screen.getAllByLabelText(m.ai_builder_question_field_name());
-    expect((names[1] as HTMLInputElement).value).toBe("user_text_2");
+    await fireEvent.input(screen.getByLabelText(m.ai_builder_question_field_label()), {
+      target: { value: "Text" }
+    });
+    expect(
+      (screen.getByLabelText(m.ai_builder_question_field_name()) as HTMLInputElement).value
+    ).toBe("user_text_2");
   });
 
   it("hands the name to the user once they type it, and refuses one the server would", async () => {
@@ -329,5 +333,37 @@ describe("FlowAIBuilderQuestion runtime metadata fields", () => {
     expect(
       (screen.getByLabelText(m.ai_builder_question_field_name()) as HTMLInputElement).value
     ).toBe("personnummer");
+  });
+
+  it("takes a pasted list and keeps a long list navigable", async () => {
+    render(FlowAIBuilderQuestion, { question: metadataQuestion() });
+
+    // 14 fields must not cost 14 rounds of clicking.
+    await fireEvent.click(
+      screen.getByRole("button", { name: m.ai_builder_question_field_paste() })
+    );
+    const labels = Array.from({ length: 14 }, (_, i) => `Fält ${i + 1}`);
+    await fireEvent.input(screen.getByLabelText(m.ai_builder_question_field_paste_hint()), {
+      target: { value: labels.join("\n") }
+    });
+    await fireEvent.click(
+      screen.getByRole("button", { name: m.ai_builder_question_field_paste_apply() })
+    );
+
+    // Every field is a row, and the button confirms exactly what was counted.
+    expect(
+      screen.getByRole("button", {
+        name: m.ai_builder_question_confirm_fields({ summary: "14 fält" })
+      })
+    ).toBeTruthy();
+    expect(screen.getAllByRole("button", { name: /^Fält \d+/ }).length).toBe(14);
+
+    // Search narrows the list and says so, rather than looking empty.
+    await fireEvent.input(screen.getByLabelText(m.ai_builder_question_field_search()), {
+      target: { value: "Fält 1" }
+    });
+    expect(
+      screen.getByText(m.ai_builder_question_field_search_count({ shown: "6", total: "14" }))
+    ).toBeTruthy();
   });
 });

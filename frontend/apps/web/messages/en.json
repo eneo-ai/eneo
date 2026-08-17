@@ -6347,11 +6347,16 @@
   "ai_builder_requirements_field_required_count_one": "1 required",
   "ai_builder_requirements_fields_more": "+{count} more",
   "ai_builder_requirements_show_all_fields": "Show all {count}",
-  "ai_builder_question_confirm_fields": "Confirm {count} fields · {required} required",
+  "ai_builder_question_confirm_fields": "Confirm {summary}",
   "ai_builder_requirements_fields_show_detail": "Show details",
   "ai_builder_requirements_fields_hide_detail": "Hide details",
   "ai_builder_requirements_field_options": "Options:",
   "ai_builder_question_field_option_n": "Option {number}",
   "ai_builder_question_field_option_remove": "Remove option {number}",
-  "ai_builder_question_field_option_add": "Add option"
+  "ai_builder_question_field_option_add": "Add option",
+  "ai_builder_question_field_search": "Search fields",
+  "ai_builder_question_field_search_count": "{shown} of {total} shown",
+  "ai_builder_question_field_paste": "Paste a list",
+  "ai_builder_question_field_paste_hint": "One label per line. Type and the rest you fill in afterwards.",
+  "ai_builder_question_field_paste_apply": "Add the rows"
 }

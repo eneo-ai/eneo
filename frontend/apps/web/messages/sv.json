@@ -6347,11 +6347,16 @@
   "ai_builder_requirements_field_required_count_one": "1 obligatoriskt",
   "ai_builder_requirements_fields_more": "+{count} till",
   "ai_builder_requirements_show_all_fields": "Visa alla {count}",
-  "ai_builder_question_confirm_fields": "Bekräfta {count} fält · {required} obligatoriska",
+  "ai_builder_question_confirm_fields": "Bekräfta {summary}",
   "ai_builder_requirements_fields_show_detail": "Visa detaljer",
   "ai_builder_requirements_fields_hide_detail": "Dölj detaljer",
   "ai_builder_requirements_field_options": "Val:",
   "ai_builder_question_field_option_n": "Val {number}",
   "ai_builder_question_field_option_remove": "Ta bort val {number}",
-  "ai_builder_question_field_option_add": "Lägg till val"
+  "ai_builder_question_field_option_add": "Lägg till val",
+  "ai_builder_question_field_search": "Sök fält",
+  "ai_builder_question_field_search_count": "{shown} av {total} visas",
+  "ai_builder_question_field_paste": "Klistra in en lista",
+  "ai_builder_question_field_paste_hint": "En rubrik per rad. Typ och övrigt fyller du i efteråt.",
+  "ai_builder_question_field_paste_apply": "Lägg till raderna"
 }

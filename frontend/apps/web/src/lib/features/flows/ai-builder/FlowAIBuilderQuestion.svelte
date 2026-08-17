@@ -116,6 +116,27 @@
   }
 
   let showTechnicalNames = $state(false);
+  function pasteFieldList(text: string) {
+    const labels = text
+      .split(/[\n\t;]+/)
+      .map((line) => line.trim())
+      .filter(Boolean);
+    if (labels.length === 0) return;
+    // A pasted list is labels; everything else keeps its default and the
+    // runtime name follows the label the way a typed one does.
+    const startedEmpty = inputFields.length === 1 && !inputFields[0]?.label.trim();
+    if (startedEmpty) inputFields.length = 0;
+    for (const label of labels.slice(0, 20 - inputFields.length)) {
+      const row = blankField();
+      row.label = label;
+      row.variableName = getSuggestedFlowFormFieldRuntimeKey(
+        label,
+        inputFields.map((other) => other.variableName)
+      );
+      inputFields.push(row);
+    }
+    expandedFieldIndex = -1;
+  }
   let copiedFieldIndex = $state<number | null>(null);
   let copiedTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -174,6 +195,33 @@
           }))
         : [blankField()]
     )
+  );
+
+  let expandedFieldIndex = $state(0);
+  let fieldSearch = $state("");
+  let pasteOpen = $state(false);
+  let pasteText = $state("");
+  const pasteId = `builder-paste-${Math.random().toString(36).slice(2, 8)}`;
+  const FIELD_LIST_SCROLLS_FROM = 12;
+  const visibleFieldIndexes = $derived.by(() => {
+    const needle = fieldSearch.trim().toLowerCase();
+    const all = inputFields.map((_, index) => index);
+    if (!needle) return all;
+    return all.filter((index) => {
+      const field = inputFields[index];
+      return (
+        field.label.toLowerCase().includes(needle) ||
+        field.variableName.toLowerCase().includes(needle)
+      );
+    });
+  });
+  const requiredFieldCount = $derived(inputFields.filter((field) => field.required).length);
+  const fieldSummaryLine = $derived(
+    requiredFieldCount > 0
+      ? `${inputFields.length === 1 ? m.ai_builder_requirements_runtime_fields_count_one() : m.ai_builder_requirements_runtime_fields_count({ count: String(inputFields.length) })} · ${requiredFieldCount === 1 ? m.ai_builder_requirements_field_required_count_one() : m.ai_builder_requirements_field_required_count({ required: String(requiredFieldCount) })}`
+      : inputFields.length === 1
+        ? m.ai_builder_requirements_runtime_fields_count_one()
+        : m.ai_builder_requirements_runtime_fields_count({ count: String(inputFields.length) })
   );
 
   let preselectedQuestionId: string | null = null;
@@ -323,12 +371,9 @@
 
   const confirmLabel = $derived.by(() => {
     if (!isInputFieldCollection) return m.ai_builder_question_confirm();
-    const required = inputFields.filter((field) => field.required).length;
     if (inputFields.length < 4) return m.ai_builder_question_confirm();
-    return m.ai_builder_question_confirm_fields({
-      count: String(inputFields.length),
-      required: String(required)
-    });
+    // The same words the list uses, so the button confirms what was counted.
+    return m.ai_builder_question_confirm_fields({ summary: fieldSummaryLine });
   });
 
   const canConfirm = $derived.by(() => {
@@ -423,9 +468,18 @@
     }
   }
 
+  function typeLabel(type: StructuredInputFieldType): string {
+    if (type === "number") return m.flow_form_field_type_number();
+    if (type === "date") return m.flow_form_field_type_date();
+    if (type === "select") return m.flow_form_field_type_select();
+    if (type === "multiselect") return m.flow_form_field_type_multiselect();
+    return m.flow_form_field_type_text();
+  }
+
   function addInputField() {
     if (inputFields.length >= 20) return;
     inputFields.push(blankField());
+    expandedFieldIndex = inputFields.length - 1;
   }
 
   function removeInputField(index: number) {
@@ -472,130 +526,212 @@
 
     {#if isInputFieldCollection}
       <div class="field-collection" aria-labelledby={questionLabelId}>
-        {#each inputFields as field, index (field)}
-          <div class="field-row">
-            <label>
-              <span>{m.ai_builder_question_field_label()}</span>
+        {#if inputFields.length > 3}
+          <div class="field-list-head">
+            <span class="field-list-count">{fieldSummaryLine}</span>
+            {#if inputFields.length >= FIELD_LIST_SCROLLS_FROM}
               <input
-                bind:value={field.label}
-                oninput={(event) => suggestFieldName(index, event.currentTarget.value)}
+                class="field-search"
+                type="search"
+                bind:value={fieldSearch}
+                placeholder={m.ai_builder_question_field_search()}
+                aria-label={m.ai_builder_question_field_search()}
                 {disabled}
               />
-            </label>
-            <div class="field-name">
-              <span class="field-name-label">{m.ai_builder_question_field_name()}</span>
-              {#if fieldToken(field.variableName)}
-                <button
-                  type="button"
-                  class="field-name-token"
-                  aria-label={m.ai_builder_question_field_copy({
-                    token: fieldToken(field.variableName)
+              {#if fieldSearch.trim()}
+                <span class="field-list-count">
+                  {m.ai_builder_question_field_search_count({
+                    shown: String(visibleFieldIndexes.length),
+                    total: String(inputFields.length)
                   })}
-                  onclick={() => copyFieldToken(index)}
-                  {disabled}
-                >
-                  {copiedFieldIndex === index
-                    ? m.ai_builder_question_field_copied()
-                    : fieldToken(field.variableName)}
-                </button>
+                </span>
               {/if}
-              {#if showTechnicalNames}
-                <input
-                  bind:value={field.variableName}
-                  oninput={() => (field.nameEdited = true)}
-                  aria-label={m.ai_builder_question_field_name()}
-                  aria-invalid={fieldNameIssue(index) !== null}
-                  {disabled}
-                />
-              {:else if !field.nameEdited}
-                <span class="field-name-auto">{m.ai_builder_question_field_name_auto()}</span>
-              {/if}
-              {#if fieldNameIssue(index)}
-                <span class="field-name-issue">{fieldNameIssue(index)}</span>
-              {/if}
-            </div>
-            <label>
-              <span>{m.ai_builder_question_field_type()}</span>
-              <select bind:value={field.fieldType} {disabled}>
-                <option value="text">{m.flow_form_field_type_text()}</option>
-                <option value="number">{m.flow_form_field_type_number()}</option>
-                <option value="date">{m.flow_form_field_type_date()}</option>
-                <option value="select">{m.flow_form_field_type_select()}</option>
-                <option value="multiselect">{m.flow_form_field_type_multiselect()}</option>
-              </select>
-            </label>
-            <label class="field-purpose">
-              <span>{m.ai_builder_question_field_purpose()}</span>
-              <select
-                bind:value={field.purpose}
-                aria-label={`${field.label.trim() || field.variableName.trim() || m.ai_builder_question_field_label()}: ${question.question}`}
-                {disabled}
-              >
-                <option value="" disabled>—</option>
-                {#each purposeOptions as option (getStructuredQuestionOptionKey(option))}
-                  <option value={option.value}>{option.label}</option>
-                {/each}
-              </select>
-            </label>
-            {#if field.fieldType === "select" || field.fieldType === "multiselect"}
-              <div class="field-options">
-                <span class="field-options-label">{m.ai_builder_question_field_options()}</span>
-                {#each field.options as _option, optionIndex (optionIndex)}
-                  <div class="field-option-row">
-                    <input
-                      bind:value={field.options[optionIndex]}
-                      aria-label={m.ai_builder_question_field_option_n({
-                        number: String(optionIndex + 1)
-                      })}
-                      {disabled}
-                    />
-                    <button
-                      type="button"
-                      class="field-option-remove"
-                      aria-label={m.ai_builder_question_field_option_remove({
-                        number: String(optionIndex + 1)
-                      })}
-                      onclick={() => field.options.splice(optionIndex, 1)}
-                      {disabled}
-                    >
-                      <IconX class="size-3.5" aria-hidden="true" />
-                    </button>
-                  </div>
-                {/each}
-                <button
-                  type="button"
-                  class="field-option-add"
-                  onclick={() => field.options.push("")}
-                  {disabled}
-                >
-                  {m.ai_builder_question_field_option_add()}
-                </button>
-              </div>
-            {/if}
-            <label class="field-required">
-              <input type="checkbox" bind:checked={field.required} {disabled} />
-              <span>{m.ai_builder_question_field_required()}</span>
-            </label>
-            {#if inputFields.length > 1}
-              <button
-                type="button"
-                class="field-remove"
-                onclick={() => removeInputField(index)}
-                {disabled}
-              >
-                {m.ai_builder_question_field_remove()}
-              </button>
             {/if}
           </div>
-        {/each}
-        <button
-          type="button"
-          class="field-add"
-          onclick={addInputField}
-          disabled={disabled || inputFields.length >= 20}
-        >
-          {m.ai_builder_question_field_add()}
-        </button>
+        {/if}
+        <div class="field-list" class:is-scrolling={inputFields.length >= FIELD_LIST_SCROLLS_FROM}>
+          {#each visibleFieldIndexes as index (index)}
+            {@const field = inputFields[index]}
+            {#if expandedFieldIndex !== index}
+              <button
+                type="button"
+                class="field-summary-row"
+                onclick={() => (expandedFieldIndex = index)}
+                {disabled}
+              >
+                <span class="field-summary-label"
+                  >{field.label.trim() || m.ai_builder_question_field_label()}</span
+                >
+                {#if showTechnicalNames && field.variableName.trim()}
+                  <span class="field-summary-name">{field.variableName.trim()}</span>
+                {/if}
+                <span class="field-summary-type">{typeLabel(field.fieldType)}</span>
+                {#if field.required}
+                  <span class="field-summary-required"
+                    >{m.ai_builder_requirements_field_required()}</span
+                  >
+                {/if}
+                {#if fieldNameIssue(index)}
+                  <span class="field-name-issue">{fieldNameIssue(index)}</span>
+                {/if}
+              </button>
+            {:else}
+              <div class="field-row">
+                <label>
+                  <span>{m.ai_builder_question_field_label()}</span>
+                  <input
+                    bind:value={field.label}
+                    oninput={(event) => suggestFieldName(index, event.currentTarget.value)}
+                    {disabled}
+                  />
+                </label>
+                <div class="field-name">
+                  <span class="field-name-label">{m.ai_builder_question_field_name()}</span>
+                  {#if fieldToken(field.variableName)}
+                    <button
+                      type="button"
+                      class="field-name-token"
+                      aria-label={m.ai_builder_question_field_copy({
+                        token: fieldToken(field.variableName)
+                      })}
+                      onclick={() => copyFieldToken(index)}
+                      {disabled}
+                    >
+                      {copiedFieldIndex === index
+                        ? m.ai_builder_question_field_copied()
+                        : fieldToken(field.variableName)}
+                    </button>
+                  {/if}
+                  {#if showTechnicalNames}
+                    <input
+                      bind:value={field.variableName}
+                      oninput={() => (field.nameEdited = true)}
+                      aria-label={m.ai_builder_question_field_name()}
+                      aria-invalid={fieldNameIssue(index) !== null}
+                      {disabled}
+                    />
+                  {:else if !field.nameEdited}
+                    <span class="field-name-auto">{m.ai_builder_question_field_name_auto()}</span>
+                  {/if}
+                  {#if fieldNameIssue(index)}
+                    <span class="field-name-issue">{fieldNameIssue(index)}</span>
+                  {/if}
+                </div>
+                <label>
+                  <span>{m.ai_builder_question_field_type()}</span>
+                  <select bind:value={field.fieldType} {disabled}>
+                    <option value="text">{m.flow_form_field_type_text()}</option>
+                    <option value="number">{m.flow_form_field_type_number()}</option>
+                    <option value="date">{m.flow_form_field_type_date()}</option>
+                    <option value="select">{m.flow_form_field_type_select()}</option>
+                    <option value="multiselect">{m.flow_form_field_type_multiselect()}</option>
+                  </select>
+                </label>
+                <label class="field-purpose">
+                  <span>{m.ai_builder_question_field_purpose()}</span>
+                  <select
+                    bind:value={field.purpose}
+                    aria-label={`${field.label.trim() || field.variableName.trim() || m.ai_builder_question_field_label()}: ${question.question}`}
+                    {disabled}
+                  >
+                    <option value="" disabled>—</option>
+                    {#each purposeOptions as option (getStructuredQuestionOptionKey(option))}
+                      <option value={option.value}>{option.label}</option>
+                    {/each}
+                  </select>
+                </label>
+                {#if field.fieldType === "select" || field.fieldType === "multiselect"}
+                  <div class="field-options">
+                    <span class="field-options-label">{m.ai_builder_question_field_options()}</span>
+                    {#each field.options as _option, optionIndex (optionIndex)}
+                      <div class="field-option-row">
+                        <input
+                          bind:value={field.options[optionIndex]}
+                          aria-label={m.ai_builder_question_field_option_n({
+                            number: String(optionIndex + 1)
+                          })}
+                          {disabled}
+                        />
+                        <button
+                          type="button"
+                          class="field-option-remove"
+                          aria-label={m.ai_builder_question_field_option_remove({
+                            number: String(optionIndex + 1)
+                          })}
+                          onclick={() => field.options.splice(optionIndex, 1)}
+                          {disabled}
+                        >
+                          <IconX class="size-3.5" aria-hidden="true" />
+                        </button>
+                      </div>
+                    {/each}
+                    <button
+                      type="button"
+                      class="field-option-add"
+                      onclick={() => field.options.push("")}
+                      {disabled}
+                    >
+                      {m.ai_builder_question_field_option_add()}
+                    </button>
+                  </div>
+                {/if}
+                <label class="field-required">
+                  <input type="checkbox" bind:checked={field.required} {disabled} />
+                  <span>{m.ai_builder_question_field_required()}</span>
+                </label>
+                {#if inputFields.length > 1}
+                  <button
+                    type="button"
+                    class="field-remove"
+                    onclick={() => removeInputField(index)}
+                    {disabled}
+                  >
+                    {m.ai_builder_question_field_remove()}
+                  </button>
+                {/if}
+              </div>
+            {/if}
+          {/each}
+        </div>
+        <div class="field-actions">
+          <button
+            type="button"
+            class="field-add"
+            onclick={addInputField}
+            disabled={disabled || inputFields.length >= 20}
+          >
+            {m.ai_builder_question_field_add()}
+          </button>
+          <button
+            type="button"
+            class="field-add"
+            onclick={() => (pasteOpen = !pasteOpen)}
+            aria-expanded={pasteOpen}
+            disabled={disabled || inputFields.length >= 20}
+          >
+            {m.ai_builder_question_field_paste()}
+          </button>
+        </div>
+        {#if pasteOpen}
+          <div class="field-paste">
+            <label class="field-paste-label" for={pasteId}>
+              {m.ai_builder_question_field_paste_hint()}
+            </label>
+            <textarea id={pasteId} bind:value={pasteText} rows="3" {disabled}></textarea>
+            <button
+              type="button"
+              class="field-add"
+              disabled={disabled || !pasteText.trim()}
+              onclick={() => {
+                pasteFieldList(pasteText);
+                pasteText = "";
+                pasteOpen = false;
+              }}
+            >
+              {m.ai_builder_question_field_paste_apply()}
+            </button>
+          </div>
+        {/if}
         <!-- The runtime name is a developer's concern; it is derived, and only
              someone who asks to see it needs the field. -->
         <label class="field-technical-toggle">
@@ -992,6 +1128,70 @@
     border-color: var(--border-dimmer);
   }
 
+  .field-list {
+    @apply flex flex-col gap-1.5;
+  }
+
+  .field-list.is-scrolling {
+    @apply overflow-y-auto pr-1;
+    max-height: 26.25rem;
+  }
+
+  .field-list-head {
+    @apply flex flex-wrap items-center gap-2;
+  }
+
+  .field-list-count {
+    @apply text-xs;
+    color: var(--text-secondary);
+  }
+
+  .field-search {
+    @apply ml-auto h-8 w-[11.875rem] rounded-md border px-2 text-xs;
+    border-color: var(--border-default);
+    background: var(--background-primary);
+  }
+
+  .field-summary-row {
+    @apply flex min-h-11 w-full flex-wrap items-center gap-x-3 gap-y-0.5 rounded-lg px-3 py-2 text-left text-xs;
+    background: var(--background-secondary);
+    color: var(--text-secondary);
+  }
+
+  .field-summary-row:hover:not(:disabled) {
+    background: oklch(from var(--background-secondary) l c h / 0.7);
+  }
+
+  .field-summary-label {
+    @apply flex-1 truncate text-[0.8125rem] font-semibold;
+    color: var(--text-primary);
+  }
+
+  .field-summary-name {
+    @apply truncate text-[0.6875rem];
+    font-family: var(--font-mono, ui-monospace, monospace);
+  }
+
+  .field-summary-required {
+    @apply rounded px-1.5 py-0.5 text-[0.6875rem] font-semibold;
+    background: var(--accent-dimmer);
+    color: var(--accent-stronger);
+  }
+
+  .field-actions {
+    @apply flex flex-wrap items-center gap-3;
+  }
+
+  .field-paste {
+    @apply flex flex-col gap-1.5 rounded-lg p-3;
+    background: var(--background-secondary);
+  }
+
+  .field-paste-label {
+    @apply text-xs;
+    color: var(--text-secondary);
+  }
+
   .field-row {
     @apply grid grid-cols-2 gap-3 rounded-lg p-3;
     background: var(--background-secondary);
@@ -1145,6 +1345,70 @@
     }
 
     /* One field per line: two columns leave no room for a label at 375 px. */
+    .field-list {
+      @apply flex flex-col gap-1.5;
+    }
+
+    .field-list.is-scrolling {
+      @apply overflow-y-auto pr-1;
+      max-height: 26.25rem;
+    }
+
+    .field-list-head {
+      @apply flex flex-wrap items-center gap-2;
+    }
+
+    .field-list-count {
+      @apply text-xs;
+      color: var(--text-secondary);
+    }
+
+    .field-search {
+      @apply ml-auto h-8 w-[11.875rem] rounded-md border px-2 text-xs;
+      border-color: var(--border-default);
+      background: var(--background-primary);
+    }
+
+    .field-summary-row {
+      @apply flex min-h-11 w-full flex-wrap items-center gap-x-3 gap-y-0.5 rounded-lg px-3 py-2 text-left text-xs;
+      background: var(--background-secondary);
+      color: var(--text-secondary);
+    }
+
+    .field-summary-row:hover:not(:disabled) {
+      background: oklch(from var(--background-secondary) l c h / 0.7);
+    }
+
+    .field-summary-label {
+      @apply flex-1 truncate text-[0.8125rem] font-semibold;
+      color: var(--text-primary);
+    }
+
+    .field-summary-name {
+      @apply truncate text-[0.6875rem];
+      font-family: var(--font-mono, ui-monospace, monospace);
+    }
+
+    .field-summary-required {
+      @apply rounded px-1.5 py-0.5 text-[0.6875rem] font-semibold;
+      background: var(--accent-dimmer);
+      color: var(--accent-stronger);
+    }
+
+    .field-actions {
+      @apply flex flex-wrap items-center gap-3;
+    }
+
+    .field-paste {
+      @apply flex flex-col gap-1.5 rounded-lg p-3;
+      background: var(--background-secondary);
+    }
+
+    .field-paste-label {
+      @apply text-xs;
+      color: var(--text-secondary);
+    }
+
     .field-row {
       grid-template-columns: minmax(0, 1fr);
     }
