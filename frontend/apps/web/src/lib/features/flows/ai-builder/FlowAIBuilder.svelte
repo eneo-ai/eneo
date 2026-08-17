@@ -121,6 +121,16 @@
     return ids;
   });
   const answerLabelByQuestionId = $derived(buildAnswerLabels(service.messages));
+  /** The newest asking of a question at or before a point in the transcript.
+   *  Wording read beside a summary has to come from the same revision. */
+  function questionAtOrBefore(questionId: string, limit: number) {
+    const end = limit === -1 ? service.messages.length - 1 : limit;
+    for (let i = end; i >= 0; i -= 1) {
+      const question = service.messages[i]?.question;
+      if (question?.question_id === questionId) return question;
+    }
+    return null;
+  }
   /** The newest field answer at or before the summary on screen. Everything
    *  the card says about fields, and the form it opens, comes from this one
    *  value — a newer answer belongs to a version the user is not looking at. */
@@ -142,7 +152,9 @@
   // question that offered it, so they come from there and are never invented.
   const purposeLabels = $derived.by(() => {
     const labels = new SvelteMap<string, string>();
-    const question = runtimeFieldsQuestionId ? newestQuestion(runtimeFieldsQuestionId) : null;
+    const question = runtimeFieldsQuestionId
+      ? questionAtOrBefore(runtimeFieldsQuestionId, latestSummaryMessageIndex)
+      : null;
     for (const option of question?.options ?? []) {
       if (option.value != null) labels.set(String(option.value), option.label);
       if (option.id) labels.set(option.id, option.label);

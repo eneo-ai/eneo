@@ -6350,5 +6350,8 @@
   "ai_builder_question_confirm_fields": "Bekräfta {count} fält · {required} obligatoriska",
   "ai_builder_requirements_fields_show_detail": "Visa detaljer",
   "ai_builder_requirements_fields_hide_detail": "Dölj detaljer",
-  "ai_builder_requirements_field_options": "Val: {options}"
+  "ai_builder_requirements_field_options": "Val:",
+  "ai_builder_question_field_option_n": "Val {number}",
+  "ai_builder_question_field_option_remove": "Ta bort val {number}",
+  "ai_builder_question_field_option_add": "Lägg till val"
 }

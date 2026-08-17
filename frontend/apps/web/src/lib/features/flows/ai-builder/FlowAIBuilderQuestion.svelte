@@ -3,6 +3,7 @@
      from theme tokens via relative oklch() syntax, which the rule cannot see
      through */
   import { untrack } from "svelte";
+  import IconX from "@lucide/svelte/icons/x";
   import { m } from "$lib/paraglide/messages";
   import {
     getFlowFormFieldNameIssue,
@@ -141,7 +142,7 @@
     label: string;
     fieldType: StructuredInputFieldType;
     required: boolean;
-    optionsText: string;
+    options: string[];
     purpose: StructuredInputFieldPurpose | "";
   }
 
@@ -152,7 +153,7 @@
       label: "",
       fieldType: "text" as StructuredInputFieldType,
       required: false,
-      optionsText: "",
+      options: [],
       purpose: "" as StructuredInputFieldPurpose | ""
     };
   }
@@ -168,7 +169,7 @@
             label: field.value.label,
             fieldType: field.value.type,
             required: field.value.required === true,
-            optionsText: (field.value.options ?? []).join("\n"),
+            options: [...(field.value.options ?? [])],
             purpose: field.purpose as StructuredInputFieldPurpose | ""
           }))
         : [blankField()]
@@ -340,7 +341,7 @@
           field.label.trim().length > 0 &&
           isStructuredInputFieldPurpose(field.purpose) &&
           (!["select", "multiselect"].includes(field.fieldType) ||
-            field.optionsText.trim().length > 0)
+            field.options.some((option) => option.trim().length > 0))
       );
     }
     if (customSelected) return customText.trim().length > 0;
@@ -394,7 +395,7 @@
             label: field.label,
             type: field.fieldType,
             required: field.required,
-            options: field.optionsText.split("\n")
+            options: field.options
           },
           purpose: field.purpose
         });
@@ -537,10 +538,39 @@
               </select>
             </label>
             {#if field.fieldType === "select" || field.fieldType === "multiselect"}
-              <label class="field-options">
-                <span>{m.ai_builder_question_field_options()}</span>
-                <textarea bind:value={field.optionsText} rows="2" {disabled}></textarea>
-              </label>
+              <div class="field-options">
+                <span class="field-options-label">{m.ai_builder_question_field_options()}</span>
+                {#each field.options as _option, optionIndex (optionIndex)}
+                  <div class="field-option-row">
+                    <input
+                      bind:value={field.options[optionIndex]}
+                      aria-label={m.ai_builder_question_field_option_n({
+                        number: String(optionIndex + 1)
+                      })}
+                      {disabled}
+                    />
+                    <button
+                      type="button"
+                      class="field-option-remove"
+                      aria-label={m.ai_builder_question_field_option_remove({
+                        number: String(optionIndex + 1)
+                      })}
+                      onclick={() => field.options.splice(optionIndex, 1)}
+                      {disabled}
+                    >
+                      <IconX class="size-3.5" aria-hidden="true" />
+                    </button>
+                  </div>
+                {/each}
+                <button
+                  type="button"
+                  class="field-option-add"
+                  onclick={() => field.options.push("")}
+                  {disabled}
+                >
+                  {m.ai_builder_question_field_option_add()}
+                </button>
+              </div>
             {/if}
             <label class="field-required">
               <input type="checkbox" bind:checked={field.required} {disabled} />
@@ -1016,7 +1046,34 @@
   }
 
   .field-options {
-    @apply col-span-2;
+    @apply col-span-2 flex flex-col gap-1.5 text-xs font-medium;
+  }
+
+  .field-options-label {
+    color: var(--text-secondary);
+  }
+
+  .field-option-row {
+    @apply flex items-center gap-2;
+  }
+
+  .field-option-row input {
+    @apply flex-1;
+  }
+
+  .field-option-remove {
+    @apply inline-flex size-8 shrink-0 items-center justify-center rounded-md;
+    color: var(--text-secondary);
+  }
+
+  .field-option-remove:hover:not(:disabled) {
+    background: var(--background-secondary);
+    color: var(--text-primary);
+  }
+
+  .field-option-add {
+    @apply w-fit text-xs font-semibold;
+    color: var(--accent-stronger);
   }
 
   .field-purpose {

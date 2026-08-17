@@ -530,10 +530,17 @@
                         : ""}{field.purpose ? ` · ${field.purpose}` : ""}
                       {#if field.options?.length}
                         <span class="mt-0.5 block text-xs">
-                          {m.ai_builder_requirements_field_options({
-                            options: field.options.join(" · ")
-                          })}
+                          {m.ai_builder_requirements_field_options()}
                         </span>
+                        <ul class="mt-1 flex list-none flex-wrap gap-1.5 p-0">
+                          {#each field.options as option, optionIndex (optionIndex)}
+                            <li
+                              class="border-default text-secondary inline-flex h-[1.375rem] items-center rounded border px-1.5 text-[0.6875rem]"
+                            >
+                              {option}
+                            </li>
+                          {/each}
+                        </ul>
                       {/if}
                     </dd>
                   </div>

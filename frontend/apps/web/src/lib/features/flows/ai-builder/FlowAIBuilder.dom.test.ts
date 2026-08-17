@@ -1196,6 +1196,56 @@ describe("FlowAIBuilder confirm, build and review", () => {
     ).toBeTruthy();
   });
 
+  it("keeps a card and the form it opens on the same revision", async () => {
+    // A turn that answered again but never produced a new summary: the newer
+    // answer belongs to a version the user is not looking at, so neither the
+    // chips nor the editor may show it.
+    const fieldQuestion = question(
+      "runtime_metadata_field_details",
+      "Vad ska den som kör flödet fylla i?",
+      [{ id: "interpret_input", label: "Använd för att förstå indata" }],
+      { input_field_collection: true }
+    );
+    const answerWith = (id: string, label: string, name: string) =>
+      userMessage(id, `${label} (${name})`, {
+        question_answer: {
+          kind: "structured_question_answer",
+          question_id: "runtime_metadata_field_details",
+          input_fields: [
+            {
+              value: { name, label, type: "text", required: false, options: [] },
+              purpose: "interpret_input"
+            }
+          ]
+        }
+      });
+    const { fetch } = makeFetch({
+      sessions: [
+        makeSession({
+          conversation: [
+            userMessage("u1", "Sammanfatta rapporter"),
+            assistantMessage("a1", "", { question: fieldQuestion }),
+            answerWith("u2", "Ort", "ort"),
+            assistantMessage("a2", "", { requirements_summary: SUMMARY }),
+            assistantMessage("a3", "", { question: fieldQuestion }),
+            answerWith("u3", "Handläggare", "handlaggare")
+          ]
+        })
+      ]
+    });
+    renderShell({ fetch, stream: makeStream().stream, resumeSessionId: "s-1" });
+
+    await screen.findByRole("heading", { name: m.ai_builder_requirements_title() });
+    expect(screen.getByText("Ort")).toBeTruthy();
+    expect(screen.queryByText("Handläggare")).toBeNull();
+
+    await fireEvent.click(
+      screen.getByRole("button", { name: m.ai_builder_requirements_runtime_fields_change() })
+    );
+    const label = await screen.findByLabelText(m.ai_builder_question_field_label());
+    expect((label as HTMLInputElement).value).toBe("Ort");
+  });
+
   it("does not claim answers on a run where nothing was asked", async () => {
     // The common live case: the description settles every slot, so the server
     // asks nothing and every row is derived.
