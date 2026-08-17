@@ -256,6 +256,13 @@ class FlowSparse(BaseModel):
     data_retention_days: Optional[int] = None
     run_history_retention: FlowRunRetentionProjection | None = None
     draft_revision: int = 0
+    # Sparse list projection of `steps` (see `_derived_step_projection` in
+    # infrastructure/flow_repo.py). Not auto-derived from `steps` — a
+    # transient `model_copy(update={"steps": ...})` elsewhere must not be
+    # trusted for these three fields until the repository recomputes them.
+    step_count: int = 0
+    input_type: FlowRuntimeInputFormat | None = None
+    output_type: FlowOutputType | None = None
     created_at: datetime | None = None
     updated_at: datetime | None = None
 

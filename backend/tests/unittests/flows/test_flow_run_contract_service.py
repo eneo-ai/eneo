@@ -10,15 +10,20 @@ import pytest
 from eneo.flows.api.flow_models import FlowOutputDelivery
 from eneo.flows.domain.flow import Flow, FlowStep
 from eneo.flows.domain.flow_invariant_exceptions import FlowPersistedIdMissingError
+from eneo.flows.domain.runtime import RuntimeStep
 from eneo.flows.domain.runtime_invariant_exceptions import (
     FlowPublishedDefinitionWithoutExecutableStepsError,
 )
+from eneo.flows.enums import FlowOutputType, final_step_output_type
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_api_exceptions import FlowBadRequestException
 from eneo.flows.flow_input_limits import FlowInputLimits
 from eneo.flows.flow_metadata import FlowFormFieldType
 from eneo.flows.flow_review_expiry_policy import FLOW_REVIEW_EXPIRY_DEFAULT_SECONDS
-from eneo.flows.flow_run_contract_service import FlowRunContractService
+from eneo.flows.flow_run_contract_service import (
+    FlowRunContractService,
+    build_final_output_contract,
+)
 from eneo.flows.published_definition import (
     FLOW_DEFINITION_SCHEMA_VERSION,
     FLOW_PUBLISHED_FORM_SCHEMA_INVALID,
@@ -869,3 +874,53 @@ async def test_get_run_contract_marks_missing_template_assets_unavailable() -> N
     assert contract.template_readiness[0].message_code == "flow_template_not_accessible"
     assert contract.template_readiness[0].can_edit is False
     assert contract.template_readiness[0].can_download is True
+
+
+def _runtime_step(*, step_order: int, output_type: str) -> RuntimeStep:
+    return RuntimeStep(
+        step_id=uuid4(),
+        step_order=step_order,
+        assistant_id=uuid4(),
+        user_description=None,
+        input_source="flow_input" if step_order == 1 else "previous_step",
+        input_bindings=None,
+        input_config=None,
+        output_mode="pass_through",
+        output_config=None,
+        output_type=output_type,
+    )
+
+
+def test_final_step_output_type_returns_none_for_no_steps() -> None:
+    assert final_step_output_type([]) is None
+
+
+def test_final_step_output_type_returns_the_last_steps_type_in_step_order() -> None:
+    assert final_step_output_type(["text", "json", "pdf"]) == FlowOutputType.PDF
+
+
+def test_build_final_output_contract_output_type_matches_final_step_output_type() -> (
+    None
+):
+    """`build_final_output_contract`'s `output_type` must be the literal
+    result of `final_step_output_type`, not a separate computation over the
+    same steps — proving there is exactly one output-type derivation to
+    import, rather than that two independent computations happen to agree.
+    """
+    steps = [
+        _runtime_step(step_order=1, output_type="text"),
+        _runtime_step(step_order=2, output_type="docx"),
+    ]
+
+    derived = final_step_output_type([step.output_type for step in steps])
+    assert derived == FlowOutputType.DOCX
+
+    contract = build_final_output_contract(steps)
+
+    assert contract is not None
+    assert contract.output_type == derived
+
+
+def test_build_final_output_contract_returns_none_for_no_steps() -> None:
+    assert build_final_output_contract([]) is None
+    assert final_step_output_type([]) is None

@@ -16887,12 +16887,14 @@ export interface components {
      *       "data_retention_days": 30,
      *       "description": "Transcribe a review conversation and return a PDF summary.",
      *       "id": "00000000-0000-0000-0000-000000000001",
+     *       "input_type": "audio",
      *       "metadata_json": {
      *         "wizard": {
      *           "transcription_enabled": true
      *         }
      *       },
      *       "name": "Employee Review Summary",
+     *       "output_type": "pdf",
      *       "owner_user_id": "00000000-0000-0000-0000-000000000030",
      *       "published_version": 3,
      *       "run_history_retention": {
@@ -16921,6 +16923,7 @@ export interface components {
      *         "state": "days"
      *       },
      *       "space_id": "00000000-0000-0000-0000-000000000020",
+     *       "step_count": 2,
      *       "steps": [
      *         {
      *           "assistant_id": "00000000-0000-0000-0000-000000000201",
@@ -16968,12 +16971,16 @@ export interface components {
        * Format: uuid
        */
       id: string;
+      /** @description Runtime input format of the flow's first step that accepts runtime input, in step order. Null when no step accepts runtime input. Uses the same `FlowRuntimeInputFormat` values as `FlowRuntimeInputContractPublic.input_format` on the run contract, so clients can reuse one input-type label mapping for both. */
+      input_type?: components["schemas"]["FlowRuntimeInputFormat"] | null;
       /** Metadata Json */
       metadata_json?: {
         [key: string]: unknown;
       } | null;
       /** Name */
       name: string;
+      /** @description Terminal output type of the flow's last step, in step order. Null when the flow has no steps. Uses the same `FlowOutputType` values as `FlowFinalOutputContractPublic.output_type` on the run contract, so clients can reuse one output-type label mapping for both. */
+      output_type?: components["schemas"]["FlowOutputType"] | null;
       /** Owner User Id */
       owner_user_id?: string | null;
       /** Published Version */
@@ -16990,6 +16997,11 @@ export interface components {
        * Format: uuid
        */
       space_id: string;
+      /**
+       * Step Count
+       * @description Number of steps in the flow's current step definitions. This reflects the editable draft; once a flow is published, editing is blocked, so a published flow's steps are frozen to what was published.
+       */
+      step_count: number;
       /** Steps */
       steps: components["schemas"]["FlowStepPublic"][];
       /**
@@ -22027,12 +22039,14 @@ export interface components {
      *       "data_retention_days": 30,
      *       "description": "Transcribe a review conversation and return a PDF summary.",
      *       "id": "00000000-0000-0000-0000-000000000001",
+     *       "input_type": "audio",
      *       "metadata_json": {
      *         "wizard": {
      *           "transcription_enabled": true
      *         }
      *       },
      *       "name": "Employee Review Summary",
+     *       "output_type": "pdf",
      *       "owner_user_id": "00000000-0000-0000-0000-000000000030",
      *       "published_version": 3,
      *       "run_history_retention": {
@@ -22061,6 +22075,7 @@ export interface components {
      *         "state": "days"
      *       },
      *       "space_id": "00000000-0000-0000-0000-000000000020",
+     *       "step_count": 2,
      *       "tenant_id": "00000000-0000-0000-0000-000000000010",
      *       "updated_at": "2026-03-17T10:00:00Z"
      *     }
@@ -22082,12 +22097,16 @@ export interface components {
        * Format: uuid
        */
       id: string;
+      /** @description Runtime input format of the flow's first step that accepts runtime input, in step order. Null when no step accepts runtime input. Uses the same `FlowRuntimeInputFormat` values as `FlowRuntimeInputContractPublic.input_format` on the run contract, so clients can reuse one input-type label mapping for both. */
+      input_type?: components["schemas"]["FlowRuntimeInputFormat"] | null;
       /** Metadata Json */
       metadata_json?: {
         [key: string]: unknown;
       } | null;
       /** Name */
       name: string;
+      /** @description Terminal output type of the flow's last step, in step order. Null when the flow has no steps. Uses the same `FlowOutputType` values as `FlowFinalOutputContractPublic.output_type` on the run contract, so clients can reuse one output-type label mapping for both. */
+      output_type?: components["schemas"]["FlowOutputType"] | null;
       /** Owner User Id */
       owner_user_id?: string | null;
       /** Published Version */
@@ -22104,6 +22123,11 @@ export interface components {
        * Format: uuid
        */
       space_id: string;
+      /**
+       * Step Count
+       * @description Number of steps in the flow's current step definitions. This reflects the editable draft; once a flow is published, editing is blocked, so a published flow's steps are frozen to what was published.
+       */
+      step_count: number;
       /**
        * Tenant Id
        * Format: uuid
@@ -47195,12 +47219,14 @@ export interface operations {
            *           "data_retention_days": 30,
            *           "description": "Transcribe a review conversation and return a PDF summary.",
            *           "id": "00000000-0000-0000-0000-000000000001",
+           *           "input_type": "audio",
            *           "metadata_json": {
            *             "wizard": {
            *               "transcription_enabled": true
            *             }
            *           },
            *           "name": "Employee Review Summary",
+           *           "output_type": "pdf",
            *           "owner_user_id": "00000000-0000-0000-0000-000000000030",
            *           "published_version": 3,
            *           "run_history_retention": {
@@ -47229,6 +47255,7 @@ export interface operations {
            *             "state": "days"
            *           },
            *           "space_id": "00000000-0000-0000-0000-000000000020",
+           *           "step_count": 2,
            *           "tenant_id": "00000000-0000-0000-0000-000000000010",
            *           "updated_at": "2026-03-17T10:00:00Z"
            *         }

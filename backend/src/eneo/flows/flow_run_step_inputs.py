@@ -17,6 +17,7 @@ from eneo.flows.domain.runtime_input import (
     build_runtime_input_config,
     runtime_input_accept_mimetypes,
 )
+from eneo.flows.enums import FlowRuntimeInputFormat
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_api_exceptions import FlowBadRequestException
 from eneo.flows.flow_input_limits import (
@@ -124,6 +125,25 @@ def build_runtime_step_input_specs(
             ),
         )
     return specs
+
+
+def primary_runtime_input_format(
+    input_configs: Sequence[dict[str, object] | None],
+) -> FlowRuntimeInputFormat | None:
+    """Runtime input format of a flow's first step that accepts runtime input.
+
+    `input_configs` must already be ordered by `step_order` ascending. Each
+    entry resolves through `build_runtime_input_config`, the same per-step
+    parser `build_runtime_step_input_specs` uses to populate the run
+    contract's `steps_requiring_input`, so a list's derived `input_type`
+    cannot diverge from what counts as accepting runtime input there. Returns
+    `None` when no step accepts runtime input.
+    """
+    for input_config in input_configs:
+        runtime_input = build_runtime_input_config(input_config)
+        if runtime_input.enabled:
+            return runtime_input.input_format
+    return None
 
 
 def normalize_step_inputs_payload(

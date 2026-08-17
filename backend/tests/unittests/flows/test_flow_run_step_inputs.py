@@ -10,12 +10,14 @@ import pytest
 from eneo.authentication.principal_types import PrincipalType
 from eneo.flows.domain.mapped_execution_policy import FlowMappedExecutionPolicy
 from eneo.flows.domain.runtime import RuntimeStep
+from eneo.flows.enums import FlowRuntimeInputFormat
 from eneo.flows.flow_input_limits import FlowInputLimits
 from eneo.flows.flow_run_step_inputs import (
     FlowRunStepInputFiles,
     aggregate_runtime_file_limit,
     build_runtime_step_input_specs,
     normalize_step_inputs_payload,
+    primary_runtime_input_format,
     validate_submitted_step_inputs,
 )
 from eneo.flows.principal import FlowPrincipal
@@ -368,3 +370,48 @@ def test_runtime_step_specs_clamp_per_source_to_published_policy_and_input_minim
     # Policy ceiling 4 clamps to 3 admitted files: one provider call stays
     # reserved for the native-JSON fallback.
     assert specs[step.step_id].max_files == 3
+
+
+def test_primary_runtime_input_format_returns_none_for_no_steps() -> None:
+    assert primary_runtime_input_format([]) is None
+
+
+def test_primary_runtime_input_format_returns_none_when_no_step_accepts_input() -> None:
+    assert primary_runtime_input_format([None, {"runtime_input": False}]) is None
+
+
+def test_primary_runtime_input_format_matches_run_contract_input_spec_for_same_step() -> (
+    None
+):
+    """`primary_runtime_input_format` must resolve through the exact per-step
+    parser `build_runtime_step_input_specs` uses, so the flow list's derived
+    `input_type` cannot diverge from the run contract's `steps_requiring_input`
+    for the same step configuration.
+    """
+    no_input_step = replace(
+        _runtime_step_with_order(1),
+        input_config=None,
+    )
+    audio_step = replace(
+        _runtime_step_with_order(2),
+        input_config={
+            "runtime_input": {"enabled": True, "input_format": "audio"},
+        },
+    )
+    document_step = replace(
+        _runtime_step_with_order(3),
+        input_config={
+            "runtime_input": {"enabled": True, "input_format": "document"},
+        },
+    )
+    steps = [no_input_step, audio_step, document_step]
+
+    specs = build_runtime_step_input_specs(
+        steps=steps,
+        limits=FlowInputLimits(file_max_size_bytes=10_000, audio_max_size_bytes=10_000),
+    )
+
+    derived = primary_runtime_input_format([step.input_config for step in steps])
+
+    assert derived == FlowRuntimeInputFormat.AUDIO
+    assert derived == specs[audio_step.step_id].runtime_input.input_format

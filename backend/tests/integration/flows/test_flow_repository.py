@@ -25,6 +25,7 @@ from eneo.flows import (
     FlowVersionRepository,
 )
 from eneo.flows.domain.flow import Flow, FlowStep
+from eneo.flows.enums import FlowOutputType, FlowRuntimeInputFormat
 from eneo.flows.flow_resource_bindings import (
     FlowResourceBindingSource,
     LocalResourceBinding,
@@ -1176,3 +1177,195 @@ async def test_flow_repository_allows_name_reuse_after_soft_delete(
             tenant_id=admin_user.tenant_id,
         )
         assert recreated.id != flow.id
+
+
+def _build_step_with(
+    *,
+    tenant_id: UUID,
+    assistant_id: UUID,
+    step_order: int,
+    output_type: str,
+    input_config: dict[str, object] | None,
+    input_type: str = "text",
+) -> FlowStep:
+    return FlowStep(
+        id=None,
+        flow_id=uuid4(),  # overwritten by repository insert payload
+        tenant_id=tenant_id,
+        assistant_id=assistant_id,
+        step_order=step_order,
+        user_description=f"Sparse list step {step_order}",
+        input_source="flow_input" if step_order == 1 else "previous_step",
+        input_type=input_type,
+        input_contract=None,
+        output_mode="pass_through",
+        output_type=output_type,
+        output_contract=None,
+        input_bindings=None,
+        output_classification_override=None,
+        input_config=input_config,
+        output_config=None,
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_flow_repository_sparse_list_derives_step_projection_in_one_batched_query(
+    db_container,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+):
+    """`get_sparse_by_space` must derive step_count/input_type/output_type for
+    every row from one batched steps query, not one query per flow, and each
+    row's values must match its own `FlowSteps` configuration. (This test
+    proves the repository's batching and per-flow wiring on real Postgres.
+    That the input-format derivation itself matches the run contract's is
+    proven independently in test_flow_run_step_inputs.py; the output-type
+    derivation has no second aggregate consumer to cross-check against, so
+    test_flow_run_contract_service.py instead proves there is exactly one
+    implementation to import.)
+    """
+    async with db_container() as container:
+        session = container.session()
+        model = await completion_model_factory(session, "gpt-4o-mini")
+        space = await space_factory(session, "Flow sparse list projection", [model.id])
+        assistant = await assistant_factory(
+            session,
+            "Sparse list assistant",
+            model.id,
+            space_id=space.id,
+        )
+
+        repo = FlowRepository(session=session)
+        audio_to_pdf_flow = await repo.create(
+            flow=Flow(
+                id=None,
+                tenant_id=admin_user.tenant_id,
+                space_id=space.id,
+                name="Audio to PDF",
+                created_by_user_id=admin_user.id,
+                owner_user_id=admin_user.id,
+                published_version=None,
+                steps=[
+                    _build_step_with(
+                        tenant_id=admin_user.tenant_id,
+                        assistant_id=assistant.id,
+                        step_order=1,
+                        output_type="text",
+                        input_config={
+                            "runtime_input": {
+                                "enabled": True,
+                                "input_format": "audio",
+                            }
+                        },
+                    ),
+                    _build_step_with(
+                        tenant_id=admin_user.tenant_id,
+                        assistant_id=assistant.id,
+                        step_order=2,
+                        output_type="pdf",
+                        # No `runtime_input` key, but carries an authored
+                        # HTTP config shape (see http_transport/
+                        # authored_config.py) with a secret-shaped value, to
+                        # prove the sparse list query never has to fetch this
+                        # column's full contents to resolve input_type=None.
+                        input_config={
+                            "url": "https://example.test/lookup",
+                            "auth": {
+                                "mode": "bearer_token",
+                                "token": "s3cret-bearer-token-value",
+                            },
+                        },
+                        input_type="json",
+                    ),
+                ],
+            ),
+            tenant_id=admin_user.tenant_id,
+        )
+        single_json_step_flow = await repo.create(
+            flow=Flow(
+                id=None,
+                tenant_id=admin_user.tenant_id,
+                space_id=space.id,
+                name="Single JSON step",
+                created_by_user_id=admin_user.id,
+                owner_user_id=admin_user.id,
+                published_version=None,
+                steps=[
+                    _build_step_with(
+                        tenant_id=admin_user.tenant_id,
+                        assistant_id=assistant.id,
+                        step_order=1,
+                        output_type="json",
+                        input_config=None,
+                    ),
+                ],
+            ),
+            tenant_id=admin_user.tenant_id,
+        )
+
+        captured_selects: list[str] = []
+
+        def count_selects(
+            _conn,
+            _cursor,
+            statement,
+            _parameters,
+            _context,
+            _executemany,
+        ) -> None:
+            if statement.lower().lstrip().startswith("select"):
+                captured_selects.append(statement)
+
+        sync_bind = session.sync_session.get_bind()
+        sa.event.listen(sync_bind, "before_cursor_execute", count_selects)
+        try:
+            rows = await repo.get_sparse_by_space(
+                space_id=space.id,
+                tenant_id=admin_user.tenant_id,
+            )
+        finally:
+            sa.event.remove(sync_bind, "before_cursor_execute", count_selects)
+
+        # One query for flows + the retention envelope, one batched query for
+        # every flow's steps together — independent of how many flows the
+        # space holds, so this stays flat as the list page grows.
+        assert len(captured_selects) == 2
+        steps_statement = captured_selects[1]
+        # The steps query must extract only the `runtime_input` JSON
+        # subfield (compiled by asyncpg as `input_config[$n::TEXT]`, not a
+        # bare column reference), so authored HTTP step secrets (auth
+        # tokens, custom headers) never round-trip through the sparse list
+        # path.
+        assert "flow_steps.input_config[" in steps_statement
+        assert "flow_steps.input_config," not in steps_statement
+        assert "flow_steps.input_config \n" not in steps_statement
+
+        by_id = {row.id: row for row in rows}
+        assert by_id[audio_to_pdf_flow.id].step_count == 2
+        assert by_id[audio_to_pdf_flow.id].input_type == FlowRuntimeInputFormat.AUDIO
+        assert by_id[audio_to_pdf_flow.id].output_type == FlowOutputType.PDF
+        assert by_id[single_json_step_flow.id].step_count == 1
+        assert by_id[single_json_step_flow.id].input_type is None
+        assert by_id[single_json_step_flow.id].output_type == FlowOutputType.JSON
+
+        # All three repository read paths must agree on the same flow's
+        # projection, since only `get_sparse_by_space`'s steps query changed
+        # shape — `get` and `get_by_space` already loaded full step rows.
+        full_flow = await repo.get(audio_to_pdf_flow.id, admin_user.tenant_id)
+        assert full_flow.step_count == 2
+        assert full_flow.input_type == FlowRuntimeInputFormat.AUDIO
+        assert full_flow.output_type == FlowOutputType.PDF
+
+        paged_flows = await repo.get_by_space(space.id, admin_user.tenant_id)
+        paged_by_id = {flow.id: flow for flow in paged_flows}
+        assert paged_by_id[audio_to_pdf_flow.id].step_count == 2
+        assert (
+            paged_by_id[audio_to_pdf_flow.id].input_type == FlowRuntimeInputFormat.AUDIO
+        )
+        assert paged_by_id[audio_to_pdf_flow.id].output_type == FlowOutputType.PDF
+        assert paged_by_id[single_json_step_flow.id].step_count == 1
+        assert paged_by_id[single_json_step_flow.id].input_type is None
+        assert paged_by_id[single_json_step_flow.id].output_type == FlowOutputType.JSON

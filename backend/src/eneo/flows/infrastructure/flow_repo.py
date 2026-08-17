@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, TypeVar
@@ -50,6 +51,7 @@ from eneo.flows.domain.flow import (
     FlowStep,
     FlowStepResult,
 )
+from eneo.flows.enums import final_step_output_type
 from eneo.flows.flow_evidence_policy import (
     FlowEvidenceAccessContext,
     flow_metadata_marks_sensitive_or_unreadable,
@@ -62,6 +64,7 @@ from eneo.flows.flow_resource_bindings import (
     ResourceSlotRef,
 )
 from eneo.flows.flow_review_policy import dump_flow_step_review_policy
+from eneo.flows.flow_run_step_inputs import primary_runtime_input_format
 from eneo.main.exceptions import BadRequestException, NotFoundException
 
 
@@ -89,6 +92,32 @@ class _AssistantAuthoringSnapshotBuilder:
 
 
 _FlowReadModel = TypeVar("_FlowReadModel", Flow, FlowSparse)
+
+
+def _derived_step_projection(
+    *,
+    output_types: Sequence[str],
+    input_configs: Sequence[dict[str, Any] | None],
+) -> dict[str, Any]:
+    """Sparse list projection of a flow's steps: count, primary input, terminal output.
+
+    Both sequences must already be ordered by `step_order` ascending (every
+    caller queries `FlowSteps` with that order) and have matching length, one
+    entry per step. Resolves through the flow's single output-type and
+    input-format derivations (`final_step_output_type`,
+    `primary_runtime_input_format`) so these fields can never diverge from
+    what the run contract exposes for the same flow.
+
+    The result populates `FlowSparse.step_count`/`input_type`/`output_type`,
+    which are not auto-derived from `Flow.steps` — every repository method
+    that returns a persisted `Flow`/`FlowSparse` must call this with that
+    flow's current steps, or the projection silently goes stale.
+    """
+    return {
+        "step_count": len(output_types),
+        "input_type": primary_runtime_input_format(list(input_configs)),
+        "output_type": final_step_output_type(list(output_types)),
+    }
 
 
 def _attach_run_history_retention(
@@ -398,9 +427,16 @@ class FlowRepository:
             policy_conflict,
         ) = row
         steps = await self._get_flow_steps(flow_id=flow_id, tenant_id=tenant_id)
+        sparse_fields = {
+            **FlowSparse.model_validate(flow_in_db).model_dump(),
+            **_derived_step_projection(
+                output_types=[step.output_type for step in steps],
+                input_configs=[step.input_config for step in steps],
+            ),
+        }
         return _attach_run_history_retention(
             Flow(
-                **FlowSparse.model_validate(flow_in_db).model_dump(),
+                **sparse_fields,
                 steps=[FlowStep.model_validate(step) for step in steps],
             ),
             organization_days=organization_days,
@@ -483,7 +519,19 @@ class FlowRepository:
         return [
             _attach_run_history_retention(
                 Flow(
-                    **FlowSparse.model_validate(row[0]).model_dump(),
+                    **{
+                        **FlowSparse.model_validate(row[0]).model_dump(),
+                        **_derived_step_projection(
+                            output_types=[
+                                step.output_type
+                                for step in steps_by_flow.get(row[0].id, [])
+                            ],
+                            input_configs=[
+                                step.input_config
+                                for step in steps_by_flow.get(row[0].id, [])
+                            ],
+                        ),
+                    },
                     steps=[
                         FlowStep.model_validate(step)
                         for step in steps_by_flow.get(row[0].id, [])
@@ -528,9 +576,55 @@ class FlowRepository:
         if limit is not None:
             stmt = stmt.limit(limit)
         flow_rows = (await self.session.execute(stmt)).all()
+        if not flow_rows:
+            return []
+
+        flow_ids = [row[0].id for row in flow_rows]
+        # `input_config` can carry an authored HTTP step's auth secrets and
+        # custom headers (see http_transport/authored_config.py), so the list
+        # projection extracts only the `runtime_input` subfield it actually
+        # needs instead of materializing the whole JSONB column.
+        step_columns = (
+            await self.session.execute(
+                sa.select(
+                    FlowSteps.flow_id,
+                    FlowSteps.output_type,
+                    FlowSteps.input_config["runtime_input"],
+                )
+                .where(FlowSteps.flow_id.in_(flow_ids))
+                .where(FlowSteps.tenant_id == tenant_id)
+                .order_by(FlowSteps.flow_id.asc(), FlowSteps.step_order.asc())
+            )
+        ).all()
+        step_columns_by_flow: dict[UUID, list[tuple[str, dict[str, Any] | None]]] = (
+            defaultdict(list)
+        )
+        for row in step_columns:
+            # `primary_runtime_input_format` resolves through the same
+            # step-level `build_runtime_input_config` parser used everywhere
+            # else, which reads `input_config["runtime_input"]` itself — so
+            # this rewraps the extracted subfield into that shape rather than
+            # introducing a second, narrower parser.
+            step_columns_by_flow[row[0]].append((row[1], {"runtime_input": row[2]}))
+
         return [
             _attach_run_history_retention(
-                FlowSparse.model_validate(row[0]),
+                FlowSparse.model_validate(row[0]).model_copy(
+                    update=_derived_step_projection(
+                        output_types=[
+                            output_type
+                            for output_type, _ in step_columns_by_flow.get(
+                                row[0].id, []
+                            )
+                        ],
+                        input_configs=[
+                            input_config
+                            for _, input_config in step_columns_by_flow.get(
+                                row[0].id, []
+                            )
+                        ],
+                    )
+                ),
                 organization_days=row[1],
                 classification_days=row[2],
                 space_days=row[3],

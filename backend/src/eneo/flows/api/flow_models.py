@@ -92,6 +92,7 @@ from eneo.flows.enums import (
     FlowRunRerunOperationStatus,
     FlowRunReviewCheckpointState,
     FlowRunStatus,
+    FlowRuntimeInputFormat,
     FlowStepAttemptStatus,
     FlowStepResultStatus,
     RerunDependencyKind,
@@ -141,6 +142,24 @@ FLOW_RUN_RETENTION_PROJECTION_DESCRIPTION = (
     "matching classification value activates deletion; space and Flow values "
     "can only tighten the active window. Organization and matching-classification "
     "minimum/no-purge barriers never activate deletion and cannot be weakened here."
+)
+FLOW_SPARSE_STEP_COUNT_DESCRIPTION = (
+    "Number of steps in the flow's current step definitions. This reflects "
+    "the editable draft; once a flow is published, editing is blocked, so a "
+    "published flow's steps are frozen to what was published."
+)
+FLOW_SPARSE_INPUT_TYPE_DESCRIPTION = (
+    "Runtime input format of the flow's first step that accepts runtime "
+    "input, in step order. Null when no step accepts runtime input. Uses "
+    "the same `FlowRuntimeInputFormat` values as "
+    "`FlowRuntimeInputContractPublic.input_format` on the run contract, so "
+    "clients can reuse one input-type label mapping for both."
+)
+FLOW_SPARSE_OUTPUT_TYPE_DESCRIPTION = (
+    "Terminal output type of the flow's last step, in step order. Null when "
+    "the flow has no steps. Uses the same `FlowOutputType` values as "
+    "`FlowFinalOutputContractPublic.output_type` on the run contract, so "
+    "clients can reuse one output-type label mapping for both."
 )
 
 
@@ -262,6 +281,9 @@ FLOW_SPARSE_PUBLIC_EXAMPLE: dict[str, Any] = {
     "created_by_user_id": "00000000-0000-0000-0000-000000000030",
     "owner_user_id": "00000000-0000-0000-0000-000000000030",
     "published_version": 3,
+    "step_count": 2,
+    "input_type": "audio",
+    "output_type": "pdf",
     "metadata_json": {"wizard": {"transcription_enabled": True}},
     "data_retention_days": 30,
     "run_history_retention": {
@@ -757,6 +779,15 @@ class FlowSparsePublic(BaseModel):
     created_by_user_id: UUID | None = None
     owner_user_id: UUID | None = None
     published_version: int | None = None
+    step_count: int = Field(description=FLOW_SPARSE_STEP_COUNT_DESCRIPTION)
+    input_type: FlowRuntimeInputFormat | None = Field(
+        default=None,
+        description=FLOW_SPARSE_INPUT_TYPE_DESCRIPTION,
+    )
+    output_type: FlowOutputType | None = Field(
+        default=None,
+        description=FLOW_SPARSE_OUTPUT_TYPE_DESCRIPTION,
+    )
     metadata_json: dict[str, Any] | None = None
     data_retention_days: FlowDataRetentionDays | None = Field(
         default=None,

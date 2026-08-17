@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from enum import Enum
 from types import MappingProxyType
@@ -118,6 +119,19 @@ def flow_output_mode_uses_completion_model(
 
 def flow_output_mode_has_outbound_delivery(mode: FlowOutputMode) -> bool:
     return mode == FlowOutputMode.HTTP_POST
+
+
+def final_step_output_type(output_types: Sequence[str]) -> FlowOutputType | None:
+    """Terminal output type of a flow's last step, in step order.
+
+    This is the flow's single output-type derivation. The run contract's
+    `final_output.output_type` and any other terminal-output projection (for
+    example a flow list's derived `output_type`) resolve through this
+    function so they cannot drift apart.
+    """
+    if not output_types:
+        return None
+    return FlowOutputType(output_types[-1])
 
 
 class FlowAuthoringOutputMode(str, Enum):

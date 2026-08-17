@@ -18,7 +18,12 @@ from eneo.flows.api.flow_run_contract_models import (
 )
 from eneo.flows.domain.flow import Flow, FlowTemplateAsset
 from eneo.flows.domain.runtime import RuntimeStep
-from eneo.flows.enums import FlowOutputMode, FlowOutputType, FlowTemplateAssetStatus
+from eneo.flows.enums import (
+    FlowOutputMode,
+    FlowOutputType,
+    FlowTemplateAssetStatus,
+    final_step_output_type,
+)
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_review_expiry_policy import FLOW_REVIEW_EXPIRY_DEFAULT_SECONDS
 from eneo.flows.flow_run_step_inputs import (
@@ -171,10 +176,10 @@ class FlowRunContractService:
 def build_final_output_contract(
     steps: Sequence[RuntimeStep],
 ) -> FlowFinalOutputContractPublic | None:
-    final_step = steps[-1] if steps else None
-    if final_step is None:
+    output_type = final_step_output_type([step.output_type for step in steps])
+    if output_type is None:
         return None
-    output_type = FlowOutputType(final_step.output_type)
+    final_step = steps[-1]
     output_mode = FlowOutputMode(final_step.output_mode)
     return FlowFinalOutputContractPublic(
         step_id=final_step.step_id,
