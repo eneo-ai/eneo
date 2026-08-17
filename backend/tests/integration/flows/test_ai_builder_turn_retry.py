@@ -481,7 +481,9 @@ async def _progress_session_to_plan(
         if requirements is not None:
             requirements_data = requirements["data"]
             assert isinstance(requirements_data, dict)
-            message = "Ja, det stämmer. Bygg planen."
+            # A confirmation turn carries no prose: text on this turn is an
+            # ordinary message that re-discloses instead of confirming.
+            message = ""
             question_answer = {
                 "kind": "requirements_confirmation",
                 "requirements_confirmed": True,
@@ -693,11 +695,15 @@ async def test_oversized_planning_state_is_committed_once_and_replayed(
     tmp_path: Path,
 ) -> None:
     marker_path = tmp_path / "oversized-state-provider-markers.txt"
+    # The oversized state is what this test exercises; the planner model's
+    # context window is incidental, and the prepared proposal request no longer
+    # fits the 8000-token tenant default, so own a model that admits it.
     space_id = await _create_space_with_model(
         client=client,
         bearer_token=bearer_token,
         db_container=db_container,
         completion_model_factory=completion_model_factory,
+        max_input_tokens=128_000,
     )
     session_id = await _create_session(
         client=client,
