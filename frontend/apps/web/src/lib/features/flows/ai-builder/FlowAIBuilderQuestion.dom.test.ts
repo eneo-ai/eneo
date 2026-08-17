@@ -139,6 +139,20 @@ describe("FlowAIBuilderQuestion single choice keyboard", () => {
   });
 });
 
+function metadataQuestion(): StructuredQuestion {
+  return {
+    question_id: "runtime_metadata_field_details",
+    question: "Which fields should the user fill in?",
+    selection_mode: "single",
+    allow_custom: false,
+    requires_confirm: true,
+    input_field_collection: true,
+    options: [
+      { id: "interpret_input", label: "Use it to read the input", value: "interpret_input" }
+    ]
+  };
+}
+
 describe("FlowAIBuilderQuestion runtime metadata fields", () => {
   it("requires and submits one purpose per field from the question options", async () => {
     const onanswer = vi.fn();
@@ -169,22 +183,17 @@ describe("FlowAIBuilderQuestion runtime metadata fields", () => {
     };
     render(FlowAIBuilderQuestion, { question, onanswer });
 
+    // The runtime name follows the label; nobody types it.
     await fireEvent.input(screen.getByLabelText(m.ai_builder_question_field_label()), {
       target: { value: "Case id" }
-    });
-    await fireEvent.input(screen.getByLabelText(m.ai_builder_question_field_name()), {
-      target: { value: "case_id" }
     });
     const confirm = screen.getByRole("button", { name: m.ai_builder_question_confirm() });
     // Reachable by keyboard while unavailable, so aria carries the state.
     expect(confirm.getAttribute("aria-disabled")).toBe("true");
 
-    await fireEvent.change(
-      screen.getByRole("combobox", {
-        name: "Case id: Which fields should the user fill in?"
-      }),
-      { target: { value: "interpret_input" } }
-    );
+    await fireEvent.change(screen.getByLabelText(m.ai_builder_question_field_purpose()), {
+      target: { value: "interpret_input" }
+    });
     expect(confirm.getAttribute("aria-disabled")).toBe("false");
     await fireEvent.click(confirm);
 
@@ -207,5 +216,52 @@ describe("FlowAIBuilderQuestion runtime metadata fields", () => {
         ]
       }
     });
+  });
+
+  it("keeps a runtime name off the label the product reserves, and off a sibling", async () => {
+    render(FlowAIBuilderQuestion, { question: metadataQuestion() });
+
+    // "Text" is reserved as a runtime key, so the shared helper prefixes it.
+    await fireEvent.input(screen.getByLabelText(m.ai_builder_question_field_label()), {
+      target: { value: "Text" }
+    });
+    await fireEvent.click(screen.getByLabelText(m.ai_builder_question_show_technical()));
+    expect(
+      (screen.getByLabelText(m.ai_builder_question_field_name()) as HTMLInputElement).value
+    ).toBe("user_text");
+
+    await fireEvent.click(screen.getByRole("button", { name: m.ai_builder_question_field_add() }));
+    const labels = screen.getAllByLabelText(m.ai_builder_question_field_label());
+    await fireEvent.input(labels[1]!, { target: { value: "Text" } });
+    const names = screen.getAllByLabelText(m.ai_builder_question_field_name());
+    expect((names[1] as HTMLInputElement).value).toBe("user_text_2");
+  });
+
+  it("hands the name to the user once they type it, and refuses one the server would", async () => {
+    render(FlowAIBuilderQuestion, { question: metadataQuestion() });
+
+    await fireEvent.input(screen.getByLabelText(m.ai_builder_question_field_label()), {
+      target: { value: "Personnummer" }
+    });
+    await fireEvent.click(screen.getByLabelText(m.ai_builder_question_show_technical()));
+    const name = screen.getByLabelText(m.ai_builder_question_field_name()) as HTMLInputElement;
+    expect(name.value).toBe("personnummer");
+
+    // Typed by hand: the label no longer drives it.
+    await fireEvent.input(name, { target: { value: "flow_input" } });
+    await fireEvent.input(screen.getByLabelText(m.ai_builder_question_field_label()), {
+      target: { value: "Sökandes personnummer" }
+    });
+    expect(name.value).toBe("flow_input");
+
+    // And a name the server refuses cannot be sent from here either.
+    await fireEvent.change(screen.getByLabelText(m.ai_builder_question_field_purpose()), {
+      target: { value: "interpret_input" }
+    });
+    expect(
+      screen
+        .getByRole("button", { name: m.ai_builder_question_confirm() })
+        .getAttribute("aria-disabled")
+    ).toBe("true");
   });
 });

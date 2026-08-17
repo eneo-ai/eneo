@@ -3,7 +3,10 @@
      from theme tokens via relative oklch() syntax, which the rule cannot see
      through */
   import { m } from "$lib/paraglide/messages";
-  import { getSuggestedFlowFormFieldRuntimeKey } from "$lib/features/flows/flowFormSchema";
+  import {
+    getFlowFormFieldNameIssue,
+    getSuggestedFlowFormFieldRuntimeKey
+  } from "$lib/features/flows/flowFormSchema";
   import { slide } from "svelte/transition";
   import { cubicOut } from "svelte/easing";
   import { prefersReducedMotion } from "$lib/core/prefersReducedMotion";
@@ -78,13 +81,44 @@
   // The technical name follows the label the way the flow's own field editor
   // suggests it — same helper, so a field named here and a field named there
   // end up with the same key — until the user types one themselves.
-  function suggestFieldName(index: number) {
+  function suggestFieldName(index: number, label: string) {
     const field = inputFields[index];
     if (!field || field.nameEdited) return;
     field.variableName = getSuggestedFlowFormFieldRuntimeKey(
-      field.label,
+      label,
       inputFields.filter((_, i) => i !== index).map((other) => other.variableName)
     );
+  }
+
+  // The same rules the flow's field editor enforces: a name that breaks them
+  // is refused by the server, so the editor should not let it be sent.
+  function fieldNameIssue(index: number): string | null {
+    const field = inputFields[index];
+    const name = field?.variableName.trim() ?? "";
+    if (!field || name.length === 0) return null;
+    const issue = getFlowFormFieldNameIssue(name);
+    if (issue === "namespace_head") return m.flow_form_field_name_namespace_head();
+    if (issue === "primary_input_key") return m.flow_form_field_name_primary_input_key();
+    if (issue === "step_alias") return m.flow_form_field_name_step_alias();
+    if (issue === "dot") return m.flow_form_field_name_dot();
+    const lowered = name.toLowerCase();
+    const first = inputFields.findIndex(
+      (other) => other.variableName.trim().toLowerCase() === lowered
+    );
+    return first !== index ? m.flow_form_field_name_duplicate() : null;
+  }
+
+  let showTechnicalNames = $state(false);
+  let copiedFieldIndex = $state<number | null>(null);
+  let copiedTimer: ReturnType<typeof setTimeout> | null = null;
+
+  async function copyFieldToken(index: number) {
+    const name = inputFields[index]?.variableName.trim();
+    if (!name) return;
+    await navigator.clipboard?.writeText(`{{ ${name} }}`).catch(() => {});
+    copiedFieldIndex = index;
+    if (copiedTimer) clearTimeout(copiedTimer);
+    copiedTimer = setTimeout(() => (copiedFieldIndex = null), 1500);
   }
 
   let inputFields = $state([
@@ -248,8 +282,9 @@
     if (answered) return false;
     if (isInputFieldCollection) {
       return inputFields.every(
-        (field) =>
+        (field, index) =>
           field.variableName.trim().length > 0 &&
+          fieldNameIssue(index) === null &&
           field.label.trim().length > 0 &&
           isStructuredInputFieldPurpose(field.purpose) &&
           (!["select", "multiselect"].includes(field.fieldType) ||
@@ -396,16 +431,44 @@
           <div class="field-row">
             <label>
               <span>{m.ai_builder_question_field_label()}</span>
-              <input bind:value={field.label} oninput={() => suggestFieldName(index)} {disabled} />
-            </label>
-            <label>
-              <span>{m.ai_builder_question_field_name()}</span>
               <input
-                bind:value={field.variableName}
-                oninput={() => (field.nameEdited = true)}
+                bind:value={field.label}
+                oninput={(event) => suggestFieldName(index, event.currentTarget.value)}
                 {disabled}
               />
             </label>
+            <div class="field-name">
+              <span class="field-name-label">{m.ai_builder_question_field_name()}</span>
+              {#if field.variableName.trim()}
+                <button
+                  type="button"
+                  class="field-name-token"
+                  aria-label={m.ai_builder_question_field_copy({
+                    token: `{{ ${field.variableName.trim()} }}`
+                  })}
+                  onclick={() => copyFieldToken(index)}
+                  {disabled}
+                >
+                  {copiedFieldIndex === index
+                    ? m.ai_builder_question_field_copied()
+                    : `{{ ${field.variableName.trim()} }}`}
+                </button>
+              {/if}
+              {#if showTechnicalNames}
+                <input
+                  bind:value={field.variableName}
+                  oninput={() => (field.nameEdited = true)}
+                  aria-label={m.ai_builder_question_field_name()}
+                  aria-invalid={fieldNameIssue(index) !== null}
+                  {disabled}
+                />
+              {:else if !field.nameEdited}
+                <span class="field-name-auto">{m.ai_builder_question_field_name_auto()}</span>
+              {/if}
+              {#if fieldNameIssue(index)}
+                <span class="field-name-issue">{fieldNameIssue(index)}</span>
+              {/if}
+            </div>
             <label>
               <span>{m.ai_builder_question_field_type()}</span>
               <select bind:value={field.fieldType} {disabled}>
@@ -417,12 +480,7 @@
               </select>
             </label>
             <label class="field-purpose">
-              <span class="sr-only">
-                {field.label.trim() ||
-                  field.variableName.trim() ||
-                  m.ai_builder_question_field_label()}:
-                {question.question}
-              </span>
+              <span>{m.ai_builder_question_field_purpose()}</span>
               <select
                 bind:value={field.purpose}
                 aria-label={`${field.label.trim() || field.variableName.trim() || m.ai_builder_question_field_label()}: ${question.question}`}
@@ -464,6 +522,12 @@
         >
           {m.ai_builder_question_field_add()}
         </button>
+        <!-- The runtime name is a developer's concern; it is derived, and only
+             someone who asks to see it needs the field. -->
+        <label class="field-technical-toggle">
+          <input type="checkbox" bind:checked={showTechnicalNames} {disabled} />
+          {m.ai_builder_question_show_technical()}
+        </label>
       </div>
     {:else}
       {#if isSchemaDirection && question.options.length > schemaDirectionVisibleOptionLimit}
@@ -850,6 +914,41 @@
   .field-row {
     @apply grid grid-cols-2 gap-3 rounded-lg p-3;
     background: var(--background-secondary);
+  }
+
+  .field-name {
+    @apply flex flex-col gap-1 text-xs font-medium;
+  }
+
+  .field-name-label {
+    color: var(--text-secondary);
+  }
+
+  .field-name-token {
+    @apply inline-flex h-[1.375rem] w-fit items-center rounded-md border px-2 text-[0.6875rem];
+    font-family: var(--font-mono, ui-monospace, monospace);
+    border-color: var(--border-default);
+    background: var(--background-primary);
+    color: var(--text-secondary);
+  }
+
+  .field-name-token:hover:not(:disabled) {
+    color: var(--text-primary);
+  }
+
+  .field-name-auto {
+    @apply text-[0.6875rem] font-normal;
+    color: var(--text-secondary);
+  }
+
+  .field-technical-toggle {
+    @apply inline-flex items-center gap-2 text-xs;
+    color: var(--text-secondary);
+  }
+
+  .field-name-issue {
+    @apply text-[0.6875rem] font-semibold;
+    color: var(--text-warning-stronger, var(--text-secondary));
   }
 
   .field-row label:not(.field-required) {

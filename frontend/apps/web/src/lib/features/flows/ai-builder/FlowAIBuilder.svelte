@@ -120,17 +120,6 @@
     return ids;
   });
   const answerLabelByQuestionId = $derived(buildAnswerLabels(service.messages));
-  const runtimeFields = $derived.by(() => {
-    let newest: string[] = [];
-    for (const message of service.messages) {
-      const fields = message.questionAnswer?.input_fields;
-      if (!fields?.length) continue;
-      newest = fields.map((field) =>
-        field.value.name ? `${field.value.label} (${field.value.name})` : field.value.label
-      );
-    }
-    return newest;
-  });
   const delegatedQuestionIds = $derived.by(() => {
     const ids = new SvelteSet<string>();
     for (const message of service.messages) {
@@ -628,7 +617,6 @@
           savedFlowStepScope={service.activeStepScope}
           attachments={service.session?.attachments ?? []}
           answered={answeredQuestions}
-          {runtimeFields}
           noQuestions={askedQuestionIds.length === 0}
           confirmed={service.isRequirementsSummaryConfirmed(latestSummary)}
           stale={summaryIsStale}

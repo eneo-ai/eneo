@@ -1,5 +1,6 @@
 // Copyright (c) 2026 Sundsvalls Kommun
 
+import { m } from "$lib/paraglide/messages";
 import type { ChatMessage } from "./protocol";
 import { getStructuredQuestionOptionKey } from "./structuredQuestionAnswer";
 
@@ -28,6 +29,16 @@ export function buildAnswerLabels(messages: readonly ChatMessage[]): Map<string,
     const questionId = answer?.question_id;
     if (!answer || !questionId) continue;
 
+    // A field answer's own words are "Personnummer (prsnnmr)" — a runtime name
+    // has no business in a summary a caseworker reads. The chip names the
+    // question and the count; the fields themselves are on the contract card.
+    if (answer.input_fields?.length) {
+      labels.set(
+        questionId,
+        m.ai_builder_answer_field_count({ count: String(answer.input_fields.length) })
+      );
+      continue;
+    }
     const written = message.content.trim();
     if (written.length > 0) {
       labels.set(questionId, written);
