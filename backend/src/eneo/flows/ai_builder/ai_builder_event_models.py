@@ -55,9 +55,22 @@ class StructuredQuestionPayload(BaseModel):
         default=False,
         exclude_if=lambda value: value is False,
     )
+    # The option the flow being edited already uses for this slot, read off the
+    # flow itself. It is what makes a question about a running flow answerable:
+    # the user can see which answer keeps the flow as it is, and which one
+    # changes what other applications already run against.
+    #
+    # Null outside an edit session, and null in one whenever the flow does not
+    # answer the slot or answers it with something no offered option carries.
+    current_option_id: str | None = None
     # Eneo's own reading of this slot, offered so a user who cannot judge the
     # choice can hand this one question back. It settles nothing on its own;
     # naming it here is what makes the answer the option they were shown.
+    #
+    # While editing, the only thing Eneo recommends is keeping what the flow
+    # already does, so this either equals current_option_id or is absent.
+    # Anything else is a proposal to change something already running, which is
+    # the user's decision to make rather than a badge to accept.
     recommended_option_id: str | None = None
     # The user's own words behind that reading: the quote the classifier cited
     # for the slot, verbatim from a message the user wrote or an option they
@@ -91,21 +104,35 @@ class StructuredQuestionPayload(BaseModel):
     questions_planned_remaining: int | None = Field(default=None, ge=0)
 
     @model_validator(mode="after")
-    def _recommendation_names_one_option(self) -> "StructuredQuestionPayload":
+    def _named_options_are_offered_and_agree(self) -> "StructuredQuestionPayload":
+        if self.current_option_id is not None:
+            self._require_one_offered_option(
+                "current_option_id", self.current_option_id
+            )
         if self.recommended_option_id is None:
             if self.recommended_option_evidence is not None:
                 raise ValueError(
                     "recommended_option_evidence requires a recommended option"
                 )
             return self
-        named = [
-            option for option in self.options if option.id == self.recommended_option_id
-        ]
-        if len(named) != 1:
+        self._require_one_offered_option(
+            "recommended_option_id", self.recommended_option_id
+        )
+        if (
+            self.current_option_id is not None
+            and self.recommended_option_id != self.current_option_id
+        ):
             raise ValueError(
-                "recommended_option_id must name exactly one offered option"
+                "recommended_option_id must not differ from current_option_id: "
+                "recommending a change to what the flow already does is a "
+                "proposal, not a recommendation"
             )
         return self
+
+    def _require_one_offered_option(self, field_name: str, option_id: str) -> None:
+        named = [option for option in self.options if option.id == option_id]
+        if len(named) != 1:
+            raise ValueError(f"{field_name} must name exactly one offered option")
 
 
 class AIBuilderTextEventData(BaseModel):

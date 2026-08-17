@@ -179,6 +179,37 @@ def test_evidence_without_a_recommendation_is_not_a_payload() -> None:
         )
 
 
+def test_a_current_value_must_name_an_option_the_user_was_offered() -> None:
+    """A current value the user cannot pick tells them nothing they can act on."""
+
+    assert (
+        StructuredQuestionPayload.model_validate(
+            {**_question(None), "current_option_id": "docx_document"}
+        ).current_option_id
+        == "docx_document"
+    )
+    with pytest.raises(ValidationError):
+        StructuredQuestionPayload.model_validate(
+            {**_question(None), "current_option_id": "csv_document"}
+        )
+
+
+def test_a_recommendation_never_contradicts_the_value_the_flow_uses_today() -> None:
+    # Badging a different value as Eneo's own reading turns a proposal to change
+    # a running flow into a one-click confirmation. The payload cannot carry that
+    # pair at all, so no owner can emit it.
+    assert (
+        StructuredQuestionPayload.model_validate(
+            {**_question("pdf_document"), "current_option_id": "pdf_document"}
+        ).recommended_option_id
+        == "pdf_document"
+    )
+    with pytest.raises(ValidationError):
+        StructuredQuestionPayload.model_validate(
+            {**_question("docx_document"), "current_option_id": "pdf_document"}
+        )
+
+
 def test_a_question_persisted_before_the_number_existed_still_loads() -> None:
     # The pending question is replayed from persisted tool arguments to settle
     # a delegated answer. A number the old record cannot carry must not make

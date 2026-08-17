@@ -9,11 +9,15 @@ from eneo.flows.ai_builder.ai_builder_architecture_commit import (
 from eneo.flows.ai_builder.ai_builder_backend_question_persistence import (
     persist_backend_question,
 )
+from eneo.flows.ai_builder.ai_builder_canonicalization import canonical_question_id
 from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
     requirements_summary_to_metadata,
 )
 from eneo.flows.ai_builder.ai_builder_discovery import (
     build_registry_question_followup,
+)
+from eneo.flows.ai_builder.ai_builder_discovery_flow_defaults import (
+    build_flow_discovery_defaults,
 )
 from eneo.flows.ai_builder.ai_builder_domain_models import ConversationMessage
 from eneo.flows.ai_builder.ai_builder_error_contract import (
@@ -165,9 +169,10 @@ async def _dispatch_question(
     if followup is not None:
         followup = replace(
             followup,
-            question_data=_numbered_question(
+            question_data=_situate_question(
                 followup.question_data,
                 conversation=request.conversation,
+                flow=request.flow,
                 planned_remaining=decision.planned_remaining,
             ),
         )
@@ -222,35 +227,93 @@ async def _dispatch_question(
     )
 
 
-def _numbered_question(
+def _situate_question(
     payload: StructuredQuestionPayload,
     *,
     conversation: list[ConversationMessage],
+    flow: Flow | None,
     planned_remaining: int | None,
 ) -> StructuredQuestionPayload:
-    """Place this question in the interview the way the user will read it.
+    """Place this question in the interview, and in the flow it is asked about.
 
-    Dispatch is where every question kind meets, whichever owner wrote it, so
-    the place is stamped once here rather than in each of them. The payload's
-    own id is what counts for the number, because it is the id persistence
-    stamps on the assistant message, and therefore the id the next turn
-    counts. The question is not persisted yet, so the conversation holds
+    Dispatch is where every question kind meets, whichever owner wrote it, and
+    the only place that both holds the flow and emits the payload, so the two
+    are stamped once here rather than in each question owner.
+
+    The payload's own id is what counts for the number, because it is the id
+    persistence stamps on the assistant message, and therefore the id the next
+    turn counts. The question is not persisted yet, so the conversation holds
     exactly the ones already asked.
 
     What is still ahead cannot be counted here, because dispatch sees one
     question and not the queue it came from. It travels on the decision, from
     the turn control that ranked the queue, and stays null for the questions
     that turn control decides ahead of that queue.
+
+    While editing, the only recommendation Eneo makes is to keep what the flow
+    already does. Anything else is a proposal to change something that is
+    already running, and a badge is not how a change like that should be put to
+    a user. So the recommendation survives only where it can be shown to match
+    the current value, and is dropped wherever that cannot be shown — including
+    a flow whose answer none of the offered options carries, where every option
+    on screen would change the flow.
+
+    The result is revalidated rather than copied into place, because a copy
+    skips the model's own rules and this is where the payload's last two facts
+    are decided.
     """
 
-    return payload.model_copy(
-        update={
+    current_option_id = _current_option_id(payload, flow=flow)
+    keeps_recommendation = (
+        payload.recommended_option_id == current_option_id if flow is not None else True
+    )
+    return StructuredQuestionPayload.model_validate(
+        payload.model_dump()
+        | {
             "question_index": question_ordinal_in_session(
                 conversation, question_id=payload.question_id
             ),
             "questions_planned_remaining": planned_remaining,
+            "current_option_id": current_option_id,
+            "recommended_option_id": (
+                payload.recommended_option_id if keeps_recommendation else None
+            ),
+            "recommended_option_evidence": (
+                payload.recommended_option_evidence if keeps_recommendation else None
+            ),
         }
     )
+
+
+def _current_option_id(
+    payload: StructuredQuestionPayload,
+    *,
+    flow: Flow | None,
+) -> str | None:
+    """The offered option the flow being edited uses for this slot today.
+
+    Read off the flow through the same capability profile the rest of the
+    Builder reads it through, so there is one derivation of what a flow does and
+    no second reading of its steps. That profile reports a slot only when the
+    flow answers it with a value the catalog can offer: a run that takes both a
+    recording and uploaded documents is not one of the materials the question
+    lists, and no current option is named rather than a wrong one.
+    """
+
+    if flow is None:
+        return None
+    values = build_flow_discovery_defaults(flow).get(
+        canonical_question_id(payload.question_id)
+    )
+    if values is None or len(values) != 1:
+        return None
+    current_value = next(iter(values))
+    named = [
+        option.id
+        for option in payload.options
+        if option.id is not None and option.value == current_value
+    ]
+    return named[0] if len(named) == 1 else None
 
 
 async def _dispatch_architecture_commit(

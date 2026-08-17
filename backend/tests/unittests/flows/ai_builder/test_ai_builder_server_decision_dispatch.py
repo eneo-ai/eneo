@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock
 from uuid import UUID, uuid4
 
 import pytest
+from pydantic import ValidationError
 
 if TYPE_CHECKING:
     from eneo.flows.domain.flow import Flow
@@ -28,6 +29,7 @@ from eneo.flows.ai_builder.ai_builder_error_contract import AIBuilderErrorCode
 from eneo.flows.ai_builder.ai_builder_event_models import (
     AIBuilderQuestionEvent,
     AIBuilderStatus,
+    StructuredQuestionPayload,
 )
 from eneo.flows.ai_builder.ai_builder_proposal_telemetry import ProposalTurnTelemetry
 from eneo.flows.ai_builder.ai_builder_requirements_disclosure import (
@@ -58,6 +60,9 @@ from eneo.flows.ai_builder.planning_state import (
     NamedResultEvidence,
     PlanningState,
     ResolvedSlot,
+)
+from eneo.flows.ai_builder.planning_state_builder import (
+    build_planning_state_from_conversation,
 )
 
 
@@ -105,6 +110,79 @@ def _request(
         planning_state=planning_state or PlanningState.empty(),
         discovery_assumptions=discovery_assumptions,
     )
+
+
+def _transcription_flow() -> "Flow":
+    """A published flow whose runs start from an uploaded recording.
+
+    Shaped after the session that surfaced the defect: a recording is
+    transcribed, and the transcript becomes a Word document.
+    """
+
+    from eneo.flows.domain.flow import Flow, FlowStep
+
+    flow_id = uuid4()
+    tenant_id = uuid4()
+    return Flow(
+        id=flow_id,
+        name="Mötesljud till protokoll",
+        description="Transkriberar mötesljud och skriver protokoll.",
+        tenant_id=tenant_id,
+        space_id=uuid4(),
+        steps=[
+            FlowStep(
+                id=uuid4(),
+                flow_id=flow_id,
+                tenant_id=tenant_id,
+                assistant_id=uuid4(),
+                step_order=1,
+                user_description="Transkribera mötesljudet",
+                input_source="flow_input",
+                input_type="audio",
+                output_mode="transcribe_only",
+                output_type="text",
+            ),
+            FlowStep(
+                id=uuid4(),
+                flow_id=flow_id,
+                tenant_id=tenant_id,
+                assistant_id=uuid4(),
+                step_order=2,
+                user_description="Skriv tjänsteskrivelsen som Word-dokument",
+                input_source="previous_step",
+                input_type="text",
+                output_mode="compose_text",
+                output_type="docx",
+            ),
+        ],
+    )
+
+
+def _recording_and_documents_flow() -> "Flow":
+    """A flow whose runs take a recording and uploaded documents together.
+
+    The runtime input question offers one material per run, so this flow's own
+    answer is not among the options it lists.
+    """
+
+    from eneo.flows.domain.flow import FlowStep
+
+    flow = _transcription_flow()
+    flow.steps.append(
+        FlowStep(
+            id=uuid4(),
+            flow_id=flow.id,
+            tenant_id=flow.tenant_id,
+            assistant_id=uuid4(),
+            step_order=3,
+            user_description="Läs de uppladdade underlagen",
+            input_source="flow_input",
+            input_type="document",
+            output_mode="compose_text",
+            output_type="text",
+        )
+    )
+    return flow
 
 
 def _slot(name: str, value: str) -> ResolvedSlot:
@@ -564,6 +642,185 @@ async def test_a_question_carries_the_questions_still_queued_behind_it() -> None
 
     question = next(event for event in result.events if event.event == "question")
     assert question.data.questions_planned_remaining == 2
+
+
+@pytest.mark.asyncio
+async def test_an_edit_question_names_the_value_the_running_flow_uses_today() -> None:
+    # The flow being edited already answers this slot, and the user is looking at
+    # a question about it. Without the current value on the payload the client
+    # cannot tell a choice apart from a change.
+    repo = AsyncMock()
+    repo.commit_turn.return_value = 5
+
+    result = await dispatch_server_decision(
+        _request(
+            repo=repo,
+            decision=AskCanonicalQuestion(slot_name="primary_runtime_input"),
+            conversation=[
+                ConversationMessage(role="user", content="Förtydliga instruktionen")
+            ],
+            flow=_transcription_flow(),
+        )
+    )
+
+    question = next(event for event in result.events if event.event == "question")
+    assert question.data.current_option_id == "audio"
+
+
+@pytest.mark.asyncio
+async def test_a_create_question_names_no_current_value() -> None:
+    # Nothing is running yet, so there is no value in use to name.
+    repo = AsyncMock()
+    repo.commit_turn.return_value = 5
+
+    result = await dispatch_server_decision(
+        _request(
+            repo=repo,
+            decision=AskCanonicalQuestion(slot_name="primary_runtime_input"),
+            conversation=[ConversationMessage(role="user", content="Bygg ett flöde")],
+        )
+    )
+
+    question = next(event for event in result.events if event.event == "question")
+    assert question.data.current_option_id is None
+
+
+@pytest.mark.asyncio
+async def test_an_edit_question_never_recommends_changing_what_the_flow_receives() -> (
+    None
+):
+    # Taken from a real session. The live flow transcribes audio and writes a
+    # Word document, and the user asked only for a PDF instead. "PDF fil" and
+    # "docx fil" read as document material, so the input slot resolves to
+    # documents on a heuristic; that is not commit-grade, so the slot counts as
+    # an unresolved core gap and turn control asks about it. Reading the same
+    # slot back as a recommendation badged Dokument on a flow that takes audio,
+    # and one click on Bekräfta would have changed the input contract of
+    # something other applications already run. Eneo does not badge that.
+    repo = AsyncMock()
+    repo.commit_turn.return_value = 5
+    conversation = [
+        ConversationMessage(
+            role="user",
+            content="Jag vill ha en PDF fil istället som utdata än en docx fil.",
+        )
+    ]
+    flow = _transcription_flow()
+
+    result = await dispatch_server_decision(
+        _request(
+            repo=repo,
+            decision=AskCanonicalQuestion(slot_name="primary_runtime_input"),
+            conversation=conversation,
+            planning_state=build_planning_state_from_conversation(
+                conversation, flow=flow
+            ),
+            flow=flow,
+        )
+    )
+
+    question = next(event for event in result.events if event.event == "question")
+    assert question.data.current_option_id == "audio"
+    assert question.data.recommended_option_id is None
+    assert question.data.recommended_option_evidence is None
+
+
+@pytest.mark.asyncio
+async def test_the_emitted_question_is_checked_against_the_payloads_own_rules() -> None:
+    # Dispatch decides the last facts on the payload, so it is the last place the
+    # model's rules can still be applied. Copying them into place would skip
+    # those rules, and the pair they forbid is exactly the one this guard exists
+    # to prevent, so the emitted question is built through validation.
+    repo = AsyncMock()
+    repo.commit_turn.return_value = 5
+    flow = _transcription_flow()
+
+    result = await dispatch_server_decision(
+        _request(
+            repo=repo,
+            decision=AskCanonicalQuestion(slot_name="primary_runtime_input"),
+            conversation=[
+                ConversationMessage(role="user", content="Förtydliga instruktionen")
+            ],
+            flow=flow,
+        )
+    )
+
+    question = next(event for event in result.events if event.event == "question")
+    with pytest.raises(ValidationError):
+        StructuredQuestionPayload.model_validate(
+            question.data.model_dump() | {"recommended_option_id": "documents"}
+        )
+
+
+@pytest.mark.asyncio
+async def test_a_flow_the_question_cannot_describe_recommends_nothing() -> None:
+    # This flow takes a recording and uploaded documents in the same run, which
+    # is not one of the materials the question offers. Naming one of them as the
+    # current value would misstate what the flow does today, and every option on
+    # screen would change the flow, so there is nothing safe to recommend either.
+    repo = AsyncMock()
+    repo.commit_turn.return_value = 5
+    planning_state = PlanningState.empty()
+    planning_state.resolved_slots = {
+        "primary_runtime_input": ResolvedSlot(
+            name="primary_runtime_input",
+            value="documents",
+            source="heuristic",
+            evidence=["heuristic:role-aware freeform analysis"],
+            confidence="high",
+        )
+    }
+
+    result = await dispatch_server_decision(
+        _request(
+            repo=repo,
+            decision=AskCanonicalQuestion(slot_name="primary_runtime_input"),
+            conversation=[
+                ConversationMessage(role="user", content="Förtydliga instruktionen")
+            ],
+            planning_state=planning_state,
+            flow=_recording_and_documents_flow(),
+        )
+    )
+
+    question = next(event for event in result.events if event.event == "question")
+    assert question.data.current_option_id is None
+    assert question.data.recommended_option_id is None
+
+
+@pytest.mark.asyncio
+async def test_an_edit_recommendation_that_agrees_with_the_flow_is_kept() -> None:
+    # Agreeing with what the flow already does changes nothing, so the
+    # recommendation is still worth offering to a user who cannot judge the slot.
+    repo = AsyncMock()
+    repo.commit_turn.return_value = 5
+    planning_state = PlanningState.empty()
+    planning_state.resolved_slots = {
+        "primary_runtime_input": ResolvedSlot(
+            name="primary_runtime_input",
+            value="audio",
+            source="heuristic",
+            evidence=["heuristic:role-aware freeform analysis"],
+            confidence="high",
+        )
+    }
+
+    result = await dispatch_server_decision(
+        _request(
+            repo=repo,
+            decision=AskCanonicalQuestion(slot_name="primary_runtime_input"),
+            conversation=[
+                ConversationMessage(role="user", content="Förtydliga instruktionen")
+            ],
+            planning_state=planning_state,
+            flow=_transcription_flow(),
+        )
+    )
+
+    question = next(event for event in result.events if event.event == "question")
+    assert question.data.current_option_id == "audio"
+    assert question.data.recommended_option_id == "audio"
 
 
 @pytest.mark.asyncio

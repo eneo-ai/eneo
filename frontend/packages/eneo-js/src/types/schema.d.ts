@@ -30261,6 +30261,8 @@ export interface components {
     StructuredQuestionPayload: {
       /** Allow Custom */
       allow_custom: boolean;
+      /** Current Option Id */
+      current_option_id?: string | null;
       /**
        * Input Field Collection
        * @default false

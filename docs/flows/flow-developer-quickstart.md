@@ -291,6 +291,21 @@ Important builder rules:
   metadata. A free-text reply records only the canonical pending question id in
   `question_response`; the cited classifier owns any meaning derived from that
   text.
+- In an edit session a question carries `current_option_id`, the offered option
+  the flow being edited already uses for that slot, read off the flow through the
+  capability profile that owns what the flow does today. It is null in create
+  mode, and null in an edit whenever the flow leaves the slot open, answers it
+  ambiguously, or answers it with something the question does not offer. Render
+  it: without it a user cannot tell a choice apart from a change to a flow other
+  applications already run.
+- While editing, the only thing Eneo recommends is keeping what the flow already
+  does: `recommended_option_id` equals `current_option_id` or is absent. Anything
+  else is a proposal to change something already running, which is the user's
+  decision rather than a badge to accept. The rule is applied where the question
+  is emitted and it fails closed, so a flow whose answer the question cannot
+  describe carries no current value and no recommendation either. A question with
+  no recommendation cannot be delegated, so in an edit session handing a decision
+  back to Eneo can only ever keep the flow as it is.
 - A question carries `recommended_option_id` when the planning state already
   holds a candidate for that slot: Eneo's own reading, too weak to settle the
   question by itself, which is why the question is asked at all. A user who cannot judge the choice may hand that one question
