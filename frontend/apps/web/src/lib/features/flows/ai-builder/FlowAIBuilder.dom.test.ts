@@ -113,7 +113,7 @@ const FORMAT_QUESTION = question(
     { id: "pdf", label: "Som PDF" },
     { id: "text", label: "Som text" }
   ],
-  { question_index: 1 }
+  { question_index: 1, topic: "Slutresultat" }
 );
 const SOURCES_QUESTION = question(
   "sources",
@@ -776,19 +776,50 @@ describe("FlowAIBuilder discovery screens", () => {
   });
 
   it("lets the user change an earlier answer from the answer chips", async () => {
-    const { fetch } = makeFetch({ sessions: [answeredThenPendingSession()] });
+    const reworded = question(
+      "output_format",
+      "Hur vill du ha resultatet levererat?",
+      [
+        { id: "pdf", label: "Som PDF" },
+        { id: "text", label: "Som text" }
+      ],
+      { question_index: 1, topic: "Slutresultat, omformulerat" }
+    );
+    const { fetch } = makeFetch({
+      sessions: [
+        makeSession({
+          conversation: [
+            userMessage("u1", "Sammanfatta rapporter till en PDF"),
+            assistantMessage("a1", "Jag behöver veta formatet.", { question: FORMAT_QUESTION }),
+            assistantMessage("a2", "Jag omformulerar.", { question: reworded }),
+            userMessage("u3", "Som PDF", {
+              question_answer: {
+                kind: "structured_question_answer",
+                question_id: "output_format",
+                selected_option_ids: ["pdf"]
+              }
+            }),
+            assistantMessage("a4", "Och källorna?", { question: SOURCES_QUESTION })
+          ]
+        })
+      ]
+    });
     const { stream, calls } = makeStream();
     renderShell({ fetch, stream, resumeSessionId: "s-1" });
 
     await screen.findByRole("heading", { name: SOURCES_QUESTION.question });
     expect(screen.getByText(m.ai_builder_question_answers_label())).toBeTruthy();
     const chip = screen.getByText("Som PDF").closest("button")!;
+    // The chip says what the answer settled, not just what was picked, and it
+    // reads the newest asking of that question rather than the first.
+    expect(within(chip).getByText("Slutresultat, omformulerat")).toBeTruthy();
     expect(within(chip).getByText(m.ai_builder_question_change())).toBeTruthy();
 
     await fireEvent.click(chip);
 
     expect(await screen.findByText(m.ai_builder_question_editing_note())).toBeTruthy();
-    expect(screen.getByRole("heading", { name: FORMAT_QUESTION.question })).toBeTruthy();
+    // Reopening lands on the same newest asking the chip described.
+    expect(screen.getByRole("heading", { name: reworded.question })).toBeTruthy();
     await fireEvent.click(screen.getByRole("radio", { name: "Som text" }));
     await fireEvent.click(button(m.ai_builder_question_confirm()));
 

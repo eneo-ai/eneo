@@ -400,6 +400,13 @@ const statusEventDataSchema = z.object({
   status: z.enum(["architecture_committed", "architecture_revised", "repairing"])
 }) satisfies z.ZodType<AIBuilderStatusEventData>;
 
+// The disclosure's input and output are non-blank at the backend model, which
+// rejects whitespace-only too; `.min(1)` alone would let "   " through and
+// render as nothing.
+const nonBlankString = z.string().refine((value) => value.trim().length > 0, {
+  message: "must not be blank"
+});
+
 const questionOptionSchema = z.object({
   // One sentence on what choosing this option produces. Null where nothing
   // observable follows from it — then the row simply says less.
@@ -453,8 +460,8 @@ const requirementsSummaryEventDataSchema = z.object({
       is_derived: z.boolean().optional()
     })
   ),
-  input_description: z.string().min(1),
-  output_description: z.string().min(1),
+  input_description: nonBlankString,
+  output_description: nonBlankString,
   // What the prose promises the result will keep, in the same order and words.
   named_content_fields: z.array(z.object({ id: z.string(), label: z.string() })).optional(),
   assumptions: stringArraySchema.optional(),

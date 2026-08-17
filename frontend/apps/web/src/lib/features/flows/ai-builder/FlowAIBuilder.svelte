@@ -128,20 +128,27 @@
     }
     return ids;
   });
+  // A question can be asked twice with different wording; the newest is the one
+  // the user answered, and the one reopening it will show.
+  function newestQuestion(questionId: string) {
+    for (let i = service.messages.length - 1; i >= 0; i -= 1) {
+      const question = service.messages[i]?.question;
+      if (question?.question_id === questionId) return question;
+    }
+    return null;
+  }
   const answeredQuestions = $derived(
     askedQuestionIds
       .filter((id) => service.isQuestionAnswered(id))
-      .map((id) => ({
-        questionId: id,
-        topic:
-          service.messages.find((message) => message.question?.question_id === id)?.question
-            ?.topic ?? null,
-        question:
-          service.messages.find((message) => message.question?.question_id === id)?.question
-            ?.question ?? "",
-        answerLabel: answerLabelByQuestionId.get(id) ?? "",
+      .map((id) => newestQuestion(id))
+      .filter((question) => question !== null)
+      .map((question) => ({
+        questionId: question.question_id,
+        topic: question.topic ?? null,
+        question: question.question,
+        answerLabel: answerLabelByQuestionId.get(question.question_id) ?? "",
         // Eneo settled this one; the answer is still the user's to change.
-        delegated: delegatedQuestionIds.has(id)
+        delegated: delegatedQuestionIds.has(question.question_id)
       }))
   );
   // Only the server can number the questions it put to the user: a re-asked

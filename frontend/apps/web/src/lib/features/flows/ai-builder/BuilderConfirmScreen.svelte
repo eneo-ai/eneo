@@ -127,8 +127,8 @@
   function openChange(topic: string | null) {
     const next = topic?.trim() ?? null;
     if (next !== changeTopic) {
-      changeDrafts.set(changeTopic ?? "", changeDraft);
-      changeDraft = changeDrafts.get(next ?? "") ?? "";
+      changeDrafts.set(changeTopic, changeDraft);
+      changeDraft = changeDrafts.get(next) ?? "";
     }
     // Two open editors would leave the user correcting one thing while looking
     // at another.
@@ -139,7 +139,7 @@
   }
 
   function reopenQuestion(questionId: string) {
-    changeDrafts.set(changeTopic ?? "", changeDraft);
+    changeDrafts.set(changeTopic, changeDraft);
     changeOpen = false;
     changeTopic = null;
     changeDraft = "";
@@ -155,7 +155,7 @@
   let changeDraft = $state("");
   /** What the user has typed under each row, so moving between rows loses
    *  nothing and never relabels one row's words as another's. */
-  const changeDrafts = new SvelteMap<string, string>();
+  const changeDrafts = new SvelteMap<string | null, string>();
   let changeRequestRef = $state<BuilderChangeRequest | undefined>();
   let assumptionsOpen = $state(false);
   const assumptions = $derived(summary.assumptions ?? []);
@@ -506,7 +506,7 @@
             const topic = changeTopic;
             changeTopic = null;
             changeDraft = "";
-            changeDrafts.delete(topic ?? "");
+            changeDrafts.delete(topic);
             onchange(text, topic);
           }}
         />

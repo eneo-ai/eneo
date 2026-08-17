@@ -207,6 +207,29 @@ describe("AI Builder stream protocol", () => {
     ]);
   });
 
+  // The backend model refuses a disclosure whose input or output is blank or
+  // whitespace-only. A parser that accepted them would render a contract row
+  // with nothing in it.
+  it.each(["", "   "])("rejects a requirements summary with a blank input (%j)", (blank) => {
+    const rawEvent = validEvents.find((event) => event.event === "requirements_summary");
+    if (!rawEvent) throw new Error("Requirements summary fixture is missing.");
+    const data = { ...JSON.parse(rawEvent.data as string), input_description: blank };
+
+    expect(() =>
+      parseAIBuilderStreamEvent({ event: "requirements_summary", data: JSON.stringify(data) })
+    ).toThrow(/Invalid AI Builder requirements_summary event payload/);
+  });
+
+  it.each(["", "   "])("rejects a requirements summary with a blank output (%j)", (blank) => {
+    const rawEvent = validEvents.find((event) => event.event === "requirements_summary");
+    if (!rawEvent) throw new Error("Requirements summary fixture is missing.");
+    const data = { ...JSON.parse(rawEvent.data as string), output_description: blank };
+
+    expect(() =>
+      parseAIBuilderStreamEvent({ event: "requirements_summary", data: JSON.stringify(data) })
+    ).toThrow(/Invalid AI Builder requirements_summary event payload/);
+  });
+
   it.each(invalidPayloads)("rejects an invalid $event payload", (rawEvent) => {
     expect(() => parseAIBuilderStreamEvent(rawEvent)).toThrow(
       new RegExp(`Invalid AI Builder ${rawEvent.event} event payload`)
