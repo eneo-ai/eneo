@@ -261,6 +261,7 @@
 
   function handleConfirm() {
     if (!canConfirm || disabled) return;
+    if (!canConfirm || disabled) return;
     if (isInputFieldCollection) {
       const completedFields: StructuredInputFieldAnswer[] = [];
       for (const field of inputFields) {
@@ -436,11 +437,15 @@
           })}
         </p>
       {/if}
+      <p id="{questionLabelId}-keys" class="sr-only">
+        {isSingle ? m.ai_builder_question_keys_single() : m.ai_builder_question_keys_multi()}
+      </p>
       <div
         bind:this={optionsStackEl}
         class="options-stack"
         role={isSingle ? "radiogroup" : "group"}
         aria-labelledby={questionLabelId}
+        aria-describedby="{questionLabelId}-keys"
       >
         {#each visibleOptions as option, optionIndex (getStructuredQuestionOptionKey(option))}
           {@const optionKey = getStructuredQuestionOptionKey(option)}
@@ -545,18 +550,29 @@
 
     <div class="actions-row">
       {#if canDelegate}
-        <button type="button" class="delegate-action" onclick={() => ondelegate?.()}>
-          {m.ai_builder_question_delegate()}
-        </button>
+        <span class="delegate-block">
+          <button type="button" class="delegate-action" onclick={() => ondelegate?.()}>
+            {m.ai_builder_question_delegate()}
+          </button>
+          <span class="delegate-note">{m.ai_builder_question_delegate_note()}</span>
+        </span>
       {/if}
+      <!-- Kept in the tab order while it is unavailable: a keyboard user has to
+           be able to reach it and hear why it does not fire yet. -->
       <Button
         variant="default"
         class="ml-auto max-sm:ml-0 max-sm:h-[44px] max-sm:w-full max-sm:text-sm"
         onclick={handleConfirm}
-        disabled={!canConfirm || disabled}
+        aria-disabled={!canConfirm || disabled}
+        aria-describedby={!canConfirm && !disabled ? `${questionLabelId}-confirm-hint` : undefined}
       >
         {m.ai_builder_question_confirm()}
       </Button>
+      {#if !canConfirm && !disabled}
+        <span id="{questionLabelId}-confirm-hint" class="sr-only">
+          {m.ai_builder_question_confirm_hint()}
+        </span>
+      {/if}
     </div>
   {/if}
 </div>
@@ -663,6 +679,15 @@
     @apply inline-flex h-[1.3125rem] shrink-0 items-center rounded-full px-2 text-[0.6875rem] font-semibold;
     color: var(--accent-stronger);
     background: var(--accent-dimmer);
+  }
+
+  .delegate-block {
+    @apply flex min-w-0 flex-col gap-0.5;
+  }
+
+  .delegate-note {
+    @apply text-xs;
+    color: var(--text-secondary);
   }
 
   .delegate-action {
@@ -820,6 +845,15 @@
     }
 
     /* Below the primary, and still a touch target of its own. */
+    .delegate-block {
+      @apply flex min-w-0 flex-col gap-0.5;
+    }
+
+    .delegate-note {
+      @apply text-xs;
+      color: var(--text-secondary);
+    }
+
     .delegate-action {
       @apply h-10 w-full;
     }

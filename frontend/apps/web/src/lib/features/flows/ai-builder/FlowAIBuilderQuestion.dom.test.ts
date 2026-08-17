@@ -176,7 +176,8 @@ describe("FlowAIBuilderQuestion runtime metadata fields", () => {
       target: { value: "case_id" }
     });
     const confirm = screen.getByRole("button", { name: m.ai_builder_question_confirm() });
-    expect((confirm as HTMLButtonElement).disabled).toBe(true);
+    // Reachable by keyboard while unavailable, so aria carries the state.
+    expect(confirm.getAttribute("aria-disabled")).toBe("true");
 
     await fireEvent.change(
       screen.getByRole("combobox", {
@@ -184,7 +185,7 @@ describe("FlowAIBuilderQuestion runtime metadata fields", () => {
       }),
       { target: { value: "interpret_input" } }
     );
-    expect((confirm as HTMLButtonElement).disabled).toBe(false);
+    expect(confirm.getAttribute("aria-disabled")).toBe("false");
     await fireEvent.click(confirm);
 
     expect(onanswer).toHaveBeenCalledWith({

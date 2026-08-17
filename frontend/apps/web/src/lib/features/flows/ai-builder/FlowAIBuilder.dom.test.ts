@@ -556,10 +556,10 @@ describe("FlowAIBuilder discovery screens", () => {
     const confirm = (await screen.findByRole("button", {
       name: m.ai_builder_question_confirm()
     })) as HTMLButtonElement;
-    expect(confirm.disabled).toBe(true);
+    expect(confirm.getAttribute("aria-disabled")).toBe("true");
 
     await fireEvent.click(screen.getByRole("radio", { name: "Som PDF" }));
-    await waitFor(() => expect(confirm.disabled).toBe(false));
+    await waitFor(() => expect(confirm.getAttribute("aria-disabled")).toBe("false"));
     await fireEvent.click(confirm);
 
     await waitFor(() => expect(calls).toHaveLength(1));
