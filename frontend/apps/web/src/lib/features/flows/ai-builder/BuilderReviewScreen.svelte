@@ -673,10 +673,12 @@
               <span
                 class="bg-accent-dimmer text-accent-stronger inline-flex items-center rounded-full px-2.5 py-0.5 text-[0.65625rem] font-bold tracking-[0.03em] uppercase"
               >
-                {m.ai_builder_draft_pill()}
+                {isCreateMode ? m.ai_builder_draft_pill() : m.ai_builder_change_pill()}
               </span>
               <span class="text-secondary text-xs">
-                {m.ai_builder_plan_meta_steps_nothing_created({ count: stepCount })}
+                {isCreateMode
+                  ? m.ai_builder_plan_meta_steps_nothing_created({ count: stepCount })
+                  : m.ai_builder_plan_meta_steps_not_published({ count: stepCount })}
               </span>
             </div>
             <h2
@@ -1049,7 +1051,9 @@
                       artifactLabel={artifactLabel(step)}
                       pausesForReview={pausesForReview(step)}
                       perFile={perFileStepRefs.has(step.plan_step_ref)}
-                      changeBadge={changeBadge(step)}
+                      changeBadge={!isCreateMode && changeBadge(step) === null
+                        ? "unchanged"
+                        : changeBadge(step)}
                       quiet={!isCreateMode && changeBadge(step) === null}
                     />
                   </li>

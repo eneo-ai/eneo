@@ -15,7 +15,7 @@
     pausesForReview?: boolean;
     /** The step runs once per uploaded file or per item. */
     perFile?: boolean;
-    changeBadge?: "new" | "updated" | null;
+    changeBadge?: "new" | "updated" | "unchanged" | null;
   }
 
   let {
@@ -74,9 +74,15 @@
           class="inline-flex h-[1.3125rem] items-center rounded-full px-2 text-[0.6875rem] font-semibold whitespace-nowrap
             {changeBadge === 'new'
             ? 'bg-positive-dimmer text-positive-stronger'
-            : 'bg-accent-dimmer text-accent-stronger'}"
+            : changeBadge === 'updated'
+              ? 'bg-accent-dimmer text-accent-stronger'
+              : 'text-secondary'}"
         >
-          {changeBadge === "new" ? m.ai_builder_badge_new() : m.ai_builder_node_updated()}
+          {changeBadge === "new"
+            ? m.ai_builder_badge_new()
+            : changeBadge === "updated"
+              ? m.ai_builder_node_updated()
+              : m.ai_builder_node_unchanged()}
         </span>
       {/if}
     </div>
