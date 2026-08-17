@@ -2685,6 +2685,54 @@ class TestFlowObservedSlotsYieldToTheEdit:
         assert "docx_output_mode" not in state.resolved_slots
         assert state.resolved_slots["pdf_generation_mode"].value == "generated_pdf"
 
+    def test_replacement_holds_when_the_classifier_never_answered(self) -> None:
+        """Classification is skipped or unsure often enough to matter.
+
+        The request is stated plainly, and the output resolver reads it without
+        a provider: it ranks an explicit replacement above what the Flow
+        produces today. Reading the Flow's own output a second time here
+        overruled that, so a skipped classification silently kept the DOCX.
+
+        The replacement lands as a heuristic reading, which is deliberately not
+        commit-grade: the user is asked to settle the output instead of the
+        Flow answering for them.
+        """
+
+        conversation = [
+            ConversationMessage(
+                role="user",
+                content="Jag vill ha en PDF fil istället som utdata än en docx fil.",
+            ),
+        ]
+
+        state = build_planning_state_from_conversation(
+            conversation,
+            flow=self._docx_flow(),
+        )
+
+        terminal_output = state.resolved_slots["terminal_output"]
+        assert terminal_output.value == "pdf_document"
+        assert not terminal_output.is_commit_grade
+        assert "docx_output_mode" not in state.resolved_slots
+
+    def test_an_edit_that_asks_for_no_output_change_keeps_the_flow_output(self) -> None:
+        conversation = [
+            ConversationMessage(
+                role="user",
+                content="Behåll flödet men gör sammanfattningen kortare.",
+            ),
+        ]
+
+        state = build_planning_state_from_conversation(
+            conversation,
+            flow=self._docx_flow(),
+        )
+
+        terminal_output = state.resolved_slots["terminal_output"]
+        assert terminal_output.value == "docx_document"
+        assert terminal_output.source == "flow_default"
+        assert state.resolved_slots["docx_output_mode"].value == "generated_docx"
+
 
 class TestModelSlotMerge:
     def test_named_result_delta_rejects_missing_per_name_evidence(self) -> None:

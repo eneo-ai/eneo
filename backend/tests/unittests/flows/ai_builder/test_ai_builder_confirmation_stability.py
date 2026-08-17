@@ -13,7 +13,7 @@ change behind it.
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import pytest
 
@@ -46,6 +46,7 @@ from eneo.flows.ai_builder.ai_builder_slot_classification_contract import (
     SlotClassificationResult,
     SlotClassificationSource,
 )
+from eneo.flows.ai_builder.ai_builder_tool_names import PROPOSE_FLOW_TOOL_NAME
 from eneo.flows.ai_builder.ai_builder_turn_controller import (
     ConfirmRequirements,
     GenerateProposal,
@@ -70,6 +71,7 @@ from eneo.flows.ai_builder.planning_state_builder import (
     merge_llm_resolved_slots,
 )
 from eneo.flows.ai_builder.question_catalog import render_summary_label
+from eneo.flows.domain.flow import Flow, FlowStep
 
 _EXAMPLE_FILE = UUID("00000000-0000-0000-0000-0000000000e1")
 
@@ -249,6 +251,167 @@ def test_replacing_the_flow_output_withdraws_the_confirmation_it_contradicts() -
     assert not isinstance(
         _decide(state, confirmed_version=disclosed.requirements_version),
         GenerateProposal,
+    )
+
+
+def _docx_flow() -> Flow:
+    return Flow(
+        id=uuid4(),
+        tenant_id=uuid4(),
+        space_id=uuid4(),
+        name="Strukturerad samtalsrapport",
+        description="Befintligt dokumentflöde",
+        steps=[
+            FlowStep(
+                assistant_id=uuid4(),
+                step_order=1,
+                user_description="Läs underlaget",
+                input_source="flow_input",
+                input_type="document",
+                output_mode="pass_through",
+                output_type="text",
+            ),
+            FlowStep(
+                assistant_id=uuid4(),
+                step_order=2,
+                user_description="Skapa DOCX",
+                input_source="previous_step",
+                input_type="text",
+                output_mode="pass_through",
+                output_type="docx",
+            ),
+        ],
+    )
+
+
+def _post_plan_conversation(
+    disclosed: RequirementsSummaryPayload,
+    *,
+    last_user_message: str,
+    last_user_metadata: dict[str, object] | None = None,
+) -> list[ConversationMessage]:
+    return [
+        ConversationMessage(role="user", content="Behåll flödet som det är."),
+        ConversationMessage(
+            role="assistant",
+            content=disclosed.summary,
+            metadata={
+                "requirements_summary": disclosed.model_dump(mode="json"),
+                "requirements_version": disclosed.requirements_version,
+            },
+        ),
+        ConversationMessage(
+            role="user",
+            content="",
+            metadata={
+                "requirements_confirmed": True,
+                "requirements_version": disclosed.requirements_version,
+            },
+        ),
+        ConversationMessage(
+            role="assistant",
+            content="Här är planen.",
+            tool_calls=[
+                {
+                    "id": "call_plan",
+                    "name": PROPOSE_FLOW_TOOL_NAME,
+                    "arguments": {"flow_name": "Strukturerad samtalsrapport"},
+                }
+            ],
+        ),
+        ConversationMessage(
+            role="tool",
+            content="Draft saved.",
+            tool_call_id="call_plan",
+        ),
+        ConversationMessage(
+            role="user",
+            content=last_user_message,
+            metadata=last_user_metadata,
+        ),
+    ]
+
+
+def _edit_disclosure(
+    conversation: list[ConversationMessage],
+) -> RequirementsSummaryPayload:
+    return build_requirements_disclosure(
+        build_planning_state_from_conversation(conversation, flow=_docx_flow()),
+        ui_language="sv",
+        is_edit_mode=True,
+    )
+
+
+def _disclosed_terminal_output(disclosure: RequirementsSummaryPayload) -> set[str]:
+    return {
+        requirement.selected_value
+        for requirement in disclosure.resolved_requirements
+        if requirement.requirement_id == "terminal_output"
+    }
+
+
+def test_a_post_plan_replacement_reaches_the_disclosure_the_user_must_reconfirm() -> (
+    None
+):
+    """The confirmation is withdrawn by a changed requirement, not by wording.
+
+    Nine hard-coded phrases used to decide this, and the accepted DOCX also
+    outranked the reading of the very message that replaced it, so the plan was
+    revised for the old artifact. The comparison that replaced the phrases is
+    typed: the disclosure is derived from the conversation each turn, and a
+    confirmation names exactly one version of it.
+    """
+
+    disclosed = _edit_disclosure([])
+    assert _disclosed_terminal_output(disclosed) == {"docx_document"}
+
+    conversation = _post_plan_conversation(
+        disclosed,
+        last_user_message="Jag vill ha en PDF fil istället som utdata än en docx fil.",
+    )
+    # The citation names the message the user just sent, which is what makes it
+    # newer than the acceptance rather than a re-reading of it.
+    conversation[-1] = conversation[-1].model_copy(
+        update={
+            "metadata": _classifier_metadata(
+                _classified(
+                    "terminal_output",
+                    "pdf_document",
+                    "high",
+                    "PDF fil istället som utdata än en docx fil",
+                    cited_message_id=conversation[-1].message_id,
+                )
+            )
+        }
+    )
+
+    revised = _edit_disclosure(conversation)
+    assert _disclosed_terminal_output(revised) == {"pdf_document"}
+    assert revised.requirements_version != disclosed.requirements_version
+    assert (
+        resolve_requirements_state(conversation).confirmed_requirements_version
+        == disclosed.requirements_version
+    )
+
+
+def test_a_post_plan_revision_keeps_the_confirmation_it_did_not_touch() -> None:
+    """The confirm-stability contract: a revision request is not a new demand.
+
+    Asking for the same requirements to be confirmed again for every revision
+    is what ran a confirmed session into the interaction limit.
+    """
+
+    disclosed = _edit_disclosure([])
+    conversation = _post_plan_conversation(
+        disclosed,
+        last_user_message="Gör steg 2 kortare.",
+    )
+
+    revised = _edit_disclosure(conversation)
+    assert revised.requirements_version == disclosed.requirements_version
+    assert (
+        resolve_requirements_state(conversation).confirmed_requirements_version
+        == disclosed.requirements_version
     )
 
 

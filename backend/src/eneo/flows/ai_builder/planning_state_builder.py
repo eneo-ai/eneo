@@ -1667,10 +1667,17 @@ def _resolve_slots(
             slot_value=primary_runtime_input,
         )
 
+    # `resolve_output_intent` owns this decision and was already given the Flow:
+    # it ranks the structured answer, an explicit replacement ("en PDF istället
+    # för en docx"), what the Flow produces today, and the heuristics against
+    # each other, and lets the Flow's output stand only for a message that asks
+    # for no change. Reading `flow_defaults` again here inverted that verdict,
+    # so an edit that named a different artifact kept the old one whenever the
+    # classifier was skipped or unsure.
     terminal_output = (
         _single_slot_value(
             answer_signals=answer_signals,
-            flow_defaults=flow_defaults,
+            flow_defaults={},
             requirements_summary_values=requirements_summary_values,
             question_id="terminal_output",
         )
