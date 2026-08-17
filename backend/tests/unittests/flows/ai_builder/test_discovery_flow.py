@@ -25,6 +25,10 @@ from eneo.flows.ai_builder.ai_builder_architecture_commit import (
 from eneo.flows.ai_builder.ai_builder_architecture_derivation import (
     derive_architecture_commit_draft,
 )
+from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
+    metadata_for_assistant_question,
+    question_answer_from_metadata,
+)
 from eneo.flows.ai_builder.ai_builder_discovery import (
     analyze_discovery,
     build_discovery_block_message,
@@ -55,6 +59,9 @@ from eneo.flows.ai_builder.ai_builder_planner_request_preparation import (
     conversation_message_to_llm_message,
 )
 from eneo.flows.ai_builder.ai_builder_proposal_telemetry import ProposalTurnTelemetry
+from eneo.flows.ai_builder.ai_builder_requirements_disclosure import (
+    build_requirements_disclosure,
+)
 from eneo.flows.ai_builder.ai_builder_requirements_state import (
     resolve_requirements_state,
 )
@@ -82,6 +89,9 @@ from eneo.flows.ai_builder.ai_builder_slot_classification_contract import (
     SlotClassificationResult,
 )
 from eneo.flows.ai_builder.ai_builder_turn_controller import AskCanonicalQuestion
+from eneo.flows.ai_builder.ai_builder_user_question_metadata import (
+    prepare_user_question_metadata,
+)
 from eneo.flows.ai_builder.planning_state import (
     FileRoleEvidence,
     MappedFileLimit,
@@ -94,6 +104,7 @@ from eneo.flows.ai_builder.planning_state_builder import (
     build_planning_state_from_conversation,
     merge_llm_resolved_slots,
 )
+from eneo.flows.ai_builder.question_catalog import render_summary_label
 from eneo.flows.domain.flow import Flow, FlowStep
 
 # ---------------------------------------------------------------------------
@@ -190,6 +201,121 @@ def _battle_case_prompt(case_id: str) -> str:
     )
     cases = cast(list[dict[str, str]], payload["cases"])
     return next(case["prompt"] for case in cases if case["id"] == case_id)
+
+
+def test_question_recommends_eneos_own_reading_of_the_slot() -> None:
+    planning_state = PlanningState.empty()
+    planning_state.resolved_slots = {
+        "post_processing_goal": ResolvedSlot(
+            name="post_processing_goal",
+            value="summarize_or_overview",
+            source="heuristic",
+            confidence="medium",
+            evidence=["heuristic:role-aware freeform analysis"],
+        ),
+    }
+
+    followup = build_registry_question_followup(
+        "post_processing_goal",
+        [ConversationMessage(role="user", content="Summarize meeting notes")],
+        planning_state=planning_state,
+    )
+
+    assert followup is not None
+    recommended_id = followup.question_data.recommended_option_id
+    assert recommended_id is not None
+    recommended = next(
+        option
+        for option in followup.question_data.options
+        if option.id == recommended_id
+    )
+    assert recommended.value == "summarize_or_overview"
+
+
+def test_question_recommends_nothing_when_the_slot_is_unread() -> None:
+    followup = build_registry_question_followup(
+        "post_processing_goal",
+        [ConversationMessage(role="user", content="Summarize meeting notes")],
+        planning_state=PlanningState.empty(),
+    )
+
+    assert followup is not None
+    assert followup.question_data.recommended_option_id is None
+
+
+def test_a_delegated_question_is_settled_and_never_asked_again() -> None:
+    """Handing a question back to Eneo decides it as firmly as answering it."""
+
+    planning_state = PlanningState.empty()
+    planning_state.resolved_slots = {
+        "post_processing_goal": ResolvedSlot(
+            name="post_processing_goal",
+            value="summarize_or_overview",
+            source="heuristic",
+            confidence="medium",
+            evidence=["heuristic:role-aware freeform analysis"],
+        ),
+    }
+    request = ConversationMessage(role="user", content="Summarize meeting notes")
+    followup = build_registry_question_followup(
+        "post_processing_goal",
+        [request],
+        planning_state=planning_state,
+    )
+    assert followup is not None
+
+    conversation = [
+        request,
+        ConversationMessage(
+            role="assistant",
+            content=followup.assistant_text,
+            metadata=metadata_for_assistant_question(followup.question_data),
+            tool_calls=[
+                {
+                    "id": "question-1",
+                    "name": "ask_structured_question",
+                    "arguments": followup.question_data.model_dump(mode="json"),
+                }
+            ],
+        ),
+    ]
+    prepared = prepare_user_question_metadata(
+        conversation=conversation,
+        message="",
+        question_answer={
+            "kind": "delegated_question_answer",
+            "question_id": "post_processing_goal",
+        },
+    )
+    conversation.append(
+        ConversationMessage(role="user", content="", metadata=prepared.metadata)
+    )
+
+    replayed = question_answer_from_metadata(prepared.metadata)
+    assert replayed is not None
+    assert replayed.selected_value == "summarize_or_overview"
+    assert replayed.delegated is True
+
+    settled = build_planning_state_from_conversation(conversation)
+    slot = settled.resolved_slots["post_processing_goal"]
+    assert slot.value == "summarize_or_overview"
+    assert slot.source == "structured_answer"
+    assert slot.is_commit_grade
+
+    disclosure = build_requirements_disclosure(settled, ui_language="sv")
+    assert "post_processing_goal" in {
+        requirement.requirement_id for requirement in disclosure.resolved_requirements
+    }
+    assert render_summary_label("post_processing_goal", "sv") in {
+        decision.topic for decision in disclosure.key_decisions
+    }
+
+    analysis = analyze_discovery(conversation, planning_state=settled)
+    assert "post_processing_goal" not in {
+        issue.suggestion.question_id
+        for issue in analysis.issues
+        if issue.suggestion is not None
+    }
 
 
 def test_mapped_file_limit_question_displays_current_policy_ceiling() -> None:

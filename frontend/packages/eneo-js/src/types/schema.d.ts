@@ -13952,6 +13952,24 @@ export interface components {
       websites: components["schemas"]["WebsitePublic"][];
     };
     /**
+     * DelegatedQuestionAnswerRequest
+     * @description The user handing one question back to Eneo, naming no option.
+     *
+     *     A delegation carries no selection because the user is declining to make
+     *     one; the server answers it with the recommendation the question showed.
+     */
+    DelegatedQuestionAnswerRequest: {
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      kind: "delegated_question_answer";
+      /** Question Id */
+      question_id: string;
+      /** Ui Language */
+      ui_language?: string | null;
+    };
+    /**
      * DeleteCredentialResponse
      * @description Response model for deleting tenant API credentials.
      *
@@ -28273,7 +28291,8 @@ export interface components {
       /** Question Answer */
       question_answer?:
         | (
-            | components["schemas"]["StructuredQuestionAnswerMetadata"]
+            | components["schemas"]["StructuredQuestionAnswerRequest"]
+            | components["schemas"]["DelegatedQuestionAnswerRequest"]
             | components["schemas"]["RequirementsConfirmationMetadata"]
           )
         | null;
@@ -30107,8 +30126,50 @@ export interface components {
       /** Updated At */
       updated_at?: string | null;
     };
-    /** StructuredQuestionAnswerMetadata */
+    /**
+     * StructuredQuestionAnswerMetadata
+     * @description A recorded answer, including who chose the option in it.
+     *
+     *     Delegation is the server's account of how the answer came about, so it
+     *     lives only on the persisted shape; a client that could set it could make
+     *     replay claim Eneo chose something the user picked.
+     */
     StructuredQuestionAnswerMetadata: {
+      /** Answer */
+      answer?: string | number | boolean | null;
+      /** Custom Value */
+      custom_value?: string | null;
+      /**
+       * Delegated
+       * @default false
+       */
+      delegated?: boolean;
+      /** Input Fields */
+      input_fields?: components["schemas"]["RuntimeMetadataFieldAnswer"][] | null;
+      /**
+       * Kind
+       * @default structured_question_answer
+       * @constant
+       */
+      kind?: "structured_question_answer";
+      /** Question Id */
+      question_id?: string | null;
+      /** Selected Option Id */
+      selected_option_id?: string | null;
+      /** Selected Option Ids */
+      selected_option_ids?: string[] | null;
+      /** Selected Value */
+      selected_value?: string | number | boolean | null;
+      /** Selected Values */
+      selected_values?: (string | number | boolean | null)[] | null;
+      /** Ui Language */
+      ui_language?: string | null;
+    };
+    /**
+     * StructuredQuestionAnswerRequest
+     * @description A selection the user made, exactly as a client may state it.
+     */
+    StructuredQuestionAnswerRequest: {
       /** Answer */
       answer?: string | number | boolean | null;
       /** Custom Value */
@@ -30159,6 +30220,8 @@ export interface components {
       question: string;
       /** Question Id */
       question_id: string;
+      /** Recommended Option Id */
+      recommended_option_id?: string | null;
       /**
        * Requires Confirm
        * @default false

@@ -10,14 +10,16 @@ from eneo.flows.ai_builder.ai_builder_canonicalization import (
 from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
     UI_LANGUAGE_METADATA_KEY,
     AIBuilderQuestionAnswerInput,
+    DelegatedQuestionAnswerRequest,
     StructuredQuestionAnswerMetadata,
+    delegated_question_answer_from_input,
     metadata_for_user_message,
     question_answer_has_real_payload,
     question_answer_question_id,
     question_answer_values,
     question_response_to_metadata,
     requirements_confirmation_from_question_answer,
-    structured_question_answer_from_input,
+    structured_question_answer_request_from_input,
     ui_language_from_question_answer,
 )
 from eneo.flows.ai_builder.ai_builder_domain_models import ConversationMessage
@@ -26,6 +28,7 @@ from eneo.flows.ai_builder.ai_builder_error_contract import (
     AIBuilderErrorCode,
 )
 from eneo.flows.ai_builder.ai_builder_question_state import (
+    pending_user_requirement_question,
     pending_user_requirement_question_id,
 )
 from eneo.flows.ai_builder.question_catalog import (
@@ -55,14 +58,25 @@ def prepare_user_question_metadata(
         question_answer
     )
     is_requirements_confirmation = requirements_confirmation is not None
+    delegation = delegated_question_answer_from_input(question_answer)
     metadata: FlowPersistedJsonObject | None = None
     if requirements_confirmation is not None:
         metadata = metadata_for_user_message(question_answer=requirements_confirmation)
+    elif delegation is not None:
+        metadata = metadata_for_user_message(
+            question_answer=_validated_structured_question_answer(
+                conversation=conversation,
+                answer=_delegated_answer(
+                    conversation=conversation,
+                    delegation=delegation,
+                ),
+            )
+        )
     elif question_answer is not None:
         metadata = metadata_for_user_message(
             question_answer=_validated_structured_question_answer(
                 conversation=conversation,
-                question_answer=question_answer,
+                answer=_client_answer(question_answer),
             )
         )
 
@@ -83,15 +97,55 @@ def prepare_user_question_metadata(
     )
 
 
+def _client_answer(
+    question_answer: AIBuilderQuestionAnswerInput,
+) -> StructuredQuestionAnswerMetadata:
+    """Read the selection the client stated, and only the selection."""
+    request = structured_question_answer_request_from_input(question_answer)
+    if request is None:
+        _raise_invalid_question_payload("invalid_question_answer")
+    return StructuredQuestionAnswerMetadata.model_validate(request.model_dump())
+
+
+def _delegated_answer(
+    *,
+    conversation: list[ConversationMessage],
+    delegation: DelegatedQuestionAnswerRequest,
+) -> StructuredQuestionAnswerMetadata:
+    """Answer the pending question with the recommendation it carried.
+
+    The delegation names no option, so the answer is the one the user was
+    shown as Eneo's own choice. Anything else — a closed question, a question
+    with nothing to recommend — leaves the decision with the user.
+    """
+    pending = pending_user_requirement_question(conversation)
+    if pending is None or (
+        canonical_question_id(pending.question_id) != delegation.question_id
+    ):
+        _raise_invalid_question_payload("delegation_without_pending_question")
+
+    if pending.recommended_option_id is None:
+        _raise_invalid_question_payload("delegation_without_recommendation")
+
+    recommended = next(
+        option
+        for option in pending.options
+        if option.id == pending.recommended_option_id
+    )
+    return StructuredQuestionAnswerMetadata(
+        question_id=delegation.question_id,
+        selected_option_id=recommended.id,
+        selected_value=recommended.value,
+        delegated=True,
+        ui_language=delegation.ui_language,
+    )
+
+
 def _validated_structured_question_answer(
     *,
     conversation: list[ConversationMessage],
-    question_answer: AIBuilderQuestionAnswerInput,
+    answer: StructuredQuestionAnswerMetadata,
 ) -> StructuredQuestionAnswerMetadata:
-    answer = structured_question_answer_from_input(question_answer)
-    if answer is None:
-        _raise_invalid_question_payload("invalid_question_answer")
-
     question_id = question_answer_question_id(answer)
     if question_id is None:
         _raise_invalid_question_payload("missing_question_id")

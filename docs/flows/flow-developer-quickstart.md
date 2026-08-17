@@ -291,6 +291,15 @@ Important builder rules:
   metadata. A free-text reply records only the canonical pending question id in
   `question_response`; the cited classifier owns any meaning derived from that
   text.
+- A question carries `recommended_option_id` when the planning state already
+  holds a candidate for that slot: Eneo's own reading, too weak to settle the
+  question by itself, which is why the question is asked at all. A user who cannot judge the choice may hand that one question
+  back with a `delegated_question_answer`, and the server answers it with the
+  recommendation the question carried. The result is an ordinary structured
+  answer marked `delegated`, so it is the user's decision, appears in the
+  requirements summary like any other, and is never asked again. Delegating a
+  closed question, a different question, or a question that recommends nothing
+  is refused; there is no session-wide automatic mode.
 - Prefer one bounded, typed understanding pass per Builder turn when model
   interpretation is needed. Split it only for a measured context-window limit;
   do not scatter semantic ownership across phrase scans.

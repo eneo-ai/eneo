@@ -6,6 +6,7 @@ from eneo.flows.ai_builder.ai_builder_event_models import (
     RequirementsDisclosureContent,
     RequirementsSummaryPayload,
     ResolvedRequirementPayload,
+    StructuredQuestionPayload,
 )
 from eneo.flows.ai_builder.ai_builder_slot_vocabulary import (
     KNOWN_REQUIREMENT_SLOT_NAMES,
@@ -133,3 +134,34 @@ def test_an_emitted_summary_must_name_itself() -> None:
     assert RequirementsSummaryPayload.model_validate(
         {**content, "requirements_version": "a" * 64}
     ).requirements_version == ("a" * 64)
+
+
+def _question(recommended_option_id: str | None) -> dict[str, object]:
+    return {
+        "question_id": "terminal_output",
+        "question": "Vilket slutresultat ska flödet leverera?",
+        "options": [
+            {"id": "pdf_document", "label": "PDF", "value": "pdf_document"},
+            {"id": "docx_document", "label": "Word", "value": "docx_document"},
+        ],
+        "selection_mode": "single",
+        "allow_custom": False,
+        "recommended_option_id": recommended_option_id,
+    }
+
+
+def test_a_recommendation_must_name_an_option_the_user_was_offered() -> None:
+    """A recommendation nobody can select is not a choice Eneo can make."""
+
+    assert (
+        StructuredQuestionPayload.model_validate(
+            _question("pdf_document")
+        ).recommended_option_id
+        == "pdf_document"
+    )
+    assert (
+        StructuredQuestionPayload.model_validate(_question(None)).recommended_option_id
+        is None
+    )
+    with pytest.raises(ValidationError):
+        StructuredQuestionPayload.model_validate(_question("csv_document"))

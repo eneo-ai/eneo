@@ -935,7 +935,9 @@ class RuntimeMetadataFieldAnswer(BaseModel):
         return value.model_copy(update={"provenance": "user_confirmed"})
 
 
-class StructuredQuestionAnswerMetadata(BaseModel):
+class StructuredQuestionAnswerRequest(BaseModel):
+    """A selection the user made, exactly as a client may state it."""
+
     model_config = ConfigDict(extra="forbid")
 
     kind: Literal["structured_question_answer"] = "structured_question_answer"
@@ -971,7 +973,7 @@ class StructuredQuestionAnswerMetadata(BaseModel):
         return normalize_question_answer(payload)
 
     @model_validator(mode="after")
-    def require_answer_specific_payload(self) -> "StructuredQuestionAnswerMetadata":
+    def require_answer_specific_payload(self) -> "StructuredQuestionAnswerRequest":
         is_field_details = self.question_id == "runtime_metadata_field_details"
         if is_field_details and not self.input_fields:
             raise ValueError(
@@ -1002,6 +1004,20 @@ class StructuredQuestionAnswerMetadata(BaseModel):
                 "input_fields are only valid for runtime metadata field details"
             )
         return self
+
+
+class StructuredQuestionAnswerMetadata(StructuredQuestionAnswerRequest):
+    """A recorded answer, including who chose the option in it.
+
+    Delegation is the server's account of how the answer came about, so it
+    lives only on the persisted shape; a client that could set it could make
+    replay claim Eneo chose something the user picked.
+    """
+
+    delegated: bool = Field(
+        default=False,
+        exclude_if=lambda value: value is False,
+    )
 
 
 class QuestionResponseMetadata(BaseModel):
@@ -1038,16 +1054,75 @@ class RequirementsConfirmationMetadata(BaseModel):
     )
 
 
+class DelegatedQuestionAnswerRequest(BaseModel):
+    """The user handing one question back to Eneo, naming no option.
+
+    A delegation carries no selection because the user is declining to make
+    one; the server answers it with the recommendation the question showed.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    kind: Literal["delegated_question_answer"] = "delegated_question_answer"
+    question_id: QuestionAnswerId
+    ui_language: str | None = Field(
+        default=None,
+        max_length=_MAX_UI_LANGUAGE_LENGTH,
+    )
+
+    @field_validator("question_id", mode="before")
+    @classmethod
+    def normalize_question_id(cls, question_id: object) -> object:
+        if not isinstance(question_id, str):
+            return question_id
+        return canonical_question_id(question_id)
+
+
 AIBuilderQuestionAnswerRequest: TypeAlias = Annotated[
-    StructuredQuestionAnswerMetadata | RequirementsConfirmationMetadata,
+    StructuredQuestionAnswerRequest
+    | DelegatedQuestionAnswerRequest
+    | RequirementsConfirmationMetadata,
     Field(discriminator="kind"),
 ]
 
 AIBuilderQuestionAnswerInput: TypeAlias = (
-    StructuredQuestionAnswerMetadata
+    StructuredQuestionAnswerRequest
+    | DelegatedQuestionAnswerRequest
     | RequirementsConfirmationMetadata
     | Mapping[str, Any]
 )
+
+
+def delegated_question_answer_from_input(
+    value: AIBuilderQuestionAnswerInput | None,
+) -> DelegatedQuestionAnswerRequest | None:
+    if value is None:
+        return None
+    data = _model_or_mapping_data(value)
+    if data.get("kind") != "delegated_question_answer":
+        return None
+    try:
+        return DelegatedQuestionAnswerRequest.model_validate(data)
+    except ValidationError:
+        return None
+
+
+def structured_question_answer_request_from_input(
+    value: AIBuilderQuestionAnswerInput | None,
+) -> StructuredQuestionAnswerRequest | None:
+    """Read a selection a client stated, refusing any server-owned field."""
+    if value is None:
+        return None
+    data = _model_or_mapping_data(value)
+    if data.get("kind") not in (None, "structured_question_answer"):
+        return None
+    if data.get("requirements_confirmed") is True:
+        return None
+    data.setdefault("kind", "structured_question_answer")
+    try:
+        return StructuredQuestionAnswerRequest.model_validate(data)
+    except ValidationError:
+        return None
 
 
 class PersistedAssistantToolCall(BaseModel):

@@ -12,6 +12,8 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from typing import Any
 
+from pydantic import ValidationError
+
 from eneo.flows.ai_builder.ai_builder_canonicalization import (
     canonical_question_id,
     is_supported_structured_question_id,
@@ -30,6 +32,9 @@ from eneo.flows.ai_builder.ai_builder_discovery_questions import (
 )
 from eneo.flows.ai_builder.ai_builder_domain_models import (
     ConversationMessage,
+)
+from eneo.flows.ai_builder.ai_builder_event_models import (
+    StructuredQuestionPayload,
 )
 from eneo.flows.ai_builder.ai_builder_tool_names import (
     ASK_STRUCTURED_QUESTION_TOOL_NAME,
@@ -163,24 +168,65 @@ def last_answered_question(
 def pending_user_requirement_question_id(
     conversation: Sequence[ConversationMessage],
 ) -> str | None:
-    pending_question_id: str | None = None
+    pending = _pending_user_requirement_question(conversation)
+    return pending[0] if pending is not None else None
+
+
+def pending_user_requirement_question(
+    conversation: Sequence[ConversationMessage],
+) -> StructuredQuestionPayload | None:
+    """The question the user is answering right now, exactly as they saw it.
+
+    Only a still-open question can be settled, and a payload the server can no
+    longer validate — or that names a different question than the one this
+    owner says is open — is not evidence of what was offered.
+    """
+    pending = _pending_user_requirement_question(conversation)
+    if pending is None or pending[1] is None:
+        return None
+    try:
+        payload = StructuredQuestionPayload.model_validate(pending[1])
+    except ValidationError:
+        return None
+    if canonical_question_id(payload.question_id) != pending[0]:
+        return None
+    return payload
+
+
+def _pending_user_requirement_question(
+    conversation: Sequence[ConversationMessage],
+) -> tuple[str, Mapping[str, Any] | None] | None:
+    pending: tuple[str, Mapping[str, Any] | None] | None = None
     for message in conversation:
         question_id = assistant_question_id(message)
         if question_id is not None:
-            pending_question_id = (
-                question_id
+            pending = (
+                (question_id, _structured_question_arguments(message))
                 if is_supported_structured_question_id(question_id)
                 and question_exposure_for_id(question_id) == "user_requirement"
                 else None
             )
             continue
-        if pending_question_id is not None and _is_user_evidence(message):
-            pending_question_id = None
-    return pending_question_id
+        if pending is not None and _is_user_evidence(message):
+            pending = None
+    return pending
+
+
+def _structured_question_arguments(
+    message: ConversationMessage | Mapping[str, Any],
+) -> Mapping[str, Any] | None:
+    for tool_call in reversed(tool_calls_from_message(message)):
+        if tool_call.name != ASK_STRUCTURED_QUESTION_TOOL_NAME:
+            continue
+        payload = structured_question_payload_from_tool_arguments(tool_call.arguments)
+        if payload is not None:
+            return payload
+    return None
 
 
 __all__ = [
     "assistant_question_id",
     "last_answered_question",
+    "pending_user_requirement_question",
     "pending_user_requirement_question_id",
 ]

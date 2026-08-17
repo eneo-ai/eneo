@@ -4,7 +4,14 @@ from enum import StrEnum
 from typing import Annotated, Final, Literal, TypeAlias, cast
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, field_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    TypeAdapter,
+    field_validator,
+    model_validator,
+)
 
 from eneo.flows.ai_builder.ai_builder_domain_models import FlowBuilderProposalContent
 from eneo.flows.ai_builder.ai_builder_error_contract import AIBuilderErrorEvent
@@ -42,6 +49,23 @@ class StructuredQuestionPayload(BaseModel):
         default=False,
         exclude_if=lambda value: value is False,
     )
+    # Eneo's own reading of this slot, offered so a user who cannot judge the
+    # choice can hand this one question back. It settles nothing on its own;
+    # naming it here is what makes the answer the option they were shown.
+    recommended_option_id: str | None = None
+
+    @model_validator(mode="after")
+    def _recommendation_names_one_option(self) -> "StructuredQuestionPayload":
+        if self.recommended_option_id is None:
+            return self
+        named = [
+            option for option in self.options if option.id == self.recommended_option_id
+        ]
+        if len(named) != 1:
+            raise ValueError(
+                "recommended_option_id must name exactly one offered option"
+            )
+        return self
 
 
 class AIBuilderTextEventData(BaseModel):

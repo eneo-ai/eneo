@@ -777,14 +777,44 @@ def build_registry_question_followup(
         else suggestion
     )
     return BackendQuestion(
-        question_data=_structured_question_payload_from_suggestion(rendered_suggestion),
+        question_data=_structured_question_payload_from_suggestion(
+            rendered_suggestion,
+            planning_state=planning_state,
+        ),
         assistant_text=assistant_text,
         issue=issue,
     )
 
 
+def recommended_option_id_for_suggestion(
+    suggestion: DiscoveryQuestionSuggestion,
+    planning_state: PlanningState | None,
+) -> str | None:
+    """The offered option holding Eneo's current reading of this slot.
+
+    The planning state already carries a candidate for slots the Builder has
+    read but the user has not settled. It is not strong enough to settle the
+    question by itself — that is why the question exists — so naming it here
+    is what lets the user hand this one decision back, and keeps a single
+    owner for what Eneo would choose.
+    """
+    if planning_state is None:
+        return None
+    slot = planning_state.resolved_slots.get(
+        canonical_question_id(suggestion.question_id)
+    )
+    if slot is None:
+        return None
+    named = [option for option in suggestion.options if option.value == slot.value]
+    if len(named) != 1:
+        return None
+    return named[0].id
+
+
 def _structured_question_payload_from_suggestion(
     suggestion: DiscoveryQuestionSuggestion,
+    *,
+    planning_state: PlanningState | None,
 ) -> StructuredQuestionPayload:
     return StructuredQuestionPayload(
         question_id=suggestion.question_id,
@@ -800,6 +830,9 @@ def _structured_question_payload_from_suggestion(
         ],
         selection_mode=suggestion.selection_mode,
         allow_custom=suggestion.allow_custom,
+        recommended_option_id=recommended_option_id_for_suggestion(
+            suggestion, planning_state
+        ),
     )
 
 
