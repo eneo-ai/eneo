@@ -6,11 +6,11 @@ readonly SOURCE_COMMIT="875cd1f67ea25e8965a4f5ba1e6aaf501ba6b6fa"
 readonly SOURCE_TREE="f6590c71c41ec414fc193b89e9d9dd586d39ad17"
 readonly SOURCE_ARCHIVE_SHA256="2e37f5d8980256e490324e3759d38437ecfee734f60aa3e75528b05f7d19460e"
 readonly SOURCE_LICENSE_SHA256="d789d433cc11da163273d1e39be2e8fa67642f9a58ef220d3f258fa9c14ef613"
-readonly DOWNSTREAM_PATCH_NAME="0001-upgrade-grpc-to-1.82.1.patch"
-readonly DOWNSTREAM_PATCH_SHA256="54cc9bd8b0cfadebbce56754914655526cee882075141fd64790686bd4ac409e"
+readonly DOWNSTREAM_PATCH_NAME="0001-upgrade-vulnerable-dependencies.patch"
+readonly DOWNSTREAM_PATCH_SHA256="24e01bfdf3bd29bdb3e4f9b55f6567332d6e6286342ef4a9097e7803fd7e8323"
 readonly SCRIPT_DIRECTORY="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 readonly DOWNSTREAM_PATCH="$SCRIPT_DIRECTORY/patches/$DOWNSTREAM_PATCH_NAME"
-readonly GO_IMAGE="docker.io/library/golang:1.25.12-bookworm@sha256:ea341baa9bd5ba6784f6d7161ace70544349a6242d54d34a0fbfd2c4d51c9d58"
+readonly GO_IMAGE="docker.io/library/golang:1.25.13-bookworm@sha256:e401dae1bf814e29204a8cb7915682e1780951e609ca0dd8865ee1937f510c48"
 readonly GO_LICENSES_REVISION="3e084b0caf710f7bfead967567539214f598c0a2"
 readonly GOVULNCHECK_VERSION="v1.6.0"
 
@@ -128,6 +128,8 @@ audit_source() {
             and .Replace.Version == "v0.23.1-0.20260429145742-d2acd3c49e58")
         and any(.[]; .Path == "google.golang.org/grpc"
             and .Version == "v1.82.1")
+        and any(.[]; .Path == "golang.org/x/image"
+            and .Version == "v0.45.0")
         ' "$output_directory/modules.json" >/dev/null
 
     cut -d, -f3 "$output_directory/licenses.csv" | LC_ALL=C sort -u \
