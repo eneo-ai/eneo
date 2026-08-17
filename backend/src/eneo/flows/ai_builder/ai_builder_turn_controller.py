@@ -47,6 +47,7 @@ from eneo.flows.ai_builder.planning_state import (
 from eneo.flows.ai_builder.question_catalog import (
     Locale,
     runtime_metadata_field_details_question,
+    runtime_metadata_field_details_rationale,
 )
 
 _UNSUPPORTED_ARCHITECTURE_MESSAGE_EN = (
@@ -287,7 +288,7 @@ def _runtime_input_field_details_question(locale: Locale) -> BackendQuestion:
             requires_confirm=True,
             input_field_collection=True,
         ),
-        assistant_text=question_text,
+        assistant_text=runtime_metadata_field_details_rationale(locale),
     )
 
 

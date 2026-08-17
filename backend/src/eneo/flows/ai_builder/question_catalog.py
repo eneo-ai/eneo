@@ -42,14 +42,29 @@ QuestionExposure = Literal["user_requirement", "planner_internal"]
 
 
 def runtime_metadata_field_details_question(locale: Locale) -> str:
+    # The controls carry label, type, required and options; the question only
+    # has to say who fills them in and when. Instructions to a developer are
+    # not a question to a caseworker.
+    if locale == "sv":
+        return "Vad ska den som kör flödet fylla i?"
+    return "What should the person running the flow fill in?"
+
+
+def runtime_metadata_field_details_rationale(locale: Locale) -> str:
+    """Why the fields matter — never a restatement of the question.
+
+    Shown beside the question; the client omits the line when it is empty, so
+    a rationale that only repeats the question would be worse than none.
+    """
+
     if locale == "sv":
         return (
-            "Vilka metadatafält ska användaren fylla i? Ange etikett/namn, typ, "
-            "om fältet är obligatoriskt och val för listfält."
+            "Fälten blir ett formulär som visas före varje körning. De blir också "
+            "variabler som stegen kan använda i sina instruktioner."
         )
     return (
-        "Which metadata fields should the user fill in? Provide the label/name, "
-        "type, requiredness, and options for select fields."
+        "The fields become a form shown before every run. They also become "
+        "variables the steps can use in their instructions."
     )
 
 

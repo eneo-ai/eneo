@@ -274,6 +274,10 @@ def test_server_collects_runtime_field_details_before_requirements_confirmation(
         "Use it to shape the final result",
         "Use it throughout the flow",
     ]
+    # The line beside the question says why the fields matter; a line that
+    # repeats the question carries nothing, so it must never be the question.
+    assert decision.question.assistant_text != decision.question.question_data.question
+    assert "form" in decision.question.assistant_text
 
 
 def test_omitted_runtime_metadata_keeps_visible_no_extra_fields_assumption() -> None:
