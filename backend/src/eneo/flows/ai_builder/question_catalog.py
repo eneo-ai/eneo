@@ -68,6 +68,47 @@ def runtime_metadata_field_details_rationale(locale: Locale) -> str:
     )
 
 
+_RUNTIME_METADATA_FIELD_PURPOSE_LABELS: Mapping[str, tuple[str, str]] = (
+    MappingProxyType(
+        {
+            "interpret_input": (
+                "Använd för att förstå indata",
+                "Use it to understand the input",
+            ),
+            "shape_result": (
+                "Använd för att forma slutresultatet",
+                "Use it to shape the final result",
+            ),
+            "whole_flow": (
+                "Använd genom hela flödet",
+                "Use it throughout the flow",
+            ),
+        }
+    )
+)
+
+# The purposes a runtime field can serve, in the order the question offers
+# them, read off the labels so a purpose can never be offered without words
+# or carry words nobody can choose. The tokens are
+# `planning_state.RuntimeMetadataFieldPurpose`, which this documented leaf
+# cannot import; `test_ai_builder_turn_controller` checks the two agree.
+RUNTIME_METADATA_FIELD_PURPOSES: tuple[str, ...] = tuple(
+    _RUNTIME_METADATA_FIELD_PURPOSE_LABELS
+)
+
+
+def runtime_metadata_field_purpose_label(purpose: str, locale: Locale) -> str:
+    """What a field's purpose is called, in the words the user chose it by.
+
+    The confirmation card names the same purpose the question asked about, so
+    both read this one owner. A second copy would let the card and the answer
+    the user gave disagree about what a field is for.
+    """
+
+    label_sv, label_en = _RUNTIME_METADATA_FIELD_PURPOSE_LABELS[purpose]
+    return label_sv if locale == "sv" else label_en
+
+
 @dataclass(frozen=True, slots=True)
 class QuestionOption:
     """Single selectable option on a `QuestionTemplate`.

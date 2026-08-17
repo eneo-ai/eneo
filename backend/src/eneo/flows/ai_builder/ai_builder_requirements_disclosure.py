@@ -36,6 +36,7 @@ from eneo.flows.ai_builder.ai_builder_event_models import (
     RequirementsDisclosureContent,
     RequirementsSummaryPayload,
     ResolvedRequirementPayload,
+    RuntimeInputFieldPayload,
 )
 from eneo.flows.ai_builder.ai_builder_form_intake_signals import (
     FORM_INTAKE_SIGNAL_ID,
@@ -72,6 +73,7 @@ from eneo.flows.ai_builder.question_catalog import (
     legal_slot_values,
     render_question,
     render_summary_label,
+    runtime_metadata_field_purpose_label,
 )
 from eneo.flows.flow_review_policy import FlowStepReviewMode
 
@@ -131,7 +133,40 @@ def build_requirements_disclosure(
             locale,
             render_value=render_ai_builder_evidence_value,
         ),
+        runtime_input_fields=_runtime_input_fields(session_state, locale),
     )
+
+
+def _runtime_input_fields(
+    session_state: PlanningState,
+    locale: Locale,
+) -> list[RuntimeInputFieldPayload]:
+    """The runtime form as items, from the state the sentence is rendered from.
+
+    Order, membership and stated facts follow `_runtime_input_field_assumptions`
+    exactly: both read `input_fields`, so the card's field list and the
+    sentence above it cannot name different fields or say different things
+    about one. That is also why this list needs no place of its own in the
+    hash — every fact it shows already reaches the confirmation identity
+    through that sentence.
+
+    Values stay whole rather than clipped, because a field's key, label and
+    options are the identities the compiled form will carry; the sentence
+    clips because it composes every field into one line, and a list gives
+    each field its own row.
+    """
+
+    return [
+        RuntimeInputFieldPayload(
+            key=field.value.variable_name,
+            label=field.value.label,
+            type=field.value.field_type,
+            required=field.value.required,
+            purpose=runtime_metadata_field_purpose_label(field.purpose, locale),
+            options=list(field.value.options),
+        )
+        for field in session_state.input_fields
+    ]
 
 
 def _named_content_fields(
@@ -262,6 +297,15 @@ def _runtime_input_field_text(
     *,
     render_value: RenderEvidenceValue,
 ) -> str:
+    """Everything about one field that the user is attesting to.
+
+    The purpose decides which step the value is placed on and the options are
+    what the operator may pick, so both change the compiled flow. A field
+    stated without them would let a confirmation the user already gave
+    authorize a flow they never read. The line is longer for it; the card
+    lists the same fields as items for reading.
+    """
+
     label = render_value(field.value.label)
     name = render_value(field.value.variable_name)
     required = (
@@ -269,7 +313,25 @@ def _runtime_input_field_text(
         if locale == "sv"
         else ("required" if field.value.required else "optional")
     )
-    return f"{label} ({name}, {field.value.field_type}, {required})"
+    stated = [
+        name,
+        field.value.field_type,
+        required,
+        runtime_metadata_field_purpose_label(field.purpose, locale),
+    ]
+    if field.value.options:
+        # Quoted before rendering, so the reader and the hash agree on where
+        # one choice ends: an option may itself contain the separator, and
+        # two choices must not read as the three a bare comma-separated list
+        # would suggest. Typographic quotes, because the display rendering
+        # escapes a straight one into the reader's line.
+        open_quote, close_quote = ("”", "”") if locale == "sv" else ("“", "”")
+        options = ", ".join(
+            render_value(f"{open_quote}{option}{close_quote}")
+            for option in field.value.options
+        )
+        stated.append(f"val: {options}" if locale == "sv" else f"choices: {options}")
+    return f"{label} ({', '.join(stated)})"
 
 
 def _mapped_file_limit_assumptions(

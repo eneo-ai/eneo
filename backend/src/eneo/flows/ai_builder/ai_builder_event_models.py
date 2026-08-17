@@ -15,6 +15,7 @@ from pydantic import (
 
 from eneo.flows.ai_builder.ai_builder_domain_models import FlowBuilderProposalContent
 from eneo.flows.ai_builder.ai_builder_error_contract import AIBuilderErrorEvent
+from eneo.flows.ai_builder.ai_builder_flow_schema_values import BuilderFormFieldType
 from eneo.flows.ai_builder.ai_builder_slot_vocabulary import (
     KNOWN_REQUIREMENT_SLOT_NAMES,
 )
@@ -292,6 +293,34 @@ class RequirementsDisclosureContent(BaseModel):
         return unique
 
 
+def _runtime_input_fields_are_empty(
+    value: list["RuntimeInputFieldPayload"],
+) -> bool:
+    return not value
+
+
+class RuntimeInputFieldPayload(BaseModel):
+    """One field the flow's operator fills in before a run.
+
+    `key` is the variable name the compiled form and the step instructions
+    use, `label` and `type` are what the form control shows and is, and
+    `options` are the choices a `select` or `multiselect` offers. Values are
+    exact rather than clipped: the summary sentence composes every field into
+    one line and has to keep that line readable, while a list gives each field
+    its own row and must show the identity the compiled flow will use.
+
+    `purpose` is what the field is for, in the same words the user picked it
+    by, so it is a localized label and not a token to branch on.
+    """
+
+    key: str
+    label: str
+    type: BuilderFormFieldType
+    required: bool
+    purpose: str
+    options: list[str] = Field(default_factory=list[str])
+
+
 class RequirementsSummaryPayload(RequirementsDisclosureContent):
     """A disclosure the user can confirm, named by the hash of its content."""
 
@@ -310,6 +339,15 @@ class RequirementsSummaryPayload(RequirementsDisclosureContent):
     named_content_fields: list[NamedContentFieldPayload] = Field(
         default_factory=list[NamedContentFieldPayload],
         exclude_if=_named_content_fields_are_empty,
+    )
+    # The form the flow will ask its operator to fill in, as items beside the
+    # assumption sentence that already states it. Outside the hashed content
+    # for the same reason as the names above: the same fields already reach
+    # identity through that sentence, and hashing the projection too would
+    # make one confirmed fact look like two.
+    runtime_input_fields: list[RuntimeInputFieldPayload] = Field(
+        default_factory=list[RuntimeInputFieldPayload],
+        exclude_if=_runtime_input_fields_are_empty,
     )
 
 
@@ -421,6 +459,7 @@ AI_BUILDER_SCHEMA_HOIST_MODELS: tuple[type[BaseModel], ...] = (
     KeyDecisionPayload,
     ResolvedRequirementPayload,
     NamedContentFieldPayload,
+    RuntimeInputFieldPayload,
     RequirementsSummaryPayload,
     AIBuilderPlanEventData,
     SessionTelemetrySummary,
@@ -456,6 +495,7 @@ __all__ = [
     "NamedContentFieldPayload",
     "ResolvedRequirementPayload",
     "RequirementsSummaryPayload",
+    "RuntimeInputFieldPayload",
     "SSE_EVENT_DONE",
     "SSE_EVENT_ERROR",
     "SSE_EVENT_PLAN",

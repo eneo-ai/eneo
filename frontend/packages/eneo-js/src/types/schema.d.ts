@@ -27566,6 +27566,8 @@ export interface components {
       requirements_version: string;
       /** Resolved Requirements */
       resolved_requirements?: components["schemas"]["ResolvedRequirementPayload"][];
+      /** Runtime Input Fields */
+      runtime_input_fields?: components["schemas"]["RuntimeInputFieldPayload"][];
       /** Summary */
       summary: string;
     };
@@ -27977,6 +27979,37 @@ export interface components {
         | "webhook_deliveries"
         | "provider_calls"
         | "whole_bundle";
+    };
+    /**
+     * RuntimeInputFieldPayload
+     * @description One field the flow's operator fills in before a run.
+     *
+     *     `key` is the variable name the compiled form and the step instructions
+     *     use, `label` and `type` are what the form control shows and is, and
+     *     `options` are the choices a `select` or `multiselect` offers. Values are
+     *     exact rather than clipped: the summary sentence composes every field into
+     *     one line and has to keep that line readable, while a list gives each field
+     *     its own row and must show the identity the compiled flow will use.
+     *
+     *     `purpose` is what the field is for, in the same words the user picked it
+     *     by, so it is a localized label and not a token to branch on.
+     */
+    RuntimeInputFieldPayload: {
+      /** Key */
+      key: string;
+      /** Label */
+      label: string;
+      /** Options */
+      options?: string[];
+      /** Purpose */
+      purpose: string;
+      /** Required */
+      required: boolean;
+      /**
+       * Type
+       * @enum {string}
+       */
+      type: "text" | "number" | "date" | "select" | "multiselect";
     };
     /** RuntimeMetadataFieldAnswer */
     RuntimeMetadataFieldAnswer: {

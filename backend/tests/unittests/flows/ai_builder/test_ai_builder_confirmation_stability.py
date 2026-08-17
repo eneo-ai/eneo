@@ -29,8 +29,10 @@ from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
 )
 from eneo.flows.ai_builder.ai_builder_domain_models import ConversationMessage
 from eneo.flows.ai_builder.ai_builder_event_models import (
+    RequirementsDisclosureContent,
     RequirementsSummaryPayload,
 )
+from eneo.flows.ai_builder.ai_builder_proposal_intent import FlowInputFieldIntent
 from eneo.flows.ai_builder.ai_builder_requirements_disclosure import (
     build_requirements_disclosure,
 )
@@ -53,6 +55,7 @@ from eneo.flows.ai_builder.ai_builder_turn_controller import (
     resolve_turn_control,
 )
 from eneo.flows.ai_builder.planning_state import (
+    ConfirmedRuntimeMetadataField,
     ExampleOutputCitation,
     ExampleOutputConstraintEvidence,
     ExampleOutputSourceCoverage,
@@ -1277,6 +1280,157 @@ def test_a_decision_the_builder_read_is_derived_and_names_no_question() -> None:
     assert len(read) == 1
     assert read[0].is_derived is True
     assert read[0].question_id is None
+
+
+def _runtime_field_state() -> PlanningState:
+    """A committed state whose operator fills in two fields before every run."""
+
+    state = _committed_state(
+        primary_runtime_input="documents",
+        terminal_output="docx_document",
+        docx_output_mode="generated_docx",
+        document_material_scope="multiple_documents_case",
+        post_processing_goal="structure_key_information",
+        runtime_metadata_fields="basic_runtime_metadata",
+    )
+    state.input_fields = [
+        ConfirmedRuntimeMetadataField(
+            value=FlowInputFieldIntent(
+                variable_name="arendetyp",
+                label="Ärendetyp",
+                field_type="select",
+                required=True,
+                # A value that contains the separator the summary sentence
+                # joins fields with: the list must keep it one option.
+                options=["Bygglov, rivning", "Serveringstillstånd"],
+                provenance="user_confirmed",
+            ),
+            purpose="interpret_input",
+            structured_answer_message_id="message-1",
+        ),
+        ConfirmedRuntimeMetadataField(
+            value=FlowInputFieldIntent(
+                variable_name="mottagare",
+                label="Mottagare",
+                field_type="text",
+                required=False,
+                provenance="user_confirmed",
+            ),
+            purpose="shape_result",
+            structured_answer_message_id="message-1",
+        ),
+    ]
+    return state
+
+
+def test_the_runtime_form_the_summary_states_is_also_readable_as_fields() -> None:
+    # The confirmation card had to parse the fields back out of the interview
+    # transcript to list them. They are the same fields the summary sentence
+    # already states, projected from the same state, so list and sentence
+    # cannot name different fields.
+    state = _runtime_field_state()
+
+    swedish = build_requirements_disclosure(state, ui_language="sv")
+    english = build_requirements_disclosure(state, ui_language="en")
+
+    assert [field.key for field in swedish.runtime_input_fields] == [
+        "arendetyp",
+        "mottagare",
+    ]
+    case_type, recipient = swedish.runtime_input_fields
+    assert case_type.label == "Ärendetyp"
+    assert case_type.type == "select"
+    assert case_type.required is True
+    assert case_type.options == ["Bygglov, rivning", "Serveringstillstånd"]
+    assert recipient.type == "text"
+    assert recipient.required is False
+    assert recipient.options == []
+    assert [field.purpose for field in swedish.runtime_input_fields] == [
+        "Använd för att förstå indata",
+        "Använd för att forma slutresultatet",
+    ]
+    assert [field.purpose for field in english.runtime_input_fields] == [
+        "Use it to understand the input",
+        "Use it to shape the final result",
+    ]
+    for field in swedish.runtime_input_fields:
+        assert any(field.label in note for note in swedish.assumptions)
+    # The same facts reach the confirmation identity through that sentence, so
+    # the list beside it needs no place of its own in the hash.
+    assert "runtime_input_fields" not in RequirementsDisclosureContent.model_fields
+
+
+def test_two_choices_and_three_choices_do_not_read_alike() -> None:
+    # An option may contain the separator the sentence joins options with.
+    # Two choices, one of them "Bygglov, rivning", must not read as the three
+    # choices a comma-separated list would suggest — the user is confirming
+    # what the operator will be able to pick.
+    two_choices = _runtime_field_state()
+    three_choices = _runtime_field_state()
+    three_choices.input_fields[0].value = three_choices.input_fields[
+        0
+    ].value.model_copy(
+        update={"options": ["Bygglov", "rivning", "Serveringstillstånd"]}
+    )
+
+    stated = build_requirements_disclosure(two_choices, ui_language="sv")
+    split = build_requirements_disclosure(three_choices, ui_language="sv")
+
+    assert stated.assumptions != split.assumptions
+    assert stated.requirements_version != split.requirements_version
+
+
+@pytest.mark.parametrize(
+    "mutate",
+    [
+        pytest.param(
+            lambda field: field.model_copy(
+                update={
+                    "value": field.value.model_copy(update={"label": "Typ av ärende"})
+                }
+            ),
+            id="renamed field",
+        ),
+        pytest.param(
+            lambda field: field.model_copy(
+                update={
+                    "value": field.value.model_copy(
+                        update={"options": ["Bygglov", "rivning"]}
+                    )
+                }
+            ),
+            id="different options",
+        ),
+        pytest.param(
+            lambda field: field.model_copy(update={"purpose": "whole_flow"}),
+            id="different purpose",
+        ),
+    ],
+)
+def test_changing_a_shown_runtime_field_invalidates_the_confirmation(mutate) -> None:
+    """Everything the card says about a field is part of what was confirmed.
+
+    The label is the control the operator reads, the options are what they may
+    pick, and the purpose decides which step the value is placed on. Purpose
+    and options once reached the compiled flow without reaching the summary,
+    so a confirmation could survive a change the user never saw.
+    """
+
+    state = _runtime_field_state()
+    confirmed = _decide(state)
+    assert isinstance(confirmed, ConfirmRequirements)
+
+    state.input_fields = [mutate(state.input_fields[0]), *state.input_fields[1:]]
+
+    reconfirmed = _decide(
+        state,
+        confirmed_version=confirmed.payload.requirements_version,
+    )
+    assert isinstance(reconfirmed, ConfirmRequirements)
+    assert (
+        reconfirmed.payload.requirements_version
+        != confirmed.payload.requirements_version
+    )
 
 
 def test_the_committed_architecture_is_a_derived_decision() -> None:

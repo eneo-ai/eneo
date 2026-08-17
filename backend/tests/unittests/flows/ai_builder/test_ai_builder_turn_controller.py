@@ -69,11 +69,15 @@ from eneo.flows.ai_builder.planning_state import (
     NamedResultEvidence,
     PlanningState,
     ResolvedSlot,
+    RuntimeMetadataFieldPurpose,
     SchemaResolution,
     SlotConfidence,
     SlotEvidenceLevel,
     SlotSource,
     StepTriple,
+)
+from eneo.flows.ai_builder.question_catalog import (
+    RUNTIME_METADATA_FIELD_PURPOSES,
 )
 
 
@@ -278,6 +282,16 @@ def test_server_collects_runtime_field_details_before_requirements_confirmation(
     # repeats the question carries nothing, so it must never be the question.
     assert decision.question.assistant_text != decision.question.question_data.question
     assert "form" in decision.question.assistant_text
+
+
+def test_every_purpose_a_field_can_be_stored_with_can_also_be_chosen() -> None:
+    # The catalog owns the words for each purpose and the question catalog is
+    # a leaf that cannot import the stored vocabulary. A purpose added to one
+    # and not the other is either an option nobody can pick or a stored value
+    # the confirmation card cannot name.
+    assert set(RUNTIME_METADATA_FIELD_PURPOSES) == set(
+        get_args(RuntimeMetadataFieldPurpose)
+    )
 
 
 def test_omitted_runtime_metadata_keeps_visible_no_extra_fields_assumption() -> None:

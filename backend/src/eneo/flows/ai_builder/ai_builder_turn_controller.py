@@ -45,9 +45,11 @@ from eneo.flows.ai_builder.planning_state import (
     PlanningState,
 )
 from eneo.flows.ai_builder.question_catalog import (
+    RUNTIME_METADATA_FIELD_PURPOSES,
     Locale,
     runtime_metadata_field_details_question,
     runtime_metadata_field_details_rationale,
+    runtime_metadata_field_purpose_label,
 )
 
 _UNSUPPORTED_ARCHITECTURE_MESSAGE_EN = (
@@ -253,23 +255,6 @@ def _runtime_input_field_details_required(session_state: PlanningState) -> bool:
 
 
 def _runtime_input_field_details_question(locale: Locale) -> BackendQuestion:
-    purpose_options = (
-        (
-            "interpret_input",
-            "Använd för att förstå indata",
-            "Use it to understand the input",
-        ),
-        (
-            "shape_result",
-            "Använd för att forma slutresultatet",
-            "Use it to shape the final result",
-        ),
-        (
-            "whole_flow",
-            "Använd genom hela flödet",
-            "Use it throughout the flow",
-        ),
-    )
     question_text = runtime_metadata_field_details_question(locale)
     return BackendQuestion(
         question_data=StructuredQuestionPayload(
@@ -277,11 +262,11 @@ def _runtime_input_field_details_question(locale: Locale) -> BackendQuestion:
             question=question_text,
             options=[
                 StructuredQuestionOptionPayload(
-                    id=value,
-                    label=label_sv if locale == "sv" else label_en,
-                    value=value,
+                    id=purpose,
+                    label=runtime_metadata_field_purpose_label(purpose, locale),
+                    value=purpose,
                 )
-                for value, label_sv, label_en in purpose_options
+                for purpose in RUNTIME_METADATA_FIELD_PURPOSES
             ],
             selection_mode="single",
             allow_custom=False,
