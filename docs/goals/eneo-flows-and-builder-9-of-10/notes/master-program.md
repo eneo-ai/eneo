@@ -1,6 +1,6 @@
 # Eneo Flows + Flow AI Builder — Master Program (living document)
 
-Status: EXECUTION PHASE, program **v10.11** (v10.2 architecture retained;
+Status: EXECUTION PHASE, program **v10.12** (v10.2 architecture retained;
 repair-economics order adjudicated 2026-08-12 and the post-smoke hold
 and post-citation order adjudicated 2026-08-13, then the sealed ×3
 conformance order adjudicated 2026-08-14 by max-effort Fable
@@ -206,6 +206,39 @@ at this writing: MIXED-INPUT, EDIT-LANE (#16/#28), RUNTIME-COST (audio spend
 at the provider boundary; shared-key authors). Order after them: sealed ×3 on
 the head, FLOW-QUALITY report, #43 typed key-decision origin, #30 create
 compilation of explicit checkpoints, #45 producer attribution.
+
+v10.12 (2026-08-17 morning). Landed on `refactor/flows-clean` (trace per slice: its
+cited commit and, where a receipt exists, `.codex/artifacts/flow-builder-measure-20260817/`):
+runtime `1b0fe1aa8..9bafb53b3` (the 2 × 409 in the 021c22e80 run were `cancel_matching_active_sessions`
+batch-cancelling idle sessions when another client on the same actor called `force_new` — that implicit
+sibling cancellation is deleted; transcription spend recorded at the provider-request boundary as
+provider-call rows, migration applied to the measurement DB), FLOW-QUALITY harness/corpus `04f57b139`
+(typed input-field facts in `_summarize_plan`; four select/multiselect/required/open-text cases; corpus
+158 → 162; the Builder carries select/multiselect/options/required with full fidelity — the "182 fields,
+0 options" observation was corpus coverage), KEY-DECISION-ORIGIN `41c7ed432` (the planner no longer
+re-parses its own rendered disclosure: `build_requirements_signal_text`, `PlannerPatternSignals`,
+`detect_planner_pattern_signals` and two dead invariants deleted, +766/−1134; identical typed state had
+produced different plans per UI language), edit-lane `d367fbe86..7c8c49271` (typed `decline_flow_change`;
+deterministic bypass module, token gate and word lists deleted; a decline leaves the plan approvable),
+DELEGATED-ANSWER `c974f5cf0` (`recommended_option_id` on the question event; `delegated_question_answer`
+records the recommended option as a user-authoritative structured answer with server-owned
+`delegated: true`; typed refusals), test-fixture fix `092971da6` (the standing integration failure was
+a stale setup: prose on the confirmation turn re-discloses; 8000-token fixture model). Measured, sealed
+158×3 on `c974f5cf0` (`sealed-158x3-c974f5cf0/`, 486 observations, 435 plan-eligible): first pass
+**421 (96.8%)**, accepted **425 (97.7%)**, builder_error 2, stalls 7, interaction_limit 0,
+requirements_unconfirmed 0, provider_outcome_unknown 1 (under investigation as COMMIT-DRIFT #51;
+the API log for that request shows a `CommitDriftError` at plan store, recorded in the task) — against
+`eeb8371e8`'s 368 / 389 / 10 / 21 / 4 / 0 / 0 on 424. First-pass misses 56 → 14; non-accepted outcomes
+35 → 10.
+Environment rulings recorded: never run same-actor `force_new` probes during a sealed run; lane runtimes
+must carry the eneo-flows-clean backend env file (API-key HMAC pepper) — without it the sealed key's
+capacity preflight 401s and the lane cannot start.
+Budget ruling (owner, 2026-08-17): ≤2 opus lanes concurrently, sonnet for mechanical lanes, short Codex
+loops, one sealed ×3 per day. In flight: BUILDER-UI-CONTRACT (typed fields for the redesigned
+AI-byggaren: KeyDecisionPayload.question_id/is_derived, question_index/total, recommended-option
+evidence, read-only named_content_fields), DEPLOY-REHEARSAL (cold bring-up from the shipped compose —
+the go/no-go for the 2026-08-18 test environment), COMMIT-DRIFT #51. Parked: STALL-POLICY re-attempt
+#46 (merge rule + corpus only), SCOPED-CREATE-REVISION #47, producer attribution #45, NESTING #31.
 
 This file owns execution and is the SOLE execution-order owner;
 `cp0-matrix-freeze.md` owns evidence and the gate inventory.
