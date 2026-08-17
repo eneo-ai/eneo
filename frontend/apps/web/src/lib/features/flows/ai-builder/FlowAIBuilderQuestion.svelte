@@ -811,6 +811,11 @@
       box-shadow: 0 -0.5rem 1rem -0.75rem var(--shadow-stronger);
     }
 
+    /* Below the primary, and still a touch target of its own. */
+    .delegate-action {
+      @apply h-10 w-full;
+    }
+
     /* One field per line: two columns leave no room for a label at 375 px. */
     .field-row {
       grid-template-columns: minmax(0, 1fr);
