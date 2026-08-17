@@ -49,6 +49,7 @@ def _expected_question_arguments() -> dict[str, object]:
         ],
         "selection_mode": "multi",
         "allow_custom": False,
+        "question_index": 3,
     }
 
 
@@ -67,6 +68,7 @@ def _expected_confirming_question_arguments() -> dict[str, object]:
         "selection_mode": "single",
         "allow_custom": False,
         "requires_confirm": True,
+        "question_index": 1,
     }
 
 
@@ -84,6 +86,7 @@ def _empty_question_id_payload() -> StructuredQuestionPayload:
             ],
             "selection_mode": "single",
             "allow_custom": True,
+            "question_index": 1,
         }
     )
 
@@ -181,6 +184,55 @@ async def test_persist_backend_question_merges_assistant_and_question_metadata()
         "request_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
     }
     assert assistant_msg.metadata["question_id"] == "runtime_metadata_fields"
+
+
+@pytest.mark.asyncio
+async def test_persist_backend_question_records_the_number_the_user_is_shown() -> None:
+    # The number the user reads has to outlive the message order it was
+    # computed from, so it is written down with the question rather than
+    # recounted later.
+    repo = AsyncMock()
+    repo.commit_turn.return_value = 1
+    conversation = [ConversationMessage(role="user", content="Bygg")]
+
+    await persist_backend_question(
+        repo=repo,
+        turn=_make_turn(),
+        conversation=conversation,
+        new_messages_start=1,
+        planning_state=PlanningState.empty(),
+        question=_backend_question(),
+    )
+
+    assistant_msg = conversation[1]
+    assert assistant_msg.metadata is not None
+    assert assistant_msg.metadata["question_index"] == 3
+    assert assistant_msg.tool_calls is not None
+    assert assistant_msg.tool_calls[0]["arguments"]["question_index"] == 3
+
+
+@pytest.mark.asyncio
+async def test_persist_backend_question_refuses_an_unnumbered_question() -> None:
+    # A question that reached persistence without a number means the writer
+    # that numbers questions stopped doing so. Persisting it would bring back
+    # the order-derived number this contract exists to remove.
+    repo = AsyncMock()
+    repo.commit_turn.return_value = 1
+
+    with pytest.raises(ValueError, match="number it is shown with"):
+        await persist_backend_question(
+            repo=repo,
+            turn=_make_turn(),
+            conversation=[ConversationMessage(role="user", content="Bygg")],
+            new_messages_start=1,
+            planning_state=PlanningState.empty(),
+            question=BackendQuestion(
+                question_data=_backend_question().question_data.model_copy(
+                    update={"question_index": None}
+                ),
+                assistant_text="Vilka fält behöver vi?",
+            ),
+        )
 
 
 @pytest.mark.asyncio

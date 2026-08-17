@@ -40,6 +40,7 @@ from eneo.flows.ai_builder.ai_builder_question_state import (
 )
 from eneo.flows.ai_builder.ai_builder_requirements_disclosure import (
     build_requirements_disclosure,
+    resolve_locale,
 )
 from eneo.flows.ai_builder.ai_builder_session_turn import SessionSendTurn
 from eneo.flows.ai_builder.ai_builder_telemetry import (
@@ -59,6 +60,11 @@ from eneo.flows.ai_builder.ai_builder_turn_controller import (
     resolve_turn_control,
 )
 from eneo.flows.ai_builder.planning_state import PlanningState
+from eneo.flows.ai_builder.question_catalog import (
+    QUESTION_CATALOG,
+    Locale,
+    render_summary_label,
+)
 from eneo.main.logging import get_logger
 
 if TYPE_CHECKING:
@@ -174,6 +180,7 @@ async def _dispatch_question(
                 conversation=request.conversation,
                 flow=request.flow,
                 planned_remaining=decision.planned_remaining,
+                locale=resolve_locale(request.ui_language),
             ),
         )
 
@@ -233,6 +240,7 @@ def _situate_question(
     conversation: list[ConversationMessage],
     flow: Flow | None,
     planned_remaining: int | None,
+    locale: Locale,
 ) -> StructuredQuestionPayload:
     """Place this question in the interview, and in the flow it is asked about.
 
@@ -258,9 +266,13 @@ def _situate_question(
     a flow whose answer none of the offered options carries, where every option
     on screen would change the flow.
 
+    The topic is the catalog's own summary label for the slot this question
+    settles, taken from the owner the requirements summary reads, so a question
+    and the summary row the user later confirms cannot name one topic two ways.
+
     The result is revalidated rather than copied into place, because a copy
-    skips the model's own rules and this is where the payload's last two facts
-    are decided.
+    skips the model's own rules and this is where the payload's last facts are
+    decided.
     """
 
     current_option_id = _current_option_id(payload, flow=flow)
@@ -274,6 +286,7 @@ def _situate_question(
                 conversation, question_id=payload.question_id
             ),
             "questions_planned_remaining": planned_remaining,
+            "topic": _question_topic(payload, locale=locale),
             "current_option_id": current_option_id,
             "recommended_option_id": (
                 payload.recommended_option_id if keeps_recommendation else None
@@ -283,6 +296,25 @@ def _situate_question(
             ),
         }
     )
+
+
+def _question_topic(
+    payload: StructuredQuestionPayload,
+    *,
+    locale: Locale,
+) -> str | None:
+    """What this question is about, named the way the summary names it.
+
+    Only a catalog slot has a name to give. A question that settles none of
+    them — schema direction, runtime field details — is left unnamed rather
+    than described from its own wording, which would be a second name for the
+    same topic with nothing keeping the two in step.
+    """
+
+    slot_name = canonical_question_id(payload.question_id)
+    if slot_name not in QUESTION_CATALOG:
+        return None
+    return render_summary_label(slot_name, locale)
 
 
 def _current_option_id(

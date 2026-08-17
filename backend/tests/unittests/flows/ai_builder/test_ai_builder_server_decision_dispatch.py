@@ -21,6 +21,7 @@ from eneo.flows.ai_builder.ai_builder_architecture_commit import (
 from eneo.flows.ai_builder.ai_builder_architecture_derivation import (
     derive_architecture_commit_draft,
 )
+from eneo.flows.ai_builder.ai_builder_discovery_models import BackendQuestion
 from eneo.flows.ai_builder.ai_builder_domain_models import (
     ConversationMessage,
     TargetKind,
@@ -29,6 +30,7 @@ from eneo.flows.ai_builder.ai_builder_error_contract import AIBuilderErrorCode
 from eneo.flows.ai_builder.ai_builder_event_models import (
     AIBuilderQuestionEvent,
     AIBuilderStatus,
+    StructuredQuestionOptionPayload,
     StructuredQuestionPayload,
 )
 from eneo.flows.ai_builder.ai_builder_proposal_telemetry import ProposalTurnTelemetry
@@ -64,6 +66,7 @@ from eneo.flows.ai_builder.planning_state import (
 from eneo.flows.ai_builder.planning_state_builder import (
     build_planning_state_from_conversation,
 )
+from eneo.flows.ai_builder.question_catalog import render_summary_label
 
 
 def _turn() -> SessionSendTurn:
@@ -88,6 +91,7 @@ def _request(
     confirmed_requirements_version: str | None = None,
     discovery_assumptions: tuple[str, ...] = (),
     flow: object | None = None,
+    ui_language: str = "en",
 ) -> ServerDecisionDispatchRequest:
     return ServerDecisionDispatchRequest(
         repo=repo,
@@ -97,7 +101,7 @@ def _request(
         new_messages_start=new_messages_start,
         flow=cast("Flow | None", flow),
         confirmed_requirements_version=confirmed_requirements_version,
-        ui_language="en",
+        ui_language=ui_language,
         telemetry=ServerDecisionTelemetry(
             request_id="req-test",
             litellm_model="server",
@@ -604,7 +608,7 @@ async def test_a_question_is_numbered_by_the_ones_the_user_has_already_seen() ->
         ConversationMessage(
             role="assistant",
             content="Vad ska flödet ta emot?",
-            metadata={"question_id": "primary_runtime_input"},
+            metadata={"question_id": "primary_runtime_input", "question_index": 1},
         ),
         ConversationMessage(role="user", content="Dokument"),
     ]
@@ -642,6 +646,64 @@ async def test_a_question_carries_the_questions_still_queued_behind_it() -> None
 
     question = next(event for event in result.events if event.event == "question")
     assert question.data.questions_planned_remaining == 2
+
+
+@pytest.mark.asyncio
+async def test_a_question_names_its_topic_the_way_the_summary_will() -> None:
+    # The user meets this topic twice: once as a question, once as a row in the
+    # summary they confirm. Both read the catalog's label for the slot, in the
+    # session's own language, so the two cannot drift apart.
+    repo = AsyncMock()
+    repo.commit_turn.return_value = 5
+
+    result = await dispatch_server_decision(
+        _request(
+            repo=repo,
+            decision=AskCanonicalQuestion(slot_name="post_processing_goal"),
+            conversation=[ConversationMessage(role="user", content="Bygg ett flöde")],
+            ui_language="sv",
+        )
+    )
+
+    question = next(event for event in result.events if event.event == "question")
+    assert question.data.topic == render_summary_label("post_processing_goal", "sv")
+
+
+@pytest.mark.asyncio
+async def test_a_question_outside_the_catalog_names_no_topic() -> None:
+    # Schema direction settles no catalog slot, so there is no label to give.
+    # Describing it from its own wording would be a second name for the topic,
+    # free to drift from whatever the summary later calls it.
+    repo = AsyncMock()
+    repo.commit_turn.return_value = 5
+    followup = BackendQuestion(
+        question_data=StructuredQuestionPayload(
+            question_id="schema_direction",
+            question="Which schema controls the result?",
+            options=[
+                StructuredQuestionOptionPayload(
+                    id="attached", label="The attached schema", value="attached"
+                )
+            ],
+            selection_mode="single",
+            allow_custom=False,
+        ),
+        assistant_text="Which schema controls the result?",
+    )
+
+    result = await dispatch_server_decision(
+        _request(
+            repo=repo,
+            decision=AskCanonicalQuestion(
+                slot_name="schema_direction",
+                question=followup,
+            ),
+            conversation=[ConversationMessage(role="user", content="Bygg ett flöde")],
+        )
+    )
+
+    question = next(event for event in result.events if event.event == "question")
+    assert question.data.topic is None
 
 
 @pytest.mark.asyncio

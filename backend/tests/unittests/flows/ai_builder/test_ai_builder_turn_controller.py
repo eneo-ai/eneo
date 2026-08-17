@@ -436,10 +436,13 @@ def test_schema_direction_maximum_question_covers_complete_set_and_fits_limit(
     assert decision.slot_name == "schema_direction"
     assert decision.question is not None
     question = decision.question
+    # Dispatch numbers the question before persisting it, so the persisted
+    # record this fixture stands in for carries a number.
+    question_data = question.question_data.model_copy(update={"question_index": 1})
     tool_call = make_persisted_assistant_tool_call(
         tool_call_id="schema_direction",
         tool_name=ASK_STRUCTURED_QUESTION_TOOL_NAME,
-        arguments=question.question_data.model_dump(
+        arguments=question_data.model_dump(
             mode="json",
             exclude_none=False,
             exclude_unset=True,
@@ -448,7 +451,7 @@ def test_schema_direction_maximum_question_covers_complete_set_and_fits_limit(
     assistant_message = ConversationMessage(
         role="assistant",
         content=question.assistant_text,
-        metadata=metadata_for_assistant_question(question.question_data),
+        metadata=metadata_for_assistant_question(question_data),
         tool_calls=[tool_call.model_dump(mode="json")],
     )
     selected_fingerprint = candidates[-1].fingerprint

@@ -316,6 +316,9 @@ def _recommended_question(
         selection_mode="single",
         allow_custom=False,
         recommended_option_id=recommended_option_id,
+        # Dispatch numbers every question before persistence, so a fixture
+        # standing in for a persisted question carries its number too.
+        question_index=1,
     )
 
 

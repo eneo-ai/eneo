@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 from eneo.flows.ai_builder.ai_builder_conversation_compaction import (
     compact_ai_builder_conversation,
 )
@@ -59,7 +61,7 @@ def test_a_question_asked_again_keeps_the_number_it_already_had() -> None:
         ConversationMessage(
             role="assistant",
             content="Which output?",
-            metadata={"question_id": "terminal_output"},
+            metadata={"question_id": "terminal_output", "question_index": 1},
         ),
         ConversationMessage(role="user", content="jag vet inte"),
     ]
@@ -149,9 +151,13 @@ def test_a_number_the_user_has_seen_survives_compaction() -> None:
         tail_messages=2,
     )
 
+    # The prerequisite: compaction dropped the first asking of the re-asked
+    # question, so what survives puts it second.
     assert [
-        message.metadata for message in compacted if message.role == "assistant"
-    ] != [message.metadata for message in conversation if message.role == "assistant"]
+        message.metadata["question_id"]
+        for message in compacted
+        if message.role == "assistant" and message.metadata is not None
+    ] == ["post_processing_goal", "terminal_output"]
     assert question_ordinal_in_session(compacted, question_id="terminal_output") == 1
     assert (
         question_ordinal_in_session(compacted, question_id="post_processing_goal") == 2
@@ -159,3 +165,19 @@ def test_a_number_the_user_has_seen_survives_compaction() -> None:
     assert (
         question_ordinal_in_session(compacted, question_id="primary_runtime_input") == 3
     )
+
+
+def test_a_question_without_a_recorded_number_is_refused() -> None:
+    # Falling back to counting positions here is what let compaction renumber a
+    # question. A record that lost its number is broken state, and saying so is
+    # better than inventing a number the user may not have seen.
+    conversation = [
+        ConversationMessage(
+            role="assistant",
+            content="Which output?",
+            metadata={"question_id": "terminal_output"},
+        ),
+    ]
+
+    with pytest.raises(ValueError, match="carries no number"):
+        question_ordinal_in_session(conversation, question_id="post_processing_goal")

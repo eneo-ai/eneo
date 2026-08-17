@@ -370,17 +370,20 @@ def test_a_delegated_question_is_settled_and_never_asked_again() -> None:
     )
     assert followup is not None
 
+    # Dispatch numbers the question before persisting it, so the persisted
+    # record this fixture stands in for carries a number.
+    question_data = followup.question_data.model_copy(update={"question_index": 1})
     conversation = [
         request,
         ConversationMessage(
             role="assistant",
             content=followup.assistant_text,
-            metadata=metadata_for_assistant_question(followup.question_data),
+            metadata=metadata_for_assistant_question(question_data),
             tool_calls=[
                 {
                     "id": "question-1",
                     "name": "ask_structured_question",
-                    "arguments": followup.question_data.model_dump(mode="json"),
+                    "arguments": question_data.model_dump(mode="json"),
                 }
             ],
         ),

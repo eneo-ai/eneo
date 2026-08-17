@@ -30292,6 +30292,8 @@ export interface components {
        * @enum {string}
        */
       selection_mode: "single" | "multi";
+      /** Topic */
+      topic?: string | null;
     };
     /**
      * SubscriptionRenewalResult

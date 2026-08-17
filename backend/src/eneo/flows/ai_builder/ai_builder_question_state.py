@@ -171,10 +171,11 @@ def question_ordinal_in_session(
     question never makes the sequence appear to grow.
 
     A number the user has already seen is read back off the message it was
-    stamped on rather than recounted, because message order is not stable:
+    stamped on, never recounted, because message order is not stable:
     compaction keeps the latest interaction of a re-asked question, which moves
-    that question behind ones it was asked before. Counting positions is the
-    fallback for questions persisted before the number travelled with them.
+    that question behind ones it was asked before. A question already put to the
+    user without a persisted number is corrupt state, and is refused rather than
+    renumbered from the order that happens to survive.
     """
 
     numbered: dict[str, int] = {}
@@ -183,16 +184,14 @@ def question_ordinal_in_session(
         if asked_id is None or asked_id in numbered:
             continue
         persisted = assistant_question_index_from_metadata(_message_metadata(message))
-        numbered[asked_id] = (
-            persisted if persisted is not None else _next_question_ordinal(numbered)
-        )
+        if persisted is None:
+            raise ValueError(
+                f"a question already put to the user carries no number: {asked_id}"
+            )
+        numbered[asked_id] = persisted
     already_seen = numbered.get(canonical_question_id(question_id))
     if already_seen is not None:
         return already_seen
-    return _next_question_ordinal(numbered)
-
-
-def _next_question_ordinal(numbered: Mapping[str, int]) -> int:
     return max(numbered.values(), default=0) + 1
 
 

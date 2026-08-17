@@ -2583,6 +2583,10 @@ class TestSendMessageStructuredQuestion:
                 ConversationMessage(
                     role="assistant",
                     content="Jag behöver förstå hur flödet ska arbeta innan jag går vidare.",
+                    metadata={
+                        "question_id": "processing_scope",
+                        "question_index": 1,
+                    },
                     tool_calls=[
                         {
                             "id": "call_scope_q1",

@@ -204,6 +204,9 @@ def _canonical_question(slot_name: str, locale: Locale) -> StructuredQuestionPay
         ],
         selection_mode="single",
         allow_custom=True,
+        # Dispatch numbers every question before persistence, so a fixture
+        # standing in for a persisted question carries its number too.
+        question_index=1,
     )
 
 

@@ -89,6 +89,15 @@ class StructuredQuestionPayload(BaseModel):
     # from the queue alone can undercount and claim the last question before
     # another one arrives.
     question_index: int | None = Field(default=None, ge=1)
+    # What this question is about, in the same few words the requirements
+    # summary already uses for the slot it settles, so the question and the
+    # summary row the user later confirms name one topic identically.
+    #
+    # Null for a question that settles no catalog slot — schema direction and
+    # runtime field details — because the catalog holds no label for those, and
+    # deriving one from the question's own wording would be a second name for
+    # the same thing, free to drift from the first.
+    topic: str | None = None
     # How many further questions the interview currently intends to ask after
     # this one, taken from the ordered ask queue this turn was decided from.
     #
