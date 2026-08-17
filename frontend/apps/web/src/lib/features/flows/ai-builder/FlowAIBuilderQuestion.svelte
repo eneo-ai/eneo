@@ -499,7 +499,8 @@
             onkeydown={(event) => moveRadioSelection(CUSTOM_RADIO_KEY, event)}
             role={isSingle ? "radio" : "checkbox"}
             aria-checked={customSelected}
-            aria-controls="{questionLabelId}-custom"
+            aria-expanded={customSelected}
+            aria-controls={customSelected ? `${questionLabelId}-custom` : undefined}
             tabindex={radioTabIndex(CUSTOM_RADIO_KEY)}
             data-radio-index={isSingle ? visibleOptions.length : undefined}
             {disabled}
