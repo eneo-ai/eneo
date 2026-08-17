@@ -1099,13 +1099,20 @@ describe("FlowAIBuilder confirm, build and review", () => {
       screen.queryByRole("textbox", { name: m.ai_builder_change_request_textarea_label() })
     ).toBeNull();
 
+    // The new summary is what settles the wait, not the stream ending: assert
+    // it while the stream is still open, or a status that hung around until
+    // the stream closed would pass this too.
     const replacement = { ...SUMMARY, requirements_version: "b".repeat(64) };
     calls[0]!.emit([{ event: "requirements_summary", data: JSON.stringify(replacement) }]);
-    calls[0]!.finish();
 
     await waitFor(() =>
-      expect(screen.queryByText(m.ai_builder_confirm_change_pending())).toBeNull()
+      expect(
+        screen
+          .queryAllByRole("status")
+          .some((node) => node.textContent?.includes(m.ai_builder_confirm_change_pending()))
+      ).toBe(false)
     );
+    calls[0]!.finish();
   });
 
   it("does not say it is working out the summary again while the first one arrives", async () => {

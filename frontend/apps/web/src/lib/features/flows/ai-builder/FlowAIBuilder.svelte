@@ -167,9 +167,6 @@
       ? null
       : (service.messages[latestSummaryMessageIndex]?.requirementsSummary ?? null)
   );
-  // "Uppdaterad — bekräfta igen": an earlier version of the requirements was
-  // confirmed and this newer version replaced it, so the old confirmation
-  // cannot carry over.
   const summaryRevisionPending = $derived(
     service.isStreaming &&
       latestSummaryMessageIndex !== -1 &&
@@ -177,6 +174,9 @@
         (message, index) => index > latestSummaryMessageIndex && message.role === "user"
       )
   );
+  // "Uppdaterad — bekräfta igen": an earlier version of the requirements was
+  // confirmed and this newer version replaced it, so the old confirmation
+  // cannot carry over.
   const summaryIsStale = $derived.by(() => {
     const latest = latestSummary;
     if (!latest || service.isRequirementsSummaryConfirmed(latest)) return false;
