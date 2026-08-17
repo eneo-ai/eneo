@@ -6358,5 +6358,13 @@
   "ai_builder_question_field_search_count": "{shown} av {total} visas",
   "ai_builder_question_field_paste": "Klistra in en lista",
   "ai_builder_question_field_paste_hint": "En rubrik per rad. Typ och övrigt fyller du i efteråt.",
-  "ai_builder_question_field_paste_apply": "Lägg till raderna"
+  "ai_builder_question_field_paste_apply": "Lägg till raderna",
+  "ai_builder_requirements_field_added_by_you": "tillagt av dig",
+  "ai_builder_requirements_field_remove": "Ta bort {field}",
+  "ai_builder_requirements_field_add": "Lägg till fält",
+  "ai_builder_requirements_field_add_placeholder": "Vad ska bevaras?",
+  "ai_builder_requirements_field_add_confirm": "Lägg till",
+  "ai_builder_content_field_edit_stale": "Kraven hann ändras medan du redigerade. Läs sammanfattningen igen och gör ändringen där.",
+  "ai_builder_content_field_edit_invalid": "Det namnet går inte att använda. Skriv om det och försök igen.",
+  "ai_builder_content_field_edit_invalid_named": "«{field}» går inte att använda som fält. Skriv om namnet och försök igen."
 }

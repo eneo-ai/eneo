@@ -391,6 +391,10 @@ export class FlowAIBuilderService {
     await this.#driver.confirmRequirements(editContext ?? null);
   }
 
+  async editNamedContentFields(requirementsVersion: string, fieldNames: string[]): Promise<void> {
+    await this.#driver.editNamedContentFields(requirementsVersion, fieldNames);
+  }
+
   async changeRequirements(feedback?: string, topic?: string | null): Promise<void> {
     await this.#driver.changeRequirements(feedback, null, topic);
   }

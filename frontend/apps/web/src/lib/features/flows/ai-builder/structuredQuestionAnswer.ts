@@ -41,7 +41,10 @@ export type PersistedStructuredQuestionAnswerMetadata = Omit<
 export type StructuredQuestionAnswerMetadata =
   | components["schemas"]["StructuredQuestionAnswerRequest"]
   | components["schemas"]["RequirementsConfirmationMetadata"]
-  | components["schemas"]["DelegatedQuestionAnswerRequest"];
+  | components["schemas"]["DelegatedQuestionAnswerRequest"]
+  // Editing the content list is an answer about the contract rather than about
+  // a question, and travels the same typed path.
+  | components["schemas"]["NamedContentFieldsEditRequest"];
 
 /** The user handing this question back to Eneo, naming no option. */
 export function delegatedQuestionAnswer(

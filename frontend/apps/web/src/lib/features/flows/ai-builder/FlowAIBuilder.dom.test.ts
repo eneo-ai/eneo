@@ -1273,6 +1273,50 @@ describe("FlowAIBuilder confirm, build and review", () => {
     expect((label as HTMLInputElement).value).toBe("Ort");
   });
 
+  it("edits the content list against the version on screen", async () => {
+    const summary = {
+      ...SUMMARY,
+      named_content_fields: [
+        { id: "beslut", label: "Beslut" },
+        { id: "handläggare", label: "Handläggare", origin: "card_edit" as const }
+      ]
+    };
+    const { fetch } = makeFetch({
+      sessions: [
+        makeSession({
+          conversation: [
+            userMessage("u1", "Sammanfatta rapporter"),
+            assistantMessage("a1", "", { requirements_summary: summary })
+          ]
+        })
+      ]
+    });
+    const { stream, calls } = makeStream();
+    renderShell({ fetch, stream, resumeSessionId: "s-1" });
+
+    await screen.findByRole("heading", { name: m.ai_builder_requirements_title() });
+    // A field the user added says so; one Eneo found does not.
+    expect(screen.getByText(m.ai_builder_requirements_field_added_by_you())).toBeTruthy();
+
+    await fireEvent.click(
+      screen.getByRole("button", {
+        name: m.ai_builder_requirements_field_remove({ field: "Beslut" })
+      })
+    );
+
+    // The resulting full set travels with the version it was read from, and
+    // the message stays empty: the set says everything.
+    await waitFor(() => expect(calls).toHaveLength(1));
+    expect(calls[0]!.body).toMatchObject({
+      message: "",
+      question_answer: {
+        kind: "named_content_fields_edit",
+        requirements_version: REQUIREMENTS_VERSION,
+        field_names: ["handläggare"]
+      }
+    });
+  });
+
   it("does not claim answers on a run where nothing was asked", async () => {
     // The common live case: the description settles every slot, so the server
     // asks nothing and every row is derived.

@@ -53,6 +53,17 @@
     if (reason === "delegation_without_pending_question") {
       return m.ai_builder_question_delegation_stale();
     }
+    // Editing the content list is refused for two different reasons that need
+    // two different actions: read the card again, or pick another name.
+    if (reason === "requirements_version_stale") {
+      return m.ai_builder_content_field_edit_stale();
+    }
+    if (reason === "invalid_field_name") {
+      const field = service.error?.details?.field_name;
+      return typeof field === "string" && field.trim()
+        ? m.ai_builder_content_field_edit_invalid_named({ field })
+        : m.ai_builder_content_field_edit_invalid();
+    }
     return null;
   });
   const turnAlertCopy = $derived.by(() => {

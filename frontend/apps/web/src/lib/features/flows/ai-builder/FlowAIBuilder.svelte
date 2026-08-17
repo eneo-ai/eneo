@@ -675,6 +675,10 @@
           oncanceledit={() => (editingQuestionId = null)}
           onconfirm={handleRequirementsConfirm}
           onchange={handleRequirementsChange}
+          oneditcontentfields={(fieldNames) => {
+            if (!latestSummary) return;
+            void service.editNamedContentFields(latestSummary.requirements_version, fieldNames);
+          }}
           oneditanswer={handleEditAnswer}
         />
       {:else if screen === "build" && generationFailedWithoutPlan}

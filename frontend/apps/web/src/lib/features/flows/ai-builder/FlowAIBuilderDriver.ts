@@ -1243,6 +1243,24 @@ export class FlowAIBuilderDriver {
     await this.sendMessage(message, undefined, undefined, editContext);
   }
 
+  /**
+   * The content list is edited on the card, not described in prose: the server
+   * takes the resulting full set of ids against the version the user is
+   * looking at, and answers with a new one. The message is empty on purpose —
+   * there is nothing for the user to say that the set does not already say.
+   */
+  async editNamedContentFields(
+    requirementsVersion: string,
+    fieldNames: string[]
+  ): Promise<AIBuilderSendOutcome> {
+    return await this.sendMessage("", {
+      kind: "named_content_fields_edit",
+      requirements_version: requirementsVersion,
+      field_names: fieldNames,
+      ui_language: getLocale()
+    });
+  }
+
   derivePhase(): AIBuilderPhase {
     // A question waiting for an answer is the newest thing asked of the user,
     // so it outranks both a disclosure and a loaded plan: the server may ask

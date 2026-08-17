@@ -8,6 +8,7 @@
   import { Skeleton } from "$lib/components/ui/skeleton/index.js";
   import * as Tooltip from "$lib/components/ui/tooltip/index.js";
   import IconInfo from "@lucide/svelte/icons/info";
+  import IconX from "@lucide/svelte/icons/x";
   import BuilderChangeRequest from "./BuilderChangeRequest.svelte";
   import { summaryTerm } from "./aiBuilderSummaryText";
   import FlowAIBuilderQuestion from "./FlowAIBuilderQuestion.svelte";
@@ -84,6 +85,9 @@
     /** A change request in the user's own words, optionally about one row; the
      *  server answers with a new requirements version, which re-arms this card. */
     onchange: (text: string, topic?: string | null) => void;
+    /** The resulting full set of content-field ids; the server answers with a
+     *  new requirements version, which re-arms this card like any change. */
+    oneditcontentfields?: (fieldNames: string[]) => void;
     oneditanswer: (questionId: string) => void;
   }
 
@@ -109,6 +113,7 @@
     oncanceledit,
     onconfirm,
     onchange,
+    oneditcontentfields,
     oneditanswer
   }: Props = $props();
 
@@ -193,6 +198,8 @@
   // this answers "and exactly what will they do", without a wall of detail on
   // a card whose job is to be readable.
   let runtimeFieldDetails = $state(false);
+  let addingContentField = $state(false);
+  let newContentField = $state("");
   const hasRuntimeFieldDetail = $derived(
     runtimeFields.some((field) => field.purpose || (field.options?.length ?? 0) > 0)
   );
@@ -596,11 +603,75 @@
             <ul class="mt-2 flex list-none flex-wrap gap-1.5 p-0">
               {#each shownContentFields as field (field.id)}
                 <li
-                  class="border-default bg-secondary text-primary inline-flex h-[1.625rem] items-center rounded-full border px-2.5 text-[0.78125rem]"
+                  class="border-default bg-secondary text-primary inline-flex h-[1.625rem] items-center gap-1 rounded-full border py-0 pr-1 pl-2.5 text-[0.78125rem]"
                 >
                   {field.label}
+                  {#if field.origin === "card_edit"}
+                    <span class="text-secondary text-[0.6875rem]">
+                      {m.ai_builder_requirements_field_added_by_you()}
+                    </span>
+                  {/if}
+                  {#if !readOnly && !confirmed && oneditcontentfields}
+                    <button
+                      type="button"
+                      class="hover:bg-negative-dimmer/40 hover:text-negative-stronger text-secondary inline-flex size-5 items-center justify-center rounded-full transition-colors"
+                      aria-label={m.ai_builder_requirements_field_remove({ field: field.label })}
+                      {disabled}
+                      onclick={() =>
+                        oneditcontentfields(
+                          namedContentFields
+                            .filter((other) => other.id !== field.id)
+                            .map((other) => other.id)
+                        )}
+                    >
+                      <IconX class="size-3" aria-hidden="true" />
+                    </button>
+                  {/if}
                 </li>
               {/each}
+              {#if !readOnly && !confirmed && oneditcontentfields}
+                <li>
+                  {#if addingContentField}
+                    <form
+                      class="flex items-center gap-1.5"
+                      onsubmit={(event) => {
+                        event.preventDefault();
+                        const name = newContentField.trim();
+                        if (!name) return;
+                        oneditcontentfields([...namedContentFields.map((f) => f.id), name]);
+                        newContentField = "";
+                        addingContentField = false;
+                      }}
+                    >
+                      <!-- svelte-ignore a11y_autofocus -->
+                      <input
+                        class="border-default bg-primary h-[1.625rem] w-40 rounded-full border px-2.5 text-[0.78125rem]"
+                        bind:value={newContentField}
+                        aria-label={m.ai_builder_requirements_field_add()}
+                        placeholder={m.ai_builder_requirements_field_add_placeholder()}
+                        autofocus
+                        {disabled}
+                      />
+                      <Button
+                        type="submit"
+                        size="sm"
+                        disabled={disabled || !newContentField.trim()}
+                      >
+                        {m.ai_builder_requirements_field_add_confirm()}
+                      </Button>
+                    </form>
+                  {:else}
+                    <button
+                      type="button"
+                      class="border-default text-secondary hover:text-primary inline-flex h-[1.625rem] items-center rounded-full border border-dashed px-2.5 text-[0.78125rem]"
+                      {disabled}
+                      onclick={() => (addingContentField = true)}
+                    >
+                      {m.ai_builder_requirements_field_add()}
+                    </button>
+                  {/if}
+                </li>
+              {/if}
               {#if namedContentFields.length > shownContentFields.length}
                 <li>
                   <button

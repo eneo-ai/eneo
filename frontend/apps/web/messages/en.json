@@ -6358,5 +6358,13 @@
   "ai_builder_question_field_search_count": "{shown} of {total} shown",
   "ai_builder_question_field_paste": "Paste a list",
   "ai_builder_question_field_paste_hint": "One label per line. Type and the rest you fill in afterwards.",
-  "ai_builder_question_field_paste_apply": "Add the rows"
+  "ai_builder_question_field_paste_apply": "Add the rows",
+  "ai_builder_requirements_field_added_by_you": "added by you",
+  "ai_builder_requirements_field_remove": "Remove {field}",
+  "ai_builder_requirements_field_add": "Add field",
+  "ai_builder_requirements_field_add_placeholder": "What should be kept?",
+  "ai_builder_requirements_field_add_confirm": "Add",
+  "ai_builder_content_field_edit_stale": "The requirements changed while you were editing. Read the summary again and make the change there.",
+  "ai_builder_content_field_edit_invalid": "That name cannot be used. Rewrite it and try again.",
+  "ai_builder_content_field_edit_invalid_named": "“{field}” cannot be used as a field. Rewrite the name and try again."
 }
