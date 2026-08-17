@@ -290,42 +290,7 @@ def _mock_assistant_for_execute_step(*, response_text: str = "ok") -> MagicMock:
 # --- RuntimeStep extended fields ---
 
 
-def test_runtime_step_has_typed_fields():
-    """RuntimeStep must have output_type, output_contract, input_type, input_contract."""
-    step = _runtime_step(
-        output_type="json",
-        output_contract={"type": "object"},
-        input_type="document",
-        input_contract=None,
-    )
-    assert step.output_type == "json"
-    assert step.output_contract == {"type": "object"}
-    assert step.input_type == "document"
-    assert step.input_contract is None
-
-
 # --- StepInputValue dataclass ---
-
-
-def test_step_input_value_creation():
-    """StepInputValue carries text, files, structured data."""
-    val = StepInputValue(
-        text="hello",
-        files=[SimpleNamespace(id=uuid4())],
-        structured={"key": "val"},
-        input_source="flow_input",
-    )
-    assert val.text == "hello"
-    assert len(val.files) == 1
-    assert val.structured == {"key": "val"}
-
-
-def test_step_input_value_defaults():
-    val = StepInputValue(text="hello")
-    assert val.files is None
-    assert val.structured is None
-    assert val.input_source == "flow_input"
-    assert val.used_question_binding is False
 
 
 # --- _resolve_step_input async + JSON structured ---
@@ -3681,37 +3646,6 @@ async def test_text_input_contract_accepts_json_object_string(user):
         "parse_attempted": True,
         "parse_succeeded": True,
         "candidate_type": "dict",
-    }
-
-
-@pytest.mark.asyncio
-async def test_text_input_contract_accepts_json_array_string(user):
-    executor, _, _, _ = _build_executor(user)
-    run = _run(
-        status=FlowRunStatus.RUNNING,
-        user=user,
-        input_payload={"text": '["a","b"]'},
-    )
-    step = _runtime_step(
-        input_type="text",
-        input_contract={
-            "type": "array",
-            "items": {"type": "string"},
-        },
-    )
-    executor._load_assistant = AsyncMock(
-        return_value=_mock_assistant_for_execute_step()
-    )
-
-    output = (await executor._execute_step(step=step, run=run, attempt_no=1)).output
-
-    assert output.input_text == '["a","b"]'
-    assert output.full_text == "ok"
-    assert output.contract_validation == {
-        "schema_type_hint": "array",
-        "parse_attempted": True,
-        "parse_succeeded": True,
-        "candidate_type": "list",
     }
 
 

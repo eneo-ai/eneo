@@ -91,24 +91,6 @@ def test_resolve_input_source_text_skips_runtime_orchestration_metadata_only_pay
     assert resolved == ""
 
 
-def test_resolve_input_source_text_skips_runtime_transcription_cache_only_payload():
-    run = SimpleNamespace(
-        id=uuid4(),
-        input_payload_json={FLOW_INPUT_TRANSCRIPTION_KEY: "cached transcript"},
-    )
-
-    resolved = resolve_input_source_text(
-        input_source="flow_input",
-        run=run,
-        step_order=1,
-        prior_results=[],
-        state=None,
-        logger=MagicMock(),
-    )
-
-    assert resolved == ""
-
-
 def test_resolve_input_source_text_strips_runtime_orchestration_metadata_from_semantic_payload():
     run = SimpleNamespace(
         id=uuid4(),

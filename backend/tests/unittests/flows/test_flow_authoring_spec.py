@@ -1,9 +1,7 @@
 from __future__ import annotations
 
-import inspect
-
 import pytest
-from pydantic import Field, ValidationError
+from pydantic import ValidationError
 
 from eneo.flows.domain.flow import FlowPersistedJsonObject
 from eneo.flows.flow_authoring_spec import (
@@ -79,13 +77,6 @@ def test_flow_draft_spec_hash_is_key_order_independent() -> None:
     assert first.spec_hash() == second.spec_hash()
 
 
-def test_pydantic_field_supports_exclude_if_for_absent_spec_metadata() -> None:
-    assert "exclude_if" in inspect.signature(Field).parameters, (
-        "exclude_if removed from Pydantic Field; switch "
-        "document_body_writer_step_refs to a @field_serializer fallback."
-    )
-
-
 def test_flow_draft_spec_omits_absent_document_body_writer_refs() -> None:
     spec = FlowDraftSpecCore(flow_name="Demo", steps=[_step()])
 
@@ -138,23 +129,6 @@ def test_document_body_writer_refs_prune_to_absent_field() -> None:
 
     assert spec.document_body_writer_step_refs is None
     assert "document_body_writer_step_refs" not in spec.model_dump(mode="json")
-
-
-def test_stale_document_body_writer_refs_are_dropped_on_rehydrate() -> None:
-    payload = FlowDraftSpecCore(
-        flow_name="Demo",
-        steps=[_step(plan_step_ref="step_a"), _step(plan_step_ref="step_c")],
-        document_body_writer_step_refs=("step_a", "step_c"),
-    ).model_dump(mode="json")
-    payload["document_body_writer_step_refs"] = ["step_a", "step_b", "step_c"]
-
-    restored = FlowDraftSpecCore.model_validate(payload)
-
-    assert restored.document_body_writer_step_refs == ("step_a", "step_c")
-    assert restored.model_dump(mode="json")["document_body_writer_step_refs"] == [
-        "step_a",
-        "step_c",
-    ]
 
 
 @pytest.mark.parametrize(

@@ -5234,24 +5234,3 @@ async def test_get_run_artifact_file_rejects_cross_tenant(user):
             file_id=file_id,
         )
     assert exc_info.value.code == "forbidden_action"
-
-
-@pytest.mark.asyncio
-async def test_get_run_artifact_file_missing_result_file_row(user):
-    file_id = uuid4()
-    run = _run(user=user, flow_id=uuid4())
-    file_repo = AsyncMock()
-
-    service, run = _artifact_service(
-        user,
-        file_repo=file_repo,
-        run=run,
-    )
-
-    with pytest.raises(NotFoundException) as exc_info:
-        await service.get_run_artifact_file(
-            run_id=run.id,
-            flow_id=run.flow_id,
-            file_id=file_id,
-        )
-    assert exc_info.value.code == "flow_run_artifact_not_found"

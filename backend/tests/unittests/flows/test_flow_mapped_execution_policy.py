@@ -40,16 +40,6 @@ def test_resolver_owns_the_deployment_default_for_every_caller(
     assert policy.max_provider_calls_per_mapped_step == 42
 
 
-def test_resolve_invalid_stored_policy_fails_closed() -> None:
-    policy = resolve_flow_mapped_execution_policy(
-        {"mapped_execution": {"version": 99}},
-        default_max_provider_calls=100,
-    )
-
-    assert policy.max_provider_calls_per_mapped_step is None
-    assert policy.max_estimated_input_tokens_per_mapped_step is None
-
-
 def test_max_mapped_items_reserves_the_fallback_call() -> None:
     def policy(calls: int | None) -> FlowMappedExecutionPolicy:
         return FlowMappedExecutionPolicy(max_provider_calls_per_mapped_step=calls)

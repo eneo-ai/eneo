@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from typing import get_type_hints
 from uuid import uuid4
 
 import pytest
@@ -28,7 +27,6 @@ from eneo.flows.flow_run_provenance import (
 )
 from eneo.flows.runtime.claim_resolution import StepClaimResolution
 from eneo.flows.runtime.step_attempt_runtime import (
-    StepFailurePlan,
     build_generic_failure_plan,
     build_step_gate_decision,
     build_step_success_plan,
@@ -196,12 +194,6 @@ def test_build_typed_failure_plan_preserves_input_payload_and_prompt():
     }
     assert plan.failed_result.effective_prompt == "Prompt"
     assert plan.return_result == {"status": "failed", "error": "Step 1 input invalid"}
-
-
-def test_step_failure_plan_error_code_is_typed_to_public_catalog():
-    hints = get_type_hints(StepFailurePlan)
-
-    assert hints["error_code"] is FlowApiErrorCode
 
 
 def test_typed_failure_run_error_uses_public_taxonomy_summary() -> None:

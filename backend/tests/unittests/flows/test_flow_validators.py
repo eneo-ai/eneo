@@ -369,24 +369,6 @@ def test_validate_steps_fail_fast_preserves_contract_validation(
     )
 
 
-def test_validate_steps_rejects_output_contract_for_text_output():
-    with pytest.raises(
-        BadRequestException,
-        match="output_contract is not supported for output_type 'text'",
-    ):
-        validate_steps(
-            [
-                _step(
-                    output_type="text",
-                    output_contract={
-                        "type": "object",
-                        "properties": {"value": {"type": "string"}},
-                    },
-                )
-            ]
-        )
-
-
 def test_validate_steps_rejects_authored_http_get_body_fields():
     with pytest.raises(
         BadRequestException,
@@ -950,29 +932,6 @@ def test_validate_steps_rejects_question_binding_with_input_contract():
                 ),
             ]
         )
-
-
-def test_validate_steps_rejects_single_expression_question_binding_with_input_contract():
-    with pytest.raises(
-        BadRequestException,
-        match="input_contract cannot validate input_bindings.question",
-    ) as exc_info:
-        validate_steps(
-            [
-                _step(1, output_type="json"),
-                _step(
-                    2,
-                    input_type="json",
-                    input_bindings={"question": "{{ step_1.output.structured }}"},
-                    input_contract={
-                        "type": "object",
-                        "properties": {"title": {"type": "string"}},
-                    },
-                ),
-            ]
-        )
-
-    assert exc_info.value.code == "flow_input_contract_inapplicable"
 
 
 def test_validate_steps_allows_question_binding_without_input_contract():

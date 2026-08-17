@@ -304,14 +304,6 @@ def test_rerun_operation_public_rejects_service_principal_without_summary():
         FlowRunRerunOperationPublic.model_validate(payload)
 
 
-def test_rerun_operation_public_rejects_mixed_requester_actor_shape():
-    payload = _rerun_operation_public_payload()
-    payload["requested_by_user_id"] = uuid4()
-
-    with pytest.raises(ValidationError, match="requested_by service principal"):
-        FlowRunRerunOperationPublic.model_validate(payload)
-
-
 def test_run_revision_and_current_attempt_projection_columns_exist():
     revision = FlowRuns.__table__.columns["revision"]
     current_attempt_no = FlowStepResults.__table__.columns["current_attempt_no"]

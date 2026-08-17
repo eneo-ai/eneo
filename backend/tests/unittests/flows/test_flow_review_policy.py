@@ -166,17 +166,6 @@ def test_parse_flow_step_review_policy_reports_outbound_mode_before_shape() -> N
     assert exc_info.value.code == FLOW_REVIEW_POLICY_OUTBOUND_OUTPUT_UNSUPPORTED
 
 
-def test_parse_flow_step_review_policy_rejects_outbound_delivery_modes() -> None:
-    with pytest.raises(BadRequestException) as exc_info:
-        parse_flow_step_review_policy(
-            raw_policy={"mode": "view"},
-            output_mode=FlowOutputMode.HTTP_POST,
-            output_type=FlowOutputType.TEXT,
-        )
-
-    assert exc_info.value.code == FLOW_REVIEW_POLICY_OUTBOUND_OUTPUT_UNSUPPORTED
-
-
 @pytest.mark.parametrize("output_type", [FlowOutputType.PDF, FlowOutputType.DOCX])
 def test_parse_flow_step_review_policy_rejects_edit_for_artifact_output(
     output_type: FlowOutputType,

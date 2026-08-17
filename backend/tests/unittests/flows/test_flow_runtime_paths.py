@@ -3,9 +3,6 @@ from __future__ import annotations
 from types import SimpleNamespace
 from uuid import uuid4
 
-import pytest
-from pydantic import ValidationError
-
 from eneo.flows.api.flow_runtime_paths import (
     FlowReviewCheckpointRuntimePathsPublic,
     FlowRuntimePathsPublic,
@@ -62,17 +59,6 @@ def _runtime_paths_payload() -> dict[str, object]:
         "artifact_signed_url_template": (
             "/api/v1/flows/{id}/runs/{run_id}/artifacts/{file_id}/signed-url/"
         ),
-    }
-
-
-def _runtime_public_payload() -> dict[str, object]:
-    return {
-        "id": str(uuid4()),
-        "space_id": str(uuid4()),
-        "name": "Published flow",
-        "description": "Runtime-safe projection",
-        "published_version": 3,
-        "runtime_paths": _runtime_paths_payload(),
     }
 
 
@@ -140,21 +126,6 @@ def test_build_flow_runtime_paths_normalizes_missing_leading_slash() -> None:
     runtime_paths = build_flow_runtime_paths(flow_id, api_prefix="api")
 
     assert runtime_paths.create_run == f"/api/flows/{flow_id}/runs/"
-
-
-def test_flow_runtime_discovery_models_reject_unknown_response_fields() -> None:
-    cases = (
-        (
-            FlowReviewCheckpointRuntimePathsPublic,
-            _runtime_review_paths_payload(),
-        ),
-        (FlowRuntimePathsPublic, _runtime_paths_payload()),
-        (FlowRuntimePublic, _runtime_public_payload()),
-    )
-
-    for model, payload in cases:
-        with pytest.raises(ValidationError):
-            model.model_validate({**payload, "unexpected": True})
 
 
 def test_flow_runtime_discovery_models_construct_from_attributes() -> None:

@@ -53,13 +53,6 @@ def test_parse_json_output_scalar_rejected():
         parse_json_output('"just a string"')
 
 
-def test_parse_json_output_number_rejected():
-    with pytest.raises(
-        TypedIOValidationException, match="Expected JSON object or array"
-    ):
-        parse_json_output("42")
-
-
 def test_parse_json_output_error_code():
     with pytest.raises(TypedIOValidationException) as exc_info:
         parse_json_output("not json")

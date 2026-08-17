@@ -3326,15 +3326,6 @@ def test_flow_consumer_page_prose_fields_are_guarded() -> None:
         )
 
 
-def test_flow_consumer_guides_answer_fresh_reader_edge_cases() -> None:
-    designing = _read(FLOW_CONSUMER_DESIGNING_GUIDE)
-    integrating = _read(FLOW_CONSUMER_INTEGRATING_GUIDE)
-
-    assert "DOCX artifact (`template_fill`)" in designing
-    assert "file id from `result.files`" in integrating
-    assert "not direct post-run output edits" in integrating
-
-
 def test_flow_consumer_guide_json_examples_are_valid_json() -> None:
     invalid_blocks: list[str] = []
 

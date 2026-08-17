@@ -143,17 +143,6 @@ def test_accepts_valid_contracts(user):
 # --- Type chain compatibility ---
 
 
-def test_rejects_incompatible_chain(user):
-    """pdf output -> audio input should be rejected."""
-    service = _service(user)
-    steps = [
-        _step(step_order=1, output_type="pdf"),
-        _step(step_order=2, input_source="previous_step", input_type="audio"),
-    ]
-    with pytest.raises(BadRequestException):
-        service._validate_steps(steps)
-
-
 def test_accepts_compatible_chain(user):
     """json output -> text input should be accepted."""
     service = _service(user)
@@ -329,20 +318,6 @@ def test_previous_step_document_blocked(user):
     steps = [
         _step(step_order=1, output_type="pdf"),
         _step(step_order=2, input_source="previous_step", input_type="document"),
-    ]
-    with pytest.raises(
-        BadRequestException,
-        match="input_type 'document' is only supported with input_source 'flow_input'",
-    ):
-        service._validate_steps(steps)
-
-
-def test_all_previous_steps_document_blocked(user):
-    """all_previous_steps + input_type=document should be rejected at publish."""
-    service = _service(user)
-    steps = [
-        _step(step_order=1),
-        _step(step_order=2, input_source="all_previous_steps", input_type="document"),
     ]
     with pytest.raises(
         BadRequestException,

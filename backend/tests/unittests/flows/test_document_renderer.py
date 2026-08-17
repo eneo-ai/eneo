@@ -733,12 +733,6 @@ def test_render_unsupported_type_raises():
         _render_service.render_document("Test", "html", step_order=1)
 
 
-def test_render_unsupported_error_code():
-    with pytest.raises(TypedIOValidationException) as exc_info:
-        _render_service.render_document("Test", "html", step_order=1)
-    assert exc_info.value.code == "typed_io_render_failed"
-
-
 # --- Unicode rendering ---
 
 

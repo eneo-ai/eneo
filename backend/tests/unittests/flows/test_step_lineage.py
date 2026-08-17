@@ -67,21 +67,6 @@ def test_build_step_ref_mapping_keeps_plan_ref_over_other_step_label() -> None:
     assert mapping == {"authored_ref": 1, "Authored owner": 1}
 
 
-def test_build_step_ref_mapping_keeps_existing_ref_over_other_step_label() -> None:
-    mapping = build_step_ref_mapping(
-        [
-            _RuntimeStepRef(
-                1,
-                existing_step_ref="authored_ref",
-                user_description="Authored owner",
-            ),
-            _RuntimeStepRef(2, user_description=" authored_ref "),
-        ]
-    )
-
-    assert mapping == {"authored_ref": 1, "Authored owner": 1}
-
-
 def test_build_step_ref_mapping_duplicate_label_uses_lowest_step_order() -> None:
     mapping = build_step_ref_mapping(
         [

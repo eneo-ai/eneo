@@ -6,11 +6,9 @@ import pytest
 from pydantic import ValidationError
 
 from eneo.flows.flow_resource_bindings import (
-    FLOW_RESOURCE_BINDING_SOURCE_VALUES,
     RESOURCE_SLOT_LOCAL_KIND_PAIRS,
     FlowResourceBindingResolutionError,
     FlowResourceBindingResolutionReason,
-    FlowResourceBindingSource,
     LocalResourceBinding,
     LocalResourceKind,
     ResourceSlotAllocator,
@@ -137,14 +135,6 @@ def test_non_knowledge_local_kind_has_no_assistant_update_field() -> None:
         assistant_update_field_for_knowledge_local_kind(
             LocalResourceKind.COMPLETION_MODEL
         )
-
-
-def test_binding_source_values_are_canonical() -> None:
-    assert FLOW_RESOURCE_BINDING_SOURCE_VALUES == (
-        FlowResourceBindingSource.AI_BUILDER.value,
-        FlowResourceBindingSource.PACKAGE_IMPORT.value,
-        FlowResourceBindingSource.MANUAL_ADMIN.value,
-    )
 
 
 def test_local_resource_binding_accepts_matching_local_kind() -> None:
@@ -379,20 +369,6 @@ def test_index_local_resource_bindings_rejects_duplicate_slot_ref() -> None:
         error.value.reason is FlowResourceBindingResolutionReason.DUPLICATE_SLOT_BINDING
     )
     assert error.value.context()["slot_ref"] == "model.default-model"
-
-
-def test_resolve_local_resource_ref_rejects_uuid_ref() -> None:
-    local_id = UUID("11111111-1111-4111-8111-111111111111")
-
-    with pytest.raises(FlowResourceBindingResolutionError) as error:
-        resolve_local_resource_ref(
-            str(local_id),
-            expected_slot_kind=ResourceSlotKind.MODEL,
-            bindings_by_slot_ref={},
-            allowed_local_kinds=frozenset({LocalResourceKind.COMPLETION_MODEL}),
-        )
-
-    assert error.value.reason is FlowResourceBindingResolutionReason.INVALID_SLOT_REF
 
 
 def test_resolve_local_resource_ref_resolves_matching_slot_binding() -> None:

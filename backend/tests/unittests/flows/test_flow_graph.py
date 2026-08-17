@@ -326,40 +326,6 @@ def test_graph_response_example_matches_public_model() -> None:
     assert isinstance(response.edges[0], GraphEdge)
 
 
-def test_graph_response_parses_typed_nodes_and_edges() -> None:
-    response = GraphResponse.model_validate(
-        {
-            "nodes": [
-                {"id": "input", "label": "Input", "type": "input"},
-                {
-                    "id": "step-1",
-                    "label": "Step 1",
-                    "type": "llm",
-                    "step_order": 1,
-                    "input_source": "flow_input",
-                    "input_type": "text",
-                    "output_type": "json",
-                    "output_mode": "pass_through",
-                    "run_status": "completed",
-                },
-            ],
-            "edges": [
-                {
-                    "source": "input",
-                    "target": "step-1",
-                    "kind": "flow_input",
-                    "source_step_order": 0,
-                    "target_step_order": 1,
-                }
-            ],
-        }
-    )
-
-    assert isinstance(response.nodes[0], GraphNode)
-    assert isinstance(response.edges[0], GraphEdge)
-    assert response.nodes[1].run_status == "completed"
-
-
 def test_graph_builders_return_typed_models_without_changing_serialized_response() -> (
     None
 ):

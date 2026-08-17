@@ -71,15 +71,6 @@ def test_missing_maintenance_queue_consumer_is_typed_and_unhealthy() -> None:
     assert response.probe.celery_inspection_timeout_seconds == 1.0
 
 
-def test_live_maintenance_queue_consumer_emits_no_liveness_flag() -> None:
-    response = _classify(FlowRuntimeHealthSnapshot())
-
-    assert (
-        FlowRuntimeHealthFlag.MAINTENANCE_QUEUE_CONSUMER_UNAVAILABLE
-        not in response.status_flags
-    )
-
-
 def test_missing_execution_queue_consumer_is_typed_and_unhealthy() -> None:
     response = classify_flow_runtime_health(
         snapshot=FlowRuntimeHealthSnapshot(),

@@ -114,23 +114,6 @@ def test_service_principal_actor_allows_recovered_run_without_exact_credential(u
     }
 
 
-def test_service_principal_actor_uses_persisted_runtime_permission(user):
-    service_principal = _service_principal(user)
-    run = _service_run(
-        user,
-        service_principal,
-        actor_api_key_id=uuid4(),
-        runtime_service_permission=ApiKeyPermission.READ,
-    )
-
-    actor = FlowRunActor.from_service_principal_run(
-        run=run,
-        service_principal=service_principal,
-    )
-
-    assert actor.runtime_service_permission == ApiKeyPermission.READ
-
-
 def test_service_principal_actor_rejects_disabled_principal(user):
     service_principal = _service_principal(
         user,

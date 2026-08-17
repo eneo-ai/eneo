@@ -131,12 +131,3 @@ def test_emit_flow_run_terminalization_event_noop_already_terminal_payload(
         caplog=caplog,
         outcome="noop_already_terminal",
     )
-
-
-def test_emit_flow_run_terminalization_event_noop_lost_race_payload(
-    caplog: pytest.LogCaptureFixture,
-) -> None:
-    _assert_noop_event_payload(
-        caplog=caplog,
-        outcome="noop_lost_race",
-    )

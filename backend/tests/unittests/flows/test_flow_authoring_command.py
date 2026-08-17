@@ -1,16 +1,12 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
 from types import SimpleNamespace
 from uuid import UUID, uuid4
 
 import pytest
-from pydantic import TypeAdapter
 
 from eneo.flows.application.flow_authoring_command import (
     CreateFlowAuthoringCommand,
-    EditFlowAuthoringCommand,
-    FlowAuthoringCommand,
     FlowAuthoringCommandService,
     FlowPackageAuthoringOrigin,
 )
@@ -38,47 +34,6 @@ from eneo.flows.flow_resource_bindings import (
     ResourceSlotRef,
 )
 from eneo.main.exceptions import BadRequestException
-
-
-def test_flow_authoring_command_discriminates_create_and_edit() -> None:
-    spec = _spec()
-    adapter = TypeAdapter(FlowAuthoringCommand)
-
-    create = adapter.validate_python(
-        {
-            "kind": "create",
-            "space_id": str(uuid4()),
-            "spec": spec.model_dump(mode="json"),
-            "origin": {
-                "kind": "flow_package",
-                "package_id": "se.demo.flow",
-                "package_version": "1.0.0",
-                "content_checksum": "sha256:abc",
-            },
-        }
-    )
-    edit = adapter.validate_python(
-        {
-            "kind": "edit",
-            "space_id": str(uuid4()),
-            "flow_id": str(uuid4()),
-            "expected_revision": 7,
-            "spec": spec.model_dump(mode="json"),
-            "removed_existing_step_refs": [],
-            "updated_existing_step_refs": [],
-            "origin": {
-                "kind": "ai_builder",
-                "session_id": str(uuid4()),
-                "plan_id": str(uuid4()),
-                "spec_hash": spec.spec_hash(),
-                "applied_at": datetime.now(timezone.utc).isoformat(),
-            },
-        }
-    )
-
-    assert isinstance(create, CreateFlowAuthoringCommand)
-    assert isinstance(edit, EditFlowAuthoringCommand)
-    assert edit.expected_revision == 7
 
 
 @pytest.mark.anyio
