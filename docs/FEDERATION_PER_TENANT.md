@@ -14,13 +14,13 @@
 - Frontend automatically powers a tenant selector when multi-tenant mode is on
 
 ### Single-Tenant with API Management
-Even with a single tenant, you may want `FEDERATION_PER_TENANT_ENABLED=true` if you prefer to:
+Even with a single tenant, you may want `FEDERATION_ENABLED=true` if you prefer to:
 - Manage OIDC settings via the sysadmin API instead of environment variables
 - Change IdP configuration without restarting the backend
 - Use the same API-based workflow as multi-tenant deployments
 
 ### Single-Tenant via Environment Variables (Default)
-If you don't need the above, keep `FEDERATION_PER_TENANT_ENABLED=false` and use:
+If you don't need the above, keep `FEDERATION_ENABLED=false` and use:
 - `OIDC_DISCOVERY_ENDPOINT`, `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET` in your `.env`
 - Simpler setup, but requires backend restart to change OIDC settings
 
@@ -45,7 +45,7 @@ Key components
 ---
 
 ## 3. Implementation Checklist
-1. Flip feature flag: `FEDERATION_PER_TENANT_ENABLED=true`
+1. Flip feature flag: `FEDERATION_ENABLED=true`
 2. Ensure every tenant has a slug (backfill command provided in the setup guide)
 3. Call `PUT /api/v1/sysadmin/tenants/{tenant_id}/federation` for each tenant to provide the full initial federation config (see [Multi-Tenant OIDC Setup Guide](./MULTITENANT_OIDC_SETUP_GUIDE.md))
 4. Register the resulting redirect URI with the tenant’s IdP
@@ -75,7 +75,7 @@ Secrets (`client_secret`) are encrypted; responses only return masked tails.
 ## 5. Migration Notes (From Single-Tenant)
 - Legacy `MOBILITYGUARD_*` env vars are still read; on startup they populate the generic `OIDC_*` settings. Plan to migrate before v3.0.
 - Tenants without federation continue to use the global IdP.
-- Frontend detects `FEDERATION_PER_TENANT_ENABLED` and shows the selector automatically; no manual UI work required.
+- The frontend asks the backend (`/api/v1/auth/federation-status`) whether federation is enabled and shows the selector automatically; no manual UI work required.
 
 ---
 
