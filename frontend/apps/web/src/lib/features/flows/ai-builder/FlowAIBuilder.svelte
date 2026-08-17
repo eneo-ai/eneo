@@ -3,7 +3,7 @@
   import { getLocale } from "$lib/paraglide/runtime";
   import { resolve } from "$app/paths";
   import { onMount, tick } from "svelte";
-  import { SvelteSet } from "svelte/reactivity";
+  import { SvelteMap, SvelteSet } from "svelte/reactivity";
   import * as AlertDialog from "$lib/components/ui/alert-dialog/index.js";
   import { Button } from "$lib/components/ui/button/index.js";
   import { Skeleton } from "$lib/components/ui/skeleton/index.js";
@@ -128,11 +128,19 @@
     }
     return ids;
   });
+  const decisionTopicByQuestionId = $derived.by(() => {
+    const topics = new SvelteMap<string, string>();
+    for (const decision of latestSummary?.key_decisions ?? []) {
+      if (decision.question_id) topics.set(decision.question_id, decision.topic);
+    }
+    return topics;
+  });
   const answeredQuestions = $derived(
     askedQuestionIds
       .filter((id) => service.isQuestionAnswered(id))
       .map((id) => ({
         questionId: id,
+        topic: decisionTopicByQuestionId.get(id) ?? null,
         question:
           service.messages.find((message) => message.question?.question_id === id)?.question
             ?.question ?? "",

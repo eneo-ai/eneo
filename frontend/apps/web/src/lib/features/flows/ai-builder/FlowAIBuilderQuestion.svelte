@@ -89,8 +89,9 @@
     const key = recommendedKey;
     if (preselectedQuestionId === question.question_id) return;
     preselectedQuestionId = question.question_id;
-    if (key && question.selection_mode === "single" && selectedOptionKeys.size === 0) {
-      selectedOptionKeys.add(key);
+    const preselect = currentKey ?? key;
+    if (preselect && question.selection_mode === "single" && selectedOptionKeys.size === 0) {
+      selectedOptionKeys.add(preselect);
     }
   });
 
@@ -101,6 +102,17 @@
   // Eneo names the option it would settle on. It is preselected, so confirming
   // is one click, and it is the only thing a delegation can produce — without
   // one there is nothing to hand back.
+  // Editing: the value in use is the one that starts selected, and it wears
+  // "Används i dag" rather than a recommendation — the server guarantees a
+  // recommendation here equals it or is absent.
+  const currentKey = $derived.by(() => {
+    const id = isEdit ? question.current_option_id : null;
+    if (!id) return null;
+    const option = question.options.find(
+      (candidate) => getStructuredQuestionOptionKey(candidate) === id
+    );
+    return option ? getStructuredQuestionOptionKey(option) : null;
+  });
   const recommendedKey = $derived.by(() => {
     const id = isEdit ? null : question.recommended_option_id;
     if (!id) return null;
@@ -353,9 +365,7 @@
       <h2 id={questionLabelId} class="question-title" tabindex="-1" data-builder-screen-heading>
         {question.question}
       </h2>
-      {#if isEdit && question.recommended_option_id}
-        <p class="question-edit-note">{m.ai_builder_question_edit_no_preselect()}</p>
-      {/if}
+
       {#if why}
         <p class="question-why">
           <span class="question-why-lead">{m.ai_builder_question_why_lead()}</span>
@@ -495,7 +505,9 @@
             <span class="option-body">
               <span class="option-label-row">
                 <span class="option-label">{option.label}</span>
-                {#if optionKey === recommendedKey}
+                {#if optionKey === currentKey}
+                  <span class="option-current">{m.ai_builder_question_in_use_today()}</span>
+                {:else if optionKey === recommendedKey}
                   <span class="option-recommendation">{m.ai_builder_question_recommended()}</span>
                 {/if}
               </span>
@@ -636,12 +648,6 @@
     color: var(--text-primary);
   }
 
-  .question-edit-note {
-    @apply mt-2 rounded-lg px-3 py-2 text-[0.8125rem];
-    color: var(--text-secondary);
-    background: var(--background-secondary);
-  }
-
   .question-kicker-rest {
     color: var(--text-secondary);
     font-weight: 500;
@@ -718,6 +724,13 @@
     @apply mt-1 inline-flex self-start rounded-md px-2 py-1 text-xs;
     color: var(--text-secondary);
     background: var(--background-tertiary);
+  }
+
+  .option-current {
+    @apply inline-flex h-5 shrink-0 items-center rounded-full px-2 text-[0.65625rem] font-bold;
+    letter-spacing: 0.03em;
+    color: var(--positive-stronger);
+    background: var(--positive-dimmer);
   }
 
   .option-recommendation {

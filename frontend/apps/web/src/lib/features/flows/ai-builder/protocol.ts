@@ -422,6 +422,9 @@ const questionEventDataSchema = z.object({
   // The user's own words behind that recommendation — never Eneo's, never a
   // policy default, and only ever alongside recommended_option_id.
   recommended_option_evidence: z.string().nullable().optional(),
+  // Editing: the option the flow uses today. The server keeps any
+  // recommendation equal to it, so Eneo never proposes changing a live flow.
+  current_option_id: z.string().nullable().optional(),
   // 1-based place among the questions actually put to the user. There is no
   // total: a re-asked question keeps its number and some slots never queue.
   question_index: z.int().min(1).nullable().optional(),

@@ -924,13 +924,28 @@ describe("FlowAIBuilder confirm, build and review", () => {
     expect(screen.getByText(m.ai_builder_requirements_named_content({ count: "2" }))).toBeTruthy();
     expect(screen.getByText("slutsatser")).toBeTruthy();
 
-    // Only the row the user answered offers a way back into its question.
-    const rows = screen.getAllByRole("button", { name: m.ai_builder_question_change() });
-    expect(rows).toHaveLength(1);
-    await fireEvent.click(rows[0]!);
-
+    // Every row is correctable, which is what the card's lead promises. The
+    // row the user answered goes back into its question; the derived row has
+    // no question to reopen, so it opens the change box naming that topic.
+    await fireEvent.click(
+      screen.getByRole("button", {
+        name: m.ai_builder_confirm_change_row_aria({ topic: "Slutresultat" })
+      })
+    );
     expect(await screen.findByText(m.ai_builder_question_editing_note())).toBeTruthy();
     expect(screen.getByRole("heading", { name: FORMAT_QUESTION.question })).toBeTruthy();
+
+    await fireEvent.click(
+      screen.getByRole("button", {
+        name: m.ai_builder_confirm_change_row_aria({ topic: "Planerad bearbetning" })
+      })
+    );
+    const box = await screen.findByRole("textbox", {
+      name: m.ai_builder_change_request_textarea_label()
+    });
+    expect((box as HTMLTextAreaElement).value).toBe(
+      m.ai_builder_confirm_change_starter({ topic: "Planerad bearbetning" })
+    );
   });
 
   it("reopens the newest wording when a question was asked twice", async () => {
@@ -977,7 +992,11 @@ describe("FlowAIBuilder confirm, build and review", () => {
     renderShell({ fetch, stream: makeStream().stream, resumeSessionId: "s-1" });
 
     await screen.findByRole("heading", { name: m.ai_builder_requirements_title() });
-    await fireEvent.click(screen.getByRole("button", { name: m.ai_builder_question_change() }));
+    await fireEvent.click(
+      screen.getByRole("button", {
+        name: m.ai_builder_confirm_change_row_aria({ topic: "Slutresultat" })
+      })
+    );
 
     expect(await screen.findByRole("heading", { name: reasked.question })).toBeTruthy();
   });

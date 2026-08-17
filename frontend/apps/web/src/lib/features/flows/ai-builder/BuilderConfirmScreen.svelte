@@ -24,6 +24,9 @@
     questionId: string;
     question: string;
     answerLabel: string;
+    /** What the answer settled, e.g. "Indata vid körning" — from the decision
+     *  the server links to this question. */
+    topic?: string | null;
     /** Eneo settled this one after the user handed it back. */
     delegated?: boolean;
   }
@@ -93,6 +96,21 @@
   const decisionsState = $derived(
     new SvelteSet(summary.key_decisions.map((decision) => decision.decision.trim()))
   );
+  const contractRows = $derived(
+    [
+      { label: m.ai_builder_requirements_input(), value: inputTerm },
+      { label: m.ai_builder_requirements_output(), value: outputTerm }
+    ].filter((row) => row.value.length > 0 && !decisionsState.has(row.value))
+  );
+
+  // Every row on this card is correctable, which is what the lead promises.
+  // A row the user answered reopens its question; a row Eneo derived has no
+  // question to reopen, so it opens the change box with the topic already
+  // written in — the correction still travels as the user's own words.
+  function changeRow(topic: string) {
+    changeOpen = true;
+    changeRequestRef?.focusInput(m.ai_builder_confirm_change_starter({ topic: topic.trim() }));
+  }
 
   const reducedMotion = prefersReducedMotion();
   // The change box lives under the card it rewrites, never in a side panel:
@@ -122,6 +140,9 @@
             onclick={() => oneditanswer(item.questionId)}
             {disabled}
           >
+            {#if item.topic}
+              <span class="text-secondary shrink-0">{item.topic}</span>
+            {/if}
             <span class="text-primary truncate font-semibold">{item.answerLabel}</span>
             {#if item.delegated}
               <span class="text-secondary shrink-0 text-[0.6875rem]">
@@ -220,7 +241,9 @@
         {#if !savedFlowStepScope}
           <section class="mt-[1.125rem]">
             <h3 class="text-primary text-[0.8125rem] font-bold">
-              {m.ai_builder_requirements_decisions()}
+              {hasCorrectableDecision
+                ? m.ai_builder_requirements_decisions()
+                : m.ai_builder_requirements_decisions_derived()}
             </h3>
             <dl class="mt-1.5 flex flex-col">
               {#each summary.key_decisions as decision (decision.topic)}
@@ -228,23 +251,12 @@
                 <div
                   class="border-dimmer grid items-baseline gap-x-4 gap-y-0.5 border-t py-2.5 sm:grid-cols-[12.5rem_1fr_auto]"
                 >
-                  <dt class="text-secondary text-[0.8125rem]">{decision.topic}</dt>
-                  <dd class="text-primary text-[0.85rem] font-medium">{decision.decision}</dd>
-                  {#if settledBy && !readOnly && !confirmed}
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      class="justify-self-start sm:justify-self-end"
-                      {disabled}
-                      onclick={() => oneditanswer(settledBy)}
-                    >
-                      {m.ai_builder_question_change()}
-                    </Button>
-                  {:else if !readOnly && !confirmed && hasCorrectableDecision}
-                    <span
-                      class="text-secondary inline-flex items-center gap-1 text-xs sm:justify-self-end"
-                    >
-                      {m.ai_builder_requirements_derived()}
+                  <dt class="text-secondary flex items-center gap-1 text-[0.8125rem]">
+                    {decision.topic}
+                    <!-- Only worth saying beside rows the user did settle
+                         themselves; with no questions asked, every row follows
+                         from the description and the note says nothing. -->
+                    {#if !settledBy && hasCorrectableDecision}
                       <Tooltip.Provider delayDuration={250}>
                         <Tooltip.Root>
                           <Tooltip.Trigger>
@@ -252,10 +264,11 @@
                               <button
                                 {...props}
                                 type="button"
-                                class="focus-visible:ring-accent-stronger/40 rounded-full focus-visible:ring-2 focus-visible:outline-none"
+                                class="text-secondary focus-visible:ring-accent-stronger/40 inline-flex items-center gap-1 rounded-full text-xs focus-visible:ring-2 focus-visible:outline-none"
                                 aria-label={m.ai_builder_requirements_derived_explained()}
                               >
-                                <IconInfo class="size-3.5" aria-hidden="true" />
+                                {m.ai_builder_requirements_derived()}
+                                <IconInfo class="size-3.5 shrink-0" aria-hidden="true" />
                               </button>
                             {/snippet}
                           </Tooltip.Trigger>
@@ -264,7 +277,21 @@
                           </Tooltip.Content>
                         </Tooltip.Root>
                       </Tooltip.Provider>
-                    </span>
+                    {/if}
+                  </dt>
+                  <dd class="text-primary text-[0.85rem] font-medium">{decision.decision}</dd>
+                  {#if !readOnly && !confirmed}
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      class="justify-self-start sm:justify-self-end"
+                      aria-label={m.ai_builder_confirm_change_row_aria({ topic: decision.topic })}
+                      {disabled}
+                      onclick={() =>
+                        settledBy ? oneditanswer(settledBy) : changeRow(decision.topic)}
+                    >
+                      {m.ai_builder_question_change()}
+                    </Button>
                   {/if}
                 </div>
               {/each}
@@ -272,26 +299,26 @@
                    fields, and a key decision is not guaranteed to repeat them.
                    Shown only when nothing above already said it, so the card
                    never states the same thing twice. -->
-              {#if !decisionsState.has(inputTerm)}
+              {#each contractRows as row (row.label)}
                 <div
-                  class="border-dimmer grid gap-x-4 gap-y-0.5 border-t py-2.5 sm:grid-cols-[12.5rem_1fr]"
+                  class="border-dimmer grid items-baseline gap-x-4 gap-y-0.5 border-t py-2.5 sm:grid-cols-[12.5rem_1fr_auto]"
                 >
-                  <dt class="text-secondary text-[0.8125rem]">
-                    {m.ai_builder_requirements_input()}
-                  </dt>
-                  <dd class="text-primary text-[0.85rem] font-medium">{inputTerm}</dd>
+                  <dt class="text-secondary text-[0.8125rem]">{row.label}</dt>
+                  <dd class="text-primary text-[0.85rem] font-medium">{row.value}</dd>
+                  {#if !readOnly && !confirmed}
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      class="justify-self-start sm:justify-self-end"
+                      aria-label={m.ai_builder_confirm_change_row_aria({ topic: row.label })}
+                      {disabled}
+                      onclick={() => changeRow(row.label)}
+                    >
+                      {m.ai_builder_question_change()}
+                    </Button>
+                  {/if}
                 </div>
-              {/if}
-              {#if !decisionsState.has(outputTerm)}
-                <div
-                  class="border-dimmer grid gap-x-4 gap-y-0.5 border-t py-2.5 sm:grid-cols-[12.5rem_1fr]"
-                >
-                  <dt class="text-secondary text-[0.8125rem]">
-                    {m.ai_builder_requirements_output()}
-                  </dt>
-                  <dd class="text-primary text-[0.85rem] font-medium">{outputTerm}</dd>
-                </div>
-              {/if}
+              {/each}
               {#if attachments.length > 0}
                 <div
                   class="border-dimmer grid gap-x-4 gap-y-0.5 border-t py-2.5 sm:grid-cols-[12.5rem_1fr]"

@@ -8,6 +8,9 @@
     questionId: string;
     question: string;
     answerLabel: string;
+    /** What the answer settled, e.g. "Indata vid körning" — from the decision
+     *  the server links to this question. */
+    topic?: string | null;
     /** Eneo settled this one after the user handed it back. */
     delegated?: boolean;
   }
@@ -70,6 +73,9 @@
             onclick={() => onedit(item.questionId)}
             {disabled}
           >
+            {#if item.topic}
+              <span class="text-secondary shrink-0">{item.topic}</span>
+            {/if}
             <span class="text-primary truncate font-semibold">{item.answerLabel}</span>
             {#if item.delegated}
               <span class="text-secondary shrink-0 text-[0.6875rem]">
