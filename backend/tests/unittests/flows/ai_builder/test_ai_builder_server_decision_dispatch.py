@@ -707,6 +707,45 @@ async def test_a_question_outside_the_catalog_names_no_topic() -> None:
 
 
 @pytest.mark.asyncio
+async def test_a_field_details_question_is_named_after_the_slot_it_settles() -> None:
+    # The runtime-field question is not a catalog slot, but it settles one:
+    # the decision row "Metadata vid körning" must lead back to it.
+    repo = AsyncMock()
+    repo.commit_turn.return_value = 5
+    followup = BackendQuestion(
+        question_data=StructuredQuestionPayload(
+            question_id="runtime_metadata_field_details",
+            question="Vad ska den som kör flödet fylla i?",
+            options=[
+                StructuredQuestionOptionPayload(
+                    id="whole_flow",
+                    label="Använd genom hela flödet",
+                    value="whole_flow",
+                )
+            ],
+            selection_mode="single",
+            allow_custom=False,
+            input_field_collection=True,
+        ),
+        assistant_text="Fälten blir ett formulär.",
+    )
+
+    result = await dispatch_server_decision(
+        _request(
+            repo=repo,
+            decision=AskCanonicalQuestion(
+                slot_name="runtime_metadata_field_details",
+                question=followup,
+            ),
+            conversation=[ConversationMessage(role="user", content="Bygg ett flöde")],
+        )
+    )
+
+    question = next(event for event in result.events if event.event == "question")
+    assert question.data.topic == render_summary_label("runtime_metadata_fields", "en")
+
+
+@pytest.mark.asyncio
 async def test_an_edit_question_names_the_value_the_running_flow_uses_today() -> None:
     # The flow being edited already answers this slot, and the user is looking at
     # a question about it. Without the current value on the payload the client

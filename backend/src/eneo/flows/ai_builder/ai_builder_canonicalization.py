@@ -59,6 +59,14 @@ SUPPORTED_STRUCTURED_QUESTION_IDS: frozenset[str] = (
     frozenset(QUESTION_CATALOG) | _NON_SLOT_SUPPORTED_STRUCTURED_QUESTION_IDS
 )
 
+# A non-slot question that nevertheless settles one catalog slot: it is named
+# after that slot wherever the summary names it, so a decision row and the
+# question that produced it read as one topic. Questions absent here settle no
+# single slot and stay unnamed.
+SETTLED_SLOT_BY_NON_SLOT_QUESTION_ID: dict[str, str] = {
+    "runtime_metadata_field_details": "runtime_metadata_fields",
+}
+
 
 def canonical_question_id(question_id: str) -> str:
     return QUESTION_ID_ALIASES.get(question_id, question_id)

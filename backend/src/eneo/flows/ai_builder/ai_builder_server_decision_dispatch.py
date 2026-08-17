@@ -9,7 +9,10 @@ from eneo.flows.ai_builder.ai_builder_architecture_commit import (
 from eneo.flows.ai_builder.ai_builder_backend_question_persistence import (
     persist_backend_question,
 )
-from eneo.flows.ai_builder.ai_builder_canonicalization import canonical_question_id
+from eneo.flows.ai_builder.ai_builder_canonicalization import (
+    SETTLED_SLOT_BY_NON_SLOT_QUESTION_ID,
+    canonical_question_id,
+)
 from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
     requirements_summary_to_metadata,
 )
@@ -306,12 +309,14 @@ def _question_topic(
     """What this question is about, named the way the summary names it.
 
     Only a catalog slot has a name to give. A question that settles none of
-    them — schema direction, runtime field details — is left unnamed rather
-    than described from its own wording, which would be a second name for the
-    same topic with nothing keeping the two in step.
+    them — schema direction — is left unnamed rather than described from its
+    own wording, which would be a second name for the same topic with nothing
+    keeping the two in step. A non-slot question that settles exactly one slot
+    (runtime field details settle the runtime-metadata slot) is named after it.
     """
 
-    slot_name = canonical_question_id(payload.question_id)
+    question_id = canonical_question_id(payload.question_id)
+    slot_name = SETTLED_SLOT_BY_NON_SLOT_QUESTION_ID.get(question_id, question_id)
     if slot_name not in QUESTION_CATALOG:
         return None
     return render_summary_label(slot_name, locale)
