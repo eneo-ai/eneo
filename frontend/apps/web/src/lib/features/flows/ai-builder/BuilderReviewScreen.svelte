@@ -71,6 +71,8 @@
       !service.applyResult &&
       !service.canApprove &&
       !service.canApply &&
+      // Eneo answering in prose is a reply, not a failure.
+      service.latestReviewNote === null &&
       !service.isBusy &&
       !service.isRevisingPlan &&
       service.session?.status === "chatting"

@@ -9,6 +9,12 @@
     /** "Steg 3: Rendera PDF" when the request is scoped to one step. */
     scopeLabel?: string | null;
     disabled?: boolean;
+    /** What this box rewrites. Defaults to the plan; the confirmation screen
+     *  passes its own words because it rewrites the summary instead. */
+    title?: string;
+    example?: string;
+    placeholder?: string;
+    hint?: string;
     onclearscope?: () => void;
     onsend: (text: string) => void;
   }
@@ -17,6 +23,10 @@
     open = $bindable(false),
     scopeLabel = null,
     disabled = false,
+    title = m.ai_builder_change_request_title(),
+    example = m.ai_builder_change_request_example(),
+    placeholder = m.ai_builder_change_request_placeholder(),
+    hint = m.ai_builder_change_request_hint(),
     onclearscope,
     onsend
   }: Props = $props();
@@ -49,9 +59,7 @@
   {#if open}
     <div class="px-[1.125rem] pt-3.5 pb-3">
       <div class="mb-2.5 flex flex-wrap items-center gap-2.5">
-        <span class="text-primary text-[0.84375rem] font-semibold">
-          {m.ai_builder_change_request_title()}
-        </span>
+        <span class="text-primary text-[0.84375rem] font-semibold">{title}</span>
         {#if scopeLabel}
           <span
             class="bg-accent-dimmer text-accent-stronger inline-flex h-[1.625rem] items-center gap-1.5 rounded-full pr-1 pl-2.5 text-xs font-semibold"
@@ -81,14 +89,12 @@
         rows={2}
         {disabled}
         aria-label={m.ai_builder_change_request_textarea_label()}
-        placeholder={m.ai_builder_change_request_placeholder()}
+        {placeholder}
         class="resize-y text-[0.84375rem] leading-relaxed"
         onkeydown={handleKeydown}
       />
       <div class="mt-2.5 flex flex-wrap items-center gap-2.5">
-        <span class="text-secondary text-xs text-pretty">
-          {m.ai_builder_change_request_hint()}
-        </span>
+        <span class="text-secondary text-xs text-pretty">{hint}</span>
         <Button size="sm" class="ml-auto max-sm:w-full" disabled={!canSend} onclick={send}>
           {m.ai_builder_send()}
         </Button>
@@ -102,12 +108,8 @@
         open = true;
       }}
     >
-      <span class="text-primary text-[0.84375rem] font-semibold">
-        {m.ai_builder_change_request_title()}
-      </span>
-      <span class="text-secondary text-xs max-sm:hidden">
-        {m.ai_builder_change_request_example()}
-      </span>
+      <span class="text-primary text-[0.84375rem] font-semibold">{title}</span>
+      <span class="text-secondary text-xs max-sm:hidden">{example}</span>
       <span class="text-accent-stronger ml-auto text-xs font-semibold">
         {m.ai_builder_change_request_write()}
       </span>

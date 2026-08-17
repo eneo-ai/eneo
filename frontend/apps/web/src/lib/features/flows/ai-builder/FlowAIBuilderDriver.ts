@@ -64,7 +64,8 @@ const FLOW_AI_BUILDER_ROUTES = {
 /** A session-mutating plan operation that must lock out all other inputs
  *  while it runs. Owned by the session/plan it was started for so a
  *  replacement session can never inherit (or clear) another one's lock. */
-export type PendingPlanOperationKind = "creating" | "approving" | "applying" | "unpublishing";
+export type PendingPlanOperationKind =
+  "creating" | "approving" | "applying" | "unpublishing" | "revising";
 
 export interface PendingPlanOperation {
   kind: PendingPlanOperationKind;
@@ -287,6 +288,10 @@ export class FlowAIBuilderDriver {
     if (!owner) return false;
     const reconciled = await this.#refreshSession(owner);
     if (!reconciled || !this.#ownsSession(owner)) return false;
+    // The session reload can succeed while the plan it names fails to load;
+    // clearing the conflict then would leave a superseded plan approvable.
+    const namedPlanId = this.#state.session?.latest_plan_id ?? null;
+    if ((this.#state.currentPlan?.plan_id ?? null) !== namedPlanId) return false;
     this.#state.isConflict = false;
     this.#state.applyError = null;
     if (
@@ -1138,10 +1143,13 @@ export class FlowAIBuilderDriver {
   }
 
   async revisePlan(type: PlanRevisionType): Promise<void> {
-    if (this.#state.pendingOperation) return;
+    if (this.#planOperationBlocked()) return;
     const plan = this.#state.currentPlan;
     const owner = this.#currentSessionOwner();
     if (!plan || !owner) return;
+    // A revision writes a new plan revision and moves latest_plan_id, so it
+    // belongs to the same lock as the other plan operations.
+    this.#claimPendingOperation("revising", owner, plan.plan_id);
 
     try {
       const result = (await this.#transport.fetch(FLOW_AI_BUILDER_ROUTES.planRevise, {
@@ -1164,6 +1172,8 @@ export class FlowAIBuilderDriver {
         });
         this.#notify();
       }
+    } finally {
+      this.#releasePendingOperation(owner, plan.plan_id);
     }
   }
 
@@ -1205,6 +1215,13 @@ export class FlowAIBuilderDriver {
   }
 
   derivePhase(): AIBuilderPhase {
+    // A question waiting for an answer is the newest thing asked of the user,
+    // so it outranks both a disclosure and a loaded plan: the server may ask
+    // one more question during a review turn and keep latest_plan_id.
+    const lastMessage = this.#state.messages[this.#state.messages.length - 1];
+    const pendingQuestionId = lastMessage?.question?.question_id;
+    if (pendingQuestionId && !this.isQuestionAnswered(pendingQuestionId)) return "discovering";
+
     // A disclosure the user has not confirmed outranks a loaded plan: the
     // server keeps latest_plan_id when it reopens the requirements, so the
     // unconfirmed summary is the only sign that the plan is superseded.

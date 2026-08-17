@@ -261,12 +261,10 @@
     builderRootEl?.querySelector<HTMLElement>("[data-builder-screen-heading]")?.focus();
   }
 
-  // The server saves every turn; the only way the draft falls behind is a
-  // message that never reached it (transport lost) or a turn it recorded as
-  // not committed. Nothing retries on its own — the turn alert offers that.
-  const savingProblem = $derived(
-    service.error?.code === "network" || service.turnRecoveryState !== null
-  );
+  // The server records the message before it works on it, so a recorded turn
+  // that failed is not lost — the turn alert below owns that case. Only a
+  // request that never got an answer leaves the draft genuinely uncertain.
+  const savingProblem = $derived(service.error?.code === "network");
 
   // ---- Error ownership ------------------------------------------------------
   // Once generation is visible, the plan surface keeps ownership of any
@@ -314,8 +312,8 @@
     void service.confirmRequirements(activeEditContext);
   }
 
-  function handleRequirementsChange() {
-    void sheetRef?.focusComposer(m.ai_builder_confirm_change_hint());
+  function handleRequirementsChange(text: string) {
+    void service.changeRequirements(text);
   }
 
   function handleSuggestChange(intent: AIBuilderSuggestChangeIntent) {

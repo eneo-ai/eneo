@@ -1322,12 +1322,14 @@ describe("FlowAIBuilderDriver", () => {
     });
 
     const revision = driver.revisePlan("keep_current_description");
+    // A revision holds the plan-operation lock, so the swap is refused until
+    // the write the user already committed to has settled.
     await driver.resumeSession(currentSession.session_id);
     delayedRevision.resolve(makePlan({ plan_id: "plan-old-revised" }));
     await revision;
 
-    expect(driver.state.session).toEqual(currentSession);
-    expect(driver.state.currentPlan).toEqual(currentPlan);
+    expect(driver.state.session?.session_id).toBe("session-old");
+    expect(driver.state.currentPlan?.plan_id).toBe("plan-old-revised");
     expect(driver.state.error).toBeNull();
   });
 
@@ -3330,6 +3332,55 @@ describe("FlowAIBuilderDriver review turns", () => {
     expect(driver.state.reviewNote).toBeNull();
   });
 
+  it("hands a review turn's question back to the user even though the plan is kept", async () => {
+    const question = {
+      question_id: "output_format",
+      question: "Ska rapporten också innehålla en sammanfattning?",
+      options: [{ id: "yes", label: "Ja" }],
+      selection_mode: "single" as const,
+      allow_custom: false
+    };
+    const stream = vi.fn(async (_path, _init, handlers) => {
+      handlers.onMessage?.(
+        { id: "", event: "question", data: JSON.stringify(question) },
+        new AbortController()
+      );
+      completeStream(handlers);
+    });
+    const fetch = vi.fn().mockImplementation((route: string) =>
+      route === SESSION_ROUTE
+        ? Promise.resolve(
+            makeSession({
+              status: "chatting",
+              latest_plan_id: "plan-1",
+              conversation: [
+                {
+                  message_id: "u-1",
+                  role: "user",
+                  content: "Lägg till källhänvisningar",
+                  timestamp: "2026-08-16T09:00:00Z"
+                },
+                {
+                  message_id: "a-1",
+                  role: "assistant",
+                  content: "",
+                  question,
+                  timestamp: "2026-08-16T09:00:01Z"
+                }
+              ]
+            })
+          )
+        : Promise.resolve(makePlan({ plan_id: "plan-1" }))
+    );
+    const { driver } = makeDriver({ fetchImpl: fetch, streamImpl: stream });
+    seedReviewSession(driver);
+
+    await driver.sendMessage("Lägg till källhänvisningar");
+
+    expect(driver.state.currentPlan?.plan_id).toBe("plan-1");
+    expect(driver.derivePhase()).toBe("discovering");
+  });
+
   it("refuses every plan operation while a review turn is streaming", async () => {
     let finish: () => void = () => {};
     const stream = vi.fn(
@@ -3422,6 +3473,21 @@ describe("FlowAIBuilderDriver review turns", () => {
       expect(driver.state.applyError).toBeNull();
       expect(driver.state.isConflict).toBe(false);
       expect(driver.state.currentPlan?.plan_id).toBe("plan-2");
+    });
+
+    it("keeps the conflict when the session names a plan that will not load", async () => {
+      const fetch = vi.fn().mockImplementation((route: string) => {
+        if (route === SESSION_ROUTE) return Promise.resolve(committedStaleSession());
+        return Promise.reject(new Error("plan gone"));
+      });
+      const { driver } = makeDriver({ fetchImpl: fetch });
+      seedReviewSession(driver);
+
+      await expect(driver.recoverFromConflict()).resolves.toBe(false);
+
+      // The old plan is still on screen, so the conflict still applies to it.
+      expect(driver.state.currentPlan?.plan_id).toBe("plan-1");
+      expect(driver.state.error?.code).toBe("stale_plan_revision");
     });
 
     it("keeps the conflict when the reload fails", async () => {

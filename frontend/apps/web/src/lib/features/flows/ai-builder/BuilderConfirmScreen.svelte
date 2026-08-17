@@ -4,6 +4,7 @@
   import { cubicOut } from "svelte/easing";
   import { prefersReducedMotion } from "$lib/core/prefersReducedMotion";
   import { Button } from "$lib/components/ui/button/index.js";
+  import BuilderChangeRequest from "./BuilderChangeRequest.svelte";
   import IconCheck from "@lucide/svelte/icons/check";
   import IconChevronDown from "@lucide/svelte/icons/chevron-down";
   import type {
@@ -38,7 +39,9 @@
     readOnly?: boolean;
     disabled?: boolean;
     onconfirm: () => void;
-    onchange: () => void;
+    /** A change request in the user's own words; the server answers with a
+     *  new requirements version, which re-arms this card. */
+    onchange: (text: string) => void;
     oneditanswer: (questionId: string) => void;
   }
 
@@ -59,6 +62,10 @@
   }: Props = $props();
 
   const reducedMotion = prefersReducedMotion();
+  // The change box lives under the card it rewrites, never in a side panel:
+  // the user is reading the summary while describing the change.
+  let changeOpen = $state(false);
+  let changeRequestRef = $state<BuilderChangeRequest | undefined>();
   let assumptionsOpen = $state(false);
   const assumptions = $derived(summary.assumptions ?? []);
   const manualNotes = $derived(summary.manual_setup_notes ?? []);
@@ -265,7 +272,14 @@
           </span>
           {#if !readOnly}
             <div class="ml-auto flex flex-wrap gap-2">
-              <Button variant="outline" onclick={onchange} {disabled}>
+              <Button
+                variant="outline"
+                onclick={() => {
+                  changeOpen = true;
+                  changeRequestRef?.focusInput();
+                }}
+                {disabled}
+              >
                 {m.ai_builder_confirm_change_answers()}
               </Button>
               <Button variant="default" onclick={onconfirm} {disabled}>
@@ -276,6 +290,24 @@
         {/if}
       </footer>
     </section>
+
+    {#if !readOnly && !confirmed}
+      <div class="mt-3">
+        <BuilderChangeRequest
+          bind:this={changeRequestRef}
+          bind:open={changeOpen}
+          {disabled}
+          title={m.ai_builder_confirm_change_answers()}
+          example={m.ai_builder_confirm_change_example()}
+          placeholder={m.ai_builder_confirm_change_hint()}
+          hint={m.ai_builder_confirm_change_request_hint()}
+          onsend={(text) => {
+            changeOpen = false;
+            onchange(text);
+          }}
+        />
+      </div>
+    {/if}
   </div>
 </div>
 

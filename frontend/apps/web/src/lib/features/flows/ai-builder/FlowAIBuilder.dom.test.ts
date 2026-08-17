@@ -1060,8 +1060,6 @@ describe("FlowAIBuilder turn recovery", () => {
     renderShell({ fetch, stream, resumeSessionId: "s-turn" });
 
     expect(await screen.findByText(m.ai_builder_turn_failed_before_provider_title())).toBeTruthy();
-    // The header's saved state says the last message is not in the draft.
-    expect(screen.getByText(m.ai_builder_saved_state_problem())).toBeTruthy();
     await fireEvent.click(button(m.ai_builder_turn_retry()));
 
     await waitFor(() => expect(calls).toHaveLength(1));
