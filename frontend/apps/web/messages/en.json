@@ -4283,8 +4283,6 @@
   "ai_builder_requirements_input": "Input",
   "ai_builder_requirements_manual_notes": "Manual setup",
   "ai_builder_requirements_output": "Output",
-  "ai_builder_requirements_missing": "missing from the summary",
-  "ai_builder_confirm_blocked_incomplete": "The summary is missing something the plan needs. Describe what applies and Eneo will work it out again.",
   "ai_builder_requirements_superseded": "Superseded by a newer requirements summary.",
   "ai_builder_requirements_title": "This is how Eneo understood the task",
   "ai_builder_requirements_user_request": "You asked for",

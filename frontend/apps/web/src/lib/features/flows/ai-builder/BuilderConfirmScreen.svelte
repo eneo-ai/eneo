@@ -1,6 +1,6 @@
 <script lang="ts">
   import { m } from "$lib/paraglide/messages";
-  import { SvelteSet } from "svelte/reactivity";
+  import { SvelteMap, SvelteSet } from "svelte/reactivity";
   import { slide } from "svelte/transition";
   import { cubicOut } from "svelte/easing";
   import { prefersReducedMotion } from "$lib/core/prefersReducedMotion";
@@ -117,11 +117,8 @@
     [
       { label: m.ai_builder_requirements_input(), value: inputTerm },
       { label: m.ai_builder_requirements_output(), value: outputTerm }
-    ].filter((row) => row.value.length === 0 || !decisionsState.has(row.value))
+    ].filter((row) => !decisionsState.has(row.value))
   );
-  // The card is a contract. A required fact the server left blank cannot be
-  // confirmed away by hiding the row it belongs on.
-  const incomplete = $derived(contractRows.some((row) => row.value.length === 0));
 
   // One owner for the whole correction: which row it is about, whether the box
   // is open, and the words in it. A draft belongs to the scope it was written
@@ -129,7 +126,10 @@
   // it along relabelled as something the user did not say.
   function openChange(topic: string | null) {
     const next = topic?.trim() ?? null;
-    if (next !== changeTopic) changeDraft = "";
+    if (next !== changeTopic) {
+      changeDrafts.set(changeTopic ?? "", changeDraft);
+      changeDraft = changeDrafts.get(next ?? "") ?? "";
+    }
     // Two open editors would leave the user correcting one thing while looking
     // at another.
     oncanceledit?.();
@@ -139,6 +139,7 @@
   }
 
   function reopenQuestion(questionId: string) {
+    changeDrafts.set(changeTopic ?? "", changeDraft);
     changeOpen = false;
     changeTopic = null;
     changeDraft = "";
@@ -152,6 +153,9 @@
   /** Which row the open change box is correcting; cleared with its chip. */
   let changeTopic = $state<string | null>(null);
   let changeDraft = $state("");
+  /** What the user has typed under each row, so moving between rows loses
+   *  nothing and never relabels one row's words as another's. */
+  const changeDrafts = new SvelteMap<string, string>();
   let changeRequestRef = $state<BuilderChangeRequest | undefined>();
   let assumptionsOpen = $state(false);
   const assumptions = $derived(summary.assumptions ?? []);
@@ -246,14 +250,6 @@
             <span class="font-semibold">{m.ai_builder_confirm_stale_title()}</span>
             <span>{m.ai_builder_confirm_stale_body()}</span>
           </div>
-        {/if}
-        {#if incomplete && !savedFlowStepScope}
-          <p
-            class="bg-warning-dimmer border-warning-default/45 text-warning-stronger mb-3.5 rounded-[9px] border px-3 py-2.5 text-[0.8125rem]"
-            role="status"
-          >
-            {m.ai_builder_confirm_blocked_incomplete()}
-          </p>
         {/if}
         {#if noQuestions && !savedFlowStepScope}
           <p class="text-secondary mb-3 text-[0.8125rem]">{m.ai_builder_confirm_no_questions()}</p>
@@ -354,13 +350,7 @@
                   class="border-dimmer grid items-baseline gap-x-4 gap-y-0.5 border-t py-2.5 sm:grid-cols-[12.5rem_1fr_auto]"
                 >
                   <dt class="text-secondary text-[0.8125rem]">{row.label}</dt>
-                  <dd
-                    class="text-[0.85rem] font-medium"
-                    class:text-primary={row.value.length > 0}
-                    class:text-warning-stronger={row.value.length === 0}
-                  >
-                    {row.value.length > 0 ? row.value : m.ai_builder_requirements_missing()}
-                  </dd>
+                  <dd class="text-primary text-[0.85rem] font-medium">{row.value}</dd>
                   {#if !readOnly && !confirmed}
                     <Button
                       variant="outline"
@@ -488,12 +478,7 @@
               <Button variant="outline" onclick={() => openChange(null)} {disabled}>
                 {m.ai_builder_confirm_change_answers()}
               </Button>
-              <Button
-                variant="default"
-                onclick={onconfirm}
-                disabled={disabled || incomplete}
-                title={incomplete ? m.ai_builder_confirm_blocked_incomplete() : undefined}
-              >
+              <Button variant="default" onclick={onconfirm} {disabled}>
                 {m.ai_builder_confirm_action()}
               </Button>
             </div>
@@ -521,6 +506,7 @@
             const topic = changeTopic;
             changeTopic = null;
             changeDraft = "";
+            changeDrafts.delete(topic ?? "");
             onchange(text, topic);
           }}
         />

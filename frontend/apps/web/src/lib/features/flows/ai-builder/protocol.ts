@@ -413,6 +413,9 @@ const questionOptionSchema = z.object({
 const questionEventDataSchema = z.object({
   question_id: z.string(),
   question: z.string(),
+  // What this question settles, worded as the summary will word it later
+  // ("Indata vid körning"). Null for questions that are not about a known slot.
+  topic: z.string().nullable().optional(),
   options: z.array(questionOptionSchema),
   selection_mode: z.enum(["single", "multi"]),
   allow_custom: z.boolean(),
@@ -450,8 +453,8 @@ const requirementsSummaryEventDataSchema = z.object({
       is_derived: z.boolean().optional()
     })
   ),
-  input_description: z.string(),
-  output_description: z.string(),
+  input_description: z.string().min(1),
+  output_description: z.string().min(1),
   // What the prose promises the result will keep, in the same order and words.
   named_content_fields: z.array(z.object({ id: z.string(), label: z.string() })).optional(),
   assumptions: stringArraySchema.optional(),

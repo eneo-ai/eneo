@@ -4283,8 +4283,6 @@
   "ai_builder_requirements_input": "Indata",
   "ai_builder_requirements_manual_notes": "Manuell konfiguration",
   "ai_builder_requirements_output": "Utdata",
-  "ai_builder_requirements_missing": "saknas i sammanfattningen",
-  "ai_builder_confirm_blocked_incomplete": "Sammanfattningen saknar något som planen behöver. Beskriv vad som gäller, så räknar Eneo om den.",
   "ai_builder_requirements_superseded": "Ersatt av en nyare sammanfattning av kraven.",
   "ai_builder_requirements_title": "Så här har Eneo förstått uppgiften",
   "ai_builder_requirements_user_request": "Du bad om",

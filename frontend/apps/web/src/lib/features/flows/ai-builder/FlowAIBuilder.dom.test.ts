@@ -925,7 +925,7 @@ describe("FlowAIBuilder confirm, build and review", () => {
     expect(screen.getByText(m.ai_builder_requirements_named_content({ count: "2" }))).toBeTruthy();
     expect(screen.getByText("slutsatser")).toBeTruthy();
 
-    // Every row is correctable, which is what the card's lead promises. The
+    // Every requirement row is correctable, which is what the lead offers. The
     // row the user answered goes back into its question; the derived row has
     // no question to reopen, so it opens the change box naming that topic.
     await fireEvent.click(
@@ -961,23 +961,29 @@ describe("FlowAIBuilder confirm, build and review", () => {
     expect(document.activeElement).toBe(box);
     expect(button(m.ai_builder_send()).disabled).toBe(true);
 
-    // Moving to another scope with words already typed must not relabel them
-    // as something the user never said about that row.
+    // Words typed under one row stay with that row: moving away must neither
+    // relabel them as another row's nor throw them away.
     await fireEvent.input(box, { target: { value: "något helt annat" } });
     await fireEvent.click(
       screen.getByRole("button", {
         name: m.ai_builder_confirm_change_row_aria({ topic: m.ai_builder_requirements_output() })
       })
     );
-    const reopened = await screen.findByRole("textbox", {
+    const other = await screen.findByRole("textbox", {
       name: m.ai_builder_change_request_textarea_label()
     });
-    expect((reopened as HTMLTextAreaElement).value).toBe("");
+    expect((other as HTMLTextAreaElement).value).toBe("");
+
     await fireEvent.click(
       screen.getByRole("button", {
         name: m.ai_builder_confirm_change_row_aria({ topic: "Planerad bearbetning" })
       })
     );
+    const reopened = await screen.findByRole("textbox", {
+      name: m.ai_builder_change_request_textarea_label()
+    });
+    expect((reopened as HTMLTextAreaElement).value).toBe("något helt annat");
+    await fireEvent.input(reopened, { target: { value: "" } });
 
     await fireEvent.input(reopened, { target: { value: "en PDF i stället" } });
     await fireEvent.click(button(m.ai_builder_send()));

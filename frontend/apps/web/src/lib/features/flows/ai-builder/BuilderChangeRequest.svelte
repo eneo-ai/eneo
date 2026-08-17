@@ -27,7 +27,7 @@
   let {
     open = $bindable(false),
     /** Owned by the caller, because the caller owns the scope this text is
-     *  labelled with; a draft must never survive into a different scope. */
+     *  labelled with and decides what happens to it when that scope changes. */
     text = $bindable(""),
     scopeLabel = null,
     disabled = false,
