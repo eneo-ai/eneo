@@ -186,6 +186,60 @@ class TestQuestionOption:
                 value="value",
             )
 
+    def test_option_accepts_no_example_in_either_language(self) -> None:
+        # Not every option has an honest concrete consequence to name, and an
+        # invented one misleads the first-time reader the copy is written for.
+        option = QuestionOption(
+            id="option_a",
+            label_sv="Etikett",
+            label_en="Label",
+            description_sv="Beskrivning",
+            description_en="Description",
+            value="value",
+        )
+        assert option.example_sv == ""
+        assert option.example_en == ""
+
+    @pytest.mark.parametrize(
+        ("example_sv", "example_en"),
+        [
+            ("Ger Mötesrapport.pdf.", ""),
+            ("", "Produces Meeting-report.pdf."),
+        ],
+    )
+    def test_option_rejects_an_example_in_only_one_language(
+        self, example_sv: str, example_en: str
+    ) -> None:
+        # A one-sided example leaves the other language's reader looking at a
+        # gap where their neighbour sees the consequence of the choice.
+        with pytest.raises(ValueError, match="example_sv and example_en"):
+            QuestionOption(
+                id="option_a",
+                label_sv="Etikett",
+                label_en="Label",
+                description_sv="Beskrivning",
+                description_en="Description",
+                value="value",
+                example_sv=example_sv,
+                example_en=example_en,
+            )
+
+    def test_option_rejects_a_blank_looking_example(self) -> None:
+        # Whitespace passes a both-or-neither check but reaches the wire as a
+        # present example, so the reader gets an empty line instead of the
+        # consequence of the choice.
+        with pytest.raises(ValueError, match="padded or blank"):
+            QuestionOption(
+                id="option_a",
+                label_sv="Etikett",
+                label_en="Label",
+                description_sv="Beskrivning",
+                description_en="Description",
+                value="value",
+                example_sv=" ",
+                example_en=" ",
+            )
+
 
 class TestQuestionTemplate:
     def test_template_is_frozen(self) -> None:
@@ -579,6 +633,24 @@ class TestBilingualContract:
                     f"{template.id}:{option.id}: empty description_en"
                 )
 
+    def test_every_option_example_is_short_enough_to_read_beside_the_choice(
+        self, all_templates: list[QuestionTemplate]
+    ) -> None:
+        # The example sits next to the option, not below it as prose. Copy that
+        # outgrows one line stops helping the reader decide and starts
+        # competing with the description for the same job.
+        for template in all_templates:
+            for option in template.options:
+                for locale, example in (
+                    ("sv", option.example_sv),
+                    ("en", option.example_en),
+                ):
+                    assert len(example) <= 90, (
+                        f"{template.id}:{option.id}: example_{locale} is "
+                        f"{len(example)} characters, over the 90 the option "
+                        "surface can show"
+                    )
+
 
 class TestQuestionExposure:
     """Every `QuestionTemplate` must declare whether the question surfaces
@@ -709,6 +781,7 @@ class TestQuestionCatalogPublicApi:
         assert first_option.label == "Ljud"
         assert first_option.description.startswith("Ladda upp")
         assert first_option.value == "audio"
+        assert first_option.example.startswith("Flödet transkriberar")
 
     def test_render_question_in_english_projects_en_fields(self) -> None:
         """Locale 'en' snapshots the English fields symmetrically."""
@@ -720,6 +793,7 @@ class TestQuestionCatalogPublicApi:
         assert first_option.label == "Audio"
         assert first_option.description.startswith("Upload an audio")
         assert first_option.value == "audio"
+        assert first_option.example.startswith("The flow transcribes the audio file")
 
     def test_render_question_preserves_option_order(self) -> None:
         """Option order is part of the UX contract — the catalog author

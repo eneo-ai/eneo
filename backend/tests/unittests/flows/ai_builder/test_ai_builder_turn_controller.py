@@ -28,6 +28,7 @@ from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
     metadata_for_assistant_question,
     metadata_for_user_message,
 )
+from eneo.flows.ai_builder.ai_builder_discovery import analyze_discovery
 from eneo.flows.ai_builder.ai_builder_domain_models import ConversationMessage
 from eneo.flows.ai_builder.ai_builder_error_contract import AIBuilderErrorCode
 from eneo.flows.ai_builder.ai_builder_requirements_disclosure import (
@@ -178,6 +179,69 @@ def test_server_builds_ask_question_for_allowed_target() -> None:
     assert decision.slot_name == "document_material_scope"
 
 
+def test_a_planned_remaining_of_zero_is_not_a_promise_the_interview_has_ended() -> None:
+    # The snapshot is only ever this turn's plan. A JSON flow whose output is
+    # still open has nothing queued behind the output question, and answering
+    # it structured JSON is what makes the JSON-processing question exist at
+    # all — so a question arrives after the plan said nothing was left. Both
+    # counts are derived from real discovery over the state of their own turn,
+    # because a snapshot asserted from an injected queue proves nothing about
+    # the contract clients read.
+    conversation = [
+        ConversationMessage(
+            role="user",
+            content="Vi vill skicka in JSON från vårt ärendesystem till flödet.",
+        )
+    ]
+
+    before = _state(primary_runtime_input="json")
+    before_decision = _decision(
+        state=before,
+        ui_language="sv",
+        selected_discovery_question_ids=analyze_discovery(
+            conversation, planning_state=before
+        ).selected_question_ids,
+    )
+
+    assert isinstance(before_decision, AskCanonicalQuestion)
+    assert before_decision.slot_name == "terminal_output"
+    assert before_decision.planned_remaining == 0
+
+    after = _state(primary_runtime_input="json", terminal_output="structured_json")
+    after_decision = _decision(
+        state=after,
+        ui_language="sv",
+        selected_discovery_question_ids=analyze_discovery(
+            conversation, planning_state=after
+        ).selected_question_ids,
+    )
+
+    assert isinstance(after_decision, AskCanonicalQuestion)
+    assert after_decision.slot_name == "structured_io_contract"
+
+
+def test_ask_question_carries_the_rest_of_the_queue_it_was_taken_from() -> None:
+    # The queue is asked head-first, so what stands behind the head is what the
+    # interview currently intends to ask next. It is this turn's plan and
+    # nothing more: the queue is re-derived next turn over whatever the session
+    # knows by then, so it can shrink or grow.
+    state = _state(primary_runtime_input="documents", terminal_output="text")
+
+    decision = _decision(
+        state=state,
+        ui_language="en",
+        selected_discovery_question_ids=(
+            "document_material_scope",
+            "report_disposition",
+            "runtime_metadata_fields",
+        ),
+    )
+
+    assert isinstance(decision, AskCanonicalQuestion)
+    assert decision.slot_name == "document_material_scope"
+    assert decision.planned_remaining == 2
+
+
 @pytest.mark.parametrize(
     "runtime_metadata_state",
     ["basic_runtime_metadata", "detailed_runtime_metadata"],
@@ -196,6 +260,8 @@ def test_server_collects_runtime_field_details_before_requirements_confirmation(
 
     assert isinstance(decision, AskCanonicalQuestion)
     assert decision.slot_name == "runtime_metadata_field_details"
+    # Decided ahead of the ranked queue, so no plan stands behind it.
+    assert decision.planned_remaining is None
     assert decision.question is not None
     assert decision.question.question_data.input_field_collection is True
     assert [option.value for option in decision.question.question_data.options] == [

@@ -52,6 +52,9 @@ class DiscoveryQuestionOption:
     label: str
     description: str
     value: str
+    # What choosing this option produces, in the question's own language.
+    # Empty where no honest concrete consequence can be named.
+    example: str = ""
 
 
 @dataclass(frozen=True)

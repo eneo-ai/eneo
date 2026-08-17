@@ -53,6 +53,7 @@ def _catalog_question(
                 label=option.label,
                 description=option.description,
                 value=option.value,
+                example=option.example,
             )
             for option in rendered.options
         ),

@@ -314,6 +314,25 @@ Important builder rules:
   the interview. Do not synthesize one from the question budget or from the ask
   queue: both undercount, and a wrong total claims a last question that another
   turn then follows.
+- `questions_planned_remaining` says how many further questions the interview
+  intends to ask after this one, taken from the ordered ask queue the turn
+  decision came from. It is a snapshot of the current plan and not a total: the
+  queue is re-derived every turn, so it shrinks when one answer settles several
+  slots and it grows when an answer opens a family that was not in play before
+  — answering that a JSON flow returns structured JSON is what makes the
+  JSON-processing question exist, and it arrives on the turn after a queue that
+  held nothing else. It is null for the questions decided ahead of that queue,
+  schema direction and the runtime-field follow-up, where no ranked plan stands
+  behind the ask. Do not render it as progress toward a known end, and do not
+  read zero as a promise that this is the last question.
+- An offered option carries `example`, one short sentence naming what choosing
+  it produces — the file the user ends up with, or what the flow does at run
+  time — where the option's `description` says what the option means. The
+  question catalog owns the copy in both languages together, and leaves it out
+  where no honest concrete consequence can be named, so `example` is null on
+  options the catalog does not describe and on every question built outside the
+  catalog. Never fill that gap with generated copy: an invented consequence
+  misleads exactly the first-time reader the field exists for.
 - Key decisions in the requirements summary say where they came from, as one
   fact enforced by the payload: `is_derived` is false exactly when
   `question_id` names the canonical question the user answered, so a client can

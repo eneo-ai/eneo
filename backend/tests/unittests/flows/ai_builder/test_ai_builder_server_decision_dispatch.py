@@ -541,3 +541,46 @@ async def test_a_question_is_numbered_by_the_ones_the_user_has_already_seen() ->
 
     question = next(event for event in result.events if event.event == "question")
     assert question.data.question_index == 2
+
+
+@pytest.mark.asyncio
+async def test_a_question_carries_the_questions_still_queued_behind_it() -> None:
+    # The count travels on the decision, from the turn control that ranked the
+    # queue, so a user weighing a choice can also see roughly how much of the
+    # interview is left.
+    repo = AsyncMock()
+    repo.commit_turn.return_value = 5
+
+    result = await dispatch_server_decision(
+        _request(
+            repo=repo,
+            decision=AskCanonicalQuestion(
+                slot_name="post_processing_goal",
+                planned_remaining=2,
+            ),
+            conversation=[ConversationMessage(role="user", content="Bygg ett flöde")],
+        )
+    )
+
+    question = next(event for event in result.events if event.event == "question")
+    assert question.data.questions_planned_remaining == 2
+
+
+@pytest.mark.asyncio
+async def test_a_question_decided_outside_the_ask_queue_promises_nothing() -> None:
+    # Schema direction and the runtime-field follow-up are decided ahead of the
+    # ranked queue, so nothing behind them has been planned. Saying zero would
+    # claim this is the last question, which the next turn can contradict.
+    repo = AsyncMock()
+    repo.commit_turn.return_value = 5
+
+    result = await dispatch_server_decision(
+        _request(
+            repo=repo,
+            decision=AskCanonicalQuestion(slot_name="post_processing_goal"),
+            conversation=[ConversationMessage(role="user", content="Bygg ett flöde")],
+        )
+    )
+
+    question = next(event for event in result.events if event.event == "question")
+    assert question.data.questions_planned_remaining is None

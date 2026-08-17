@@ -36,6 +36,12 @@ class StructuredQuestionOptionPayload(BaseModel):
     label: str
     value: JsonScalar = None
     description: str | None = None
+    # What choosing this option produces, said in the user's own terms: the
+    # file they end up with, or what the flow does at run time. The
+    # description says what the option means; this says what it gets them.
+    # Null where no honest concrete consequence can be named, because an
+    # invented example is worse than none.
+    example: str | None = None
 
 
 class StructuredQuestionPayload(BaseModel):
@@ -70,6 +76,19 @@ class StructuredQuestionPayload(BaseModel):
     # from the queue alone can undercount and claim the last question before
     # another one arrives.
     question_index: int | None = Field(default=None, ge=1)
+    # How many further questions the interview currently intends to ask after
+    # this one, taken from the ordered ask queue this turn was decided from.
+    #
+    # A snapshot of the current plan, not a promise. The queue is re-derived
+    # every turn from everything the session knows by then, so it shrinks when
+    # one answer settles several slots, and it can grow when an answer opens a
+    # family that was not in play before — answering that a JSON flow returns
+    # structured JSON is what makes the JSON-processing question exist at all,
+    # and it arrives on the turn after a queue that held nothing else. Null
+    # when the question was decided outside that queue and no plan stands
+    # behind it: the schema-direction and runtime-field questions, and every
+    # question asked by an owner that does not rank the interview.
+    questions_planned_remaining: int | None = Field(default=None, ge=0)
 
     @model_validator(mode="after")
     def _recommendation_names_one_option(self) -> "StructuredQuestionPayload":

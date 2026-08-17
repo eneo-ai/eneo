@@ -168,6 +168,7 @@ async def _dispatch_question(
             question_data=_numbered_question(
                 followup.question_data,
                 conversation=request.conversation,
+                planned_remaining=decision.planned_remaining,
             ),
         )
 
@@ -225,22 +226,29 @@ def _numbered_question(
     payload: StructuredQuestionPayload,
     *,
     conversation: list[ConversationMessage],
+    planned_remaining: int | None,
 ) -> StructuredQuestionPayload:
-    """Number this question the way the user will read it.
+    """Place this question in the interview the way the user will read it.
 
     Dispatch is where every question kind meets, whichever owner wrote it, so
-    the number is stamped once here rather than in each of them. The payload's
-    own id is what counts, because it is the id persistence stamps on the
-    assistant message, and therefore the id the next turn counts. The question
-    is not persisted yet, so the conversation holds exactly the ones already
-    asked.
+    the place is stamped once here rather than in each of them. The payload's
+    own id is what counts for the number, because it is the id persistence
+    stamps on the assistant message, and therefore the id the next turn
+    counts. The question is not persisted yet, so the conversation holds
+    exactly the ones already asked.
+
+    What is still ahead cannot be counted here, because dispatch sees one
+    question and not the queue it came from. It travels on the decision, from
+    the turn control that ranked the queue, and stays null for the questions
+    that turn control decides ahead of that queue.
     """
 
     return payload.model_copy(
         update={
             "question_index": question_ordinal_in_session(
                 conversation, question_id=payload.question_id
-            )
+            ),
+            "questions_planned_remaining": planned_remaining,
         }
     )
 

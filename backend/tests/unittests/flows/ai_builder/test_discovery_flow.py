@@ -329,6 +329,26 @@ def test_question_recommends_nothing_when_the_slot_is_unread() -> None:
     assert followup.question_data.recommended_option_id is None
 
 
+def test_an_offered_option_says_what_choosing_it_produces() -> None:
+    # A first-time user reading "Strukturerad JSON" cannot tell what they end up
+    # with. The catalog's example travels to the offered option, so the
+    # consequence of the choice is on screen beside it.
+    followup = build_registry_question_followup(
+        "terminal_output",
+        [ConversationMessage(role="user", content="Sammanfatta mötesanteckningar")],
+        planning_state=PlanningState.empty(),
+    )
+
+    assert followup is not None
+    examples = {option.id: option.example for option in followup.question_data.options}
+    assert examples["pdf_document"] == (
+        "Körningen slutar med en PDF-fil, till exempel Mötesrapport.pdf."
+    )
+    assert examples["structured_json"] == (
+        "Resultatet innehåller fält som kan skickas vidare till ett annat system."
+    )
+
+
 def test_a_delegated_question_is_settled_and_never_asked_again() -> None:
     """Handing a question back to Eneo decides it as firmly as answering it."""
 

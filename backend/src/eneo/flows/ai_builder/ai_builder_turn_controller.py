@@ -126,6 +126,10 @@ _ARCHITECTURE_REFUSAL_MESSAGES: Mapping[AIBuilderErrorCode, Mapping[Locale, str]
 class AskCanonicalQuestion:
     slot_name: str
     question: BackendQuestion | None = None
+    # The questions still queued behind this one, counted from the ordered
+    # ask queue this decision was taken from. None for the questions decided
+    # ahead of that queue, where no ranked plan stands behind the ask.
+    planned_remaining: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -294,9 +298,15 @@ def _decision_from_policy(
     requirements_disclosure: RequirementsSummaryPayload,
 ) -> BuilderTurnDecision:
     if "ask_question" in action_policy.allowed_action_kinds:
-        target = _first(action_policy.allowed_ask_question_targets)
+        targets = action_policy.allowed_ask_question_targets
+        target = _first(targets)
         if target is not None:
-            return AskCanonicalQuestion(slot_name=target)
+            # The queue is asked head-first, so everything behind the head is
+            # what the interview currently intends to ask next.
+            return AskCanonicalQuestion(
+                slot_name=target,
+                planned_remaining=len(targets) - 1,
+            )
 
     if (
         "commit_architecture" in action_policy.allowed_action_kinds

@@ -30248,6 +30248,8 @@ export interface components {
     StructuredQuestionOptionPayload: {
       /** Description */
       description?: string | null;
+      /** Example */
+      example?: string | null;
       /** Id */
       id?: string | null;
       /** Label */
@@ -30272,6 +30274,8 @@ export interface components {
       question_id: string;
       /** Question Index */
       question_index?: number | null;
+      /** Questions Planned Remaining */
+      questions_planned_remaining?: number | null;
       /** Recommended Option Evidence */
       recommended_option_evidence?: string | null;
       /** Recommended Option Id */

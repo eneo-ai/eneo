@@ -843,6 +843,7 @@ def _structured_question_payload_from_suggestion(
                 label=option.label,
                 description=option.description,
                 value=option.value,
+                example=option.example or None,
             )
             for option in suggestion.options
         ],
