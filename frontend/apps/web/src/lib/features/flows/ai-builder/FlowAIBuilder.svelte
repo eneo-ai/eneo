@@ -7,6 +7,7 @@
   import { Button } from "$lib/components/ui/button/index.js";
   import { Skeleton } from "$lib/components/ui/skeleton/index.js";
   import IconCheck from "@lucide/svelte/icons/check";
+  import IconAlertTriangle from "@lucide/svelte/icons/triangle-alert";
   import IconMessageSquare from "@lucide/svelte/icons/message-square-text";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
   import BuilderPhaseRail, { type BuilderPhaseIndex } from "./BuilderPhaseRail.svelte";
@@ -260,6 +261,13 @@
     builderRootEl?.querySelector<HTMLElement>("[data-builder-screen-heading]")?.focus();
   }
 
+  // The server saves every turn; the only way the draft falls behind is a
+  // message that never reached it (transport lost) or a turn it recorded as
+  // not committed. Nothing retries on its own — the turn alert offers that.
+  const savingProblem = $derived(
+    service.error?.code === "network" || service.turnRecoveryState !== null
+  );
+
   // ---- Error ownership ------------------------------------------------------
   // Once generation is visible, the plan surface keeps ownership of any
   // failure so the same error cannot flash on two surfaces.
@@ -460,7 +468,16 @@
          so the rail starts on the same line as the plan the user reads most. -->
     <div class="bg-primary border-default sticky top-0 z-20 shrink-0 border-b px-7 max-sm:px-3">
       <div class="mx-auto flex max-w-[53.75rem] items-center gap-3 pt-3">
-        {#if service.hasSession && service.messages.length > 0}
+        {#if savingProblem}
+          <span
+            class="text-warning-stronger inline-flex items-center gap-1.5 text-xs font-semibold"
+            title={m.ai_builder_saved_state_problem_title()}
+            role="status"
+          >
+            <IconAlertTriangle class="size-3.5" aria-hidden="true" />
+            {m.ai_builder_saved_state_problem()}
+          </span>
+        {:else if service.hasSession && service.messages.length > 0}
           <span
             class="text-secondary inline-flex items-center gap-1.5 text-xs"
             title={m.ai_builder_saved_state_title()}

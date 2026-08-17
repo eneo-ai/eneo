@@ -4327,6 +4327,8 @@
   "ai_builder_saved_state_new": "nytt utkast",
   "ai_builder_saved_state_auto": "utkastet sparas automatiskt",
   "ai_builder_saved_state_title": "Varje svar och varje ändring sparas i utkastet.",
+  "ai_builder_saved_state_problem": "Kunde inte spara det senaste svaret",
+  "ai_builder_saved_state_problem_title": "Meddelandet nådde inte servern. Skicka det igen — allt före det är sparat.",
   "ai_builder_conversation_button": "Samtal",
   "ai_builder_conversation_button_aria": "Samtal, {count} meddelanden",
   "ai_builder_conversation_button_title": "Öppna hela samtalet — ändra ett svar utan att börja om",
