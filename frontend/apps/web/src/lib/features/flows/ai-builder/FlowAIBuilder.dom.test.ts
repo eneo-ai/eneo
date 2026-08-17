@@ -702,6 +702,35 @@ describe("FlowAIBuilder discovery screens", () => {
     expect(screen.queryByText(/^Fråga /)).toBeNull();
   });
 
+  it("says what an option produces and how many questions are planned", async () => {
+    const withExamples = question("output_format", "Hur ska resultatet levereras?", [
+      { id: "pdf", label: "Som PDF" },
+      { id: "text", label: "Som text" }
+    ]);
+    withExamples.options[0]!.example = "Ger till exempel Motesrapport.pdf";
+    withExamples.question_index = 2;
+    withExamples.questions_planned_remaining = 2;
+    const { fetch } = makeFetch({ sessions: [questionSession(withExamples)] });
+    renderShell({ fetch, stream: makeStream().stream, resumeSessionId: "s-1" });
+
+    expect(await screen.findByText("Ger till exempel Motesrapport.pdf")).toBeTruthy();
+    expect(screen.getByText(m.ai_builder_question_planned_remaining({ count: "2" }))).toBeTruthy();
+  });
+
+  it("keeps quiet about what is left when the server has no plan behind the ask", async () => {
+    const noPlan = question("output_format", "Hur ska resultatet levereras?", [
+      { id: "pdf", label: "Som PDF" }
+    ]);
+    noPlan.question_index = 1;
+    noPlan.questions_planned_remaining = 0;
+    const { fetch } = makeFetch({ sessions: [questionSession(noPlan)] });
+    renderShell({ fetch, stream: makeStream().stream, resumeSessionId: "s-1" });
+
+    await screen.findByRole("heading", { name: noPlan.question });
+    // 0 means nothing is queued behind this one, not that the interview ends.
+    expect(screen.queryByText(/kvar/)).toBeNull();
+  });
+
   it("does not offer to hand back a question Eneo has no recommendation for", async () => {
     const { fetch } = makeFetch({ sessions: [questionSession()] });
     const { stream } = makeStream();

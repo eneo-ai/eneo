@@ -4374,6 +4374,7 @@
   "ai_builder_task_manual_question": "Want to control everything yourself?",
   "ai_builder_task_manual_link": "Build manually",
   "ai_builder_question_number": "Question {number}",
+  "ai_builder_question_planned_remaining": "· roughly {count} to go",
   "ai_builder_question_why_lead": "Why I ask:",
   "ai_builder_question_answers_label": "Your answers:",
   "ai_builder_question_change": "Change",

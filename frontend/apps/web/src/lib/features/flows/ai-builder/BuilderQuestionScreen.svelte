@@ -104,6 +104,7 @@
         <FlowAIBuilderQuestion
           {question}
           {questionNumber}
+          plannedRemaining={questionMessage.question?.questions_planned_remaining ?? null}
           {why}
           {disabled}
           {onanswer}

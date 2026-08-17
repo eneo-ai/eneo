@@ -401,6 +401,9 @@ const statusEventDataSchema = z.object({
 }) satisfies z.ZodType<AIBuilderStatusEventData>;
 
 const questionOptionSchema = z.object({
+  // One sentence on what choosing this option produces. Null where nothing
+  // observable follows from it — then the row simply says less.
+  example: z.string().nullable().optional(),
   id: nullableStringSchema,
   label: z.string(),
   value: z.union([z.string(), z.number(), z.boolean(), z.null()]).optional(),
@@ -422,6 +425,9 @@ const questionEventDataSchema = z.object({
   // 1-based place among the questions actually put to the user. There is no
   // total: a re-asked question keeps its number and some slots never queue.
   question_index: z.int().min(1).nullable().optional(),
+  // Further questions the server currently plans after this one. A snapshot
+  // that can shrink or grow, so it is never rendered as progress to an end.
+  questions_planned_remaining: z.int().nonnegative().nullable().optional(),
   requires_confirm: z.boolean().optional(),
   input_field_collection: z.boolean().optional()
 }) satisfies z.ZodType<AIBuilderQuestionEventData>;

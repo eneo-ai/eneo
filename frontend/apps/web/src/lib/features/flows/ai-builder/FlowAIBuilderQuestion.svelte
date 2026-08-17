@@ -44,6 +44,9 @@
     /** Changing a published flow: a recommendation here would propose changing
      *  a value the flow already runs on, so nothing is chosen for the user. */
     isEdit?: boolean;
+    /** Further questions the server plans after this one — a snapshot that can
+     *  grow, so it is said in words and never drawn as a progress bar. */
+    plannedRemaining?: number | null;
   }
 
   let {
@@ -55,7 +58,8 @@
     why = null,
     onanswer,
     ondelegate,
-    isEdit = false
+    isEdit = false,
+    plannedRemaining = null
   }: Props = $props();
 
   // Generated once per instance so radiogroup + its label can link without colliding.
@@ -339,6 +343,11 @@
       {#if questionNumber !== null}
         <p class="question-kicker">
           {m.ai_builder_question_number({ number: String(questionNumber) })}
+          {#if plannedRemaining !== null && plannedRemaining > 0}
+            <span class="question-kicker-rest">
+              {m.ai_builder_question_planned_remaining({ count: String(plannedRemaining) })}
+            </span>
+          {/if}
         </p>
       {/if}
       <h2 id={questionLabelId} class="question-title" tabindex="-1" data-builder-screen-heading>
@@ -493,6 +502,9 @@
               {#if option.description}
                 <span class="option-description">{option.description}</span>
               {/if}
+              {#if option.example}
+                <span class="option-example">{option.example}</span>
+              {/if}
               {#if optionKey === recommendedKey && question.recommended_option_evidence}
                 <!-- The user's own words, so the recommendation is traceable
                      rather than asserted. -->
@@ -630,6 +642,11 @@
     background: var(--background-secondary);
   }
 
+  .question-kicker-rest {
+    color: var(--text-secondary);
+    font-weight: 500;
+  }
+
   .question-why {
     @apply mt-2 max-w-[62ch] text-[0.8125rem] leading-relaxed text-pretty;
     color: var(--text-secondary);
@@ -690,6 +707,11 @@
 
   .option-label-row {
     @apply flex flex-wrap items-center gap-1.5;
+  }
+
+  .option-example {
+    @apply text-[0.8125rem];
+    color: var(--text-secondary);
   }
 
   .option-evidence {

@@ -4374,6 +4374,7 @@
   "ai_builder_task_manual_question": "Vill du styra allt själv?",
   "ai_builder_task_manual_link": "Bygg manuellt",
   "ai_builder_question_number": "Fråga {number}",
+  "ai_builder_question_planned_remaining": "· ungefär {count} kvar",
   "ai_builder_question_why_lead": "Därför frågar jag:",
   "ai_builder_question_answers_label": "Dina svar:",
   "ai_builder_question_change": "Ändra",
