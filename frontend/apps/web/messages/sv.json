@@ -6221,6 +6221,7 @@
   "ai_builder_footer_steps_nothing_created": "{count} steg · inget skapas förrän du godkänner.",
   "ai_builder_footer_draft_not_running": "Flödet skapas som utkast och är inte igång förrän du publicerar det.",
   "ai_builder_footer_locked_while_revising": "Planen skrivs om — godkännande är låst tills den är klar.",
+  "ai_builder_footer_plan_needs_update": "Den senaste ändringen gick inte igenom, så planen kan inte godkännas ännu. Skicka ändringen igen eller beskriv den på ett annat sätt.",
   "ai_builder_revising_overlay": "Eneo skriver om planen — godkännande är låst",
   "ai_builder_plan_basis": "Vad planen utgår från ({count})",
   "ai_builder_plan_basis_description": "Det här bygger planen på. Stämmer något inte — be om en ändring innan du godkänner.",

@@ -63,6 +63,18 @@
   } = getSpacesManager();
 
   const isCreateMode = $derived(service.session?.target_kind === "create");
+  // The server accepts a change request by leaving approval (status "chatting")
+  // and only returns to it when a new plan lands. If that turn failed, the last
+  // plan is still shown but cannot be approved until a change request succeeds.
+  const planNotApprovable = $derived(
+    service.currentPlan !== null &&
+      !service.applyResult &&
+      !service.canApprove &&
+      !service.canApply &&
+      !service.isBusy &&
+      !service.isRevisingPlan &&
+      service.session?.status === "chatting"
+  );
   const plan = $derived(service.currentPlan);
   const spec = $derived<FlowDraftSpecCore | null>(plan?.proposal.spec ?? null);
   const steps = $derived<StepSpec[]>(spec?.steps ?? []);
@@ -1225,6 +1237,12 @@
               aria-live="polite"
             >
               {m.ai_builder_footer_locked_while_revising()}
+            </span>
+          {:else if planNotApprovable}
+            <!-- A change request left the session waiting for a plan that never
+                 came; the shown plan is context, not something to approve. -->
+            <span class="text-warning-stronger text-xs font-semibold" role="status">
+              {m.ai_builder_footer_plan_needs_update()}
             </span>
           {/if}
         </div>
