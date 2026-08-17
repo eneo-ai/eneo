@@ -456,7 +456,22 @@ describe("FlowAIBuilderService", () => {
 
     expect(service.phase).toBe("confirming");
 
+    // A plan can only be reviewed against a confirmed disclosure; an
+    // unconfirmed one keeps the builder in confirming even with a plan loaded.
     service.seedState({ currentPlan: makePlan() });
+    expect(service.phase).toBe("confirming");
+
+    service.seedState({
+      messages: [
+        ...service.messages,
+        {
+          role: "user",
+          content: "",
+          metadata: { requirements_confirmed: true, requirements_version: "req-1" },
+          timestamp: 2
+        }
+      ]
+    });
 
     expect(service.phase).toBe("reviewing");
   });

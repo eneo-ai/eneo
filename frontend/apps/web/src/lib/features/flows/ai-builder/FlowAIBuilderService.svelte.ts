@@ -407,6 +407,11 @@ export class FlowAIBuilderService {
     this.#driver.clearError();
   }
 
+  /** Reload session + plan; the conflict clears only when that succeeds. */
+  async recoverFromConflict(): Promise<boolean> {
+    return this.#driver.recoverFromConflict();
+  }
+
   dismissConflict(): void {
     this.#driver.dismissConflict();
   }

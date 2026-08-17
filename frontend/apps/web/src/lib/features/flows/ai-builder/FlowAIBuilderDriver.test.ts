@@ -7,6 +7,7 @@ import type {
   AIBuilderDraftSession,
   AIBuilderError,
   AIBuilderModel,
+  AIBuilderPublicErrorPayload,
   AIBuilderSendMessageRequest,
   AIBuilderSession,
   ApplyResult,
@@ -3208,6 +3209,8 @@ describe("FlowAIBuilderDriver plan operation lock", () => {
 describe("FlowAIBuilderDriver review turns", () => {
   const PLAN_ROUTE = "/api/v1/flows/ai-builder/plans/{plan_id}";
   const SESSION_ROUTE = "/api/v1/flows/ai-builder/sessions/{session_id}";
+  const APPROVE_ROUTE = "/api/v1/flows/ai-builder/plans/{plan_id}/approve";
+  const APPLY_ROUTE = "/api/v1/flows/ai-builder/plans/{plan_id}/apply";
 
   function seedReviewSession(driver: ReturnType<typeof makeDriver>["driver"]) {
     driver.seedState({
@@ -3273,22 +3276,208 @@ describe("FlowAIBuilderDriver review turns", () => {
     expect(driver.state.reviewNote).toBeNull();
   });
 
-  it("drops the plan when the refreshed session no longer names one", async () => {
+  it("reopens confirmation when a review turn discloses a new summary and the plan stays named", async () => {
+    // The server never clears latest_plan_id: a reopened requirements flow
+    // returns the session to chatting with a fresh disclosure and the old plan
+    // still named. The unconfirmed disclosure outranks the loaded plan.
+    const disclosed = {
+      summary: "Ny sammanfattning",
+      key_decisions: [],
+      input_description: "Ljud",
+      output_description: "PDF",
+      requirements_version: "req-v2"
+    };
     const stream = vi.fn(async (_path, _init, handlers) => {
       handlers.onMessage?.(
-        { id: "", event: "text", data: JSON.stringify({ text: "Vad ska rapporten innehålla?" }) },
+        { id: "", event: "requirements_summary", data: JSON.stringify(disclosed) },
         new AbortController()
       );
       completeStream(handlers);
     });
-    const fetch = vi.fn().mockResolvedValue(makeSession({ latest_plan_id: null }));
+    const fetch = vi.fn().mockImplementation((route: string) => {
+      if (route === SESSION_ROUTE) {
+        return Promise.resolve(
+          makeSession({
+            status: "chatting",
+            latest_plan_id: "plan-1",
+            conversation: [
+              {
+                message_id: "user-1",
+                role: "user",
+                content: "Börja om med kraven",
+                timestamp: "2026-08-16T09:00:00Z"
+              },
+              {
+                message_id: "assistant-1",
+                role: "assistant",
+                content: "",
+                requirements_summary: disclosed,
+                timestamp: "2026-08-16T09:00:01Z"
+              }
+            ]
+          })
+        );
+      }
+      return Promise.resolve(makePlan({ plan_id: "plan-1" }));
+    });
     const { driver } = makeDriver({ fetchImpl: fetch, streamImpl: stream });
     seedReviewSession(driver);
 
     await driver.sendMessage("Börja om med kraven");
 
-    expect(driver.state.currentPlan).toBeNull();
+    expect(driver.state.currentPlan?.plan_id).toBe("plan-1");
+    expect(driver.derivePhase()).toBe("confirming");
     expect(driver.state.reviewNote).toBeNull();
+  });
+
+  it("refuses every plan operation while a review turn is streaming", async () => {
+    let finish: () => void = () => {};
+    const stream = vi.fn(
+      (_path, _init, handlers) =>
+        new Promise<void>((resolve) => {
+          finish = () => {
+            completeStream(handlers);
+            resolve();
+          };
+        })
+    );
+    const fetch = vi.fn().mockImplementation((route: string) => {
+      if (route === SESSION_ROUTE) {
+        return Promise.resolve(makeSession({ latest_plan_id: "plan-1" }));
+      }
+      return Promise.resolve(makePlan({ plan_id: "plan-1" }));
+    });
+    const { driver } = makeDriver({ fetchImpl: fetch, streamImpl: stream });
+    seedReviewSession(driver);
+
+    const turn = driver.sendMessage("Lägg till ett steg");
+    expect(driver.isStreaming).toBe(true);
+
+    await driver.approvePlan();
+    await expect(driver.applyPlan()).rejects.toThrow(/already in progress/);
+    await expect(driver.createFlowFromPlan()).rejects.toThrow(/already in progress/);
+    await expect(driver.unpublishAndApplyPlan()).rejects.toThrow(/already in progress/);
+    const routes = fetch.mock.calls.map(([route]) => route as string);
+    expect(routes).not.toContain(APPROVE_ROUTE);
+    expect(routes).not.toContain(APPLY_ROUTE);
+    expect(routes.some((route) => route.includes("/create"))).toBe(false);
+    expect(driver.state.currentPlan?.status).toBe("proposed");
+    expect(driver.state.pendingOperation).toBeNull();
+
+    finish();
+    await turn;
+  });
+
+  describe("conflict recovery", () => {
+    const publicError = (
+      code: AIBuilderPublicErrorPayload["code"],
+      category: AIBuilderPublicErrorPayload["category"]
+    ): AIBuilderPublicErrorPayload => ({
+      schema_version: 2,
+      code,
+      category,
+      message: "Turn failed",
+      phase: "planner",
+      eneo_error_code: 9000,
+      request_id: "req-1",
+      diagnostic_context: null,
+      details: {}
+    });
+    const staleTurnError = publicError("stale_plan_revision", "conflict");
+    const committedStaleSession = () =>
+      makeSession({
+        status: "awaiting_approval",
+        latest_plan_id: "plan-2",
+        latest_turn: {
+          client_turn_id: "11111111-1111-4111-8111-111111111111",
+          state: "committed",
+          user_message_id: "11111111-1111-4111-8111-111111111112",
+          error: staleTurnError,
+          requires_duplicate_provider_spend_acknowledgement: false,
+          retry_request: {
+            client_turn_id: "11111111-1111-4111-8111-111111111111",
+            message: "Lägg till ett steg",
+            model_id: null,
+            ui_language: "sv",
+            acknowledge_duplicate_provider_spend: false
+          }
+        }
+      });
+
+    it("clears a persisted stream conflict once the session and plan reload", async () => {
+      const fetch = vi.fn().mockImplementation((route: string) => {
+        if (route === SESSION_ROUTE) return Promise.resolve(committedStaleSession());
+        return Promise.resolve(makePlan({ plan_id: "plan-2" }));
+      });
+      const { driver } = makeDriver({ fetchImpl: fetch });
+      seedReviewSession(driver);
+      // A refresh alone rehydrates the committed error, so the conflict is
+      // still classified after the reload it should have resolved.
+      await driver.refreshSession();
+      expect(driver.state.error?.code).toBe("stale_plan_revision");
+
+      await expect(driver.recoverFromConflict()).resolves.toBe(true);
+
+      expect(driver.state.error).toBeNull();
+      expect(driver.state.applyError).toBeNull();
+      expect(driver.state.isConflict).toBe(false);
+      expect(driver.state.currentPlan?.plan_id).toBe("plan-2");
+    });
+
+    it("keeps the conflict when the reload fails", async () => {
+      let sessionCalls = 0;
+      const fetch = vi.fn().mockImplementation((route: string) => {
+        if (route === SESSION_ROUTE) {
+          sessionCalls += 1;
+          return sessionCalls === 1
+            ? Promise.resolve(committedStaleSession())
+            : Promise.reject(new Error("offline"));
+        }
+        return Promise.resolve(makePlan({ plan_id: "plan-2" }));
+      });
+      const { driver } = makeDriver({ fetchImpl: fetch });
+      seedReviewSession(driver);
+      await driver.refreshSession();
+      expect(driver.state.error?.code).toBe("stale_plan_revision");
+
+      await expect(driver.recoverFromConflict()).resolves.toBe(false);
+
+      expect(driver.state.error?.code).toBe("stale_plan_revision");
+    });
+
+    it("leaves a non-conflict error alone after recovery", async () => {
+      const fetch = vi.fn().mockImplementation((route: string) => {
+        if (route === SESSION_ROUTE) {
+          return Promise.resolve(
+            makeSession({
+              status: "chatting",
+              latest_plan_id: "plan-1",
+              latest_turn: {
+                client_turn_id: "11111111-1111-4111-8111-111111111111",
+                state: "committed",
+                user_message_id: "11111111-1111-4111-8111-111111111112",
+                error: publicError("planner_upstream_error", "upstream"),
+                requires_duplicate_provider_spend_acknowledgement: false,
+                retry_request: {
+                  client_turn_id: "11111111-1111-4111-8111-111111111111",
+                  message: "Lägg till ett steg",
+                  model_id: null,
+                  ui_language: "sv",
+                  acknowledge_duplicate_provider_spend: false
+                }
+              }
+            })
+          );
+        }
+        return Promise.resolve(makePlan({ plan_id: "plan-1" }));
+      });
+      const { driver } = makeDriver({ fetchImpl: fetch });
+      seedReviewSession(driver);
+
+      await expect(driver.recoverFromConflict()).resolves.toBe(true);
+
+      expect(driver.state.error?.code).toBe("planner_upstream_error");
+    });
   });
 
   it("replaces the plan when the turn emits a new one", async () => {

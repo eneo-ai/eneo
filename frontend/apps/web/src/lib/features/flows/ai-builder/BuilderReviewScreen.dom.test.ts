@@ -11,6 +11,7 @@ import type {
   ProposedPlan,
   StepSpec
 } from "./protocol";
+import type { AIBuilderClientTransport } from "./FlowAIBuilderDriver";
 import BuilderReviewScreenHarness from "./test-harnesses/BuilderReviewScreenHarness.svelte";
 
 afterEach(() => {
@@ -278,21 +279,80 @@ describe("BuilderReviewScreen change requests", () => {
 });
 
 describe("BuilderReviewScreen recovery surfaces", () => {
-  it("renders one conflict card for a stream conflict and refreshes from it", async () => {
-    const refreshSession = vi.fn().mockResolvedValue(undefined);
+  it("renders one conflict card for a stream conflict and clears it when the reload succeeds", async () => {
+    // The stale conflict is also persisted on the committed turn, so a
+    // refresh alone would rehydrate it; recovery must end with the card gone
+    // and the reloaded plan on screen.
+    const reloadedSession = makeSession({
+      status: "awaiting_approval",
+      target_kind: "create",
+      flow_id: null,
+      latest_plan_id: "plan-2",
+      latest_turn: {
+        client_turn_id: "11111111-1111-4111-8111-111111111111",
+        state: "committed",
+        user_message_id: "11111111-1111-4111-8111-111111111112",
+        error: {
+          schema_version: 2,
+          code: "stale_plan_revision",
+          category: "conflict",
+          message: "Planen ändrades",
+          phase: "planner",
+          eneo_error_code: 9000,
+          request_id: "req-1",
+          diagnostic_context: null,
+          details: {}
+        },
+        requires_duplicate_provider_spend_acknowledgement: false,
+        retry_request: {
+          client_turn_id: "11111111-1111-4111-8111-111111111111",
+          message: "Lägg till ett steg",
+          model_id: null,
+          ui_language: "sv",
+          acknowledge_duplicate_provider_spend: false
+        }
+      }
+    });
+    const transport = {
+      fetch: vi.fn(async (route: string) =>
+        route.endsWith("/sessions/{session_id}") ? reloadedSession : makePlan({ plan_id: "plan-2" })
+      ),
+      stream: vi.fn()
+    } as unknown as AIBuilderClientTransport;
     render(BuilderReviewScreenHarness, {
       currentSpace: makeSpace({ transcriptionModels: [{ can_access: true }] }),
       state: { ...makeCreateState(), error: makeError("stale_plan_revision") },
-      onservice: (service) => {
-        service.refreshSession = refreshSession;
-      }
+      transport
     });
 
     expect(screen.getAllByText(m.ai_builder_conflict_elsewhere_title())).toHaveLength(1);
     expect(screen.getByText(m.ai_builder_conflict_stale_plan())).toBeTruthy();
 
     await fireEvent.click(screen.getByRole("button", { name: m.ai_builder_conflict_refresh() }));
-    expect(refreshSession).toHaveBeenCalledOnce();
+
+    await waitFor(() => {
+      expect(screen.queryByText(m.ai_builder_conflict_elsewhere_title())).toBeNull();
+    });
+    expect(screen.getByRole("button", { name: m.ai_builder_approve_create() })).toBeTruthy();
+  });
+
+  it("keeps the conflict card when the reload fails", async () => {
+    const transport = {
+      fetch: vi.fn(async () => {
+        throw new Error("offline");
+      }),
+      stream: vi.fn()
+    } as unknown as AIBuilderClientTransport;
+    render(BuilderReviewScreenHarness, {
+      currentSpace: makeSpace({ transcriptionModels: [{ can_access: true }] }),
+      state: { ...makeCreateState(), error: makeError("stale_plan_revision") },
+      transport
+    });
+
+    await fireEvent.click(screen.getByRole("button", { name: m.ai_builder_conflict_refresh() }));
+    await waitFor(() => expect(transport.fetch).toHaveBeenCalled());
+
+    expect(screen.getAllByText(m.ai_builder_conflict_elsewhere_title())).toHaveLength(1);
   });
 
   it("offers only the cost-acknowledging retry for an unknown provider outcome", async () => {

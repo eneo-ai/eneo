@@ -530,7 +530,7 @@
       {conflictDescription}
     </p>
     <div class="mt-3 flex flex-wrap gap-2">
-      <Button size="sm" onclick={() => void service.refreshSession()}>
+      <Button size="sm" onclick={() => void service.recoverFromConflict()}>
         {m.ai_builder_conflict_refresh()}
       </Button>
       <Button

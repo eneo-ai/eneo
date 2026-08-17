@@ -13,6 +13,7 @@ import {
   parseAIBuilderError,
   toAIBuilderError
 } from "./aiBuilderError";
+import { classifyAIBuilderConflict } from "./aiBuilderConflict";
 import { isRecoverableCreateDraft, parseAIBuilderStreamEvent } from "./protocol";
 import type {
   AIBuilderConversationMessage,
@@ -273,6 +274,33 @@ export class FlowAIBuilderDriver {
     this.#state.isConflict = false;
     this.#state.applyError = null;
     this.#notify();
+  }
+
+  /** The one way out of a conflict card: reload the session and its plan,
+   *  and only then drop the conflict that was raised against the old view.
+   *  A committed turn error is rehydrated on every refresh, so a stale
+   *  conflict would otherwise outlive the reload that resolved it. When
+   *  the refresh fails the conflict stays: the user still sees the old view. */
+  async recoverFromConflict(): Promise<boolean> {
+    if (this.isStreaming || this.#state.pendingOperation) return false;
+    const owner = this.#currentSessionOwner();
+    if (!owner) return false;
+    const reconciled = await this.#refreshSession(owner);
+    if (!reconciled || !this.#ownsSession(owner)) return false;
+    this.#state.isConflict = false;
+    this.#state.applyError = null;
+    if (
+      this.#state.error &&
+      classifyAIBuilderConflict({
+        applyError: null,
+        error: this.#state.error,
+        isConflict: false
+      })
+    ) {
+      this.#state.error = null;
+    }
+    this.#notify();
+    return true;
   }
 
   dismissPlanPane(): void {
@@ -739,8 +767,10 @@ export class FlowAIBuilderDriver {
         this.#requiresAuthoritativeRefresh = true;
       }
       // A review turn that produced no plan is only resolvable against the
-      // server: a typed decline keeps latest_plan_id, a reopened requirements
-      // flow drops it. Never guess from the stream alone.
+      // server, which never clears latest_plan_id: a decline leaves the plan
+      // and returns the session to chatting; a reopened requirements flow
+      // discloses a new summary and derivePhase lets that outrank the plan.
+      // Never guess from the stream alone.
       const reviewTurnWithoutPlanEvent = planBeforeTurn !== null && !receivedPlanEvent;
       const shouldRefreshAfterStream =
         !receivedDone ||
@@ -790,8 +820,15 @@ export class FlowAIBuilderDriver {
     }
   }
 
+  /** A plan operation may only start against a settled plan: never while a
+   *  turn is streaming (the plan on screen may be mid-rewrite) and never
+   *  while another plan operation holds the lock. */
+  #planOperationBlocked(): boolean {
+    return this.isStreaming || this.#state.pendingOperation !== null;
+  }
+
   async approvePlan(): Promise<void> {
-    if (this.#state.pendingOperation) return;
+    if (this.#planOperationBlocked()) return;
     const plan = this.#state.currentPlan;
     const owner = this.#currentSessionOwner();
     if (!plan || !owner) return;
@@ -852,7 +889,7 @@ export class FlowAIBuilderDriver {
     const plan = this.#state.currentPlan;
     const owner = this.#currentSessionOwner();
     if (!plan || !owner) throw new Error("No plan to create from");
-    if (this.#state.pendingOperation) {
+    if (this.#planOperationBlocked()) {
       throw new Error("A plan operation is already in progress");
     }
 
@@ -930,7 +967,7 @@ export class FlowAIBuilderDriver {
     const plan = this.#state.currentPlan;
     const owner = this.#currentSessionOwner();
     if (!plan || !owner) throw new Error("No plan to apply");
-    if (this.#state.pendingOperation) {
+    if (this.#planOperationBlocked()) {
       throw new Error("A plan operation is already in progress");
     }
 
@@ -996,7 +1033,7 @@ export class FlowAIBuilderDriver {
     const plan = this.#state.currentPlan;
     const owner = this.#currentSessionOwner();
     if (!plan || !owner) throw new Error("No plan to apply");
-    if (this.#state.pendingOperation) {
+    if (this.#planOperationBlocked()) {
       throw new Error("A plan operation is already in progress");
     }
     const flowId = this.#publishedApplyFlowId();
@@ -1168,14 +1205,16 @@ export class FlowAIBuilderDriver {
   }
 
   derivePhase(): AIBuilderPhase {
+    // A disclosure the user has not confirmed outranks a loaded plan: the
+    // server keeps latest_plan_id when it reopens the requirements, so the
+    // unconfirmed summary is the only sign that the plan is superseded.
+    const latestSummary = this.#getLatestRequirementsSummary();
+    const summaryConfirmed =
+      latestSummary !== null && this.isRequirementsSummaryConfirmed(latestSummary);
+    if (latestSummary && !summaryConfirmed) return "confirming";
     if (this.#state.currentPlan) return "reviewing";
     if (this.isStreaming && this.#state.statusMessage) return "building";
-
-    const latestSummary = this.#getLatestRequirementsSummary();
-    if (latestSummary) {
-      return this.isRequirementsSummaryConfirmed(latestSummary) ? "building" : "confirming";
-    }
-
+    if (summaryConfirmed) return "building";
     return "discovering";
   }
 
