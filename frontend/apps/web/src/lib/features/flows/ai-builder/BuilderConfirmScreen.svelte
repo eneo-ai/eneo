@@ -92,6 +92,11 @@
   function questionForDecision(decision: string): string | null {
     return questionIdByAnswerLabel.get(decision.trim().toLocaleLowerCase()) ?? null;
   }
+  // Saying "follows from your answers" on every row says nothing; it only
+  // means something next to rows the user can correct.
+  const hasCorrectableDecision = $derived(
+    summary.key_decisions.some((decision) => questionForDecision(decision.decision) !== null)
+  );
 
   const reducedMotion = prefersReducedMotion();
   // The change box lives under the card it rewrites, never in a side panel:
@@ -240,29 +245,13 @@
                     >
                       {m.ai_builder_question_change()}
                     </Button>
-                  {:else}
+                  {:else if hasCorrectableDecision && !readOnly && !confirmed}
                     <span class="text-secondary text-xs sm:justify-self-end">
                       {m.ai_builder_requirements_derived()}
                     </span>
                   {/if}
                 </div>
               {/each}
-              <div
-                class="border-dimmer grid gap-x-4 gap-y-0.5 border-t py-2.5 sm:grid-cols-[12.5rem_1fr]"
-              >
-                <dt class="text-secondary text-[0.8125rem]">{m.ai_builder_requirements_input()}</dt>
-                <dd class="text-primary text-[0.85rem] font-medium">{summary.input_description}</dd>
-              </div>
-              <div
-                class="border-dimmer grid gap-x-4 gap-y-0.5 border-t py-2.5 sm:grid-cols-[12.5rem_1fr]"
-              >
-                <dt class="text-secondary text-[0.8125rem]">
-                  {m.ai_builder_requirements_output()}
-                </dt>
-                <dd class="text-primary text-[0.85rem] font-medium">
-                  {summary.output_description}
-                </dd>
-              </div>
               {#if attachments.length > 0}
                 <div
                   class="border-dimmer grid gap-x-4 gap-y-0.5 border-t py-2.5 sm:grid-cols-[12.5rem_1fr]"
