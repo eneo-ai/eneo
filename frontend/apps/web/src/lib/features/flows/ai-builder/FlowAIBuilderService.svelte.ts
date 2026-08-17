@@ -391,8 +391,8 @@ export class FlowAIBuilderService {
     await this.#driver.confirmRequirements(editContext ?? null);
   }
 
-  async changeRequirements(feedback?: string): Promise<void> {
-    await this.#driver.changeRequirements(feedback, null);
+  async changeRequirements(feedback?: string, topic?: string | null): Promise<void> {
+    await this.#driver.changeRequirements(feedback, null, topic);
   }
 
   async continueEditing(): Promise<void> {

@@ -41,8 +41,9 @@
     onanswer?: (payload: StructuredQuestionAnswerPayload) => void;
     /** The user hands this question back; only offered with a recommendation. */
     ondelegate?: () => void;
-    /** Changing a published flow: a recommendation here would propose changing
-     *  a value the flow already runs on, so nothing is chosen for the user. */
+    /** Changing a published flow: the option the flow runs on today is the one
+     *  preselected and marked "Används i dag", so confirming without reading
+     *  cannot move a live flow off its current value. */
     isEdit?: boolean;
     /** Further questions the server plans after this one — a snapshot that can
      *  grow, so it is said in words and never drawn as a progress bar. */

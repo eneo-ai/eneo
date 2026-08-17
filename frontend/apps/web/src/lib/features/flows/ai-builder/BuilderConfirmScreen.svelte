@@ -49,6 +49,9 @@
     stale: boolean;
     /** The build phase (or later) already started from this confirmation. */
     readOnly?: boolean;
+    /** Changing a published flow, so a reopened question must not propose
+     *  moving away from what the flow runs on today. */
+    isEdit?: boolean;
     disabled?: boolean;
     /** The answer being changed, edited here instead of walking back through
      *  the questions; the card below it stays visible the whole time. */
@@ -59,7 +62,7 @@
     onconfirm: () => void;
     /** A change request in the user's own words; the server answers with a
      *  new requirements version, which re-arms this card. */
-    onchange: (text: string) => void;
+    onchange: (text: string, topic?: string | null) => void;
     oneditanswer: (questionId: string) => void;
   }
 
@@ -73,6 +76,7 @@
     confirmed,
     stale,
     readOnly = false,
+    isEdit = false,
     disabled = false,
     editingQuestion = null,
     editingQuestionNumber = null,
@@ -83,9 +87,9 @@
     oneditanswer
   }: Props = $props();
 
-  // Naming what Eneo derived only means something beside rows the user can
-  // correct; on a run with no questions every row would carry it.
-  const hasCorrectableDecision = $derived(
+  // Naming what Eneo derived only means something beside rows the user settled
+  // themselves; on a run with no questions every row would carry it.
+  const hasAnsweredDecision = $derived(
     summary.key_decisions.some((decision) => decision.question_id != null)
   );
   const namedContentFields = $derived(summary.named_content_fields ?? []);
@@ -121,14 +125,26 @@
   // question to reopen, so it opens the change box with the topic already
   // written in — the correction still travels as the user's own words.
   function changeRow(topic: string) {
+    // Two open editors would leave the user correcting one thing while looking
+    // at another.
+    oncanceledit?.();
+    changeTopic = topic.trim();
     changeOpen = true;
-    changeRequestRef?.focusInput(m.ai_builder_confirm_change_starter({ topic: topic.trim() }));
+    void changeRequestRef?.focusInput();
+  }
+
+  function reopenQuestion(questionId: string) {
+    changeOpen = false;
+    changeTopic = null;
+    oneditanswer(questionId);
   }
 
   const reducedMotion = prefersReducedMotion();
   // The change box lives under the card it rewrites, never in a side panel:
   // the user is reading the summary while describing the change.
   let changeOpen = $state(false);
+  /** Which row the open change box is correcting; cleared with its chip. */
+  let changeTopic = $state<string | null>(null);
   let changeRequestRef = $state<BuilderChangeRequest | undefined>();
   let assumptionsOpen = $state(false);
   const assumptions = $derived(summary.assumptions ?? []);
@@ -143,14 +159,14 @@
         {#each unlistedAnswers as item (item.questionId)}
           <button
             type="button"
-            class="border-default bg-primary hover:bg-secondary inline-flex h-[1.875rem] max-w-full items-center gap-1.5 rounded-full border px-2.5 text-[0.8125rem]"
+            class="border-default bg-primary hover:bg-secondary inline-flex h-[1.875rem] max-w-full items-center gap-1.5 rounded-full border px-[0.6875rem] text-[0.78125rem]"
             title={item.question}
             aria-label={m.ai_builder_question_chip_aria({
               question: item.question,
               answer: item.answerLabel
             })}
             class:opacity-60={editingQuestion?.question?.question_id === item.questionId}
-            onclick={() => oneditanswer(item.questionId)}
+            onclick={() => reopenQuestion(item.questionId)}
             {disabled}
           >
             {#if item.topic}
@@ -186,6 +202,7 @@
           <FlowAIBuilderQuestion
             question={editingQuestion.question}
             questionNumber={editingQuestionNumber}
+            {isEdit}
             why={editingQuestion.content.trim() || null}
             {disabled}
             onanswer={(payload) => onanswer?.(payload)}
@@ -254,7 +271,7 @@
         {#if !savedFlowStepScope}
           <section class="mt-[1.125rem]">
             <h3 class="text-primary text-[0.8125rem] font-bold">
-              {hasCorrectableDecision
+              {hasAnsweredDecision
                 ? m.ai_builder_requirements_decisions()
                 : m.ai_builder_requirements_decisions_derived()}
             </h3>
@@ -271,7 +288,7 @@
                          value. Only worth saying beside rows the user did
                          settle themselves: with no questions asked, every row
                          follows from the description and the note says nothing. -->
-                    {#if !settledBy && hasCorrectableDecision}
+                    {#if !settledBy && hasAnsweredDecision}
                       <Tooltip.Provider delayDuration={250}>
                         <Tooltip.Root>
                           <Tooltip.Trigger>
@@ -306,7 +323,7 @@
                       aria-label={m.ai_builder_confirm_change_row_aria({ topic: decision.topic })}
                       {disabled}
                       onclick={() =>
-                        settledBy ? oneditanswer(settledBy) : changeRow(decision.topic)}
+                        settledBy ? reopenQuestion(settledBy) : changeRow(decision.topic)}
                     >
                       {m.ai_builder_question_change()}
                     </Button>
@@ -386,7 +403,7 @@
             <ul class="mt-2 flex list-none flex-wrap gap-1.5 p-0">
               {#each namedContentFields as field (field.id)}
                 <li
-                  class="border-default bg-secondary text-primary inline-flex items-center rounded-full border px-2.5 py-1 text-[0.8125rem]"
+                  class="border-default bg-secondary text-primary inline-flex h-[1.625rem] items-center rounded-full border px-2.5 text-[0.78125rem]"
                 >
                   {field.label}
                 </li>
@@ -471,6 +488,8 @@
         <BuilderChangeRequest
           bind:this={changeRequestRef}
           bind:open={changeOpen}
+          scopeLabel={changeTopic}
+          onclearscope={() => (changeTopic = null)}
           {disabled}
           title={m.ai_builder_confirm_change_answers()}
           example={m.ai_builder_confirm_change_example()}
@@ -478,7 +497,9 @@
           hint={m.ai_builder_confirm_change_request_hint()}
           onsend={(text) => {
             changeOpen = false;
-            onchange(text);
+            const topic = changeTopic;
+            changeTopic = null;
+            onchange(text, topic);
           }}
         />
       </div>

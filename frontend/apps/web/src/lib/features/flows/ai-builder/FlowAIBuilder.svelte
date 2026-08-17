@@ -214,7 +214,10 @@
       if (pendingQuestionMessage) return "question";
       if (service.phase === "confirming" && latestSummary && peekPhase === null) return "confirm";
       if (service.messages.length === 0 && !service.isStreaming) return "task";
-      if (latestSummary && phaseIndex > 0) return "confirm";
+      // Stepping back to the contract keeps it on screen until the phase moves
+      // on: opening a question from the card peeks at phase 0, so closing that
+      // question must land back on the card and not on the composer.
+      if (latestSummary && (phaseIndex > 0 || peekPhase === 0)) return "confirm";
       return "reply";
     })()
   );
@@ -371,8 +374,8 @@
     return input && output ? `${input} → ${output}` : input || output;
   }
 
-  function handleRequirementsChange(text: string) {
-    void service.changeRequirements(text);
+  function handleRequirementsChange(text: string, topic?: string | null) {
+    void service.changeRequirements(text, topic);
   }
 
   function handleRailSelect(phase: BuilderPhaseIndex) {
@@ -609,6 +612,7 @@
           confirmed={service.isRequirementsSummaryConfirmed(latestSummary)}
           stale={summaryIsStale}
           readOnly={phaseIndex > 0}
+          isEdit={targetKind === "edit"}
           disabled={service.isCreating || service.isStreaming}
           editingQuestion={editingQuestionMessage}
           editingQuestionNumber={questionNumber}

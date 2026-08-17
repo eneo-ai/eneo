@@ -918,7 +918,8 @@ describe("FlowAIBuilder confirm, build and review", () => {
         })
       ]
     });
-    renderShell({ fetch, stream: makeStream().stream, resumeSessionId: "s-1" });
+    const { stream, calls } = makeStream();
+    renderShell({ fetch, stream, resumeSessionId: "s-1" });
 
     await screen.findByRole("heading", { name: m.ai_builder_requirements_title() });
     expect(screen.getByText(m.ai_builder_requirements_named_content({ count: "2" }))).toBeTruthy();
@@ -934,18 +935,93 @@ describe("FlowAIBuilder confirm, build and review", () => {
     );
     expect(await screen.findByText(m.ai_builder_question_editing_note())).toBeTruthy();
     expect(screen.getByRole("heading", { name: FORMAT_QUESTION.question })).toBeTruthy();
-
+    // Correcting a derived row closes the question editor: two open editors
+    // would leave the user correcting one thing while reading another.
     await fireEvent.click(
       screen.getByRole("button", {
         name: m.ai_builder_confirm_change_row_aria({ topic: "Planerad bearbetning" })
       })
     );
+    expect(screen.queryByText(m.ai_builder_question_editing_note())).toBeNull();
+    // Closing the question editor must land back on the card, never on the
+    // composer: the card is what the user stepped away from.
+    expect(screen.getByRole("heading", { name: m.ai_builder_requirements_title() })).toBeTruthy();
+
+    // The topic is named beside the box, never written into the user's draft,
+    // so nothing is sendable until the user has actually said something.
+    expect(screen.queryByRole("heading", { name: m.ai_builder_requirements_title() })).toBeTruthy();
+    const clearScope = await screen.findByRole("button", {
+      name: m.ai_builder_change_request_clear_scope()
+    });
+    expect(clearScope.parentElement?.textContent).toContain("Planerad bearbetning");
     const box = await screen.findByRole("textbox", {
       name: m.ai_builder_change_request_textarea_label()
     });
-    expect((box as HTMLTextAreaElement).value).toBe(
-      m.ai_builder_confirm_change_starter({ topic: "Planerad bearbetning" })
+    expect((box as HTMLTextAreaElement).value).toBe("");
+    expect(button(m.ai_builder_send()).disabled).toBe(true);
+
+    await fireEvent.input(box, { target: { value: "en PDF i stället" } });
+    await fireEvent.click(button(m.ai_builder_send()));
+
+    await waitFor(() => expect(calls).toHaveLength(1));
+    expect(calls[0]!.body).toMatchObject({
+      message: m.ai_builder_requirements_change_message_scoped({
+        topic: "Planerad bearbetning",
+        feedback: "en PDF i stället"
+      })
+    });
+  });
+
+  it("keeps the option an edited flow runs on today when a question is reopened here", async () => {
+    const editQuestion = {
+      ...FORMAT_QUESTION,
+      recommended_option_id: "pdf",
+      current_option_id: "text"
+    };
+    const summary = {
+      ...SUMMARY,
+      key_decisions: [{ topic: "Slutresultat", decision: "Text", question_id: "output_format" }]
+    };
+    const { fetch } = makeFetch({
+      sessions: [
+        makeSession({
+          target_kind: "edit",
+          flow_id: "flow-1",
+          conversation: [
+            userMessage("u1", "Byt format"),
+            assistantMessage("a1", "Hur ska resultatet levereras?", { question: editQuestion }),
+            userMessage("u2", "Som text", {
+              question_answer: {
+                kind: "structured_question_answer",
+                question_id: "output_format",
+                selected_option_ids: ["text"]
+              }
+            }),
+            assistantMessage("a2", "", { requirements_summary: summary })
+          ]
+        })
+      ]
+    });
+    renderShell({
+      fetch,
+      stream: makeStream().stream,
+      resumeSessionId: "s-1",
+      targetKind: "edit",
+      flowId: "flow-1"
+    });
+
+    await screen.findByRole("heading", { name: m.ai_builder_requirements_title() });
+    await fireEvent.click(
+      screen.getByRole("button", {
+        name: m.ai_builder_confirm_change_row_aria({ topic: "Slutresultat" })
+      })
     );
+
+    // Reopened from the card, the question still knows it is editing a live
+    // flow: the running option stays selected instead of the recommendation.
+    const running = await screen.findByRole("radio", { name: /Som text/ });
+    expect(running.getAttribute("aria-checked")).toBe("true");
+    expect(screen.getByText(m.ai_builder_question_in_use_today())).toBeTruthy();
   });
 
   it("reopens the newest wording when a question was asked twice", async () => {

@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { tick } from "svelte";
   import { m } from "$lib/paraglide/messages";
   import { Button } from "$lib/components/ui/button/index.js";
   import { Textarea } from "$lib/components/ui/textarea/index.js";
@@ -36,13 +37,10 @@
 
   const canSend = $derived(!disabled && text.trim().length > 0);
 
-  /**
-   * `starter` names what the user pressed Ändra on, e.g. "Slutresultat: ".
-   * It goes into the message itself rather than a chip beside it, because the
-   * server only ever sees the words the user sends.
-   */
-  export function focusInput(starter?: string) {
-    if (starter && text.trim().length === 0) text = starter;
+  // The caller opens the box in the same tick, so the textarea does not exist
+  // yet when this runs.
+  export async function focusInput() {
+    await tick();
     textarea?.focus();
     const end = text.length;
     textarea?.setSelectionRange(end, end);

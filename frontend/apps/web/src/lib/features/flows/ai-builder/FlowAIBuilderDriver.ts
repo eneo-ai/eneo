@@ -1220,12 +1220,21 @@ export class FlowAIBuilderDriver {
 
   async changeRequirements(
     feedback?: string,
-    editContext?: AIBuilderEditContext | null
+    editContext?: AIBuilderEditContext | null,
+    /** The contract row the user pressed Ändra on, when the correction came
+     *  from one row rather than the card as a whole. */
+    topic?: string | null
   ): Promise<void> {
     if (this.#state.pendingOperation) return;
-    const message = feedback?.trim()
-      ? m.ai_builder_requirements_change_message({ feedback: feedback.trim() })
-      : m.ai_builder_requirements_change_message_empty();
+    const text = feedback?.trim();
+    const message = !text
+      ? m.ai_builder_requirements_change_message_empty()
+      : topic?.trim()
+        ? m.ai_builder_requirements_change_message_scoped({
+            topic: topic.trim(),
+            feedback: text
+          })
+        : m.ai_builder_requirements_change_message({ feedback: text });
     await this.sendMessage(message, undefined, undefined, editContext);
   }
 
