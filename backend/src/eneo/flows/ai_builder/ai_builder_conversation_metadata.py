@@ -1904,23 +1904,21 @@ def metadata_for_assistant_question(
     the latest interaction of a re-asked question, not its first — hand the same
     question a different number afterwards.
 
-    A recognisable question without a number is refused rather than persisted
-    unnumbered. Dispatch numbers every question it puts to a user, and a message
-    that reached persistence without one is a writer that stopped doing so — the
-    one thing that could bring silent renumbering back.
+    A question dispatched unnumbered — because an earlier question in the
+    session predates numbers being persisted — is persisted without one, so the
+    session keeps working and never renumbers: an unknown sequence stays
+    unknown rather than being invented from message order.
     """
 
     question_id = canonical_question_id(question_data.question_id)
     if not question_id:
         return None
-    if question_data.question_index is None:
-        raise ValueError(
-            "a question put to the user must carry the number it is shown with"
-        )
-    return {
+    metadata: FlowPersistedJsonObject = {
         ASSISTANT_QUESTION_ID_METADATA_KEY: question_id,
-        ASSISTANT_QUESTION_INDEX_METADATA_KEY: question_data.question_index,
     }
+    if question_data.question_index is not None:
+        metadata[ASSISTANT_QUESTION_INDEX_METADATA_KEY] = question_data.question_index
+    return metadata
 
 
 def structured_question_payload_from_tool_arguments(

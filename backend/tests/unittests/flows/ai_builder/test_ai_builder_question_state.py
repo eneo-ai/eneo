@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import pytest
-
 from eneo.flows.ai_builder.ai_builder_conversation_compaction import (
     compact_ai_builder_conversation,
 )
@@ -167,17 +165,43 @@ def test_a_number_the_user_has_seen_survives_compaction() -> None:
     )
 
 
-def test_a_question_without_a_recorded_number_is_refused() -> None:
+def test_a_session_with_an_unnumbered_question_goes_on_unnumbered() -> None:
     # Falling back to counting positions here is what let compaction renumber a
-    # question. A record that lost its number is broken state, and saying so is
-    # better than inventing a number the user may not have seen.
+    # question, and refusing outright bricked every session whose earlier turns
+    # predate the number being persisted. The honest middle: a question that
+    # kept its number keeps it, everything else in that session goes out
+    # unnumbered, and the session takes its next turn.
     conversation = [
         ConversationMessage(
             role="assistant",
             content="Which output?",
             metadata={"question_id": "terminal_output"},
         ),
+        ConversationMessage(
+            role="assistant",
+            content="Which input?",
+            metadata={"question_id": "primary_runtime_input", "question_index": 2},
+        ),
     ]
 
-    with pytest.raises(ValueError, match="carries no number"):
+    assert (
+        question_ordinal_in_session(conversation, question_id="terminal_output") is None
+    )
+    assert (
+        question_ordinal_in_session(conversation, question_id="primary_runtime_input")
+        == 2
+    )
+    assert (
         question_ordinal_in_session(conversation, question_id="post_processing_goal")
+        is None
+    )
+    unnumbered = metadata_for_assistant_question(
+        StructuredQuestionPayload(
+            question_id="post_processing_goal",
+            question="Why?",
+            options=[],
+            selection_mode="single",
+            allow_custom=True,
+        )
+    )
+    assert unnumbered == {"question_id": "post_processing_goal"}

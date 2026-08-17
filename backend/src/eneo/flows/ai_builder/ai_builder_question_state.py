@@ -162,7 +162,7 @@ def question_ordinal_in_session(
     conversation: Sequence[ConversationMessage | Mapping[str, Any]],
     *,
     question_id: str,
-) -> int:
+) -> int | None:
     """Where this question sits in the sequence the user has been walked through.
 
     Counted over the questions actually put to the user, not the ones they
@@ -173,25 +173,30 @@ def question_ordinal_in_session(
     A number the user has already seen is read back off the message it was
     stamped on, never recounted, because message order is not stable:
     compaction keeps the latest interaction of a re-asked question, which moves
-    that question behind ones it was asked before. A question already put to the
-    user without a persisted number is corrupt state, and is refused rather than
-    renumbered from the order that happens to survive.
+    that question behind ones it was asked before. Once any question in the
+    session was put to the user without a persisted number, the sequence is
+    unknown: a question that kept its number keeps it, and every other question
+    goes out unnumbered (None) rather than renumbered from the order that
+    happens to survive. Unnumbered beats bricked — a session must stay usable
+    even when its earlier turns predate the number being persisted.
     """
 
     numbered: dict[str, int] = {}
+    sequence_known = True
     for message in conversation:
         asked_id = assistant_question_id(message)
         if asked_id is None or asked_id in numbered:
             continue
         persisted = assistant_question_index_from_metadata(_message_metadata(message))
         if persisted is None:
-            raise ValueError(
-                f"a question already put to the user carries no number: {asked_id}"
-            )
+            sequence_known = False
+            continue
         numbered[asked_id] = persisted
     already_seen = numbered.get(canonical_question_id(question_id))
     if already_seen is not None:
         return already_seen
+    if not sequence_known:
+        return None
     return max(numbered.values(), default=0) + 1
 
 

@@ -212,30 +212,6 @@ async def test_persist_backend_question_records_the_number_the_user_is_shown() -
 
 
 @pytest.mark.asyncio
-async def test_persist_backend_question_refuses_an_unnumbered_question() -> None:
-    # A question that reached persistence without a number means the writer
-    # that numbers questions stopped doing so. Persisting it would bring back
-    # the order-derived number this contract exists to remove.
-    repo = AsyncMock()
-    repo.commit_turn.return_value = 1
-
-    with pytest.raises(ValueError, match="number it is shown with"):
-        await persist_backend_question(
-            repo=repo,
-            turn=_make_turn(),
-            conversation=[ConversationMessage(role="user", content="Bygg")],
-            new_messages_start=1,
-            planning_state=PlanningState.empty(),
-            question=BackendQuestion(
-                question_data=_backend_question().question_data.model_copy(
-                    update={"question_index": None}
-                ),
-                assistant_text="Vilka fält behöver vi?",
-            ),
-        )
-
-
-@pytest.mark.asyncio
 async def test_persist_backend_question_omits_empty_metadata() -> None:
     repo = AsyncMock()
     repo.commit_turn.return_value = 1
