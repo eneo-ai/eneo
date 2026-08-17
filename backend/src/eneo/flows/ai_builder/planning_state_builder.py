@@ -384,14 +384,14 @@ def _reconcile_report_disposition_after_classifier_replay(
     )
 
 
+# Sources a model reading may neither clear nor overwrite on its own. A flow
+# default is here for the first half only: the flow it was read from is still
+# the answer while the user says nothing about it, so an unsure reading must
+# not unresolve it. What the user does say about it is settled in
+# `_model_slot_can_replace`.
 _MODEL_PROTECTED_SOURCES: frozenset[SlotSource] = frozenset(
     {"structured_answer", "flow_default", "attachment_structure"}
 )
-# Most flow defaults state a structural fact of the existing flow that the user
-# has not contradicted. The purpose is different: read off the flow it describes
-# what the flow does today, so an edit asking for something else must be able to
-# replace it with cited, high-confidence evidence from the current turn.
-_FLOW_OBSERVED_SLOT_NAMES: frozenset[str] = frozenset({"post_processing_goal"})
 
 
 def carry_forward_turn_resolved_planner_state(
@@ -1586,10 +1586,15 @@ def _model_slot_can_replace(
     """Protect authoritative sources while permitting cited model corrections."""
     if existing_slot is None:
         return model_confidence in {"high", "medium"}
-    if (
-        existing_slot.source == "flow_default"
-        and existing_slot.name in _FLOW_OBSERVED_SLOT_NAMES
-    ):
+    if existing_slot.source == "flow_default":
+        # A flow default is an observation, not an answer: read off the Flow
+        # being edited, it states what that Flow does today. An edit naming
+        # something else describes what it should do next, so cited
+        # high-confidence evidence from the conversation replaces it. Without
+        # this, "I want a PDF instead of a DOCX" could not reach the slot at
+        # all — the classifier was never even offered a slot it could not
+        # change, and the disclosure quoted the request back under decisions
+        # that all still said DOCX.
         return model_confidence == "high"
     if existing_slot.source in _MODEL_PROTECTED_SOURCES:
         return False

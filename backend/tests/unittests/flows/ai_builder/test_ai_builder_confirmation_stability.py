@@ -169,6 +169,89 @@ def _decide(
     ).decision
 
 
+def _flow_observed_document_state() -> PlanningState:
+    """A DOCX Flow being edited, before the user has said anything about it."""
+
+    state = PlanningState.empty()
+    state.resolved_slots = {
+        name: ResolvedSlot(
+            name=name,
+            value=value,
+            source="flow_default",
+            confidence="high",
+            evidence=[f"flow_default:{name}"],
+        )
+        for name, value in (
+            ("primary_runtime_input", "documents"),
+            ("terminal_output", "docx_document"),
+            ("docx_output_mode", "generated_docx"),
+            ("runtime_metadata_fields", "no_extra_metadata"),
+        )
+    }
+    draft = derive_architecture_commit_draft(state)
+    assert draft is not None
+    state.architecture_commit = finalize_architecture_commit(
+        draft,
+        now=lambda: datetime(2026, 8, 17, tzinfo=timezone.utc),
+    )
+    return state
+
+
+def test_replacing_the_flow_output_withdraws_the_confirmation_it_contradicts() -> None:
+    """The reported defect: the summary quoted the request and kept DOCX.
+
+    Editing a DOCX Flow, the user wrote that they want a PDF instead. The
+    disclosure repeated the sentence back while every decision under it still
+    said DOCX, and the turn proposed a plan against the confirmed DOCX
+    requirements. A requirement the user replaces is a different disclosure,
+    and a different disclosure is not the one they confirmed.
+    """
+
+    state = _flow_observed_document_state()
+    disclosed = build_requirements_disclosure(
+        state, ui_language="sv", is_edit_mode=True
+    )
+    assert isinstance(
+        _decide(state, confirmed_version=disclosed.requirements_version),
+        GenerateProposal,
+    )
+
+    merge_llm_resolved_slots(
+        state,
+        SlotClassificationResult(
+            slots=(
+                ClassifiedSlot(
+                    slot_name="terminal_output",
+                    value="pdf_document",
+                    confidence="high",
+                    reason="The user asked for a PDF instead of the DOCX.",
+                    evidence=(
+                        ClassifiedEvidence(
+                            source_id="user_message:user-1",
+                            quote="PDF fil istället som utdata än en docx fil",
+                        ),
+                    ),
+                    evidence_level="explicit",
+                ),
+            )
+        ),
+        prompt_hash="d" * 64,
+        freeform_text="Jag vill ha en PDF fil istället som utdata än en docx fil.",
+    )
+
+    revised = build_requirements_disclosure(state, ui_language="sv", is_edit_mode=True)
+    assert revised.requirements_version != disclosed.requirements_version
+    assert {
+        requirement.selected_value
+        for requirement in revised.resolved_requirements
+        if requirement.requirement_id == "terminal_output"
+    } == {"pdf_document"}
+    assert not isinstance(
+        _decide(state, confirmed_version=disclosed.requirements_version),
+        GenerateProposal,
+    )
+
+
 def test_reclassifying_unchanged_example_evidence_keeps_the_confirmation() -> None:
     """The measured defect: same file, same coverage, reworded interpretation.
 

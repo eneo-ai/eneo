@@ -203,13 +203,15 @@ def resolve_requirements_state(
             )
             continue
 
-        # After a plan was proposed, preserve requirements unless the user
-        # explicitly wants to restart discovery (mentions "ändra krav",
-        # "change requirements", "börja om", "start over").
+        # Once a plan exists, ordinary messages are revision requests, and
+        # asking for the same requirements to be confirmed again for each one
+        # never ended. Whether such a message changed a requirement is not a
+        # question about its wording: the disclosure this turn derives carries
+        # the requirements it resolved, and a confirmation names exactly one
+        # disclosure, so a changed requirement is already a version the user
+        # has not confirmed.
         if has_plan_after_confirmation and confirmed_version is not None:
-            content = message.content if isinstance(message.content, str) else ""
-            if not _is_requirements_invalidation(content.casefold()):
-                continue  # Keep requirements confirmed for revision requests
+            continue
 
         confirmed_version = None
 
@@ -241,11 +243,14 @@ def resolve_attested_disclosure(
     """The last disclosure the user accepted, whatever has been shown since.
 
     A confirmation names one disclosure by version, so acceptance survives a
-    later disclosure the user has not answered yet. Only an explicit request to
-    restart discovery withdraws it. That is deliberately narrower than what
-    withdraws a *pending* confirmation, where any ordinary message before a
-    plan is a change of mind: the user cannot un-say something they already
-    said, and the pinned architecture is derived from it.
+    later disclosure the user has not answered yet. That is deliberately
+    narrower than what withdraws a *pending* confirmation, where any ordinary
+    message before a plan is a change of mind: the user cannot un-say
+    something they already said, and the pinned architecture is derived from
+    it. What they say next is not un-saying it either — a slot they resolve
+    differently later is settled by the newer evidence
+    (`attested_slots_without_newer_evidence`), which is a typed comparison of
+    what was cited when, not a reading of how the request was worded.
     """
 
     shown: dict[str, tuple[int, RequirementsSummaryPayload]] = {}
@@ -259,18 +264,15 @@ def resolve_attested_disclosure(
         if message.role != "user":
             continue
         confirmation = content_free_confirmation(message)
-        if confirmation is not None:
-            accepted = shown.get(confirmation.requirements_version)
-            if accepted is not None:
-                attested = AttestedDisclosure(
-                    summary=accepted[1],
-                    summary_index=accepted[0],
-                    confirmation_index=index,
-                )
+        if confirmation is None:
             continue
-        content = message.content if isinstance(message.content, str) else ""
-        if _is_requirements_invalidation(content.casefold()):
-            attested = None
+        accepted = shown.get(confirmation.requirements_version)
+        if accepted is not None:
+            attested = AttestedDisclosure(
+                summary=accepted[1],
+                summary_index=accepted[0],
+                confirmation_index=index,
+            )
     return attested
 
 
@@ -349,22 +351,6 @@ def render_confirmed_requirements_proposal_prompt_block(
         lines.extend(f"  - {assumption}" for assumption in relevant_assumptions)
 
     return "\n".join(lines) if lines else "- none"
-
-
-def _is_requirements_invalidation(text: str) -> bool:
-    """Check if the user explicitly wants to restart/change requirements."""
-    invalidation_phrases = (
-        "ändra krav",
-        "change requirements",
-        "börja om",
-        "start over",
-        "nya krav",
-        "new requirements",
-        "restart",
-        "starta om",
-        "omformulera krav",
-    )
-    return any(phrase in text for phrase in invalidation_phrases)
 
 
 def _is_plan_proposal_message(message: ConversationMessage) -> bool:

@@ -98,6 +98,7 @@ from eneo.flows.ai_builder.planning_state_builder import (
     merge_llm_resolved_slots,
     resolve_docx_mode_from_template_evidence,
 )
+from eneo.flows.domain.flow import Flow, FlowStep
 from eneo.flows.domain.mapped_execution_policy import FlowMappedExecutionPolicy
 from eneo.flows.flow_review_policy import FlowStepReviewMode
 
@@ -2599,6 +2600,92 @@ class TestSlotClassificationMetadataReplay:
         assert state.resolved_slots["primary_runtime_input"].value == "text"
 
 
+class TestFlowObservedSlotsYieldToTheEdit:
+    """An edit that names a different output must be able to change it.
+
+    Reading the Flow being edited states what it produces today. A user asking
+    for a PDF instead of the DOCX it produces is describing what it should
+    produce next, and the disclosure quoted that sentence back while every
+    decision under it still said DOCX.
+    """
+
+    def _docx_flow(self) -> Flow:
+        return Flow(
+            id=uuid4(),
+            tenant_id=uuid4(),
+            space_id=uuid4(),
+            name="Strukturerad samtalsrapport",
+            description="Befintligt dokumentflöde",
+            steps=[
+                FlowStep(
+                    assistant_id=uuid4(),
+                    step_order=1,
+                    user_description="Läs underlaget",
+                    input_source="flow_input",
+                    input_type="document",
+                    output_mode="pass_through",
+                    output_type="text",
+                ),
+                FlowStep(
+                    assistant_id=uuid4(),
+                    step_order=2,
+                    user_description="Skapa DOCX",
+                    input_source="previous_step",
+                    input_type="text",
+                    output_mode="pass_through",
+                    output_type="docx",
+                ),
+            ],
+        )
+
+    def test_flow_observed_output_is_offered_to_the_classifier(self) -> None:
+        state = _state()
+        state.resolved_slots = {
+            "primary_runtime_input": _slot(
+                name="primary_runtime_input",
+                value="documents",
+                source="flow_default",
+            ),
+            "terminal_output": _slot(
+                name="terminal_output",
+                value="docx_document",
+                source="flow_default",
+            ),
+        }
+
+        assert "terminal_output" in llm_resolvable_slot_values_for_state(state)
+
+    def test_cited_edit_replaces_the_observed_output_and_its_dependent_mode(
+        self,
+    ) -> None:
+        conversation = [
+            ConversationMessage(
+                role="user",
+                content="Jag vill ha en PDF fil istället som utdata än en docx fil.",
+                metadata=_slot_classification_metadata(
+                    _classified(
+                        "terminal_output",
+                        "pdf_document",
+                        "high",
+                        evidence=("PDF fil istället som utdata än en docx fil",),
+                        evidence_level="explicit",
+                    ),
+                ),
+            ),
+        ]
+
+        state = build_planning_state_from_conversation(
+            conversation,
+            flow=self._docx_flow(),
+        )
+
+        terminal_output = state.resolved_slots["terminal_output"]
+        assert terminal_output.value == "pdf_document"
+        assert terminal_output.source == "model"
+        assert "docx_output_mode" not in state.resolved_slots
+        assert state.resolved_slots["pdf_generation_mode"].value == "generated_pdf"
+
+
 class TestModelSlotMerge:
     def test_named_result_delta_rejects_missing_per_name_evidence(self) -> None:
         with pytest.raises(
@@ -3876,9 +3963,17 @@ class TestModelSlotMerge:
             state
         )
 
-    def test_model_output_preserves_user_and_flow_sources_but_can_correct_summary(
+    def test_model_output_preserves_the_answer_and_corrects_summary_and_flow(
         self,
     ) -> None:
+        """What the user answered stands; what was read off the Flow does not.
+
+        A structured answer is the user's own choice. A summary they accepted
+        and a fact observed on the Flow being edited are both derived, so a
+        cited high-confidence reading of what they said this turn replaces
+        them.
+        """
+
         state = _state()
         state.resolved_slots = {
             "primary_runtime_input": _slot(
@@ -3919,9 +4014,9 @@ class TestModelSlotMerge:
         corrected_output = state.resolved_slots["terminal_output"]
         assert corrected_output.value == "pdf_document"
         assert corrected_output.source == "model"
-        assert state.resolved_slots["runtime_metadata_fields"].value == (
-            "no_extra_metadata"
-        )
+        corrected_metadata = state.resolved_slots["runtime_metadata_fields"]
+        assert corrected_metadata.value == "detailed_runtime_metadata"
+        assert corrected_metadata.source == "model"
 
     def test_model_post_processing_goal_uses_typed_evidence_without_raw_text_match(
         self,
