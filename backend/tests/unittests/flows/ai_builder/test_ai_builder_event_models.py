@@ -120,6 +120,23 @@ def test_requirements_summary_bounds_resolved_requirement_projection() -> None:
         )
 
 
+@pytest.mark.parametrize("blank", ["", "   "])
+@pytest.mark.parametrize("field", ["input_description", "output_description"])
+def test_a_disclosure_cannot_leave_the_input_or_output_blank(
+    field: str, blank: str
+) -> None:
+    """The card the user signs must name what goes in and what comes out."""
+    content = {
+        "summary": "Flödet ska ta emot ljud och leverera en PDF.",
+        "key_decisions": [],
+        "input_description": "Primär indata vid körning: Ljud.",
+        "output_description": "Huvudsakligt slutresultat: PDF-dokument.",
+        field: blank,
+    }
+    with pytest.raises(ValidationError):
+        RequirementsDisclosureContent(**content)
+
+
 def test_an_emitted_summary_must_name_itself() -> None:
     """A disclosure the client cannot name is one the user cannot confirm."""
 

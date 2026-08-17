@@ -233,8 +233,11 @@ class RequirementsDisclosureContent(BaseModel):
 
     summary: str
     key_decisions: list[KeyDecisionPayload]
-    input_description: str
-    output_description: str
+    # The two facts a user signs off on: the confirmation card must never
+    # show a hole where the input or output should be, so the contract, not
+    # the builder's defaults, guarantees they are filled.
+    input_description: str = Field(min_length=1)
+    output_description: str = Field(min_length=1)
     assumptions: list[str] = Field(default_factory=list)
     manual_setup_notes: list[str] = Field(default_factory=list)
     resolved_requirements: list[ResolvedRequirementPayload] = Field(
@@ -242,6 +245,13 @@ class RequirementsDisclosureContent(BaseModel):
         max_length=len(KNOWN_REQUIREMENT_SLOT_NAMES),
         exclude_if=_resolved_requirements_are_empty,
     )
+
+    @field_validator("input_description", "output_description", mode="after")
+    @classmethod
+    def _describes_something(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("must describe the input or output, not be blank")
+        return value
 
     @field_validator("key_decisions", mode="after")
     @classmethod
