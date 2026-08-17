@@ -1484,7 +1484,9 @@ class TestListSessionsEndpoint:
 
         assert isinstance(result, SessionListResponse)
         assert result.sessions == [session]
-        service.list_sessions.assert_awaited_once_with()
+        service.list_sessions.assert_awaited_once_with(
+            space_id=None, target_kind=None, drafts_only=False, limit=20
+        )
         container.space_service.return_value.get_space.assert_not_awaited()
 
     @pytest.mark.anyio
