@@ -28,6 +28,7 @@ function makeFlow(metadataJson: Flow["metadata_json"] = null, overrides: Partial
     name: "Flow",
     description: null,
     published_version: null,
+    step_count: 0,
     metadata_json: metadataJson,
     data_retention_days: null,
     run_history_retention: {

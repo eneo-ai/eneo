@@ -1,4 +1,5 @@
 import type { FlowSparse } from "@eneo/eneo-js";
+import { m } from "$lib/paraglide/messages";
 import type { RecoverableAIBuilderDraftSession } from "$lib/features/flows/ai-builder/protocol";
 
 /** One row in the Flöden list: a saved flow or an in-progress AI draft.
@@ -29,6 +30,38 @@ export type FlowListRow =
 
 export type FlowListFilter = "all" | "published" | "drafts";
 
+/** "5 steg · ljud in, PDF ut": what the flow is, in one line, for a reader who
+ *  has not opened it. A flow with no steps has nothing to summarise, so its
+ *  description speaks instead; a flow whose input or output the server cannot
+ *  name says the part it knows. */
+function describeFlow(flow: FlowSparse): string | null {
+  const stepCount = flow.step_count;
+  if (stepCount === 0) return flow.description?.trim() || null;
+
+  const steps =
+    stepCount === 1
+      ? m.flow_list_row_steps_one()
+      : m.flow_list_row_steps({ count: String(stepCount) });
+  const input = flow.input_type ? FLOW_INPUT_LABELS[flow.input_type]() : null;
+  const output = flow.output_type ? FLOW_OUTPUT_LABELS[flow.output_type]() : null;
+  const shape =
+    input && output ? m.flow_list_row_shape({ input, output }) : (input ?? output ?? null);
+  return shape ? `${steps} · ${shape}` : steps;
+}
+
+const FLOW_INPUT_LABELS: Record<NonNullable<FlowSparse["input_type"]>, () => string> = {
+  document: () => m.flow_list_input_document(),
+  audio: () => m.flow_list_input_audio(),
+  file: () => m.flow_list_input_file()
+};
+
+const FLOW_OUTPUT_LABELS: Record<NonNullable<FlowSparse["output_type"]>, () => string> = {
+  text: () => m.flow_list_output_text(),
+  json: () => m.flow_list_output_json(),
+  pdf: () => m.flow_list_output_pdf(),
+  docx: () => m.flow_list_output_docx()
+};
+
 export function buildFlowListRows(
   flows: readonly FlowSparse[],
   drafts: readonly RecoverableAIBuilderDraftSession[]
@@ -37,7 +70,7 @@ export function buildFlowListRows(
     kind: "flow",
     id: flow.id,
     name: flow.name,
-    subtitle: flow.description?.trim() || null,
+    subtitle: describeFlow(flow),
     status: flow.published_version != null ? "published" : "draft",
     ownerUserId: flow.owner_user_id ?? flow.created_by_user_id ?? null,
     updatedAt: flow.updated_at ?? flow.created_at ?? null,
@@ -74,7 +107,10 @@ export function filterFlowListRows(
     if (options.filter === "published" && row.status !== "published") return false;
     if (options.filter === "drafts" && row.status !== "draft") return false;
     if (!query) return true;
-    const haystack = `${row.name ?? ""} ${row.subtitle ?? ""}`.toLocaleLowerCase();
+    // The row may show a derived summary instead of the description, but the
+    // description is still what people remember a flow by.
+    const description = row.kind === "flow" ? (row.flow.description ?? "") : "";
+    const haystack = `${row.name ?? ""} ${row.subtitle ?? ""} ${description}`.toLocaleLowerCase();
     return haystack.includes(query);
   });
 }

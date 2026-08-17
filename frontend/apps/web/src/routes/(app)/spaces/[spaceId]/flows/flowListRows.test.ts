@@ -10,6 +10,7 @@ function flow(overrides: Partial<FlowSparse>): FlowSparse {
     space_id: "space-1",
     tenant_id: "tenant-1",
     run_history_retention: { state: "off" },
+    step_count: 0,
     ...overrides
   } as FlowSparse;
 }
@@ -32,6 +33,59 @@ function draft(
 }
 
 describe("buildFlowListRows", () => {
+  it("keeps a flow findable by its description once the row shows a summary", () => {
+    const rows = buildFlowListRows(
+      [
+        flow({
+          id: "flow-2",
+          name: "Ljud till PDF",
+          description: "Sammanställ remissvar per avsnitt",
+          step_count: 4,
+          input_type: "audio",
+          output_type: "pdf"
+        })
+      ],
+      []
+    );
+    // The subtitle says "4 steg · ljud in, PDF ut"; the description is not on
+    // screen, and is still what the user searches for.
+    expect(rows[0]?.subtitle).not.toContain("remissvar");
+    expect(filterFlowListRows(rows, { query: "remissvar", filter: "all" })).toHaveLength(1);
+  });
+
+  it("says what a flow is in one line, and falls back to its description", () => {
+    const [described] = buildFlowListRows(
+      [flow({ step_count: 5, input_type: "audio", output_type: "pdf" })],
+      []
+    );
+    expect(described?.subtitle).toBe("5 steg · ljud in, PDF ut");
+
+    // A flow the server cannot describe still says how long it is.
+    const [partial] = buildFlowListRows(
+      [flow({ step_count: 3, input_type: null, output_type: null })],
+      []
+    );
+    expect(partial?.subtitle).toBe("3 steg");
+
+    // One step is not "1 steg" by accident of a plural string.
+    const [single] = buildFlowListRows([flow({ step_count: 1, output_type: "text" })], []);
+    expect(single?.subtitle).toBe("1 steg · text ut");
+
+    // Input known, output not.
+    const [inputOnly] = buildFlowListRows(
+      [flow({ step_count: 2, input_type: "document", output_type: null })],
+      []
+    );
+    expect(inputOnly?.subtitle).toBe("2 steg · dokument in");
+
+    // Nothing built yet: the description is all there is to say.
+    const [empty] = buildFlowListRows(
+      [flow({ step_count: 0, description: "Sammanställ remissvar per avsnitt" })],
+      []
+    );
+    expect(empty?.subtitle).toBe("Sammanställ remissvar per avsnitt");
+  });
+
   it("merges flows and AI drafts into one list sorted by last change", () => {
     const rows = buildFlowListRows(
       [

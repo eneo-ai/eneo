@@ -20,6 +20,7 @@ function makeFlow(fields: FlowFormField[]): Flow {
     name: "Flow",
     description: null,
     published_version: null,
+    step_count: 0,
     metadata_json: { form_schema: { fields } },
     data_retention_days: null,
     run_history_retention: {
