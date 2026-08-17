@@ -5,6 +5,7 @@
   import { Page } from "$lib/components/layout";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
   import FlowAIBuilder from "$lib/features/flows/ai-builder/FlowAIBuilder.svelte";
+  import BuilderSessionStatus from "$lib/features/flows/ai-builder/BuilderSessionStatus.svelte";
   import { initAIBuilderService } from "$lib/features/flows/ai-builder/FlowAIBuilderService.svelte.ts";
   import { m } from "$lib/paraglide/messages";
   import { onDestroy, untrack } from "svelte";
@@ -38,12 +39,16 @@
       parent={{ href: `/spaces/${$currentSpace.routeId}/flows` }}
       title={m.ai_builder_tab()}
     ></Page.Title>
+    <!-- The design keeps the saved state and the way into the conversation on
+         the title row, so the phase rail is the only thing above the work. -->
+    <BuilderSessionStatus />
   </Page.Header>
 
   <Page.Main>
     <div class="flex flex-1 flex-col overflow-hidden">
       <FlowAIBuilder
         targetKind="create"
+        statusInPageHeader
         {resumeSessionId}
         onapplied={async (detail) => {
           goto(resolve(`/spaces/${$currentSpace.routeId}/flows/${detail.flow_id}`));

@@ -203,10 +203,9 @@ test.describe("AI builder phase shell", () => {
     await expect(page.getByRole("button", { name: "Skicka" })).toBeEnabled();
   });
 
-  // Per the design, the header column is wider than the content column and
-  // both are centred on the same axis: the rail frames the plan rather than
-  // hugging it.
-  test("the rail frames the plan on the same centre line", async ({ page, request }) => {
+  // One column per screen: the rail sits in the same container as the content
+  // it describes, so the two share an edge instead of floating apart.
+  test("the rail shares its column with the plan", async ({ page, request }) => {
     await openBuilder(page, request, "?session=plan-session");
     const rail = page.getByRole("navigation", { name: RAIL_LABEL });
     const planCard = page.getByRole("article", { name: PLAN_CARD });
@@ -218,10 +217,11 @@ test.describe("AI builder phase shell", () => {
       const planBox = await planCard.boundingBox();
       expect(railBox, `rail at ${width}px`).not.toBeNull();
       expect(planBox, `plan card at ${width}px`).not.toBeNull();
-      const railCentre = railBox!.x + railBox!.width / 2;
-      const planCentre = planBox!.x + planBox!.width / 2;
-      expect(Math.abs(railCentre - planCentre), `centre at ${width}px`).toBeLessThanOrEqual(2);
-      expect(railBox!.width, `rail wider than plan at ${width}px`).toBeGreaterThan(planBox!.width);
+      expect(Math.abs(railBox!.x - planBox!.x), `left edge at ${width}px`).toBeLessThanOrEqual(2);
+      expect(
+        Math.abs(railBox!.width - planBox!.width),
+        `column width at ${width}px`
+      ).toBeLessThanOrEqual(2);
     }
   });
 

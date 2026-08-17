@@ -403,6 +403,26 @@ export class FlowAIBuilderService {
     await this.#driver.removeAttachment(fileId);
   }
 
+  /** Whether the transcript replaces the phase screen. It lives here because
+   *  the button that opens it can sit outside the builder, in the page header. */
+  conversationOpen = $state(false);
+
+  toggleConversation(): void {
+    this.conversationOpen = !this.conversationOpen;
+  }
+
+  closeConversation(): void {
+    this.conversationOpen = false;
+  }
+
+  /** Messages worth counting on the Samtal button: the ones a reader sees. */
+  visibleMessageCount = $derived(
+    this.messages.filter(
+      (message) =>
+        message.content.trim().length > 0 || message.question || message.requirementsSummary
+    ).length
+  );
+
   clearError(): void {
     this.#driver.clearError();
   }

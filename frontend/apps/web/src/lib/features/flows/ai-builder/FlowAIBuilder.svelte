@@ -7,9 +7,6 @@
   import * as AlertDialog from "$lib/components/ui/alert-dialog/index.js";
   import { Button } from "$lib/components/ui/button/index.js";
   import { Skeleton } from "$lib/components/ui/skeleton/index.js";
-  import IconCheck from "@lucide/svelte/icons/check";
-  import IconAlertTriangle from "@lucide/svelte/icons/triangle-alert";
-  import IconMessageSquare from "@lucide/svelte/icons/message-square-text";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
   import BuilderPhaseRail, { type BuilderPhaseIndex } from "./BuilderPhaseRail.svelte";
   import BuilderTaskScreen from "./BuilderTaskScreen.svelte";
@@ -19,6 +16,7 @@
   import BuilderBuildScreen from "./BuilderBuildScreen.svelte";
   import BuilderTurnAlert from "./BuilderTurnAlert.svelte";
   import BuilderConversationScreen from "./BuilderConversationScreen.svelte";
+  import BuilderSessionStatus from "./BuilderSessionStatus.svelte";
   import BuilderReviewScreen from "./BuilderReviewScreen.svelte";
   import { getAIBuilderService } from "./FlowAIBuilderService.svelte.ts";
   import { summaryTerm } from "./aiBuilderSummaryText";
@@ -31,12 +29,19 @@
 
   interface Props {
     targetKind?: "create" | "edit";
+    /** The host shows the saved state and Samtal on its own title row. */
+    statusInPageHeader?: boolean;
     onapplied?: (detail: { flow_id: string; focusStepIndex: number | null }) => void;
     /** A draft chosen in the Flöden list; the page opens that session instead of a new one. */
     resumeSessionId?: string | null;
   }
 
-  let { targetKind = "edit", onapplied, resumeSessionId = null }: Props = $props();
+  let {
+    targetKind = "edit",
+    statusInPageHeader = false,
+    onapplied,
+    resumeSessionId = null
+  }: Props = $props();
 
   const service = getAIBuilderService();
   const {
@@ -45,7 +50,6 @@
 
   let taskScreenRef = $state<BuilderTaskScreen | undefined>();
   let conversationRef = $state<BuilderConversationScreen | undefined>();
-  let conversationOpen = $state(false);
   let pendingSavedFlowStepScope = $state<AIBuilderSavedFlowStepScope | null>(null);
   let showReplaceEditSessionDialog = $state(false);
   let resumeFailed = $state(false);
@@ -192,7 +196,7 @@
     (() => {
       // The transcript is a screen of its own; it replaces the phase screen
       // instead of covering it.
-      if (conversationOpen) return "conversation";
+      if (service.conversationOpen) return "conversation";
       if (viewingPhase === 2) return "review";
       if (viewingPhase === 1) return "build";
       // Changing an earlier answer happens on the confirmation, above the card
@@ -206,6 +210,22 @@
       return "reply";
     })()
   );
+
+  // One column per screen: the rail, the status row and the content sit in it,
+  // so nothing floats beside the card it belongs to.
+  const columnClass = $derived.by(() => {
+    switch (screen) {
+      case "review":
+        return "max-w-[53.75rem] 2xl:max-w-[62.5rem]";
+      case "task":
+        return "max-w-[40.625rem] 2xl:max-w-[45rem]";
+      case "question":
+      case "reply":
+        return "max-w-[41.25rem] 2xl:max-w-[45.625rem]";
+      default:
+        return "max-w-[43.75rem] 2xl:max-w-[48.125rem]";
+    }
+  });
 
   // ---- Screen change: announce it, then hand focus to the new heading -------
   // A screen swap is a navigation for anyone not watching the viewport, so it
@@ -279,11 +299,6 @@
       ?.focus({ preventScroll: true });
   }
 
-  // The server records the message before it works on it, so a recorded turn
-  // that failed is not lost — the turn alert below owns that case. Only a
-  // request that never got an answer leaves the draft genuinely uncertain.
-  const savingProblem = $derived(service.error?.code === "network");
-
   // ---- Error ownership ------------------------------------------------------
   // Once generation is visible, the plan surface keeps ownership of any
   // failure so the same error cannot flash on two surfaces.
@@ -333,7 +348,7 @@
   function handleEditAnswer(questionId: string) {
     editingQuestionId = questionId;
     peekPhase = 0;
-    conversationOpen = false;
+    service.closeConversation();
   }
 
   function handleRequirementsConfirm() {
@@ -358,13 +373,6 @@
     editingQuestionId = null;
     peekPhase = phase === phaseIndex ? null : phase;
   }
-
-  const visibleMessageCount = $derived(
-    service.messages.filter(
-      (message) =>
-        message.content.trim().length > 0 || message.question || message.requirementsSummary
-    ).length
-  );
 
   const otherDraftCount = $derived(
     service.recoverableCreateDrafts.filter(
@@ -497,65 +505,34 @@
          The header column is as wide as the review card and centred with it,
          so the rail starts on the same line as the plan the user reads most. -->
     <div class="bg-primary border-default sticky top-0 z-20 shrink-0 border-b px-7 max-sm:px-3">
-      <div class="mx-auto flex max-w-[63.75rem] items-center gap-3 pt-3 2xl:max-w-[75rem]">
-        {#if savingProblem}
-          <span
-            class="text-warning-stronger inline-flex items-center gap-1.5 text-xs font-semibold"
-            title={m.ai_builder_saved_state_problem_title()}
-            role="status"
-          >
-            <IconAlertTriangle class="size-3.5" aria-hidden="true" />
-            {m.ai_builder_saved_state_problem()}
-          </span>
-        {:else if service.hasSession && service.messages.length > 0}
-          <span
-            class="text-secondary inline-flex items-center gap-1.5 text-xs"
-            title={m.ai_builder_saved_state_title()}
-          >
-            <span
-              class="bg-positive-dimmer text-positive-stronger inline-flex size-[0.9375rem] items-center justify-center rounded-full"
-              aria-hidden="true"
-            >
-              <IconCheck class="size-2.5" strokeWidth={3.5} />
-            </span>
-            {m.ai_builder_saved_state_auto()}
-          </span>
-        {:else}
-          <span class="text-secondary text-xs">{m.ai_builder_saved_state_new()}</span>
-        {/if}
-        <div class="ml-auto flex items-center gap-2">
+      {#if !statusInPageHeader}
+        <!-- The status belongs on the title row; a host that has no room for it
+             there (the flow page's tab bar) keeps it above the rail. -->
+        <div class="mx-auto flex w-full items-center gap-3 pt-3 {columnClass}">
+          <BuilderSessionStatus />
           {#if canStartOver}
             <Button
               variant="ghost"
               size="sm"
+              class="ml-auto"
               onclick={handleStartOver}
               disabled={service.isCreating}
             >
               {m.ai_builder_start_fresh()}
             </Button>
           {/if}
-          <Button
-            variant="outline"
-            size="sm"
-            class="gap-1.5"
-            aria-pressed={conversationOpen}
-            aria-label={m.ai_builder_conversation_button_aria({
-              count: String(visibleMessageCount)
-            })}
-            title={m.ai_builder_conversation_button_title()}
-            onclick={() => (conversationOpen = !conversationOpen)}
-          >
-            <IconMessageSquare class="size-3.5" />
-            {m.ai_builder_conversation_button()}
-            <span
-              class="bg-tertiary text-secondary inline-flex h-[1.125rem] min-w-[1.125rem] items-center justify-center rounded-full px-1.5 text-[0.6875rem] font-bold"
-            >
-              {visibleMessageCount}
-            </span>
+        </div>
+      {:else if canStartOver}
+        <div class="mx-auto flex w-full justify-end pt-3 {columnClass}">
+          <Button variant="ghost" size="sm" onclick={handleStartOver} disabled={service.isCreating}>
+            {m.ai_builder_start_fresh()}
           </Button>
         </div>
-      </div>
-      <div class="mx-auto max-w-[63.75rem] py-3 2xl:max-w-[75rem]">
+      {/if}
+      <div
+        class="mx-auto w-full py-3 {columnClass}"
+        class:pt-3={statusInPageHeader && !canStartOver}
+      >
         <BuilderPhaseRail current={phaseIndex} viewing={viewingPhase} onselect={handleRailSelect} />
       </div>
     </div>
@@ -571,7 +548,7 @@
         <BuilderConversationScreen
           bind:this={conversationRef}
           oneditanswer={handleEditAnswer}
-          onclose={() => (conversationOpen = false)}
+          onclose={() => service.closeConversation()}
         />
       {:else if screen === "task"}
         <BuilderTaskScreen
@@ -621,7 +598,7 @@
           <BuilderReviewScreen
             showGenerationFailure={true}
             onapplied={(detail) => onapplied?.(detail)}
-            onshowconversation={() => (conversationOpen = true)}
+            onshowconversation={() => (service.conversationOpen = true)}
           />
         </div>
       {:else if screen === "build"}
@@ -636,7 +613,7 @@
           <BuilderReviewScreen
             showGenerationFailure={generationFailedWithoutPlan}
             onapplied={(detail) => onapplied?.(detail)}
-            onshowconversation={() => (conversationOpen = true)}
+            onshowconversation={() => (service.conversationOpen = true)}
           />
         </div>
       {:else}
