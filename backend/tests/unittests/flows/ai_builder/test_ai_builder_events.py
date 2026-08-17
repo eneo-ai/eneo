@@ -132,7 +132,9 @@ def test_requirements_summary_event_serializes_typed_payload() -> None:
     assert json.loads(event["data"]) == {
         "requirements_version": "a1" * 32,
         "summary": "Create a meeting report from audio.",
-        "key_decisions": [{"topic": "Input", "decision": "Meeting audio"}],
+        "key_decisions": [
+            {"topic": "Input", "decision": "Meeting audio", "is_derived": True}
+        ],
         "input_description": "One audio file per run.",
         "output_description": "DOCX meeting report.",
         "assumptions": [],

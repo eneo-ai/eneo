@@ -512,3 +512,32 @@ async def test_chained_confirmation_of_an_edit_session_ignores_named_result_admi
         event for event in result.events if event.event == "requirements_summary"
     )
     assert "top level" not in summary.data.summary
+
+
+@pytest.mark.asyncio
+async def test_a_question_is_numbered_by_the_ones_the_user_has_already_seen() -> None:
+    # "Another question" reads as an open-ended interview. The count is taken
+    # from the questions actually put to the user, and this one is not persisted
+    # yet, so it is the next number after them.
+    repo = AsyncMock()
+    repo.commit_turn.return_value = 5
+    conversation = [
+        ConversationMessage(role="user", content="Bygg ett flöde"),
+        ConversationMessage(
+            role="assistant",
+            content="Vad ska flödet ta emot?",
+            metadata={"question_id": "primary_runtime_input"},
+        ),
+        ConversationMessage(role="user", content="Dokument"),
+    ]
+
+    result = await dispatch_server_decision(
+        _request(
+            repo=repo,
+            decision=AskCanonicalQuestion(slot_name="post_processing_goal"),
+            conversation=conversation,
+        )
+    )
+
+    question = next(event for event in result.events if event.event == "question")
+    assert question.data.question_index == 2

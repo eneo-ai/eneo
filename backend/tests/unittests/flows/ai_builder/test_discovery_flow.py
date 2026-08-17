@@ -232,6 +232,92 @@ def test_question_recommends_eneos_own_reading_of_the_slot() -> None:
     assert recommended.value == "summarize_or_overview"
 
 
+def test_a_recommendation_read_from_the_user_quotes_them_back() -> None:
+    # A recommendation the user cannot weigh is a recommendation they have to
+    # take on trust. When Eneo's reading came from the user's own sentence, the
+    # question carries that sentence, so accepting it is an informed choice.
+    planning_state = PlanningState.empty()
+    planning_state.resolved_slots = {
+        "post_processing_goal": ResolvedSlot(
+            name="post_processing_goal",
+            value="summarize_or_overview",
+            source="model",
+            confidence="high",
+            evidence=["quote:user_message:user-1:en kort sammanfattning"],
+            evidence_level="explicit",
+        ),
+    }
+
+    followup = build_registry_question_followup(
+        "post_processing_goal",
+        [ConversationMessage(role="user", content="Summarize meeting notes")],
+        planning_state=planning_state,
+    )
+
+    assert followup is not None
+    assert followup.question_data.recommended_option_id is not None
+    assert followup.question_data.recommended_option_evidence == (
+        "en kort sammanfattning"
+    )
+
+
+def test_a_recommendation_read_from_an_attachment_is_not_put_in_the_users_mouth() -> (
+    None
+):
+    # An uploaded file is cited exactly like a message the user wrote. Showing
+    # its excerpt as the user's own words would misattribute the sentence the
+    # recommendation rests on.
+    planning_state = PlanningState.empty()
+    planning_state.resolved_slots = {
+        "post_processing_goal": ResolvedSlot(
+            name="post_processing_goal",
+            value="summarize_or_overview",
+            source="model",
+            confidence="high",
+            evidence=[
+                "quote:uploaded_file:0192a0f1-1111-7000-8000-000000000001:"
+                "Sammanfattning per ärende"
+            ],
+            evidence_level="explicit",
+        ),
+    }
+
+    followup = build_registry_question_followup(
+        "post_processing_goal",
+        [ConversationMessage(role="user", content="Summarize meeting notes")],
+        planning_state=planning_state,
+    )
+
+    assert followup is not None
+    assert followup.question_data.recommended_option_id is not None
+    assert followup.question_data.recommended_option_evidence is None
+
+
+def test_a_recommendation_nobody_said_out_loud_quotes_nothing() -> None:
+    # A heuristic reading is still worth offering, but there is no sentence
+    # behind it, and inventing one would dress a guess up as the user's words.
+    planning_state = PlanningState.empty()
+    planning_state.resolved_slots = {
+        "post_processing_goal": ResolvedSlot(
+            name="post_processing_goal",
+            value="summarize_or_overview",
+            source="heuristic",
+            confidence="medium",
+            evidence=["heuristic:role-aware freeform analysis"],
+        ),
+    }
+
+    followup = build_registry_question_followup(
+        "post_processing_goal",
+        [ConversationMessage(role="user", content="Summarize meeting notes")],
+        planning_state=planning_state,
+    )
+
+    assert followup is not None
+    assert followup.question_data.recommended_option_id is not None
+    assert followup.question_data.recommended_option_evidence is None
+
+
 def test_question_recommends_nothing_when_the_slot_is_unread() -> None:
     followup = build_registry_question_followup(
         "post_processing_goal",

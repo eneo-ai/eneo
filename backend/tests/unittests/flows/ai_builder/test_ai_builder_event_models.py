@@ -165,3 +165,77 @@ def test_a_recommendation_must_name_an_option_the_user_was_offered() -> None:
     )
     with pytest.raises(ValidationError):
         StructuredQuestionPayload.model_validate(_question("csv_document"))
+
+
+def test_evidence_without_a_recommendation_is_not_a_payload() -> None:
+    """A quote is the reason for a recommendation, so it cannot stand alone."""
+
+    with pytest.raises(ValidationError):
+        StructuredQuestionPayload.model_validate(
+            {
+                **_question(None),
+                "recommended_option_evidence": "en kort sammanfattning",
+            }
+        )
+
+
+def test_a_question_persisted_before_the_number_existed_still_loads() -> None:
+    # The pending question is replayed from persisted tool arguments to settle
+    # a delegated answer. A number the old record cannot carry must not make
+    # that payload unreadable.
+    payload = StructuredQuestionPayload.model_validate(_question("pdf_document"))
+
+    assert payload.question_index is None
+    assert payload.recommended_option_evidence is None
+
+
+def test_a_decision_makes_one_claim_about_where_it_came_from() -> None:
+    """Provenance is one fact; two fields that can disagree are not one fact."""
+
+    answered = KeyDecisionPayload.model_validate(
+        {
+            "topic": "Slutresultat",
+            "decision": "PDF-dokument",
+            "question_id": "terminal_output",
+            "is_derived": False,
+        }
+    )
+    assert (answered.question_id, answered.is_derived) == ("terminal_output", False)
+
+    derived = KeyDecisionPayload.model_validate(
+        {"topic": "Planerad bearbetning", "decision": "dokument till PDF"}
+    )
+    assert (derived.question_id, derived.is_derived) == (None, True)
+
+    with pytest.raises(ValidationError):
+        KeyDecisionPayload.model_validate(
+            {
+                "topic": "Slutresultat",
+                "decision": "PDF-dokument",
+                "question_id": "terminal_output",
+                "is_derived": True,
+            }
+        )
+    with pytest.raises(ValidationError):
+        KeyDecisionPayload.model_validate(
+            {
+                "topic": "Slutresultat",
+                "decision": "PDF-dokument",
+                "is_derived": False,
+            }
+        )
+
+
+def test_a_decision_cannot_point_at_a_question_that_cannot_be_asked() -> None:
+    # Naming a question is an offer to go back to it. A name outside the
+    # requirement vocabulary is a link to nowhere, which reads as a change the
+    # user can make and is not.
+    with pytest.raises(ValidationError):
+        KeyDecisionPayload.model_validate(
+            {
+                "topic": "Slutresultat",
+                "decision": "PDF-dokument",
+                "question_id": "not-a-question",
+                "is_derived": False,
+            }
+        )

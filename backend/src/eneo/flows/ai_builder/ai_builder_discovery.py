@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from typing import Final
 
 from eneo.flows.ai_builder.ai_builder_aggregation_intent import (
@@ -125,6 +125,7 @@ from eneo.flows.ai_builder.ai_builder_signal_confidence import (
 from eneo.flows.ai_builder.ai_builder_slot_classification_contract import (
     UNKNOWN_SLOT_VALUE,
     SlotClassificationResult,
+    first_user_owned_quoted_text,
 )
 from eneo.flows.ai_builder.planning_state import PlanningState
 from eneo.flows.domain.flow import Flow
@@ -786,10 +787,18 @@ def build_registry_question_followup(
     )
 
 
-def recommended_option_id_for_suggestion(
+@dataclass(frozen=True, slots=True)
+class RecommendedOption:
+    """The option Eneo would choose, with the words it read behind it."""
+
+    option_id: str
+    evidence: str | None = None
+
+
+def recommended_option_for_suggestion(
     suggestion: DiscoveryQuestionSuggestion,
     planning_state: PlanningState | None,
-) -> str | None:
+) -> RecommendedOption | None:
     """The offered option holding Eneo's current reading of this slot.
 
     The planning state already carries a candidate for slots the Builder has
@@ -797,6 +806,11 @@ def recommended_option_id_for_suggestion(
     question by itself — that is why the question exists — so naming it here
     is what lets the user hand this one decision back, and keeps a single
     owner for what Eneo would choose.
+
+    The reading travels with the words it was read from when the user supplied
+    them, and with nothing when a policy default, a heuristic or an attachment
+    did, so a user weighing the recommendation can see whether their own
+    sentence is behind it.
     """
     if planning_state is None:
         return None
@@ -808,7 +822,10 @@ def recommended_option_id_for_suggestion(
     named = [option for option in suggestion.options if option.value == slot.value]
     if len(named) != 1:
         return None
-    return named[0].id
+    return RecommendedOption(
+        option_id=named[0].id,
+        evidence=first_user_owned_quoted_text(slot.evidence),
+    )
 
 
 def _structured_question_payload_from_suggestion(
@@ -816,6 +833,7 @@ def _structured_question_payload_from_suggestion(
     *,
     planning_state: PlanningState | None,
 ) -> StructuredQuestionPayload:
+    recommended = recommended_option_for_suggestion(suggestion, planning_state)
     return StructuredQuestionPayload(
         question_id=suggestion.question_id,
         question=suggestion.question,
@@ -830,8 +848,11 @@ def _structured_question_payload_from_suggestion(
         ],
         selection_mode=suggestion.selection_mode,
         allow_custom=suggestion.allow_custom,
-        recommended_option_id=recommended_option_id_for_suggestion(
-            suggestion, planning_state
+        recommended_option_id=(
+            recommended.option_id if recommended is not None else None
+        ),
+        recommended_option_evidence=(
+            recommended.evidence if recommended is not None else None
         ),
     )
 

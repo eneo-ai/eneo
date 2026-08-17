@@ -3105,21 +3105,62 @@ def test_parser_fails_the_attempt_for_a_malformed_present_delta() -> None:
     assert result is None
 
 
-def test_quoted_text_from_planning_reference_strips_compound_source_ids() -> None:
+@pytest.mark.parametrize(
+    "source_id",
+    [
+        "user_message:019fd7c0-8030-7712-b7b6-f2e3cc2ad814",
+        "structured_answer:019fd7c0-8030-7712-b7b6-f2e3cc2ad814:2",
+        "uploaded_file:0192a0f1-1111-7000-8000-000000000001",
+    ],
+)
+def test_every_source_kind_decodes_back_to_the_quote_alone(source_id: str) -> None:
     # Live 2026-08-06: a critic remediation quoted "user_message:<uuid>:..."
-    # back to the user because the encoding had no decoder beside it.
+    # back to the user because the encoding had no decoder beside it. The first
+    # decoder only knew one id shape, so the structured-answer and uploaded-file
+    # kinds still leaked their identity into the quote.
     from eneo.flows.ai_builder.ai_builder_slot_classification_contract import (
         ClassifiedEvidence,
         quoted_text_from_planning_reference,
     )
 
+    quote = "fyller i område, beräknad klartid och kontaktväg"
     reference = ClassifiedEvidence(
-        source_id="user_message:019fd7c0-8030-7712-b7b6-f2e3cc2ad814",
-        quote="fyller i område, beräknad klartid och kontaktväg",
+        source_id=source_id, quote=quote
     ).planning_reference()
 
-    assert (
-        quoted_text_from_planning_reference(reference)
-        == "fyller i område, beräknad klartid och kontaktväg"
+    assert quoted_text_from_planning_reference(reference) == quote
+
+
+def test_a_reference_that_is_not_a_quote_decodes_to_nothing() -> None:
+    from eneo.flows.ai_builder.ai_builder_slot_classification_contract import (
+        quoted_text_from_planning_reference,
     )
+
     assert quoted_text_from_planning_reference("model:slot:abc123") is None
+    assert quoted_text_from_planning_reference("quote:no_such_kind:x:y") is None
+    assert quoted_text_from_planning_reference("quote:user_message:only-an-id") is None
+
+
+def test_only_the_users_own_sources_yield_words_to_quote_back() -> None:
+    # Slot evidence does not restrict the source kind, so a slot can rest on an
+    # attachment excerpt. A caller quoting the user must not read that as
+    # something they said.
+    from eneo.flows.ai_builder.ai_builder_slot_classification_contract import (
+        ClassifiedEvidence,
+        first_user_owned_quoted_text,
+    )
+
+    attachment = ClassifiedEvidence(
+        source_id="uploaded_file:0192a0f1-1111-7000-8000-000000000001",
+        quote="Samlad bedömning",
+    ).planning_reference()
+    written = ClassifiedEvidence(
+        source_id="user_message:019fd7c0-8030-7712-b7b6-f2e3cc2ad814",
+        quote="en kort sammanfattning",
+    ).planning_reference()
+
+    assert first_user_owned_quoted_text([attachment]) is None
+    assert first_user_owned_quoted_text([attachment, written]) == (
+        "en kort sammanfattning"
+    )
+    assert first_user_owned_quoted_text([]) is None

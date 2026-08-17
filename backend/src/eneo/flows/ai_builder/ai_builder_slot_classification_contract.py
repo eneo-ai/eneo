@@ -6,7 +6,7 @@ import json
 import unicodedata
 from collections.abc import Collection, Iterable, Mapping, Sequence
 from dataclasses import dataclass
-from typing import Any, Literal, cast, get_args
+from typing import Any, Literal, assert_never, cast, get_args
 from uuid import UUID
 
 from pydantic import ValidationError
@@ -46,6 +46,9 @@ SlotClassificationSourceKind = Literal[
 ]
 _USER_OWNED_CLASSIFICATION_SOURCE_KINDS: frozenset[SlotClassificationSourceKind] = (
     frozenset({"user_message", "structured_answer"})
+)
+_CLASSIFICATION_SOURCE_KINDS: frozenset[str] = frozenset(
+    get_args(SlotClassificationSourceKind)
 )
 _FIELD_STRUCTURAL_BOUNDARIES = frozenset(
     {"$", "@", "#", "/", "\\", ":", "[", "]", "{", "}", "."}
@@ -106,41 +109,95 @@ def planning_reference_cites_source(reference: str, *, source_id: str) -> bool:
     return reference.startswith(f"quote:{source_id}:")
 
 
-def quoted_texts_from_planning_references(references: Sequence[str]) -> list[str]:
-    """Return every user quote carried by persisted evidence references."""
+def user_owned_quoted_text_from_planning_reference(reference: str) -> str | None:
+    """The user's own words from a reference, or nothing if they are not theirs.
+
+    An attachment excerpt is cited exactly like a sentence the user wrote, so
+    only the source kind separates them. A caller quoting words back to the
+    person who wrote them needs that distinction; the rest of the decoding is
+    identical, so both readers live here.
+    """
+
+    kind = _source_kind_of_planning_reference(reference)
+    if kind is None or kind not in _USER_OWNED_CLASSIFICATION_SOURCE_KINDS:
+        return None
+    return quoted_text_from_planning_reference(reference)
+
+
+def user_owned_quoted_texts_from_planning_references(
+    references: Sequence[str],
+) -> list[str]:
+    """Every quote among these references that the user themselves supplied.
+
+    There is deliberately no reader that returns every quote regardless of
+    source: the callers that quote evidence back are addressing the person who
+    wrote it, and an attachment excerpt read out as their own words is a
+    misattribution rather than a stylistic slip.
+    """
 
     return [
         text
         for reference in references
-        for text in [quoted_text_from_planning_reference(reference)]
+        for text in [user_owned_quoted_text_from_planning_reference(reference)]
         if text is not None
     ]
 
 
+def first_user_owned_quoted_text(references: Sequence[str]) -> str | None:
+    """The first quote among these references that the user supplied."""
+
+    return next(
+        iter(user_owned_quoted_texts_from_planning_references(references)), None
+    )
+
+
 def quoted_text_from_planning_reference(reference: str) -> str | None:
-    """Return the user's words from a persisted evidence reference.
+    """Return the cited words from a persisted evidence reference.
 
     The decoder lives beside `ClassifiedEvidence.planning_reference` so the
-    encoding has one owner: source ids carry their own colons, so a naive
-    prefix strip leaks internal ids into user-facing remediation text
-    (observed live 2026-08-06).
+    encoding has one owner. A source id is `<kind>:<identity>` and the identity
+    is not one segment for every kind, so the boundary is read from the kind
+    rather than guessed: guessing leaked internal ids into user-facing
+    remediation text (observed live 2026-08-06), and a hand-kept list of
+    "compound" kinds drifted away from the kinds that actually exist.
     """
 
-    if not reference.startswith("quote:"):
+    kind = _source_kind_of_planning_reference(reference)
+    if kind is None:
         return None
-    body = reference.removeprefix("quote:")
-    source_id, separator, quote = body.partition(":")
-    if source_id in _COMPOUND_EVIDENCE_SOURCE_KINDS:
-        _, _, remainder = quote.partition(":")
-        quote = remainder or quote
-    text = quote.strip() if separator else ""
+    remainder = reference.removeprefix("quote:").partition(":")[2]
+    for _ in range(_source_identity_segment_count(kind)):
+        _, separator, remainder = remainder.partition(":")
+        if not separator:
+            return None
+    text = remainder.strip()
     return text or None
 
 
-# Source kinds whose ids embed a second colon (`user_message:<message_id>`).
-_COMPOUND_EVIDENCE_SOURCE_KINDS = frozenset(
-    {"user_message", "assistant_message", "answer", "attachment", "file"}
-)
+def _source_kind_of_planning_reference(
+    reference: str,
+) -> SlotClassificationSourceKind | None:
+    if not reference.startswith("quote:"):
+        return None
+    kind, separator, _ = reference.removeprefix("quote:").partition(":")
+    if not separator or kind not in _CLASSIFICATION_SOURCE_KINDS:
+        return None
+    return cast(SlotClassificationSourceKind, kind)
+
+
+def _source_identity_segment_count(kind: SlotClassificationSourceKind) -> int:
+    """How many colon-separated segments this kind's identity spends.
+
+    Exhaustive on the kind, so adding a source kind fails type checking here
+    instead of silently mis-splitting its quotes.
+    """
+
+    match kind:
+        case "user_message" | "uploaded_file":
+            return 1
+        case "structured_answer":
+            return 2
+    assert_never(kind)
 
 
 @dataclass(frozen=True, slots=True)

@@ -5462,3 +5462,83 @@ def test_sectioned_form_intake_reports_one_missing_form_fields_issue() -> None:
     ]
 
     assert issue_ids == ["sectioned_form_intake_requires_form_fields"]
+
+
+def _runtime_metadata_edit_context(*, evidence: list[str]) -> "CriticContext":
+    from eneo.flows.ai_builder.ai_builder_critic_invariants import CriticContext
+    from eneo.flows.ai_builder.ai_builder_framework_policy import (
+        OutputIntentResolution,
+    )
+    from eneo.flows.ai_builder.planning_state import ResolvedSlot
+
+    return CriticContext(
+        spec=FlowDraftSpecCore(
+            flow_name="Dokumentanalys",
+            steps=[
+                _step(
+                    "step_a",
+                    "Analysera dokument",
+                    "Sammanfatta ärendet.",
+                    input_type=InputType.DOCUMENT,
+                )
+            ],
+        ),
+        flow=_edit_flow(),
+        answer_signals={"runtime_metadata_fields": {"basic_runtime_metadata"}},
+        text="",
+        sectioned_form_intake=False,
+        runtime_form_fields_requested=False,
+        runtime_form_fields_evidence=(),
+        simple_text_transform=False,
+        output_intent=OutputIntentResolution(terminal_output=None),
+        mixed_audio_doc_input=False,
+        resolved_slots={
+            "runtime_metadata_fields": ResolvedSlot(
+                name="runtime_metadata_fields",
+                value="basic_runtime_metadata",
+                source="model",
+                confidence="high",
+                evidence=evidence,
+                evidence_level="explicit",
+            )
+        },
+    )
+
+
+def _runtime_metadata_remediation(context: "CriticContext") -> str:
+    return next(
+        issue.remediation
+        for issue in evaluate_critic_invariants(context)
+        if issue.id == "runtime_metadata_requires_form_fields"
+    )
+
+
+def test_the_repair_quotes_the_user_when_the_user_asked_for_the_fields() -> None:
+    remediation = _runtime_metadata_remediation(
+        _runtime_metadata_edit_context(
+            evidence=[
+                "quote:user_message:019fd7c0-8030-7712-b7b6-f2e3cc2ad814:"
+                "fyller i område och kontaktväg"
+            ]
+        )
+    )
+
+    assert "Användarens ord" in remediation
+    assert "fyller i område och kontaktväg" in remediation
+
+
+def test_an_attachment_excerpt_is_never_repeated_as_the_users_own_words() -> None:
+    # A slot can rest on an uploaded file, cited exactly like a message. The
+    # repair used to introduce whatever it found with "Användarens ord", which
+    # attributes a document's wording to the person reading it.
+    remediation = _runtime_metadata_remediation(
+        _runtime_metadata_edit_context(
+            evidence=[
+                "quote:uploaded_file:0192a0f1-1111-7000-8000-000000000001:"
+                "Blankett för felanmälan"
+            ]
+        )
+    )
+
+    assert "Användarens ord" not in remediation
+    assert "Blankett för felanmälan" not in remediation

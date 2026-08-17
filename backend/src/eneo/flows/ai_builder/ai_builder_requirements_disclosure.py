@@ -32,6 +32,7 @@ from eneo.flows.ai_builder.ai_builder_attachment_context import (
 )
 from eneo.flows.ai_builder.ai_builder_event_models import (
     KeyDecisionPayload,
+    NamedContentFieldPayload,
     RequirementsDisclosureContent,
     RequirementsSummaryPayload,
     ResolvedRequirementPayload,
@@ -125,7 +126,35 @@ def build_requirements_disclosure(
     return RequirementsSummaryPayload(
         **display.model_dump(),
         requirements_version=build_requirements_version(identity),
+        named_content_fields=_named_content_fields(
+            session_state,
+            locale,
+            render_value=render_ai_builder_evidence_value,
+        ),
     )
+
+
+def _named_content_fields(
+    session_state: PlanningState,
+    locale: Locale,
+    *,
+    render_value: RenderEvidenceValue,
+) -> list[NamedContentFieldPayload]:
+    """The obligations the summary sentence names, as items rather than prose.
+
+    Order and membership follow `_named_result_summary_line` exactly, weak
+    names included: a reader who compares the list with the sentence must not
+    find a name in one and not the other. Only the display rendering exists
+    here, because this projection is outside the hashed disclosure content.
+    """
+
+    return [
+        NamedContentFieldPayload(
+            id=obligation.name,
+            label=_named_result_text(obligation, locale, render_value=render_value),
+        )
+        for obligation in session_state.named_result_evidence
+    ]
 
 
 def _disclosure_content(
@@ -145,6 +174,8 @@ def _disclosure_content(
                 resolved[slot_name].value,
                 locale,
             ),
+            question_id=_settling_question_id(slot_name, resolved[slot_name]),
+            is_derived=resolved[slot_name].source != "structured_answer",
         )
         for slot_name in sorted(resolved)
         if _slot_is_key_decision(resolved[slot_name])
@@ -821,6 +852,21 @@ def _no_inference_assumption(
     return (
         f"No JSON shape was inferred from the example output because {rendered_reason}."
     )
+
+
+def _settling_question_id(slot_name: str, slot: ResolvedSlot) -> str | None:
+    """The question a reader can be sent back to for this decision.
+
+    A structured answer is the only slot provenance that came from a question,
+    and slots are keyed by the canonical question id, so the catalog decides
+    whether that question can be put again. A slot the catalog does not hold
+    would be a link to nowhere, and the mixed-material phrasing settles the
+    same canonical question, so the canonical id is what travels.
+    """
+
+    if slot.source != "structured_answer" or slot_name not in QUESTION_CATALOG:
+        return None
+    return slot_name
 
 
 def _slot_is_key_decision(slot: ResolvedSlot) -> bool:

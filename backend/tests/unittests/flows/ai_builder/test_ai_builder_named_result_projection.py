@@ -1224,3 +1224,60 @@ def test_the_postcondition_reports_the_path_it_lost_not_just_the_name() -> None:
         "named_result_obligation_dropped"
     )
     assert failure.value.log_context["field_names"] == "assessment.risks"
+
+
+def test_the_named_content_the_summary_states_is_also_readable_as_items() -> None:
+    # The names reached the client only inside a Swedish sentence, so a reader
+    # had to parse prose to list them. The list is the same names, in the same
+    # order, said the same way — a second source of truth would let list and
+    # sentence disagree about what the result must carry.
+    state = _state(MEETING_ACTION_OBLIGATIONS, primary_runtime_input="audio")
+
+    disclosure = build_requirements_disclosure(state, ui_language="sv")
+
+    assert [field.id for field in disclosure.named_content_fields] == [
+        name for name, _ in MEETING_ACTION_OBLIGATIONS
+    ]
+    assert disclosure.named_content_fields[0].label == (
+        "agenda_items (användaren skrev en lista)"
+    )
+    for field in disclosure.named_content_fields:
+        assert field.label in disclosure.summary
+
+
+def test_naming_no_content_leaves_the_item_list_empty() -> None:
+    state = _state(primary_runtime_input="audio")
+
+    disclosure = build_requirements_disclosure(state, ui_language="sv")
+
+    assert disclosure.named_content_fields == []
+    assert "namngett innehåll" not in disclosure.summary
+
+
+@pytest.mark.parametrize(
+    "changed",
+    [
+        pytest.param((("agenda_items", "array"), ("beslut", None)), id="renamed"),
+        pytest.param((("agenda_items", "object"), ("decisions", None)), id="reshaped"),
+    ],
+)
+def test_naming_content_differently_is_a_different_disclosure(
+    changed: tuple[tuple[str, NamedResultDeclaredShape | None], ...],
+) -> None:
+    # The names and the shapes the user wrote next to them reach the version
+    # through the summary prose, so a user who confirmed one set of obligations
+    # has not confirmed another. That is also why the item list does not need
+    # its own place in the hash: it projects facts already inside it.
+    baseline = _state(
+        (("agenda_items", "array"), ("decisions", None)),
+        primary_runtime_input="audio",
+    )
+    other = _state(changed, primary_runtime_input="audio")
+
+    first = build_requirements_disclosure(baseline, ui_language="sv")
+    second = build_requirements_disclosure(other, ui_language="sv")
+
+    assert first.requirements_version != second.requirements_version
+    assert [field.label for field in first.named_content_fields] != [
+        field.label for field in second.named_content_fields
+    ]

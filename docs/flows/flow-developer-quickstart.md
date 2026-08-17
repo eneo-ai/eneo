@@ -300,6 +300,34 @@ Important builder rules:
   requirements summary like any other, and is never asked again. Delegating a
   closed question, a different question, or a question that recommends nothing
   is refused; there is no session-wide automatic mode.
+- `recommended_option_evidence` carries the words the recommendation was read
+  from, and only when the user wrote them: a classifier quote from a message or
+  a structured answer, decoded by the evidence codec that owns the encoding. A
+  reading taken from an attachment, a policy default or a heuristic carries no
+  quote, because presenting one of those as the user's own sentence would
+  misattribute the reason for the recommendation.
+- A question carries `question_index`, its place among the questions the
+  session has actually put to the user; a re-asked question keeps its number.
+  There is deliberately no total. Architecture questions, the budget-exempt
+  quality candidates, and the schema-direction and runtime-field questions are
+  each decided outside the per-turn ask queue, so no owner holds the length of
+  the interview. Do not synthesize one from the question budget or from the ask
+  queue: both undercount, and a wrong total claims a last question that another
+  turn then follows.
+- Key decisions in the requirements summary say where they came from, as one
+  fact enforced by the payload: `is_derived` is false exactly when
+  `question_id` names the canonical question the user answered, so a client can
+  offer to change that one. Everything else — flow defaults, classifier
+  readings, the committed architecture, checkpoint intents — is derived and
+  names no question.
+- `named_content_fields` lists the content obligations the summary prose
+  already states, as `{id, label}` items in the same order. `id` is the stored
+  obligation name, not a promise that a field by that name reaches the compiled
+  result. It is read-only: obligations are admitted from cited user evidence,
+  and there is no contract for adding or removing one from the summary. The
+  list stays outside `RequirementsDisclosureContent`, so it does not enter the
+  version hash — the prose already carries those names and shapes into
+  identity.
 - Prefer one bounded, typed understanding pass per Builder turn when model
   interpretation is needed. Split it only for a measured context-window limit;
   do not scatter semantic ownership across phrase scans.

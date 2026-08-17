@@ -24,12 +24,16 @@ from eneo.flows.ai_builder.ai_builder_error_contract import (
 from eneo.flows.ai_builder.ai_builder_event_models import (
     AIBuilderStatus,
     AIBuilderStreamEvent,
+    StructuredQuestionPayload,
 )
 from eneo.flows.ai_builder.ai_builder_events import (
     build_requirements_summary_event,
     build_status_event,
 )
 from eneo.flows.ai_builder.ai_builder_proposal_telemetry import ProposalTurnTelemetry
+from eneo.flows.ai_builder.ai_builder_question_state import (
+    question_ordinal_in_session,
+)
 from eneo.flows.ai_builder.ai_builder_requirements_disclosure import (
     build_requirements_disclosure,
 )
@@ -158,6 +162,14 @@ async def _dispatch_question(
         flow=request.flow,
         planning_state=request.planning_state,
     )
+    if followup is not None:
+        followup = replace(
+            followup,
+            question_data=_numbered_question(
+                followup.question_data,
+                conversation=request.conversation,
+            ),
+        )
 
     telemetry = _server_turn_telemetry(
         request,
@@ -206,6 +218,30 @@ async def _dispatch_question(
             ),
         ),
         new_planning_state_version=request.turn.base_planning_state_version,
+    )
+
+
+def _numbered_question(
+    payload: StructuredQuestionPayload,
+    *,
+    conversation: list[ConversationMessage],
+) -> StructuredQuestionPayload:
+    """Number this question the way the user will read it.
+
+    Dispatch is where every question kind meets, whichever owner wrote it, so
+    the number is stamped once here rather than in each of them. The payload's
+    own id is what counts, because it is the id persistence stamps on the
+    assistant message, and therefore the id the next turn counts. The question
+    is not persisted yet, so the conversation holds exactly the ones already
+    asked.
+    """
+
+    return payload.model_copy(
+        update={
+            "question_index": question_ordinal_in_session(
+                conversation, question_id=payload.question_id
+            )
+        }
     )
 
 

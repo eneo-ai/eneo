@@ -69,6 +69,7 @@ from eneo.flows.ai_builder.planning_state_builder import (
     build_planning_state_from_conversation,
     merge_llm_resolved_slots,
 )
+from eneo.flows.ai_builder.question_catalog import render_summary_label
 
 _EXAMPLE_FILE = UUID("00000000-0000-0000-0000-0000000000e1")
 
@@ -985,3 +986,65 @@ def test_the_confirmation_turns_own_reading_does_not_replace_what_it_confirms() 
         build_requirements_disclosure(rebuilt, ui_language="sv").requirements_version
         == disclosed.requirements_version
     )
+
+
+def test_an_answered_decision_names_the_question_that_settled_it() -> None:
+    # The summary rendered every decision the same way, so a reader could not
+    # tell an answer from a reading, and had nothing to change a wrong one
+    # against. Provenance is on the slot; the disclosure stops discarding it.
+    state = _document_state()
+
+    disclosure = build_requirements_disclosure(state, ui_language="sv")
+
+    answered = {
+        decision.question_id
+        for decision in disclosure.key_decisions
+        if not decision.is_derived
+    }
+    assert "terminal_output" in answered
+    assert "primary_runtime_input" in answered
+    assert all(
+        decision.question_id is not None
+        for decision in disclosure.key_decisions
+        if not decision.is_derived
+    )
+
+
+def test_a_decision_the_builder_read_is_derived_and_names_no_question() -> None:
+    # A high-confidence explicit classification is presented as a key decision,
+    # but the user never answered it. Offering a question to change would point
+    # at a question they were never asked.
+    state = _document_state()
+    state.resolved_slots["report_disposition"] = _report_disposition_slot(
+        source="model",
+        confidence="high",
+        evidence_level="explicit",
+    )
+
+    disclosure = build_requirements_disclosure(state, ui_language="sv")
+
+    read = [
+        decision
+        for decision in disclosure.key_decisions
+        if decision.topic == render_summary_label("report_disposition", "sv")
+    ]
+    assert len(read) == 1
+    assert read[0].is_derived is True
+    assert read[0].question_id is None
+
+
+def test_the_committed_architecture_is_a_derived_decision() -> None:
+    # The chain follows from the answers; nobody was asked to approve it as a
+    # question, and there is no question to send a reader back to.
+    state = _document_state()
+
+    disclosure = build_requirements_disclosure(state, ui_language="sv")
+
+    architecture = [
+        decision
+        for decision in disclosure.key_decisions
+        if decision.topic == "Planerad bearbetning"
+    ]
+    assert len(architecture) == 1
+    assert architecture[0].is_derived is True
+    assert architecture[0].question_id is None

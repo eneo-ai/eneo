@@ -65,7 +65,7 @@ from eneo.flows.ai_builder.ai_builder_result_contract import (
     resolve_result_output_field_roles,
 )
 from eneo.flows.ai_builder.ai_builder_slot_classification_contract import (
-    quoted_texts_from_planning_references,
+    user_owned_quoted_texts_from_planning_references,
 )
 from eneo.flows.ai_builder.ai_builder_source_reader_contracts import (
     source_capture_field_satisfied,
@@ -385,7 +385,7 @@ def _runtime_metadata_requires_form_fields_remediation(
     # fields" message (2026-08-06). Either source of the request carries the
     # user's own wording, so quote whichever one spoke.
     slot = context.resolved_slots.get("runtime_metadata_fields")
-    quotes = quoted_texts_from_planning_references(
+    quotes = user_owned_quoted_texts_from_planning_references(
         list(slot.evidence if slot is not None else [])
         + list(context.runtime_form_fields_evidence)
     )

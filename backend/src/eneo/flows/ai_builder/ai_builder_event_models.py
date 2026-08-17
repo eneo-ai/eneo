@@ -53,10 +53,31 @@ class StructuredQuestionPayload(BaseModel):
     # choice can hand this one question back. It settles nothing on its own;
     # naming it here is what makes the answer the option they were shown.
     recommended_option_id: str | None = None
+    # The user's own words behind that reading: the quote the classifier cited
+    # for the slot, verbatim from a message the user wrote or an option they
+    # selected. Null when the reading rests on something else — a policy
+    # default, a heuristic, or attachment structure — so a recommendation is
+    # never dressed up as something the user said.
+    recommended_option_evidence: str | None = None
+    # Where this question sits in the sequence the user is walking through:
+    # the server's own count of the questions this session has put to them,
+    # counting this one. A re-asked question keeps its number.
+    #
+    # There is deliberately no companion total. Architecture questions, the
+    # budget-exempt quality questions, and the schema-direction and
+    # runtime-field questions are each decided outside the per-turn ask queue,
+    # so no owner holds the length of the whole interview, and a total taken
+    # from the queue alone can undercount and claim the last question before
+    # another one arrives.
+    question_index: int | None = Field(default=None, ge=1)
 
     @model_validator(mode="after")
     def _recommendation_names_one_option(self) -> "StructuredQuestionPayload":
         if self.recommended_option_id is None:
+            if self.recommended_option_evidence is not None:
+                raise ValueError(
+                    "recommended_option_evidence requires a recommended option"
+                )
             return self
         named = [
             option for option in self.options if option.id == self.recommended_option_id
@@ -79,11 +100,61 @@ class AIBuilderStatusEventData(BaseModel):
 class KeyDecisionPayload(BaseModel):
     topic: str
     decision: str
+    # The structured question that settles this decision, so a reader can be
+    # sent back to the exact question instead of guessing which one moved.
+    # Present only when the user answered a question the catalog can ask
+    # again; None for everything the Builder derived.
+    question_id: str | None = None
+    # Whether this decision follows from what the user said rather than being
+    # answered. Derived is the default: a record that does not say cannot
+    # prove the user answered, and presenting it as answered invites trust the
+    # record does not carry.
+    is_derived: bool = True
+
+    @model_validator(mode="after")
+    def _provenance_is_one_claim(self) -> "KeyDecisionPayload":
+        # Two fields, one fact. Naming a question the user answered while
+        # calling the decision derived — or either half alone — would leave a
+        # client to guess which half to believe.
+        if self.is_derived != (self.question_id is None):
+            raise ValueError(
+                "a decision names the question it was answered with exactly "
+                "when it is not derived"
+            )
+        if self.question_id is not None and (
+            self.question_id not in KNOWN_REQUIREMENT_SLOT_NAMES
+        ):
+            # The point of naming a question is that the reader can be sent
+            # back to it. A name the vocabulary does not hold is a link to
+            # nowhere, which is worse than saying nothing.
+            raise ValueError("question_id must name a known requirement question")
+        return self
 
 
 class ResolvedRequirementPayload(BaseModel):
     requirement_id: str
     selected_value: str
+
+
+def _named_content_fields_are_empty(
+    value: list["NamedContentFieldPayload"],
+) -> bool:
+    return not value
+
+
+class NamedContentFieldPayload(BaseModel):
+    """One content obligation the user named, as an item rather than prose.
+
+    `id` is the obligation name as the user wrote it and as planning state
+    stores it. It is not a promise that a field by that name reaches the
+    compiled result: whether an obligation is projected at all depends on the
+    output mode, the presence of a declared schema, and the confidence the name
+    was admitted with. `label` is what the summary sentence says about the same
+    obligation, rendered by the same owner, so list and prose cannot disagree.
+    """
+
+    id: str
+    label: str
 
 
 def _resolved_requirements_are_empty(
@@ -155,6 +226,19 @@ class RequirementsSummaryPayload(RequirementsDisclosureContent):
     # Required, because a summary the client cannot name is a summary the user
     # cannot confirm: the confirmation request carries this exact version back.
     requirements_version: str = Field(pattern=r"^[0-9a-f]{64}$")
+    # The content obligations the user named, as items beside the sentence
+    # that already states them. Read-only: naming content is admitted from
+    # cited user evidence, and adding or removing an obligation has no
+    # contract yet, so this list is for reading and not an edit surface.
+    #
+    # It deliberately sits outside `RequirementsDisclosureContent`, so it does
+    # not enter the version hash. The same names already reach identity
+    # through the summary prose; hashing them again would make a projection of
+    # one fact look like a second fact the user attested to.
+    named_content_fields: list[NamedContentFieldPayload] = Field(
+        default_factory=list[NamedContentFieldPayload],
+        exclude_if=_named_content_fields_are_empty,
+    )
 
 
 class AIBuilderPlanEventData(BaseModel):
@@ -264,6 +348,7 @@ AI_BUILDER_SCHEMA_HOIST_MODELS: tuple[type[BaseModel], ...] = (
     StructuredQuestionPayload,
     KeyDecisionPayload,
     ResolvedRequirementPayload,
+    NamedContentFieldPayload,
     RequirementsSummaryPayload,
     AIBuilderPlanEventData,
     SessionTelemetrySummary,
@@ -296,6 +381,7 @@ __all__ = [
     "AIBuilderTextEvent",
     "AIBuilderUsageEvent",
     "KeyDecisionPayload",
+    "NamedContentFieldPayload",
     "ResolvedRequirementPayload",
     "RequirementsSummaryPayload",
     "SSE_EVENT_DONE",

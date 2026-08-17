@@ -165,6 +165,31 @@ def last_answered_question(
     return last_question_id, latest_answer
 
 
+def question_ordinal_in_session(
+    conversation: Sequence[ConversationMessage | Mapping[str, Any]],
+    *,
+    question_id: str,
+) -> int:
+    """Where this question sits in the sequence the user has been walked through.
+
+    Counted over the questions actually put to the user, not the ones they
+    answered, because the number they read has to match what they have seen. A
+    question asked again keeps the place it already had, so re-asking a
+    question never makes the sequence appear to grow.
+    """
+
+    asked: list[str] = []
+    for message in conversation:
+        asked_id = assistant_question_id(message)
+        if asked_id is None or asked_id in asked:
+            continue
+        asked.append(asked_id)
+    canonical = canonical_question_id(question_id)
+    if canonical in asked:
+        return asked.index(canonical) + 1
+    return len(asked) + 1
+
+
 def pending_user_requirement_question_id(
     conversation: Sequence[ConversationMessage],
 ) -> str | None:
@@ -229,4 +254,5 @@ __all__ = [
     "last_answered_question",
     "pending_user_requirement_question",
     "pending_user_requirement_question_id",
+    "question_ordinal_in_session",
 ]

@@ -23827,6 +23827,13 @@ export interface components {
     KeyDecisionPayload: {
       /** Decision */
       decision: string;
+      /**
+       * Is Derived
+       * @default true
+       */
+      is_derived?: boolean;
+      /** Question Id */
+      question_id?: string | null;
       /** Topic */
       topic: string;
     };
@@ -25024,6 +25031,23 @@ export interface components {
       oldest_updated_at: string | null;
       state: components["schemas"]["ContentMoveState"];
       target: components["schemas"]["StorageKind"];
+    };
+    /**
+     * NamedContentFieldPayload
+     * @description One content obligation the user named, as an item rather than prose.
+     *
+     *     `id` is the obligation name as the user wrote it and as planning state
+     *     stores it. It is not a promise that a field by that name reaches the
+     *     compiled result: whether an obligation is projected at all depends on the
+     *     output mode, the presence of a declared schema, and the confidence the name
+     *     was admitted with. `label` is what the summary sentence says about the same
+     *     obligation, rendered by the same owner, so list and prose cannot disagree.
+     */
+    NamedContentFieldPayload: {
+      /** Id */
+      id: string;
+      /** Label */
+      label: string;
     };
     /** OIDCDebugToggleRequest */
     OIDCDebugToggleRequest: {
@@ -27459,6 +27483,8 @@ export interface components {
       key_decisions: components["schemas"]["KeyDecisionPayload"][];
       /** Manual Setup Notes */
       manual_setup_notes?: string[];
+      /** Named Content Fields */
+      named_content_fields?: components["schemas"]["NamedContentFieldPayload"][];
       /** Output Description */
       output_description: string;
       /** Requirements Version */
@@ -30220,6 +30246,10 @@ export interface components {
       question: string;
       /** Question Id */
       question_id: string;
+      /** Question Index */
+      question_index?: number | null;
+      /** Recommended Option Evidence */
+      recommended_option_evidence?: string | null;
       /** Recommended Option Id */
       recommended_option_id?: string | null;
       /**
