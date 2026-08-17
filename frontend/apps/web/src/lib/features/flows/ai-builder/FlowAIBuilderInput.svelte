@@ -549,6 +549,8 @@
 
     <div class="composer-actions">
       <div class="composer-actions-left">
+        <!-- The visible button is the control; this picker is plumbing it opens,
+             so it stays out of the tab order and out of the accessibility tree. -->
         <input
           bind:this={fileInputEl}
           type="file"
@@ -556,6 +558,8 @@
           multiple
           aria-label={m.attach_files()}
           class="sr-only"
+          tabindex="-1"
+          aria-hidden="true"
           onchange={handleFileInputChange}
           disabled={!service.canSendMessage || $isUploading}
         />
@@ -963,7 +967,7 @@
   }
 
   .composer-attach:focus-visible {
-    outline: 2px solid var(--accent-default);
+    outline: 2px solid var(--accent-stronger);
     outline-offset: 2px;
   }
 

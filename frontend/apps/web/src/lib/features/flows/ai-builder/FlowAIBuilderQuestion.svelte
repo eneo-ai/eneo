@@ -73,6 +73,10 @@
     }
   ]);
 
+  // The custom-answer row is the last radio in a single-choice group; this
+  // sentinel keeps it addressable next to the real option keys.
+  const CUSTOM_RADIO_KEY = "__ai_builder_custom__";
+
   const isSingle = $derived(question.selection_mode === "single");
   const isSchemaDirection = $derived(question.question_id === "schema_direction");
   const isInputFieldCollection = $derived(question.input_field_collection === true);
@@ -112,6 +116,70 @@
   const visibleMatchingOptionCount = $derived(
     visibleOptions.filter((option) => matchingOptions.includes(option)).length
   );
+
+  // A single-choice group is one tab stop: the chosen option carries it, and
+  // the arrow keys move both selection and focus inside the group.
+  const radioKeys = $derived(
+    isSingle
+      ? [
+          ...visibleOptions.map(getStructuredQuestionOptionKey),
+          ...(question.allow_custom ? [CUSTOM_RADIO_KEY] : [])
+        ]
+      : []
+  );
+  const activeRadioKey = $derived.by(() => {
+    if (!isSingle) return null;
+    if (customSelected) return CUSTOM_RADIO_KEY;
+    return radioKeys.find((key) => selectedOptionKeys.has(key)) ?? radioKeys[0] ?? null;
+  });
+  function radioTabIndex(key: string): number | undefined {
+    if (!isSingle) return undefined;
+    return key === activeRadioKey ? 0 : -1;
+  }
+
+  let optionsStackEl = $state<HTMLDivElement | null>(null);
+
+  function moveRadioSelection(fromKey: string, event: KeyboardEvent) {
+    if (!isSingle || answered || disabled) return;
+    const keys = radioKeys;
+    const index = keys.indexOf(fromKey);
+    if (index === -1 || keys.length === 0) return;
+    let next: number;
+    switch (event.key) {
+      case "ArrowDown":
+      case "ArrowRight":
+        next = (index + 1) % keys.length;
+        break;
+      case "ArrowUp":
+      case "ArrowLeft":
+        next = (index - 1 + keys.length) % keys.length;
+        break;
+      case "Home":
+        next = 0;
+        break;
+      case "End":
+        next = keys.length - 1;
+        break;
+      default:
+        return;
+    }
+    event.preventDefault();
+    const nextKey = keys[next]!;
+    if (nextKey === CUSTOM_RADIO_KEY) {
+      // Arrowing onto the custom row selects it but keeps focus on the radio,
+      // so the next arrow press still moves inside the group.
+      selectCustom({ focusTextarea: false });
+    } else {
+      const option = visibleOptions.find(
+        (candidate) => getStructuredQuestionOptionKey(candidate) === nextKey
+      );
+      if (!option) return;
+      selectOption(option);
+    }
+    queueMicrotask(() =>
+      optionsStackEl?.querySelector<HTMLElement>(`[data-radio-index="${next}"]`)?.focus()
+    );
+  }
 
   const canConfirm = $derived.by(() => {
     if (answered) return false;
@@ -154,13 +222,13 @@
     for (const selectedKey of nextSelection) selectedOptionKeys.add(selectedKey);
   }
 
-  function selectCustom() {
+  function selectCustom(options: { focusTextarea?: boolean } = {}) {
     if (answered || disabled) return;
     customSelected = true;
     // Custom answers intentionally replace preset selections instead of mixing
     // both answer types in one payload.
     selectedOptionKeys.clear();
-    queueMicrotask(() => textareaRef?.focus());
+    if (options.focusTextarea !== false) queueMicrotask(() => textareaRef?.focus());
   }
 
   function handleConfirm() {
@@ -240,7 +308,9 @@
           {m.ai_builder_question_number({ number: String(questionNumber) })}
         </p>
       {/if}
-      <h2 id={questionLabelId} class="question-title">{question.question}</h2>
+      <h2 id={questionLabelId} class="question-title" tabindex="-1" data-builder-screen-heading>
+        {question.question}
+      </h2>
       {#if why}
         <p class="question-why">
           <span class="question-why-lead">{m.ai_builder_question_why_lead()}</span>
@@ -339,11 +409,12 @@
         </p>
       {/if}
       <div
+        bind:this={optionsStackEl}
         class="options-stack"
         role={isSingle ? "radiogroup" : "group"}
         aria-labelledby={questionLabelId}
       >
-        {#each visibleOptions as option (getStructuredQuestionOptionKey(option))}
+        {#each visibleOptions as option, optionIndex (getStructuredQuestionOptionKey(option))}
           {@const optionKey = getStructuredQuestionOptionKey(option)}
           {@const isSelected = selectedOptionKeys.has(optionKey)}
           <button
@@ -351,8 +422,11 @@
             class="option-row"
             class:is-selected={isSelected}
             onclick={() => selectOption(option)}
+            onkeydown={(event) => moveRadioSelection(optionKey, event)}
             role={isSingle ? "radio" : "checkbox"}
             aria-checked={isSelected}
+            tabindex={radioTabIndex(optionKey)}
+            data-radio-index={isSingle ? optionIndex : undefined}
             {disabled}
           >
             <span
@@ -383,10 +457,13 @@
             type="button"
             class="option-row option-row-custom"
             class:is-selected={customSelected}
-            onclick={selectCustom}
+            onclick={() => selectCustom()}
+            onkeydown={(event) => moveRadioSelection(CUSTOM_RADIO_KEY, event)}
             role={isSingle ? "radio" : "checkbox"}
             aria-checked={customSelected}
             aria-controls="{questionLabelId}-custom"
+            tabindex={radioTabIndex(CUSTOM_RADIO_KEY)}
+            data-radio-index={isSingle ? visibleOptions.length : undefined}
             {disabled}
           >
             <span
@@ -535,7 +612,7 @@
   }
 
   .option-row:focus-visible {
-    outline: 2px solid var(--accent-default);
+    outline: 2px solid var(--accent-stronger);
     outline-offset: 1px;
   }
 

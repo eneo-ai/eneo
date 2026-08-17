@@ -183,7 +183,7 @@
           {#if instructions.length > INSTRUCTION_CLAMP_CHARS}
             <button
               type="button"
-              class="text-accent-default hover:text-accent-stronger focus-visible:ring-accent-default/40 mt-1 rounded text-xs font-medium transition-colors hover:underline focus-visible:ring-2 focus-visible:outline-none"
+              class="text-accent-stronger focus-visible:ring-accent-stronger/40 mt-1 rounded text-xs font-medium transition-colors hover:underline focus-visible:ring-2 focus-visible:outline-none"
               onclick={() => (instructionsExpanded = !instructionsExpanded)}
             >
               {instructionsExpanded ? m.ai_builder_show_less() : m.ai_builder_show_more()}

@@ -135,7 +135,7 @@
     background: var(--background-secondary);
   }
   .rail-button:focus-visible {
-    outline: 2px solid var(--accent-default);
+    outline: 2px solid var(--accent-stronger);
     outline-offset: 1px;
   }
   .rail-button.is-viewing:not(:disabled) {

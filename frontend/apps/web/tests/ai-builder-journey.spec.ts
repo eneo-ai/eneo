@@ -197,6 +197,8 @@ test.describe("AI builder journey", () => {
 
     // Confirm card is the contract.
     await expect(page.getByText(CONFIRM_TITLE).first()).toBeVisible();
+    // The screen swap is spoken for anyone who is not watching the viewport.
+    await expect(page.locator("[data-builder-announcer]")).toHaveText(CONFIRM_TITLE);
     await page.getByRole("button", { name: CONFIRM_ACTION }).click();
 
     // Plan lands on the review phase.

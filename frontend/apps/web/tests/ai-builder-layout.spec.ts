@@ -141,6 +141,7 @@ const CONVERSATION_BUTTON = "Samtal";
 const CONVERSATION_TITLE = "Samtalet";
 const CONFIRM_TITLE = "Så här har Eneo förstått uppgiften";
 const TASK_TITLE = "Vad ska flödet göra?";
+const PLAN_CARD = PLAN.proposal.spec.flow_name;
 
 async function openBuilder(page: Page, request: APIRequestContext, query = "") {
   await page.goto("/");
@@ -190,6 +191,24 @@ test.describe("AI builder phase shell", () => {
     await expect(page.getByRole("button", { name: "Skicka" })).toBeDisabled();
     await composer.fill("Sammanfatta rapporter");
     await expect(page.getByRole("button", { name: "Skicka" })).toBeEnabled();
+  });
+
+  // The header column is sized to the review card, so the rail starts on the
+  // same line as the plan — the surface the user spends the most time on.
+  test("the rail starts on the same line as the plan", async ({ page, request }) => {
+    await openBuilder(page, request, "?session=plan-session");
+    const rail = page.getByRole("navigation", { name: RAIL_LABEL });
+    const planCard = page.getByRole("article", { name: PLAN_CARD });
+    await expect(planCard).toBeVisible();
+
+    for (const width of [1280, 1440, 2560]) {
+      await page.setViewportSize({ width, height: 900 });
+      const railBox = await rail.boundingBox();
+      const planBox = await planCard.boundingBox();
+      expect(railBox, `rail at ${width}px`).not.toBeNull();
+      expect(planBox, `plan card at ${width}px`).not.toBeNull();
+      expect(Math.abs(railBox!.x - planBox!.x), `alignment at ${width}px`).toBeLessThanOrEqual(2);
+    }
   });
 
   test("the rail collapses to one line on a phone", async ({ page, request }) => {

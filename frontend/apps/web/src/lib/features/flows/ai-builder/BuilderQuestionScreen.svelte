@@ -53,11 +53,15 @@
             class="border-default bg-primary hover:bg-secondary inline-flex h-[1.875rem] max-w-full shrink-0 items-center gap-1.5 rounded-full border px-2.5 text-[0.8125rem] max-sm:h-[44px] max-sm:max-w-[70vw] max-sm:px-3.5"
             class:opacity-60={editingQuestionId === item.questionId}
             title={item.question}
+            aria-label={m.ai_builder_question_chip_aria({
+              question: item.question,
+              answer: item.answerLabel
+            })}
             onclick={() => onedit(item.questionId)}
             {disabled}
           >
             <span class="text-primary truncate font-semibold">{item.answerLabel}</span>
-            <span class="text-accent-default shrink-0 font-semibold"
+            <span class="text-accent-stronger shrink-0 font-semibold"
               >{m.ai_builder_question_change()}</span
             >
           </button>
@@ -70,7 +74,7 @@
         {m.ai_builder_question_editing_note()}
         <button
           type="button"
-          class="text-accent-default font-semibold hover:underline"
+          class="text-accent-stronger font-semibold hover:underline"
           onclick={() => oncanceledit?.()}
         >
           {m.cancel()}

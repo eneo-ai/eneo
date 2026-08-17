@@ -233,7 +233,11 @@
     if (step.output_mode === "transcribe_only") return m.ai_builder_step_transcription_model();
     const ref = step.assistant_spec.model_ref;
     if (!ref) return m.ai_builder_node_model_none();
-    return service.availableModels.find((model) => model.id === ref)?.name ?? ref;
+    const known = service.availableModels.find((model) => model.id === ref);
+    if (known) return known.name;
+    // An unresolved plan-local reference still names the model; "model." is
+    // protocol bookkeeping and reads as noise on the step chip.
+    return ref.startsWith("model.") ? ref.slice("model.".length) : ref;
   }
 
   function artifactLabel(step: StepSpec): string | null {
@@ -581,7 +585,7 @@
             </span>
             <button
               type="button"
-              class="text-accent-default hover:text-accent-stronger focus-visible:ring-accent-default/40 ml-auto rounded text-xs font-semibold whitespace-nowrap focus-visible:ring-2 focus-visible:outline-none"
+              class="text-accent-stronger focus-visible:ring-accent-stronger/40 ml-auto rounded text-xs font-semibold whitespace-nowrap hover:underline focus-visible:ring-2 focus-visible:outline-none"
               onclick={() => service.dismissReviewNote()}
             >
               {m.ai_builder_review_note_acknowledge()}
@@ -657,6 +661,8 @@
             <h2
               id="builder-plan-heading"
               class="text-primary mt-2.5 text-[1.375rem] font-extrabold tracking-[-0.025em] text-pretty"
+              tabindex="-1"
+              data-builder-screen-heading
             >
               {isScopedStepReview && activeStepScope
                 ? m.ai_builder_saved_step_plan_title({

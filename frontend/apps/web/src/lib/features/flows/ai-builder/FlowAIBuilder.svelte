@@ -199,6 +199,67 @@
     screen === "task" || (screen === "reply" && !service.isStreaming)
   );
 
+  // ---- Screen change: announce it, then hand focus to the new heading -------
+  // A screen swap is a navigation for anyone not watching the viewport, so it
+  // is spoken once and the caret lands on the heading of what just appeared.
+
+  // A second question is a new screen even though `screen` stays "question".
+  const screenKey = $derived(
+    screen === "question" ? `question:${questionMessage?.question?.question_id ?? ""}` : screen
+  );
+  const screenAnnouncement = $derived.by(() => {
+    switch (screen) {
+      case "question":
+        return questionMessage?.question
+          ? m.ai_builder_announce_question({
+              number: String(questionNumber),
+              question: questionMessage.question.question
+            })
+          : "";
+      case "confirm":
+        return m.ai_builder_requirements_title();
+      case "build":
+        return m.ai_builder_rail_planning();
+      case "review":
+        return m.ai_builder_announce_review();
+      default:
+        return "";
+    }
+  });
+  let screenAnnouncementText = $state("");
+  let builderRootEl = $state<HTMLElement | null>(null);
+  let announcedScreenKey: string | null = null;
+  $effect(() => {
+    const key = screenKey;
+    const text = screenAnnouncement;
+    // Bootstrap and resume settle on a screen without the user doing anything.
+    if (!service.hasSession || service.isInitializing) {
+      announcedScreenKey = null;
+      return;
+    }
+    if (announcedScreenKey === null || key === announcedScreenKey) {
+      announcedScreenKey = key;
+      return;
+    }
+    announcedScreenKey = key;
+    if (!text) return;
+    screenAnnouncementText = text;
+    void focusScreenHeading();
+  });
+
+  async function focusScreenHeading() {
+    await tick();
+    const active = document.activeElement;
+    // Never yank the caret out of the sheet composer mid-sentence.
+    if (
+      active instanceof HTMLElement &&
+      (active.tagName === "TEXTAREA" || active.tagName === "INPUT" || active.isContentEditable)
+    ) {
+      return;
+    }
+    builderRootEl?.querySelector<HTMLElement>("[data-builder-screen-heading]")?.focus();
+  }
+
   // ---- Error ownership ------------------------------------------------------
   // Once generation is visible, the plan surface keeps ownership of any
   // failure so the same error cannot flash on two surfaces.
@@ -387,10 +448,18 @@
     </div>
   </div>
 {:else}
-  <div class="bg-secondary @container/builder flex min-h-0 w-full flex-1 flex-col">
-    <!-- Phase header: rail + saved state + the conversation one gesture away. -->
+  <div
+    bind:this={builderRootEl}
+    class="bg-secondary @container/builder flex min-h-0 w-full flex-1 flex-col"
+  >
+    <p class="sr-only" role="status" aria-live="polite" data-builder-announcer>
+      {screenAnnouncementText}
+    </p>
+    <!-- Phase header: rail + saved state + the conversation one gesture away.
+         The header column is as wide as the review card and centred with it,
+         so the rail starts on the same line as the plan the user reads most. -->
     <div class="bg-primary border-default sticky top-0 z-20 shrink-0 border-b px-7 max-sm:px-3">
-      <div class="flex max-w-[63.75rem] items-center gap-3 pt-3">
+      <div class="mx-auto flex max-w-[53.75rem] items-center gap-3 pt-3">
         {#if service.hasSession && service.messages.length > 0}
           <span
             class="text-secondary inline-flex items-center gap-1.5 text-xs"
@@ -423,6 +492,9 @@
             size="sm"
             class="gap-1.5"
             aria-expanded={sheetOpen}
+            aria-label={m.ai_builder_conversation_button_aria({
+              count: String(visibleMessageCount)
+            })}
             title={m.ai_builder_conversation_button_title()}
             onclick={() => (sheetOpen = true)}
           >
@@ -436,7 +508,7 @@
           </Button>
         </div>
       </div>
-      <div class="max-w-[63.75rem] py-3">
+      <div class="mx-auto max-w-[53.75rem] py-3">
         <BuilderPhaseRail current={phaseIndex} viewing={viewingPhase} onselect={handleRailSelect} />
       </div>
     </div>

@@ -159,7 +159,6 @@
               variant="ghost"
               class="text-muted hover:text-primary max-sm:size-[44px]"
               aria-label={m.actions()}
-              title={m.actions()}
             >
               <IconEllipsis />
             </Button>
@@ -207,8 +206,10 @@
           </Button>
         {/each}
       </div>
-      <p class="text-secondary ml-auto text-xs max-sm:ml-0 max-sm:w-full" aria-live="polite">
-        {m.flow_list_count({ count: String(visibleRows.length) })}
+      <p class="text-secondary ml-auto text-xs max-sm:ml-0 max-sm:w-full">
+        {visibleRows.length === 1
+          ? m.flow_list_count_one()
+          : m.flow_list_count({ count: String(visibleRows.length) })}
       </p>
     </div>
   {/if}

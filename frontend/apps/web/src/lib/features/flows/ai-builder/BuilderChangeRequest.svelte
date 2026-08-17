@@ -108,7 +108,7 @@
       <span class="text-secondary text-xs max-sm:hidden">
         {m.ai_builder_change_request_example()}
       </span>
-      <span class="text-accent-default ml-auto text-xs font-semibold">
+      <span class="text-accent-stronger ml-auto text-xs font-semibold">
         {m.ai_builder_change_request_write()}
       </span>
     </button>

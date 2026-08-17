@@ -630,6 +630,27 @@ describe("FlowAIBuilder discovery screens", () => {
       question_answer: { question_id: "output_format", selected_option_ids: ["text"] }
     });
   });
+
+  it("announces the screen that replaces the answered question", async () => {
+    const { fetch } = makeFetch({ sessions: [questionSession()] });
+    const { stream } = makeStream(() => [questionEvent(SOURCES_QUESTION)]);
+    renderShell({ fetch, stream, resumeSessionId: "s-1" });
+
+    const announcer = () => document.querySelector("[data-builder-announcer]")!;
+    await screen.findByRole("heading", { name: FORMAT_QUESTION.question });
+    // The screen the session opened on was not reached by a user action.
+    expect(announcer().textContent?.trim()).toBe("");
+
+    await fireEvent.click(screen.getByRole("radio", { name: "Som PDF" }));
+    await fireEvent.click(button(m.ai_builder_question_confirm()));
+
+    await screen.findByRole("heading", { name: SOURCES_QUESTION.question });
+    await waitFor(() =>
+      expect(announcer().textContent?.trim()).toBe(
+        m.ai_builder_announce_question({ number: "2", question: SOURCES_QUESTION.question })
+      )
+    );
+  });
 });
 
 // ---- Confirm, build, review, rail ---------------------------------------------------

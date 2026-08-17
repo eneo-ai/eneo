@@ -49,7 +49,7 @@
         {#if onshowconfirmation}
           <button
             type="button"
-            class="text-accent-default ml-auto text-[0.8125rem] font-semibold hover:underline"
+            class="text-accent-stronger ml-auto text-[0.8125rem] font-semibold hover:underline"
             onclick={onshowconfirmation}
           >
             {m.ai_builder_build_show_confirmation()}
@@ -59,7 +59,11 @@
     {/if}
     <div class="border-default bg-primary overflow-hidden rounded-xl border">
       <div class="px-5 pt-[1.125rem] pb-4 max-sm:px-4">
-        <h2 class="text-primary text-[1.0625rem] font-bold tracking-[-0.015em]">
+        <h2
+          class="text-primary text-[1.0625rem] font-bold tracking-[-0.015em]"
+          tabindex="-1"
+          data-builder-screen-heading
+        >
           {m.ai_builder_build_title()}
         </h2>
         <p class="text-secondary mt-1 text-[0.8125rem] text-pretty">
@@ -69,7 +73,7 @@
           {narration} …
         </p>
         {#if slow}
-          <p class="text-warning-stronger mt-2 text-[0.8125rem]">
+          <p class="text-warning-stronger mt-2 text-[0.8125rem]" role="status">
             {m.ai_builder_build_slow_note()}
           </p>
         {/if}

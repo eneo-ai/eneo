@@ -86,7 +86,9 @@
         {#if otherDraftCount > 0}
           <span class="text-secondary">{m.ai_builder_task_drafts_question()}</span>
           <Button variant="link" class="h-auto p-0 text-xs font-semibold" href={flowsHref}>
-            {m.ai_builder_task_drafts_link({ count: String(otherDraftCount) })}
+            {otherDraftCount === 1
+              ? m.ai_builder_task_drafts_link_one()
+              : m.ai_builder_task_drafts_link({ count: String(otherDraftCount) })}
           </Button>
         {/if}
         <span class="text-secondary ml-auto max-sm:ml-0">

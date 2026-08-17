@@ -96,6 +96,49 @@ describe("FlowAIBuilderQuestion schema direction", () => {
   });
 });
 
+function singleChoiceQuestion(): StructuredQuestion {
+  return {
+    question_id: "output_format",
+    question: "What should the flow produce?",
+    selection_mode: "single",
+    allow_custom: false,
+    requires_confirm: true,
+    options: [
+      { id: "pdf", value: "pdf", label: "PDF" },
+      { id: "text", value: "text", label: "Text" },
+      { id: "table", value: "table", label: "Table" }
+    ]
+  };
+}
+
+describe("FlowAIBuilderQuestion single choice keyboard", () => {
+  it("is one tab stop whose arrow keys move the selection", async () => {
+    render(FlowAIBuilderQuestion, { question: singleChoiceQuestion() });
+
+    const radios = screen.getAllByRole("radio");
+    expect(radios.map((radio) => radio.getAttribute("tabindex"))).toEqual(["0", "-1", "-1"]);
+
+    await fireEvent.keyDown(radios[0]!, { key: "ArrowDown" });
+    expect(radios[1]!.getAttribute("aria-checked")).toBe("true");
+    expect(radios.map((radio) => radio.getAttribute("tabindex"))).toEqual(["-1", "0", "-1"]);
+
+    await fireEvent.keyDown(radios[1]!, { key: "End" });
+    expect(radios[2]!.getAttribute("aria-checked")).toBe("true");
+
+    await fireEvent.keyDown(radios[2]!, { key: "ArrowRight" });
+    expect(radios[0]!.getAttribute("aria-checked")).toBe("true");
+    expect(radios.filter((radio) => radio.getAttribute("tabindex") === "0")).toHaveLength(1);
+  });
+
+  it("leaves every row of a multi-select group tabbable", () => {
+    render(FlowAIBuilderQuestion, { question: schemaDirectionQuestion() });
+
+    for (const row of screen.getAllByRole("checkbox")) {
+      expect(row.getAttribute("tabindex")).toBeNull();
+    }
+  });
+});
+
 describe("FlowAIBuilderQuestion runtime metadata fields", () => {
   it("requires and submits one purpose per field from the question options", async () => {
     const onanswer = vi.fn();

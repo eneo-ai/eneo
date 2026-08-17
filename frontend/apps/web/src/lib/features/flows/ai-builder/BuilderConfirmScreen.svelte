@@ -74,11 +74,15 @@
             type="button"
             class="border-default bg-primary hover:bg-secondary inline-flex h-[1.875rem] max-w-full items-center gap-1.5 rounded-full border px-2.5 text-[0.8125rem]"
             title={item.question}
+            aria-label={m.ai_builder_question_chip_aria({
+              question: item.question,
+              answer: item.answerLabel
+            })}
             onclick={() => oneditanswer(item.questionId)}
             {disabled}
           >
             <span class="text-primary truncate font-semibold">{item.answerLabel}</span>
-            <span class="text-accent-default shrink-0 font-semibold">
+            <span class="text-accent-stronger shrink-0 font-semibold">
               {m.ai_builder_question_change()}
             </span>
           </button>
@@ -91,7 +95,11 @@
       aria-label={m.ai_builder_requirements_title()}
     >
       <header class="bg-accent-dimmer border-accent-default/25 border-b px-5 py-3.5">
-        <h2 class="text-primary text-[1.0625rem] font-bold tracking-[-0.015em]">
+        <h2
+          class="text-primary text-[1.0625rem] font-bold tracking-[-0.015em]"
+          tabindex="-1"
+          data-builder-screen-heading
+        >
           {savedFlowStepScope
             ? m.ai_builder_saved_step_review_heading({ step: savedFlowStepScope.stepNumber })
             : m.ai_builder_requirements_title()}
@@ -209,7 +217,7 @@
           <section class="border-default mt-4 border-t pt-3.5">
             <button
               type="button"
-              class="text-primary flex items-center gap-1.5 text-[0.8125rem] font-bold"
+              class="text-primary flex min-h-[2.75rem] w-full items-center gap-1.5 text-left text-[0.8125rem] font-bold"
               aria-expanded={assumptionsOpen}
               onclick={() => (assumptionsOpen = !assumptionsOpen)}
             >

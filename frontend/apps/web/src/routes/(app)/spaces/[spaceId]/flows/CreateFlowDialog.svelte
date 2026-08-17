@@ -139,7 +139,10 @@
         />
         <p class="text-secondary text-xs">{m.flow_create_path_manual_hint()}</p>
         {#if createError}
-          <p class="text-negative-stronger bg-negative-dimmer rounded-lg px-3 py-2 text-sm">
+          <p
+            class="text-negative-stronger bg-negative-dimmer rounded-lg px-3 py-2 text-sm"
+            role="alert"
+          >
             {createError}
           </p>
         {/if}
