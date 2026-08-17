@@ -1094,7 +1094,15 @@ describe("FlowAIBuilder confirm, build and review", () => {
 
     // The editor closed, so the waiting state has to take its place: without
     // it, sending looks like nothing happened at all.
-    expect(await screen.findByText(m.ai_builder_confirm_change_pending())).toBeTruthy();
+    // Announced, not just drawn: a screen reader has to hear that the
+    // correction was sent, so the role is part of the contract.
+    await waitFor(() =>
+      expect(
+        screen
+          .getAllByRole("status")
+          .some((node) => node.textContent?.includes(m.ai_builder_confirm_change_pending()))
+      ).toBe(true)
+    );
     expect(
       screen.queryByRole("textbox", { name: m.ai_builder_change_request_textarea_label() })
     ).toBeNull();
