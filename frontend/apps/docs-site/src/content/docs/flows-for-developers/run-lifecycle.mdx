@@ -4,58 +4,33 @@ import { Cards } from "nextra/components";
 
 Use this page when a run pauses, reruns, fails, or needs a new status. It shows which module owns each transition before you edit code.
 
-## State map
+## Run statuses
+
+One run row moves through these statuses. Review pauses and reruns return the run to `queued`; the checkpoint and rerun operation keep their own state, below.
 
 <div className="flow-docs-mermaid-figure">
 
 ```mermaid
-%%{init: {"themeVariables": {"background": "#f8f6f0", "primaryColor": "#e8ded1", "primaryTextColor": "#242620", "primaryBorderColor": "#6f7b5d", "secondaryColor": "#d7e0d2", "tertiaryColor": "#f1ece4", "lineColor": "#78816f", "edgeLabelBackground": "#f8f6f0", "clusterBkg": "#f4efe7", "clusterBorder": "#9a8a73", "fontFamily": "Inter, ui-sans-serif, system-ui, sans-serif"}}}%%
+%%{init: {"theme": "base", "themeVariables": {"background": "#f8f6f0", "primaryColor": "#e8ded1", "primaryTextColor": "#242620", "primaryBorderColor": "#6f7b5d", "secondaryColor": "#d7e0d2", "tertiaryColor": "#f1ece4", "lineColor": "#78816f", "edgeLabelBackground": "#f8f6f0", "clusterBkg": "#f4efe7", "clusterBorder": "#9a8a73", "fontFamily": "Inter, ui-sans-serif, system-ui, sans-serif"}}}%%
 stateDiagram-v2
-  state "FlowRunStatus" as RunStatus {
-    [*] --> queued
-    queued --> running: worker starts
-    running --> awaiting_review: checkpoint opens
-    awaiting_review --> queued: approved checkpoint resumes
-    running --> completed: all steps complete
-    running --> failed: step or runtime failure
-    queued --> cancelled: user cancel or deleted flow
-    running --> cancelled: user cancel or deleted flow
-    awaiting_review --> cancelled: review rejected
-    awaiting_review --> cancelled: review expired
-    awaiting_review --> cancelled: user cancel or deleted flow
-    completed --> queued: rerun accepted
-    failed --> queued: rerun accepted
-  }
-  state "FlowRunReviewCheckpointState" as ReviewState {
-    [*] --> awaiting_review
-    awaiting_review --> edited: edit output
-    edited --> edited: edit again
-    awaiting_review --> approved: approve
-    edited --> approved: approve
-    approved --> resumed: resume
-    awaiting_review --> rejected: reject
-    edited --> rejected: reject
-    awaiting_review --> expired: expiry reconciler
-    edited --> expired: expiry reconciler
-    awaiting_review --> cancelled: run terminalized
-    edited --> cancelled: run terminalized
-    approved --> cancelled: run terminalized before resume
-  }
-  state "FlowRunRerunOperationStatus" as RerunState {
-    [*] --> queued
-    queued --> running: root attempt starts
-    queued --> completed: run terminalizes
-    running --> completed: run terminalizes
-    queued --> failed: run terminalizes
-    running --> failed: run terminalizes
-    queued --> cancelled: run terminalizes
-    running --> cancelled: run terminalizes
-  }
+  direction LR
+  [*] --> queued
+  queued --> running: worker starts
+  running --> awaiting_review: checkpoint opens
+  awaiting_review --> queued: approved checkpoint resumes
+  running --> completed: all steps complete
+  running --> failed: step or runtime failure
+  queued --> cancelled: user cancel or deleted flow
+  running --> cancelled: user cancel or deleted flow
+  awaiting_review --> cancelled: rejected, expired, or cancelled
+  completed --> queued: rerun accepted
+  failed --> queued: rerun accepted
+  completed --> [*]
+  failed --> [*]
+  cancelled --> [*]
 ```
 
 </div>
-
-## Run status capabilities
 
 | Status            | Active | Poll | Terminal | Cancellable | Awaiting review | Redispatch | Rerun eligible |
 | ----------------- | ------ | ---- | -------- | ----------- | --------------- | ---------- | -------------- |
@@ -78,7 +53,26 @@ stateDiagram-v2
 | `Redispatch`      | stale queued runs may be claimed and dispatched again          |
 | `Rerun eligible`  | the rerun API can accept a completed or failed run             |
 
-## Step result states
+## Step result and attempt states
+
+Each step has one current result row and one row per attempt. The result is what the run reads; attempts keep the history.
+
+<div className="flow-docs-mermaid-figure">
+
+```mermaid
+%%{init: {"theme": "base", "themeVariables": {"background": "#f8f6f0", "primaryColor": "#e8ded1", "primaryTextColor": "#242620", "primaryBorderColor": "#6f7b5d", "secondaryColor": "#d7e0d2", "tertiaryColor": "#f1ece4", "lineColor": "#78816f", "edgeLabelBackground": "#f8f6f0", "clusterBkg": "#f4efe7", "clusterBorder": "#9a8a73", "fontFamily": "Inter, ui-sans-serif, system-ui, sans-serif"}}}%%
+stateDiagram-v2
+  direction LR
+  [*] --> pending
+  pending --> running: executor claims step
+  running --> completed: handler output persisted
+  running --> failed: typed or generic failure
+  running --> cancelled: run cancellation
+  pending --> failed: failed run terminalization
+  pending --> cancelled: cancelled run terminalization
+```
+
+</div>
 
 | Status      | Active | Meaning                                                        |
 | ----------- | ------ | -------------------------------------------------------------- |
@@ -88,7 +82,19 @@ stateDiagram-v2
 | `failed`    | no     | typed or generic step failure was persisted and the run failed |
 | `cancelled` | no     | run cancellation or terminalization closed an active result    |
 
-## Step attempt states
+<div className="flow-docs-mermaid-figure">
+
+```mermaid
+%%{init: {"theme": "base", "themeVariables": {"background": "#f8f6f0", "primaryColor": "#e8ded1", "primaryTextColor": "#242620", "primaryBorderColor": "#6f7b5d", "secondaryColor": "#d7e0d2", "tertiaryColor": "#f1ece4", "lineColor": "#78816f", "edgeLabelBackground": "#f8f6f0", "clusterBkg": "#f4efe7", "clusterBorder": "#9a8a73", "fontFamily": "Inter, ui-sans-serif, system-ui, sans-serif"}}}%%
+stateDiagram-v2
+  direction LR
+  [*] --> started
+  started --> completed: output persisted
+  started --> failed: typed or generic failure
+  started --> cancelled: run cancellation
+```
+
+</div>
 
 | Status      | Open | Meaning                                          |
 | ----------- | ---- | ------------------------------------------------ |
@@ -97,33 +103,7 @@ stateDiagram-v2
 | `completed` | no   | attempt finished with persisted output           |
 | `cancelled` | no   | attempt was closed because the run was cancelled |
 
-## Step failure and runtime file binding
-
-### Step failure
-
-<div className="flow-docs-mermaid-figure">
-
-```mermaid
-%%{init: {"themeVariables": {"background": "#f8f6f0", "primaryColor": "#e8ded1", "primaryTextColor": "#242620", "primaryBorderColor": "#6f7b5d", "secondaryColor": "#d7e0d2", "tertiaryColor": "#f1ece4", "lineColor": "#78816f", "edgeLabelBackground": "#f8f6f0", "clusterBkg": "#f4efe7", "clusterBorder": "#9a8a73", "fontFamily": "Inter, ui-sans-serif, system-ui, sans-serif"}}}%%
-stateDiagram-v2
-  state "FlowStepResultStatus" as StepResult {
-    [*] --> pending
-    pending --> running: executor claims step
-    running --> completed: handler output persisted
-    running --> failed: typed or generic failure
-    running --> cancelled: run cancellation
-    pending --> failed: failed run terminalization
-    pending --> cancelled: cancelled run terminalization
-  }
-  state "FlowStepAttemptStatus" as StepAttempt {
-    [*] --> started
-    started --> completed: output persisted
-    started --> failed: typed or generic failure
-    started --> cancelled: run cancellation
-  }
-```
-
-</div>
+### How a step failure ends the run
 
 - `backend/src/eneo/flows/runtime/executor.py` claims the step result, opens a step attempt, dispatches the handler, and handles typed or generic failures.
 - Typed failures go through `_handle_typed_step_failure`; generic exceptions go through `_handle_generic_step_failure`.
@@ -133,37 +113,32 @@ stateDiagram-v2
 - `FlowRunRepository` locks the parent run before claiming a step result or opening an attempt, then rechecks that the run is still `queued` or `running`. Terminalization and child mutation therefore share parent-before-child lock order, and a losing child writer cannot recreate active work.
 - Attempt-start failures have no attempt number, so the executor saves the failed result with `attempt_no=None` and terminalizes the run.
 
-### Runtime upload binding
+## Review checkpoint states
+
+`Open` means a checkpoint can still receive a decision, be resumed, or be reconciled by expiry.
 
 <div className="flow-docs-mermaid-figure">
 
 ```mermaid
-%%{init: {"themeVariables": {"background": "#f8f6f0", "primaryColor": "#e8ded1", "primaryTextColor": "#242620", "primaryBorderColor": "#6f7b5d", "secondaryColor": "#d7e0d2", "tertiaryColor": "#f1ece4", "lineColor": "#78816f", "edgeLabelBackground": "#f8f6f0", "clusterBkg": "#f4efe7", "clusterBorder": "#9a8a73", "fontFamily": "Inter, ui-sans-serif, system-ui, sans-serif"}}}%%
-sequenceDiagram
-  participant UploadAPI as "Runtime upload API"
-  participant FileService as "FlowRuntimeFileService"
-  participant UploadRepo as "FlowRuntimeUploadRepository"
-  participant RunService as "FlowRunService"
-  participant StepInputs as "flow_run_step_inputs.py"
-  participant Rows as "flow_run_step_input_file_rows.py"
-  UploadAPI->>FileService: upload file for published step
-  FileService->>UploadRepo: create flow_runtime_uploaded_files row
-  RunService->>StepInputs: validate step_inputs[step_id].file_ids
-  StepInputs->>UploadRepo: list_bound_file_ids_for_owner(lock_for_binding=True)
-  RunService->>Rows: insert flow_run_step_input_files for attempt 1
+%%{init: {"theme": "base", "themeVariables": {"background": "#f8f6f0", "primaryColor": "#e8ded1", "primaryTextColor": "#242620", "primaryBorderColor": "#6f7b5d", "secondaryColor": "#d7e0d2", "tertiaryColor": "#f1ece4", "lineColor": "#78816f", "edgeLabelBackground": "#f8f6f0", "clusterBkg": "#f4efe7", "clusterBorder": "#9a8a73", "fontFamily": "Inter, ui-sans-serif, system-ui, sans-serif"}}}%%
+stateDiagram-v2
+  direction LR
+  [*] --> awaiting_review
+  awaiting_review --> edited: edit output
+  edited --> edited: edit again
+  awaiting_review --> approved: approve
+  edited --> approved: approve
+  approved --> resumed: resume
+  awaiting_review --> rejected: reject
+  edited --> rejected: reject
+  awaiting_review --> expired: expiry reconciler
+  edited --> expired: expiry reconciler
+  awaiting_review --> cancelled: run terminalized
+  edited --> cancelled: run terminalized
+  approved --> cancelled: run terminalized before resume
 ```
 
 </div>
-
-- `FlowRuntimeFileService` validates upload MIME type and size for a published runtime step before the file can be reused in a run.
-- `FlowRuntimeUploadRepository` writes `flow_runtime_uploaded_files` with the flow, tenant, step, and principal owner.
-- Run creation accepts `step_inputs[step_id].file_ids`; `flow_run_step_inputs.py` checks file access, limits, and existing upload binding.
-- Binding validation calls `list_bound_file_ids_for_owner(..., lock_for_binding=True)` before relational `flow_run_step_input_files` rows are inserted.
-- Reruns copy or replace `flow_run_step_input_files` rows for rerun attempts; there is no JSON step-input branch.
-
-## Review checkpoint states
-
-`Open` means a checkpoint can still receive a decision, be resumed, or be reconciled by expiry.
 
 | State             | Open | Expires | Meaning                                                                    |
 | ----------------- | ---- | ------- | -------------------------------------------------------------------------- |
@@ -176,6 +151,26 @@ sequenceDiagram
 | `expired`         | no   | no      | terminal checkpoint state written by `FlowReviewExpiryReconciler`          |
 
 ## Rerun operation states
+
+A rerun operation is active from acceptance until the run reaches a terminal status; it then takes the run's terminal status.
+
+<div className="flow-docs-mermaid-figure">
+
+```mermaid
+%%{init: {"theme": "base", "themeVariables": {"background": "#f8f6f0", "primaryColor": "#e8ded1", "primaryTextColor": "#242620", "primaryBorderColor": "#6f7b5d", "secondaryColor": "#d7e0d2", "tertiaryColor": "#f1ece4", "lineColor": "#78816f", "edgeLabelBackground": "#f8f6f0", "clusterBkg": "#f4efe7", "clusterBorder": "#9a8a73", "fontFamily": "Inter, ui-sans-serif, system-ui, sans-serif"}}}%%
+stateDiagram-v2
+  direction LR
+  [*] --> queued
+  queued --> running: root attempt starts
+  queued --> completed: run terminalizes
+  running --> completed: run terminalizes
+  queued --> failed: run terminalizes
+  running --> failed: run terminalizes
+  queued --> cancelled: run terminalizes
+  running --> cancelled: run terminalizes
+```
+
+</div>
 
 | Status      | Active | Meaning                                                                        |
 | ----------- | ------ | ------------------------------------------------------------------------------ |
@@ -192,7 +187,7 @@ sequenceDiagram
 <div className="flow-docs-mermaid-figure">
 
 ```mermaid
-%%{init: {"themeVariables": {"background": "#f8f6f0", "primaryColor": "#e8ded1", "primaryTextColor": "#242620", "primaryBorderColor": "#6f7b5d", "secondaryColor": "#d7e0d2", "tertiaryColor": "#f1ece4", "lineColor": "#78816f", "edgeLabelBackground": "#f8f6f0", "clusterBkg": "#f4efe7", "clusterBorder": "#9a8a73", "fontFamily": "Inter, ui-sans-serif, system-ui, sans-serif"}}}%%
+%%{init: {"theme": "base", "themeVariables": {"background": "#f8f6f0", "primaryColor": "#e8ded1", "primaryTextColor": "#242620", "primaryBorderColor": "#6f7b5d", "secondaryColor": "#d7e0d2", "tertiaryColor": "#f1ece4", "lineColor": "#78816f", "edgeLabelBackground": "#f8f6f0", "clusterBkg": "#f4efe7", "clusterBorder": "#9a8a73", "fontFamily": "Inter, ui-sans-serif, system-ui, sans-serif"}}}%%
 sequenceDiagram
   participant API as "Run API"
   participant Service as "FlowRunService"
@@ -222,7 +217,7 @@ sequenceDiagram
 <div className="flow-docs-mermaid-figure">
 
 ```mermaid
-%%{init: {"themeVariables": {"background": "#f8f6f0", "primaryColor": "#e8ded1", "primaryTextColor": "#242620", "primaryBorderColor": "#6f7b5d", "secondaryColor": "#d7e0d2", "tertiaryColor": "#f1ece4", "lineColor": "#78816f", "edgeLabelBackground": "#f8f6f0", "clusterBkg": "#f4efe7", "clusterBorder": "#9a8a73", "fontFamily": "Inter, ui-sans-serif, system-ui, sans-serif"}}}%%
+%%{init: {"theme": "base", "themeVariables": {"background": "#f8f6f0", "primaryColor": "#e8ded1", "primaryTextColor": "#242620", "primaryBorderColor": "#6f7b5d", "secondaryColor": "#d7e0d2", "tertiaryColor": "#f1ece4", "lineColor": "#78816f", "edgeLabelBackground": "#f8f6f0", "clusterBkg": "#f4efe7", "clusterBorder": "#9a8a73", "fontFamily": "Inter, ui-sans-serif, system-ui, sans-serif"}}}%%
 sequenceDiagram
   participant Executor as "FlowRunExecutor"
   participant Repo as "FlowRunRepository"
@@ -247,7 +242,7 @@ sequenceDiagram
 <div className="flow-docs-mermaid-figure">
 
 ```mermaid
-%%{init: {"themeVariables": {"background": "#f8f6f0", "primaryColor": "#e8ded1", "primaryTextColor": "#242620", "primaryBorderColor": "#6f7b5d", "secondaryColor": "#d7e0d2", "tertiaryColor": "#f1ece4", "lineColor": "#78816f", "edgeLabelBackground": "#f8f6f0", "clusterBkg": "#f4efe7", "clusterBorder": "#9a8a73", "fontFamily": "Inter, ui-sans-serif, system-ui, sans-serif"}}}%%
+%%{init: {"theme": "base", "themeVariables": {"background": "#f8f6f0", "primaryColor": "#e8ded1", "primaryTextColor": "#242620", "primaryBorderColor": "#6f7b5d", "secondaryColor": "#d7e0d2", "tertiaryColor": "#f1ece4", "lineColor": "#78816f", "edgeLabelBackground": "#f8f6f0", "clusterBkg": "#f4efe7", "clusterBorder": "#9a8a73", "fontFamily": "Inter, ui-sans-serif, system-ui, sans-serif"}}}%%
 sequenceDiagram
   participant Executor as "FlowRunExecutor"
   participant Repo as "ReviewCheckpointRepository"
@@ -280,7 +275,7 @@ sequenceDiagram
 <div className="flow-docs-mermaid-figure">
 
 ```mermaid
-%%{init: {"themeVariables": {"background": "#f8f6f0", "primaryColor": "#e8ded1", "primaryTextColor": "#242620", "primaryBorderColor": "#6f7b5d", "secondaryColor": "#d7e0d2", "tertiaryColor": "#f1ece4", "lineColor": "#78816f", "edgeLabelBackground": "#f8f6f0", "clusterBkg": "#f4efe7", "clusterBorder": "#9a8a73", "fontFamily": "Inter, ui-sans-serif, system-ui, sans-serif"}}}%%
+%%{init: {"theme": "base", "themeVariables": {"background": "#f8f6f0", "primaryColor": "#e8ded1", "primaryTextColor": "#242620", "primaryBorderColor": "#6f7b5d", "secondaryColor": "#d7e0d2", "tertiaryColor": "#f1ece4", "lineColor": "#78816f", "edgeLabelBackground": "#f8f6f0", "clusterBkg": "#f4efe7", "clusterBorder": "#9a8a73", "fontFamily": "Inter, ui-sans-serif, system-ui, sans-serif"}}}%%
 sequenceDiagram
   participant API as "Rerun API"
   participant Service as "FlowRunRerunService"
@@ -305,6 +300,34 @@ sequenceDiagram
 - `backend/src/eneo/flows/infrastructure/flow_run_rerun_repo.py` persists rerun operations and resets the run to queued.
 - `backend/src/eneo/flows/application/flow_dispatch.py` owns the rerun queue epoch's bounded dispatch lifecycle.
 - `backend/src/eneo/flows/runtime/executor.py` links rerun invalidated steps to new attempts.
+
+### Bind uploaded files to a run
+
+<div className="flow-docs-mermaid-figure">
+
+```mermaid
+%%{init: {"theme": "base", "themeVariables": {"background": "#f8f6f0", "primaryColor": "#e8ded1", "primaryTextColor": "#242620", "primaryBorderColor": "#6f7b5d", "secondaryColor": "#d7e0d2", "tertiaryColor": "#f1ece4", "lineColor": "#78816f", "edgeLabelBackground": "#f8f6f0", "clusterBkg": "#f4efe7", "clusterBorder": "#9a8a73", "fontFamily": "Inter, ui-sans-serif, system-ui, sans-serif"}}}%%
+sequenceDiagram
+  participant UploadAPI as "Runtime upload API"
+  participant FileService as "FlowRuntimeFileService"
+  participant UploadRepo as "FlowRuntimeUploadRepository"
+  participant RunService as "FlowRunService"
+  participant StepInputs as "flow_run_step_inputs.py"
+  participant Rows as "flow_run_step_input_file_rows.py"
+  UploadAPI->>FileService: upload file for published step
+  FileService->>UploadRepo: create flow_runtime_uploaded_files row
+  RunService->>StepInputs: validate step_inputs[step_id].file_ids
+  StepInputs->>UploadRepo: list_bound_file_ids_for_owner(lock_for_binding=True)
+  RunService->>Rows: insert flow_run_step_input_files for attempt 1
+```
+
+</div>
+
+- `FlowRuntimeFileService` validates upload MIME type and size for a published runtime step before the file can be reused in a run.
+- `FlowRuntimeUploadRepository` writes `flow_runtime_uploaded_files` with the flow, tenant, step, and principal owner.
+- Run creation accepts `step_inputs[step_id].file_ids`; `flow_run_step_inputs.py` checks file access, limits, and existing upload binding.
+- Binding validation calls `list_bound_file_ids_for_owner(..., lock_for_binding=True)` before relational `flow_run_step_input_files` rows are inserted.
+- Reruns copy or replace `flow_run_step_input_files` rows for rerun attempts; there is no JSON step-input branch.
 
 ## Source guards
 

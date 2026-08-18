@@ -8,8 +8,10 @@ FLOW_DOCS_MERMAID_FIGURE_CLASS: Final[str] = "flow-docs-mermaid-figure"
 FLOW_DOCS_MERMAID_FIGURE_OPEN: Final[str] = (
     f'<div className="{FLOW_DOCS_MERMAID_FIGURE_CLASS}">'
 )
+# "base" pins a light palette: the figure surface is always light
+# (color-scheme: light in the stylesheet), while the site theme may be dark.
 FLOW_DOCS_MERMAID_INIT_DIRECTIVE: Final[str] = (
-    '%%{init: {"themeVariables": {'
+    '%%{init: {"theme": "base", "themeVariables": {'
     '"background": "#f8f6f0", '
     '"primaryColor": "#e8ded1", '
     '"primaryTextColor": "#242620", '

@@ -1301,7 +1301,9 @@ def test_flow_docs_mermaid_surface_color_matches_theme_labels() -> None:
     assert match is not None
 
     surface_background = match.group(1)
-    assert '"theme":' not in FLOW_DOCS_MERMAID_INIT_DIRECTIVE
+    # The figure surface is always light, so the palette must not follow a
+    # dark site theme.
+    assert '"theme": "base"' in FLOW_DOCS_MERMAID_INIT_DIRECTIVE
     assert f'"background": "{surface_background}"' in FLOW_DOCS_MERMAID_INIT_DIRECTIVE
     assert (
         f'"edgeLabelBackground": "{surface_background}"'
@@ -1786,7 +1788,14 @@ def test_flow_developer_docs_run_lifecycle_is_generated_from_lifecycle_sources()
     assert "run occupies active execution capacity while queued or running" in page
     assert "stale queued runs may be claimed and dispatched again" in page
     assert "the rerun API can accept a completed or failed run" in page
-    assert "Step failure and runtime file binding" in page
+    assert "## Run statuses" in page
+    assert "## Step result and attempt states" in page
+    assert "### Bind uploaded files to a run" in page
+    # One state machine per diagram: mermaid state ids are global, so two
+    # machines sharing `queued`/`completed` in one figure merge into one graph.
+    for block in MERMAID_CODE_BLOCK_PATTERN.findall(page):
+        if "stateDiagram" in block:
+            assert 'state "' not in block
     assert "_handle_typed_step_failure" in page
     assert "_handle_generic_step_failure" in page
     assert "FlowRunTerminalizer" in page
@@ -1815,7 +1824,8 @@ def test_flow_developer_docs_run_lifecycle_is_generated_from_lifecycle_sources()
     assert "checkpoint can still receive a decision" in page
     assert re.search(r"\| State\s+\| Open\s+\| Expires\s+\| Meaning", page)
     assert "run is failed by review rejection" not in page
-    assert "awaiting_review --> cancelled: review rejected" in page
+    # A rejected review cancels the run; it never fails it.
+    assert "awaiting_review --> cancelled: rejected, expired, or cancelled" in page
 
 
 def test_flow_developer_docs_run_lifecycle_source_references_exist() -> None:

@@ -223,11 +223,13 @@ def render_flow_developer_lifecycle_docs_page() -> str:
         "",
         "Use this page when a run pauses, reruns, fails, or needs a new status. It shows which module owns each transition before you edit code.",
         "",
-        "## State map",
+        "## Run statuses",
         "",
-        _render_state_diagram(),
+        "One run row moves through these statuses. Review pauses and reruns "
+        "return the run to `queued`; the checkpoint and rerun operation keep "
+        "their own state, below.",
         "",
-        "## Run status capabilities",
+        _render_run_status_diagram(),
         "",
         _render_run_status_capabilities_table(),
         "",
@@ -235,31 +237,47 @@ def render_flow_developer_lifecycle_docs_page() -> str:
         "",
         _render_run_status_capability_meanings_table(),
         "",
-        "## Step result states",
+        "## Step result and attempt states",
+        "",
+        "Each step has one current result row and one row per attempt. The "
+        "result is what the run reads; attempts keep the history.",
+        "",
+        _render_step_result_diagram(),
         "",
         _render_step_result_state_table(),
         "",
-        "## Step attempt states",
+        _render_step_attempt_diagram(),
         "",
         _render_step_attempt_state_table(),
         "",
-        "## Step failure and runtime file binding",
+        "### How a step failure ends the run",
         "",
-        _render_step_failure_and_upload_binding(),
+        *_render_step_failure_notes(),
         "",
         "## Review checkpoint states",
         "",
         "`Open` means a checkpoint can still receive a decision, be resumed, or be reconciled by expiry.",
         "",
+        _render_review_checkpoint_diagram(),
+        "",
         _render_review_checkpoint_state_table(),
         "",
         "## Rerun operation states",
+        "",
+        "A rerun operation is active from acceptance until the run reaches a "
+        "terminal status; it then takes the run's terminal status.",
+        "",
+        _render_rerun_operation_diagram(),
         "",
         _render_rerun_operation_state_table(),
         "",
         "## Golden paths",
         "",
         *_render_golden_paths(),
+        "### Bind uploaded files to a run",
+        "",
+        *_render_upload_binding(),
+        "",
         "## Source guards",
         "",
         _render_source_guard_table(),
@@ -321,49 +339,84 @@ def _require_complete_state_notes() -> None:
         )
 
 
-def _render_state_diagram() -> str:
+def _render_run_status_diagram() -> str:
     return render_flow_docs_mermaid_block(
         "stateDiagram-v2",
-        '  state "FlowRunStatus" as RunStatus {',
-        "    [*] --> queued",
-        "    queued --> running: worker starts",
-        "    running --> awaiting_review: checkpoint opens",
-        "    awaiting_review --> queued: approved checkpoint resumes",
-        "    running --> completed: all steps complete",
-        "    running --> failed: step or runtime failure",
-        "    queued --> cancelled: user cancel or deleted flow",
-        "    running --> cancelled: user cancel or deleted flow",
-        "    awaiting_review --> cancelled: review rejected",
-        "    awaiting_review --> cancelled: review expired",
-        "    awaiting_review --> cancelled: user cancel or deleted flow",
-        "    completed --> queued: rerun accepted",
-        "    failed --> queued: rerun accepted",
-        "  }",
-        '  state "FlowRunReviewCheckpointState" as ReviewState {',
-        "    [*] --> awaiting_review",
-        "    awaiting_review --> edited: edit output",
-        "    edited --> edited: edit again",
-        "    awaiting_review --> approved: approve",
-        "    edited --> approved: approve",
-        "    approved --> resumed: resume",
-        "    awaiting_review --> rejected: reject",
-        "    edited --> rejected: reject",
-        "    awaiting_review --> expired: expiry reconciler",
-        "    edited --> expired: expiry reconciler",
-        "    awaiting_review --> cancelled: run terminalized",
-        "    edited --> cancelled: run terminalized",
-        "    approved --> cancelled: run terminalized before resume",
-        "  }",
-        '  state "FlowRunRerunOperationStatus" as RerunState {',
-        "    [*] --> queued",
-        "    queued --> running: root attempt starts",
-        "    queued --> completed: run terminalizes",
-        "    running --> completed: run terminalizes",
-        "    queued --> failed: run terminalizes",
-        "    running --> failed: run terminalizes",
-        "    queued --> cancelled: run terminalizes",
-        "    running --> cancelled: run terminalizes",
-        "  }",
+        "  direction LR",
+        "  [*] --> queued",
+        "  queued --> running: worker starts",
+        "  running --> awaiting_review: checkpoint opens",
+        "  awaiting_review --> queued: approved checkpoint resumes",
+        "  running --> completed: all steps complete",
+        "  running --> failed: step or runtime failure",
+        "  queued --> cancelled: user cancel or deleted flow",
+        "  running --> cancelled: user cancel or deleted flow",
+        "  awaiting_review --> cancelled: rejected, expired, or cancelled",
+        "  completed --> queued: rerun accepted",
+        "  failed --> queued: rerun accepted",
+        "  completed --> [*]",
+        "  failed --> [*]",
+        "  cancelled --> [*]",
+    )
+
+
+def _render_step_result_diagram() -> str:
+    return render_flow_docs_mermaid_block(
+        "stateDiagram-v2",
+        "  direction LR",
+        "  [*] --> pending",
+        "  pending --> running: executor claims step",
+        "  running --> completed: handler output persisted",
+        "  running --> failed: typed or generic failure",
+        "  running --> cancelled: run cancellation",
+        "  pending --> failed: failed run terminalization",
+        "  pending --> cancelled: cancelled run terminalization",
+    )
+
+
+def _render_step_attempt_diagram() -> str:
+    return render_flow_docs_mermaid_block(
+        "stateDiagram-v2",
+        "  direction LR",
+        "  [*] --> started",
+        "  started --> completed: output persisted",
+        "  started --> failed: typed or generic failure",
+        "  started --> cancelled: run cancellation",
+    )
+
+
+def _render_review_checkpoint_diagram() -> str:
+    return render_flow_docs_mermaid_block(
+        "stateDiagram-v2",
+        "  direction LR",
+        "  [*] --> awaiting_review",
+        "  awaiting_review --> edited: edit output",
+        "  edited --> edited: edit again",
+        "  awaiting_review --> approved: approve",
+        "  edited --> approved: approve",
+        "  approved --> resumed: resume",
+        "  awaiting_review --> rejected: reject",
+        "  edited --> rejected: reject",
+        "  awaiting_review --> expired: expiry reconciler",
+        "  edited --> expired: expiry reconciler",
+        "  awaiting_review --> cancelled: run terminalized",
+        "  edited --> cancelled: run terminalized",
+        "  approved --> cancelled: run terminalized before resume",
+    )
+
+
+def _render_rerun_operation_diagram() -> str:
+    return render_flow_docs_mermaid_block(
+        "stateDiagram-v2",
+        "  direction LR",
+        "  [*] --> queued",
+        "  queued --> running: root attempt starts",
+        "  queued --> completed: run terminalizes",
+        "  running --> completed: run terminalizes",
+        "  queued --> failed: run terminalizes",
+        "  running --> failed: run terminalizes",
+        "  queued --> cancelled: run terminalizes",
+        "  running --> cancelled: run terminalizes",
     )
 
 
@@ -476,62 +529,41 @@ def _render_rerun_operation_state_table() -> str:
     return _render_markdown_table(("Status", "Active", "Meaning"), rows)
 
 
-def _render_step_failure_and_upload_binding() -> str:
-    return "\n".join(
-        [
-            "### Step failure",
-            "",
-            render_flow_docs_mermaid_block(
-                "stateDiagram-v2",
-                '  state "FlowStepResultStatus" as StepResult {',
-                "    [*] --> pending",
-                "    pending --> running: executor claims step",
-                "    running --> completed: handler output persisted",
-                "    running --> failed: typed or generic failure",
-                "    running --> cancelled: run cancellation",
-                "    pending --> failed: failed run terminalization",
-                "    pending --> cancelled: cancelled run terminalization",
-                "  }",
-                '  state "FlowStepAttemptStatus" as StepAttempt {',
-                "    [*] --> started",
-                "    started --> completed: output persisted",
-                "    started --> failed: typed or generic failure",
-                "    started --> cancelled: run cancellation",
-                "  }",
-            ),
-            "",
-            "- `backend/src/eneo/flows/runtime/executor.py` claims the step result, opens a step attempt, dispatches the handler, and handles typed or generic failures.",
-            "- Typed failures go through `_handle_typed_step_failure`; generic exceptions go through `_handle_generic_step_failure`.",
-            "- Both failure paths finish the open attempt, save a failed step result, and call `FlowRunTerminalizer` with a run error code.",
-            "- Downstream steps do not continue after a failed step because terminalization moves the run to `failed`.",
-            "- When the run fails, the terminalizer closes active `pending` or `running` step results and open attempts as failed; when the run is cancelled, it closes them as cancelled. Completed results stay unchanged.",
-            "- `FlowRunRepository` locks the parent run before claiming a step result or opening an attempt, then rechecks that the run is still `queued` or `running`. Terminalization and child mutation therefore share parent-before-child lock order, and a losing child writer cannot recreate active work.",
-            "- Attempt-start failures have no attempt number, so the executor saves the failed result with `attempt_no=None` and terminalizes the run.",
-            "",
-            "### Runtime upload binding",
-            "",
-            render_flow_docs_mermaid_block(
-                "sequenceDiagram",
-                '  participant UploadAPI as "Runtime upload API"',
-                '  participant FileService as "FlowRuntimeFileService"',
-                '  participant UploadRepo as "FlowRuntimeUploadRepository"',
-                '  participant RunService as "FlowRunService"',
-                '  participant StepInputs as "flow_run_step_inputs.py"',
-                '  participant Rows as "flow_run_step_input_file_rows.py"',
-                "  UploadAPI->>FileService: upload file for published step",
-                "  FileService->>UploadRepo: create flow_runtime_uploaded_files row",
-                "  RunService->>StepInputs: validate step_inputs[step_id].file_ids",
-                "  StepInputs->>UploadRepo: list_bound_file_ids_for_owner(lock_for_binding=True)",
-                "  RunService->>Rows: insert flow_run_step_input_files for attempt 1",
-            ),
-            "",
-            "- `FlowRuntimeFileService` validates upload MIME type and size for a published runtime step before the file can be reused in a run.",
-            "- `FlowRuntimeUploadRepository` writes `flow_runtime_uploaded_files` with the flow, tenant, step, and principal owner.",
-            "- Run creation accepts `step_inputs[step_id].file_ids`; `flow_run_step_inputs.py` checks file access, limits, and existing upload binding.",
-            "- Binding validation calls `list_bound_file_ids_for_owner(..., lock_for_binding=True)` before relational `flow_run_step_input_files` rows are inserted.",
-            "- Reruns copy or replace `flow_run_step_input_files` rows for rerun attempts; there is no JSON step-input branch.",
-        ]
-    )
+def _render_step_failure_notes() -> list[str]:
+    return [
+        "- `backend/src/eneo/flows/runtime/executor.py` claims the step result, opens a step attempt, dispatches the handler, and handles typed or generic failures.",
+        "- Typed failures go through `_handle_typed_step_failure`; generic exceptions go through `_handle_generic_step_failure`.",
+        "- Both failure paths finish the open attempt, save a failed step result, and call `FlowRunTerminalizer` with a run error code.",
+        "- Downstream steps do not continue after a failed step because terminalization moves the run to `failed`.",
+        "- When the run fails, the terminalizer closes active `pending` or `running` step results and open attempts as failed; when the run is cancelled, it closes them as cancelled. Completed results stay unchanged.",
+        "- `FlowRunRepository` locks the parent run before claiming a step result or opening an attempt, then rechecks that the run is still `queued` or `running`. Terminalization and child mutation therefore share parent-before-child lock order, and a losing child writer cannot recreate active work.",
+        "- Attempt-start failures have no attempt number, so the executor saves the failed result with `attempt_no=None` and terminalizes the run.",
+    ]
+
+
+def _render_upload_binding() -> list[str]:
+    return [
+        render_flow_docs_mermaid_block(
+            "sequenceDiagram",
+            '  participant UploadAPI as "Runtime upload API"',
+            '  participant FileService as "FlowRuntimeFileService"',
+            '  participant UploadRepo as "FlowRuntimeUploadRepository"',
+            '  participant RunService as "FlowRunService"',
+            '  participant StepInputs as "flow_run_step_inputs.py"',
+            '  participant Rows as "flow_run_step_input_file_rows.py"',
+            "  UploadAPI->>FileService: upload file for published step",
+            "  FileService->>UploadRepo: create flow_runtime_uploaded_files row",
+            "  RunService->>StepInputs: validate step_inputs[step_id].file_ids",
+            "  StepInputs->>UploadRepo: list_bound_file_ids_for_owner(lock_for_binding=True)",
+            "  RunService->>Rows: insert flow_run_step_input_files for attempt 1",
+        ),
+        "",
+        "- `FlowRuntimeFileService` validates upload MIME type and size for a published runtime step before the file can be reused in a run.",
+        "- `FlowRuntimeUploadRepository` writes `flow_runtime_uploaded_files` with the flow, tenant, step, and principal owner.",
+        "- Run creation accepts `step_inputs[step_id].file_ids`; `flow_run_step_inputs.py` checks file access, limits, and existing upload binding.",
+        "- Binding validation calls `list_bound_file_ids_for_owner(..., lock_for_binding=True)` before relational `flow_run_step_input_files` rows are inserted.",
+        "- Reruns copy or replace `flow_run_step_input_files` rows for rerun attempts; there is no JSON step-input branch.",
+    ]
 
 
 def _render_golden_paths() -> list[str]:
