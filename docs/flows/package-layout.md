@@ -1,4 +1,9 @@
-# Flow Package Layout
+# Flow package layout
+
+Where each root-level Flow module belongs, and the rule for adding or moving
+one. Read this before creating a file directly under `eneo.flows`.
+
+## What this page is
 
 This page freezes the current root-level Flow package shape and records the
 target home for each root entry. It is a layout decision, not a mass-move plan.
@@ -6,6 +11,11 @@ Root-level Flow modules should shrink over time; new root entries require an
 explicit architecture decision.
 When a root entry moves into a package, lower the guard's expected root count in
 the same commit.
+
+## Canonical owners
+
+These four are settled and have no compatibility shims left; code that reaches
+for the old location is wrong, not merely old.
 
 Shared execution contract dataclasses (`RuntimeStep`, `RunExecutionState`,
 `StepInputValue`, `StepExecutionOutput`, and `StepDiagnostic`) are owned by
@@ -21,6 +31,11 @@ Dispatch recovery timing and attempt limits are domain invariants canonically
 owned by `eneo.flows.domain.flow_run_recovery_policy`; there is no compatibility
 module at `eneo.flows.application.flow_run_recovery_policy`.
 
+## The layers
+
+Every root entry belongs in one of these. The list is parsed by the docs-site
+generator, which matches the line below verbatim.
+
 Allowed target homes:
 
 - `api`: HTTP adapters, API schemas, OpenAPI-facing errors, and presenters.
@@ -32,6 +47,8 @@ Allowed target homes:
 - `plugin`: Flow-adjacent plugin boundary.
 - `remove-merge-later`: duplicate or temporary root import surface to delete.
 
+## Portable transfer
+
 Portable transfer is owned by `eneo.flow_packages`, not by a new root entry
 under `eneo.flows`. Within that package, `FlowPackageProvenance` is the only
 durable omissions owner. `FlowRepository` and `FlowService` contribute one
@@ -39,6 +56,12 @@ tenant-scoped scalar distinct-assistant count for source-local MCP associations;
 they do not copy MCP implementation, identifiers, configuration, credentials,
 or content into Flow package code. Public adapters project the closed
 provenance value instead of creating another omission model.
+
+## Where each root entry goes
+
+The table is read by `backend/scripts/flow_developer_architecture_docs.py` to
+generate the developer docs site, so its header and column order are a
+contract: change the rows freely, keep the shape.
 
 | Entry | Kind | Target home | Rationale |
 | --------------------------------- | ------- | -------------- | ------------------------------------------------------------------------------------- |

@@ -35,7 +35,7 @@ This directory contains the complete documentation for Eneo, the democratic AI p
 1. Understand **[ARCHITECTURE.md](ARCHITECTURE.md)** for system design
 2. Follow **[CONTRIBUTING.md](CONTRIBUTING.md)** for development workflow
 3. Use **[INSTALLATION.md](INSTALLATION.md)** for local setup
-4. Read the **[Flow Developer Quickstart](flows/flow-developer-quickstart.md#step-schema)** for supported Flow step inputs, outputs, and effect boundaries
+4. Read the **[Flows documentation index](flows/README.md)**, then the **[Flow Developer Quickstart](flows/flow-developer-quickstart.md#step-schema)** for supported Flow step inputs, outputs, and effect boundaries
 
 ### For Public Sector Organizations
 1. **[Project Overview](../README.md)** explains democratic AI mission
