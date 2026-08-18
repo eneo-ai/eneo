@@ -4,6 +4,8 @@ const meta: MetaRecord = {
   index: "Overview",
   "getting-started": "Getting Started",
   architecture: "Architecture",
+  "authentication-architecture": "Authentication Architecture",
+  "module-authentication": "Module Authentication",
   "knowledge-retrieval-and-mcp": "Knowledge Retrieval and MCP",
   "object-content-architecture": "Object Content Architecture",
   "audit-logging": "Audit Logging",
