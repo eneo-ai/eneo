@@ -668,10 +668,22 @@ class Space:
     def get_website(self, website_id: UUID) -> "Website":
         return self._get_entity(website_id, self.websites)
 
-    def validate_model_security_compatibility(self, model: "AIModel") -> None:
+    def allows_model_security_classification(self, model: "AIModel") -> bool:
+        """Whether this space's classification permits the model.
+
+        The predicate form exists for callers that must *choose* a model rather
+        than accept one: the stored model list is only validated when it is
+        assigned, so a caller picking from it on the user's behalf has to ask
+        again rather than assume.
+        """
         if not self.security_classification:
-            return
-        if self.security_classification.is_greater_than(model.security_classification):
+            return True
+        return not self.security_classification.is_greater_than(
+            model.security_classification
+        )
+
+    def validate_model_security_compatibility(self, model: "AIModel") -> None:
+        if not self.allows_model_security_classification(model):
             raise BadRequestException(SECURITY_CLASSIFICATION_EXCEPTION_MESSAGE)
 
     def validate_mcp_server_security_compatibility(

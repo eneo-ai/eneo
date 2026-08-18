@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from types import SimpleNamespace
 from uuid import uuid4
 
@@ -62,7 +63,14 @@ def test_serialize_space_kbs_keeps_local_id_for_catalog_input() -> None:
     ]
 
 
-def _model(*, provider_id, name: str = "planner"):
+def _model(
+    *,
+    provider_id,
+    name: str = "planner",
+    can_access: bool = True,
+    is_org_default: bool = False,
+    created_at: datetime | None = None,
+):
     return SimpleNamespace(
         id=uuid4(),
         name=name,
@@ -71,6 +79,18 @@ def _model(*, provider_id, name: str = "planner"):
         litellm_model_name=f"openai/{name}",
         max_input_tokens=32_000,
         max_output_tokens=4_000,
+        can_access=can_access,
+        is_org_default=is_org_default,
+        created_at=created_at or datetime(2026, 1, 1, tzinfo=timezone.utc),
+    )
+
+
+def _space(models, *, default=None, allows=lambda candidate: True):  # noqa: ARG005
+    return SimpleNamespace(
+        completion_models=models,
+        collections=[],
+        get_default_completion_model=lambda: default,
+        allows_model_security_classification=allows,
     )
 
 
@@ -82,13 +102,11 @@ def test_listing_and_omitted_model_resolve_the_same_model() -> None:
     rejects it, leaving the caller no way through.
     """
     active_provider_id = uuid4()
-    inactive_default = _model(provider_id=uuid4(), name="inactive-default")
-    active_alternate = _model(provider_id=active_provider_id, name="active-alternate")
-    space = SimpleNamespace(
-        completion_models=[inactive_default, active_alternate],
-        collections=[],
-        get_default_completion_model=lambda: inactive_default,
+    inactive_default = _model(
+        provider_id=uuid4(), name="inactive-default", is_org_default=True
     )
+    active_alternate = _model(provider_id=active_provider_id, name="active-alternate")
+    space = _space([inactive_default, active_alternate], default=inactive_default)
     active_provider_ids = {active_provider_id}
 
     listed = eligible_planner_models(space, active_provider_ids=active_provider_ids)
@@ -108,11 +126,7 @@ def test_explicitly_requesting_an_inactive_model_is_rejected_as_unavailable() ->
     active_provider_id = uuid4()
     inactive = _model(provider_id=uuid4(), name="inactive")
     active = _model(provider_id=active_provider_id, name="active")
-    space = SimpleNamespace(
-        completion_models=[inactive, active],
-        collections=[],
-        get_default_completion_model=lambda: active,
-    )
+    space = _space([inactive, active], default=active)
 
     with pytest.raises(AIBuilderBadRequestException) as excinfo:
         resolve_requested_model(
@@ -126,11 +140,7 @@ def test_explicitly_requesting_an_inactive_model_is_rejected_as_unavailable() ->
 
 def test_no_eligible_model_is_named_rather_than_silently_substituted() -> None:
     only_inactive = _model(provider_id=uuid4(), name="inactive")
-    space = SimpleNamespace(
-        completion_models=[only_inactive],
-        collections=[],
-        get_default_completion_model=lambda: only_inactive,
-    )
+    space = _space([only_inactive], default=only_inactive)
 
     assert eligible_planner_models(space, active_provider_ids=set()) == []
     assert select_default_planner_model(space, active_provider_ids=set()) is None
@@ -140,22 +150,85 @@ def test_no_eligible_model_is_named_rather_than_silently_substituted() -> None:
     assert excinfo.value.code == AIBuilderErrorCode.NO_PLANNER_MODEL_AVAILABLE
 
 
+def test_fallback_never_crosses_the_space_security_classification() -> None:
+    """A space only checks its models when the list is assigned, so a stored
+    list can outlive a reclassification. Choosing on the user's behalf must not
+    be what quietly hands a restricted space a lower-classified model."""
+    provider_id = uuid4()
+    below_bar = _model(provider_id=provider_id, name="below-bar")
+    permitted = _model(provider_id=provider_id, name="permitted")
+    space = _space(
+        [below_bar, permitted],
+        default=None,
+        allows=lambda model: model is not below_bar,
+    )
+
+    listed = eligible_planner_models(space, active_provider_ids={provider_id})
+    fallback = select_default_planner_model(space, active_provider_ids={provider_id})
+
+    assert listed == [permitted]
+    assert fallback is permitted
+    with pytest.raises(AIBuilderBadRequestException) as excinfo:
+        resolve_requested_model(
+            space, model_id=below_bar.id, active_provider_ids={provider_id}
+        )
+    assert excinfo.value.code == AIBuilderErrorCode.MODEL_NOT_AVAILABLE
+
+
+def test_inaccessible_models_are_neither_listed_nor_runnable() -> None:
+    # can_access covers locked, org-disabled, effectively deprecated, migrated
+    # and deleted models; an active provider does not make any of them usable.
+    provider_id = uuid4()
+    locked = _model(provider_id=provider_id, name="locked", can_access=False)
+    usable = _model(provider_id=provider_id, name="usable")
+    space = _space([locked, usable], default=None)
+
+    assert eligible_planner_models(space, active_provider_ids={provider_id}) == [usable]
+    with pytest.raises(AIBuilderBadRequestException) as excinfo:
+        resolve_requested_model(
+            space, model_id=locked.id, active_provider_ids={provider_id}
+        )
+    assert excinfo.value.code == AIBuilderErrorCode.MODEL_NOT_AVAILABLE
+
+
+def test_fallback_prefers_the_organisation_default_then_the_newest() -> None:
+    # Taking the first of the list would make persistence order the policy and
+    # hand the planner the oldest model whenever a default drops out.
+    provider_id = uuid4()
+    oldest = _model(
+        provider_id=provider_id,
+        name="oldest",
+        created_at=datetime(2025, 1, 1, tzinfo=timezone.utc),
+    )
+    newest = _model(
+        provider_id=provider_id,
+        name="newest",
+        created_at=datetime(2026, 6, 1, tzinfo=timezone.utc),
+    )
+    active_provider_ids = {provider_id}
+
+    without_default = _space([oldest, newest], default=None)
+    assert (
+        select_default_planner_model(
+            without_default, active_provider_ids=active_provider_ids
+        )
+        is newest
+    )
+
+    oldest.is_org_default = True
+    with_default = _space([oldest, newest], default=oldest)
+    assert (
+        select_default_planner_model(
+            with_default, active_provider_ids=active_provider_ids
+        )
+        is oldest
+    )
+
+
 def test_planner_context_reuses_admin_builder_attachment_limits() -> None:
     provider_id = uuid4()
-    model = SimpleNamespace(
-        id=uuid4(),
-        name="planner",
-        provider_id=provider_id,
-        provider_type="openai",
-        litellm_model_name="openai/gpt-5.4",
-        max_input_tokens=32_000,
-        max_output_tokens=4_000,
-    )
-    space = SimpleNamespace(
-        completion_models=[model],
-        collections=[],
-        get_default_completion_model=lambda: model,
-    )
+    model = _model(provider_id=provider_id, name="gpt-5.4", is_org_default=True)
+    space = _space([model], default=model)
 
     context = build_planner_context(
         space,

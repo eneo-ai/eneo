@@ -349,8 +349,9 @@ def _authorized_space(authorization: AIBuilderAuthorization) -> "Space":
 
 
 async def _active_provider_ids(container: Container) -> set[UUID]:
-    """Providers a planner model may run on. Read once per request by both the
-    model listing and the send path, so neither can disagree with the other."""
+    """Providers a planner model may run on. Read per request by both the model
+    listing and the send path, so both judge eligibility by the same rule
+    against the same state."""
     providers = await container.model_provider_repository().all(active_only=True)
     return {provider.id for provider in providers}
 
@@ -1407,8 +1408,8 @@ async def get_session_models(
         require_creator=True,
     )
     space = _authorized_space(authorization)
-    # The same two calls the send path makes, so the advertised default is the
-    # model an omitted `model_id` actually resolves to.
+    # The same two calls the send path makes, so the advertised default is what
+    # an omitted `model_id` resolves to against this same state.
     active_provider_ids = await _active_provider_ids(container)
     models = eligible_planner_models(space, active_provider_ids=active_provider_ids)
     default_model = select_default_planner_model(

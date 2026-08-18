@@ -561,7 +561,7 @@ describe("FlowAIBuilder planner controls", () => {
     );
   }
 
-  it("names the model the turn will run on once the space offers a choice", async () => {
+  it("names the advertised model once the space offers a choice", async () => {
     renderShell({ fetch: withTwoModels(), stream: makeStream().stream });
 
     expect(

@@ -97,8 +97,9 @@ export interface FlowAIBuilderState {
   /** Display names for per-step model refs, and the choices behind the
    *  composer's planner controls. */
   availableModels: AIBuilderModel[];
-  /** The planner model the server applies when the client sends none. Display
-   *  data: it names what will run before the user has chosen anything. */
+  /** The planner default the server advertised when the list was read. Display
+   *  data only: an omitted model_id is resolved again at send time, so this
+   *  names what was advertised, not what a later turn is guaranteed to use. */
   defaultModelId: string | null;
   /** An explicit planner override, or null to let the server default apply.
    *  Never a precondition for sending — an unread model list simply leaves it

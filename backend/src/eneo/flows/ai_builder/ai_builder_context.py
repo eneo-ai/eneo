@@ -24,6 +24,7 @@ from eneo.flows.domain.mapped_execution_policy import (
     FlowMappedExecutionPolicy,
     resolve_flow_mapped_execution_policy,
 )
+from eneo.main.datetime_utils import datetime_or_utc_min
 from eneo.model_providers.domain.model_defaults import lookup_model_defaults
 
 if TYPE_CHECKING:
@@ -78,28 +79,45 @@ def eligible_planner_models(
 ) -> list["CompletionModel"]:
     """The planner models a caller may use, listed or sent.
 
-    A model on an inactive provider is rejected at provider resolution, so it is
-    not eligible here either. Listing and sending must share this rule, or the
-    session advertises one set of models and runs another.
+    Three constraints, each already the product's rule elsewhere: the model must
+    be accessible, its provider must be active or provider resolution refuses
+    it, and it must clear the space's security classification. The last is not
+    redundant with the space's own validation — a space validates its models
+    when the list is assigned, not when it is loaded, so a stored list outlives
+    a reclassification. Since the caller below picks a model on the user's
+    behalf, the candidate set is where that has to be caught.
+
+    Listing and sending share this rule, or the session advertises one set of
+    models and runs another.
     """
     return [
         model
         for model in getattr(space, "completion_models", [])
-        if model.provider_id in active_provider_ids
+        if model.can_access
+        and model.provider_id in active_provider_ids
+        and space.allows_model_security_classification(model)
     ]
 
 
 def select_default_planner_model(
     space: "Space", *, active_provider_ids: AbstractSet[UUID]
 ) -> "CompletionModel | None":
-    """The model an omitted `model_id` resolves to, or None if there is none."""
+    """The model an omitted `model_id` resolves to, or None if there is none.
+
+    Mirrors the space's own default policy — the organisation default, else the
+    newest — over the eligible models rather than over every stored one. Taking
+    the first of the list instead would make persistence order the policy, and
+    quietly hand the planner the oldest model whenever a default drops out.
+    """
     eligible = eligible_planner_models(space, active_provider_ids=active_provider_ids)
-    configured_default = space.get_default_completion_model()
-    if configured_default is not None and any(
-        model.id == configured_default.id for model in eligible
-    ):
-        return configured_default
-    return eligible[0] if eligible else None
+    if not eligible:
+        return None
+    organisation_default = next(
+        (model for model in eligible if model.is_org_default), None
+    )
+    if organisation_default is not None:
+        return organisation_default
+    return max(eligible, key=lambda model: datetime_or_utc_min(model.created_at))
 
 
 def resolve_planner_model(
