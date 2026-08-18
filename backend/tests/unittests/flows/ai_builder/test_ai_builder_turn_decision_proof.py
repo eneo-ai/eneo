@@ -243,6 +243,7 @@ def _cases() -> tuple[TurnDecisionCase, ...]:
         TurnDecisionCase(
             id="commit-grade document drift revises before later discovery",
             state=_committed_state_with_commit_grade_output_drift(),
+            selected_questions=("runtime_metadata_fields",),
             expected_type=ReviseArchitecture,
         ),
         TurnDecisionCase(

@@ -1043,6 +1043,9 @@ def _server_output_prepared() -> ServerOutputPrepared:
             prior_bindings=(),
         ),
         attachment_context=None,
+        schema_candidates=(),
+        schema_direction_pending=False,
+        requirements_confirmation_required=True,
         flow_context=None,
     )
 

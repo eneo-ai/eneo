@@ -544,6 +544,21 @@ class AIBuilderPlanner:
                                     usage_tracker=usage_tracker,
                                 ),
                                 planning_state=planner_turn_request.planning_state,
+                                selected_discovery_question_ids=(
+                                    planner_turn_request.discovery_analysis.selected_question_ids
+                                ),
+                                requirements_confirmation_required=(
+                                    planner_turn_request.requirements_confirmation_required
+                                ),
+                                attachment_context=(
+                                    planner_turn_request.attachment_context
+                                ),
+                                schema_candidates=(
+                                    planner_turn_request.schema_candidates
+                                ),
+                                schema_direction_pending=(
+                                    planner_turn_request.schema_direction_pending
+                                ),
                                 discovery_assumptions=(
                                     planner_turn_request.discovery_analysis.assumptions
                                 ),

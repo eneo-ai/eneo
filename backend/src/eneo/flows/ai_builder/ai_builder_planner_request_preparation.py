@@ -197,6 +197,9 @@ class ServerOutputPrepared(_PreparedBase):
     planning_state: PlanningState
     resource_catalog: AIBuilderResourceCatalog
     attachment_context: AIBuilderAttachmentContext | None
+    schema_candidates: tuple[DeclaredSchemaCandidate, ...]
+    schema_direction_pending: bool
+    requirements_confirmation_required: bool
     flow_context: str | None
 
 
@@ -358,6 +361,9 @@ async def prepare_planner_request(
             output_evidence=None,
             example_inference=None,
         )
+    requirements_confirmation_required = (
+        request.plan_edit_context is None or request.plan_edit_context.scope != "step"
+    )
     turn_control = resolve_turn_control(
         session_state=rebuilt_planning_state,
         selected_discovery_question_ids=discovery_analysis.selected_question_ids,
@@ -369,10 +375,7 @@ async def prepare_planner_request(
         attachment_context=attachment_context_result,
         schema_candidates=control_schema_candidates,
         schema_direction_pending=schema_direction_pending,
-        requirements_confirmation_required=(
-            request.plan_edit_context is None
-            or request.plan_edit_context.scope != "step"
-        ),
+        requirements_confirmation_required=requirements_confirmation_required,
         is_edit_mode=request.flow is not None,
     )
     if not isinstance(turn_control.decision, GenerateProposal):
@@ -385,6 +388,9 @@ async def prepare_planner_request(
             planning_state=rebuilt_planning_state,
             resource_catalog=resource_catalog,
             attachment_context=attachment_context_result,
+            schema_candidates=control_schema_candidates,
+            schema_direction_pending=schema_direction_pending,
+            requirements_confirmation_required=requirements_confirmation_required,
             flow_context=flow_context,
         )
 

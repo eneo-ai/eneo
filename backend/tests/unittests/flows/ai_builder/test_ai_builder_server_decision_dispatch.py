@@ -21,6 +21,9 @@ from eneo.flows.ai_builder.ai_builder_architecture_commit import (
 from eneo.flows.ai_builder.ai_builder_architecture_derivation import (
     derive_architecture_commit_draft,
 )
+from eneo.flows.ai_builder.ai_builder_attachment_context import (
+    AIBuilderAttachmentContext,
+)
 from eneo.flows.ai_builder.ai_builder_discovery_models import BackendQuestion
 from eneo.flows.ai_builder.ai_builder_domain_models import (
     ConversationMessage,
@@ -36,6 +39,10 @@ from eneo.flows.ai_builder.ai_builder_event_models import (
 from eneo.flows.ai_builder.ai_builder_proposal_telemetry import ProposalTurnTelemetry
 from eneo.flows.ai_builder.ai_builder_requirements_disclosure import (
     build_requirements_disclosure,
+)
+from eneo.flows.ai_builder.ai_builder_schema_evidence import (
+    DeclaredSchemaCandidate,
+    build_declared_schema_candidate,
 )
 from eneo.flows.ai_builder.ai_builder_server_decision_dispatch import (
     ServerDecisionDispatchRequest,
@@ -58,6 +65,7 @@ from eneo.flows.ai_builder.ai_builder_turn_controller import (
 from eneo.flows.ai_builder.planning_state import (
     ArchitectureCommit,
     ArchitectureCommitDraft,
+    CheckpointIntent,
     FileRoleEvidence,
     NamedResultEvidence,
     PlanningState,
@@ -92,6 +100,11 @@ def _request(
     discovery_assumptions: tuple[str, ...] = (),
     flow: object | None = None,
     ui_language: str = "en",
+    selected_discovery_question_ids: tuple[str, ...] = (),
+    requirements_confirmation_required: bool = True,
+    attachment_context: AIBuilderAttachmentContext | None = None,
+    schema_candidates: tuple[DeclaredSchemaCandidate, ...] = (),
+    schema_direction_pending: bool = False,
 ) -> ServerDecisionDispatchRequest:
     return ServerDecisionDispatchRequest(
         repo=repo,
@@ -112,6 +125,11 @@ def _request(
             ),
         ),
         planning_state=planning_state or PlanningState.empty(),
+        selected_discovery_question_ids=selected_discovery_question_ids,
+        requirements_confirmation_required=requirements_confirmation_required,
+        attachment_context=attachment_context,
+        schema_candidates=schema_candidates,
+        schema_direction_pending=schema_direction_pending,
         discovery_assumptions=discovery_assumptions,
     )
 
@@ -452,6 +470,69 @@ async def test_architecture_revision_persists_revised_commit_and_status() -> Non
 
 
 @pytest.mark.asyncio
+async def test_architecture_revision_chains_selected_discovery_question() -> None:
+    repo = AsyncMock()
+    repo.commit_turn.side_effect = [5, 6]
+    state = _revised_pdf_state()
+    draft = _draft_for_state(state)
+    state.architecture_commit = finalize_architecture_commit(
+        draft,
+        now=lambda: datetime(2026, 4, 24, tzinfo=timezone.utc),
+    )
+    repo.load_planning_state.return_value = state
+
+    result = await dispatch_server_decision(
+        _request(
+            repo=repo,
+            decision=ReviseArchitecture(architecture_commit=draft),
+            conversation=[
+                ConversationMessage(role="user", content="Make it PDF instead")
+            ],
+            selected_discovery_question_ids=("runtime_metadata_fields",),
+        )
+    )
+
+    assert [event.event for event in result.events] == ["status", "text", "question"]
+    question = result.events[2]
+    assert isinstance(question, AIBuilderQuestionEvent)
+    assert question.data.question_id == "runtime_metadata_fields"
+    assert result.new_planning_state_version == 6
+
+
+@pytest.mark.asyncio
+async def test_architecture_commit_chains_refusal_instead_of_ending_silently() -> None:
+    repo = AsyncMock()
+    repo.commit_turn.return_value = 5
+    state = _confirmed_state()
+    state.checkpoint_intents = [
+        CheckpointIntent(
+            evidence_level="explicit",
+            producer_kind="transcript",
+            operation="set",
+            mode="edit",
+            confidence="high",
+            evidence=["quote:user_message:test:review the transcript"],
+        )
+    ]
+    repo.load_planning_state.return_value = state
+
+    result = await dispatch_server_decision(
+        _request(
+            repo=repo,
+            decision=CommitArchitecture(architecture_commit=_draft_for_state(state)),
+            conversation=[
+                ConversationMessage(role="user", content="Review the transcript")
+            ],
+        )
+    )
+
+    assert [event.event for event in result.events] == ["status", "error"]
+    error = result.events[1].data
+    assert error.code is AIBuilderErrorCode.TRANSCRIPT_CHECKPOINT_REQUIRES_AUDIO
+    assert result.new_planning_state_version == 5
+
+
+@pytest.mark.asyncio
 async def test_confirmed_architecture_revision_returns_proposal_continuation() -> None:
     repo = AsyncMock()
     repo.commit_turn.return_value = 5
@@ -486,6 +567,115 @@ async def test_confirmed_architecture_revision_returns_proposal_continuation() -
     assert result.new_planning_state_version == 5
     assert result.proposal_continuation is not None
     assert result.proposal_continuation.planning_state is state
+
+
+@pytest.mark.asyncio
+async def test_step_edit_revision_continues_without_requirements_confirmation() -> None:
+    repo = AsyncMock()
+    repo.commit_turn.return_value = 5
+    state = _revised_pdf_state()
+    draft = _draft_for_state(state)
+    state.architecture_commit = finalize_architecture_commit(
+        draft,
+        now=lambda: datetime(2026, 4, 24, tzinfo=timezone.utc),
+    )
+    repo.load_planning_state.return_value = state
+
+    result = await dispatch_server_decision(
+        _request(
+            repo=repo,
+            decision=ReviseArchitecture(architecture_commit=draft),
+            conversation=[
+                ConversationMessage(role="user", content="Make this step a PDF")
+            ],
+            requirements_confirmation_required=False,
+            flow=object(),
+        )
+    )
+
+    assert [event.event for event in result.events] == ["status"]
+    assert result.proposal_continuation is not None
+    assert repo.commit_turn.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_revision_chains_schema_direction_question_with_same_candidates() -> None:
+    repo = AsyncMock()
+    repo.commit_turn.side_effect = [5, 6]
+    state = _revised_pdf_state()
+    draft = _draft_for_state(state)
+    state.architecture_commit = finalize_architecture_commit(
+        draft,
+        now=lambda: datetime(2026, 4, 24, tzinfo=timezone.utc),
+    )
+    repo.load_planning_state.return_value = state
+    candidates = (
+        build_declared_schema_candidate(
+            {
+                "type": "object",
+                "properties": {"summary": {"type": "string"}},
+            },
+            source_file_ids=(UUID(int=1),),
+            provenance=(f"file:{UUID(int=1)}:json_schema_attachment",),
+        ),
+    )
+
+    result = await dispatch_server_decision(
+        _request(
+            repo=repo,
+            decision=ReviseArchitecture(architecture_commit=draft),
+            conversation=[
+                ConversationMessage(role="user", content="Make it PDF instead")
+            ],
+            schema_candidates=candidates,
+            schema_direction_pending=True,
+        )
+    )
+
+    assert [event.event for event in result.events] == ["status", "text", "question"]
+    question = result.events[2]
+    assert isinstance(question, AIBuilderQuestionEvent)
+    assert question.data.question_id == "schema_direction"
+
+
+@pytest.mark.asyncio
+async def test_architecture_chain_rejects_a_second_revision() -> None:
+    repo = AsyncMock()
+    stale_state = PlanningState.empty()
+    stale_state.resolved_slots = {
+        "primary_runtime_input": _slot("primary_runtime_input", "text"),
+        "terminal_output": _slot("terminal_output", "structured_text"),
+    }
+    stale_state.architecture_commit = _finalized_commit_for_state(stale_state)
+    stale_state.resolved_slots["terminal_output"] = _slot(
+        "terminal_output",
+        "pdf_document",
+    )
+    stale_state.resolved_slots["pdf_generation_mode"] = _slot(
+        "pdf_generation_mode",
+        "generated_pdf",
+    )
+    revision = _draft_for_state(stale_state)
+    repo.commit_turn.return_value = 5
+    repo.load_planning_state.return_value = stale_state
+
+    with pytest.raises(
+        ValueError,
+        match=(
+            "architecture commit chain produced another architecture decision: "
+            "original=ReviseArchitecture, chained=ReviseArchitecture, "
+            "request_id=req-test"
+        ),
+    ):
+        await dispatch_server_decision(
+            _request(
+                repo=repo,
+                decision=ReviseArchitecture(architecture_commit=revision),
+                conversation=[
+                    ConversationMessage(role="user", content="Make it PDF instead")
+                ],
+            )
+        )
 
 
 @pytest.mark.asyncio

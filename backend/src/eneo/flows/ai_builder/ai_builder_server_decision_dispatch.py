@@ -71,7 +71,13 @@ from eneo.flows.ai_builder.question_catalog import (
 from eneo.main.logging import get_logger
 
 if TYPE_CHECKING:
+    from eneo.flows.ai_builder.ai_builder_attachment_context import (
+        AIBuilderAttachmentContext,
+    )
     from eneo.flows.ai_builder.ai_builder_repo import AIBuilderRepository
+    from eneo.flows.ai_builder.ai_builder_schema_evidence import (
+        DeclaredSchemaCandidate,
+    )
     from eneo.flows.domain.flow import Flow
 
 logger = get_logger(__name__)
@@ -104,6 +110,11 @@ class ServerDecisionDispatchRequest:
     ui_language: str | None
     telemetry: ServerDecisionTelemetry
     planning_state: PlanningState
+    selected_discovery_question_ids: tuple[str, ...]
+    requirements_confirmation_required: bool
+    attachment_context: AIBuilderAttachmentContext | None
+    schema_candidates: tuple[DeclaredSchemaCandidate, ...]
+    schema_direction_pending: bool
     discovery_assumptions: tuple[str, ...] = ()
 
 
@@ -379,11 +390,11 @@ async def _dispatch_architecture_commit(
         tenant_id=chained_turn.tenant_id,
     )
     session_state = persisted_state or PlanningState.empty()
-    # The chained confirmation reads the same disclosure the direct path would
-    # have produced from this exact persisted state.
+    # Chained control reads the same disclosure the direct path would have
+    # produced from this exact persisted state.
     turn_control = resolve_turn_control(
         session_state=session_state,
-        selected_discovery_question_ids=(),
+        selected_discovery_question_ids=request.selected_discovery_question_ids,
         requirements_disclosure=build_requirements_disclosure(
             session_state,
             ui_language=request.ui_language,
@@ -392,38 +403,63 @@ async def _dispatch_architecture_commit(
         ),
         confirmed_requirements_version=request.confirmed_requirements_version,
         ui_language=request.ui_language,
+        attachment_context=request.attachment_context,
+        schema_candidates=request.schema_candidates,
+        schema_direction_pending=request.schema_direction_pending,
+        requirements_confirmation_required=(request.requirements_confirmation_required),
         is_edit_mode=request.flow is not None,
     )
-    if isinstance(turn_control.decision, ConfirmRequirements) or (
-        isinstance(turn_control.decision, AskCanonicalQuestion)
-        and turn_control.decision.slot_name == "runtime_metadata_field_details"
-    ):
-        chained = await dispatch_server_decision(
-            ServerDecisionDispatchRequest(
-                repo=request.repo,
-                turn=chained_turn,
-                decision=turn_control.decision,
-                conversation=request.conversation,
-                new_messages_start=len(request.conversation),
-                flow=request.flow,
-                confirmed_requirements_version=request.confirmed_requirements_version,
-                ui_language=request.ui_language,
-                telemetry=request.telemetry,
-                planning_state=session_state,
-                discovery_assumptions=request.discovery_assumptions,
+    chained_decision = turn_control.decision
+    match chained_decision:
+        case (
+            AskCanonicalQuestion() | ConfirmRequirements() | RefuseArchitectureCommit()
+        ):
+            chained = await dispatch_server_decision(
+                ServerDecisionDispatchRequest(
+                    repo=request.repo,
+                    turn=chained_turn,
+                    decision=chained_decision,
+                    conversation=request.conversation,
+                    new_messages_start=len(request.conversation),
+                    flow=request.flow,
+                    confirmed_requirements_version=(
+                        request.confirmed_requirements_version
+                    ),
+                    ui_language=request.ui_language,
+                    telemetry=request.telemetry,
+                    planning_state=session_state,
+                    selected_discovery_question_ids=(
+                        request.selected_discovery_question_ids
+                    ),
+                    requirements_confirmation_required=(
+                        request.requirements_confirmation_required
+                    ),
+                    attachment_context=request.attachment_context,
+                    schema_candidates=request.schema_candidates,
+                    schema_direction_pending=request.schema_direction_pending,
+                    discovery_assumptions=request.discovery_assumptions,
+                )
             )
-        )
-        events.extend(chained.events)
-        new_version = chained.new_planning_state_version
-    elif isinstance(turn_control.decision, GenerateProposal):
-        return ServerDecisionDispatchResult(
-            action_kind=action_kind,
-            events=tuple(events),
-            new_planning_state_version=new_version,
-            proposal_continuation=ServerDecisionProposalContinuation(
-                planning_state=session_state,
-            ),
-        )
+            events.extend(chained.events)
+            new_version = chained.new_planning_state_version
+        case GenerateProposal():
+            return ServerDecisionDispatchResult(
+                action_kind=action_kind,
+                events=tuple(events),
+                new_planning_state_version=new_version,
+                proposal_continuation=ServerDecisionProposalContinuation(
+                    planning_state=session_state,
+                ),
+            )
+        case CommitArchitecture() | ReviseArchitecture():
+            raise ValueError(
+                "architecture commit chain produced another architecture decision: "
+                f"original={type(decision).__name__}, "
+                f"chained={type(chained_decision).__name__}, "
+                f"request_id={request.telemetry.request_id}"
+            )
+        case _:
+            assert_never(chained_decision)
 
     return ServerDecisionDispatchResult(
         action_kind=action_kind,

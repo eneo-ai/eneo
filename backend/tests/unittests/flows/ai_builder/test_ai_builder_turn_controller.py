@@ -396,6 +396,54 @@ def test_server_routes_renderable_non_slot_discovery_question() -> None:
     assert decision.slot_name == "flow_input_architecture"
 
 
+def test_server_revises_architecture_before_asking_schema_direction() -> None:
+    state = _state(
+        primary_runtime_input="documents",
+        terminal_output="structured_text",
+        document_material_scope="flexible_document_case",
+    )
+    state.architecture_commit = _finalized_commit_for_state(state)
+    state.resolved_slots["terminal_output"] = _slot(
+        "terminal_output",
+        "pdf_document",
+    )
+    state.resolved_slots["pdf_generation_mode"] = _slot(
+        "pdf_generation_mode",
+        "generated_pdf",
+    )
+    candidates = (
+        build_declared_schema_candidate(
+            {
+                "type": "object",
+                "properties": {"summary": {"type": "string"}},
+            },
+            source_file_ids=(UUID(int=1),),
+            provenance=(f"file:{UUID(int=1)}:json_schema_attachment",),
+        ),
+    )
+
+    revision = _turn_control(
+        session_state=state,
+        schema_candidates=candidates,
+        schema_direction_pending=True,
+    ).decision
+
+    assert isinstance(revision, ReviseArchitecture)
+    state.architecture_commit = finalize_architecture_commit(
+        revision.architecture_commit,
+        now=lambda: datetime(2026, 4, 24, tzinfo=timezone.utc),
+    )
+
+    question = _turn_control(
+        session_state=state,
+        schema_candidates=candidates,
+        schema_direction_pending=True,
+    ).decision
+
+    assert isinstance(question, AskCanonicalQuestion)
+    assert question.slot_name == "schema_direction"
+
+
 @pytest.mark.parametrize("ui_language", ["en", "sv"])
 @pytest.mark.parametrize("field_fill", ["\0", '"', "\\", "😀"])
 def test_schema_direction_maximum_question_covers_complete_set_and_fits_limit(

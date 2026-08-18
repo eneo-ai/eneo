@@ -214,6 +214,13 @@ def resolve_turn_control(
                 message=_ARCHITECTURE_REFUSAL_MESSAGES[refusal_code][locale],
             )
         )
+    if action_policy.allowed_action_kinds == ("revise_architecture",):
+        draft = derive_architecture_commit_draft(session_state)
+        if draft is None:
+            raise ValueError("architecture revision action requires a derived draft")
+        return BuilderTurnControl(
+            decision=ReviseArchitecture(architecture_commit=draft)
+        )
     if schema_direction_pending:
         if not schema_candidates:
             raise ValueError("pending schema direction requires candidates")
@@ -301,11 +308,6 @@ def _decision_from_policy(
         draft = derive_architecture_commit_draft(session_state)
         if draft is not None:
             return CommitArchitecture(architecture_commit=draft)
-
-    if "revise_architecture" in action_policy.allowed_action_kinds:
-        draft = derive_architecture_commit_draft(session_state)
-        if draft is not None:
-            return ReviseArchitecture(architecture_commit=draft)
 
     if "confirm_requirements" in action_policy.allowed_action_kinds:
         return ConfirmRequirements(payload=requirements_disclosure)

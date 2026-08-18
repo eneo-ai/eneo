@@ -3629,6 +3629,11 @@ class TestPlannerDiscoveryQuestionDispatch:
                     ),
                 ),
                 planning_state=PlanningState.empty(),
+                selected_discovery_question_ids=(),
+                requirements_confirmation_required=True,
+                attachment_context=None,
+                schema_candidates=(),
+                schema_direction_pending=False,
             )
         )
 

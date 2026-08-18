@@ -5643,6 +5643,11 @@ async def test_accepting_an_inferred_requirement_pins_it_and_converges(
                 ui_language="sv",
                 telemetry=_server_decision_telemetry("req-disclosure"),
                 planning_state=turn_state,
+                selected_discovery_question_ids=(),
+                requirements_confirmation_required=True,
+                attachment_context=None,
+                schema_candidates=(),
+                schema_direction_pending=False,
             )
         )
         await repo.release_session_send(
@@ -5755,6 +5760,15 @@ async def test_accepting_an_inferred_requirement_pins_it_and_converges(
                 ui_language="sv",
                 telemetry=_server_decision_telemetry("req-acknowledgment"),
                 planning_state=prepared.planning_state,
+                selected_discovery_question_ids=(
+                    prepared.discovery_analysis.selected_question_ids
+                ),
+                requirements_confirmation_required=(
+                    prepared.requirements_confirmation_required
+                ),
+                attachment_context=prepared.attachment_context,
+                schema_candidates=prepared.schema_candidates,
+                schema_direction_pending=prepared.schema_direction_pending,
             )
         )
         await repo.release_session_send(
@@ -5794,6 +5808,292 @@ async def test_accepting_an_inferred_requirement_pins_it_and_converges(
         == 1
     )
     assert resolve_requirements_state(revised_conversation).latest_summary == disclosure
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_classified_output_drift_revises_before_persisting_question(
+    client,
+    bearer_token,
+    completion_model_factory,
+    db_container,
+) -> None:
+    from eneo.flows.ai_builder.ai_builder_action_policy import (
+        build_planner_action_policy,
+    )
+    from eneo.flows.ai_builder.ai_builder_attachment_context import (
+        AIBuilderAttachmentContextPolicy,
+    )
+    from eneo.flows.ai_builder.ai_builder_commit_invariance import (
+        architecture_commit_draft_matches_pinned,
+    )
+    from eneo.flows.ai_builder.ai_builder_planner_request_preparation import (
+        PlannerRequestPreparationInput,
+        ServerOutputPrepared,
+        prepare_planner_request,
+    )
+    from eneo.flows.ai_builder.ai_builder_server_decision_dispatch import (
+        ServerDecisionDispatchRequest,
+        dispatch_server_decision,
+    )
+    from eneo.flows.ai_builder.ai_builder_settings import AIBuilderBudgetPolicy
+    from eneo.flows.ai_builder.ai_builder_turn_controller import ReviseArchitecture
+    from eneo.flows.domain.mapped_execution_policy import FlowMappedExecutionPolicy
+
+    space_id = await _create_space_with_planner_model(
+        client=client,
+        bearer_token=bearer_token,
+        db_container=db_container,
+        completion_model_factory=completion_model_factory,
+        space_name="AI Builder Classified Output Revision",
+    )
+    initial_request = "Skapa ett flöde som tar emot ljud och lämnar text."
+    audio_input = _structured_answer_message(
+        question_id="primary_runtime_input",
+        value="audio",
+        content="Ljud",
+    )
+    text_output = _structured_answer_message(
+        question_id="terminal_output",
+        value="structured_text",
+        content="Strukturerad text",
+    )
+    pinned_architecture_state = build_planning_state_from_conversation(
+        [
+            ConversationMessage(role="user", content=initial_request),
+            audio_input,
+            text_output,
+        ]
+    )
+    initial_draft = derive_architecture_commit_draft(pinned_architecture_state)
+    assert initial_draft is not None
+    initial_state = build_planning_state_from_conversation(
+        [
+            ConversationMessage(role="user", content=initial_request),
+            audio_input,
+        ]
+    )
+
+    async with db_container() as container:
+        repo = AIBuilderRepository(container.session())
+        user = container.user()
+        session = await repo.create_session(
+            tenant_id=user.tenant_id,
+            space_id=UUID(space_id),
+            actor_user_id=user.id,
+            target_kind=TargetKind.CREATE,
+            flow_id=None,
+        )
+        initial_turn = await _claim_session_send_turn(
+            repo=repo,
+            session_id=session.id,
+            tenant_id=user.tenant_id,
+            message_content=initial_request,
+        )
+        await repo.commit_turn(
+            turn=initial_turn,
+            new_messages=[
+                audio_input,
+                ConversationMessage(role="assistant", content="Architecture pinned"),
+            ],
+            architecture_commit=finalize_architecture_commit(initial_draft),
+            planning_state=initial_state,
+        )
+        await repo.release_session_send(
+            session_id=session.id,
+            tenant_id=user.tenant_id,
+            lease=initial_turn.lease,
+        )
+
+        current_turn = await _claim_session_send_turn(
+            repo=repo,
+            session_id=session.id,
+            tenant_id=user.tenant_id,
+            message_content="Jag vill att slutresultatet ska vara en PDF-rapport.",
+        )
+        current_session = await repo.get_session(
+            session_id=session.id,
+            tenant_id=user.tenant_id,
+        )
+        conversation = list(current_session.conversation)
+        current_message = conversation[-1]
+        assert current_message.message_id is not None
+        source_id = f"user_message:{current_message.message_id}"
+        classification_response = _make_llm_response(
+            content=json.dumps(
+                {
+                    "slots": [
+                        {
+                            "slot_name": "terminal_output",
+                            "value": "pdf_document",
+                            "confidence": "high",
+                            "reason": "Användaren anger uttryckligen PDF som slutfil.",
+                            "evidence": [
+                                {
+                                    "source_id": source_id,
+                                    "quote": current_message.content,
+                                }
+                            ],
+                            "evidence_level": "explicit",
+                        },
+                    ],
+                    "file_roles": [],
+                    "checkpoint_updates": [],
+                    "form_intake": None,
+                    "named_result_evidence": None,
+                    "example_output_constraints": None,
+                    "schema_direction": None,
+                    "secondary_obligations": [],
+                    "assumptions": [],
+                    "contradictions": [],
+                }
+            )
+        )
+        litellm_client = AsyncMock()
+        litellm_client.acompletion.return_value = classification_response
+        route = _route(model=f"openai/gpt-5.6-luna-{uuid4().hex}")
+
+        async def mark_provider_work_started() -> None:
+            await repo.mark_session_turn_processing(turn=current_turn)
+
+        persisted_planning_state = await repo.load_planning_state(
+            session_id=session.id,
+            tenant_id=user.tenant_id,
+        )
+        assert persisted_planning_state is not None
+        assert persisted_planning_state.architecture_commit is not None
+        assert (
+            persisted_planning_state.architecture_commit.tuples_chain[-1].output_type
+            == "text"
+        )
+        prepared = await prepare_planner_request(
+            PlannerRequestPreparationInput(
+                conversation=conversation,
+                litellm_client=litellm_client,
+                completion_model_route=route,
+                available_models=None,
+                available_kbs=None,
+                flow=None,
+                assistant_snapshots=None,
+                attachment_files=[],
+                max_input_tokens=8000,
+                max_output_tokens=1024,
+                budget_policy=AIBuilderBudgetPolicy(
+                    conversation_safety_buffer_tokens=128,
+                    minimum_conversation_budget_tokens=256,
+                ),
+                attachment_context_policy=AIBuilderAttachmentContextPolicy(),
+                mapped_execution_policy=FlowMappedExecutionPolicy(),
+                base_planning_state_version=(current_turn.base_planning_state_version),
+                tenant_id=user.tenant_id,
+                plan_edit_context=None,
+                prior_plan_for_revision=None,
+                persisted_planning_state=persisted_planning_state,
+                current_turn_start=len(conversation) - 1,
+                usage_tracker=ProposalTurnTelemetry(
+                    request_id="req-classified-output-revision",
+                    model=route.litellm_model,
+                    target_kind=TargetKind.CREATE,
+                ),
+                before_provider_call=mark_provider_work_started,
+            )
+        )
+
+        assert isinstance(prepared, ServerOutputPrepared)
+        assert (
+            prepared.planning_state.commit_grade_slot_value("terminal_output")
+            == "pdf_document"
+        )
+        primary_input = prepared.planning_state.resolved_slots.get(
+            "primary_runtime_input"
+        )
+        assert primary_input is not None
+        assert primary_input.value == "audio"
+        assert primary_input.is_commit_grade
+        prepared_draft = derive_architecture_commit_draft(prepared.planning_state)
+        assert prepared_draft is not None
+        assert prepared_draft.tuples_chain[-1].output_type == "pdf"
+        assert prepared.planning_state.architecture_commit is not None
+        assert not architecture_commit_draft_matches_pinned(
+            before=prepared.planning_state.architecture_commit,
+            after=prepared_draft,
+        )
+        prepared_policy = build_planner_action_policy(
+            session_state=prepared.planning_state,
+            selected_discovery_question_ids=(
+                prepared.discovery_analysis.selected_question_ids
+            ),
+        )
+        assert prepared_policy.allowed_action_kinds == ("revise_architecture",)
+        assert isinstance(prepared.server_decision, ReviseArchitecture)
+        assert prepared.discovery_analysis.selected_question_ids
+        assert prepared.slot_classification_metadata is not None
+        assert (
+            prepared.server_decision.architecture_commit.tuples_chain[-1].output_type
+            == "pdf"
+        )
+
+        current_message.metadata = metadata_with_slot_classification(
+            current_message.metadata,
+            prepared.slot_classification_metadata,
+        )
+        await repo.append_session_messages(
+            session_id=session.id,
+            tenant_id=user.tenant_id,
+            conversation=[current_message],
+            lease=current_turn.lease,
+        )
+        result = await dispatch_server_decision(
+            ServerDecisionDispatchRequest(
+                repo=repo,
+                turn=current_turn,
+                decision=prepared.server_decision,
+                conversation=conversation,
+                new_messages_start=len(conversation) - 1,
+                flow=None,
+                confirmed_requirements_version=(
+                    prepared.requirements_state.confirmed_requirements_version
+                ),
+                ui_language="sv",
+                telemetry=_server_decision_telemetry("req-classified-output-revision"),
+                planning_state=prepared.planning_state,
+                selected_discovery_question_ids=(
+                    prepared.discovery_analysis.selected_question_ids
+                ),
+                requirements_confirmation_required=(
+                    prepared.requirements_confirmation_required
+                ),
+                attachment_context=prepared.attachment_context,
+                schema_candidates=prepared.schema_candidates,
+                schema_direction_pending=prepared.schema_direction_pending,
+                discovery_assumptions=prepared.discovery_analysis.assumptions,
+            )
+        )
+        await repo.complete_session_turn(turn=current_turn)
+        await repo.release_session_send(
+            session_id=session.id,
+            tenant_id=user.tenant_id,
+            lease=current_turn.lease,
+        )
+        final_state = await repo.load_planning_state(
+            session_id=session.id,
+            tenant_id=user.tenant_id,
+        )
+        latest_turn_state, latest_turn_error = (
+            await repo.session.execute(
+                select(
+                    BuilderSessions.latest_turn_state,
+                    BuilderSessions.latest_turn_error_jsonb,
+                ).where(BuilderSessions.id == session.id)
+            )
+        ).one()
+
+    assert [event.event for event in result.events] == ["status", "text", "question"]
+    assert final_state is not None
+    assert final_state.architecture_commit is not None
+    assert final_state.architecture_commit.tuples_chain[-1].output_type == "pdf"
+    assert latest_turn_state == BuilderTurnState.COMMITTED.value
+    assert latest_turn_error is None
 
 
 @pytest.mark.integration
@@ -6744,6 +7044,11 @@ async def test_server_requirements_confirmation_with_lost_lease_rolls_back(
                         ),
                     ),
                     planning_state=PlanningState.empty(),
+                    selected_discovery_question_ids=(),
+                    requirements_confirmation_required=True,
+                    attachment_context=None,
+                    schema_candidates=(),
+                    schema_direction_pending=False,
                 )
             )
 
@@ -6833,6 +7138,11 @@ async def test_server_question_with_lost_lease_rolls_back(
                         ),
                     ),
                     planning_state=PlanningState.empty(),
+                    selected_discovery_question_ids=(),
+                    requirements_confirmation_required=True,
+                    attachment_context=None,
+                    schema_candidates=(),
+                    schema_direction_pending=False,
                 )
             )
 

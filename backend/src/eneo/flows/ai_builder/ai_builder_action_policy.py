@@ -193,12 +193,7 @@ def build_planner_action_policy(
     ):
         allowed.append("commit_architecture")
 
-    if (
-        architecture_committed
-        and not ask_targets
-        and derived_commit is not None
-        and architecture_drift_detected
-    ):
+    if architecture_committed and architecture_drift_detected:
         allowed.append("revise_architecture")
 
     if architecture_committed and not ask_targets and not architecture_drift_detected:
@@ -289,8 +284,8 @@ def _phase_priority(candidates: list[PlannerActionKind]) -> list[PlannerActionKi
 
     for action in (
         "refuse_architecture_commit",
-        "ask_question",
         "revise_architecture",
+        "ask_question",
         "commit_architecture",
         "confirm_requirements",
         "propose_plan",

@@ -113,6 +113,7 @@ from eneo.flows.ai_builder.ai_builder_turn_controller import (
     resolve_turn_control,
 )
 from eneo.flows.ai_builder.planning_state import (
+    ArchitectureCommit,
     PlanningState,
     ResolvedSlot,
 )
@@ -2442,6 +2443,21 @@ class TestSendMessageStructuredQuestion:
             repo=repo,
             completion_service=completion_service,
         )
+
+        # Dispatch reloads the state that commit_turn persisted. Keep this
+        # focused fake faithful to that repository contract.
+        def persist_planning_state(**kwargs: object) -> int:
+            planning_state = kwargs["planning_state"]
+            assert isinstance(planning_state, PlanningState)
+            persisted_state = planning_state.model_copy(deep=True)
+            architecture_commit = kwargs.get("architecture_commit")
+            if architecture_commit is not None:
+                assert isinstance(architecture_commit, ArchitectureCommit)
+                persisted_state.architecture_commit = architecture_commit
+            repo.load_planning_state.return_value = persisted_state
+            return 1
+
+        repo.commit_turn.side_effect = persist_planning_state
 
         with patch("eneo.flows.ai_builder.ai_builder_service.litellm") as mock_litellm:
             mock_litellm.acompletion = AsyncMock(
