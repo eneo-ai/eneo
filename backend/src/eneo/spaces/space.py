@@ -40,6 +40,10 @@ UNAUTHORIZED_EXCEPTION_MESSAGE = "Unauthorized. User has no permissions to acces
 SECURITY_CLASSIFICATION_EXCEPTION_MESSAGE = (
     "Security classification is not compatible with the space."
 )
+NO_COMPLETION_MODEL_EXCEPTION_MESSAGE = (
+    "Cannot perform operation: Space '{space_name}' has no completion models configured. "
+    "Please configure at least one completion model in the space settings."
+)
 
 
 class SpacePermissionsActions(Enum):
@@ -211,8 +215,7 @@ class Space:
 
         if not sorted_completion_models:
             raise BadRequestException(
-                f"Cannot perform operation: Space '{self.name}' has no completion models configured. "
-                "Please configure at least one completion model in the space settings."
+                NO_COMPLETION_MODEL_EXCEPTION_MESSAGE.format(space_name=self.name)
             )
 
         return sorted_completion_models[0]  # type: ignore
@@ -267,8 +270,7 @@ class Space:
         )
         if default_model is None:
             raise BadRequestException(
-                f"Cannot perform operation: Space '{self.name}' has no completion models configured. "
-                "Please configure at least one completion model in the space settings."
+                NO_COMPLETION_MODEL_EXCEPTION_MESSAGE.format(space_name=self.name)
             )
 
         return default_model

@@ -21,9 +21,10 @@
 </script>
 
 <!-- Nothing renders while the read is in flight; the composer never waits on
-     it. Every settled outcome says something, because silence here is the
-     complaint this control answers. -->
+     it. Every settled outcome says something, so an absent control is never
+     left to look like an absent feature. -->
 {#if service.modelLoadStatus === "failed"}
+  <!-- Sending still works; only the choice is unavailable. -->
   <div class="flex min-w-0 items-center gap-1" role="alert">
     <span class="text-destructive max-w-44 truncate text-[0.8125rem]">
       {m.failed_to_load_models()}
@@ -33,8 +34,8 @@
     </Button>
   </div>
 {:else if service.modelLoadStatus === "loaded" && service.availableModels.length === 0}
-  <!-- The turn will fail at the server for want of a planner model; saying so
-       here beats letting the user discover it by sending. -->
+  <!-- The space offers no model this turn could run on. Saying so beats
+       letting the user find out by sending. -->
   <span class="text-secondary max-w-72 truncate text-[0.8125rem]" role="status">
     {m.no_completion_model_description()}
   </span>

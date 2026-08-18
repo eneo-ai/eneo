@@ -53,7 +53,6 @@ from eneo.flows.ai_builder.ai_builder_api_models import (
 )
 from eneo.flows.ai_builder.ai_builder_context import (
     eligible_planner_models,
-    select_default_planner_model,
 )
 from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
     named_content_fields_edit_from_metadata,
@@ -349,9 +348,10 @@ def _authorized_space(authorization: AIBuilderAuthorization) -> "Space":
 
 
 async def _active_provider_ids(container: Container) -> set[UUID]:
-    """Providers a planner model may run on. Read per request by both the model
-    listing and the send path, so both judge eligibility by the same rule
-    against the same state."""
+    """Providers a planner model may run on, as of this request. Read rather
+    than held: provider state is what makes a model eligible, so a cached set
+    would let a session keep offering a model that has since been switched
+    off."""
     providers = await container.model_provider_repository().all(active_only=True)
     return {provider.id for provider in providers}
 
@@ -1408,13 +1408,13 @@ async def get_session_models(
         require_creator=True,
     )
     space = _authorized_space(authorization)
-    # The same two calls the send path makes, so the advertised default is what
-    # an omitted `model_id` resolves to against this same state.
-    active_provider_ids = await _active_provider_ids(container)
-    models = eligible_planner_models(space, active_provider_ids=active_provider_ids)
-    default_model = select_default_planner_model(
-        space, active_provider_ids=active_provider_ids
+    # Eligibility is computed once and the default chosen from it, by the same
+    # rule the send path applies, so the advertised default is the model an
+    # omitted `model_id` resolves to when nothing has changed in between.
+    models = eligible_planner_models(
+        space, active_provider_ids=await _active_provider_ids(container)
     )
+    default_model = space.select_default_completion_model(models)
     default_model_id = default_model.id if default_model is not None else None
 
     resolved_models: list[SessionModelOption] = []

@@ -650,14 +650,19 @@ export class FlowAIBuilderDriver {
       message,
       ui_language: getLocale()
     };
-    // Only an explicit override is sent. Staying silent lets the server apply
-    // its own default, which can change between turns without the client
-    // pinning a stale one.
-    if (this.#state.selectedModelId) {
-      requestBody.model_id = this.#state.selectedModelId;
+    // Silence lets the server apply its own default, so an unchanged composer
+    // never pins a model. An effort is the exception: it is one of the options
+    // a particular model advertised, so it has to name that model. Sent alone,
+    // the server would judge it against whatever its default resolves to now,
+    // and either apply the choice to a different model or refuse the turn.
+    const reasoningEffort = this.#state.selectedReasoningEffort;
+    const modelId =
+      this.#state.selectedModelId ?? (reasoningEffort ? (this.effectiveModel?.id ?? null) : null);
+    if (modelId) {
+      requestBody.model_id = modelId;
     }
-    if (this.#state.selectedReasoningEffort) {
-      requestBody.reasoning_effort = this.#state.selectedReasoningEffort;
+    if (reasoningEffort) {
+      requestBody.reasoning_effort = reasoningEffort;
     }
     if (questionAnswer) {
       requestBody.question_answer = questionAnswer;

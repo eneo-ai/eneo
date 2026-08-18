@@ -615,26 +615,34 @@ describe("FlowAIBuilderDriver", () => {
       expect(body.reasoning_effort).toBeUndefined();
     });
 
-    it("sends the override and effort the user chose", async () => {
+    it("names the model an effort was chosen against, even without an override", async () => {
+      // "high" is one of that model's advertised options. Sent alone, the
+      // server would judge it against whatever its default resolves to at send
+      // time, and apply the choice to a model the user never saw.
       const { driver, stream } = makeSendableDriver();
 
       driver.selectReasoningEffort("high");
       await driver.sendMessage("Sammanfatta rapporter");
 
-      const first = stream.mock.calls[0]?.[1].requestBody["application/json"];
-      expect(first.model_id).toBeUndefined();
-      expect(first.reasoning_effort).toBe("high");
+      const body = stream.mock.calls[0]?.[1].requestBody["application/json"];
+      expect(body.model_id).toBe(DEFAULT_MODEL_ID);
+      expect(body.reasoning_effort).toBe("high");
+    });
+
+    it("sends the override the user chose", async () => {
+      const { driver, stream } = makeSendableDriver();
 
       driver.selectModel(ALTERNATE_MODEL_ID);
       await driver.sendMessage("Och lägg till en sammanfattning");
 
-      const second = stream.mock.calls[1]?.[1].requestBody["application/json"];
-      expect(second.model_id).toBe(ALTERNATE_MODEL_ID);
+      const body = stream.mock.calls[0]?.[1].requestBody["application/json"];
+      expect(body.model_id).toBe(ALTERNATE_MODEL_ID);
+      expect(body.reasoning_effort).toBeUndefined();
     });
 
     it("still sends when the model list never arrives", async () => {
-      // The control was removed once because a slow list blocked the first
-      // message. Selection is a refinement now, never a precondition.
+      // Selection is a refinement, never a precondition: an unread list leaves
+      // the request exactly as it was before these controls existed.
       const { driver, stream } = makeDriver({
         streamImpl: vi.fn(async (_path, _init, handlers) => {
           completeStream(handlers);

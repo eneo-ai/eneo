@@ -123,7 +123,8 @@ def test_get_default_model(space: Space):
     space.completion_models = [default_model]
     assert space.get_default_completion_model() is not None
 
-    # Disable access - falls back to get_latest_completion_model which raises BadRequestException
+    # Disable access - a space holding models but none usable raises rather
+    # than reporting no default
     default_model.can_access = False
     with pytest.raises(BadRequestException):
         space.get_default_completion_model()
