@@ -123,6 +123,7 @@ class TestCategoryMappings:
             ActionType.SECURITY_CLASSIFICATION_DISABLED,
             ActionType.MODULE_AUTH_TICKET_ISSUED,
             ActionType.MODULE_AUTH_TOKEN_EXCHANGED,
+            ActionType.MODULE_AUTH_TOKEN_REFRESHED,
         ]
 
         for action_type in security_actions:
@@ -262,7 +263,7 @@ class TestCategoryDistribution:
         expected_counts = {
             "admin_actions": 49,
             "user_actions": 45,
-            "security_events": 8,
+            "security_events": 9,
             "file_operations": 4,
             "integration_events": 19,
             "system_actions": 3,

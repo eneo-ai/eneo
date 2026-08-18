@@ -1,7 +1,9 @@
 import hashlib
 import json
 import secrets
+import time
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import Optional
 from urllib.parse import urlencode
 from uuid import UUID
@@ -38,6 +40,11 @@ from eneo.users.user_service import UserService
 
 _TICKET_KEY_PREFIX = "module_auth_ticket:"
 MODULE_AUDIENCE_PREFIX = "eneo-module:"
+# Unix timestamp of the original ticket exchange, carried unchanged through
+# every refresh so the session ceiling cannot slide. Tokens minted before the
+# claim existed fall back to ``iat``, which equals the handoff time for any
+# never-refreshed token.
+MODULE_HANDOFF_AT_CLAIM = "handoff_at"
 
 
 class ModuleTicketRequest(BaseModel):
@@ -95,6 +102,14 @@ class ModuleTokenResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
     expires_in: int
+    session_expires_at: datetime = Field(
+        description=(
+            "Absolute UTC ceiling of this module session, fixed at the "
+            "original ticket exchange. Refresh can renew the token until this "
+            "instant but never past it; afterwards a new login handoff is "
+            "required."
+        ),
+    )
     module_key: str
     tenant_id: UUID
     user: ModuleTokenUser
@@ -110,11 +125,17 @@ class ModuleResourceSessionResponse(BaseModel):
 
 @dataclass(frozen=True, slots=True)
 class ModuleRequestPrincipal:
-    """Live authorization result for one module resource request."""
+    """Live authorization result for one module resource request.
+
+    ``access_token`` is the already-validated module user token that proved
+    this request; the refresh flow re-reads its verified claims to carry the
+    session ceiling forward.
+    """
 
     module: ModuleInDB
     user: UserInDB
     api_key: ApiKeyV2InDB
+    access_token: str
 
 
 def module_audience(module_key: str) -> str:
@@ -267,8 +288,6 @@ class ModuleAuthBroker:
     async def exchange_ticket(
         self, api_key: ApiKeyV2InDB, ticket: str
     ) -> ModuleTokenResponse:
-        settings = get_settings()
-
         registration_error = self._service_key_registration_error(api_key)
         if registration_error is not None:
             raise UnauthorizedException(
@@ -318,11 +337,13 @@ class ModuleAuthBroker:
         if consumed is None or consumed != raw:
             raise AuthenticationException("Invalid or expired module ticket.")
 
-        expires_in_minutes = settings.module_auth_token_expiry_minutes
+        handoff_at = int(time.time())
+        expires_in_seconds, session_expires_at = self._token_window(handoff_at)
         access_token = self.auth_service.create_access_token_for_user(
             user,
             audience=module_audience(module.name),
-            expires_in=expires_in_minutes,
+            expires_in=expires_in_seconds / 60,
+            extra_claims={MODULE_HANDOFF_AT_CLAIM: handoff_at},
         )
 
         await self.audit_service.log_async(
@@ -341,9 +362,93 @@ class ModuleAuthBroker:
 
         return ModuleTokenResponse(
             access_token=access_token,
-            expires_in=expires_in_minutes * 60,
+            expires_in=expires_in_seconds,
+            session_expires_at=session_expires_at,
             module_key=module.name,
             tenant_id=tenant_id,
+            user=ModuleTokenUser(id=user.id, email=user.email, username=user.username),
+        )
+
+    @staticmethod
+    def _token_window(handoff_at: int) -> tuple[int, datetime]:
+        """Seconds the next token may live, plus the fixed session ceiling.
+
+        The ceiling is anchored at ``handoff_at``, so a token minted late in
+        the session is clipped and no token is ever valid past the ceiling.
+        Raises when the ceiling has passed - the caller turns that into a
+        re-handoff signal.
+        """
+        settings = get_settings()
+        ceiling = handoff_at + settings.module_auth_max_session_hours * 3600
+        remaining = ceiling - int(time.time())
+        if remaining <= 0:
+            raise AuthenticationException(
+                "Module session has reached its maximum length; "
+                "a new login handoff is required."
+            )
+        expires_in_seconds = min(
+            settings.module_auth_token_expiry_minutes * 60, remaining
+        )
+        session_expires_at = datetime.fromtimestamp(ceiling, tz=timezone.utc)
+        return expires_in_seconds, session_expires_at
+
+    async def refresh_token(
+        self, *, principal: ModuleRequestPrincipal
+    ) -> ModuleTokenResponse:
+        """Renew a still-valid module user token inside the session ceiling.
+
+        The caller must have run the full dual-credential resource
+        authentication for this request; refresh therefore re-validates the
+        same live state as any module resource call. An expired token cannot
+        be refreshed - renewal after expiry is always a new login handoff, so
+        access re-anchors in the central session gate.
+        """
+        settings = get_settings()
+        module = principal.module
+        user = principal.user
+
+        claims = self.auth_service.get_verified_claims(
+            principal.access_token,
+            key=str(settings.jwt_secret),
+            aud=module_audience(module.name),
+        )
+        try:
+            handoff_at = int(float(claims.get(MODULE_HANDOFF_AT_CLAIM, claims["iat"])))
+        except (KeyError, TypeError, ValueError) as exc:
+            raise AuthenticationException(
+                "Could not validate token credentials."
+            ) from exc
+
+        expires_in_seconds, session_expires_at = self._token_window(handoff_at)
+        access_token = self.auth_service.create_access_token_for_user(
+            user,
+            audience=module_audience(module.name),
+            expires_in=expires_in_seconds / 60,
+            extra_claims={MODULE_HANDOFF_AT_CLAIM: handoff_at},
+        )
+
+        await self.audit_service.log_async(
+            tenant_id=user.tenant_id,
+            actor_id=user.id,
+            actor_type=ActorType.USER,
+            action=ActionType.MODULE_AUTH_TOKEN_REFRESHED,
+            entity_type=EntityType.MODULE,
+            entity_id=module.id,
+            description=f"Module '{module.name}' refreshed a module user token",
+            metadata={
+                "module": {"id": str(module.id), "name": module.name},
+                "api_key_id": str(principal.api_key.id),
+                "handoff_at": handoff_at,
+                "session_expires_at": session_expires_at.isoformat(),
+            },
+        )
+
+        return ModuleTokenResponse(
+            access_token=access_token,
+            expires_in=expires_in_seconds,
+            session_expires_at=session_expires_at,
+            module_key=module.name,
+            tenant_id=user.tenant_id,
             user=ModuleTokenUser(id=user.id, email=user.email, username=user.username),
         )
 
@@ -409,4 +514,6 @@ class ModuleAuthBroker:
         await self.user_service.validate_active_identity(
             user, correlation_id="module-resource-auth"
         )
-        return ModuleRequestPrincipal(module=module, user=user, api_key=api_key)
+        return ModuleRequestPrincipal(
+            module=module, user=user, api_key=api_key, access_token=access_token
+        )

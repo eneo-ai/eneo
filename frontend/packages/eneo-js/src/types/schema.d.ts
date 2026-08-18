@@ -7725,6 +7725,26 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/module-auth/{module_key}/token/refresh/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Refresh Module Token
+     * @description Renew a still-valid module user token inside the session ceiling. Requires the same dual credentials as any module resource call - the bound sk_ service key and the current, unexpired Bearer token - and re-validates live user, tenant and module-assignment state before minting. The new token carries the original handoff time, so refresh slides the token window but can never extend the session past `session_expires_at`; after the ceiling, or once the token has expired, the module must run a new login handoff.
+     */
+    post: operations["refresh_module_token_api_v1_module_auth__module_key__token_refresh__post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/module-auth/{module_key}/session/": {
     parameters: {
       query?: never;
@@ -8257,6 +8277,7 @@ export interface components {
       | "module_client_config_updated"
       | "module_auth_ticket_issued"
       | "module_auth_token_exchanged"
+      | "module_auth_token_refreshed"
       | "assistant_created"
       | "assistant_deleted"
       | "assistant_updated"
@@ -14549,6 +14570,12 @@ export interface components {
       token_type?: string;
       /** Expires In */
       expires_in: number;
+      /**
+       * Session Expires At
+       * Format: date-time
+       * @description Absolute UTC ceiling of this module session, fixed at the original ticket exchange. Refresh can renew the token until this instant but never past it; afterwards a new login handoff is required.
+       */
+      session_expires_at: string;
       /** Module Key */
       module_key: string;
       /**
@@ -47457,6 +47484,64 @@ export interface operations {
       };
       /** @description Forbidden */
       403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  refresh_module_token_api_v1_module_auth__module_key__token_refresh__post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        module_key: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ModuleTokenResponse"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
         headers: {
           [name: string]: unknown;
         };

@@ -294,6 +294,84 @@ async def test_partial_config_patch_preserves_key_and_full_handoff_succeeds(
 
 
 @pytest.mark.asyncio
+async def test_token_refresh_slides_window_inside_fixed_session_ceiling(
+    client,
+    admin_token,
+    admin_user,
+    enabled_module,
+    test_settings,
+):
+    service_key = await create_api_key(
+        client,
+        token=admin_token,
+        ownership=ApiKeyOwnership.SERVICE,
+        permission=ApiKeyPermission.WRITE,
+    )
+    config = await client.patch(
+        client_config_path(tenant_id=admin_user.tenant_id, module_id=enabled_module.id),
+        json={
+            "redirect_uris": [REDIRECT_URI],
+            "service_key_id": service_key["api_key"]["id"],
+        },
+        headers={"X-API-Key": test_settings.eneo_super_duper_api_key},
+    )
+    assert config.status_code == 200, config.text
+
+    ticket_response = await client.post(
+        "/api/v1/module-auth/tickets/",
+        json={
+            "module_key": enabled_module.name,
+            "redirect_uri": REDIRECT_URI,
+            "state": "module-csrf-binding-refresh",
+        },
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert ticket_response.status_code == 201, ticket_response.text
+    ticket = parse_qs(urlparse(ticket_response.json()["redirect_target"]).query)[
+        "ticket"
+    ][0]
+
+    exchange = await client.post(
+        "/api/v1/module-auth/token/",
+        json={"ticket": ticket},
+        headers={"X-API-Key": service_key["secret"]},
+    )
+    assert exchange.status_code == 200, exchange.text
+    exchanged = exchange.json()
+    assert exchanged["session_expires_at"] is not None
+
+    refresh_path = f"/api/v1/module-auth/{enabled_module.name}/token/refresh/"
+    refresh = await client.post(
+        refresh_path,
+        headers={
+            "Authorization": f"Bearer {exchanged['access_token']}",
+            "X-API-Key": service_key["secret"],
+        },
+    )
+    assert refresh.status_code == 200, refresh.text
+    refreshed = refresh.json()
+    # The ceiling is anchored at the original exchange and must not slide.
+    assert refreshed["session_expires_at"] == exchanged["session_expires_at"]
+    assert refreshed["module_key"] == enabled_module.name
+    assert refreshed["expires_in"] > 0
+
+    session = await client.get(
+        f"/api/v1/module-auth/{enabled_module.name}/session/",
+        headers={
+            "Authorization": f"Bearer {refreshed['access_token']}",
+            "X-API-Key": service_key["secret"],
+        },
+    )
+    assert session.status_code == 200, session.text
+
+    missing_bearer = await client.post(
+        refresh_path,
+        headers={"X-API-Key": service_key["secret"]},
+    )
+    assert missing_bearer.status_code == 401, missing_bearer.text
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("ownership", "permission"),
     [

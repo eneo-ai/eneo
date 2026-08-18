@@ -946,7 +946,8 @@ def patch_auth_service_jwt(monkeypatch, test_settings):
         user: UserInDB,
         secret_key: str | None = None,
         audience: str | None = None,
-        expires_in: int | None = None,
+        expires_in: float | None = None,
+        extra_claims: dict[str, object] | None = None,
     ) -> str:
         secret = secret_key or test_settings.jwt_secret
         aud = audience or test_settings.jwt_audience
@@ -961,11 +962,14 @@ def patch_auth_service_jwt(monkeypatch, test_settings):
             ),
         )
         jwt_creds = JWTCreds(sub=user.email, username=user.username)
-        payload = JWTPayload(**jwt_meta.model_dump(), **jwt_creds.model_dump())
+        payload = {
+            **JWTPayload(
+                **jwt_meta.model_dump(), **jwt_creds.model_dump()
+            ).model_dump(),
+            **(extra_claims or {}),
+        }
 
-        return jwt_lib.encode(
-            payload.model_dump(), secret, algorithm=test_settings.jwt_algorithm
-        )
+        return jwt_lib.encode(payload, secret, algorithm=test_settings.jwt_algorithm)
 
     def patched_get_jwt_payload(
         self,

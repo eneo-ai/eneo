@@ -89,6 +89,33 @@ async def exchange_module_ticket(
     return await broker.exchange_ticket(api_key=api_key, ticket=payload.ticket)
 
 
+@router.post(
+    "/{module_key}/token/refresh/",
+    response_model=ModuleTokenResponse,
+    description=(
+        "Renew a still-valid module user token inside the session ceiling. "
+        "Requires the same dual credentials as any module resource call - the "
+        "bound sk_ service key and the current, unexpired Bearer token - and "
+        "re-validates live user, tenant and module-assignment state before "
+        "minting. The new token carries the original handoff time, so refresh "
+        "slides the token window but can never extend the session past "
+        "`session_expires_at`; after the ceiling, or once the token has "
+        "expired, the module must run a new login handoff."
+    ),
+    responses=responses.get_responses([401, 403, 404]),
+    openapi_extra={
+        "security": [{"OAuth2PasswordBearer": [], "APIKeyHeader": []}],
+    },
+)
+async def refresh_module_token(
+    request: Request,
+    container: _ModuleRequestContainer,
+) -> ModuleTokenResponse:
+    principal = module_principal_from_request(request)
+    broker = container.module_auth_broker()
+    return await broker.refresh_token(principal=principal)
+
+
 @router.get(
     "/{module_key}/session/",
     response_model=ModuleResourceSessionResponse,

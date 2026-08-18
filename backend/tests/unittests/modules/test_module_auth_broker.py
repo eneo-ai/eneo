@@ -1,3 +1,4 @@
+import time
 from unittest.mock import AsyncMock, MagicMock
 from urllib.parse import parse_qs, quote_plus, urlparse
 from uuid import uuid4
@@ -5,6 +6,7 @@ from uuid import uuid4
 import pytest
 from pydantic import ValidationError
 
+from eneo.audit.domain.action_types import ActionType
 from eneo.authentication.auth_models import (
     ApiKeyOwnership,
     ApiKeyPermission,
@@ -20,7 +22,9 @@ from eneo.main.exceptions import (
 )
 from eneo.modules.module import ModuleClientConfig, ModuleInDB, ModuleTenantClientConfig
 from eneo.modules.module_auth import (
+    MODULE_HANDOFF_AT_CLAIM,
     ModuleAuthBroker,
+    ModuleRequestPrincipal,
     ModuleTicketRequest,
     module_audience,
 )
@@ -416,6 +420,154 @@ class TestModuleResourceAuthentication:
                 access_token=await self.module_token(broker),
                 api_key=make_api_key(),
             )
+
+
+class TestRefreshToken:
+    def make_principal(self, broker, token, *, module=None):
+        return ModuleRequestPrincipal(
+            module=module if module is not None else make_module(),
+            user=make_user(),
+            api_key=make_api_key(),
+            access_token=token,
+        )
+
+    def claims_of(self, broker, token, *, module_name=MODULE_KEY):
+        return broker.auth_service.get_verified_claims(
+            token,
+            key=str(get_settings().jwt_secret),
+            aud=module_audience(module_name),
+        )
+
+    def token_with_handoff(self, broker, handoff_at, *, module_name=MODULE_KEY):
+        return broker.auth_service.create_access_token_for_user(
+            make_user(),
+            audience=module_audience(module_name),
+            expires_in=get_settings().module_auth_token_expiry_minutes,
+            extra_claims={MODULE_HANDOFF_AT_CLAIM: handoff_at},
+        )
+
+    async def test_exchange_reports_fixed_session_ceiling(self):
+        broker = make_broker()
+        ticket = issued_ticket(await issue(broker))
+
+        result = await broker.exchange_ticket(api_key=make_api_key(), ticket=ticket)
+
+        settings = get_settings()
+        assert result.expires_in == settings.module_auth_token_expiry_minutes * 60
+        ceiling = result.session_expires_at.timestamp()
+        expected = time.time() + settings.module_auth_max_session_hours * 3600
+        assert abs(ceiling - expected) < 5
+        claims = self.claims_of(broker, result.access_token)
+        assert claims[MODULE_HANDOFF_AT_CLAIM] == pytest.approx(time.time(), abs=5)
+
+    async def test_refresh_preserves_original_handoff_time(self):
+        broker = make_broker()
+        ticket = issued_ticket(await issue(broker))
+        exchanged = await broker.exchange_ticket(api_key=make_api_key(), ticket=ticket)
+        principal = await broker.authenticate_resource_request(
+            module_key=MODULE_KEY,
+            access_token=exchanged.access_token,
+            api_key=make_api_key(),
+        )
+
+        refreshed = await broker.refresh_token(principal=principal)
+
+        original = self.claims_of(broker, exchanged.access_token)
+        renewed = self.claims_of(broker, refreshed.access_token)
+        assert renewed[MODULE_HANDOFF_AT_CLAIM] == original[MODULE_HANDOFF_AT_CLAIM]
+        assert refreshed.session_expires_at == exchanged.session_expires_at
+        assert refreshed.module_key == MODULE_KEY
+        assert refreshed.user.id == USER_ID
+
+    async def test_refresh_near_ceiling_clips_token_expiry(self):
+        broker = make_broker()
+        settings = get_settings()
+        remaining = 120
+        handoff_at = int(
+            time.time() - settings.module_auth_max_session_hours * 3600 + remaining
+        )
+        principal = self.make_principal(
+            broker, self.token_with_handoff(broker, handoff_at)
+        )
+
+        result = await broker.refresh_token(principal=principal)
+
+        assert 0 < result.expires_in <= remaining
+        assert result.session_expires_at.timestamp() == pytest.approx(
+            handoff_at + settings.module_auth_max_session_hours * 3600, abs=1
+        )
+
+    async def test_refresh_past_ceiling_requires_new_handoff(self):
+        broker = make_broker()
+        settings = get_settings()
+        handoff_at = int(
+            time.time() - settings.module_auth_max_session_hours * 3600 - 1
+        )
+        principal = self.make_principal(
+            broker, self.token_with_handoff(broker, handoff_at)
+        )
+
+        with pytest.raises(AuthenticationException, match="maximum length"):
+            await broker.refresh_token(principal=principal)
+
+    async def test_expired_token_cannot_be_refreshed(self):
+        broker = make_broker()
+        expired = broker.auth_service.create_access_token_for_user(
+            make_user(),
+            audience=module_audience(MODULE_KEY),
+            expires_in=-1,
+        )
+
+        with pytest.raises(AuthenticationException):
+            await broker.authenticate_resource_request(
+                module_key=MODULE_KEY,
+                access_token=expired,
+                api_key=make_api_key(),
+            )
+
+    async def test_legacy_token_without_handoff_claim_anchors_ceiling_at_iat(self):
+        broker = make_broker()
+        legacy = broker.auth_service.create_access_token_for_user(
+            make_user(),
+            audience=module_audience(MODULE_KEY),
+            expires_in=get_settings().module_auth_token_expiry_minutes,
+        )
+        principal = self.make_principal(broker, legacy)
+
+        result = await broker.refresh_token(principal=principal)
+
+        legacy_iat = self.claims_of(broker, legacy)["iat"]
+        renewed = self.claims_of(broker, result.access_token)
+        assert renewed[MODULE_HANDOFF_AT_CLAIM] == int(legacy_iat)
+        expected_ceiling = (
+            int(legacy_iat) + get_settings().module_auth_max_session_hours * 3600
+        )
+        assert result.session_expires_at.timestamp() == pytest.approx(
+            expected_ceiling, abs=1
+        )
+
+    async def test_refresh_rejects_token_minted_for_another_module(self):
+        broker = make_broker()
+        foreign = self.token_with_handoff(
+            broker, int(time.time()), module_name="another-module"
+        )
+        principal = self.make_principal(broker, foreign)
+
+        with pytest.raises(AuthenticationException):
+            await broker.refresh_token(principal=principal)
+
+    async def test_refresh_is_audited_as_security_event(self):
+        broker = make_broker()
+        principal = self.make_principal(
+            broker, self.token_with_handoff(broker, int(time.time()))
+        )
+
+        await broker.refresh_token(principal=principal)
+
+        assert broker.audit_service.log_async.await_count == 1
+        kwargs = broker.audit_service.log_async.await_args.kwargs
+        assert kwargs["action"] == ActionType.MODULE_AUTH_TOKEN_REFRESHED
+        assert kwargs["tenant_id"] == TENANT_ID
 
 
 class TestModuleClientConfig:

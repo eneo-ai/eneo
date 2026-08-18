@@ -39,6 +39,7 @@ class ActionType(str, Enum):
     MODULE_CLIENT_CONFIG_UPDATED = "module_client_config_updated"
     MODULE_AUTH_TICKET_ISSUED = "module_auth_ticket_issued"
     MODULE_AUTH_TOKEN_EXCHANGED = "module_auth_token_exchanged"
+    MODULE_AUTH_TOKEN_REFRESHED = "module_auth_token_refreshed"
 
     # User Actions (Priority 2)
     ASSISTANT_CREATED = "assistant_created"

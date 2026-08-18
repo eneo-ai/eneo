@@ -33,6 +33,7 @@ async def test_module_dependency_resolves_service_key_and_module_token_together(
         module=MagicMock(),
         user=real_user,
         api_key=resolved_key,
+        access_token="module-user-token",
     )
     user_service = AsyncMock()
     user_service.authenticate.return_value = service_user

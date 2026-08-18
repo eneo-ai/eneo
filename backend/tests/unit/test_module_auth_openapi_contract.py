@@ -32,12 +32,21 @@ def test_module_handoff_openapi_uses_public_key_and_keeps_admin_uuid():
     token_response = schemas["ModuleTokenResponse"]
     assert "module_key" in token_response["properties"]
     assert "module" not in token_response["properties"]
+    assert "session_expires_at" in token_response["required"]
 
     paths = openapi["paths"]
     module_session = paths["/api/v1/module-auth/{module_key}/session/"]["get"]
     assert module_session["security"] == [
         {"OAuth2PasswordBearer": [], "APIKeyHeader": []}
     ]
+
+    token_refresh = paths["/api/v1/module-auth/{module_key}/token/refresh/"]["post"]
+    assert token_refresh["security"] == [
+        {"OAuth2PasswordBearer": [], "APIKeyHeader": []}
+    ]
+    assert token_refresh["responses"]["200"]["content"]["application/json"][
+        "schema"
+    ] == {"$ref": "#/components/schemas/ModuleTokenResponse"}
     assert module_session["responses"]["200"]["content"]["application/json"][
         "schema"
     ] == {"$ref": "#/components/schemas/ModuleResourceSessionResponse"}

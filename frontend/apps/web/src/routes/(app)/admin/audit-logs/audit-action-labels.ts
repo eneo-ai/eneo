@@ -133,6 +133,10 @@ const ACTION_MESSAGES = {
     name: m.audit_action_module_auth_token_exchanged,
     description: m.audit_action_module_auth_token_exchanged_description
   },
+  module_auth_token_refreshed: {
+    name: m.audit_action_module_auth_token_refreshed,
+    description: m.audit_action_module_auth_token_refreshed_description
+  },
   governance_policy_updated: {
     name: m.audit_action_governance_policy_updated,
     description: m.audit_action_governance_policy_updated_description

@@ -406,10 +406,15 @@ class Settings(BaseSettings):
     # Module auth broker (SSO handoff from the Eneo session to module BFFs)
     module_auth_ticket_ttl_seconds: int = 30
     # Must comfortably exceed a module's longest single request. Modules do
-    # long uploads (e.g. speech-to-text audio) with no token refresh path, so a
-    # token minted at login has to stay valid through record + upload; 60 min
-    # covers that while keeping the bearer token short-lived.
+    # long uploads (e.g. speech-to-text audio); a request that starts inside
+    # the token's lifetime is never aborted mid-flight, but the next request
+    # needs a valid token, so modules refresh proactively before long work.
     module_auth_token_expiry_minutes: int = 60
+    # Absolute ceiling on one module session, measured from the original
+    # ticket exchange. Refresh slides the 60-minute token window but can never
+    # extend past handoff + this ceiling; after that the module must run a new
+    # login handoff (cheap while the Eneo session is alive).
+    module_auth_max_session_hours: int = 8
     api_key_rate_limit_window_seconds: int = 3600
     api_key_rate_limit_fail_open: bool = False
     api_key_rate_limit_tenant_default: int = 10000
