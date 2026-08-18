@@ -405,7 +405,11 @@ class Settings(BaseSettings):
     api_key_rotation_grace_hours: int = 24
     # Module auth broker (SSO handoff from the Eneo session to module BFFs)
     module_auth_ticket_ttl_seconds: int = 30
-    module_auth_token_expiry_minutes: int = 15
+    # Must comfortably exceed a module's longest single request. Modules do
+    # long uploads (e.g. speech-to-text audio) with no token refresh path, so a
+    # token minted at login has to stay valid through record + upload; 60 min
+    # covers that while keeping the bearer token short-lived.
+    module_auth_token_expiry_minutes: int = 60
     api_key_rate_limit_window_seconds: int = 3600
     api_key_rate_limit_fail_open: bool = False
     api_key_rate_limit_tenant_default: int = 10000
