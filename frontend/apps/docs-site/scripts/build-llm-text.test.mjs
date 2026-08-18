@@ -57,18 +57,16 @@ test("flattenMdx keeps every exported declaration of the published client", asyn
   const source = await readFile(integratingGuide, "utf8");
   const exported = (line) => /^export\s/.test(line);
   const inFence = (text) =>
-    text
-      .split("\n")
-      .reduce(
-        (state, line) =>
-          /^\s*```/.test(line)
-            ? { open: !state.open, lines: state.lines }
-            : {
-                open: state.open,
-                lines: state.open ? [...state.lines, line] : state.lines,
-              },
-        { open: false, lines: [] },
-      ).lines;
+    text.split("\n").reduce(
+      (state, line) =>
+        /^\s*```/.test(line)
+          ? { open: !state.open, lines: state.lines }
+          : {
+              open: state.open,
+              lines: state.open ? [...state.lines, line] : state.lines,
+            },
+      { open: false, lines: [] },
+    ).lines;
 
   const before = inFence(source).filter(exported).length;
   const after = inFence(flattenMdx(source)).filter(exported).length;
@@ -97,4 +95,24 @@ test("the published TypeScript client parses without syntax errors", async () =>
       ts.flattenDiagnosticMessageText(d.messageText, " "),
     ),
   ).toEqual([]);
+});
+
+test("every route in the Flows bundle exists as content", async () => {
+  const { FLOWS_BUNDLE_ROUTES } = await import("./build-llm-text.mjs");
+  const { access } = await import("node:fs/promises");
+  for (const route of FLOWS_BUNDLE_ROUTES) {
+    const candidates = [
+      join(appDir, "src", "content", `${route}.mdx`),
+      join(appDir, "src", "content", route, "index.mdx"),
+    ];
+    let found = false;
+    for (const candidate of candidates) {
+      try {
+        await access(candidate);
+        found = true;
+        break;
+      } catch {}
+    }
+    expect(found, route).toBe(true);
+  }
 });

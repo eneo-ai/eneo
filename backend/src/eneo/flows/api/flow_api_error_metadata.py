@@ -28,7 +28,7 @@ def render_flow_error_taxonomy_docs_page() -> str:
         "",
         _render_delivery_diagram(),
         "",
-        "## How to use this page",
+        "## Read an error entry",
         "",
         "- `API error response` means the request failed before or during the HTTP operation.",
         "- `Run error payload` means the run reached a terminal state with a structured `run.error.code`.",

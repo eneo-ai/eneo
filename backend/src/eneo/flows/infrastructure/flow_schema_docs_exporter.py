@@ -44,6 +44,8 @@ _WRITER_MARKER = " Writer: "
 _PURPOSE_MARKER = " Purpose: "
 _TENANT_TABLE_NAME = "tenants"
 _TENANT_COLUMN_NAME = "tenant_id"
+_FLOW_TABLE_NAME = "flows"
+_RUN_TABLE_NAME = "flow_runs"
 
 
 class FlowSchemaAggregate(Enum):
@@ -335,7 +337,9 @@ def render_flow_schema_docs_page() -> str:
         "parent's tenant or flow.",
         f"- Every table with a `{_TENANT_COLUMN_NAME}` column references "
         f"`{_TENANT_TABLE_NAME}` with `ON DELETE CASCADE`. Those lines are "
-        "omitted; deleting a tenant deletes all of its Flow rows.",
+        "omitted; deleting a tenant deletes all of its Flow rows. Likewise, "
+        f"every table that references `{_RUN_TABLE_NAME}` also references "
+        f"`{_FLOW_TABLE_NAME}` with the same rule; only the run line is drawn.",
         "- Crow's foot marks the side that holds the foreign key: `}o` many "
         "rows, `|o` at most one. On the referenced side `||` means the "
         "column is required and `o|` means it is nullable.",
@@ -616,6 +620,8 @@ def _render_er_diagram(
                 continue
             relationships.append(relationship)
 
+    relationships = _without_implied_flow_edges(relationships)
+
     edges = _diagram_edges(relationships)
     drawn = {
         name
@@ -631,6 +637,31 @@ def _render_er_diagram(
     lines.extend(edges)
 
     return render_flow_docs_mermaid_block(*lines)
+
+
+def _without_implied_flow_edges(
+    relationships: list[FlowSchemaRelationshipDoc],
+) -> list[FlowSchemaRelationshipDoc]:
+    """Drop `-> flows` edges implied by a `-> flow_runs` edge with the same rule.
+
+    Every run-child table carries `flow_id` next to `flow_run_id`; the page
+    states that once instead of drawing it on each table.
+    """
+    run_rule_by_source: dict[str, set[str]] = defaultdict(set)
+    for relationship in relationships:
+        if relationship.target_table_name == _RUN_TABLE_NAME:
+            run_rule_by_source[relationship.source_table_name].add(
+                relationship.ondelete
+            )
+    return [
+        relationship
+        for relationship in relationships
+        if not (
+            relationship.target_table_name == _FLOW_TABLE_NAME
+            and relationship.ondelete
+            in run_rule_by_source[relationship.source_table_name]
+        )
+    ]
 
 
 def _diagram_edges(relationships: list[FlowSchemaRelationshipDoc]) -> list[str]:

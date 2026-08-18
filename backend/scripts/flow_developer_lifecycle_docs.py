@@ -676,7 +676,17 @@ def _render_source_guard_table() -> str:
             "Committed lifecycle page parity, enum coverage, and source-reference drift guard.",
         )
     )
-    return _render_markdown_table(("Source", "Guarded lifecycle role"), rows)
+    table = _render_markdown_table(("Source", "Guarded lifecycle role"), rows)
+    return "\n".join(
+        (
+            "<details>",
+            f"<summary>{len(rows)} guarded source files</summary>",
+            "",
+            table,
+            "",
+            "</details>",
+        )
+    )
 
 
 def _render_markdown_table(

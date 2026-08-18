@@ -9,7 +9,7 @@ Generated from SQLAlchemy metadata and the Flow JSONB ownership registry; run `m
 ## How to read the diagrams
 
 - One line per pair of tables. The label is the `ON DELETE` rule; when a table references the same target through more than one foreign key, the label also names the column. Composite foreign keys that repeat a simpler one (`flow_id` and `flow_id, tenant_id`) are drawn once, and the column lists show only the half that identifies the parent row; the other half pins the child to its parent's tenant or flow.
-- Every table with a `tenant_id` column references `tenants` with `ON DELETE CASCADE`. Those lines are omitted; deleting a tenant deletes all of its Flow rows.
+- Every table with a `tenant_id` column references `tenants` with `ON DELETE CASCADE`. Those lines are omitted; deleting a tenant deletes all of its Flow rows. Likewise, every table that references `flow_runs` also references `flows` with the same rule; only the run line is drawn.
 - Crow's foot marks the side that holds the foreign key: `}o` many rows, `|o` at most one. On the referenced side `||` means the column is required and `o|` means it is nullable.
 - Tables owned outside Flows (`users`, `files`, `spaces`, ...) and Flow tables from another aggregate are drawn as plain boxes. Every column, key, and foreign key is listed under **Columns** in each section.
 
@@ -208,10 +208,8 @@ erDiagram
   flow_step_attempts }o--|| flow_runs : "CASCADE"
   flow_step_attempts }o--o| flow_step_attempts : "predecessor_attempt_id: SET NULL"
   flow_step_attempts }o--o| flow_step_attempts : "superseded_by_attempt_id: SET NULL"
-  flow_step_attempts }o--|| flows : "CASCADE"
   flow_step_results }o--o| assistants : "SET NULL"
   flow_step_results }o--|| flow_runs : "CASCADE"
-  flow_step_results }o--|| flows : "CASCADE"
 ```
 
 </div>
@@ -226,20 +224,16 @@ erDiagram
   flow_run_audit_outbox }o--o| api_keys_v2 : "SET NULL"
   flow_run_audit_outbox }o--o| flow_run_review_checkpoints : "RESTRICT"
   flow_run_audit_outbox }o--|| flow_runs : "RESTRICT"
-  flow_run_audit_outbox }o--|| flows : "RESTRICT"
   flow_run_audit_outbox }o--o| users : "SET NULL"
   flow_run_step_input_files }o--|| files : "RESTRICT"
   flow_run_step_input_files }o--|| flow_runs : "CASCADE"
   flow_run_step_input_files }o--|| flow_runtime_uploaded_files : "RESTRICT"
-  flow_run_step_input_files }o--|| flows : "CASCADE"
   flow_run_step_result_files }o--|| files : "RESTRICT"
   flow_run_step_result_files }o--|| flow_runs : "CASCADE"
   flow_run_step_result_files }o--|| flow_step_attempts : "CASCADE"
   flow_run_step_result_files }o--|| flow_step_results : "CASCADE"
-  flow_run_step_result_files }o--|| flows : "CASCADE"
   flow_run_webhook_deliveries }o--|| flow_runs : "RESTRICT"
   flow_run_webhook_deliveries |o--|| flow_step_attempts : "RESTRICT"
-  flow_run_webhook_deliveries }o--|| flows : "RESTRICT"
   flow_runtime_uploaded_files |o--|| files : "CASCADE"
   flow_runtime_uploaded_files }o--|| flows : "CASCADE"
   flow_runtime_uploaded_files }o--o| service_principals : "RESTRICT"
@@ -550,15 +544,12 @@ erDiagram
   flow_run_rerun_invalidated_steps }o--o| flow_step_attempts : "new_attempt_id: SET NULL"
   flow_run_rerun_invalidated_steps }o--o| flow_step_attempts : "prior_attempt_id: SET NULL"
   flow_run_rerun_invalidated_steps }o--o| flow_step_results : "SET NULL"
-  flow_run_rerun_invalidated_steps }o--|| flows : "CASCADE"
   flow_run_rerun_operations }o--|| flow_runs : "CASCADE"
   flow_run_rerun_operations }o--o| flow_step_attempts : "SET NULL"
-  flow_run_rerun_operations }o--|| flows : "CASCADE"
   flow_run_rerun_operations }o--o| service_principals : "RESTRICT"
   flow_run_rerun_operations }o--o| users : "RESTRICT"
   flow_run_review_checkpoints }o--|| flow_runs : "CASCADE"
   flow_run_review_checkpoints |o--|| flow_step_attempts : "RESTRICT"
-  flow_run_review_checkpoints }o--|| flows : "CASCADE"
   flow_run_review_checkpoints }o--o| service_principals : "decided_by_service_id: RESTRICT"
   flow_run_review_checkpoints }o--o| service_principals : "requester_service_id: RESTRICT"
   flow_run_review_checkpoints }o--o| users : "decided_by_user_id: RESTRICT"

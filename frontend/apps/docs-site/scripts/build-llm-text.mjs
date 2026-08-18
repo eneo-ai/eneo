@@ -21,6 +21,26 @@ const contentDir = join(appDir, "src", "content");
 const outDir = join(appDir, "out");
 const siteUrl = "https://docs.eneo.ai";
 
+// Reading order for the Flows-only bundle: product, API guide, developer pages,
+// then the Builder. Routes not listed here are excluded from llms-flows.txt.
+export const FLOWS_BUNDLE_ROUTES = [
+  "docs/flows",
+  "guides/flows",
+  "guides/flows/designing-flows",
+  "guides/flows/integrating-flows",
+  "guides/flows-api-guide",
+  "guides/flows/reference/errors",
+  "guides/flows/flows-faq",
+  "docs/flows-for-developers",
+  "docs/flows-for-developers/how-built",
+  "docs/flows-for-developers/data-schema",
+  "docs/flows-for-developers/run-lifecycle",
+  "docs/flows-for-developers/when-things-fail",
+  "docs/flows-for-developers/key-decisions",
+  "docs/flows-for-developers/reviewing-flows-code",
+  "docs/ai-builder",
+];
+
 const SECTION_TITLES = {
   docs: "Documentation",
   guides: "Guides",
@@ -157,8 +177,9 @@ export async function buildLlmText() {
     "> review, and returns typed results and downloadable artifacts over an HTTP API.",
     "",
     "Every page below is available as Markdown at the linked path. The complete site is also",
-    "available as a single document at /llms-full.txt, and the runtime API contract is served",
-    "as OpenAPI 3.1 from the Eneo deployment itself at /openapi.json.",
+    "available as a single document at /llms-full.txt; the Flows pages alone (product guide,",
+    "API guide, developer pages, AI Builder) are at /llms-flows.txt. The runtime API contract",
+    "is served as OpenAPI 3.1 from the Eneo deployment itself at /openapi.json.",
     "",
   ];
   for (const [section, list] of bySection) {
@@ -185,12 +206,34 @@ export async function buildLlmText() {
     "utf8",
   );
 
+  const byRoute = new Map(pages.map((page) => [page.route, page]));
+  const missing = FLOWS_BUNDLE_ROUTES.filter((route) => !byRoute.has(route));
+  if (missing.length) {
+    throw new Error(
+      `llms-flows.txt lists routes that do not exist: ${missing.join(", ")}`,
+    );
+  }
+  const flowsParts = FLOWS_BUNDLE_ROUTES.map((route) => byRoute.get(route)).map(
+    (page) => `<!-- source: ${page.href} -->\n\n${page.body}`,
+  );
+  await writeFile(
+    join(outDir, "llms-flows.txt"),
+    `${[
+      "# Eneo Flows documentation",
+      "",
+      "Product guide, API guide, developer pages, and AI Builder, in reading order. Each part",
+      "names its source page; the same pages are listed in /llms.txt.",
+      ...flowsParts,
+    ].join("\n\n---\n\n")}\n`,
+    "utf8",
+  );
+
   return pages;
 }
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
   const pages = await buildLlmText();
   console.log(
-    `llm text: wrote ${pages.length} .md pages, llms.txt and llms-full.txt`,
+    `llm text: wrote ${pages.length} .md pages, llms.txt, llms-full.txt and llms-flows.txt`,
   );
 }
