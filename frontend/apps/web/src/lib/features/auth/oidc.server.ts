@@ -7,15 +7,19 @@ import { getBackendUrl } from "$lib/core/environment.server";
 import { setFrontendAuthCookie } from "./auth.server";
 import { LoginError } from "./LoginError";
 
+export type OidcLoginResult = {
+  frontendState: string;
+};
+
 export async function loginWithOidc(
   code: string,
   state: string,
   fetchFn: typeof fetch = fetch
-): Promise<boolean> {
+): Promise<OidcLoginResult | null> {
   const resolvedBackendUrl = getBackendUrl();
   if (!resolvedBackendUrl) {
     console.error("[OIDC] Missing ENEO_BACKEND_URL configuration");
-    return false;
+    return null;
   }
 
   const backendUrl = `${resolvedBackendUrl}/api/v1/auth/callback`;
@@ -121,19 +125,27 @@ export async function loginWithOidc(
 
     console.debug("[OIDC] Backend callback successful");
 
-    const data = await response.json();
-    const { access_token } = data;
+    const data = (await response.json()) as {
+      access_token?: unknown;
+      frontend_state?: unknown;
+    };
+    const accessToken = data.access_token;
 
-    if (!access_token) {
+    if (typeof accessToken !== "string" || accessToken.length === 0) {
       console.error("[OIDC] No access token in response", { responseKeys: Object.keys(data) });
-      return false;
+      return null;
     }
 
-    // Set frontend auth cookie (backend returns "access_token", frontend calls it "id_token")
-    await setFrontendAuthCookie({ id_token: access_token });
+    // The backend token is Eneo's frontend session JWT. It is not the
+    // provider access token used by Zitadel's activation and profile flows.
+    await setFrontendAuthCookie({ id_token: accessToken });
 
     console.debug("[OIDC] Login complete, auth cookie set");
-    return true;
+    return {
+      // Empty fallback keeps authentication compatible during rolling upgrades;
+      // safe destination resolution will send the user to the normal landing page.
+      frontendState: typeof data.frontend_state === "string" ? data.frontend_state : ""
+    };
   } catch (error) {
     // Re-throw LoginError so it propagates to the callback handler with metadata
     if (error instanceof LoginError) {
@@ -144,6 +156,6 @@ export async function loginWithOidc(
       error: error instanceof Error ? error.message : String(error),
       stack: error instanceof Error ? error.stack : undefined
     });
-    return false;
+    return null;
   }
 }

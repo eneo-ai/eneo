@@ -1,9 +1,17 @@
 import { LoginError } from "$lib/features/auth/LoginError.js";
+import { resolveSafeLoginDestination } from "$lib/features/auth/auth.server";
 
 export const load = async (event) => {
   const message = event.url.searchParams.get("message") ?? "Unknown failure. No message received.";
   const errorInfo = event.url.searchParams.get("info");
   const details = event.url.searchParams.get("details");
+  const requestedDestination = event.url.searchParams.get("next");
+  const retryUrl =
+    requestedDestination === null
+      ? "/login"
+      : `/login?${new URLSearchParams({
+          next: resolveSafeLoginDestination(requestedDestination)
+        }).toString()}`;
 
   // Map error messages to user-friendly text
   let userMessage = "";
@@ -31,6 +39,7 @@ export const load = async (event) => {
 
   return {
     message: userMessage,
-    details: details ? decodeURIComponent(details) : null
+    details: details ? decodeURIComponent(details) : null,
+    retryUrl
   };
 };

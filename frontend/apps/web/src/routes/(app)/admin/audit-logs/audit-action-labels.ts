@@ -109,9 +109,17 @@ const ACTION_MESSAGES = {
     name: m.audit_action_module_added,
     description: m.audit_action_module_added_description
   },
+  module_set_replaced: {
+    name: m.audit_action_module_set_replaced,
+    description: m.audit_action_module_set_replaced_description
+  },
   module_added_to_tenant: {
     name: m.audit_action_module_added_to_tenant,
     description: m.audit_action_module_added_to_tenant_description
+  },
+  module_removed_from_tenant: {
+    name: m.audit_action_module_removed_from_tenant,
+    description: m.audit_action_module_removed_from_tenant_description
   },
   module_client_config_updated: {
     name: m.audit_action_module_client_config_updated,

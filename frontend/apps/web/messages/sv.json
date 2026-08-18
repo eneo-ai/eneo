@@ -2637,7 +2637,9 @@
   "audit_action_website_deleted": "Webbplats borttagen",
   "audit_action_website_transferred": "Webbplats flyttad till annan yta",
   "audit_action_module_added": "Modul tillagd",
+  "audit_action_module_set_replaced": "Organisationens moduluppsättning ersatt",
   "audit_action_module_added_to_tenant": "Modul tillagd till organisation",
+  "audit_action_module_removed_from_tenant": "Modul borttagen från organisation",
   "audit_action_module_client_config_updated": "Modulens klientkonfiguration uppdaterad",
   "audit_action_module_auth_ticket_issued": "Modulens auth-ticket utfärdad",
   "audit_action_module_auth_token_exchanged": "Modulens auth-ticket växlad",
@@ -4025,7 +4027,9 @@
   "audit_action_mcp_server_tool_enabled_description": "Loggar när ett MCP-verktyg aktiveras",
   "audit_action_mcp_server_updated_description": "Loggar ändringar av MCP-serverinställningar",
   "audit_action_module_added_description": "Loggar när en ny modul läggs till",
+  "audit_action_module_set_replaced_description": "Loggar när organisationens fullständiga moduluppsättning ersätts",
   "audit_action_module_added_to_tenant_description": "Loggar när en modul aktiveras för organisationen",
+  "audit_action_module_removed_from_tenant_description": "Loggar när en modul inaktiveras för organisationen",
   "audit_action_module_client_config_updated_description": "Loggar ändringar av en tenant-moduls auth handoff-konfiguration",
   "audit_action_module_auth_ticket_issued_description": "Loggar när en modul-login-ticket utfärdas",
   "audit_action_module_auth_token_exchanged_description": "Loggar när en modul-login-ticket växlas mot en modulavgränsad token",
@@ -4337,5 +4341,10 @@
   "storage_connection_error_unknown_title": "Resultatet kunde inte bekräftas",
   "storage_connection_error_unknown_description": "Stäng dialogrutan och läs in anslutningen på nytt innan du försöker igen. Begäran kan redan ha slutförts.",
   "storage_connection_error_unavailable_title": "Anslutningstestet kunde inte slutföras",
-  "storage_connection_error_unavailable_description": "Kontrollera endpoint, bucket, nätverksåtkomst och tjänstens driftstatus. Inget sparades."
+  "storage_connection_error_unavailable_description": "Kontrollera endpoint, bucket, nätverksåtkomst och tjänstens driftstatus. Inget sparades.",
+  "module_login_failed": "Modulen kunde inte öppnas",
+  "module_login_invalid_request": "Inloggningsbegäran är ofullständig. Gå tillbaka till modulen och försök igen.",
+  "module_login_unavailable": "Modulen är inte tillgänglig för din organisation.",
+  "module_login_service_unavailable": "Eneo kunde inte slutföra modulinloggningen just nu. Försök igen senare.",
+  "module_login_back_to_eneo": "Tillbaka till Eneo"
 }
