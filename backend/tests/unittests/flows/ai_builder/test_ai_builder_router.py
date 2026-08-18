@@ -7,6 +7,7 @@ import logging
 from collections.abc import Iterator
 from contextlib import contextmanager
 from datetime import datetime, timezone
+from functools import partial
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 from uuid import UUID, uuid4
@@ -112,6 +113,7 @@ from eneo.main.exceptions import (
     UnauthorizedException,
 )
 from eneo.roles.permissions import Permission
+from eneo.spaces.space import Space
 from tests.unit.api_key_test_utils import flatten_routes
 
 
@@ -471,6 +473,15 @@ def _activate_model_provider(container: MagicMock, model: MagicMock) -> None:
     container.model_provider_repository.return_value.all.return_value = [
         SimpleNamespace(id=model.provider_id)
     ]
+
+
+def _use_real_default_policy(space: MagicMock) -> None:
+    """Run the space's real default selection over whatever the endpoint deems
+    eligible, so these tests prove the endpoint's own filtering decides the
+    advertised default instead of a stub answering regardless of it."""
+    space.select_default_completion_model.side_effect = partial(
+        Space.select_default_completion_model, space
+    )
 
 
 def _make_apply_plan_client(container: MagicMock) -> TestClient:
@@ -1589,7 +1600,7 @@ class TestGetSessionModelsEndpoint:
         _activate_model_provider(container, model)
         space = container.space_service.return_value.get_space.return_value
         space.completion_models = [model]
-        space.get_default_completion_model.return_value = model
+        _use_real_default_policy(space)
 
         result = await get_session_models(
             request=MagicMock(),
@@ -1635,7 +1646,7 @@ class TestGetSessionModelsEndpoint:
         _activate_model_provider(container, model)
         space = container.space_service.return_value.get_space.return_value
         space.completion_models = [model]
-        space.get_default_completion_model.return_value = model
+        _use_real_default_policy(space)
 
         result = await get_session_models(
             request=MagicMock(),
@@ -1655,7 +1666,7 @@ class TestGetSessionModelsEndpoint:
         service.get_session.return_value = session
         space = container.space_service.return_value.get_space.return_value
         space.completion_models = []
-        space.get_default_completion_model.return_value = None
+        _use_real_default_policy(space)
 
         result = await get_session_models(
             request=MagicMock(),
@@ -1683,7 +1694,7 @@ class TestGetSessionModelsEndpoint:
         model.supported_model_kwargs = SupportedModelKwargs()
         space = container.space_service.return_value.get_space.return_value
         space.completion_models = [model]
-        space.get_default_completion_model.return_value = model
+        _use_real_default_policy(space)
 
         result = await get_session_models(
             request=MagicMock(),
@@ -1730,7 +1741,7 @@ class TestGetSessionModelsEndpoint:
         _activate_model_provider(container, model)
         space = container.space_service.return_value.get_space.return_value
         space.completion_models = [model]
-        space.get_default_completion_model.return_value = model
+        _use_real_default_policy(space)
 
         result = await get_session_models(
             request=MagicMock(),

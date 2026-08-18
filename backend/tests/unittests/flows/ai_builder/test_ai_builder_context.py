@@ -19,6 +19,10 @@ from eneo.flows.ai_builder.ai_builder_error_contract import (
     AIBuilderBadRequestException,
     AIBuilderErrorCode,
 )
+from eneo.security_classifications.domain.entities.security_classification import (
+    SecurityClassification,
+)
+from eneo.spaces.space import Space
 
 
 def test_serialize_space_models_keeps_local_id_for_catalog_input() -> None:
@@ -70,6 +74,7 @@ def _model(
     can_access: bool = True,
     is_org_default: bool = False,
     created_at: datetime | None = None,
+    classification: "SecurityClassification | None" = None,
 ):
     return SimpleNamespace(
         id=uuid4(),
@@ -82,15 +87,46 @@ def _model(
         can_access=can_access,
         is_org_default=is_org_default,
         created_at=created_at or datetime(2026, 1, 1, tzinfo=timezone.utc),
+        security_classification=classification,
     )
 
 
-def _space(models, *, default=None, allows=lambda candidate: True):  # noqa: ARG005
-    return SimpleNamespace(
+def _classification(level: int) -> SecurityClassification:
+    return SecurityClassification(
+        tenant_id=uuid4(),
+        name=f"level-{level}",
+        security_level=level,
+        security_enabled=True,
+    )
+
+
+def _space(models, *, classification: SecurityClassification | None = None) -> Space:
+    """A real Space, built the way a load builds one.
+
+    The constructor assigns the model list directly rather than through the
+    validating setter, which is exactly how a stored list comes to hold a model
+    the space would now refuse — the state these tests care about.
+    """
+    return Space(
+        id=uuid4(),
+        tenant_id=uuid4(),
+        tenant_space_id=None,
+        user_id=None,
+        name="Planner space",
+        description=None,
+        embedding_models=[],
         completion_models=models,
+        transcription_models=[],
+        mcp_servers=[],
+        default_assistant=None,
+        assistants=[],
+        apps=[],
+        services=[],
+        websites=[],
         collections=[],
-        get_default_completion_model=lambda: default,
-        allows_model_security_classification=allows,
+        integration_knowledge_list=[],
+        members={},
+        security_classification=classification,
     )
 
 
@@ -106,7 +142,7 @@ def test_listing_and_omitted_model_resolve_the_same_model() -> None:
         provider_id=uuid4(), name="inactive-default", is_org_default=True
     )
     active_alternate = _model(provider_id=active_provider_id, name="active-alternate")
-    space = _space([inactive_default, active_alternate], default=inactive_default)
+    space = _space([inactive_default, active_alternate])
     active_provider_ids = {active_provider_id}
 
     listed = eligible_planner_models(space, active_provider_ids=active_provider_ids)
@@ -126,7 +162,7 @@ def test_explicitly_requesting_an_inactive_model_is_rejected_as_unavailable() ->
     active_provider_id = uuid4()
     inactive = _model(provider_id=uuid4(), name="inactive")
     active = _model(provider_id=active_provider_id, name="active")
-    space = _space([inactive, active], default=active)
+    space = _space([inactive, active])
 
     with pytest.raises(AIBuilderBadRequestException) as excinfo:
         resolve_requested_model(
@@ -140,7 +176,7 @@ def test_explicitly_requesting_an_inactive_model_is_rejected_as_unavailable() ->
 
 def test_no_eligible_model_is_named_rather_than_silently_substituted() -> None:
     only_inactive = _model(provider_id=uuid4(), name="inactive")
-    space = _space([only_inactive], default=only_inactive)
+    space = _space([only_inactive])
 
     assert eligible_planner_models(space, active_provider_ids=set()) == []
     assert select_default_planner_model(space, active_provider_ids=set()) is None
@@ -155,12 +191,15 @@ def test_fallback_never_crosses_the_space_security_classification() -> None:
     list can outlive a reclassification. Choosing on the user's behalf must not
     be what quietly hands a restricted space a lower-classified model."""
     provider_id = uuid4()
-    below_bar = _model(provider_id=provider_id, name="below-bar")
-    permitted = _model(provider_id=provider_id, name="permitted")
+    below_bar = _model(
+        provider_id=provider_id, name="below-bar", classification=_classification(1)
+    )
+    unclassified = _model(provider_id=provider_id, name="unclassified")
+    permitted = _model(
+        provider_id=provider_id, name="permitted", classification=_classification(3)
+    )
     space = _space(
-        [below_bar, permitted],
-        default=None,
-        allows=lambda model: model is not below_bar,
+        [below_bar, unclassified, permitted], classification=_classification(3)
     )
 
     listed = eligible_planner_models(space, active_provider_ids={provider_id})
@@ -181,7 +220,7 @@ def test_inaccessible_models_are_neither_listed_nor_runnable() -> None:
     provider_id = uuid4()
     locked = _model(provider_id=provider_id, name="locked", can_access=False)
     usable = _model(provider_id=provider_id, name="usable")
-    space = _space([locked, usable], default=None)
+    space = _space([locked, usable])
 
     assert eligible_planner_models(space, active_provider_ids={provider_id}) == [usable]
     with pytest.raises(AIBuilderBadRequestException) as excinfo:
@@ -207,7 +246,7 @@ def test_fallback_prefers_the_organisation_default_then_the_newest() -> None:
     )
     active_provider_ids = {provider_id}
 
-    without_default = _space([oldest, newest], default=None)
+    without_default = _space([oldest, newest])
     assert (
         select_default_planner_model(
             without_default, active_provider_ids=active_provider_ids
@@ -216,7 +255,7 @@ def test_fallback_prefers_the_organisation_default_then_the_newest() -> None:
     )
 
     oldest.is_org_default = True
-    with_default = _space([oldest, newest], default=oldest)
+    with_default = _space([oldest, newest])
     assert (
         select_default_planner_model(
             with_default, active_provider_ids=active_provider_ids
@@ -228,7 +267,7 @@ def test_fallback_prefers_the_organisation_default_then_the_newest() -> None:
 def test_planner_context_reuses_admin_builder_attachment_limits() -> None:
     provider_id = uuid4()
     model = _model(provider_id=provider_id, name="gpt-5.4", is_org_default=True)
-    space = _space([model], default=model)
+    space = _space([model])
 
     context = build_planner_context(
         space,

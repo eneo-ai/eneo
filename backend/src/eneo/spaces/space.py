@@ -1,3 +1,4 @@
+from collections.abc import Iterable
 from datetime import datetime
 from enum import Enum
 from typing import TYPE_CHECKING, Any, Optional, Union
@@ -235,17 +236,40 @@ class Space:
 
         return sorted_transcription_models[0]  # type: ignore
 
+    def select_default_completion_model(
+        self, candidates: Iterable["CompletionModel"]
+    ) -> Optional["CompletionModel"]:
+        """This space's default among an already-vetted candidate set.
+
+        The policy — the organisation default, else the newest — lives here so
+        that callers narrowing the candidates for their own reasons (a planner
+        that also needs an active provider, say) pick the same way this space
+        would, instead of restating it and drifting.
+        """
+        eligible = list(candidates)
+        organisation_default = next(
+            (model for model in eligible if model.is_org_default), None
+        )
+        if organisation_default is not None:
+            return organisation_default
+        return max(
+            eligible,
+            key=lambda model: datetime_or_utc_min(model.created_at),
+            default=None,
+        )
+
     def get_default_completion_model(self) -> Optional["CompletionModel"]:
         if not self.completion_models:
             return None
 
-        model = filter(
-            lambda m: m.is_org_default and m.can_access, self.completion_models
+        default_model = self.select_default_completion_model(
+            model for model in self.completion_models if model.can_access
         )
-        default_model = next(model, None)
-
         if default_model is None:
-            default_model = self.get_latest_completion_model()
+            raise BadRequestException(
+                f"Cannot perform operation: Space '{self.name}' has no completion models configured. "
+                "Please configure at least one completion model in the space settings."
+            )
 
         return default_model
 
@@ -356,23 +380,17 @@ class Space:
                 self.completion_models = [
                     model
                     for model in self.completion_models
-                    if not self.security_classification.is_greater_than(
-                        model.security_classification
-                    )
+                    if self.allows_model_security_classification(model)
                 ]
                 self.embedding_models = [
                     model
                     for model in self.embedding_models
-                    if not self.security_classification.is_greater_than(
-                        model.security_classification
-                    )
+                    if self.allows_model_security_classification(model)
                 ]
                 self.transcription_models = [
                     model
                     for model in self.transcription_models
-                    if not self.security_classification.is_greater_than(
-                        model.security_classification
-                    )
+                    if self.allows_model_security_classification(model)
                 ]
                 self._mcp_servers = [
                     server

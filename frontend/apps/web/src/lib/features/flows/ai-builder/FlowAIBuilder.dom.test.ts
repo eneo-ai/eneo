@@ -676,7 +676,12 @@ describe("FlowAIBuilder planner controls", () => {
     await fireEvent.click(retry);
 
     expect(modelReads).toBe(2);
+
+    // Settle the retry so the assertion covers where the second click landed,
+    // not just how many reads started.
     release();
+    expect(await screen.findByText(m.no_completion_model_description())).toBeTruthy();
+    expect(modelReads).toBe(2);
   });
 
   it("carries a chosen model through to the request", async () => {

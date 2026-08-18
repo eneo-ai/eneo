@@ -24,7 +24,6 @@ from eneo.flows.domain.mapped_execution_policy import (
     FlowMappedExecutionPolicy,
     resolve_flow_mapped_execution_policy,
 )
-from eneo.main.datetime_utils import datetime_or_utc_min
 from eneo.model_providers.domain.model_defaults import lookup_model_defaults
 
 if TYPE_CHECKING:
@@ -104,20 +103,12 @@ def select_default_planner_model(
 ) -> "CompletionModel | None":
     """The model an omitted `model_id` resolves to, or None if there is none.
 
-    Mirrors the space's own default policy — the organisation default, else the
-    newest — over the eligible models rather than over every stored one. Taking
-    the first of the list instead would make persistence order the policy, and
-    quietly hand the planner the oldest model whenever a default drops out.
+    The space decides how a default is chosen; the planner only decides which
+    models are allowed to be candidates.
     """
-    eligible = eligible_planner_models(space, active_provider_ids=active_provider_ids)
-    if not eligible:
-        return None
-    organisation_default = next(
-        (model for model in eligible if model.is_org_default), None
+    return space.select_default_completion_model(
+        eligible_planner_models(space, active_provider_ids=active_provider_ids)
     )
-    if organisation_default is not None:
-        return organisation_default
-    return max(eligible, key=lambda model: datetime_or_utc_min(model.created_at))
 
 
 def resolve_planner_model(
