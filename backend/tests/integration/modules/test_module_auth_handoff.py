@@ -373,6 +373,125 @@ async def test_token_refresh_slides_window_inside_fixed_session_ceiling(
 
 
 @pytest.mark.asyncio
+async def test_client_config_rejects_revoked_key_and_preserves_prior_binding(
+    client,
+    db_container,
+    admin_token,
+    admin_user,
+    enabled_module,
+    test_settings,
+):
+    """A dead key must be refused at binding time, not discovered at login.
+
+    A key revoked after a valid binding still fails at ticket exchange with
+    401 - that runtime path is owned by normal API-key authentication.
+    """
+    active_key = await create_api_key(
+        client,
+        token=admin_token,
+        ownership=ApiKeyOwnership.SERVICE,
+        permission=ApiKeyPermission.WRITE,
+    )
+    config_path = client_config_path(
+        tenant_id=admin_user.tenant_id, module_id=enabled_module.id
+    )
+    sysadmin_headers = {"X-API-Key": test_settings.eneo_super_duper_api_key}
+
+    initial = await client.patch(
+        config_path,
+        json={
+            "redirect_uris": [REDIRECT_URI],
+            "service_key_id": active_key["api_key"]["id"],
+        },
+        headers=sysadmin_headers,
+    )
+    assert initial.status_code == 200, initial.text
+
+    revoked_key = await create_api_key(
+        client,
+        token=admin_token,
+        ownership=ApiKeyOwnership.SERVICE,
+        permission=ApiKeyPermission.WRITE,
+    )
+    revoke = await client.post(
+        f"/api/v1/api-keys/{revoked_key['api_key']['id']}/revoke",
+        json={"reason_code": "security_concern", "reason_text": "Test revocation"},
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert revoke.status_code == 200, revoke.text
+
+    rejected = await client.patch(
+        config_path,
+        json={"service_key_id": revoked_key["api_key"]["id"]},
+        headers=sysadmin_headers,
+    )
+    assert rejected.status_code == 400, rejected.text
+    assert "revoked" in rejected.json()["message"].lower()
+
+    async with db_container() as container:
+        preserved = await container.module_repo().get_module_client_config(
+            tenant_id=admin_user.tenant_id, module_id=enabled_module.id
+        )
+    assert preserved is not None
+    assert str(preserved.service_key_id) == active_key["api_key"]["id"]
+
+    # Revocation after a valid binding keeps failing at exchange with 401.
+    ticket_response = await client.post(
+        "/api/v1/module-auth/tickets/",
+        json={"module_key": enabled_module.name, "redirect_uri": REDIRECT_URI},
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert ticket_response.status_code == 201, ticket_response.text
+    ticket = parse_qs(urlparse(ticket_response.json()["redirect_target"]).query)[
+        "ticket"
+    ][0]
+    late_revoke = await client.post(
+        f"/api/v1/api-keys/{active_key['api_key']['id']}/revoke",
+        json={"reason_code": "security_concern", "reason_text": "Post-binding"},
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert late_revoke.status_code == 200, late_revoke.text
+
+    exchange = await client.post(
+        "/api/v1/module-auth/token/",
+        json={"ticket": ticket},
+        headers={"X-API-Key": active_key["secret"]},
+    )
+    assert exchange.status_code == 401, exchange.text
+
+
+@pytest.mark.asyncio
+async def test_legacy_non_url_safe_module_key_cannot_be_broker_enabled(
+    client,
+    db_container,
+    admin_user,
+    test_settings,
+):
+    """A pre-restriction row like 'reports/v2' can never reach the
+    path-segment session and refresh routes, so broker-enabling it must be
+    refused up front instead of failing at the first token renewal."""
+    legacy_key = f"reports/v2-{uuid4().hex[:6]}"
+    async with db_container() as container:
+        # model_construct skips validation, mirroring a row created before
+        # the URL-safe restriction existed.
+        legacy_module = await container.module_repo().add(
+            ModuleCreate.model_construct(name=legacy_key)
+        )
+        await container.tenant_repo().enable_module(
+            tenant_id=admin_user.tenant_id, module_id=legacy_module.id
+        )
+
+    response = await client.patch(
+        client_config_path(tenant_id=admin_user.tenant_id, module_id=legacy_module.id),
+        json={"redirect_uris": [REDIRECT_URI]},
+        headers={"X-API-Key": test_settings.eneo_super_duper_api_key},
+    )
+
+    assert response.status_code == 400, response.text
+    assert "url-safe" in response.json()["message"].lower()
+
+
+@pytest.mark.asyncio
 async def test_stale_module_token_rejected_after_email_moves_to_replacement_account(
     client,
     db_container,

@@ -20,8 +20,10 @@ from eneo.authentication.auth_models import (
     PERMISSION_LEVEL_ORDER,
     ApiKeyOwnership,
     ApiKeyPermission,
+    ApiKeyState,
     ApiKeyType,
     ApiKeyV2InDB,
+    compute_effective_state,
 )
 from eneo.authentication.auth_service import AuthService
 from eneo.main.config import get_settings, validate_redirect_uri
@@ -203,11 +205,14 @@ class ModuleAuthBroker:
     async def validate_client_config_service_key(
         self, *, tenant_id: UUID, service_key_id: UUID
     ) -> None:
-        """Validate the durable invariants for a module exchange key.
+        """Validate a module exchange key at registration time.
 
-        Runtime state such as suspension, expiry, IP allowlists, and rate limits
-        remains owned by normal API-key authentication. This registration check
-        rejects configurations that can never authenticate successfully.
+        Beyond the durable invariants (ownership, key type, permission), the
+        key must be effectively active right now: binding a revoked, suspended
+        or expired key would persist a config under which every ticket
+        exchange fails API-key authentication. State changes made after
+        registration remain owned by normal API-key authentication, as do IP
+        allowlists and rate limits, and take effect on the next request.
         """
         api_key = await self.api_key_repo.get(
             key_id=service_key_id, tenant_id=tenant_id
@@ -221,6 +226,17 @@ class ModuleAuthBroker:
         if registration_error is not None:
             raise BadRequestException(
                 f"Invalid module service key: {registration_error}."
+            )
+
+        effective_state = compute_effective_state(
+            revoked_at=api_key.revoked_at,
+            suspended_at=api_key.suspended_at,
+            expires_at=api_key.expires_at,
+            rotation_grace_until=getattr(api_key, "rotation_grace_until", None),
+        )
+        if effective_state != ApiKeyState.ACTIVE:
+            raise BadRequestException(
+                f"Invalid module service key: the API key is {effective_state.value}."
             )
 
     async def issue_ticket(

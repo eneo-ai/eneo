@@ -17,6 +17,7 @@ from eneo.modules.module import (
     ModuleInDB,
     ModuleTenantAssignment,
     ModuleTenantClientConfig,
+    is_url_safe_module_key,
 )
 from eneo.server.dependencies.container import get_container
 from eneo.server.protocol import responses
@@ -90,6 +91,16 @@ async def update_module_client_config(
     module = await module_repo.get_module(module_id)
     if module is None:
         raise NotFoundException("Module not found.")
+
+    # A key that cannot ride as a URL path segment would pass handoff (the
+    # key travels in JSON and JWT claims) but could never reach the session
+    # and refresh routes - refuse to broker-enable it at all.
+    if not is_url_safe_module_key(module.name):
+        raise BadRequestException(
+            "Module key is not URL-safe, so the module session and refresh "
+            "routes cannot address it. Register a new module key for login "
+            "handoff."
+        )
 
     previous = await module_repo.get_module_client_config(
         tenant_id=tenant_id, module_id=module_id

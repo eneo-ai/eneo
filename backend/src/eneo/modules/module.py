@@ -25,6 +25,15 @@ class Modules(str, Enum):
 _MODULE_KEY_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 
 
+def is_url_safe_module_key(value: str) -> bool:
+    """True when the key can travel as a single URL path segment.
+
+    Rows that predate the registration restriction may fail this; they keep
+    working as feature-flag modules but cannot be enabled for login handoff.
+    """
+    return _MODULE_KEY_PATTERN.fullmatch(value) is not None
+
+
 class ModuleBase(BaseModel):
     """A module's globally unique machine identity.
 

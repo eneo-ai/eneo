@@ -1,4 +1,5 @@
 import time
+from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock, MagicMock
 from urllib.parse import parse_qs, quote_plus, urlparse
 from uuid import uuid4
@@ -97,6 +98,10 @@ def make_api_key(**overrides):
     key.key_type = ApiKeyType.SK
     key.permission = ApiKeyPermission.WRITE
     key.rotated_from_key_id = None
+    key.revoked_at = None
+    key.suspended_at = None
+    key.expires_at = None
+    key.rotation_grace_until = None
     for k, v in overrides.items():
         setattr(key, k, v)
     return key
@@ -737,3 +742,37 @@ class TestModuleServiceKeyRegistration:
             await broker.validate_client_config_service_key(
                 tenant_id=TENANT_ID, service_key_id=SERVICE_KEY_ID
             )
+
+    @pytest.mark.parametrize(
+        ("key_overrides", "message"),
+        [
+            ({"revoked_at": datetime.now(timezone.utc)}, "revoked"),
+            ({"suspended_at": datetime.now(timezone.utc)}, "suspended"),
+            (
+                {"expires_at": datetime.now(timezone.utc) - timedelta(days=1)},
+                "expired",
+            ),
+        ],
+    )
+    async def test_rejects_key_that_cannot_authenticate_right_now(
+        self, key_overrides, message
+    ):
+        """Binding a dead key would persist a config under which every ticket
+        exchange fails at API-key authentication."""
+        broker = make_broker()
+        broker.api_key_repo.get.return_value = make_api_key(**key_overrides)
+
+        with pytest.raises(BadRequestException, match=message):
+            await broker.validate_client_config_service_key(
+                tenant_id=TENANT_ID, service_key_id=SERVICE_KEY_ID
+            )
+
+    async def test_accepts_key_expiring_in_the_future(self):
+        broker = make_broker()
+        broker.api_key_repo.get.return_value = make_api_key(
+            expires_at=datetime.now(timezone.utc) + timedelta(days=7)
+        )
+
+        await broker.validate_client_config_service_key(
+            tenant_id=TENANT_ID, service_key_id=SERVICE_KEY_ID
+        )

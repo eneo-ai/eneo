@@ -64,7 +64,9 @@ A module implementing refresh must:
   slug (letters and digits plus `.`, `_` or `-`, starting with a letter or
   digit) because the key travels as a URL path segment in the session and
   refresh routes, as the `MODULE_KEY` environment variable and as a
-  JWT-audience suffix.
+  JWT-audience suffix. A pre-existing row whose key does not meet this
+  restriction keeps working as a feature-flag module but cannot be enabled
+  for login handoff — register a new module key instead.
 - The module image receives this value through the canonical `MODULE_KEY` environment variable.
 
 ### Required callback behavior
