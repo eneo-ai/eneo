@@ -37,40 +37,22 @@ This split keeps generated plans maintainable. The model describes what each ste
 
 When the final report or document needs named sections, say which headings must appear in the finished output. You can still use headings to organize a detailed workflow description: headings that describe inputs, tasks, reviews, or delivery stages are treated as authoring guidance rather than as an automatic final-report outline.
 
-For create-plan compilation, supported shapes now pass through an explicit compile-time assembly spine:
-
-| Module                            | Responsibility                                                                                                 |
-| --------------------------------- | -------------------------------------------------------------------------------------------------------------- |
-| `ai_builder_assembly.create`      | Admits supported create topologies and builds a `FlowAssemblyPlan`                                             |
-| `ai_builder_assembly.plan`        | Defines the compile-time `FlowAssemblyPlan` and `PlannedStep` contract                                         |
-| `ai_builder_assembly.fixed_steps` | Owns backend-fixed planned steps such as audio transcription, final document rendering, and DOCX template fill |
-| `ai_builder_assembly.lower`       | Projects the assembly plan into the normal `FlowDraftSpecCore` authoring graph                                 |
-
-That spine is compile-time only; it is not persisted and it is not a second Flow definition. Its job is to make mechanical choices once, then lower them into normal Flow authoring data.
-
-`FlowAssemblyPlan` is the construction-time guardrail. It validates capability support, step order, previous-output references, form-field placement, source exposure, source-reader obligations, UI language, and aggregation intent before lowering. Linear plans reject broad fan-in. Aggregate and compare terminal steps use targeted `source_refs` when prior steps have structured output contracts; they fall back to `all_previous_steps` only when a prior step has no structured contract to bind.
-
-There is no parallel create-dataflow or step-skeleton materializer for create plans. Those legacy paths were removed so new Builder work has one assembly owner to extend or delete.
-
-The lowering layer is the only writer of compiled source refs and input bindings for assembly-backed create plans. Do not add create-mode passes that rewrite underlag, renderer, transcription, or template-fill mechanics after lowering.
-
-Current assembly-backed create shapes include:
+Compilation is deterministic and server-owned: the model never chooses step
+wiring, output mechanics, or renderer settings, so two plans that describe the
+same outcome compile to the same Flow mechanics. Supported create shapes are:
 
 - linear text, JSON, and document-source flows
-- generated PDF/DOCX artifact flows with a body-writer step followed by a `render_verbatim` renderer
-- aggregate and compare document flows where the body writer reads targeted structured outputs from prior steps
+- generated PDF/DOCX artifact flows: a body-writer step followed by a fixed renderer
+- aggregate and compare document flows, where the body writer reads structured outputs from prior steps
 - pure audio transcription and audio-derived report flows
-- DOCX template-fill flows with a template-variable reader, content-preparation step, and `template_fill` step
+- DOCX template-fill flows: a template-variable reader, a content-preparation step, and a fixed fill step
 
-Generated document artifacts use `render_verbatim` for the final renderer. Source-section document reports insert a deterministic `compose_text` body writer immediately before that renderer. Audio transcription uses `transcribe_only`. These are zero-LLM runtime pathways; the LLM work happens in semantic preparation steps before the fixed composer, renderer, transcriber, or filler step.
-
-Create-mode proposal tools do not expose per-step input sources, input types, output types, output modes, previous-step refs, or raw bindings. `output_fields` describe semantic JSON fields; the compiler derives the concrete Flow output type and renderer mechanics from the committed architecture.
+The final renderer, transcriber, and template-fill steps make no model calls;
+model work happens in the preparation steps before them.
 
 In edit sessions, changes to a step's input source, input type, or selected form/previous fields are semantic changes. The backend re-derives the compiled input bindings, input contract, and runtime input configuration from those choices.
 
-Existing Flow steps are preserved unless the approved edit proposal explicitly includes a modified version of the step or lists the step for removal. AI Builder can request a terminal artifact format from the conversation context, but Flow package imports and manual authoring do not infer a final artifact type from Builder-only conversation state.
-
-Resource names shown to AI Builder are prompt-visible aliases. The Builder resolves those aliases into portable Flow resource refs before the Flow application preparation validates and applies the authoring graph.
+Existing Flow steps are preserved unless the approved edit proposal explicitly includes a modified version of the step or lists the step for removal.
 
 ## Typical workflow
 
@@ -117,8 +99,8 @@ instead of retrying the same invalid request.
 
 ## One user, several concurrent clients
 
-A user can drive AI Builder from more than one place at once — several browser
-tabs, or an application using a user-owned API key. All of them authenticate as
+A user can drive AI Builder from more than one place at once, for example
+several browser tabs or an application using a user-owned API key. All of them authenticate as
 the same user, so the server cannot tell them apart, and each Builder session
 still belongs to that user: only its creator may read or send to it, and a
 session id on its own grants nothing. Service-key principals cannot author
@@ -135,7 +117,7 @@ session that was created through another client; retention and other explicit
 operations can also end sessions. Only the create/resume path is guaranteed not
 to touch a sibling.
 
-Two sends on the *same* session id still conflict: the second is refused with
+Two sends on the _same_ session id still conflict: the second is refused with
 `session_send_in_progress` while the first turn is with the provider. Give each
 concurrent client its own session id.
 
@@ -200,7 +182,7 @@ Edit sessions may also include `proposal.edit`. This is the approval metadata fo
 
 The `description_override_manual` flag records that the reviewer chose to keep the current Flow description. It applies to create and edit plans.
 
-Do not depend on compiled edit internals or legacy `edit_result` fields. The public contract is the proposal content plus optional `proposal.edit`; the backend owns compilation, validation, and application details.
+The public contract is the proposal content plus optional `proposal.edit`; the backend owns compilation, validation, and application details.
 
 ## Inputs, outputs, and contracts
 
@@ -231,9 +213,7 @@ That is different from instructions:
 | Instructions         | Tell the model what to do                                   |
 | Underlag till steget | Controls the text or structured material the model works on |
 
-AI Builder should normally let the backend compose material from flow input, form fields, files, and previous outputs. That is more robust than asking the language model to hand-write fragile prompt templates. Use advanced material overrides only when the default material assembly is not precise enough.
-
-For assembly-backed create plans, the underlag channel is part of `FlowAssemblyPlan`: implicit previous output, whole-object refs, field refs, targeted `source_refs`, text anchors, or broad fan-in. The selected channel is lowered into normal Flow bindings once. Later validation may reject invalid output, but it must not silently choose a different channel.
+AI Builder lets the backend compose material from flow input, form fields, files, and previous outputs instead of asking the language model to write prompt templates. Use advanced material overrides only when the default material assembly is not precise enough.
 
 See <a href="/docs/flows#advanced-step-input-templates-underlag-till-steget">Advanced step input templates</a> for the runtime mental model.
 

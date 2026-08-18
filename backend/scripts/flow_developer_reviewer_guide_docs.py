@@ -65,10 +65,6 @@ REVIEWER_ROUTE_SLUGS = (
 )
 REVIEWER_VALIDATION_COMMAND_SLUGS = (
     "docs-regen",
-    "docs-contract",
-    "ruff",
-    "pyright",
-    "docs-prettier",
     "targeted-pytest",
     "import-boundary",
 )
@@ -816,56 +812,11 @@ REVIEWER_VALIDATION_COMMANDS: tuple[ReviewerValidationCommand, ...] = (
         requires_path_arguments=False,
     ),
     _command(
-        slug="docs-contract",
-        label="Developer docs contract",
-        command="set -a; source .env.template; set +a; uv run pytest tests/unittests/flows/test_flow_docs_site_contract.py -q",
-        workdir="backend",
-        when_to_run="Run after changing guarded Flow developer docs, error codes, tables, lifecycle states, or modules.",
-        referenced_paths=(
-            "backend/tests/unittests/flows/test_flow_docs_site_contract.py",
-        ),
-    ),
-    _command(
-        slug="ruff",
-        label="Python lint",
-        command="uv run ruff check scripts/flow_developer_reviewer_guide_docs.py scripts/generate_flow_developer_reviewer_guide_docs.py tests/unittests/flows/test_flow_docs_site_contract.py",
-        workdir="backend",
-        when_to_run="Run after changing the reviewer-guide generator or docs contract tests.",
-        referenced_paths=(
-            "backend/scripts/flow_developer_reviewer_guide_docs.py",
-            "backend/scripts/generate_flow_developer_reviewer_guide_docs.py",
-            "backend/tests/unittests/flows/test_flow_docs_site_contract.py",
-        ),
-    ),
-    _command(
-        slug="pyright",
-        label="Python type check",
-        command="uv run pyright scripts/flow_developer_reviewer_guide_docs.py scripts/generate_flow_developer_reviewer_guide_docs.py tests/unittests/flows/test_flow_docs_site_contract.py",
-        workdir="backend",
-        when_to_run="Run after changing typed docs generator records or contract protocols.",
-        referenced_paths=(
-            "backend/scripts/flow_developer_reviewer_guide_docs.py",
-            "backend/scripts/generate_flow_developer_reviewer_guide_docs.py",
-            "backend/tests/unittests/flows/test_flow_docs_site_contract.py",
-        ),
-    ),
-    _command(
-        slug="docs-prettier",
-        label="Docs-site format",
-        command="bun prettier --check apps/docs-site/src/content/docs/flows-for-developers/reviewing-flows-code.mdx apps/docs-site/src/content/docs/flows-for-developers/_meta.ts",
-        workdir="frontend",
-        when_to_run="Run after changing the rendered reviewer guide page or docs-site section metadata.",
-        referenced_paths=(
-            "frontend/apps/docs-site/src/content/docs/flows-for-developers/reviewing-flows-code.mdx",
-            "frontend/apps/docs-site/src/content/docs/flows-for-developers/_meta.ts",
-        ),
-    ),
-    _command(
         slug="targeted-pytest",
-        label="Focused Flow tests",
+        label="Docs contract and package layout",
         command="set -a; source .env.template; set +a; uv run pytest tests/unittests/flows/test_flow_docs_site_contract.py tests/unittests/flows/test_flow_package_layout.py -q",
         workdir="backend",
-        when_to_run="Run for Flow docs, package layout, module ownership, or boundary changes.",
+        when_to_run="Run after changing guarded developer docs, error codes, tables, lifecycle states, or root modules.",
         referenced_paths=(
             "backend/tests/unittests/flows/test_flow_docs_site_contract.py",
             "backend/tests/unittests/flows/test_flow_package_layout.py",
@@ -1342,7 +1293,7 @@ def _render_markdown_table(
 
 
 def _render_source_refs(source_refs: tuple[ReviewerGuideSourceRef, ...]) -> str:
-    return ", ".join(
+    return "<br />".join(
         f"{source_ref.label}: `{source_ref.path}`" for source_ref in source_refs
     )
 
@@ -1352,4 +1303,4 @@ def _render_signal_tokens(signals: tuple[str, ...]) -> str:
 
 
 def _render_path_refs(paths: tuple[str, ...]) -> str:
-    return ", ".join(f"`{path}`" for path in paths)
+    return "<br />".join(f"`{path}`" for path in paths)

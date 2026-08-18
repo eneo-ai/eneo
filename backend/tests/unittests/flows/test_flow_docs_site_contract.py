@@ -1387,11 +1387,9 @@ def test_flow_developer_docs_orientation_contract() -> None:
 def test_flow_developer_docs_data_schema_is_generated_from_backend_metadata() -> None:
     from eneo.flows.infrastructure.flow_schema_docs_exporter import (
         _AGGREGATE_DESCRIPTIONS,
+        FLOW_SCHEMA_BOUNDARY_TABLE_NAMES,
         FLOW_SCHEMA_MODEL_REGISTRY,
         FlowSchemaAggregate,
-        _aggregate_heading_href,
-        _aggregate_map_edges,
-        _aggregate_map_relationship_lines,
         render_flow_schema_docs_page,
     )
 
@@ -1406,149 +1404,48 @@ def test_flow_developer_docs_data_schema_is_generated_from_backend_metadata() ->
     )
     _assert_purpose_header(page, "The data schema")
     assert "make docs:regen" in page
+    assert "## How to read the diagrams" in page
+    assert "## Aggregates" in page
+    assert "## JSONB columns" in page
     assert "## Related" in page
     assert "/docs/flows-for-developers/key-decisions" in page
     assert "/docs/flows-for-developers/reviewing-flows-code" in page
-    assert 'import { Tabs } from "nextra/components";' not in page
-    assert "## Aggregate map" in page
-    assert "## Schema map" not in page
+
+    # One section per aggregate, in registry order, each with its description,
+    # its tables in the summary table, and a collapsible column list per table.
+    headings = [f"## {aggregate.value}" for aggregate in FlowSchemaAggregate]
+    positions = [page.index(heading) for heading in headings]
+    assert positions == sorted(positions)
+    for aggregate in FlowSchemaAggregate:
+        assert _AGGREGATE_DESCRIPTIONS[aggregate] in page
+    for entry in FLOW_SCHEMA_MODEL_REGISTRY:
+        table_name = entry.model.__table__.name
+        assert f"| `{table_name}` " in page
+        assert f"<summary><code>{table_name}</code> columns (" in page
+
+    # Diagrams: relationship-only, tenant edges stated once instead of drawn,
+    # composite duplicates collapsed, external tables allowed only from the list.
+    assert "ondelete=" not in page
+    assert " tenants : " not in page
+    assert page.count('flow_steps }o--|| flows : "CASCADE"') == 1
+    assert 'flow_steps }o--|| assistants : "RESTRICT"' in page
+    assert 'flows |o--o| flow_versions : "NO ACTION"' in page
+    assert 'flows }o--o| users : "created_by_user_id: SET NULL"' in page
+    assert 'flows }o--o| users : "owner_user_id: SET NULL"' in page
     assert (
-        "Single-direction links point from the aggregate that owns the foreign key"
+        'flow_classification_retention_policies |o--|| security_classifications : "CASCADE"'
         in page
     )
-    assert "## Aggregate entity relationship diagrams" in page
-    assert page.index("## Aggregate map") < page.index(
-        "## Aggregate entity relationship diagrams"
-    )
-    assert "### ERD shortcuts" in page
-    assert page.index("## Aggregate map") < page.index("### ERD shortcuts")
-    assert page.index("### ERD shortcuts") < page.index("### Tables by aggregate")
-    assert page.index("### Tables by aggregate") < page.index(
-        "## Aggregate entity relationship diagrams"
-    )
-    assert "## Entity relationship diagram" not in page
-    assert "\n## Deferred adjacent tables\n" not in page
-    assert "<Tabs items={[" not in page
-    assert "<Tabs.Tab>" not in page
-    assert page.count(FLOW_DOCS_MERMAID_FIGURE_CLASS) == (
-        len(tuple(FlowSchemaAggregate)) + 1
-    )
-    for aggregate in FlowSchemaAggregate:
-        assert f"### {aggregate.value}" in page
-
-    aggregate_map = page.split("## Aggregate map", maxsplit=1)[1].split(
-        "## Aggregate entity relationship diagrams",
-        maxsplit=1,
-    )[0]
-    shortcut_section = page.split("### ERD shortcuts", maxsplit=1)[1].split(
-        "### Tables by aggregate",
-        maxsplit=1,
-    )[0]
-    shortcut_cards = _nextra_cards_from_section(shortcut_section)
-
-    assert "erDiagram" in aggregate_map
-    assert "flowchart LR" not in aggregate_map
-    assert "run_execution }o--|| flow_definition : references" in aggregate_map
-    assert "run_execution }o--o{ review_and_rerun : mutual_FKs" in aggregate_map
-    assert "retention }o--|| run_execution" not in aggregate_map
-    assert "retention }o--o{ run_execution" not in aggregate_map
-    assert "<Cards num={3}>" in shortcut_section
-    assert tuple(title for title, _ in shortcut_cards) == tuple(
-        aggregate.value for aggregate in FlowSchemaAggregate
-    )
-    assert tuple(href for _, href in shortcut_cards) == tuple(
-        _aggregate_heading_href(aggregate) for aggregate in FlowSchemaAggregate
-    )
-
-    aggregate_edges = _aggregate_map_edges(FLOW_SCHEMA_MODEL_REGISTRY)
-    assert (
-        FlowSchemaAggregate.RUN_EXECUTION,
-        FlowSchemaAggregate.FLOW_DEFINITION,
-    ) in aggregate_edges
-    assert (
-        FlowSchemaAggregate.REVIEW_AND_RERUN,
-        FlowSchemaAggregate.RUN_EXECUTION,
-    ) in aggregate_edges
-    assert (
-        FlowSchemaAggregate.RETENTION,
-        FlowSchemaAggregate.RUN_EXECUTION,
-    ) not in aggregate_edges
-    aggregate_relationship_lines = _aggregate_map_relationship_lines(
-        FLOW_SCHEMA_MODEL_REGISTRY
-    )
-    assert (
-        "  run_execution }o--|| flow_definition : references"
-        in aggregate_relationship_lines
-    )
-    assert (
-        "  run_execution }o--o{ review_and_rerun : mutual_FKs"
-        in aggregate_relationship_lines
-    )
-
-    for aggregate in FlowSchemaAggregate:
-        assert aggregate.value in aggregate_map
-        assert _AGGREGATE_DESCRIPTIONS[aggregate] in aggregate_map
-        for entry in FLOW_SCHEMA_MODEL_REGISTRY:
-            if entry.aggregate is aggregate:
-                assert f"`{entry.model.__table__.name}`" in aggregate_map
-
-    assert "flow_classification_retention_policies" in page
-    for boundary_table in (
-        "tenants",
-        "spaces",
-        "users",
-        "files",
-        "assistants",
-        "service_principals",
-        "api_keys_v2",
-        "jobs",
-        "security_classifications",
-    ):
-        assert f"{boundary_table} {{" in page
-        assert (
-            f'{boundary_table} {{\n    string boundary "external owner"\n  }}' in page
-        )
-
-    assert (
-        "flow_classification_retention_policies }o--|| tenants : "
-        '"tenant_id ondelete=CASCADE"'
-    ) in page
-    assert (
-        "flow_classification_retention_policies |o--|| security_classifications : "
-        '"security_classification_id, tenant_id ondelete=CASCADE"'
-    ) in page
-    assert 'flows }o--o| users : "created_by_user_id ondelete=SET NULL"' in page
-    assert 'flows }o--o| users : "owner_user_id ondelete=SET NULL"' in page
-    assert (
-        "flow_package_imports }o--o| flows : "
-        '"flow_id, tenant_id, space_id ondelete=CASCADE"'
-    ) in page
+    assert 'builder_sessions |o--o| builder_plans : "NO ACTION"' in page
+    for boundary_table in FLOW_SCHEMA_BOUNDARY_TABLE_NAMES - {"tenants"}:
+        assert f" {boundary_table} : " in page
     assert "flow_step_dependencies" not in page
-    assert 'flow_steps }o--|| assistants : "assistant_id ondelete=RESTRICT"' in page
-    assert (
-        'flows |o--o| flow_versions : "id, published_version ondelete=NO ACTION"'
-        in page
-    )
-    assert (
-        'flow_template_assets }o--|| files : "file_id, tenant_id ondelete=RESTRICT"'
-        in page
-    )
-    assert (
-        "flow_runtime_uploaded_files |o--|| files : "
-        '"file_id, tenant_id ondelete=CASCADE"' in page
-    )
-    assert (
-        "flow_run_step_result_files }o--|| files : "
-        '"file_id, tenant_id ondelete=RESTRICT"' in page
-    )
-    assert (
-        "builder_session_files }o--|| files : "
-        '"file_id, tenant_id ondelete=CASCADE"' in page
-    )
-    assert (
-        "builder_sessions |o--o| builder_plans : "
-        '"latest_plan_id, id ondelete=NO ACTION"' in page
-    )
+
+    # Column lists carry keys; the composite tenant half is not repeated.
+    assert "| `flow_id`" in page
+    assert "FK → `flows.id` CASCADE" in page
+    assert "FK → `flows.tenant_id`" not in page
+    assert "FK → `tenants.id` CASCADE" in page
 
 
 def test_flow_schema_docs_registry_covers_flow_schema_models() -> None:
@@ -1683,27 +1580,28 @@ def test_flow_schema_docs_relationship_labels_derive_fk_semantics() -> None:
     )
     assert required_relationship.source_cardinality == "}o"
     assert required_relationship.target_cardinality == "||"
-    assert required_relationship.label == "parent_id ondelete=CASCADE"
+    assert required_relationship.ondelete == "CASCADE"
 
     nullable_relationship = _flow_schema_relationship_from_constraint(
         next(iter(nullable_child.foreign_key_constraints))
     )
     assert nullable_relationship.target_cardinality == "o|"
-    assert nullable_relationship.label == "parent_id ondelete=NO ACTION"
+    assert nullable_relationship.ondelete == "NO ACTION"
 
     partial_unique_relationship = _flow_schema_relationship_from_constraint(
         next(iter(partial_unique_child.foreign_key_constraints))
     )
     assert partial_unique_relationship.source_cardinality == "}o"
     assert partial_unique_relationship.target_cardinality == "||"
-    assert partial_unique_relationship.label == "parent_id ondelete=RESTRICT"
+    assert partial_unique_relationship.ondelete == "RESTRICT"
 
     composite_relationship = _flow_schema_relationship_from_constraint(
         next(iter(composite_child.foreign_key_constraints))
     )
     assert composite_relationship.source_cardinality == "|o"
     assert composite_relationship.target_cardinality == "||"
-    assert composite_relationship.label == "parent_id, tenant_id ondelete=SET NULL"
+    assert composite_relationship.local_column_names == ("parent_id", "tenant_id")
+    assert composite_relationship.ondelete == "SET NULL"
 
     subset_unique_relationship = _flow_schema_relationship_from_constraint(
         next(iter(subset_unique_child.foreign_key_constraints))
@@ -1788,7 +1686,8 @@ def test_flow_developer_docs_how_built_is_generated_from_layout_sources() -> Non
     assert "/docs/flows-for-developers/run-lifecycle" in page
     assert _non_empty_lines(page)[0] == FLOW_DOCS_RELATED_NEXTRA_CARDS_IMPORT
     assert "target ownership model" in page
-    assert "current root entry and its target-home group" in page
+    assert "each current root entry and its target-home group" in page
+    assert "## Target homes" not in page
     assert "`FlowRunAccessPolicy`" in page
     assert "`tenant_id`" in page
     assert "`flow_run_access_denied`" in page
@@ -1833,16 +1732,15 @@ def test_flow_developer_docs_how_built_is_generated_from_layout_sources() -> Non
     }
 
     assert "<details>" not in change_index_section
-    assert module_ownership_section.count("<details>") == len(target_home_counts)
-    assert module_ownership_section.count("</details>") == len(target_home_counts)
-    assert "| Target home" not in module_ownership_section
-    for target_home, row_count in target_home_counts.items():
-        assert (
-            f"<summary><code>{target_home}</code> ({row_count} entries)</summary>"
-            in module_ownership_section
-        )
+    assert "<details>" not in module_ownership_section
+    assert "| Target home" in module_ownership_section
+    for target_home in target_home_counts:
+        assert f"| `{target_home}` " in module_ownership_section
     for row in layout_rows:
-        assert f"`{row.entry}`" in module_ownership_section
+        suffix = "/" if row.kind == "package" else ""
+        assert f"`{row.entry}{suffix}`" in module_ownership_section
+    # The per-entry rationale is not repeated; it restates the home.
+    assert "is a domain contract" not in module_ownership_section
     assert related_section.strip() == render_flow_docs_related_nextra_cards(
         related_cards
     )
@@ -2290,10 +2188,6 @@ def test_flow_developer_docs_reviewer_guide_is_generated_from_review_catalog() -
     )
     assert generator.REVIEWER_VALIDATION_COMMAND_SLUGS == (
         "docs-regen",
-        "docs-contract",
-        "ruff",
-        "pyright",
-        "docs-prettier",
         "targeted-pytest",
         "import-boundary",
     )
@@ -2431,11 +2325,7 @@ def test_flow_developer_docs_reviewer_guide_source_references_exist() -> None:
     referenced_files = sorted(set(FLOW_DEVELOPER_SOURCE_FILE_REF_PATTERN.findall(page)))
 
     assert "backend/.importlinter" in referenced_files
-    assert "backend/scripts/flow_developer_reviewer_guide_docs.py" in referenced_files
-    assert (
-        "frontend/apps/docs-site/src/content/docs/flows-for-developers/reviewing-flows-code.mdx"
-        in referenced_files
-    )
+    assert "backend/scripts/generate_flow_docs.py" in referenced_files
     assert referenced_files
     assert all(":" not in file_ref for file_ref in referenced_files)
     missing_files = [

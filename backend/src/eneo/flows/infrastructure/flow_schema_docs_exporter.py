@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import inspect
+from collections import defaultdict
 from dataclasses import dataclass
 from enum import Enum
 from importlib import import_module
@@ -19,9 +20,7 @@ from eneo.flows.infrastructure.flow_docs_mermaid import (
 )
 from eneo.flows.infrastructure.flow_docs_related_cards import (
     FLOW_DOCS_RELATED_NEXTRA_CARDS_IMPORT,
-    FlowDocsNextraCard,
     FlowDocsRelatedNextraCard,
-    render_flow_docs_anchor_shortcut_cards,
     render_flow_docs_related_nextra_cards,
 )
 from eneo.flows.infrastructure.flow_jsonb_ownership import (
@@ -43,7 +42,8 @@ FLOW_DEVELOPER_SCHEMA_DOCS_OUTPUT_PATH = (
 
 _WRITER_MARKER = " Writer: "
 _PURPOSE_MARKER = " Purpose: "
-_BOUNDARY_NODE_LABEL = "external owner"
+_TENANT_TABLE_NAME = "tenants"
+_TENANT_COLUMN_NAME = "tenant_id"
 
 
 class FlowSchemaAggregate(Enum):
@@ -140,34 +140,65 @@ FLOW_SCHEMA_BOUNDARY_TABLE_NAMES = frozenset(
     }
 )
 
-_CORE_SCHEMA_AGGREGATES = (
-    FlowSchemaAggregate.FLOW_DEFINITION,
-    FlowSchemaAggregate.RUN_EXECUTION,
-    FlowSchemaAggregate.REVIEW_AND_RERUN,
-    FlowSchemaAggregate.RETENTION,
-)
-
 _AGGREGATE_DESCRIPTIONS = {
     FlowSchemaAggregate.FLOW_DEFINITION: (
-        "Authoring tables define the draft Flow, immutable published versions, "
-        "step graph, templates, and local resource bindings."
+        "The draft Flow an author edits, the immutable published versions "
+        "runs execute, the step graph, DOCX templates, and the tenant-local "
+        "resources a Flow is bound to."
     ),
     FlowSchemaAggregate.RUN_EXECUTION: (
-        "Runtime tables persist runs, attempts, current step results, runtime "
-        "uploads, generated files, audit delivery, and outbound HTTP delivery."
+        "One row per run, per step result, per attempt, and per provider "
+        "call, plus the files a run reads and produces, and the two outboxes "
+        "(audit, webhook) that deliver after the run transaction commits."
     ),
     FlowSchemaAggregate.REVIEW_AND_RERUN: (
-        "Review and rerun tables preserve human checkpoints, rerun requests, "
-        "and invalidation lineage without deleting earlier history."
+        "Human review checkpoints and rerun operations. Reruns invalidate "
+        "downstream steps and link the new attempts to the old ones instead "
+        "of deleting history."
     ),
     FlowSchemaAggregate.RETENTION: (
-        "Delete-after values activate automatic run-history deletion. "
-        "Minimum-retention values preserve history and no-purge values block "
-        "deletion without activating it."
+        "Per-classification retention rules. `data_retention_days` activates "
+        "automatic run-history deletion; `minimum_retention_days` and "
+        "`no_purge` only block deletion, they never activate it."
     ),
     FlowSchemaAggregate.DEFERRED_ADJACENT: (
-        "Adjacent builder and import tables live near Flow persistence "
-        "but are not core runtime/history aggregates."
+        "AI Builder sessions and Flow package imports. They reference Flow "
+        "tables but are not part of the run or history model."
+    ),
+}
+
+
+# Aggregates whose relationship diagram would still be too dense as one figure
+# are drawn as named parts; every table of the aggregate must appear in exactly
+# one part.
+_AGGREGATE_DIAGRAM_PARTS: dict[
+    FlowSchemaAggregate, tuple[tuple[str, frozenset[str]], ...]
+] = {
+    FlowSchemaAggregate.RUN_EXECUTION: (
+        (
+            "Runs, step results, attempts, and provider calls",
+            frozenset(
+                {
+                    "flow_runs",
+                    "flow_step_results",
+                    "flow_step_attempts",
+                    "flow_step_attempt_resolved_inputs",
+                    "flow_provider_calls",
+                }
+            ),
+        ),
+        (
+            "Files and delivery outboxes",
+            frozenset(
+                {
+                    "flow_runtime_uploaded_files",
+                    "flow_run_step_input_files",
+                    "flow_run_step_result_files",
+                    "flow_run_audit_outbox",
+                    "flow_run_webhook_deliveries",
+                }
+            ),
+        ),
     ),
 }
 
@@ -194,10 +225,6 @@ class FlowSchemaRelationshipDoc:
     target_cardinality: str
     local_column_names: tuple[str, ...]
     ondelete: str
-
-    @property
-    def label(self) -> str:
-        return f"{', '.join(self.local_column_names)} ondelete={self.ondelete}"
 
     @property
     def sort_key(self) -> tuple[str, str, tuple[str, ...], str]:
@@ -282,52 +309,53 @@ def discover_flow_schema_tables() -> tuple[FlowSchemaTableDoc, ...]:
 
 def render_flow_schema_docs_page() -> str:
     table_docs = discover_flow_schema_tables()
+    _assert_tenant_edges_cascade(table_docs)
 
     parts = [
         FLOW_DOCS_RELATED_NEXTRA_CARDS_IMPORT,
         "",
         "# The data schema",
         "",
-        "Use this page before changing Flow tables, retention, or JSONB. It shows each database aggregate, delete rule, writer, and typed JSON owner.",
+        "Use this page before changing Flow tables, retention, or JSONB. It shows which tables belong together, how rows are deleted, which module writes each table, and which typed owner reads each JSONB column.",
         "",
-        "This page is generated from SQLAlchemy metadata and the Flow JSONB "
-        "ownership registry. Run `make docs:regen` from the repository root "
-        "after schema or JSONB ownership changes; it includes the schema docs "
-        "generator.",
+        "Generated from SQLAlchemy metadata and the Flow JSONB ownership "
+        "registry; run `make docs:regen` from the repository root after a "
+        "schema or JSONB ownership change. Model classes live in "
+        "`backend/src/eneo/database/tables/` and are named after their tables "
+        "(`flow_runs` is `FlowRuns`).",
         "",
-        "The ERDs are split by aggregate. Nodes marked "
-        f"`{_BOUNDARY_NODE_LABEL}` are platform-owned tables referenced by Flow "
-        "foreign keys. Relationship labels show local FK columns and delete "
-        "`ondelete` behavior; `NO ACTION` can be explicit or the SQL default.",
+        "## How to read the diagrams",
         "",
-        "## Aggregate map",
+        "- One line per pair of tables. The label is the `ON DELETE` rule; "
+        "when a table references the same target through more than one "
+        "foreign key, the label also names the column. Composite foreign "
+        "keys that repeat a simpler one (`flow_id` and `flow_id, tenant_id`) "
+        "are drawn once, and the column lists show only the half that "
+        "identifies the parent row; the other half pins the child to its "
+        "parent's tenant or flow.",
+        f"- Every table with a `{_TENANT_COLUMN_NAME}` column references "
+        f"`{_TENANT_TABLE_NAME}` with `ON DELETE CASCADE`. Those lines are "
+        "omitted; deleting a tenant deletes all of its Flow rows.",
+        "- Crow's foot marks the side that holds the foreign key: `}o` many "
+        "rows, `|o` at most one. On the referenced side `||` means the "
+        "column is required and `o|` means it is nullable.",
+        "- Tables owned outside Flows (`users`, `files`, `spaces`, ...) and "
+        "Flow tables from another aggregate are drawn as plain boxes. Every "
+        "column, key, and foreign key is listed under **Columns** in each "
+        "section.",
         "",
-        "Single-direction links point from the aggregate that owns the foreign "
-        "key to the aggregate it references; mutual links combine foreign keys "
-        "in both directions. Delete behavior stays on the ERD labels below.",
+        "## Aggregates",
         "",
         _render_aggregate_map(),
         "",
-        "### ERD shortcuts",
-        "",
-        "Use these cards to jump to one aggregate ERD. The diagrams stay visible "
-        "on the page so Mermaid can render them reliably.",
-        "",
-        _render_aggregate_shortcut_cards(),
-        "",
-        "### Tables by aggregate",
-        "",
         _render_aggregate_inventory(table_docs),
         "",
-        "## Aggregate entity relationship diagrams",
+        _render_aggregate_sections(table_docs),
         "",
-        _render_aggregate_er_diagram_sections(table_docs),
+        "## JSONB columns",
         "",
-        "## Tables",
-        "",
-        _render_table_summary(table_docs),
-        "",
-        "## JSONB policy",
+        "Every Flow JSONB column has one typed owner. `Invalid payload` says what "
+        "a reader does with a stored value the owner cannot parse.",
         "",
         _render_jsonb_policy(),
         "",
@@ -350,21 +378,41 @@ def render_flow_schema_docs_page() -> str:
     return "\n".join(parts)
 
 
-def _render_aggregate_map() -> str:
-    lines = ["erDiagram"]
-    for aggregate in FlowSchemaAggregate:
-        scope = "Core" if aggregate in _CORE_SCHEMA_AGGREGATES else "Deferred adjacent"
-        lines.extend(
-            (
-                f"  {_aggregate_node_id(aggregate)} {{",
-                f'    string aggregate "{aggregate.value}"',
-                f'    string scope "{scope}"',
-                "  }",
+def write_flow_schema_docs_page(
+    output_path: Path = FLOW_DEVELOPER_SCHEMA_DOCS_OUTPUT_PATH,
+) -> None:
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text(render_flow_schema_docs_page(), encoding="utf-8")
+
+
+def _assert_tenant_edges_cascade(table_docs: tuple[FlowSchemaTableDoc, ...]) -> None:
+    """The page states this rule once instead of drawing the edges; keep it true."""
+    for table_doc in table_docs:
+        if _TENANT_COLUMN_NAME not in table_doc.table.c:
+            continue
+        tenant_constraints = [
+            constraint
+            for constraint in table_doc.table.foreign_key_constraints
+            if constraint.referred_table.name == _TENANT_TABLE_NAME
+        ]
+        if not tenant_constraints or any(
+            constraint.ondelete != "CASCADE" for constraint in tenant_constraints
+        ):
+            raise ValueError(
+                f"{table_doc.table_name}.{_TENANT_COLUMN_NAME} must reference "
+                f"{_TENANT_TABLE_NAME} with ondelete=CASCADE; the schema docs "
+                "state that rule for every table"
             )
-        )
 
+
+# --- aggregate overview -----------------------------------------------------
+
+
+def _render_aggregate_map() -> str:
+    lines = ["flowchart LR"]
+    for aggregate in FlowSchemaAggregate:
+        lines.append(f'  {_aggregate_node_id(aggregate)}["{aggregate.value}"]')
     lines.extend(_aggregate_map_relationship_lines(FLOW_SCHEMA_MODEL_REGISTRY))
-
     return render_flow_docs_mermaid_block(*lines)
 
 
@@ -380,28 +428,23 @@ def _aggregate_map_relationship_lines(
 
     for source_aggregate, target_aggregate in sorted(
         edges,
-        key=lambda edge: (
-            aggregate_order[edge[0]],
-            aggregate_order[edge[1]],
-        ),
+        key=lambda edge: (aggregate_order[edge[0]], aggregate_order[edge[1]]),
     ):
         pair = frozenset((source_aggregate, target_aggregate))
         if pair in rendered_pairs:
             continue
         rendered_pairs.add(pair)
 
-        reverse_edge = (target_aggregate, source_aggregate)
-        if reverse_edge in edges:
+        if (target_aggregate, source_aggregate) in edges:
             left, right = sorted(pair, key=lambda aggregate: aggregate_order[aggregate])
             lines.append(
-                f"  {_aggregate_node_id(left)} }}o--o{{ "
-                f"{_aggregate_node_id(right)} : mutual_FKs"
+                f"  {_aggregate_node_id(left)} <--> {_aggregate_node_id(right)}"
             )
             continue
 
         lines.append(
-            f"  {_aggregate_node_id(source_aggregate)} }}o--|| "
-            f"{_aggregate_node_id(target_aggregate)} : references"
+            f"  {_aggregate_node_id(source_aggregate)} --> "
+            f"{_aggregate_node_id(target_aggregate)}"
         )
 
     return tuple(lines)
@@ -449,26 +492,13 @@ def _aggregate_heading_href(aggregate: FlowSchemaAggregate) -> str:
     return f"#{_flow_docs_heading_slug(aggregate.value)}"
 
 
-def _render_aggregate_shortcut_cards() -> str:
-    cards = tuple(
-        FlowDocsNextraCard(aggregate.value, _aggregate_heading_href(aggregate))
-        for aggregate in FlowSchemaAggregate
-    )
-    return render_flow_docs_anchor_shortcut_cards(cards)
-
-
 def _render_aggregate_inventory(table_docs: tuple[FlowSchemaTableDoc, ...]) -> str:
     rows: list[tuple[str, ...]] = []
     for aggregate in FlowSchemaAggregate:
         aggregate_table_docs = _table_docs_for_aggregate(table_docs, aggregate)
         rows.append(
             (
-                _markdown_cell(aggregate.value),
-                (
-                    "Core"
-                    if aggregate in _CORE_SCHEMA_AGGREGATES
-                    else "Deferred adjacent"
-                ),
+                f"[{aggregate.value}]({_aggregate_heading_href(aggregate)})",
                 _markdown_cell(_AGGREGATE_DESCRIPTIONS[aggregate]),
                 ", ".join(
                     f"`{table_doc.table_name}`" for table_doc in aggregate_table_docs
@@ -476,19 +506,13 @@ def _render_aggregate_inventory(table_docs: tuple[FlowSchemaTableDoc, ...]) -> s
             )
         )
 
-    return _render_markdown_table(
-        ("Aggregate", "Scope", "What it owns", "Tables"), rows
-    )
+    return _render_markdown_table(("Aggregate", "What it owns", "Tables"), rows)
 
 
-def write_flow_schema_docs_page(
-    output_path: Path = FLOW_DEVELOPER_SCHEMA_DOCS_OUTPUT_PATH,
-) -> None:
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    output_path.write_text(render_flow_schema_docs_page(), encoding="utf-8")
+# --- per-aggregate sections -------------------------------------------------
 
 
-def _render_aggregate_er_diagram_sections(
+def _render_aggregate_sections(
     table_docs: tuple[FlowSchemaTableDoc, ...],
 ) -> str:
     parts: list[str] = []
@@ -496,14 +520,17 @@ def _render_aggregate_er_diagram_sections(
         aggregate_table_docs = _table_docs_for_aggregate(table_docs, aggregate)
         parts.extend(
             (
-                f"### {aggregate.value}",
+                f"## {aggregate.value}",
                 "",
                 _AGGREGATE_DESCRIPTIONS[aggregate],
                 "",
-                _render_er_diagram(
-                    aggregate_table_docs,
-                    all_table_docs=table_docs,
+                _render_aggregate_diagrams(
+                    aggregate, aggregate_table_docs, all_table_docs=table_docs
                 ),
+                "",
+                _render_table_summary(aggregate_table_docs),
+                "",
+                _render_column_details(aggregate_table_docs),
                 "",
             )
         )
@@ -536,75 +563,201 @@ def _table_docs_for_aggregate(
     )
 
 
+def _render_aggregate_diagrams(
+    aggregate: FlowSchemaAggregate,
+    table_docs: tuple[FlowSchemaTableDoc, ...],
+    *,
+    all_table_docs: tuple[FlowSchemaTableDoc, ...],
+) -> str:
+    parts = _AGGREGATE_DIAGRAM_PARTS.get(aggregate)
+    if parts is None:
+        return _render_er_diagram(table_docs, all_table_docs=all_table_docs)
+
+    covered = [name for _, names in parts for name in names]
+    if sorted(covered) != sorted(table_doc.table_name for table_doc in table_docs):
+        raise ValueError(
+            f"Diagram parts for {aggregate.value} must cover each table exactly once"
+        )
+
+    rendered: list[str] = []
+    for title, names in parts:
+        part_docs = tuple(doc for doc in table_docs if doc.table_name in names)
+        rendered.extend(
+            (
+                f"**{title}**",
+                "",
+                _render_er_diagram(part_docs, all_table_docs=all_table_docs),
+                "",
+            )
+        )
+    return "\n".join(rendered).rstrip()
+
+
 def _render_er_diagram(
     table_docs: tuple[FlowSchemaTableDoc, ...],
     *,
     all_table_docs: tuple[FlowSchemaTableDoc, ...],
 ) -> str:
-    lines = ["erDiagram"]
-    aggregate_table_names = {table_doc.table_name for table_doc in table_docs}
     flow_table_names = {table_doc.table_name for table_doc in all_table_docs}
-    context_table_names: set[str] = set()
-    boundary_table_names: set[str] = set()
     relationships: list[FlowSchemaRelationshipDoc] = []
 
     for table_doc in table_docs:
-        for constraint in table_doc.table.foreign_key_constraints:
+        for constraint in _sorted_foreign_keys(table_doc.table):
             relationship = _flow_schema_relationship_from_constraint(constraint)
-            if relationship.target_table_name in flow_table_names:
-                relationships.append(relationship)
-                if relationship.target_table_name not in aggregate_table_names:
-                    context_table_names.add(relationship.target_table_name)
-            elif relationship.target_table_name in FLOW_SCHEMA_BOUNDARY_TABLE_NAMES:
-                relationships.append(relationship)
-                boundary_table_names.add(relationship.target_table_name)
-            else:
+            target = relationship.target_table_name
+            if target not in flow_table_names and (
+                target not in FLOW_SCHEMA_BOUNDARY_TABLE_NAMES
+            ):
                 raise ValueError(
                     "Flow schema docs boundary table allowlist is missing "
-                    f"foreign key target {relationship.target_table_name}"
+                    f"foreign key target {target}"
                 )
+            if target == _TENANT_TABLE_NAME:
+                continue
+            relationships.append(relationship)
 
+    edges = _diagram_edges(relationships)
+    drawn = {
+        name
+        for relationship in relationships
+        for name in (relationship.source_table_name, relationship.target_table_name)
+        if name != _TENANT_TABLE_NAME
+    }
+    lines = ["erDiagram"]
     for table_doc in sorted(table_docs, key=lambda table_doc: table_doc.table_name):
-        _append_table_entity(lines, table_doc.table)
-    for table_name in sorted(context_table_names):
-        _append_context_entity(lines, table_name)
-    for table_name in sorted(boundary_table_names):
-        _append_boundary_entity(lines, table_name)
-
-    for relationship in sorted(relationships, key=lambda item: item.sort_key):
-        lines.append(
-            f"  {_mermaid_entity_name(relationship.source_table_name)} "
-            f"{relationship.source_cardinality}--"
-            f"{relationship.target_cardinality} "
-            f"{_mermaid_entity_name(relationship.target_table_name)} : "
-            f'"{relationship.label}"'
-        )
+        if table_doc.table_name not in drawn:
+            # A table with no drawn relationship still needs to appear.
+            lines.append(f"  {_mermaid_entity_name(table_doc.table_name)} {{ }}")
+    lines.extend(edges)
 
     return render_flow_docs_mermaid_block(*lines)
 
 
-def _append_table_entity(lines: list[str], table: sa.Table) -> None:
-    lines.append(f"  {_mermaid_entity_name(table.name)} {{")
-    for column in table.columns:
-        column = cast(sa.Column[object], column)
-        primary_key = " PK" if column.primary_key else ""
-        nullable = "nullable" if column.nullable else "required"
-        lines.append(
-            f'    {_column_type_label(column)} {column.name}{primary_key} "{nullable}"'
+def _diagram_edges(relationships: list[FlowSchemaRelationshipDoc]) -> list[str]:
+    """One edge per semantic foreign key.
+
+    Constraints from one table to one target whose local columns overlap
+    (`flow_id` and `flow_id, tenant_id`) are the same relationship written
+    twice for composite integrity; they are drawn once, using the constraint
+    with the fewest columns. Constraints with disjoint columns (`created_by_user_id`
+    and `owner_user_id`) are distinct relationships and each keep their column
+    in the label.
+    """
+    by_pair: dict[tuple[str, str], list[FlowSchemaRelationshipDoc]] = defaultdict(list)
+    for relationship in relationships:
+        by_pair[
+            (relationship.source_table_name, relationship.target_table_name)
+        ].append(relationship)
+
+    edges: list[str] = []
+    for (source, target), pair_relationships in sorted(by_pair.items()):
+        groups = _semantic_groups(pair_relationships)
+        for group in groups:
+            representative = min(
+                group, key=lambda item: (len(item.local_column_names), item.sort_key)
+            )
+            rules = sorted({item.ondelete for item in group})
+            label = " / ".join(rules)
+            if len(groups) > 1:
+                label = f"{representative.local_column_names[0]}: {label}"
+            edges.append(
+                f"  {_mermaid_entity_name(source)} "
+                f"{representative.source_cardinality}--"
+                f"{representative.target_cardinality} "
+                f'{_mermaid_entity_name(target)} : "{label}"'
+            )
+    return edges
+
+
+def _semantic_groups(
+    relationships: list[FlowSchemaRelationshipDoc],
+) -> list[list[FlowSchemaRelationshipDoc]]:
+    groups: list[list[FlowSchemaRelationshipDoc]] = []
+    for relationship in sorted(relationships, key=lambda item: item.sort_key):
+        columns = set(relationship.local_column_names)
+        for group in groups:
+            if any(columns & set(member.local_column_names) for member in group):
+                group.append(relationship)
+                break
+        else:
+            groups.append([relationship])
+    return groups
+
+
+def _render_table_summary(table_docs: tuple[FlowSchemaTableDoc, ...]) -> str:
+    rows: list[tuple[str, ...]] = []
+    for table_doc in table_docs:
+        rows.append(
+            (
+                f"`{table_doc.table_name}`",
+                _markdown_cell(_sentence(table_doc.stores)),
+                _markdown_cell(table_doc.writer.rstrip(".")),
+                _markdown_cell(_sentence(table_doc.purpose)),
+            )
         )
-    lines.append("  }")
+
+    return _render_markdown_table(
+        ("Table", "Stores", "Written by", "Why it exists"),
+        rows,
+    )
 
 
-def _append_context_entity(lines: list[str], table_name: str) -> None:
-    lines.append(f"  {_mermaid_entity_name(table_name)} {{")
-    lines.append('    string context "Flow table; see its aggregate"')
-    lines.append("  }")
+def _render_column_details(table_docs: tuple[FlowSchemaTableDoc, ...]) -> str:
+    parts: list[str] = []
+    for table_doc in table_docs:
+        table = table_doc.table
+        rows = [
+            (
+                f"`{column.name}`",
+                _column_type_label(cast(sa.Column[object], column)),
+                "yes" if column.nullable else "",
+                _column_key_cell(table, cast(sa.Column[object], column)),
+            )
+            for column in table.columns
+        ]
+        body = _render_markdown_table(("Column", "Type", "Nullable", "Key"), rows)
+        parts.append(
+            "\n".join(
+                (
+                    "<details>",
+                    f"<summary><code>{table.name}</code> columns ({len(rows)})</summary>",
+                    "",
+                    body,
+                    "",
+                    "</details>",
+                )
+            )
+        )
+    return "\n\n".join(parts)
 
 
-def _append_boundary_entity(lines: list[str], table_name: str) -> None:
-    lines.append(f"  {_mermaid_entity_name(table_name)} {{")
-    lines.append(f'    string boundary "{_BOUNDARY_NODE_LABEL}"')
-    lines.append("  }")
+def _column_key_cell(table: sa.Table, column: sa.Column[object]) -> str:
+    keys: list[str] = []
+    if column.primary_key:
+        keys.append("PK")
+    seen: set[tuple[str, str, str]] = set()
+    for constraint in _sorted_foreign_keys(table):
+        referred_pk = {
+            element.column.name
+            for element in constraint.elements
+            if element.column.primary_key
+        }
+        for element in constraint.elements:
+            if element.parent.name != column.name:
+                continue
+            target = element.column
+            if referred_pk and target.name not in referred_pk:
+                # In a composite key such as (flow_id, tenant_id) -> flows(id,
+                # tenant_id) only the primary-key half identifies the row; the
+                # other half pins the child to its parent's tenant or flow.
+                continue
+            rule = constraint.ondelete or "NO ACTION"
+            key = (target.table.name, target.name, rule)
+            if key in seen:
+                continue
+            seen.add(key)
+            keys.append(f"FK → `{target.table.name}.{target.name}` {rule}")
+    return "; ".join(keys)
 
 
 def _flow_schema_relationship_from_constraint(
@@ -671,31 +824,7 @@ def _index_column_names(index: sa.Index) -> tuple[str, ...] | None:
     return tuple(column_names)
 
 
-def _render_table_summary(table_docs: tuple[FlowSchemaTableDoc, ...]) -> str:
-    rows: list[tuple[str, ...]] = []
-    for table_doc in table_docs:
-        rows.append(
-            (
-                f"`{table_doc.table_name}`",
-                f"`{table_doc.model_name}`",
-                _markdown_cell(table_doc.aggregate.value),
-                _markdown_cell(table_doc.stores),
-                _markdown_cell(table_doc.writer),
-                _markdown_cell(table_doc.purpose),
-            )
-        )
-
-    return _render_markdown_table(
-        (
-            "Table",
-            "Model",
-            "Aggregate",
-            "What it stores",
-            "Primary writer",
-            "Why it exists",
-        ),
-        rows,
-    )
+# --- JSONB ------------------------------------------------------------------
 
 
 def _render_jsonb_policy() -> str:
@@ -709,8 +838,7 @@ def _render_jsonb_policy() -> str:
         rows.append(
             (
                 f"`{owner.table_name}.{owner.column_name}`",
-                f"`{owner.envelope_name}`",
-                f"`{owner.owner_module}`",
+                f"`{owner.envelope_name}`<br />`{owner.owner_module}`",
                 f"`{owner.storage_category.value}`",
                 _markdown_cell(str(owner.schema_version_policy)),
                 _markdown_cell(str(owner.corruption_behavior)),
@@ -721,15 +849,17 @@ def _render_jsonb_policy() -> str:
     return _render_markdown_table(
         (
             "Column",
-            "Envelope",
-            "Owner",
+            "Envelope and owner",
             "Category",
-            "Version behavior",
-            "Invalid-payload behavior",
-            "Rationale",
+            "Versioning",
+            "Invalid payload",
+            "Why JSON",
         ),
         rows,
     )
+
+
+# --- helpers ----------------------------------------------------------------
 
 
 def _render_markdown_table(
@@ -764,8 +894,23 @@ def _column_type_label(column: sa.Column[object]) -> str:
     return "".join(character if character.isalnum() else "_" for character in raw_type)
 
 
+def _sorted_foreign_keys(table: sa.Table) -> list[sa.ForeignKeyConstraint]:
+    return sorted(
+        table.foreign_key_constraints,
+        key=lambda constraint: (
+            constraint.referred_table.name,
+            tuple(column.name for column in constraint.columns),
+        ),
+    )
+
+
 def _mermaid_entity_name(table_name: str) -> str:
     return table_name.replace("-", "_")
+
+
+def _sentence(value: str) -> str:
+    text = " ".join(value.split())
+    return text[:1].upper() + text[1:] if text else text
 
 
 def _markdown_cell(value: str) -> str:

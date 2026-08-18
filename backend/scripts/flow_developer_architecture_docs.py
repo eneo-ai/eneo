@@ -238,8 +238,8 @@ def render_flow_developer_architecture_docs_page() -> str:
         _render_layer_map(),
         "",
         "This map is a target ownership model, not a promise that every module "
-        "already lives under that directory. Use the grouped module tables below "
-        "for the current root entry and its target-home group.",
+        "already lives under that directory. The module ownership table below "
+        "lists each current root entry and its target-home group.",
         "",
         "## Import boundaries",
         "",
@@ -251,10 +251,6 @@ def render_flow_developer_architecture_docs_page() -> str:
         "## Runtime access enforcement",
         "",
         _render_runtime_access_enforcement(),
-        "",
-        "## Target homes",
-        "",
-        _render_target_home_table(target_home_descriptions),
         "",
         "## AI Builder create compile spine",
         "",
@@ -268,7 +264,11 @@ def render_flow_developer_architecture_docs_page() -> str:
         "",
         "## Module ownership",
         "",
-        _render_module_ownership_table(layout_rows),
+        "Root entries under `backend/src/eneo/flows/` grouped by the home they "
+        "belong to; `canonical-home` marks the packages that already are the "
+        "stable home. `docs/flows/package-layout.md` is the source of this table.",
+        "",
+        _render_module_ownership_table(layout_rows, target_home_descriptions),
         "",
         "## Source guards",
         "",
@@ -357,14 +357,6 @@ def _render_runtime_access_enforcement() -> str:
     )
 
 
-def _render_target_home_table(target_home_descriptions: dict[str, str]) -> str:
-    rows = [
-        (f"`{target_home}`", _markdown_cell(description))
-        for target_home, description in sorted(target_home_descriptions.items())
-    ]
-    return _render_markdown_table(("Target home", "Use it for"), rows)
-
-
 def _render_change_index_table() -> str:
     return _render_markdown_table(
         ("Change type", "Start in", "Then check"),
@@ -443,44 +435,34 @@ def _render_ai_builder_create_compile_spine() -> str:
 
 def _render_module_ownership_table(
     layout_rows: tuple[FlowPackageLayoutRow, ...],
+    target_home_descriptions: dict[str, str],
 ) -> str:
-    parts: list[str] = []
+    """One row per target home, listing the root entries that belong to it.
+
+    The per-entry rationale in `docs/flows/package-layout.md` restates the
+    home ("X is a domain contract"), so only the grouping is rendered here.
+    """
+    rows: list[tuple[str, ...]] = []
     target_homes = tuple(dict.fromkeys(row.target_home for row in layout_rows))
     for target_home in target_homes:
         target_home_rows = tuple(
             row for row in layout_rows if row.target_home == target_home
         )
-        rows = [
+        packages = [row.entry for row in target_home_rows if row.kind == "package"]
+        modules = [row.entry for row in target_home_rows if row.kind == "module"]
+        entries: list[str] = []
+        if packages:
+            entries.append("packages " + ", ".join(f"`{entry}/`" for entry in packages))
+        if modules:
+            entries.append(", ".join(f"`{entry}`" for entry in modules))
+        rows.append(
             (
-                f"`{row.entry}`",
-                f"`{row.kind}`",
-                _markdown_cell(row.rationale),
-            )
-            for row in target_home_rows
-        ]
-        parts.append(
-            _render_details(
-                f"<code>{target_home}</code> ({len(target_home_rows)} entries)",
-                _render_markdown_table(
-                    ("Entry", "Kind", "Owns / start here"),
-                    rows,
-                ),
+                f"`{target_home}`",
+                _markdown_cell(target_home_descriptions[target_home]),
+                "; ".join(entries),
             )
         )
-    return "\n\n".join(parts)
-
-
-def _render_details(summary: str, body: str) -> str:
-    return "\n".join(
-        (
-            "<details>",
-            f"<summary>{summary}</summary>",
-            "",
-            body,
-            "",
-            "</details>",
-        )
-    )
+    return _render_markdown_table(("Target home", "Use it for", "Root entries"), rows)
 
 
 def _render_source_guard_table() -> str:

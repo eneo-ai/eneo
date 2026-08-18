@@ -22,7 +22,7 @@ flowchart TD
 
 </div>
 
-This map is a target ownership model, not a promise that every module already lives under that directory. Use the grouped module tables below for the current root entry and its target-home group.
+This map is a target ownership model, not a promise that every module already lives under that directory. The module ownership table below lists each current root entry and its target-home group.
 
 ## Import boundaries
 
@@ -46,19 +46,6 @@ Import-linter enforces package dependency boundaries. Runtime policies enforce t
 - `FlowRunAccessPolicy.ensure_can_access_run` denies cross-tenant rows and mismatched service-key principals.
 - Denied access raises `flow_run_access_denied` with an `auth_layer` context value, so API consumers get a typed error instead of an internal invariant.
 - Runtime upload ownership uses `FlowPrincipal` and tenant-scoped repositories; do not reintroduce synthetic `UserInDB` identity in Flow runtime code.
-
-## Target homes
-
-| Target home          | Use it for                                                        |
-| -------------------- | ----------------------------------------------------------------- |
-| `api`                | HTTP adapters, API schemas, OpenAPI-facing errors, and presenters |
-| `application`        | use-case services and request-independent orchestration           |
-| `canonical-home`     | an existing top-level package that is already a stable home       |
-| `domain`             | typed contracts, policies, value objects, and invariants          |
-| `infrastructure`     | persistence and external storage adapters                         |
-| `plugin`             | Flow-adjacent plugin boundary                                     |
-| `remove-merge-later` | duplicate or temporary root import surface to delete              |
-| `runtime`            | worker, executor, step execution, and runtime adapter code        |
 
 ## AI Builder create compile spine
 
@@ -102,133 +89,17 @@ This is the coarse module index. Use [Reviewing Flows code](/docs/flows-for-deve
 
 ## Module ownership
 
-<details>
-<summary><code>api</code> (3 entries)</summary>
+Root entries under `backend/src/eneo/flows/` grouped by the home they belong to; `canonical-home` marks the packages that already are the stable home. `docs/flows/package-layout.md` is the source of this table.
 
-| Entry                 | Kind     | Owns / start here                                           |
-| --------------------- | -------- | ----------------------------------------------------------- |
-| `flow_api_error_code` | `module` | Public Flow error catalog is API-facing.                    |
-| `flow_api_exceptions` | `module` | Public Flow error helpers are API-facing.                   |
-| `flow_error_taxonomy` | `module` | Public Flow error taxonomy is API consumer-facing metadata. |
-
-</details>
-
-<details>
-<summary><code>application</code> (6 entries)</summary>
-
-| Entry                         | Kind     | Owns / start here                                            |
-| ----------------------------- | -------- | ------------------------------------------------------------ |
-| `flow_access_policy`          | `module` | Access policy supports use-case authorization decisions.     |
-| `flow_run_contract_service`   | `module` | Run-contract assembly is an application use case.            |
-| `flow_run_rerun_request`      | `module` | Rerun request normalization belongs with the rerun use case. |
-| `flow_run_step_inputs`        | `module` | Step-input resolution is run-creation/rerun orchestration.   |
-| `flow_runtime_file_service`   | `module` | Runtime-file operations are application use cases.           |
-| `flow_template_asset_service` | `module` | Template asset operations are application use cases.         |
-
-</details>
-
-<details>
-<summary><code>canonical-home</code> (5 entries)</summary>
-
-| Entry            | Kind      | Owns / start here                                          |
-| ---------------- | --------- | ---------------------------------------------------------- |
-| `api`            | `package` | HTTP adapters and API schemas already live here.           |
-| `application`    | `package` | Flow use cases and application services already live here. |
-| `domain`         | `package` | Domain entities and invariants already live here.          |
-| `infrastructure` | `package` | Persistence and storage adapters already live here.        |
-| `runtime`        | `package` | Worker and execution concerns already live here.           |
-
-</details>
-
-<details>
-<summary><code>domain</code> (46 entries)</summary>
-
-| Entry                               | Kind     | Owns / start here                                                             |
-| ----------------------------------- | -------- | ----------------------------------------------------------------------------- |
-| `assistant_authoring_snapshot`      | `module` | Assistant authoring snapshot is a typed published-definition value.           |
-| `citation_sidecar`                  | `module` | Citation sidecar is a typed Flow data contract.                               |
-| `enums`                             | `module` | Shared Flow vocabularies belong with domain contracts.                        |
-| `flow_authoring_name`               | `module` | Authoring name normalization is a domain value rule.                          |
-| `flow_authoring_runtime_input`      | `module` | Runtime-input authoring rules are Flow contract rules.                        |
-| `flow_authoring_spec`               | `module` | Authoring spec is a domain contract.                                          |
-| `flow_authoring_transcription`      | `module` | Transcription authoring config is a domain contract.                          |
-| `flow_authoring_variable_rewriting` | `module` | Variable rewrite rules are authoring-domain rules.                            |
-| `flow_capability_manifest`          | `module` | Capability vocabulary is a Flow domain contract.                              |
-| `flow_document_limits`              | `module` | Document limits are Flow policy values.                                       |
-| `flow_evidence_policy`              | `module` | Evidence policy is a Flow domain policy.                                      |
-| `flow_input_limits`                 | `module` | Runtime input limits are Flow policy values.                                  |
-| `flow_metadata`                     | `module` | Flow metadata is a domain contract.                                           |
-| `flow_resource_bindings`            | `module` | Resource bindings are Flow domain relationships.                              |
-| `flow_retention_policy`             | `module` | Retention policy is a data/domain policy.                                     |
-| `flow_retention_tombstone`          | `module` | Retention tombstones are domain audit records.                                |
-| `flow_review_expiry_policy`         | `module` | Review expiry rules are Flow domain policy.                                   |
-| `flow_review_policy`                | `module` | Review requirements are Flow domain policy.                                   |
-| `flow_run_error`                    | `module` | Run error payloads are Flow domain contracts.                                 |
-| `flow_run_input_envelope`           | `module` | Run input envelope is a typed Flow contract.                                  |
-| `flow_run_input_payload`            | `module` | Run input payload is a typed Flow contract.                                   |
-| `flow_run_payload_validation`       | `module` | Payload validation enforces Flow contract invariants.                         |
-| `flow_run_provenance`               | `module` | Provenance is Flow run domain metadata.                                       |
-| `flow_run_redaction`                | `module` | Redaction policy belongs with privacy/domain rules.                           |
-| `flow_run_rerun_graph`              | `module` | Rerun graph rules are domain lifecycle rules.                                 |
-| `flow_run_step_input_file`          | `module` | Step input file references are domain contracts.                              |
-| `flow_run_step_result_file`         | `module` | Step result file references are domain contracts.                             |
-| `flow_runtime_policy`               | `module` | Runtime policy is a Flow domain policy.                                       |
-| `flow_security_classification`      | `module` | Security classification is a domain policy value.                             |
-| `flow_settings`                     | `module` | Flow settings are typed domain configuration.                                 |
-| `flow_validators`                   | `module` | Cross-field validators enforce domain contracts.                              |
-| `flow_validators_form`              | `module` | Form validators enforce domain contracts.                                     |
-| `flow_validators_http`              | `module` | HTTP-step validators enforce domain contracts.                                |
-| `flow_validators_template`          | `module` | Template validators enforce domain contracts.                                 |
-| `flow_variable_definitions`         | `module` | Variable definitions are Flow domain contracts.                               |
-| `input_binding_contract_rules`      | `module` | Input binding rules are contract invariants.                                  |
-| `output_modes`                      | `module` | Output modes are Flow domain vocabulary.                                      |
-| `principal`                         | `module` | Flow principal identity is a domain contract.                                 |
-| `published_definition`              | `module` | Published definition parsing owns snapshot invariants.                        |
-| `source_display`                    | `module` | Source display values are Flow domain presentation.                           |
-| `source_identity`                   | `module` | Runtime source identity fields and schema projection are Flow contract rules. |
-| `step_chain_rules`                  | `module` | Step chain rules are domain invariants.                                       |
-| `step_lineage`                      | `module` | Step lineage is domain metadata.                                              |
-| `template_reference_analyzer`       | `module` | Template reference analysis enforces domain contracts.                        |
-| `transcription_config`              | `module` | Transcription config is a domain contract.                                    |
-| `type_policies`                     | `module` | Type policy is a domain contract.                                             |
-
-</details>
-
-<details>
-<summary><code>infrastructure</code> (2 entries)</summary>
-
-| Entry                      | Kind     | Owns / start here                             |
-| -------------------------- | -------- | --------------------------------------------- |
-| `flow_runtime_upload_repo` | `module` | Runtime upload persistence is infrastructure. |
-| `flow_template_asset_repo` | `module` | Template asset persistence is infrastructure. |
-
-</details>
-
-<details>
-<summary><code>plugin</code> (2 entries)</summary>
-
-| Entry                             | Kind      | Owns / start here                                                                     |
-| --------------------------------- | --------- | ------------------------------------------------------------------------------------- |
-| `flow_ai_builder_budget_settings` | `module`  | Builder budget settings should live with the builder boundary.                        |
-| `ai_builder`                      | `package` | Flow AI Builder plugin boundary; only shared contracts should cross into Flow proper. |
-
-</details>
-
-<details>
-<summary><code>runtime</code> (8 entries)</summary>
-
-| Entry                          | Kind      | Owns / start here                                              |
-| ------------------------------ | --------- | -------------------------------------------------------------- |
-| `assistant_execution_snapshot` | `module`  | Assistant execution snapshot is consumed by runtime execution. |
-| `execution_backend`            | `module`  | Execution backend selection is runtime behavior.               |
-| `flow_run_dispatch_request`    | `module`  | Dispatch payload is a worker/runtime command.                  |
-| `flow_runtime_file_integrity`  | `module`  | Runtime file integrity is execution/runtime safety.            |
-| `output_processing`            | `module`  | Output processing is runtime execution behavior.               |
-| `published_runtime`            | `module`  | Published runtime parsing feeds execution.                     |
-| `variable_resolver`            | `module`  | Variable resolution is runtime execution behavior.             |
-| `http_transport`               | `package` | HTTP transport belongs under runtime step handling.            |
-
-</details>
+| Target home      | Use it for                                                        | Root entries                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| ---------------- | ----------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `api`            | HTTP adapters, API schemas, OpenAPI-facing errors, and presenters | `flow_api_error_code`, `flow_api_exceptions`, `flow_error_taxonomy`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| `application`    | use-case services and request-independent orchestration           | `flow_access_policy`, `flow_run_contract_service`, `flow_run_rerun_request`, `flow_run_step_inputs`, `flow_runtime_file_service`, `flow_template_asset_service`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| `canonical-home` | an existing top-level package that is already a stable home       | packages `api/`, `application/`, `domain/`, `infrastructure/`, `runtime/`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| `domain`         | typed contracts, policies, value objects, and invariants          | `assistant_authoring_snapshot`, `citation_sidecar`, `enums`, `flow_authoring_name`, `flow_authoring_runtime_input`, `flow_authoring_spec`, `flow_authoring_transcription`, `flow_authoring_variable_rewriting`, `flow_capability_manifest`, `flow_document_limits`, `flow_evidence_policy`, `flow_input_limits`, `flow_metadata`, `flow_resource_bindings`, `flow_retention_policy`, `flow_retention_tombstone`, `flow_review_expiry_policy`, `flow_review_policy`, `flow_run_error`, `flow_run_input_envelope`, `flow_run_input_payload`, `flow_run_payload_validation`, `flow_run_provenance`, `flow_run_redaction`, `flow_run_rerun_graph`, `flow_run_step_input_file`, `flow_run_step_result_file`, `flow_runtime_policy`, `flow_security_classification`, `flow_settings`, `flow_validators`, `flow_validators_form`, `flow_validators_http`, `flow_validators_template`, `flow_variable_definitions`, `input_binding_contract_rules`, `output_modes`, `principal`, `published_definition`, `source_display`, `source_identity`, `step_chain_rules`, `step_lineage`, `template_reference_analyzer`, `transcription_config`, `type_policies` |
+| `infrastructure` | persistence and external storage adapters                         | `flow_runtime_upload_repo`, `flow_template_asset_repo`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| `plugin`         | Flow-adjacent plugin boundary                                     | packages `ai_builder/`; `flow_ai_builder_budget_settings`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| `runtime`        | worker, executor, step execution, and runtime adapter code        | packages `http_transport/`; `assistant_execution_snapshot`, `execution_backend`, `flow_run_dispatch_request`, `flow_runtime_file_integrity`, `output_processing`, `published_runtime`, `variable_resolver`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 
 ## Source guards
 
