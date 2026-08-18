@@ -225,6 +225,7 @@ export interface ChatMessage {
 }
 
 export type AIBuilderModel = GeneratedAIBuilderModel;
+export type AIBuilderModelsResponse = components["schemas"]["SessionModelsResponse"];
 
 export type AIBuilderTextEventData = Extract<AIBuilderParsedStreamEvent, { event: "text" }>["data"];
 

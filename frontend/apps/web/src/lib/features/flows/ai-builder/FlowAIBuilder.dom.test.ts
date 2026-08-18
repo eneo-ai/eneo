@@ -596,6 +596,94 @@ describe("FlowAIBuilder planner controls", () => {
     await waitFor(() => expect(service().availableModels).toHaveLength(2));
     expect(screen.queryByRole("button", { name: new RegExp(m.reasoning_effort()) })).toBeNull();
   });
+
+  it("offers the lone model when the server names no default", async () => {
+    // No default means the server falls back on its own, possibly to a model
+    // this list excludes. Choosing explicitly is the only way through.
+    const { fetch } = makeFetch();
+    const noDefault = vi.fn(async (path: string, init?: Record<string, unknown>) =>
+      path.endsWith("/models")
+        ? {
+            models: [
+              {
+                id: DEFAULT_MODEL_ID,
+                name: "Only active model",
+                provider: "openai",
+                reasoning_effort_options: []
+              }
+            ],
+            default_model_id: null
+          }
+        : fetch(path as string, init as never)
+    );
+    renderShell({ fetch: noDefault, stream: makeStream().stream });
+
+    expect(
+      await screen.findByRole("button", {
+        name: `${m.ai_builder_model_label()}: ${m.ai_builder_model_default()}`
+      })
+    ).toBeTruthy();
+  });
+
+  it("says so and retries when the model read fails, without blocking the send", async () => {
+    const { fetch } = makeFetch();
+    let failNext = true;
+    const flaky = vi.fn(async (path: string, init?: Record<string, unknown>) => {
+      if (!path.endsWith("/models")) return fetch(path as string, init as never);
+      if (failNext) {
+        failNext = false;
+        throw new Error("models unavailable");
+      }
+      return {
+        models: [
+          {
+            id: DEFAULT_MODEL_ID,
+            name: "Test model",
+            provider: "openai",
+            reasoning_effort_options: []
+          },
+          {
+            id: SECOND_MODEL_ID,
+            name: "Second model",
+            provider: "openai",
+            reasoning_effort_options: []
+          }
+        ],
+        default_model_id: DEFAULT_MODEL_ID
+      };
+    });
+    const { service } = renderShell({ fetch: flaky, stream: makeStream().stream });
+
+    expect(await screen.findByText(m.failed_to_load_models())).toBeTruthy();
+    // The failure explains itself; it never reaches the send path.
+    await waitFor(() => expect(service().canSendMessage).toBe(true));
+
+    await fireEvent.click(button(m.retry()));
+
+    expect(
+      await screen.findByRole("button", {
+        name: `${m.ai_builder_model_label()}: Test model`
+      })
+    ).toBeTruthy();
+    expect(screen.queryByText(m.failed_to_load_models())).toBeNull();
+  });
+
+  it("carries a chosen model through to the request", async () => {
+    const { stream, calls } = makeStream(() => "hold");
+    const { service } = renderShell({ fetch: withTwoModels(["low", "high"]), stream });
+
+    await fireEvent.click(
+      await screen.findByRole("button", { name: `${m.ai_builder_model_label()}: Test model` })
+    );
+    await fireEvent.click(await screen.findByRole("option", { name: /Second model/ }));
+    await waitFor(() => expect(service().effectiveModel?.id).toBe(SECOND_MODEL_ID));
+
+    await sendTask();
+
+    await waitFor(() => expect(calls).toHaveLength(1));
+    expect(calls[0]!.body).toMatchObject({ model_id: SECOND_MODEL_ID });
+    calls[0]!.finish();
+  });
 });
 
 describe("FlowAIBuilder discovery screens", () => {

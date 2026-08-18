@@ -262,16 +262,21 @@ export class FlowAIBuilderService {
     return this.#state.availableModels;
   }
 
-  /** The model the next turn runs on — the override when set, else the server
-   *  default. Null until the list arrives; the composer hides its controls
-   *  rather than blocking on it. */
+  /** The model the composer names — the override when set, else the advertised
+   *  default. Null when neither is known. */
   get effectiveModel(): AIBuilderModel | null {
     void this.#state;
     return this.#driver.effectiveModel;
   }
 
-  get hasModelOverride(): boolean {
-    return this.#state.selectedModelId !== null;
+  /** Null means the server never named a default, so the composer must let the
+   *  user pick even from a single model. */
+  get defaultModelId(): string | null {
+    return this.#state.defaultModelId;
+  }
+
+  get modelLoadFailed(): boolean {
+    return this.#state.modelLoadFailed;
   }
 
   get selectedReasoningEffort(): string | null {
@@ -284,6 +289,10 @@ export class FlowAIBuilderService {
 
   selectReasoningEffort(reasoningEffort: string | null): void {
     this.#driver.selectReasoningEffort(reasoningEffort);
+  }
+
+  async retryModelLoad(): Promise<void> {
+    await this.#driver.retryModelLoad();
   }
 
   get draftSessions(): AIBuilderDraftSession[] {

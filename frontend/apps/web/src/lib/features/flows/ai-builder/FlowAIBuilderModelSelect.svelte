@@ -3,6 +3,7 @@
      runs on, which the plan lists per step. The composer owns the trigger's
      appearance so this control sits level with "Bifoga filer". */
   import * as ModelSelector from "$lib/components/ai-elements/model-selector/index.js";
+  import { Button } from "$lib/components/ui/button/index.js";
   import { groupModelsByVendor } from "$lib/features/ai-models/groupModels";
   import { m } from "$lib/paraglide/messages";
 
@@ -15,6 +16,14 @@
   // falls back on its own. Naming the control beats naming a model we would
   // only be guessing at.
   const label = $derived(activeModel?.name ?? m.ai_builder_model_default());
+  // One model is normally no choice at all. But when the server named no
+  // default it may fall back to a model this list does not contain — an
+  // inactive provider's — so picking the one active model explicitly is the
+  // user's only way through. Offer it.
+  const canChoose = $derived(
+    service.availableModels.length > 1 ||
+      (service.availableModels.length === 1 && service.defaultModelId === null)
+  );
   const groups = $derived(
     groupModelsByVendor(
       service.availableModels.map((model) => ({ ...model, provider_type: model.provider })),
@@ -23,9 +32,18 @@
   );
 </script>
 
-<!-- A single model is not a choice, and an unread list is not a control: in
-     both cases the server default applies and the row stays quiet. -->
-{#if service.availableModels.length > 1}
+{#if service.modelLoadFailed}
+  <!-- Saying nothing here would reproduce the very complaint this control
+       answers: the model picker missing, with no reason given. -->
+  <div class="flex min-w-0 items-center gap-1" role="alert">
+    <span class="text-destructive max-w-44 truncate text-[0.8125rem]">
+      {m.failed_to_load_models()}
+    </span>
+    <Button variant="destructive" size="xs" onclick={() => void service.retryModelLoad()}>
+      {m.retry()}
+    </Button>
+  </div>
+{:else if canChoose}
   <ModelSelector.Root>
     <ModelSelector.Trigger
       class="composer-control"

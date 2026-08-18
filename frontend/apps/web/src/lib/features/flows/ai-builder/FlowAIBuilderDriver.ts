@@ -20,6 +20,7 @@ import type {
   AIBuilderDraftSession,
   AIBuilderError,
   AIBuilderModel,
+  AIBuilderModelsResponse,
   AIBuilderPhase,
   AIBuilderSendOutcome,
   AIBuilderEditContext,
@@ -104,6 +105,9 @@ export interface FlowAIBuilderState {
    *  existed. */
   selectedModelId: string | null;
   selectedReasoningEffort: string | null;
+  /** The model read failed. Sending is unaffected, but the composer must say
+   *  so and offer a retry rather than silently showing no controls. */
+  modelLoadFailed: boolean;
   draftSessions: AIBuilderDraftSession[];
   pendingOperation: PendingPlanOperation | null;
   createFailureOutcome: CreateFailureOutcome | null;
@@ -129,6 +133,7 @@ export function createInitialFlowAIBuilderState(): FlowAIBuilderState {
     defaultModelId: null,
     selectedModelId: null,
     selectedReasoningEffort: null,
+    modelLoadFailed: false,
     draftSessions: [],
     pendingOperation: null,
     createFailureOutcome: null,
@@ -260,10 +265,10 @@ export class FlowAIBuilderDriver {
     return this.#state.streamState === "streaming";
   }
 
-  /** The model the next turn will actually run on: the user's override when
-   *  there is one, otherwise the server default. Null while the list is
-   *  unread — the send path treats that as "server decides", never as an
-   *  error. */
+  /** The model the composer names: the user's override when there is one,
+   *  otherwise the advertised default. An omitted model_id is resolved by the
+   *  server at send time, so this is what we can show, not a guarantee of what
+   *  will run. */
   get effectiveModel(): AIBuilderModel | null {
     const id = this.#state.selectedModelId ?? this.#state.defaultModelId;
     return this.#state.availableModels.find((model) => model.id === id) ?? null;
@@ -287,6 +292,13 @@ export class FlowAIBuilderDriver {
     }
     this.#state.selectedReasoningEffort = reasoningEffort;
     this.#notify();
+  }
+
+  async retryModelLoad(): Promise<void> {
+    if (!this.#state.modelLoadFailed) return;
+    const owner = this.#currentSessionOwner();
+    if (!owner) return;
+    await this.#fetchModels(owner);
   }
 
   seedState(partial: Partial<FlowAIBuilderState>): void {
@@ -1441,14 +1453,15 @@ export class FlowAIBuilderDriver {
       const result = (await this.#transport.fetch(FLOW_AI_BUILDER_ROUTES.sessionModels, {
         method: "get",
         params: { path: { session_id: this.#state.session.session_id } }
-      })) as { models: AIBuilderModel[]; default_model_id: string | null };
+      })) as AIBuilderModelsResponse;
       if (!this.#ownsSessionIdentity(owner)) return;
       this.#state.availableModels = result.models;
       this.#state.defaultModelId = result.models.some(
         (model) => model.id === result.default_model_id
       )
-        ? result.default_model_id
+        ? (result.default_model_id ?? null)
         : null;
+      this.#state.modelLoadFailed = false;
       this.#notify();
     } catch {
       if (!this.#ownsSessionIdentity(owner)) return;
@@ -1456,6 +1469,7 @@ export class FlowAIBuilderDriver {
       this.#state.defaultModelId = null;
       this.#state.selectedModelId = null;
       this.#state.selectedReasoningEffort = null;
+      this.#state.modelLoadFailed = true;
       this.#notify();
     }
   }
