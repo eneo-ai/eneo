@@ -29,8 +29,9 @@ EXCLUDED_PATHSPECS = [
     ":!**/package-lock.json",
     ":!scripts/check_no_intric.py",
     ":!scripts/tests/test_no_intric.py",
-    # Frozen Goal Maker evidence records the pre-migration namespace and guard
-    # history verbatim. Active goal instructions and Hermes state remain scanned.
+    # The guard's own CI job names it in full; develop excludes it and this
+    # branch should not quietly diverge on a shared guard.
+    ":!.github/workflows/no-intric.yml",
 ]
 
 

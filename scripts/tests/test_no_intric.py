@@ -94,5 +94,6 @@ class NoIntricGuardTests(unittest.TestCase):
         self.assertEqual(result.returncode, 1)
         self.assertIn("backend/.env.template", result.stdout)
 
+
 if __name__ == "__main__":
     unittest.main()
