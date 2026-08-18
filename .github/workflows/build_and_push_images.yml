@@ -478,7 +478,7 @@ jobs:
           only-fixed: false
           output-format: json
           output-file: seaweedfs-${{ matrix.slug }}-evidence/grype-${{ matrix.slug }}.json
-          grype-version: v0.110.0
+          grype-version: v0.117.0
 
       - name: Record exact platform digest
         env:
