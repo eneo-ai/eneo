@@ -8,6 +8,33 @@ the full v10.13 done ledger and the completion narrative for all 79 landed
 slices, should anyone need to reconstruct why something was built the way it
 was.
 
+## What is left — twelve slices
+
+Each line names the slice and what it is for; the body under the same name in
+The Ranked Program below carries the evidence, the gate and the acceptance
+condition. The execution order there is authoritative — this table is a way in,
+not a substitute for it.
+
+| Slice | What it settles |
+| --- | --- |
+| FIELD-COLLIDE | One identity per confirmed runtime input, so a source-extracted comparison value cannot collide with a user-filled field. |
+| STALL-POLICY | Adjudicate the 15 measured stalls by prompt quote, and separate clarification accounting from product economics. |
+| RECOVERY | Deferred, evidence-decided: whether a classifier omitting a declared obligation at first emission needs its own recovery path. |
+| FLOW-QUALITY | A bounded, reporting-only checkpoint on the quality of the Flow that gets produced — not just whether the plan was accepted. |
+| CP-EDIT | One owner and one precedence rule for terminal type on the edit path; two files disagree today. |
+| CP-D6 | Commit-drift bypass, receipt-gated: one behaviour test at the decision-and-persistence exit. |
+| CP7 | Attribute the validation repair triggers CP3's form-field family does not already own. |
+| Remaining family assignments | Every measured failure family gets an assigned attribution slice; counts live in `cp0-matrix-freeze.md`. |
+| Post-CP5 re-attribution loop | Rerun attribution and keep transferring ownership until the release registry passes. The named slices are a starting set, not assumed sufficient. |
+| BUILDER-API | The public authoring contract: the plan-create operation in the required OpenAPI set, one `aiBuilder` SDK facade, and the session listing made explicit. |
+| L4 | Object-content scope. Default OUT: the base launch ships PostgreSQL-only and object storage is a conditional opt-in gate. |
+| L5 | Launch receipt: pool-budget arithmetic under load, queue-recovery smoke, exact deployment identity, rollback and drain evidence. |
+
+Reading order for someone joining: this table, then THE END STATE (what
+"done" means), then the dual-ownership ledger (where a single concern still has
+two owners), then the slice bodies. The operating protocol at the end is
+binding on anyone continuing the work, not background.
+
 ## Mission
 
 Production-excellent Flow AI Builder and Flows runtime (9/10): no
