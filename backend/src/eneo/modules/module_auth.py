@@ -4,7 +4,7 @@ import secrets
 import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Any, Optional
 from urllib.parse import urlencode
 from uuid import UUID
 
@@ -22,7 +22,6 @@ from eneo.authentication.auth_models import (
     ApiKeyPermission,
     ApiKeyType,
     ApiKeyV2InDB,
-    JWTPayload,
 )
 from eneo.authentication.auth_service import AuthService
 from eneo.main.config import get_settings, validate_redirect_uri
@@ -45,6 +44,12 @@ MODULE_AUDIENCE_PREFIX = "eneo-module:"
 # claim existed fall back to ``iat``, which equals the handoff time for any
 # never-refreshed token.
 MODULE_HANDOFF_AT_CLAIM = "handoff_at"
+# Immutable identity claims minted at ticket exchange and preserved across
+# refresh. Resource authentication resolves the principal by these - never by
+# email: the active-email unique index excludes soft-deleted rows, so an email
+# can move to a replacement account while an older module token is still valid.
+MODULE_USER_ID_CLAIM = "user_id"
+MODULE_TENANT_ID_CLAIM = "tenant_id"
 
 
 class ModuleTicketRequest(BaseModel):
@@ -343,7 +348,11 @@ class ModuleAuthBroker:
             user,
             audience=module_audience(module.name),
             expires_in=expires_in_seconds / 60,
-            extra_claims={MODULE_HANDOFF_AT_CLAIM: handoff_at},
+            extra_claims={
+                MODULE_HANDOFF_AT_CLAIM: handoff_at,
+                MODULE_USER_ID_CLAIM: str(user.id),
+                MODULE_TENANT_ID_CLAIM: str(user.tenant_id),
+            },
         )
 
         await self.audit_service.log_async(
@@ -424,7 +433,11 @@ class ModuleAuthBroker:
             user,
             audience=module_audience(module.name),
             expires_in=expires_in_seconds / 60,
-            extra_claims={MODULE_HANDOFF_AT_CLAIM: handoff_at},
+            extra_claims={
+                MODULE_HANDOFF_AT_CLAIM: handoff_at,
+                MODULE_USER_ID_CLAIM: str(user.id),
+                MODULE_TENANT_ID_CLAIM: str(user.tenant_id),
+            },
         )
 
         await self.audit_service.log_async(
@@ -452,20 +465,22 @@ class ModuleAuthBroker:
             user=ModuleTokenUser(id=user.id, email=user.email, username=user.username),
         )
 
-    def validate_module_user_token(self, token: str, module: ModuleInDB) -> JWTPayload:
+    def validate_module_user_token(
+        self, token: str, module: ModuleInDB
+    ) -> dict[str, Any]:
         """Validate a module user token for the given module.
 
         Module-facing endpoints call this on EVERY request (alongside the sk_
         key check) - the module session alone must never authorize anything.
-        Raises AuthenticationException on any mismatch (signature, expiry, or
-        audience minted for a different module).
+        Returns the verified claims, including the identity claims minted at
+        exchange. Raises AuthenticationException on any mismatch (signature,
+        expiry, or audience minted for a different module).
         """
         settings = get_settings()
-        return self.auth_service.get_jwt_payload(
-            token,
-            key=str(settings.jwt_secret),
-            aud=module_audience(module.name),
-        )
+        key = str(settings.jwt_secret)
+        aud = module_audience(module.name)
+        self.auth_service.get_jwt_payload(token, key=key, aud=aud)
+        return self.auth_service.get_verified_claims(token, key=key, aud=aud)
 
     async def authenticate_resource_request(
         self,
@@ -480,8 +495,9 @@ class ModuleAuthBroker:
         resolver, including revocation, expiry, allowlist and rate-limit
         checks. This method adds the module-specific binding and independently
         validates the short-lived user token against the expected module
-        audience. Tenant assignment and user/tenant state are read on every
-        request so disabling either takes effect immediately.
+        audience. The principal is resolved by the token's immutable user-id
+        and tenant-id claims, and user/tenant state is read on every request
+        so disabling either takes effect immediately.
         """
         registration_error = self._service_key_registration_error(api_key)
         if registration_error is not None:
@@ -506,9 +522,22 @@ class ModuleAuthBroker:
         ):
             raise UnauthorizedException("API key is not registered for this module.")
 
-        payload = self.validate_module_user_token(access_token, module)
-        user = await self.user_repo.get_user_by_email(payload.sub)
-        if user is None or not user.is_active or user.tenant_id != api_key.tenant_id:
+        claims = self.validate_module_user_token(access_token, module)
+        try:
+            token_user_id = UUID(str(claims[MODULE_USER_ID_CLAIM]))
+            token_tenant_id = UUID(str(claims[MODULE_TENANT_ID_CLAIM]))
+        except (KeyError, ValueError) as exc:
+            raise AuthenticationException(
+                "Could not validate token credentials."
+            ) from exc
+
+        if token_tenant_id != api_key.tenant_id:
+            raise AuthenticationException("Module user is not active in this tenant.")
+
+        user = await self.user_repo.get_user_by_id_and_tenant_id(
+            token_user_id, tenant_id=token_tenant_id
+        )
+        if user is None or not user.is_active:
             raise AuthenticationException("Module user is not active in this tenant.")
 
         await self.user_service.validate_active_identity(

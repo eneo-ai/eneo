@@ -23,6 +23,8 @@ from eneo.main.exceptions import (
 from eneo.modules.module import ModuleClientConfig, ModuleInDB, ModuleTenantClientConfig
 from eneo.modules.module_auth import (
     MODULE_HANDOFF_AT_CLAIM,
+    MODULE_TENANT_ID_CLAIM,
+    MODULE_USER_ID_CLAIM,
     ModuleAuthBroker,
     ModuleRequestPrincipal,
     ModuleTicketRequest,
@@ -253,6 +255,14 @@ class TestExchangeTicket:
             aud=module_audience("tal-till-text"),
         )
         assert payload.sub == "user@example.com"
+        # The token carries the immutable identity resolved on every request.
+        claims = broker.auth_service.get_verified_claims(
+            result.access_token,
+            key=str(get_settings().jwt_secret),
+            aud=module_audience("tal-till-text"),
+        )
+        assert claims[MODULE_USER_ID_CLAIM] == str(USER_ID)
+        assert claims[MODULE_TENANT_ID_CLAIM] == str(TENANT_ID)
         # ...and validate_module_user_token rejects it for another module.
         with pytest.raises(AuthenticationException):
             broker.validate_module_user_token(
@@ -350,10 +360,16 @@ class TestExchangeTicket:
 
 
 class TestModuleResourceAuthentication:
-    async def module_token(self, broker, *, module_name=MODULE_KEY):
+    async def module_token(self, broker, *, module_name=MODULE_KEY, claims=None):
+        if claims is None:
+            claims = {
+                MODULE_USER_ID_CLAIM: str(USER_ID),
+                MODULE_TENANT_ID_CLAIM: str(TENANT_ID),
+            }
         return broker.auth_service.create_access_token_for_user(
             make_user(),
             audience=module_audience(module_name),
+            extra_claims=claims or None,
         )
 
     async def test_validates_both_credentials_and_live_state(self):
@@ -373,6 +389,12 @@ class TestModuleResourceAuthentication:
             tenant_id=TENANT_ID,
             module_id=MODULE_ID,
         )
+        # The principal is resolved by the token's immutable identity claims,
+        # never by email (which can move to a replacement account).
+        broker.user_repo.get_user_by_id_and_tenant_id.assert_awaited_once_with(
+            USER_ID, tenant_id=TENANT_ID
+        )
+        broker.user_repo.get_user_by_email.assert_not_called()
         broker.user_service.validate_active_identity.assert_awaited_once_with(
             principal.user,
             correlation_id="module-resource-auth",
@@ -410,16 +432,59 @@ class TestModuleResourceAuthentication:
                 api_key=make_api_key(id=uuid4()),
             )
 
-    async def test_rejects_user_from_another_tenant(self):
+    async def test_rejects_token_minted_for_another_tenant(self):
         broker = make_broker()
-        broker.user_repo.get_user_by_email.return_value = make_user(tenant_id=uuid4())
+        token = await self.module_token(
+            broker,
+            claims={
+                MODULE_USER_ID_CLAIM: str(USER_ID),
+                MODULE_TENANT_ID_CLAIM: str(uuid4()),
+            },
+        )
 
         with pytest.raises(AuthenticationException):
             await broker.authenticate_resource_request(
                 module_key=MODULE_KEY,
-                access_token=await self.module_token(broker),
+                access_token=token,
                 api_key=make_api_key(),
             )
+
+        broker.user_repo.get_user_by_id_and_tenant_id.assert_not_awaited()
+
+    async def test_rejects_token_without_identity_claims(self):
+        broker = make_broker()
+        token = await self.module_token(broker, claims={})
+
+        with pytest.raises(AuthenticationException):
+            await broker.authenticate_resource_request(
+                module_key=MODULE_KEY,
+                access_token=token,
+                api_key=make_api_key(),
+            )
+
+        broker.user_repo.get_user_by_id_and_tenant_id.assert_not_awaited()
+        broker.user_repo.get_user_by_email.assert_not_called()
+
+    async def test_stale_token_never_rebinds_to_replacement_account_with_same_email(
+        self,
+    ):
+        broker = make_broker()
+        ticket = issued_ticket(await issue(broker))
+        exchanged = await broker.exchange_ticket(api_key=make_api_key(), ticket=ticket)
+
+        # The original row is soft-deleted and a replacement account now owns
+        # the email; only email-based resolution would accept the old token.
+        broker.user_repo.get_user_by_id_and_tenant_id.return_value = None
+        broker.user_repo.get_user_by_email.return_value = make_user(id=uuid4())
+
+        with pytest.raises(AuthenticationException):
+            await broker.authenticate_resource_request(
+                module_key=MODULE_KEY,
+                access_token=exchanged.access_token,
+                api_key=make_api_key(),
+            )
+
+        broker.user_repo.get_user_by_email.assert_not_called()
 
 
 class TestRefreshToken:
@@ -443,7 +508,11 @@ class TestRefreshToken:
             make_user(),
             audience=module_audience(module_name),
             expires_in=get_settings().module_auth_token_expiry_minutes,
-            extra_claims={MODULE_HANDOFF_AT_CLAIM: handoff_at},
+            extra_claims={
+                MODULE_HANDOFF_AT_CLAIM: handoff_at,
+                MODULE_USER_ID_CLAIM: str(USER_ID),
+                MODULE_TENANT_ID_CLAIM: str(TENANT_ID),
+            },
         )
 
     async def test_exchange_reports_fixed_session_ceiling(self):
@@ -475,6 +544,8 @@ class TestRefreshToken:
         original = self.claims_of(broker, exchanged.access_token)
         renewed = self.claims_of(broker, refreshed.access_token)
         assert renewed[MODULE_HANDOFF_AT_CLAIM] == original[MODULE_HANDOFF_AT_CLAIM]
+        assert renewed[MODULE_USER_ID_CLAIM] == original[MODULE_USER_ID_CLAIM]
+        assert renewed[MODULE_TENANT_ID_CLAIM] == original[MODULE_TENANT_ID_CLAIM]
         assert refreshed.session_expires_at == exchanged.session_expires_at
         assert refreshed.module_key == MODULE_KEY
         assert refreshed.user.id == USER_ID

@@ -22,6 +22,7 @@ from eneo.authentication.auth_models import (
 from eneo.database.database import get_session_with_transaction
 from eneo.modules.module import ModuleCreate
 from eneo.tenants.tenant import TenantBase
+from eneo.users.user import UserAdd, UserState
 
 pytestmark = pytest.mark.integration
 
@@ -369,6 +370,99 @@ async def test_token_refresh_slides_window_inside_fixed_session_ceiling(
         headers={"X-API-Key": service_key["secret"]},
     )
     assert missing_bearer.status_code == 401, missing_bearer.text
+
+
+@pytest.mark.asyncio
+async def test_stale_module_token_rejected_after_email_moves_to_replacement_account(
+    client,
+    db_container,
+    patch_auth_service_jwt,
+    admin_token,
+    admin_user,
+    enabled_module,
+    test_settings,
+):
+    """A module token must die with the account it was minted for.
+
+    The active-email unique index excludes soft-deleted users, so an email can
+    be re-assigned to a replacement account while an old module token is still
+    inside its lifetime. That token must not authenticate as the replacement.
+    """
+    service_key = await create_api_key(
+        client,
+        token=admin_token,
+        ownership=ApiKeyOwnership.SERVICE,
+        permission=ApiKeyPermission.WRITE,
+    )
+    config = await client.patch(
+        client_config_path(tenant_id=admin_user.tenant_id, module_id=enabled_module.id),
+        json={
+            "redirect_uris": [REDIRECT_URI],
+            "service_key_id": service_key["api_key"]["id"],
+        },
+        headers={"X-API-Key": test_settings.eneo_super_duper_api_key},
+    )
+    assert config.status_code == 200, config.text
+
+    email = f"module-rebind-{uuid4().hex[:8]}@example.com"
+    async with db_container() as container:
+        original = await container.user_repo().add(
+            UserAdd(
+                email=email,
+                username=f"module-rebind-{uuid4().hex[:8]}",
+                state=UserState.ACTIVE,
+                tenant_id=admin_user.tenant_id,
+            )
+        )
+        original_token = container.auth_service().create_access_token_for_user(original)
+
+    ticket_response = await client.post(
+        "/api/v1/module-auth/tickets/",
+        json={"module_key": enabled_module.name, "redirect_uri": REDIRECT_URI},
+        headers={"Authorization": f"Bearer {original_token}"},
+    )
+    assert ticket_response.status_code == 201, ticket_response.text
+    ticket = parse_qs(urlparse(ticket_response.json()["redirect_target"]).query)[
+        "ticket"
+    ][0]
+
+    exchange = await client.post(
+        "/api/v1/module-auth/token/",
+        json={"ticket": ticket},
+        headers={"X-API-Key": service_key["secret"]},
+    )
+    assert exchange.status_code == 200, exchange.text
+    module_headers = {
+        "Authorization": f"Bearer {exchange.json()['access_token']}",
+        "X-API-Key": service_key["secret"],
+    }
+    session_path = f"/api/v1/module-auth/{enabled_module.name}/session/"
+
+    live = await client.get(session_path, headers=module_headers)
+    assert live.status_code == 200, live.text
+    assert live.json()["user"]["id"] == str(original.id)
+
+    # Soft-delete frees the email for a replacement account with a new id.
+    async with db_container() as container:
+        await container.user_repo().delete(original.id)
+        replacement = await container.user_repo().add(
+            UserAdd(
+                email=email,
+                username=f"module-rebind-replacement-{uuid4().hex[:8]}",
+                state=UserState.ACTIVE,
+                tenant_id=admin_user.tenant_id,
+            )
+        )
+    assert replacement.id != original.id
+
+    stale_session = await client.get(session_path, headers=module_headers)
+    assert stale_session.status_code == 401, stale_session.text
+
+    stale_refresh = await client.post(
+        f"/api/v1/module-auth/{enabled_module.name}/token/refresh/",
+        headers=module_headers,
+    )
+    assert stale_refresh.status_code == 401, stale_refresh.text
 
 
 @pytest.mark.asyncio

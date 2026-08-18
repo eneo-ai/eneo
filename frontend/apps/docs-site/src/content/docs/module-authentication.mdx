@@ -322,6 +322,9 @@ client-config changes and tenant assignment changes all produce audit events
   to the session ceiling. Everything the token can reach still re-validates
   live user and tenant state per request, so deactivating the user closes
   access — including renewal — immediately.
-- **User identity is email-based.** Like Eneo session JWTs, the module token
-  identifies the user by email (`sub`); the broker then requires that user to
-  exist and be active in the service key's tenant.
+- **User identity is bound to the account, not the email.** The module token
+  still carries the email as `sub` for display, but the broker resolves the
+  principal from immutable `user_id` and `tenant_id` claims minted at the
+  ticket exchange and preserved across refresh. If the account is deleted, its
+  tokens stop authenticating — even when the same email is later re-assigned
+  to a replacement account.
