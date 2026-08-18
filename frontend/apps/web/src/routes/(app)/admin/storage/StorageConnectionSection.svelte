@@ -17,7 +17,6 @@
   import Loader2 from "lucide-svelte/icons/loader-circle";
   import Settings2 from "lucide-svelte/icons/settings-2";
   import * as Alert from "$lib/components/ui/alert/index.js";
-  import { Badge } from "$lib/components/ui/badge/index.js";
   import { Button } from "$lib/components/ui/button/index.js";
   import * as Collapsible from "$lib/components/ui/collapsible/index.js";
   import * as Dialog from "$lib/components/ui/dialog/index.js";
@@ -56,6 +55,7 @@
   let dialogOpen = $state(false);
   let dialogMode = $state<DialogMode>("create");
   let advancedOpen = $state(false);
+  let previousOpen = $state(false);
   let submitting = $state(false);
   let submissionCode = $state<string | null>(null);
   let submissionUnknown = $state(false);
@@ -670,13 +670,10 @@
         </div>
         <div>
           <dt class="text-secondary text-sm">{m.storage_connection_addressing_style()}</dt>
-          <dd class="mt-1 flex items-center gap-2 text-sm font-medium">
+          <dd class="mt-1 text-sm font-medium">
             {connection.addressing_style === "virtual"
               ? m.storage_connection_addressing_virtual()
               : m.storage_connection_addressing_path()}
-            <Badge variant="outline">
-              {m.storage_connection_revision({ revision: connection.revision ?? 0 })}
-            </Badge>
           </dd>
         </div>
       </dl>
@@ -700,48 +697,68 @@
       </div>
 
       {#if previousDestination}
-        <div class="border-default rounded-md border p-4">
-          <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-            <div class="min-w-0">
-              <p class="text-sm font-medium">{m.storage_switch_previous_title()}</p>
-              <p class="text-secondary mt-1 truncate text-sm" title={previousDestination.bucket}>
-                {previousDestination.endpoint_url} · {previousDestination.bucket}
-              </p>
-              <p class="text-secondary mt-2 max-w-[68ch] text-sm leading-5">
-                {m.storage_switch_previous_description()}
-              </p>
-              {#if previousActionFailed}
-                <Alert.Root class="mt-3" variant="destructive" aria-live="assertive">
-                  <AlertCircle />
-                  <Alert.Title>{errorTitle(previousActionCode)}</Alert.Title>
-                  <Alert.Description>
-                    {errorDescription(previousActionCode)}
-                  </Alert.Description>
-                </Alert.Root>
-              {/if}
+        <Collapsible.Root bind:open={previousOpen}>
+          <Collapsible.Trigger
+            class="hover:bg-hover-dimmer focus-visible:ring-ring flex w-full items-center gap-2 rounded-md px-3 py-2 text-left focus-visible:ring-2 focus-visible:outline-none [&[data-state=open]>svg]:rotate-180"
+          >
+            <span class="min-w-0 flex-1 text-sm font-medium">
+              {m.storage_switch_previous_title()}
+            </span>
+            <span class="text-muted max-w-72 truncate text-sm" title={previousDestination.bucket}>
+              {previousDestination.bucket}
+            </span>
+            <ChevronDown
+              aria-hidden="true"
+              class="size-4 shrink-0 transition-transform motion-reduce:transition-none"
+            />
+          </Collapsible.Trigger>
+          <Collapsible.Content class="pt-3">
+            <div class="border-default rounded-md border p-4">
+              <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                <div class="min-w-0">
+                  <p
+                    class="text-secondary truncate text-sm"
+                    title={previousDestination.endpoint_url}
+                  >
+                    {previousDestination.endpoint_url} · {previousDestination.bucket}
+                  </p>
+                  <p class="text-secondary mt-2 max-w-[68ch] text-sm leading-5">
+                    {m.storage_switch_previous_description()}
+                  </p>
+                  {#if previousActionFailed}
+                    <Alert.Root class="mt-3" variant="destructive" aria-live="assertive">
+                      <AlertCircle />
+                      <Alert.Title>{errorTitle(previousActionCode)}</Alert.Title>
+                      <Alert.Description>
+                        {errorDescription(previousActionCode)}
+                      </Alert.Description>
+                    </Alert.Root>
+                  {/if}
+                </div>
+                <div class="flex shrink-0 flex-col gap-2 sm:flex-row">
+                  <Button
+                    variant="outline"
+                    onclick={switchBackDestination}
+                    disabled={!canSwitch || switchInFlight}
+                    aria-busy={switchInFlight}
+                  >
+                    {#if switchInFlight}
+                      <Loader2 data-icon="inline-start" class="animate-spin" aria-hidden="true" />
+                    {/if}
+                    {m.storage_switch_back_action()}
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    onclick={forgetPreviousDestination}
+                    disabled={!canSwitch || switchInFlight}
+                  >
+                    {m.storage_switch_forget_action()}
+                  </Button>
+                </div>
+              </div>
             </div>
-            <div class="flex shrink-0 flex-col gap-2 sm:flex-row">
-              <Button
-                variant="outline"
-                onclick={switchBackDestination}
-                disabled={!canSwitch || switchInFlight}
-                aria-busy={switchInFlight}
-              >
-                {#if switchInFlight}
-                  <Loader2 data-icon="inline-start" class="animate-spin" aria-hidden="true" />
-                {/if}
-                {m.storage_switch_back_action()}
-              </Button>
-              <Button
-                variant="ghost"
-                onclick={forgetPreviousDestination}
-                disabled={!canSwitch || switchInFlight}
-              >
-                {m.storage_switch_forget_action()}
-              </Button>
-            </div>
-          </div>
-        </div>
+          </Collapsible.Content>
+        </Collapsible.Root>
       {/if}
 
       {#if pendingDestination}

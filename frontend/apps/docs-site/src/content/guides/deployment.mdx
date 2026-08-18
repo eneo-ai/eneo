@@ -316,8 +316,9 @@ curl -fsS https://your-domain.com/version
     | `MAX_IN_QUESTION` | `1` | Max files per chat message |
 
     <Callout type="info">
-      Platform admins set byte limits and new-write placement in **Admin >
-      Storage**. Those changes take effect without restarting backend or worker.
+      Administrators with the Storage permission set byte limits and new-write
+      placement in **Admin > Storage**. Those changes take effect without
+      restarting backend or worker.
       Operators keep `OBJECT_CONTENT_INLINE_MAXIMUM_BYTES` as a PostgreSQL, WAL,
       backup, and process safety ceiling. For an inline session upload, the
       effective limit is the smaller value; the admin page shows the configured
@@ -434,16 +435,30 @@ compatible endpoint, including MinIO. Both object-store paths use the same
 contract and fail closed when configuration or the database/bucket binding does
 not match.
 
-| Owner          | Responsibility                                                                                                                          |
-| -------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
-| Platform admin | Choose one deployment-wide target for eligible new File and Icon writes and set business upload limits in **Admin > Storage**           |
-| Operator       | Run PostgreSQL and any optional compatible endpoint; own credentials, TLS, capacity, backups, and `OBJECT_CONTENT_INLINE_MAXIMUM_BYTES` |
+| Owner                                 | Responsibility                                                                                                                                     |
+| ------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Administrator with Storage permission | Choose one deployment-wide target for eligible new File, Icon, and knowledge-original writes and set business upload limits in **Admin > Storage** |
+| Operator                              | Run PostgreSQL and any optional compatible endpoint; own credentials, TLS, capacity, backups, and `OBJECT_CONTENT_INLINE_MAXIMUM_BYTES`            |
 
 Policy changes take effect without a backend or worker restart. They affect
 eligible new writes only; existing content stays in its recorded backend until
 an explicit verified migration moves it. The product has one provider-neutral
 object-store path, not vendor-specific storage modes. **Admin > Storage** also
-shows the portable multipart envelope when it constrains object-store session
+compares Eneo's recorded file-content size with the entire PostgreSQL database
+on disk. These figures overlap: inline file content is part of both totals, and
+the PostgreSQL figure also includes searchable text, pgvector embeddings,
+tables, indexes, and internal storage. The page does not report remaining host
+or bucket capacity. See [What do the storage-usage figures
+mean?](/guides/object-content-storage#what-do-the-storage-usage-figures-mean)
+for the exact boundaries.
+
+The same page presents current status before configuration: the active target,
+object-store health, file-content distribution, and migration state appear
+first. PostgreSQL allocation and detailed effective limits remain available as
+technical details instead of competing with routine storage decisions.
+
+The page also shows the portable multipart envelope when it constrains
+object-store session
 uploads. FastAPI/Starlette multipart parsing happens before route admission and
 may use temporary disk. Eneo rejects an oversized File or Icon before its own
 capture/spool or any storage mutation. Operators must use ingress/request-body

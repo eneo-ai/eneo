@@ -32,7 +32,7 @@ from eneo.files.file_models import (
     ContentDisposition,
     FileType,
 )
-from eneo.files.file_reference import url_only_file_ids
+from eneo.files.file_reference import referenced_file_ids, url_only_file_ids
 
 
 class TestSignedTokenTenantClaim:
@@ -120,10 +120,22 @@ class TestFileReferencesString:
         files = [self._file(with_url), self._file(without_url)]
         block = build_file_references_string(files, {with_url: "https://x/dl"})
         assert "https://x/dl" in block
-        assert block.count('"url"') == 1
+        assert block.count('"url":') == 1
 
     def test_empty_when_no_file_in_map(self):
         assert build_file_references_string([self._file(uuid4())], {}) == ""
+
+    def test_preamble_carries_mechanics_only(self):
+        # The block repeats per message with referenced files (history
+        # included), so it states what the entries are and that the bytes are
+        # absent; the tool-arbitration rules live in the system prompt
+        # (ATTACHED_FILE_REFERENCES_INSTRUCTION), stated once per request.
+        fid = uuid4()
+        block = build_file_references_string([self._file(fid)], {fid: "https://x/dl"})
+        assert "signed attachment reference" in block
+        assert "raw bytes are NOT in this prompt" in block
+        assert "read_file" not in block
+        assert "re-upload" not in block
 
 
 class TestInlineFileTextToggle:
@@ -233,6 +245,32 @@ class TestUrlOnlyFileIds:
             inline_file_text=False,
         )
         assert ids == {text_with_original.id}
+
+
+class TestReferencedFileIds:
+    """Files a signed reference URL can serve, independent of inlining mode.
+
+    ``url_only_file_ids`` must always be this set gated on inlining being off,
+    so the two predicates cannot drift apart across the send path, preflight
+    count, and fit guard.
+    """
+
+    def test_ignores_the_inlining_mode(self, monkeypatch):
+        _enable_file_references(monkeypatch)
+        stored = _stub_file()
+
+        ids = referenced_file_ids([stored, _stub_file(original_available=False)])
+
+        assert ids == {stored.id}
+        assert url_only_file_ids([stored], inline_file_text=True) == set()
+        assert url_only_file_ids([stored], inline_file_text=False) == ids
+
+    def test_empty_without_base_url_or_object_store(self, monkeypatch):
+        _enable_file_references(monkeypatch, base_url=None)
+        assert referenced_file_ids([_stub_file()]) == set()
+
+        _enable_file_references(monkeypatch, object_store=False)
+        assert referenced_file_ids([_stub_file()]) == set()
 
 
 class TestSendPathUrlOnlyFiltering:

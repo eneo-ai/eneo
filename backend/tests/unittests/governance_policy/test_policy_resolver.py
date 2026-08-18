@@ -1,6 +1,10 @@
 from types import SimpleNamespace
 from uuid import uuid4
 
+from eneo.completion_models.domain.model_kwargs_capabilities import (
+    ModelKwargCapability,
+    SupportedModelKwargs,
+)
 from eneo.governance_policy.domain.governance_policy import (
     GovernancePolicy,
     PolicyCompletionModel,
@@ -11,6 +15,7 @@ from eneo.governance_policy.domain.policy_resolver import (
     EffectiveConfig,
     resolve,
     select_effective_completion_model,
+    select_effective_reasoning_effort,
 )
 from eneo.skills.domain.skill import (
     ResolvedSkillBinding,
@@ -86,6 +91,105 @@ def test_no_policy_returns_all_disabled():
     assert cfg.models_enforced is False
     assert cfg.mcp_enforced is False
     assert cfg.prompt_enforced is False
+
+
+def test_personal_default_projects_reasoning_governance():
+    policy = _empty_policy()
+    policy.set_reasoning_policy(default_effort="medium", allow_user_override=True)
+
+    cfg = resolve(
+        assistant=_mk_assistant(),
+        space_is_personal=True,
+        policy=policy,
+        tenant_completion_models=[],
+        tenant_mcp_servers=[],
+        library_prompt_text=None,
+    )
+
+    assert cfg.default_reasoning_effort == "medium"
+    assert cfg.reasoning_effort_user_configurable is True
+    assert cfg.reasoning_policy_configured is True
+
+
+def test_explicit_provider_default_suppresses_a_stale_user_choice():
+    supported_model_kwargs = SupportedModelKwargs(
+        reasoning_effort=ModelKwargCapability(
+            supported=True,
+            control="select",
+            options=["low", "medium", "high"],
+        )
+    )
+    model = SimpleNamespace(get_supported_model_kwargs=lambda: supported_model_kwargs)
+    config = EffectiveConfig(
+        models_enforced=False,
+        available_models=[],
+        locked_model=None,
+        policy_default_model=None,
+        mcp_enforced=False,
+        available_mcp_servers=[],
+        prompt_enforced=False,
+        enforced_prompt_text=None,
+        reasoning_policy_configured=True,
+        default_reasoning_effort=None,
+        reasoning_effort_user_configurable=False,
+    )
+
+    assert (
+        select_effective_reasoning_effort(
+            selected_model=model,
+            stored_effort="high",
+            effective_config=config,
+        )
+        is None
+    )
+
+
+def test_reasoning_effort_uses_user_choice_only_when_supported_and_allowed():
+    supported_model_kwargs = SupportedModelKwargs(
+        reasoning_effort=ModelKwargCapability(
+            supported=True,
+            control="select",
+            options=["low", "medium", "high"],
+        )
+    )
+    model = SimpleNamespace(get_supported_model_kwargs=lambda: supported_model_kwargs)
+    config = EffectiveConfig(
+        models_enforced=False,
+        available_models=[],
+        locked_model=None,
+        policy_default_model=None,
+        mcp_enforced=False,
+        available_mcp_servers=[],
+        prompt_enforced=False,
+        enforced_prompt_text=None,
+        default_reasoning_effort="medium",
+        reasoning_effort_user_configurable=True,
+    )
+
+    assert (
+        select_effective_reasoning_effort(
+            selected_model=model,
+            stored_effort="high",
+            effective_config=config,
+        )
+        == "high"
+    )
+    assert (
+        select_effective_reasoning_effort(
+            selected_model=model,
+            stored_effort="xhigh",
+            effective_config=config,
+        )
+        == "medium"
+    )
+    assert (
+        select_effective_reasoning_effort(
+            selected_model=model,
+            stored_effort=None,
+            effective_config=config,
+        )
+        == "medium"
+    )
 
 
 def test_personal_default_carries_governance_skill_bindings_with_enforced_prompt():

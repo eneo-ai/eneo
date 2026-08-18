@@ -6,6 +6,7 @@ Explicit persisted capability evidence is the request-shape authority.
 from __future__ import annotations
 
 import logging
+from collections.abc import Mapping
 from typing import Literal
 from uuid import UUID
 
@@ -22,6 +23,16 @@ class ModelKwargCapability(BaseModel):
     step: float | None = None
     options: list[str] | None = None
 
+    def accepts(self, value: object | None) -> bool:
+        """Whether a typed model-setting value is allowed by this capability."""
+        if value is None:
+            return True
+        if not self.supported:
+            return False
+        if self.control == "select":
+            return self.options is not None and value in self.options
+        return True
+
 
 class SupportedModelKwargs(BaseModel):
     temperature: ModelKwargCapability = Field(default_factory=ModelKwargCapability)
@@ -35,18 +46,197 @@ class SupportedModelKwargs(BaseModel):
     top_k: ModelKwargCapability = Field(default_factory=ModelKwargCapability)
 
 
+def _slider_capability(
+    *, minimum: float, maximum: float, step: float
+) -> ModelKwargCapability:
+    return ModelKwargCapability(
+        supported=True,
+        control="slider",
+        minimum=minimum,
+        maximum=maximum,
+        step=step,
+    )
+
+
+_CapabilityEvidence = Literal[
+    "admin_explicit",
+    "provider_discovered",
+    "catalog_backfill",
+]
+
+
 class _PersistedSupportedModelKwargs(SupportedModelKwargs):
-    evidence: Literal["admin_explicit"] = Field(alias="_evidence")
+    evidence: _CapabilityEvidence = Field(alias="_evidence")
+
+
+def _persist_model_kwargs_capabilities(
+    capabilities: SupportedModelKwargs,
+    *,
+    evidence: _CapabilityEvidence,
+) -> dict[str, object]:
+    persisted = _PersistedSupportedModelKwargs.model_validate(
+        {**capabilities.model_dump(), "_evidence": evidence}
+    )
+    return persisted.model_dump(by_alias=True)
 
 
 def persist_explicit_model_kwargs_capabilities(
     capabilities: SupportedModelKwargs,
 ) -> dict[str, object]:
     """Tag admin-authored value-domain evidence before JSONB persistence."""
-    persisted = _PersistedSupportedModelKwargs.model_validate(
-        {**capabilities.model_dump(), "_evidence": "admin_explicit"}
+    return _persist_model_kwargs_capabilities(
+        capabilities,
+        evidence="admin_explicit",
     )
-    return persisted.model_dump(by_alias=True)
+
+
+def persist_discovered_model_kwargs_capabilities(
+    capabilities: SupportedModelKwargs,
+) -> dict[str, object]:
+    """Tag a capability snapshot discovered for the exact provider route."""
+    return _persist_model_kwargs_capabilities(
+        capabilities,
+        evidence="provider_discovered",
+    )
+
+
+def _reasoning_effort_select() -> ModelKwargCapability:
+    return ModelKwargCapability(
+        supported=True,
+        control="select",
+        options=["low", "medium", "high"],
+    )
+
+
+def reasoning_effort_options_from_model_info(
+    model_info: Mapping[str, object],
+) -> list[str]:
+    """Project LiteLLM reasoning levels, using its standard levels as fallback."""
+    if model_info.get("supports_reasoning") is not True:
+        return []
+
+    options: list[str] = []
+    if model_info.get("supports_none_reasoning_effort") is True:
+        options.append("none")
+    if model_info.get("supports_minimal_reasoning_effort") is True:
+        options.append("minimal")
+    if model_info.get("supports_low_reasoning_effort") is not False:
+        options.append("low")
+    options.extend(("medium", "high"))
+    if model_info.get("supports_xhigh_reasoning_effort") is True:
+        options.append("xhigh")
+    if model_info.get("supports_max_reasoning_effort") is True:
+        options.append("max")
+    return options
+
+
+def _default_supported_model_kwargs(*, reasoning: bool) -> SupportedModelKwargs:
+    if reasoning:
+        return SupportedModelKwargs(reasoning_effort=_reasoning_effort_select())
+
+    return SupportedModelKwargs(
+        temperature=_slider_capability(minimum=0, maximum=2, step=0.01)
+    )
+
+
+def _tenant_supported_model_kwargs() -> SupportedModelKwargs:
+    return SupportedModelKwargs(
+        temperature=_slider_capability(minimum=0, maximum=2, step=0.01),
+        top_p=_slider_capability(minimum=0, maximum=1, step=0.01),
+        presence_penalty=_slider_capability(minimum=-2, maximum=2, step=0.1),
+        frequency_penalty=_slider_capability(minimum=-2, maximum=2, step=0.1),
+        top_k=ModelKwargCapability(
+            supported=True,
+            control="slider",
+            minimum=1,
+            maximum=100,
+            step=1,
+        ),
+    )
+
+
+def snapshot_supported_model_kwargs(
+    supported_params: list[str] | None,
+    *,
+    reasoning: bool,
+    reasoning_effort_options: list[str] | None = None,
+) -> SupportedModelKwargs:
+    """Convert LiteLLM discovery data into persisted Eneo capabilities.
+
+    This is intended for model creation/update, not request-time lookup. The
+    resulting snapshot keeps UI and execution behavior stable across dependency
+    upgrades.
+
+    `reasoning` is the admin-declared model flag. It must be honored here:
+    discovery is name-based, so opaque routes (e.g. Azure deployment names)
+    miss reasoning support entirely, and the persisted snapshot acts as an
+    explicit override at resolve time which is never widened again.
+    """
+    if supported_params is None:
+        return _default_supported_model_kwargs(reasoning=reasoning)
+
+    supported = set(supported_params)
+    reasoning_options = (
+        reasoning_effort_options
+        if reasoning_effort_options is not None
+        else ["low", "medium", "high"]
+    )
+    snapshot = SupportedModelKwargs(
+        temperature=(
+            _slider_capability(minimum=0, maximum=2, step=0.01)
+            if "temperature" in supported
+            else ModelKwargCapability()
+        ),
+        top_p=(
+            _slider_capability(minimum=0, maximum=1, step=0.01)
+            if "top_p" in supported
+            else ModelKwargCapability()
+        ),
+        reasoning_effort=(
+            ModelKwargCapability(
+                supported=True,
+                control="select",
+                options=reasoning_options,
+            )
+            if "reasoning_effort" in supported and reasoning_options
+            else ModelKwargCapability()
+        ),
+        verbosity=(
+            ModelKwargCapability(
+                supported=True,
+                control="select",
+                options=["low", "medium", "high"],
+            )
+            if "verbosity" in supported
+            else ModelKwargCapability()
+        ),
+        presence_penalty=(
+            _slider_capability(minimum=-2, maximum=2, step=0.1)
+            if "presence_penalty" in supported
+            else ModelKwargCapability()
+        ),
+        frequency_penalty=(
+            _slider_capability(minimum=-2, maximum=2, step=0.1)
+            if "frequency_penalty" in supported
+            else ModelKwargCapability()
+        ),
+        top_k=(
+            ModelKwargCapability(
+                supported=True,
+                control="slider",
+                minimum=1,
+                maximum=100,
+                step=1,
+            )
+            if "top_k" in supported
+            else ModelKwargCapability()
+        ),
+    )
+    if reasoning and not snapshot.reasoning_effort.supported:
+        snapshot = snapshot.model_copy(
+            update={"reasoning_effort": _reasoning_effort_select()}
+        )
+    return snapshot
 
 
 def _apply_model_capability_flags(

@@ -202,6 +202,20 @@ ENEO_SUPER_API_KEY=
 ENEO_SUPER_DUPER_API_KEY=
 
 # ----------------------------------------------------------------------------
+# Upload Limits (startup requirement on released images, migration seed later)
+# ----------------------------------------------------------------------------
+# Backend images built before the Admin > Storage upload policy existed
+# require all four variables at startup; without them the db-init/migration
+# step exits with a Settings validation error and the stack never comes up.
+# Images that include migration 202607251700 read them exactly once, to seed
+# the initial upload policy, and ignore them afterwards; administrators then
+# manage the limits in Admin > Storage. Values below match the seed defaults.
+UPLOAD_FILE_TO_SESSION_MAX_SIZE=10485760
+UPLOAD_IMAGE_TO_SESSION_MAX_SIZE=10485760
+UPLOAD_MAX_FILE_SIZE=10485760
+TRANSCRIPTION_MAX_FILE_SIZE=209715200
+
+# ----------------------------------------------------------------------------
 # Durable Object Content (PostgreSQL-inline defaults)
 # ----------------------------------------------------------------------------
 # These settings are active whether or not an external object store is enabled.
@@ -522,7 +536,8 @@ DEV=false
 # ============================================================================
 # OBJECT CONTENT SAFETY AND UPLOAD BEHAVIOR
 # ============================================================================
-# Platform admins set upload limits and new-write placement in Admin > Storage.
+# Administrators with the Storage permission set upload limits and new-write
+# placement in Admin > Storage.
 # Updates take effect without restarting backend or worker processes.
 MAX_IN_QUESTION=1                           # Max file attachments per chat message
 

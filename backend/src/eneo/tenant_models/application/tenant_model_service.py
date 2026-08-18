@@ -16,6 +16,7 @@ logging — live as private helpers on the module.
 
 from __future__ import annotations
 
+import logging
 from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
@@ -34,7 +35,10 @@ from eneo.completion_models.domain.completion_model_repo import (
     CompletionModelRepository,
 )
 from eneo.completion_models.domain.model_kwargs_capabilities import (
+    persist_discovered_model_kwargs_capabilities,
     persist_explicit_model_kwargs_capabilities,
+    reasoning_effort_options_from_model_info,
+    snapshot_supported_model_kwargs,
 )
 from eneo.database.tables.ai_models_table import (
     CompletionModels,
@@ -48,6 +52,11 @@ from eneo.main.exceptions import (
     NotFoundException,
     UnauthorizedException,
 )
+from eneo.model_providers.domain.model_route import resolve_model_route
+from eneo.model_providers.infrastructure.litellm_transport import (
+    get_model_info,
+    get_supported_openai_params,
+)
 from eneo.model_providers.infrastructure.model_provider_repository import (
     ModelProviderRepository,
 )
@@ -57,6 +66,8 @@ from eneo.security_classifications.tenant_validation import (
 from eneo.transcription_models.domain.transcription_model_repo import (
     TranscriptionModelRepository,
 )
+
+logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from eneo.audit.application.audit_service import AuditService
@@ -113,6 +124,47 @@ async def _unset_other_defaults(
     """
     stmt = sa.update(table).where(table.tenant_id == tenant_id).values(is_default=False)
     await session.execute(stmt)
+
+
+def _snapshot_completion_capabilities(
+    provider_type: str,
+    model_name: str,
+) -> dict[str, object] | None:
+    model_route = resolve_model_route(
+        provider_type=provider_type,
+        model_name=model_name,
+    )
+    try:
+        supported_params = get_supported_openai_params(model_route)
+    except Exception:
+        logger.warning(
+            "Could not discover model parameter capabilities; omitting controls",
+            extra={"model_route": model_route},
+            exc_info=True,
+        )
+        return None
+    if supported_params is None:
+        return None
+    reasoning_effort_options: list[str] | None = None
+    if supported_params is not None and "reasoning_effort" in supported_params:
+        try:
+            reasoning_effort_options = reasoning_effort_options_from_model_info(
+                get_model_info(model_route)
+            )
+        except Exception:
+            logger.warning(
+                "Could not discover model reasoning levels; omitting the control",
+                extra={"model_route": model_route},
+                exc_info=True,
+            )
+            reasoning_effort_options = []
+    return persist_discovered_model_kwargs_capabilities(
+        snapshot_supported_model_kwargs(
+            supported_params,
+            reasoning=False,
+            reasoning_effort_options=reasoning_effort_options,
+        )
+    )
 
 
 def _ensure_tenant_owned(model: Any) -> None:
@@ -181,7 +233,7 @@ class TenantCompletionModelService:
         self.audit_service = audit_service
 
     async def create(self, payload: "TenantCompletionModelCreate") -> "CompletionModel":
-        await _validate_active_provider(
+        provider = await _validate_active_provider(
             self.session, payload.provider_id, self.user.tenant_id
         )
         await _validate_unique_display_name(
@@ -233,7 +285,10 @@ class TenantCompletionModelService:
                 payload.model_kwargs_capabilities
             )
             if payload.model_kwargs_capabilities is not None
-            else None
+            else _snapshot_completion_capabilities(
+                provider.provider_type,
+                payload.name,
+            )
         )
         new_model.input_cost_per_token = payload.input_cost_per_token
         new_model.output_cost_per_token = payload.output_cost_per_token
@@ -319,10 +374,24 @@ class TenantCompletionModelService:
             model.input_cost_per_token = payload.input_cost_per_token
         if "output_cost_per_token" in provided:
             model.output_cost_per_token = payload.output_cost_per_token
-        # Name or reasoning changes invalidate route-specific capability evidence.
-        # An explicit capability payload below still wins over the cleared value.
-        if payload.name is not None or payload.reasoning is not None:
-            model.model_kwargs_capabilities = None
+        # Name or reasoning changes replace the route-specific capability snapshot.
+        # An explicit capability payload below still wins over the discovered value.
+        if (
+            renames_route or payload.reasoning is not None
+        ) and "model_kwargs_capabilities" not in provided:
+            if model.provider_id is None:
+                raise BadRequestException(
+                    "Tenant completion model is missing its provider"
+                )
+            provider_repo = ModelProviderRepository(
+                session=self.session,
+                tenant_id=self.user.tenant_id,
+            )
+            provider = await provider_repo.get_by_id(model.provider_id)
+            model.model_kwargs_capabilities = _snapshot_completion_capabilities(
+                provider.provider_type,
+                model.name,
+            )
         if "model_kwargs_capabilities" in provided:
             model.model_kwargs_capabilities = (
                 persist_explicit_model_kwargs_capabilities(

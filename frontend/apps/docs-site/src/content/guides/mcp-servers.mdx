@@ -4,21 +4,28 @@ import { Callout } from "nextra/components";
 
 Model Context Protocol (MCP) servers give assistants access to external tools and live data. This guide covers setup, tool approval, user-specific catalogs, session state, and day-to-day operation.
 
+<Callout type="info">
+  This guide covers administrator setup for external MCP servers. For the deeper
+  architecture—including knowledge retrieval modes, Eneo's built-in loopback MCP
+  servers, and how internal and external tools interoperate—see [Knowledge
+  Retrieval and MCP Interoperability](/docs/knowledge-retrieval-and-mcp).
+</Callout>
+
 ## Overview
 
 MCP is an open protocol that lets AI assistants call external tools — such as searching a database, creating tickets, or fetching live data. Eneo connects to MCP servers over **Streamable HTTP** transport and acts as a proxy between assistants and the remote server.
 
 **Key concepts:**
 
-| Concept              | Description                                                                        |
-| -------------------- | ---------------------------------------------------------------------------------- |
-| **MCP Server**       | A remote service that exposes tools via the MCP protocol                           |
-| **Tool**             | A single function the server provides (e.g. `search_tickets`, `create_issue`)      |
-| **Tool Sync**        | Discovering tools from the remote server and detecting changes                     |
-| **Approved catalog** | The tool names, descriptions, and schemas an admin has accepted in Eneo             |
-| **Live catalog**     | The tools the remote server returns for the signed-in user during this request      |
-| **Approval**         | Admin review before a new or changed definition becomes active                     |
-| **Space**            | Where you enable MCP servers so assistants can use their tools                     |
+| Concept              | Description                                                                    |
+| -------------------- | ------------------------------------------------------------------------------ |
+| **MCP Server**       | A remote service that exposes tools via the MCP protocol                       |
+| **Tool**             | A single function the server provides (e.g. `search_tickets`, `create_issue`)  |
+| **Tool Sync**        | Discovering tools from the remote server and detecting changes                 |
+| **Approved catalog** | The tool names, descriptions, and schemas an admin has accepted in Eneo        |
+| **Live catalog**     | The tools the remote server returns for the signed-in user during this request |
+| **Approval**         | Admin review before a new or changed definition becomes active                 |
+| **Space**            | Where you enable MCP servers so assistants can use their tools                 |
 
 For a server that receives user identity, Eneo exposes only the intersection of
 the two catalogs:
@@ -54,7 +61,11 @@ MCP servers are managed in **Admin → MCP Servers**. Only admins can add, edit,
 Eneo will **test the connection** before saving. If the URL is unreachable or returns an error, the server is not created and you get an error message.
 
 <Callout type="info">
-  On successful creation, Eneo connects to the server and stores the tools visible to the creating admin. These initial tools are enabled by default because the admin is explicitly adding the server. When identity forwarding is enabled, other users may have a different catalog; their additional tools enter the approval flow described below.
+  On successful creation, Eneo connects to the server and stores the tools
+  visible to the creating admin. These initial tools are enabled by default
+  because the admin is explicitly adding the server. When identity forwarding is
+  enabled, other users may have a different catalog; their additional tools
+  enter the approval flow described below.
 </Callout>
 
 ### Authentication
@@ -91,11 +102,11 @@ calls, and protocol-session termination.
 Open **Tool catalog limits** in the server form to set two safeguards for that
 server:
 
-| Setting | Default | Allowed range |
-|---|---:|---:|
-| Maximum tools | 256 | 1–4,096 |
-| Maximum catalog size | 16 MiB | 1–64 MiB |
-| Maximum size per tool | 64 KiB | 1–1,024 KiB |
+| Setting               | Default | Allowed range |
+| --------------------- | ------: | ------------: |
+| Maximum tools         |     256 |       1–4,096 |
+| Maximum catalog size  |  16 MiB |      1–64 MiB |
+| Maximum size per tool |  64 KiB |   1–1,024 KiB |
 
 The sizes include tool names, descriptions, and input schemas as serialized
 JSON. The total-size limit prevents a large collection of individually valid
@@ -282,14 +293,14 @@ servers should also enforce a reasonable idle timeout.
 
 ### Security and failure boundaries
 
-| Event | Eneo behavior |
-|---|---|
-| Live tool is not approved | Store as pending; do not expose it |
-| Live schema differs from approved schema | Continue using the approved schema until review |
-| User cannot see an approved tool | Omit it from this request |
-| Identity-scoped discovery fails or times out | Omit that server's tools from this request |
-| Catalog exceeds an admin limit | Reject the entire catalog for this request; save nothing |
-| New protocol session cannot be persisted | Terminate it and omit that discovery result |
+| Event                                         | Eneo behavior                                            |
+| --------------------------------------------- | -------------------------------------------------------- |
+| Live tool is not approved                     | Store as pending; do not expose it                       |
+| Live schema differs from approved schema      | Continue using the approved schema until review          |
+| User cannot see an approved tool              | Omit it from this request                                |
+| Identity-scoped discovery fails or times out  | Omit that server's tools from this request               |
+| Catalog exceeds an admin limit                | Reject the entire catalog for this request; save nothing |
+| New protocol session cannot be persisted      | Terminate it and omit that discovery result              |
 | Admin cannot see a user-only tool during sync | Keep the existing tool; absence is not deletion evidence |
 
 ### Checklist for MCP server operators

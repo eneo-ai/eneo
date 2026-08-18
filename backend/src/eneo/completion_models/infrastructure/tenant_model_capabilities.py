@@ -10,6 +10,7 @@ import litellm
 from eneo.completion_models.domain.model_kwargs_capabilities import (
     ModelKwargCapability,
     SupportedModelKwargs,
+    reasoning_effort_options_from_model_info,
 )
 from eneo.main.logging import get_logger
 
@@ -164,22 +165,7 @@ def resolve_reasoning_effort_options(
         )
         return ()
 
-    if model_info.get("supports_reasoning") is not True:
-        return ()
-
-    options: list[str] = []
-    if model_info.get("supports_none_reasoning_effort") is True:
-        options.append("none")
-    if model_info.get("supports_minimal_reasoning_effort") is True:
-        options.append("minimal")
-    if model_info.get("supports_low_reasoning_effort") is not False:
-        options.append("low")
-    options.extend(("medium", "high"))
-    if model_info.get("supports_xhigh_reasoning_effort") is True:
-        options.append("xhigh")
-    if model_info.get("supports_max_reasoning_effort") is True:
-        options.append("max")
-    return tuple(options)
+    return tuple(reasoning_effort_options_from_model_info(model_info))
 
 
 def enrich_reasoning_effort_capability(
@@ -256,10 +242,15 @@ def normalize_reasoning_effort(
     )
     absent_effort = openai_absent_effort
     if reasoning_supported and provider_type == "openai":
+        requested_absent_effort: Literal["none", "low"] = (
+            "none"
+            if normalized.get("reasoning_effort") == "none"
+            else openai_absent_effort
+        )
         absent_effort = _resolve_openai_absent_effort(
             litellm_model=litellm_model,
             provider_type=provider_type,
-            requested=openai_absent_effort,
+            requested=requested_absent_effort,
         )
     if "reasoning_effort" in normalized:
         is_off_signal = normalized["reasoning_effort"] in (None, "none", "")

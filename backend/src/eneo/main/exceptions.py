@@ -321,7 +321,8 @@ class FileNotSupportedException(Exception):
 
 class FileTooLargeException(Exception):
     DEFAULT_DOCS_HINT = (
-        "Ask a platform administrator to review the object-content deployment policy."
+        "Ask an administrator with the Storage permission to review the "
+        "object-content deployment policy."
     )
 
     def __init__(

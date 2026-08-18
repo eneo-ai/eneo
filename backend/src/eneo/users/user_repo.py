@@ -13,7 +13,7 @@ from eneo.database.tables.assistant_table import Assistants
 from eneo.database.tables.roles_table import Roles
 from eneo.database.tables.spaces_table import Spaces
 from eneo.database.tables.tenant_table import Tenants
-from eneo.database.tables.users_table import Users, users_roles_table
+from eneo.database.tables.users_table import Users
 from eneo.database.tables.widget_table import Widgets
 from eneo.main.exceptions import (
     SystemUserProtected,
@@ -22,9 +22,7 @@ from eneo.main.exceptions import (
 )
 from eneo.main.logging import get_logger
 from eneo.main.models import ModelId
-from eneo.roles.permissions import Permission
 from eneo.spaces.space_flow_delete_blockers import space_has_flow_delete_blockers
-from eneo.tenants.tenant import TenantState
 from eneo.users.user import (
     PaginatedResult,
     PaginationParams,
@@ -53,10 +51,6 @@ def _is_foreign_key_violation(exc: IntegrityError) -> bool:
         getattr(origin, attribute, None) == _FOREIGN_KEY_VIOLATION_SQLSTATE
         for attribute in ("sqlstate", "pgcode")
     )
-
-
-class PlatformAdminGrantIneligible(Exception):
-    pass
 
 
 class UsersRepository:
@@ -141,43 +135,6 @@ class UsersRepository:
         query = sa.select(Users).where(Users.id == id)
 
         return await self._get_model_from_query(query, with_deleted=with_deleted)
-
-    async def set_platform_admin(
-        self, user_id: UUID, *, enabled: bool
-    ) -> tuple[bool, bool] | None:
-        admin_role_exists = (
-            sa.select(sa.literal(True))
-            .select_from(users_roles_table)
-            .join(Roles, Roles.id == users_roles_table.c.role_id)
-            .where(
-                users_roles_table.c.user_id == Users.id,
-                Roles.permissions.contains([Permission.ADMIN.value]),
-            )
-            .exists()
-        )
-        found = (
-            await self.session.execute(
-                sa.select(Users, Tenants.state, admin_role_exists)
-                .join(Tenants, Tenants.id == Users.tenant_id)
-                .where(Users.id == user_id)
-                .with_for_update(of=Users)
-            )
-        ).one_or_none()
-        if found is None:
-            return None
-        row, tenant_state, has_admin_permission = found
-        if enabled and (
-            row.is_system_user
-            or row.deleted_at is not None
-            or UserState(row.state) is not UserState.ACTIVE
-            or str(tenant_state) != TenantState.ACTIVE.value
-            or not has_admin_permission
-        ):
-            raise PlatformAdminGrantIneligible
-        before = row.is_platform_admin
-        row.is_platform_admin = enabled
-        await self.session.flush()
-        return before, enabled
 
     async def get_user_by_assistant_id(
         self, assistant_id: UUID, with_deleted: bool = False

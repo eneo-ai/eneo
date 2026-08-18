@@ -746,8 +746,9 @@ your public URL.
 
 **Solutions**:
 1. **Check file size limits**:
-   - Ask a platform admin to review configured and effective values in **Admin
-     > Storage**. Policy changes apply without restarting backend or worker.
+   - Ask an administrator with the Storage permission to review configured and
+     effective values in **Admin > Storage**. Policy changes apply without
+     restarting backend or worker.
    - For PostgreSQL-inline session uploads, the effective limit is the smaller
      of the admin policy and the operator-owned
      `OBJECT_CONTENT_INLINE_MAXIMUM_BYTES` safety ceiling.

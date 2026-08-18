@@ -528,8 +528,9 @@ If you see `middleware "redirect-to-https@docker" does not exist` in Traefik log
 - Go to the admin panel, navigate to the "Models" page, select the "Transcription" tab, and enable a model like Whisper
 
 ### Errors when uploading large files (e.g., PDFs)
-- Ask a platform admin to review configured and effective limits in **Admin >
-  Storage**. Policy updates apply without restarting backend or worker.
+- Ask an administrator with the Storage permission to review configured and
+  effective limits in **Admin > Storage**. Policy updates apply without
+  restarting backend or worker.
 - For PostgreSQL-inline session uploads, the effective limit is the smaller of
   the admin policy and the operator-owned
   `OBJECT_CONTENT_INLINE_MAXIMUM_BYTES` safety ceiling.

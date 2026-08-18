@@ -448,6 +448,17 @@ class TenantModelAdapter(CompletionModelAdapter):
 
     MAX_TOOL_ROUNDS = 10
 
+    # Tool-result payload for calls refused because the round budget ran out.
+    # The forced follow-up runs with tool_choice="none", so the model must
+    # produce a final answer from what it already gathered instead of the
+    # message hard-failing with tool_round_limit.
+    TOOL_ROUND_LIMIT_MESSAGE = (
+        "Tool round limit reached for this turn; no further tool calls are "
+        "possible. Answer now using the information already gathered. If the "
+        "task is unfinished, say so and tell the user they can continue in a "
+        "follow-up message."
+    )
+
     def __init__(
         self,
         model: "TenantCompletionModel",
@@ -697,6 +708,52 @@ class TenantModelAdapter(CompletionModelAdapter):
             context_prompt_tokens=new.context_prompt_tokens,
             context_completion_tokens=new.context_completion_tokens,
         )
+
+    def _append_tool_round_limit_refusal(
+        self,
+        messages: list[dict[str, Any]],
+        *,
+        assistant_content: str | None,
+        calls: list[ProviderToolCall],
+    ) -> bool:
+        """Refuse pending tool calls once the round budget is exhausted.
+
+        Appends the assistant's pending tool-call message and one refusal
+        result per call so the transcript stays well-formed for the forced
+        toolless follow-up. Returns False without touching ``messages`` when
+        any call lacks an id or name — an incomplete exchange would be
+        rejected by the provider, and the follow-up works from the prior
+        messages alone.
+        """
+        if not calls or any(not call.call_id or not call.name for call in calls):
+            return False
+        messages.append(
+            {
+                "role": "assistant",
+                "content": assistant_content,
+                "tool_calls": [
+                    {
+                        "id": call.call_id,
+                        "type": "function",
+                        "function": {
+                            "name": call.name,
+                            "arguments": call.arguments,
+                        },
+                    }
+                    for call in calls
+                ],
+            }
+        )
+        refusal = json.dumps({"error": self.TOOL_ROUND_LIMIT_MESSAGE})
+        for call in calls:
+            messages.append(
+                {
+                    "role": "tool",
+                    "tool_call_id": call.call_id,
+                    "content": refusal,
+                }
+            )
+        return True
 
     def _resolve_request_input_tokens(
         self,
@@ -1119,12 +1176,90 @@ class TenantModelAdapter(CompletionModelAdapter):
                     skill_runtime is not None
                     and skill_runtime.tool_definition is not None
                 )
+                forced_final = False
+
+                async def _follow_up_completion() -> bool:
+                    """Run the next completion and refresh msg; False when empty."""
+                    nonlocal response, usage, choice, msg
+                    nonlocal completed_provider_calls
+                    nonlocal cumulative_input_tokens, used_input_estimate
+                    nonlocal context_input_token_estimate
+                    nonlocal cumulative_output_tokens, used_output_estimate
+                    nonlocal context_output_token_estimate
+                    response = await self._observed_provider_call(
+                        messages=messages,
+                        litellm_kwargs=litellm_kwargs,
+                        observer=provider_call_observer,
+                        reason="tool_round",
+                        retry_without_capability_safe=False,
+                    )
+                    completed_provider_calls += 1
+                    request_input_tokens, request_was_estimated = (
+                        self._resolve_request_input_tokens(
+                            response=response,
+                            messages=messages,
+                            provider_tools=cast(
+                                "list[dict[str, Any]]",
+                                litellm_kwargs.get("tools") or [],
+                            ),
+                        )
+                    )
+                    cumulative_input_tokens += request_input_tokens
+                    used_input_estimate = used_input_estimate or request_was_estimated
+                    context_input_token_estimate = (
+                        request_input_tokens if request_was_estimated else None
+                    )
+                    request_output_tokens, request_output_was_estimated = (
+                        self._resolve_request_output_tokens(response=response)
+                    )
+                    cumulative_output_tokens += request_output_tokens
+                    used_output_estimate = (
+                        used_output_estimate or request_output_was_estimated
+                    )
+                    context_output_token_estimate = (
+                        request_output_tokens if request_output_was_estimated else None
+                    )
+                    usage = self._combine_usage(usage, self._extract_usage(response))
+                    if not response.choices:
+                        return False
+                    choice = response.choices[0]
+                    msg = choice.message
+                    return True
+
                 while msg.tool_calls and (mcp_proxy or activation_available):
                     if tool_round >= self.MAX_TOOL_ROUNDS:
-                        raise OpenAIException(
-                            "The model exceeded the maximum number of tool rounds.",
-                            code="tool_round_limit",
+                        if forced_final:
+                            logger.warning(
+                                "[MCP] Model attempted tool calls after tools "
+                                "were disabled; failing the turn"
+                            )
+                            raise OpenAIException(
+                                "The model could not finish after reaching the "
+                                "tool round limit.",
+                                code="tool_round_limit",
+                            )
+                        forced_final = True
+                        logger.warning(
+                            f"[MCP] Reached max tool rounds "
+                            f"({self.MAX_TOOL_ROUNDS}); forcing a final answer "
+                            "without tools"
                         )
+                        self._append_tool_round_limit_refusal(
+                            messages,
+                            assistant_content=msg.content,
+                            calls=[
+                                ProviderToolCall(
+                                    call_id=tc.id,
+                                    name=tc.function.name,
+                                    arguments=tc.function.arguments,
+                                )
+                                for tc in msg.tool_calls
+                            ],
+                        )
+                        litellm_kwargs = {**litellm_kwargs, "tool_choice": "none"}
+                        if not await _follow_up_completion():
+                            break
+                        continue
                     tool_round += 1
 
                     provider_calls = tuple(
@@ -1221,44 +1356,8 @@ class TenantModelAdapter(CompletionModelAdapter):
                                 "content": result_budget.admit(llm_text),
                             }
                         )
-                    response = await self._observed_provider_call(
-                        messages=messages,
-                        litellm_kwargs=litellm_kwargs,
-                        observer=provider_call_observer,
-                        reason="tool_round",
-                        retry_without_capability_safe=False,
-                    )
-                    completed_provider_calls += 1
-                    request_input_tokens, request_was_estimated = (
-                        self._resolve_request_input_tokens(
-                            response=response,
-                            messages=messages,
-                            provider_tools=cast(
-                                "list[dict[str, Any]]",
-                                litellm_kwargs.get("tools") or [],
-                            ),
-                        )
-                    )
-                    cumulative_input_tokens += request_input_tokens
-                    used_input_estimate = used_input_estimate or request_was_estimated
-                    context_input_token_estimate = (
-                        request_input_tokens if request_was_estimated else None
-                    )
-                    request_output_tokens, request_output_was_estimated = (
-                        self._resolve_request_output_tokens(response=response)
-                    )
-                    cumulative_output_tokens += request_output_tokens
-                    used_output_estimate = (
-                        used_output_estimate or request_output_was_estimated
-                    )
-                    context_output_token_estimate = (
-                        request_output_tokens if request_output_was_estimated else None
-                    )
-                    usage = self._combine_usage(usage, self._extract_usage(response))
-                    if not response.choices:
+                    if not await _follow_up_completion():
                         break
-                    choice = response.choices[0]
-                    msg = choice.message
 
                 if captured_refs:
                     completion.mcp_tool_references = captured_refs
@@ -1569,8 +1668,16 @@ class TenantModelAdapter(CompletionModelAdapter):
                 *,
                 request_messages: list[dict[str, Any]] | None = None,
                 provider_tools: list[dict[str, Any]] | None = None,
+                emit_pending: bool = True,
             ) -> AsyncIterator[Completion]:
-                """Drain a stream: yield text Completions, accumulate tool calls into res."""
+                """Drain a stream: yield text Completions, accumulate tool calls into res.
+
+                ``emit_pending=False`` suppresses the early "pending" TOOL_CALL
+                events. Used for the forced toolless final response: a provider
+                that ignores tool_choice="none" would otherwise surface a
+                pending step that nothing ever resolves, and that unresolved
+                status would be persisted.
+                """
                 buffer = ""
                 inside_thinking = False
                 thinking_stripped = False
@@ -1645,7 +1752,7 @@ class TenantModelAdapter(CompletionModelAdapter):
                         # name and id are known — argument JSON for many parallel
                         # calls can take tens of seconds to generate, and the
                         # stream is otherwise silent for that whole window.
-                        if mcp_tools_active:
+                        if mcp_tools_active and emit_pending:
                             for idx, acc in res.tool_calls_acc.items():
                                 if idx in pending_emitted:
                                     continue
@@ -2276,11 +2383,87 @@ class TenantModelAdapter(CompletionModelAdapter):
                         yield comp
 
                 if result.has_tool_calls and tool_round >= max_rounds:
-                    logger.warning(f"[MCP] Reached max tool rounds ({max_rounds})")
-                    raise OpenAIException(
-                        "The model exceeded the maximum number of tool rounds.",
-                        code="tool_round_limit",
+                    # Round budget exhausted: refuse the pending calls and force
+                    # a final answer from the gathered context instead of
+                    # failing the whole message.
+                    logger.warning(
+                        f"[MCP] Reached max tool rounds ({max_rounds}); "
+                        "forcing a final answer without tools"
                     )
+                    pending_calls = [
+                        result.tool_calls_acc[idx]
+                        for idx in sorted(result.tool_calls_acc.keys())
+                    ]
+                    refused = self._append_tool_round_limit_refusal(
+                        messages,
+                        assistant_content="".join(result.assistant_content) or None,
+                        calls=[
+                            ProviderToolCall(
+                                call_id=tool_call["id"] or "",
+                                name=tool_call["function"]["name"],
+                                arguments=tool_call["function"]["arguments"],
+                            )
+                            for tool_call in pending_calls
+                        ],
+                    )
+                    if refused:
+                        refusal_payload = json.dumps(
+                            {"error": self.TOOL_ROUND_LIMIT_MESSAGE}
+                        )
+                        refused_metadata: list[ToolCallMetadata] = []
+                        for tool_call in pending_calls:
+                            name = tool_call["function"]["name"]
+                            try:
+                                args = self._parse_tool_arguments(
+                                    tool_call["function"]["arguments"]
+                                )
+                            except OpenAIException:
+                                args = None
+                            server_name, tool_name, title = _resolve_tool_names(name)
+                            refused_metadata.append(
+                                ToolCallMetadata(
+                                    server_name=server_name,
+                                    tool_name=tool_name,
+                                    title=title,
+                                    arguments=args,
+                                    tool_call_id=tool_call["id"],
+                                    result_status="failed",
+                                    result=refusal_payload,
+                                    mcp_tool_name=name,
+                                )
+                            )
+                        yield Completion(
+                            response_type=ResponseType.TOOL_CALL,
+                            tool_calls_metadata=refused_metadata,
+                        )
+                    litellm_kwargs = {**litellm_kwargs, "tool_choice": "none"}
+                    follow_up = cast(
+                        AsyncIterator[_LiteLLMStreamChunk],
+                        await _acompletion_call(
+                            model=self.litellm_model,
+                            messages=messages,
+                            stream=True,
+                            drop_params=True,
+                            stream_options={"include_usage": True},
+                            **litellm_kwargs,
+                        ),
+                    )
+                    async for comp in _drain_stream(
+                        follow_up,
+                        result,
+                        request_messages=list(messages),
+                        provider_tools=cast(
+                            "list[dict[str, Any]]",
+                            litellm_kwargs.get("tools") or [],
+                        ),
+                        emit_pending=False,
+                    ):
+                        yield comp
+                    if result.has_tool_calls:
+                        logger.warning(
+                            "[MCP] Model attempted tool calls after tools were "
+                            "disabled; failing the turn"
+                        )
 
             # Final stop — attach accumulated usage. If any request lacked
             # provider prompt usage, keep that field unset and expose the
@@ -2290,6 +2473,31 @@ class TenantModelAdapter(CompletionModelAdapter):
                 final_usage = final_usage.model_copy(update={"prompt_tokens": None})
             if result.used_output_estimate and final_usage is not None:
                 final_usage = final_usage.model_copy(update={"completion_tokens": None})
+            if result.has_tool_calls:
+                yield Completion(
+                    text="",
+                    stop=True,
+                    error=(
+                        "The model could not finish after reaching the tool "
+                        "round limit."
+                    ),
+                    error_code=500,
+                    response_type=ResponseType.ERROR,
+                    usage=final_usage,
+                    input_token_estimate=(
+                        result.cumulative_input_tokens
+                        if result.used_input_estimate
+                        else None
+                    ),
+                    context_input_token_estimate=result.context_input_token_estimate,
+                    output_token_estimate=(
+                        result.cumulative_output_tokens
+                        if result.used_output_estimate
+                        else None
+                    ),
+                    context_output_token_estimate=result.context_output_token_estimate,
+                )
+                return
             yield Completion(
                 text="",
                 stop=True,

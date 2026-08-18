@@ -86,10 +86,11 @@ The worker service will process files in the background. You'll see:
 
 ### File Size Limits
 
-Platform admins set the knowledge-file limit in **Admin > Storage**. Changes
-apply without restarting backend or worker. Operators keep a deployment safety
-ceiling for PostgreSQL rows or the optional object-store transport; Eneo uses
-the lower effective limit and shows which setting constrains it.
+Administrators with the Storage permission set the knowledge-file limit in
+**Admin > Storage**. Changes apply without restarting backend or worker.
+Operators keep a deployment safety ceiling for PostgreSQL rows or the optional
+object-store transport; Eneo uses the lower effective limit and shows which
+setting constrains it.
 
 See [Choose Content Storage](/guides/object-content-storage#admin-and-operator-responsibilities)
 for the exact responsibility split.

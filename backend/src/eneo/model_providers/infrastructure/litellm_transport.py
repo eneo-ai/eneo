@@ -81,6 +81,10 @@ def get_supported_openai_params(model: str) -> list[str] | None:
     )
 
 
+def get_model_info(model: str) -> dict[str, object]:
+    return cast(dict[str, object], getattr(litellm, "get_model_info")(model=model))
+
+
 async def acompletion(**kwargs: Any) -> Any:
     call = cast(Callable[..., Any], getattr(litellm, "acompletion"))
     return await call(**kwargs)

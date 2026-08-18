@@ -1191,6 +1191,111 @@ async def test_circuit_breaker_open_returns_generic_message_without_internal_det
     assert str(server.id) not in message
 
 
+def _make_files_loopback_server() -> MCPServer:
+    server_id = uuid4()
+    tool = MCPServerTool(
+        mcp_server_id=server_id,
+        name="read_file",
+        title="Read attached file",
+        description="Read the text content of an attached file.",
+        input_schema={"type": "object", "properties": {}},
+        is_enabled_by_default=True,
+    )
+    return MCPServer(
+        id=server_id,
+        tenant_id=uuid4(),
+        name="files",
+        http_url="http://localhost:8123/internal-mcp/files/mcp",
+        tools=[tool],
+    )
+
+
+class TestReferenceFallbackHint:
+    """A failed tool call that carried a signed attachment reference points the
+    model at the loopback read_file instead of inviting a retry loop. The hint
+    keys on the argument shape, not on which server failed, and only appears
+    when read_file is actually registered."""
+
+    def _reference_url(self) -> str:
+        from eneo.authentication.signed_urls import (
+            build_signed_original_download_url,
+        )
+
+        return build_signed_original_download_url(
+            file_id=uuid4(),
+            base_url="http://host.docker.internal:8123",
+            expires_in=3600,
+            tenant_id=uuid4(),
+        )
+
+    def _failing_client(self):
+        return SimpleNamespace(
+            call_tool=AsyncMock(
+                return_value={
+                    "content": [{"type": "text", "text": "could not fetch URL"}],
+                    "is_error": True,
+                }
+            )
+        )
+
+    async def test_error_result_names_read_file_when_a_reference_url_failed(self):
+        external = _make_server(name="tabular")
+        proxy = MCPProxySession([_make_files_loopback_server(), external])
+        proxy._clients[external.id] = self._failing_client()
+
+        result = await proxy.call_tool("tabular__tool", {"url": self._reference_url()})
+
+        assert result["is_error"] is True
+        texts = [block["text"] for block in result["content"]]
+        assert any("files__read_file" in text for text in texts)
+        assert any('"Read attached file"' in text for text in texts)
+
+    async def test_no_hint_for_non_reference_arguments(self):
+        external = _make_server(name="tabular")
+        proxy = MCPProxySession([_make_files_loopback_server(), external])
+        proxy._clients[external.id] = self._failing_client()
+
+        result = await proxy.call_tool(
+            "tabular__tool", {"url": "https://example.com/data.csv"}
+        )
+
+        texts = [block["text"] for block in result["content"]]
+        assert not any("files__read_file" in text for text in texts)
+
+    async def test_no_hint_when_read_file_is_not_registered(self):
+        external = _make_server(name="tabular")
+        proxy = MCPProxySession([external])
+        proxy._clients[external.id] = self._failing_client()
+
+        result = await proxy.call_tool("tabular__tool", {"url": self._reference_url()})
+
+        texts = [block["text"] for block in result["content"]]
+        assert not any("read_file" in text for text in texts)
+
+    async def test_unavailable_server_result_carries_the_hint(self):
+        external = _make_server(name="tabular")
+        proxy = MCPProxySession([_make_files_loopback_server(), external])
+        proxy._failed_server_ids.add(external.id)
+
+        result = await proxy.call_tool("tabular__tool", {"url": self._reference_url()})
+
+        message = result["content"][0]["text"]
+        assert "temporarily unavailable" in message.lower()
+        assert "files__read_file" in message
+
+    async def test_read_file_failure_does_not_hint_at_itself(self):
+        files_server = _make_files_loopback_server()
+        proxy = MCPProxySession([files_server])
+        proxy._clients[files_server.id] = self._failing_client()
+
+        result = await proxy.call_tool(
+            "files__read_file", {"url": self._reference_url()}
+        )
+
+        texts = [block["text"] for block in result["content"]]
+        assert not any("still readable" in text for text in texts)
+
+
 class TestTruncateToolResult:
     """Oversized tool results are trimmed to the budget, never failed."""
 

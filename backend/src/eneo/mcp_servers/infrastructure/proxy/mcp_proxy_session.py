@@ -16,6 +16,8 @@ from types import TracebackType
 from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
+from eneo.authentication.signed_urls import looks_like_reference_url
+from eneo.internal_mcp.constants import FILES_SERVER_NAME
 from eneo.main.config import get_settings
 from eneo.main.logging import get_logger
 from eneo.mcp_servers.domain.entities.mcp_server import MCPServer, MCPServerTool
@@ -904,6 +906,63 @@ class MCPProxySession:
                 f"Could not establish an MCP session for '{server.name}'"
             )
 
+    def _files_read_file_entry(self) -> tuple[str, str | None] | None:
+        """Prefixed name + title of the loopback read_file, when registered.
+
+        Scanned on demand rather than cached: the registry is small and is
+        cleared and rebuilt by the live-refresh path, so stored state could go
+        stale.
+        """
+        for prefixed_name, (server, name, title) in self._tool_registry.items():
+            if server.name == FILES_SERVER_NAME and name == "read_file":
+                return prefixed_name, title
+        return None
+
+    def _reference_fallback_hint(
+        self, failing_tool_name: str, arguments: dict[str, Any]
+    ) -> str:
+        """Pointer to the built-in reader for a failed reference-URL call.
+
+        Keys on the argument shape (a signed attachment reference URL), not on
+        which server failed: any tool call that carried a reference url can be
+        retried against the loopback read_file, which registers exactly when
+        reference entries render in the prompt. Empty when no argument is a
+        reference, read_file is not registered, or read_file itself failed.
+        """
+        if not any(
+            isinstance(value, str) and looks_like_reference_url(value)
+            for value in arguments.values()
+        ):
+            return ""
+        entry = self._files_read_file_entry()
+        if entry is None:
+            return ""
+        prefixed_name, title = entry
+        if prefixed_name == failing_tool_name:
+            return ""
+        display = f' ("{title}")' if title else ""
+        return (
+            "The attached file itself is still readable: pass the same url "
+            f"to the {prefixed_name}{display} tool."
+        )
+
+    def _unavailable_result(
+        self, tool_name: str, arguments: dict[str, Any]
+    ) -> dict[str, Any]:
+        """Error result for a tool whose server cannot be called right now."""
+        text = (
+            "External tool service temporarily unavailable. If another "
+            "available tool can do the job, use it instead of retrying this "
+            "one."
+        )
+        hint = self._reference_fallback_hint(tool_name, arguments)
+        if hint:
+            text = f"{text} {hint}"
+        return {
+            "content": [{"type": "text", "text": text}],
+            "is_error": True,
+        }
+
     async def call_tool(
         self,
         tool_name: str,
@@ -937,26 +996,10 @@ class MCPProxySession:
         logger.debug(f"[MCPProxy] Calling {original_tool_name} on '{server.name}'")
 
         if await self._is_circuit_open(server.id):
-            return {
-                "content": [
-                    {
-                        "type": "text",
-                        "text": "External tool service temporarily unavailable. Please retry later.",
-                    }
-                ],
-                "is_error": True,
-            }
+            return self._unavailable_result(tool_name, arguments)
 
         if server.id in self._failed_server_ids:
-            return {
-                "content": [
-                    {
-                        "type": "text",
-                        "text": "External tool service temporarily unavailable. Please retry later.",
-                    }
-                ],
-                "is_error": True,
-            }
+            return self._unavailable_result(tool_name, arguments)
 
         # Use cached client only. Connecting here is unsafe: this method runs
         # under asyncio.gather (see call_tools_parallel), which dispatches each
@@ -971,15 +1014,7 @@ class MCPProxySession:
                 server.name,
             )
             self._mark_server_failed(server.id)
-            return {
-                "content": [
-                    {
-                        "type": "text",
-                        "text": "External tool service temporarily unavailable. Please retry later.",
-                    }
-                ],
-                "is_error": True,
-            }
+            return self._unavailable_result(tool_name, arguments)
 
         try:
             # Execute tool with timing
@@ -996,7 +1031,17 @@ class MCPProxySession:
                 await self._record_failure(server.id)
             else:
                 await self._record_success(server.id)
-            return self._truncate_tool_result(result)
+            result = self._truncate_tool_result(result)
+            if is_error:
+                # A tool that failed on a reference URL should not be retried
+                # into a loop; appended after truncation so the pointer to the
+                # built-in reader survives it.
+                hint = self._reference_fallback_hint(tool_name, arguments)
+                if hint:
+                    blocks: list[Any] = list(result.get("content") or [])
+                    blocks.append({"type": "text", "text": hint})
+                    result = {**result, "content": blocks}
+            return result
         except MCPClientError:
             self._mark_server_failed(server.id)
             await self._record_failure(server.id)

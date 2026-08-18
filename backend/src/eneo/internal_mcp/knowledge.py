@@ -19,6 +19,7 @@ from mcp.server.fastmcp import Context, FastMCP
 from mcp.types import EmbeddedResource, TextContent, TextResourceContents
 from pydantic import AnyUrl
 
+from eneo.info_blobs.info_blob_chunk_repo import InfoBlobChunkExcerpt
 from eneo.info_blobs.info_blob_repo import InfoBlobListing
 from eneo.internal_mcp.constants import KNOWLEDGE_SERVER_NAME
 from eneo.internal_mcp.foundation import (
@@ -112,6 +113,17 @@ class KnowledgeScope(NamedTuple):
     info_blob_ids: list[UUID]
     source_id: UUID | None = None
     name: str = ""
+
+
+class _SearchResultChunk(NamedTuple):
+    """A semantic anchor or an unscored contextual neighbor."""
+
+    info_blob_id: UUID
+    chunk_no: int
+    text: str
+    info_blob_title: str | None
+    score: float | None
+    context_for_chunk: int | None
 
 
 class _ScopeNotResolved(Exception):
@@ -288,6 +300,52 @@ def _diversify(chunks, per_doc: int, cap: int):
             if round_no < len(doc_chunks):
                 selected.append(doc_chunks[round_no])
     return selected
+
+
+def _merge_adjacent_chunks(
+    anchors: Sequence[Any], neighbors: Sequence[InfoBlobChunkExcerpt]
+) -> list[_SearchResultChunk]:
+    """Combine ranked anchors with context around the best one, without duplicates."""
+    if not anchors:
+        return []
+
+    best_anchor = anchors[0]
+    merged: list[_SearchResultChunk] = []
+    seen: set[tuple[UUID, int]] = set()
+    for anchor in anchors:
+        key = (anchor.info_blob_id, anchor.chunk_no)
+        if key in seen:
+            continue
+        seen.add(key)
+        merged.append(
+            _SearchResultChunk(
+                info_blob_id=anchor.info_blob_id,
+                chunk_no=anchor.chunk_no,
+                text=anchor.text,
+                info_blob_title=anchor.info_blob_title,
+                score=anchor.score,
+                context_for_chunk=None,
+            )
+        )
+
+    for neighbor in neighbors:
+        if neighbor.info_blob_id != best_anchor.info_blob_id:
+            continue
+        key = (neighbor.info_blob_id, neighbor.chunk_no)
+        if key in seen:
+            continue
+        seen.add(key)
+        merged.append(
+            _SearchResultChunk(
+                info_blob_id=neighbor.info_blob_id,
+                chunk_no=neighbor.chunk_no,
+                text=neighbor.text,
+                info_blob_title=best_anchor.info_blob_title,
+                score=None,
+                context_for_chunk=best_anchor.chunk_no,
+            )
+        )
+    return merged
 
 
 def _document_page_content(
@@ -472,13 +530,20 @@ def _search_result_content(query: str, chunks) -> list[TextContent | EmbeddedRes
         )
     ]
     for chunk in chunks:
+        meta = {}
+        score = getattr(chunk, "score", None)
+        context_for_chunk = getattr(chunk, "context_for_chunk", None)
+        if score is not None:
+            meta["score"] = score
+        if context_for_chunk is not None:
+            meta["context_for_chunk"] = context_for_chunk
         content.append(
             _chunk_resource(
                 info_blob_id=chunk.info_blob_id,
                 chunk_no=chunk.chunk_no,
                 title=chunk.info_blob_title or "Untitled source",
                 text=chunk.text,
-                meta={"score": chunk.score},
+                meta=meta,
             )
         )
     return content
@@ -644,7 +709,7 @@ async def search_knowledge(
             )
             return [TextContent(type="text", text=unresolved.message)]
 
-        chunks = await container.datastore().semantic_search(
+        semantic_chunks = await container.datastore().semantic_search(
             query,
             embedding_model=embedding_model,
             collections=scope.collections,
@@ -655,24 +720,37 @@ async def search_knowledge(
             autocut_cutoff=autocut_cutoff,
         )
 
-    fetched = len(chunks)
-    if mode == "overview" and not scope.info_blob_ids:
-        chunks = _diversify(chunks, per_doc=OVERVIEW_CHUNKS_PER_DOC, cap=cap)
-    else:
-        chunks = chunks[:cap]
-    top_score = f"{chunks[0].score:.3f}" if chunks else "n/a"
+        fetched = len(semantic_chunks)
+        if mode == "overview" and not scope.info_blob_ids:
+            chunks = _diversify(
+                semantic_chunks, per_doc=OVERVIEW_CHUNKS_PER_DOC, cap=cap
+            )
+        else:
+            chunks = semantic_chunks[:cap]
+
+        semantic_anchor_count = len(chunks)
+        top_score = f"{chunks[0].score:.3f}" if chunks else "n/a"
+        if mode == "specific" and chunks:
+            best_anchor = chunks[0]
+            neighbors = await container.info_blob_chunk_repo().get_adjacent_chunks(
+                info_blob_id=best_anchor.info_blob_id,
+                chunk_no=best_anchor.chunk_no,
+            )
+            chunks = _merge_adjacent_chunks(chunks, neighbors)
+
     if scope.info_blob_ids:
         # Within one document the model is reading, not ranking: reading order
         # carries more meaning than relevance order.
         chunks = sorted(chunks, key=lambda chunk: chunk.chunk_no)
     logger.info(
         "[RAG] search_knowledge assistant=%s mode=%s scope=%s fetch=%d fetched=%d "
-        "returned=%d top_score=%s",
+        "semantic_anchors=%d returned=%d top_score=%s",
         assistant_id,
         mode,
         scope.label,
         fetch,
         fetched,
+        semantic_anchor_count,
         len(chunks),
         top_score,
     )

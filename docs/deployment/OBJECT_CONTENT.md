@@ -32,14 +32,18 @@ state, audit, and reconciliation facts. The chosen byte backend owns only the
 payload. Selection is explicit when content is created and never changes
 silently after a failure.
 
-| Owner          | Responsibility                                                                                                                        |
-| -------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
-| Administrator  | Connect an S3-compatible destination, change or roll back that destination, rotate its access keys, and set the new-write target and business upload limits in **Admin > Storage** |
-| Operator       | Run PostgreSQL and any optional compatible endpoint; own TLS, certificates, capacity, backups, network reachability, and process safety tuning |
+| Owner         | Responsibility                                                                                                                                                                     |
+| ------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Administrator | Connect an S3-compatible destination, change or roll back that destination, rotate its access keys, and set the new-write target and business upload limits in **Admin > Storage** |
+| Operator      | Run PostgreSQL and any optional compatible endpoint; own TLS, certificates, capacity, backups, network reachability, and process safety tuning                                     |
 
 Storage administration uses the same administrator authority as API keys and
 models. Deployment-wide content inventory spans tenants, so it is part of that
-same administrative view.
+same administrative view. **Admin > Storage** leads with the active target,
+object-store health, recorded file-content distribution, and migration state.
+Changing the target, editing upload limits, and moving existing content remain
+separate actions; detailed limits and PostgreSQL allocation stay available in
+expandable technical details.
 
 Persisted business limits accept whole-byte values from 1 through
 9,007,199,254,740,991 so PostgreSQL and browser clients can round-trip the same
@@ -564,6 +568,18 @@ whole-object chunk retain their previous full-verification cost. The chunk size
 is captured per object, so later multipart tuning cannot invalidate existing
 content. A range proves the chunks it covers; a full read still checks the
 canonical full-object SHA-256 and can detect corruption elsewhere.
+
+**Admin > Storage** reports two related measurements, not remaining capacity.
+The file-content total is the sum of Eneo's recorded content sizes, excluding
+content whose deletion has completed (`tombstoned`). Its PostgreSQL and
+object-storage figures are parts of that total. **PostgreSQL on disk** comes
+from PostgreSQL's catalog and covers the whole database, including inline file
+content, searchable knowledge text and pgvector embeddings, tables, indexes,
+and internal storage. It is therefore larger than the PostgreSQL file-content
+figure and must not be added to the file-content total. The object-storage
+figure is Eneo's recorded content
+size, not provider-reported bucket usage, free capacity, version history, or
+billing size. Use provider and host monitoring for those operational measures.
 
 For PostgreSQL-inline content, monitor database size, WAL generation, backup
 duration, connection-pool pressure, and the documented inline admission

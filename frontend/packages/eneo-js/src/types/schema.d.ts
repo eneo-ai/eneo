@@ -8813,26 +8813,6 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
-  "/api/v1/sysadmin/users/{user_id}/platform-admin": {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    get?: never;
-    /**
-     * Set Platform Admin
-     * @description Grant or revoke session-backed platform-administrator authority for a user. Granting requires an active tenant administrator; revoking does not.
-     */
-    put: operations["set_platform_admin_api_v1_sysadmin_users__user_id__platform_admin_put"];
-    post?: never;
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
   "/api/v1/templates/": {
     parameters: {
       query?: never;
@@ -13175,6 +13155,11 @@ export interface components {
      */
     ContentMoveState: "pending" | "target_verified" | "failed";
     /**
+     * ContentOwner
+     * @enum {string}
+     */
+    ContentOwner: "file_content" | "icon" | "knowledge_file" | "other";
+    /**
      * ContentState
      * @enum {string}
      */
@@ -14128,6 +14113,8 @@ export interface components {
       /** Default Disabled Mcp Server Ids */
       default_disabled_mcp_server_ids?: string[];
       default_model: components["schemas"]["CompletionModelSparse"] | null;
+      /** Default Reasoning Effort */
+      default_reasoning_effort: string | null;
       locked_model: components["schemas"]["CompletionModelSparse"] | null;
       /** Mcp Enforced */
       mcp_enforced: boolean;
@@ -14135,6 +14122,8 @@ export interface components {
       models_enforced: boolean;
       /** Prompt Locked */
       prompt_locked: boolean;
+      /** Reasoning Effort User Configurable */
+      reasoning_effort_user_configurable: boolean;
     };
     /** EmbeddingModelCreate */
     EmbeddingModelCreate: {
@@ -22854,6 +22843,7 @@ export interface components {
       mcp_restriction: components["schemas"]["McpRestrictionPublic"];
       models_restriction: components["schemas"]["ModelsRestrictionPublic"];
       prompt_enforcement: components["schemas"]["PromptEnforcementPublic"];
+      reasoning_policy: components["schemas"]["ReasoningPolicyPublic"];
       skills: components["schemas"]["SkillsPolicyPublic"];
       /** Updated At */
       updated_at: string | null;
@@ -22865,6 +22855,7 @@ export interface components {
       mcp_restriction?: components["schemas"]["McpRestrictionInput"] | null;
       models_restriction?: components["schemas"]["ModelsRestrictionInput"] | null;
       prompt_enforcement?: components["schemas"]["PromptEnforcementInput"] | null;
+      reasoning_policy?: components["schemas"]["ReasoningPolicyInput"] | null;
       skills?: components["schemas"]["SkillsPolicyInput"] | null;
     };
     /** GraphEdge */
@@ -23804,6 +23795,7 @@ export interface components {
       count: number;
       /** Oldest Created At */
       oldest_created_at: string | null;
+      owner: components["schemas"]["ContentOwner"];
       state: components["schemas"]["ContentState"];
       target: components["schemas"]["StorageKind"];
     };
@@ -25162,6 +25154,7 @@ export interface components {
     ObjectContentInventoryPublic: {
       /** Inventory */
       inventory: components["schemas"]["InventoryPublic"][];
+      postgresql_allocation: components["schemas"]["PostgresqlAllocationPublic"] | null;
     };
     /** ObjectContentMovesPublic */
     ObjectContentMovesPublic: {
@@ -26781,21 +26774,6 @@ export interface components {
      * @enum {string}
      */
     PlanStatus: "proposed" | "approved" | "applied" | "superseded";
-    /** PlatformAdminGrantRequest */
-    PlatformAdminGrantRequest: {
-      /** Enabled */
-      enabled: boolean;
-    };
-    /** PlatformAdminGrantResponse */
-    PlatformAdminGrantResponse: {
-      /** Is Platform Admin */
-      is_platform_admin: boolean;
-      /**
-       * User Id
-       * Format: uuid
-       */
-      user_id: string;
-    };
     /**
      * PolicyActor
      * @enum {string}
@@ -26846,6 +26824,17 @@ export interface components {
        * Format: uuid
        */
       mcp_server_id: string;
+    };
+    /** PostgresqlAllocationPublic */
+    PostgresqlAllocationPublic: {
+      /** Inline Content Bytes */
+      inline_content_bytes: number;
+      /** Other Bytes */
+      other_bytes: number;
+      /** Searchable Knowledge Bytes */
+      searchable_knowledge_bytes: number;
+      /** Total Bytes */
+      total_bytes: number;
     };
     /**
      * PreflightRequest
@@ -27526,6 +27515,25 @@ export interface components {
        * Format: uuid
        */
       session_id: string;
+    };
+    /** ReasoningPolicyInput */
+    ReasoningPolicyInput: {
+      /**
+       * Allow User Override
+       * @default false
+       */
+      allow_user_override?: boolean;
+      /** Default Effort */
+      default_effort?: string | null;
+    };
+    /** ReasoningPolicyPublic */
+    ReasoningPolicyPublic: {
+      /** Allow User Override */
+      allow_user_override: boolean;
+      /** Configured */
+      configured: boolean;
+      /** Default Effort */
+      default_effort: string | null;
     };
     /** RequirementsConfirmationMetadata */
     RequirementsConfirmationMetadata: {
@@ -32017,11 +32025,6 @@ export interface components {
        * @default true
        */
       is_active?: boolean;
-      /**
-       * Is Platform Admin
-       * @default false
-       */
-      is_platform_admin?: boolean;
       /** Modules */
       readonly modules: string[];
       /** Password */
@@ -32196,11 +32199,6 @@ export interface components {
        * @default true
        */
       is_active?: boolean;
-      /**
-       * Is Platform Admin
-       * @default false
-       */
-      is_platform_admin?: boolean;
       /** Modules */
       readonly modules: string[];
       /** Password */
@@ -32309,11 +32307,6 @@ export interface components {
        * Format: uuid
        */
       id: string;
-      /**
-       * Is Platform Admin
-       * @default false
-       */
-      is_platform_admin?: boolean;
       /** Quota Limit */
       quota_limit?: number | null;
       /**
@@ -64333,68 +64326,6 @@ export interface operations {
       };
       /** @description Not Found */
       404: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["GeneralError"];
-        };
-      };
-      /** @description Validation Error */
-      422: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["GeneralError"];
-        };
-      };
-    };
-  };
-  set_platform_admin_api_v1_sysadmin_users__user_id__platform_admin_put: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path: {
-        user_id: string;
-      };
-      cookie?: never;
-    };
-    requestBody: {
-      content: {
-        "application/json": components["schemas"]["PlatformAdminGrantRequest"];
-      };
-    };
-    responses: {
-      /** @description Successful Response */
-      200: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["PlatformAdminGrantResponse"];
-        };
-      };
-      /** @description Unauthorized */
-      401: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["GeneralError"];
-        };
-      };
-      /** @description Not Found */
-      404: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["GeneralError"];
-        };
-      };
-      /** @description Conflict */
-      409: {
         headers: {
           [name: string]: unknown;
         };

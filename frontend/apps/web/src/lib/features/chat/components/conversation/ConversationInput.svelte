@@ -9,6 +9,7 @@
   import { initMentionInput } from "../mentions/MentionInput";
   import MentionButton from "../mentions/MentionButton.svelte";
   import ChatModelSelect from "../switcher/ChatModelSelect.svelte";
+  import ChatReasoningSelect from "../switcher/ChatReasoningSelect.svelte";
   import ChatKnowledge from "./ChatKnowledge.svelte";
   import ChatMcpServers from "./ChatMcpServers.svelte";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
@@ -504,6 +505,7 @@
     <div class="flex items-center gap-2">
       {#if showModelSelect}
         <ChatModelSelect />
+        <ChatReasoningSelect />
       {/if}
 
       <PromptInput.Submit disabled={isAskingDisabled} name="ask" />

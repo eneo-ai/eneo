@@ -7,6 +7,116 @@ vi.mock("$app/navigation", () => ({
 }));
 
 describe("PolicyDraft", () => {
+  it("submits only the reasoning facet when its default changes", async () => {
+    const update = vi.fn(async () => {});
+    const draft = new PolicyDraft();
+    draft.sync({
+      eneo: { governancePolicy: { update } } as never,
+      policy: {
+        models_restriction: { enabled: false, models: [], provider_ids: [] },
+        mcp_restriction: { enabled: false, servers: [], disabled_tool_ids: [] },
+        prompt_enforcement: { enabled: false, prompt_library_id: null },
+        reasoning_policy: { configured: false, default_effort: null, allow_user_override: false },
+        skills: { bindings: [] }
+      },
+      models: {
+        completionModels: [
+          {
+            id: "reasoning-model",
+            name: "Reasoning model",
+            can_access: true,
+            supported_model_kwargs: {
+              reasoning_effort: {
+                supported: true,
+                control: "select",
+                options: ["low", "medium", "high", "xhigh"]
+              }
+            }
+          },
+          {
+            id: "inaccessible-reasoning-model",
+            name: "Inaccessible reasoning model",
+            can_access: false,
+            supported_model_kwargs: {
+              reasoning_effort: {
+                supported: true,
+                control: "select",
+                options: ["max"]
+              }
+            }
+          }
+        ]
+      },
+      modelProviders: [],
+      mcpSettings: { items: [] },
+      promptLibrary: { items: [] },
+      skills: emptySkillBindingCatalogPage(),
+      skillRuntimePolicy: { selective_activation_enabled: true }
+    });
+
+    draft.defaultReasoningEffort = "high";
+    draft.allowUserReasoningEffort = true;
+    expect(draft.reasoningOptions).toEqual(["low", "medium", "high", "xhigh"]);
+    draft.save();
+
+    await vi.waitFor(() => expect(update).toHaveBeenCalledOnce());
+    expect(update).toHaveBeenCalledWith({
+      reasoning_policy: {
+        default_effort: "high",
+        allow_user_override: true
+      }
+    });
+  });
+
+  it("activates an explicit provider-default policy without changing its values", async () => {
+    const update = vi.fn(async () => {});
+    const draft = new PolicyDraft();
+    draft.sync({
+      eneo: { governancePolicy: { update } } as never,
+      policy: {
+        models_restriction: { enabled: false, models: [], provider_ids: [] },
+        mcp_restriction: { enabled: false, servers: [], disabled_tool_ids: [] },
+        prompt_enforcement: { enabled: false, prompt_library_id: null },
+        reasoning_policy: { configured: false, default_effort: null, allow_user_override: false },
+        skills: { bindings: [] }
+      },
+      models: {
+        completionModels: [
+          {
+            id: "reasoning-model",
+            name: "Reasoning model",
+            can_access: true,
+            supported_model_kwargs: {
+              reasoning_effort: {
+                supported: true,
+                control: "select",
+                options: ["low", "medium", "high"]
+              }
+            }
+          }
+        ]
+      },
+      modelProviders: [],
+      mcpSettings: { items: [] },
+      promptLibrary: { items: [] },
+      skills: emptySkillBindingCatalogPage(),
+      skillRuntimePolicy: { selective_activation_enabled: true }
+    });
+
+    expect(draft.dirty).toBe(false);
+    draft.activateReasoningPolicy();
+    expect(draft.dirty).toBe(true);
+    draft.save();
+
+    await vi.waitFor(() => expect(update).toHaveBeenCalledOnce());
+    expect(update).toHaveBeenCalledWith({
+      reasoning_policy: {
+        default_effort: null,
+        allow_user_override: false
+      }
+    });
+  });
+
   it("does not submit hidden MCP grants when only the prompt changes", async () => {
     const update = vi.fn(async () => {});
     const draft = new PolicyDraft();

@@ -2,10 +2,12 @@
   import { createEventDispatcher } from "svelte";
   import { IconQuestionMark } from "@eneo/icons/question-mark";
   import { Input, Tooltip } from "@eneo/ui";
+  import * as Select from "$lib/components/ui/select/index.js";
   import type { ModelKwargs } from "@eneo/eneo-js";
   import { m } from "$lib/paraglide/messages";
   import {
     getModelKwargCapability,
+    getModelKwargOptionLabel,
     getModelSpecificKwargNames,
     type CompletionModelWithSupportedKwargs,
     type ModelKwargName
@@ -169,21 +171,6 @@
         return "";
     }
   }
-
-  function getOptionLabel(option: string) {
-    switch (option) {
-      case "none":
-        return m.none();
-      case "low":
-        return m.parameter_option_low();
-      case "medium":
-        return m.parameter_option_medium();
-      case "high":
-        return m.parameter_option_high();
-      default:
-        return option;
-    }
-  }
 </script>
 
 {#each modelSpecificKwargNames as kwargName (kwargName)}
@@ -204,17 +191,27 @@
     </div>
 
     {#if isSelectKwargName(kwargName)}
-      <select
-        id={`model-setting-${kwargName}`}
-        value={selectValues[kwargName] ?? ""}
-        on:change={(event) => setSelectKwarg(kwargName, event.currentTarget.value)}
-        class="border-default bg-primary ring-default rounded border px-3 py-2 focus:ring-2"
+      <Select.Root
+        type="single"
+        value={selectValues[kwargName] || "default"}
+        onValueChange={(value) => setSelectKwarg(kwargName, value === "default" ? "" : value)}
       >
-        <option value="">{m.default_behavior()}</option>
-        {#each getSelectOptions(kwargName) as option (option)}
-          <option value={option}>{getOptionLabel(option)}</option>
-        {/each}
-      </select>
+        <Select.Trigger class="w-48" aria-label={getKwargLabel(kwargName)}>
+          {selectValues[kwargName]
+            ? getModelKwargOptionLabel(selectValues[kwargName] ?? "")
+            : m.default_behavior()}
+        </Select.Trigger>
+        <Select.Content>
+          <Select.Item value="default" label={m.default_behavior()}>
+            {m.default_behavior()}
+          </Select.Item>
+          {#each getSelectOptions(kwargName) as option (option)}
+            <Select.Item value={option} label={getModelKwargOptionLabel(option)}>
+              {getModelKwargOptionLabel(option)}
+            </Select.Item>
+          {/each}
+        </Select.Content>
+      </Select.Root>
     {:else if isNumericKwargName(kwargName)}
       <div class="flex flex-1 items-center justify-end gap-4">
         <label class="flex items-center gap-2 text-sm whitespace-nowrap">

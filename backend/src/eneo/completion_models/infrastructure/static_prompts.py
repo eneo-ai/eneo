@@ -31,6 +31,23 @@ TOOL_NAMING_INSTRUCTION = (
     "of identifiers. Show a raw identifier only when the user asks for it."
 )
 
+# Appended to the system prompt when attached-file reference entries render in
+# the conversation and tools are advertised. States the arbitration rule once
+# per request; the per-message reference preamble
+# (build_file_references_string) carries only mechanics, so multi-turn
+# histories do not repeat this text.
+ATTACHED_FILE_REFERENCES_INSTRUCTION = (
+    'Some messages list attached files as JSON entries whose "url" is a '
+    "signed attachment reference, not a web link. Pass the url, exactly as "
+    "written, to a tool that accepts a URL input. The url's host carries no "
+    "meaning: never judge from the url whether a file is readable, and never "
+    "ask the user to re-upload a file listed in a reference entry. Prefer a "
+    "tool suited to the file and the task; when no more specific tool fits or "
+    'a chosen tool fails, the read_file ("Read attached file") tool, when '
+    "available, accepts every reference url. Use it rather than telling the "
+    "user a file cannot be read."
+)
+
 SHOW_REFERENCES_PROMPT = """Use the provided sources delimited by triple quotes to answer questions.
 Only use the sources to answer questions. You MUST reference every source you use by adding an inline XML self-closing tag immediately after the information: <inref id="<source_id>"/>
 

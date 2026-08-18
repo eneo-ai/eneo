@@ -135,6 +135,10 @@ class AssistantAssembler:
                 effective_config.default_disabled_mcp_server_ids
             ),
             prompt_locked=effective_config.prompt_enforced,
+            default_reasoning_effort=effective_config.default_reasoning_effort,
+            reasoning_effort_user_configurable=(
+                effective_config.reasoning_effort_user_configurable
+            ),
         )
 
     def from_assistant_to_model(

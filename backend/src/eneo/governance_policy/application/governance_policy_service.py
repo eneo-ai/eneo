@@ -15,6 +15,7 @@ from eneo.governance_policy.domain.governance_policy import (
 from eneo.governance_policy.domain.governance_policy_repo import (
     GovernancePolicyRepo,
 )
+from eneo.governance_policy.domain.policy_resolver import resolve_personal_default
 from eneo.main.exceptions import BadRequestException, NotFoundException
 from eneo.roles.permissions import Permission, validate_permission
 from eneo.skills.domain.skill import SkillBindingIntent
@@ -113,6 +114,7 @@ class GovernancePolicyService:
         ) = None,
         mcp_restriction: (tuple[bool, list[PolicyMcpServer], list[UUID]] | None) = None,
         prompt_enforcement: tuple[bool, UUID | None] | None = None,
+        reasoning_policy: tuple[str | None, bool] | None = None,
         skill_intents: list[SkillBindingIntent] | None = None,
     ) -> GovernancePolicy:
         policy = await self.get_policy_for_update()
@@ -143,6 +145,21 @@ class GovernancePolicyService:
             if enabled and prompt_id is not None:
                 await self._validate_prompt_belongs_to_tenant(prompt_id)
             policy.set_prompt_enforcement(enabled=enabled, prompt_library_id=prompt_id)
+
+        if reasoning_policy is not None:
+            default_effort, allow_user_override = reasoning_policy
+            policy.set_reasoning_policy(
+                default_effort=default_effort,
+                allow_user_override=allow_user_override,
+            )
+
+        if (
+            models_restriction is not None or reasoning_policy is not None
+        ) and policy.default_reasoning_effort is not None:
+            await self._validate_reasoning_effort(
+                policy.default_reasoning_effort,
+                policy=policy,
+            )
 
         saved = await self.repo.save(policy, updated_by_user_id=self.user.id)
 
@@ -182,6 +199,34 @@ class GovernancePolicyService:
                     f"Completion model {m.completion_model_id} is not "
                     "accessible to this tenant"
                 )
+
+    async def _validate_reasoning_effort(
+        self,
+        effort: str,
+        *,
+        policy: GovernancePolicy,
+    ) -> None:
+        tenant_models = (
+            await self.completion_model_crud_service.get_available_completion_models()
+        )
+        effective_config = resolve_personal_default(
+            policy=policy,
+            tenant_completion_models=tenant_models,
+            tenant_mcp_servers=[],
+            library_prompt_text=None,
+        )
+        allowed_models = (
+            effective_config.available_models
+            if effective_config.models_enforced
+            else tenant_models
+        )
+        if not any(
+            model.get_supported_model_kwargs().reasoning_effort.accepts(effort)
+            for model in allowed_models
+        ):
+            raise BadRequestException(
+                "Default reasoning effort is not supported by an allowed model"
+            )
 
     async def _validate_mcp_servers_and_tools(
         self, servers: list[PolicyMcpServer], disabled_tool_ids: list[UUID]

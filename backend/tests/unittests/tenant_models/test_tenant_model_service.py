@@ -17,13 +17,12 @@ from eneo.completion_models.presentation.tenant_completion_models_router import 
 )
 from eneo.tenant_models.application.tenant_model_service import (
     TenantCompletionModelService,
+    _snapshot_completion_capabilities,
 )
 
 
 @pytest.mark.asyncio
-async def test_completion_model_route_changes_clear_capabilities_without_lookup() -> (
-    None
-):
+async def test_completion_model_route_changes_refresh_discovered_capabilities() -> None:
     tenant_id = uuid4()
     provider_id = uuid4()
     model = SimpleNamespace(
@@ -42,6 +41,10 @@ async def test_completion_model_route_changes_clear_capabilities_without_lookup(
     session.flush = AsyncMock()
     user = MagicMock(tenant_id=tenant_id)
     loaded = SimpleNamespace(id=model.id, name="new-model")
+    discovered = {
+        "temperature": {"supported": True},
+        "_evidence": "provider_discovered",
+    }
 
     with (
         patch(
@@ -50,6 +53,11 @@ async def test_completion_model_route_changes_clear_capabilities_without_lookup(
         patch(
             "eneo.tenant_models.application.tenant_model_service.CompletionModelRepository"
         ) as completion_repository_type,
+        patch(
+            "eneo.tenant_models.application.tenant_model_service."
+            "_snapshot_completion_capabilities",
+            return_value=discovered,
+        ) as snapshot_capabilities,
     ):
         provider_repository_type.return_value.get_by_id = AsyncMock(
             return_value=SimpleNamespace(provider_type="azure")
@@ -65,11 +73,12 @@ async def test_completion_model_route_changes_clear_capabilities_without_lookup(
             result_model = await service.update(model.id, payload)
 
             assert result_model is loaded
-            assert model.model_kwargs_capabilities is None
+            assert model.model_kwargs_capabilities == discovered
 
     assert model.name == "new-model"
     assert model.reasoning is True
-    provider_repository_type.assert_not_called()
+    assert provider_repository_type.return_value.get_by_id.await_count == 2
+    assert snapshot_capabilities.call_count == 2
     assert session.flush.await_count == 2
 
 
@@ -126,11 +135,14 @@ async def test_strict_tool_schema_declaration_follows_the_model_route(
     with (
         patch(
             "eneo.tenant_models.application.tenant_model_service.ModelProviderRepository"
-        ),
+        ) as provider_repository_type,
         patch(
             "eneo.tenant_models.application.tenant_model_service.CompletionModelRepository"
         ) as completion_repository_type,
     ):
+        provider_repository_type.return_value.get_by_id = AsyncMock(
+            return_value=SimpleNamespace(provider_type="openai")
+        )
         completion_repository_type.return_value.one = AsyncMock(
             return_value=SimpleNamespace(id=model.id, name=model.name)
         )
@@ -315,12 +327,18 @@ async def test_completion_model_create_tags_explicit_admin_capabilities() -> Non
 
 
 @pytest.mark.asyncio
-async def test_completion_model_create_without_capabilities_persists_none() -> None:
+async def test_completion_model_create_without_capabilities_persists_discovery() -> (
+    None
+):
     tenant_id = uuid4()
     provider_id = uuid4()
     session = MagicMock()
     session.flush = AsyncMock()
     loaded = SimpleNamespace(id=uuid4(), name="model")
+    discovered = {
+        "temperature": {"supported": True},
+        "_evidence": "provider_discovered",
+    }
 
     with (
         patch(
@@ -338,6 +356,11 @@ async def test_completion_model_create_without_capabilities_persists_none() -> N
         patch(
             "eneo.tenant_models.application.tenant_model_service.CompletionModelRepository"
         ) as completion_repository_type,
+        patch(
+            "eneo.tenant_models.application.tenant_model_service."
+            "_snapshot_completion_capabilities",
+            return_value=discovered,
+        ),
     ):
         completion_repository_type.return_value.one = AsyncMock(return_value=loaded)
         service = TenantCompletionModelService(
@@ -356,5 +379,62 @@ async def test_completion_model_create_without_capabilities_persists_none() -> N
         )
 
     assert result_model is loaded
-    assert session.add.call_args.args[0].model_kwargs_capabilities is None
+    assert session.add.call_args.args[0].model_kwargs_capabilities == discovered
     session.flush.assert_awaited_once_with()
+
+
+@pytest.mark.parametrize("discovery", [None, RuntimeError("metadata unavailable")])
+def test_incomplete_capability_discovery_persists_no_trusted_snapshot(
+    discovery: None | Exception,
+) -> None:
+    with patch(
+        "eneo.tenant_models.application.tenant_model_service."
+        "get_supported_openai_params",
+        side_effect=discovery if isinstance(discovery, Exception) else None,
+        return_value=discovery,
+    ):
+        assert _snapshot_completion_capabilities("openai", "model") is None
+
+
+def test_declared_reasoning_does_not_widen_provider_discovery() -> None:
+    with patch(
+        "eneo.tenant_models.application.tenant_model_service."
+        "get_supported_openai_params",
+        return_value=[],
+    ):
+        persisted = _snapshot_completion_capabilities("openai", "reasoning-model")
+
+    assert persisted is not None
+    assert persisted["_evidence"] == "provider_discovered"
+    assert (
+        resolve_supported_model_kwargs(
+            model_kwargs_capabilities=persisted,
+            reasoning=True,
+        ).reasoning_effort.supported
+        is False
+    )
+
+
+def test_missing_reasoning_metadata_persists_no_reasoning_control() -> None:
+    with (
+        patch(
+            "eneo.tenant_models.application.tenant_model_service."
+            "get_supported_openai_params",
+            return_value=["reasoning_effort"],
+        ),
+        patch(
+            "eneo.tenant_models.application.tenant_model_service.get_model_info",
+            side_effect=RuntimeError("value metadata unavailable"),
+        ),
+    ):
+        persisted = _snapshot_completion_capabilities("openai", "reasoning-model")
+
+    assert persisted is not None
+    assert persisted["_evidence"] == "provider_discovered"
+    assert (
+        resolve_supported_model_kwargs(
+            model_kwargs_capabilities=persisted,
+            reasoning=True,
+        ).reasoning_effort.supported
+        is False
+    )
