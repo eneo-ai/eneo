@@ -8,6 +8,7 @@ from eneo.assistants.api.assistant_models import AssistantType, KnowledgeMode
 from eneo.base.base_entity import Entity
 from eneo.completion_models.domain.completion_model import CompletionModel
 from eneo.completion_models.infrastructure.completion_service import CompletionService
+from eneo.embedding_models.domain.chunking import resolve_chunk_config
 from eneo.files.file_models import File, FileType
 from eneo.files.text import TextMimeTypes
 from eneo.info_blobs.info_blob import InfoBlobChunkInDBWithScore
@@ -221,6 +222,23 @@ class Assistant(Entity):
             self._validate_embedding_model(collections)
 
         self._collections = collections
+
+    def _smallest_chunk_size(self) -> int:
+        """The finest chunking any attached source uses, resolved through defaults.
+
+        Falls back to the platform default when the assistant has no knowledge: the
+        count is computed before the retrieval branch is taken, so an empty source set
+        must not raise.
+        """
+        sizes = [
+            resolve_chunk_config(source.chunk_size, source.chunk_overlap)[0]
+            for source in (
+                *self.collections,
+                *self.websites,
+                *self._integration_knowledge_list,
+            )
+        ]
+        return min(sizes) if sizes else resolve_chunk_config(None, None)[0]
 
     @property
     def integration_knowledge_list(self):
@@ -496,9 +514,26 @@ class Assistant(Entity):
                     f"Completion model {effective_model.name} do not support vision."
                 )
 
-        # Fill half the context
+        # Fill half the context. This count is only a proxy for that budget — the
+        # budget itself is enforced exactly in the context builder, which counts the
+        # tokens of each chunk and stops. So the job here is to fetch *enough*, and
+        # what decides that is the smallest chunk size among the attached sources.
+        #
+        # It used to divide by a hardcoded 200, which was right while every chunk was
+        # 200 tokens. Per-source chunking made it wrong in both directions, and the
+        # damaging one is fine chunking: at 50 tokens the old count filled a quarter of
+        # the budget and quietly dropped three quarters of the context the assistant
+        # was allowed to use — the very case fine chunking is chosen for.
+        #
+        # Dividing by the largest size would reproduce that under-fill, so it is the
+        # minimum. Over-fetching costs rows that the exact trim then discards, and
+        # since results arrive ordered by relevance the discarded ones are the worst
+        # ones. The chunk vector is deferred from that query, so a row is text and
+        # metadata rather than an embedding.
         num_chunks = (
-            effective_model.max_input_tokens // 200 // 2 if version == 2 else 30
+            effective_model.max_input_tokens // self._smallest_chunk_size() // 2
+            if version == 2
+            else 30
         )
 
         # Tool mode: the loopback knowledge-MCP server (when provided by the
