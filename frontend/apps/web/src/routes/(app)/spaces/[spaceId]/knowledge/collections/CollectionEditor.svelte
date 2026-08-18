@@ -132,7 +132,14 @@
           required
           class="border-default hover:bg-hover-dimmer border-b px-4 py-4"
         ></Input.Text>
-        <ChunkSettings bind:chunkSize bind:chunkOverlap maxInput={chunkMaxInput} />
+        <!-- Editing an existing collection: anything already stored has to be split and
+             embedded again before it follows the new setting. -->
+        <ChunkSettings
+          bind:chunkSize
+          bind:chunkOverlap
+          maxInput={chunkMaxInput}
+          hasIndexedContent={true}
+        />
       {/if}
     </Dialog.Section>
 

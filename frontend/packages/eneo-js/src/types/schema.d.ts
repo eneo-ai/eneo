@@ -19451,8 +19451,12 @@ export interface components {
     };
     /** UpdateIntegrationKnowledgeRequest */
     UpdateIntegrationKnowledgeRequest: {
+      /** Chunk Size */
+      chunk_size?: number | null;
+      /** Chunk Overlap */
+      chunk_overlap?: number | null;
       /** Name */
-      name: string;
+      name?: string | null;
     };
     /** UpdateIntegrationKnowledgeWrapperRequest */
     UpdateIntegrationKnowledgeWrapperRequest: {

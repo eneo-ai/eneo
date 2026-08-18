@@ -4323,6 +4323,8 @@
   "chunk_overlap_label": "Chunk-överlapp (tokens)",
   "chunk_overlap_description": "Hur mycket intilliggande bitar överlappar, så att sammanhang inte tappas vid gränserna. Högre överlapp ger fler bitar att embedda och lagra.",
   "chunk_settings_reembed_note": "Ändringar slår igenom när källan bearbetas nästa gång: webbplatser vid nästa crawl, uppladdat material när det laddas upp igen. Innehåll som inte bearbetas om behåller sin nuvarande chunkning.",
+  "chunk_settings_reindex_warning_title": "Det här kostar en omindexering.",
+  "chunk_settings_reindex_warning": "Material som redan lagrats här behåller sin nuvarande chunkning tills det bearbetas igen — webbplatser vid nästa crawl, integrationer vid nästa synkronisering, uppladdade filer först när de laddas upp på nytt. Fram till dess innehåller källan flera chunkstorlekar samtidigt, vilket snedvrider sökresultaten. Att bearbeta om embeddar varje dokument från grunden, vilket tar tid och kostar användning hos leverantören.",
   "chunk_size_ceiling_note": "Begränsas till {ceiling} tokens för den valda embedding-modellen.",
   "chunk_overlap_value": "{percent} % · {tokens} tokens",
   "chunk_overlap_value_default": "Plattformens standard · {tokens} tokens",

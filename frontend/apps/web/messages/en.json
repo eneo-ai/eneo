@@ -4323,6 +4323,8 @@
   "chunk_overlap_label": "Chunk overlap (tokens)",
   "chunk_overlap_description": "How much neighbouring chunks overlap, so context isn't lost at chunk boundaries. Higher overlap means more chunks to embed and store.",
   "chunk_settings_reembed_note": "Changes apply when a source is next processed: websites at their next crawl, uploaded material when it is uploaded again. Content that is not reprocessed keeps its current chunking.",
+  "chunk_settings_reindex_warning_title": "This costs a re-index.",
+  "chunk_settings_reindex_warning": "Material already stored here keeps its current chunking until it is processed again — websites at their next crawl, integrations at their next sync, uploaded files only when uploaded again. Until then the source holds several chunk sizes at once, which skews search results. Reprocessing embeds every document from scratch, which takes time and costs provider usage.",
   "chunk_size_ceiling_note": "Capped at {ceiling} tokens for the selected embedding model.",
   "chunk_overlap_value": "{percent}% · {tokens} tokens",
   "chunk_overlap_value_default": "Platform default · {tokens} tokens",

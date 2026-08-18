@@ -380,8 +380,10 @@ class CreateSpaceIntegrationKnowledgeBatchResponse(BaseModel):
     failed_count: int
 
 
-class UpdateIntegrationKnowledgeRequest(BaseModel):
-    name: str
+class UpdateIntegrationKnowledgeRequest(ChunkConfigRequestMixin):
+    # Optional so the same endpoint can carry a rename, a chunking change, or both.
+    # The router reads model_fields_set to tell "omitted" from an explicit null.
+    name: str | None = None
 
 
 class UpdateIntegrationKnowledgeWrapperRequest(BaseModel):

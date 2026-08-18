@@ -16,6 +16,12 @@
    * it after the fact. */
   export let maxInput: number | null | undefined = undefined;
 
+  /** Whether this source already holds indexed material. Creating a source costs
+   * nothing to configure, but changing an existing one means every document has to be
+   * split and embedded again — real time and real provider spend. The two cases
+   * therefore say different things, and only the second is a warning. */
+  export let hasIndexedContent: boolean = false;
+
   // Overlap is chosen as a share of the chunk size, which is how the limit is defined
   // and how the practical guidance is stated, and it survives a change of chunk size:
   // an absolute overlap would quietly slide from 20% to 4% when the size grows.
@@ -240,9 +246,19 @@
     </div>
   </div>
 
-  <div
-    class="bg-info-dimmer border-info-default text-info-stronger mx-4 my-3 rounded-md border px-3 py-2 text-sm"
-  >
-    {m.chunk_settings_reembed_note()}
-  </div>
+  {#if hasIndexedContent}
+    <div
+      class="bg-label-dimmer border-label-default text-label-stronger mx-4 my-3 rounded-md border px-3 py-2 text-sm"
+      role="status"
+    >
+      <span class="font-medium">{m.chunk_settings_reindex_warning_title()}</span>
+      {m.chunk_settings_reindex_warning()}
+    </div>
+  {:else}
+    <div
+      class="bg-info-dimmer border-info-default text-info-stronger mx-4 my-3 rounded-md border px-3 py-2 text-sm"
+    >
+      {m.chunk_settings_reembed_note()}
+    </div>
+  {/if}
 {/if}

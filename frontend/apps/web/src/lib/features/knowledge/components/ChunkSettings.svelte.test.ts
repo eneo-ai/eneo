@@ -125,6 +125,30 @@ describe("ChunkSettings", () => {
     await expect.element(submitted).toHaveTextContent("size=null, overlap=null");
   });
 
+  it("warns about the re-index cost only when the source already holds content", async () => {
+    // Creating a source: nothing is stored yet, so configuring it costs nothing.
+    render(ChunkSettings, { chunkSize: 400, chunkOverlap: 40 });
+    await expect.element(page.getByText(m.chunk_settings_reembed_note())).toBeInTheDocument();
+    await expect
+      .element(page.getByText(m.chunk_settings_reindex_warning_title()))
+      .not.toBeInTheDocument();
+  });
+
+  it("names the cost when editing a source that already holds content", async () => {
+    render(ChunkSettings, {
+      chunkSize: 400,
+      chunkOverlap: 40,
+      hasIndexedContent: true
+    });
+
+    // The warning has to say what it costs, not just that it applies later: every
+    // document is split and embedded again, which is time and provider spend.
+    await expect
+      .element(page.getByText(m.chunk_settings_reindex_warning_title()))
+      .toBeInTheDocument();
+    await expect.element(page.getByText(m.chunk_settings_reembed_note())).not.toBeInTheDocument();
+  });
+
   it("gives the overlap slider a localized accessible name", async () => {
     // An explicit override starts the disclosure expanded.
     render(ChunkSettings, { chunkSize: 400, chunkOverlap: 40 });

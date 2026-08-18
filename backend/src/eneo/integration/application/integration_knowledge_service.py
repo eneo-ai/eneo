@@ -26,6 +26,7 @@ from eneo.main.exceptions import (
     UnauthorizedException,
 )
 from eneo.main.logging import get_logger
+from eneo.main.models import NOT_PROVIDED, NotProvided
 from eneo.roles.permissions import Permission
 
 if TYPE_CHECKING:
@@ -720,13 +721,21 @@ class IntegrationKnowledgeService:
 
         return job
 
-    async def update_knowledge_name(
+    async def update_knowledge(
         self,
         space_id: UUID,
         integration_knowledge_id: UUID,
-        name: str,
+        name: str | NotProvided = NOT_PROVIDED,
+        chunk_size: int | None | NotProvided = NOT_PROVIDED,
+        chunk_overlap: int | None | NotProvided = NOT_PROVIDED,
     ) -> IntegrationKnowledge:
-        """Update the name of an integration knowledge item."""
+        """Update an integration knowledge item's name and/or chunk configuration.
+
+        Chunking is editable here for the same reason it is on collections and
+        websites. Without it the drift detection this branch adds for integrations
+        could only ever fire when a deployment retunes its platform defaults, since a
+        source's own pair was fixed at import.
+        """
         space = await self.space_repo.one(id=space_id)
         # Verify the knowledge exists in this space (for permission check)
         space_knowledge = space.get_integration_knowledge(
@@ -756,7 +765,7 @@ class IntegrationKnowledgeService:
         knowledge = await self.integration_knowledge_repo.one(
             id=integration_knowledge_id
         )
-        knowledge.name = name
+        knowledge.update(name=name, chunk_size=chunk_size, chunk_overlap=chunk_overlap)
         return await self.integration_knowledge_repo.update(knowledge)
 
     async def _get_owned_wrapper_knowledge(

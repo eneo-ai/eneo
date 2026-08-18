@@ -1063,10 +1063,21 @@ async def update_integration_knowledge(
     container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
     service = container.integration_knowledge_service()
-    knowledge = await service.update_knowledge_name(
+    # Null means different things per field, so they are read differently. For the
+    # chunk pair it is a real state — "go back to the platform default" — so omitted
+    # and null have to be told apart via model_fields_set; without that a rename would
+    # carry chunk_size=None, reset the source, and make the next sync re-index the
+    # whole corpus. A source has no such thing as "no name", so a null name is simply
+    # not a change.
+    provided = data.model_fields_set
+    knowledge = await service.update_knowledge(
         space_id=id,
         integration_knowledge_id=integration_knowledge_id,
-        name=data.name,
+        name=data.name if data.name is not None else NOT_PROVIDED,
+        chunk_size=data.chunk_size if "chunk_size" in provided else NOT_PROVIDED,
+        chunk_overlap=(
+            data.chunk_overlap if "chunk_overlap" in provided else NOT_PROVIDED
+        ),
     )
     return IntegrationKnowledgeAssembler.to_space_knowledge_model(knowledge)
 

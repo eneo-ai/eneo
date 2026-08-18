@@ -3,6 +3,8 @@ from typing import TYPE_CHECKING, Dict, Optional
 from uuid import UUID
 
 from eneo.base.base_entity import Entity
+from eneo.embedding_models.domain.chunking import resolve_source_chunk_config
+from eneo.main.models import NOT_PROVIDED, NotProvided, is_provided
 
 if TYPE_CHECKING:
     from eneo.embedding_models.domain.embedding_model import EmbeddingModel
@@ -69,6 +71,33 @@ class IntegrationKnowledge(Entity):
         self.wrapper_name = wrapper_name
         self.chunk_size = chunk_size
         self.chunk_overlap = chunk_overlap
+
+    def update(
+        self,
+        name: str | NotProvided = NOT_PROVIDED,
+        chunk_size: int | None | NotProvided = NOT_PROVIDED,
+        chunk_overlap: int | None | NotProvided = NOT_PROVIDED,
+    ) -> None:
+        """Apply a partial update, mirroring Collection.update and Website.update.
+
+        The sentinel matters more here than elsewhere: this is also the rename path,
+        so treating an omitted field as ``None`` would silently return the source to
+        the platform default. For an integration that means the next sync sees drifted
+        stamps and re-syncs the whole corpus — a rename would quietly cost a full
+        re-index.
+        """
+        if is_provided(name):
+            self.name = name
+        if is_provided(chunk_size) or is_provided(chunk_overlap):
+            # Merge with what is stored: the two fields are one setting, so a size-only
+            # change still has to be valid next to the retained overlap.
+            self.chunk_size, self.chunk_overlap = resolve_source_chunk_config(
+                chunk_size=chunk_size if is_provided(chunk_size) else self.chunk_size,
+                chunk_overlap=(
+                    chunk_overlap if is_provided(chunk_overlap) else self.chunk_overlap
+                ),
+                max_input=self.embedding_model.max_input,
+            )
 
     @property
     def integration_type(self) -> str:

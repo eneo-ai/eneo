@@ -336,6 +336,40 @@ export function initIntegrations(client) {
           }
         );
         return res;
+      },
+
+      /**
+       * Change an integration knowledge item's chunk configuration.
+       *
+       * Sends only the chunk pair, never the name: the endpoint treats an omitted
+       * field as "leave it alone", so a chunking change must not carry a name and a
+       * rename must not carry chunking. Both sides of the pair are always sent —
+       * null on both means "follow the platform default".
+       *
+       * Takes effect at the source's next sync, which re-embeds its documents.
+       * @param {Object} args
+       * @param {{id: string}} args.knowledge IntegrationKnowledge to reconfigure
+       * @param {{id: string}} args.space Space where the knowledge belongs
+       * @param {number | null} args.chunk_size Chunk size in tokens, or null
+       * @param {number | null} args.chunk_overlap Chunk overlap in tokens, or null
+       * @throws {EneoError}
+       * */
+      updateChunkSettings: async ({ knowledge, space, chunk_size, chunk_overlap }) => {
+        const { id: integration_knowledge_id } = knowledge;
+        const { id } = space;
+        const res = await client.fetch(
+          "/api/v1/spaces/{id}/knowledge/integrations/{integration_knowledge_id}/",
+          {
+            method: "patch",
+            params: {
+              path: { id, integration_knowledge_id }
+            },
+            requestBody: {
+              "application/json": { chunk_size, chunk_overlap }
+            }
+          }
+        );
+        return res;
       }
     },
 

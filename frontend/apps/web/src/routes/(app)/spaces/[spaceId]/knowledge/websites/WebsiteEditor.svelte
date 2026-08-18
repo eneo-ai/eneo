@@ -482,7 +482,14 @@
       {/if}
 
       {#key chunkSettingsKey}
-        <ChunkSettings bind:chunkSize bind:chunkOverlap maxInput={chunkMaxInput} />
+        <!-- Editing an existing website: its crawled pages keep their current chunking
+             until the next crawl re-embeds them. -->
+        <ChunkSettings
+          bind:chunkSize
+          bind:chunkOverlap
+          maxInput={chunkMaxInput}
+          hasIndexedContent={mode === "update"}
+        />
       {/key}
     </Dialog.Section>
 

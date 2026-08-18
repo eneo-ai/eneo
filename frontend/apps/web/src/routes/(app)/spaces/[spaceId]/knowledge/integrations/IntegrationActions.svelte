@@ -5,6 +5,7 @@
   import { IconEdit } from "@eneo/icons/edit";
   import { IconRefresh } from "@eneo/icons/refresh";
   import { Button, Dialog, Dropdown, Input } from "@eneo/ui";
+  import ChunkSettings from "$lib/features/knowledge/components/ChunkSettings.svelte";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
   import { getEneo } from "$lib/core/Eneo";
   import { m } from "$lib/paraglide/messages";
@@ -71,6 +72,31 @@
     isSyncing = false;
   }
 
+  // An imported source always holds indexed material, so a change here always costs a
+  // re-embedding of its documents at the next sync. ChunkSettings says so.
+  let chunkSize: number | null = knowledgeItem.chunk_size ?? null;
+  let chunkOverlap: number | null = knowledgeItem.chunk_overlap ?? null;
+  let isSavingChunkSettings = false;
+
+  async function saveChunkSettings() {
+    isSavingChunkSettings = true;
+    try {
+      await eneo.integrations.knowledge.updateChunkSettings({
+        knowledge: knowledgeItem,
+        space: $currentSpace,
+        chunk_size: chunkSize,
+        chunk_overlap: chunkOverlap
+      });
+      refreshCurrentSpace();
+      $showChunkSettingsDialog = false;
+    } catch (e) {
+      toastError(e);
+      console.error(e);
+    }
+    isSavingChunkSettings = false;
+  }
+
+  let showChunkSettingsDialog: Dialog.OpenState;
   let showDeleteDialog: Dialog.OpenState;
   let showRenameDialog: Dialog.OpenState;
   let showSyncDialog: Dialog.OpenState;
@@ -93,6 +119,17 @@
         padding="icon-leading"
       >
         <IconEdit size="sm" />{m.rename()}</Button
+      >
+      <Button
+        is={item}
+        on:click={() => {
+          chunkSize = knowledgeItem.chunk_size ?? null;
+          chunkOverlap = knowledgeItem.chunk_overlap ?? null;
+          $showChunkSettingsDialog = true;
+        }}
+        padding="icon-leading"
+      >
+        <IconEdit size="sm" />{m.chunk_settings_customize()}</Button
       >
     {/if}
     {#if knowledgeItem.integration_type === "sharepoint" && knowledgeItem.permissions?.includes("edit")}
@@ -120,6 +157,26 @@
     {/if}
   </Dropdown.Menu>
 </Dropdown.Root>
+
+<Dialog.Root bind:isOpen={showChunkSettingsDialog}>
+  <Dialog.Content width="medium">
+    <Dialog.Title>{m.chunk_settings_customize()}</Dialog.Title>
+    <Dialog.Section scrollable={false}>
+      <ChunkSettings
+        bind:chunkSize
+        bind:chunkOverlap
+        maxInput={knowledgeItem.embedding_model?.max_input}
+        hasIndexedContent={true}
+      />
+    </Dialog.Section>
+    <Dialog.Controls let:close>
+      <Button is={close}>{m.cancel()}</Button>
+      <Button variant="primary" on:click={saveChunkSettings}
+        >{isSavingChunkSettings ? m.saving() : m.save()}</Button
+      >
+    </Dialog.Controls>
+  </Dialog.Content>
+</Dialog.Root>
 
 <Dialog.Root bind:isOpen={showRenameDialog}>
   <Dialog.Content width="small">
