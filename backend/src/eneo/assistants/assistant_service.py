@@ -12,6 +12,7 @@ from eneo.ai_models.completion_models.completion_model import (
     ModelKwargs,
     ResponseType,
     TokenUsage,
+    ToolCallMetadata,
     function_definition_to_tool,
 )
 from eneo.assistants.api.assistant_models import AssistantResponse, KnowledgeMode
@@ -2401,6 +2402,7 @@ class AssistantService:
             generated_files: list[File] = []
 
             non_streaming_mcp_refs: list[McpToolReference] = []
+            non_streaming_tool_calls: list[ToolCallInfo] = []
             if response.completion is not None:
                 answer = response.completion
                 if isinstance(answer, str):
@@ -2411,6 +2413,24 @@ class AssistantService:
                     non_streaming_mcp_refs = (
                         getattr(answer, "mcp_tool_references", None) or []
                     )
+                    non_streaming_tool_metadata = cast(
+                        list[ToolCallMetadata],
+                        getattr(answer, "tool_calls_metadata", None) or [],
+                    )
+                    non_streaming_tool_calls = [
+                        ToolCallInfo(
+                            server_name=tc.server_name,
+                            tool_name=tc.tool_name,
+                            title=tc.title,
+                            arguments=tc.arguments,
+                            tool_call_id=tc.tool_call_id,
+                            approved=tc.approved,
+                            result_status=tc.result_status,
+                            result=tc.result,
+                            mcp_tool_name=tc.mcp_tool_name,
+                        )
+                        for tc in non_streaming_tool_metadata
+                    ]
                     final_reasoning = getattr(answer, "reasoning_content", None)
 
             non_streaming_mcp_refs = filter_mcp_tool_references(
@@ -2506,6 +2526,7 @@ class AssistantService:
                 logging_details=response.extended_logging
                 or LoggingDetails(model_kwargs={}),
                 web_search_results=list(web_search_results or []),
+                tool_calls=non_streaming_tool_calls or None,
                 mcp_tool_references=non_streaming_mcp_refs or None,
                 reasoning=final_reasoning,
                 skill_provenance=skill_provenance,
