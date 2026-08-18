@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Set as AbstractSet
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 from uuid import UUID
@@ -72,28 +73,62 @@ def serialize_space_kbs(
     ]
 
 
-def resolve_planner_model(space: "Space") -> "CompletionModel":
-    model = space.get_default_completion_model()
-    if model:
-        return model
-    if space.completion_models:
-        return space.completion_models[0]
-    raise AIBuilderBadRequestException(
-        "No AI builder planner model is available in this space.",
-        code=AIBuilderErrorCode.NO_PLANNER_MODEL_AVAILABLE,
-    )
+def eligible_planner_models(
+    space: "Space", *, active_provider_ids: AbstractSet[UUID]
+) -> list["CompletionModel"]:
+    """The planner models a caller may use, listed or sent.
+
+    A model on an inactive provider is rejected at provider resolution, so it is
+    not eligible here either. Listing and sending must share this rule, or the
+    session advertises one set of models and runs another.
+    """
+    return [
+        model
+        for model in getattr(space, "completion_models", [])
+        if model.provider_id in active_provider_ids
+    ]
+
+
+def select_default_planner_model(
+    space: "Space", *, active_provider_ids: AbstractSet[UUID]
+) -> "CompletionModel | None":
+    """The model an omitted `model_id` resolves to, or None if there is none."""
+    eligible = eligible_planner_models(space, active_provider_ids=active_provider_ids)
+    configured_default = space.get_default_completion_model()
+    if configured_default is not None and any(
+        model.id == configured_default.id for model in eligible
+    ):
+        return configured_default
+    return eligible[0] if eligible else None
+
+
+def resolve_planner_model(
+    space: "Space", *, active_provider_ids: AbstractSet[UUID]
+) -> "CompletionModel":
+    model = select_default_planner_model(space, active_provider_ids=active_provider_ids)
+    if model is None:
+        raise AIBuilderBadRequestException(
+            "No AI builder planner model is available in this space.",
+            code=AIBuilderErrorCode.NO_PLANNER_MODEL_AVAILABLE,
+        )
+    return model
 
 
 def resolve_requested_model(
-    space: "Space", *, model_id: UUID | None
+    space: "Space",
+    *,
+    model_id: UUID | None,
+    active_provider_ids: AbstractSet[UUID],
 ) -> "CompletionModel":
     if model_id is None:
-        return resolve_planner_model(space)
+        return resolve_planner_model(space, active_provider_ids=active_provider_ids)
 
     model = next(
         (
             candidate
-            for candidate in getattr(space, "completion_models", [])
+            for candidate in eligible_planner_models(
+                space, active_provider_ids=active_provider_ids
+            )
             if candidate.id == model_id
         ),
         None,
@@ -109,10 +144,13 @@ def resolve_requested_model(
 def build_planner_context(
     space: "Space",
     *,
+    active_provider_ids: AbstractSet[UUID],
     model_id: UUID | None = None,
     tenant_flow_settings: dict[str, Any] | None = None,
 ) -> AIBuilderPlannerContext:
-    model = resolve_requested_model(space, model_id=model_id)
+    model = resolve_requested_model(
+        space, model_id=model_id, active_provider_ids=active_provider_ids
+    )
     defaults = lookup_model_defaults(
         getattr(model, "litellm_model_name", None),
         getattr(model, "name", None),

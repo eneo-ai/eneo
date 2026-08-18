@@ -51,6 +51,10 @@ from eneo.flows.ai_builder.ai_builder_api_models import (
 from eneo.flows.ai_builder.ai_builder_api_models import (
     ApplyResultResponse as ApplyResult,
 )
+from eneo.flows.ai_builder.ai_builder_context import (
+    eligible_planner_models,
+    select_default_planner_model,
+)
 from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
     named_content_fields_edit_from_metadata,
     question_answer_from_metadata,
@@ -342,6 +346,13 @@ def _authorized_space(authorization: AIBuilderAuthorization) -> "Space":
     if authorization.space is None:
         raise RuntimeError("AI Builder authorization did not load a space.")
     return authorization.space
+
+
+async def _active_provider_ids(container: Container) -> set[UUID]:
+    """Providers a planner model may run on. Read once per request by both the
+    model listing and the send path, so neither can disagree with the other."""
+    providers = await container.model_provider_repository().all(active_only=True)
+    return {provider.id for provider in providers}
 
 
 def _ensure_session_creator(
@@ -937,6 +948,7 @@ async def send_message(
                             session=turn_preflight.session,
                             space=space,
                             model_id=body.model_id,
+                            active_provider_ids=await _active_provider_ids(container),
                             reasoning_effort=body.reasoning_effort,
                             tenant_flow_settings=(
                                 tenant.flow_settings if tenant else None
@@ -1395,20 +1407,14 @@ async def get_session_models(
         require_creator=True,
     )
     space = _authorized_space(authorization)
-    active_providers = await container.model_provider_repository().all(active_only=True)
-    active_provider_ids = {provider.id for provider in active_providers}
-    models = [
-        model
-        for model in space.completion_models
-        if model.provider_id in active_provider_ids
-    ]
-    default_model = space.get_default_completion_model()
-    default_model_id = (
-        default_model.id
-        if default_model is not None
-        and default_model.provider_id in active_provider_ids
-        else None
+    # The same two calls the send path makes, so the advertised default is the
+    # model an omitted `model_id` actually resolves to.
+    active_provider_ids = await _active_provider_ids(container)
+    models = eligible_planner_models(space, active_provider_ids=active_provider_ids)
+    default_model = select_default_planner_model(
+        space, active_provider_ids=active_provider_ids
     )
+    default_model_id = default_model.id if default_model is not None else None
 
     resolved_models: list[SessionModelOption] = []
     for model in models:

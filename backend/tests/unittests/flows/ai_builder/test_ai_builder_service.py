@@ -619,7 +619,14 @@ def _make_model() -> MagicMock:
     model = MagicMock()
     model.id = uuid4()
     model.name = "test-model"
+    model.provider_id = uuid4()
     return model
+
+
+def _all_providers_active(space) -> set:
+    """These tests are not about provider eligibility, so every configured
+    provider is active — the same set the router reads per request."""
+    return {model.provider_id for model in space.completion_models}
 
 
 def _make_adapter() -> MagicMock:
@@ -1100,6 +1107,7 @@ class TestPlannerContextPreparation:
         result = await service.prepare_message_context(
             session=session,
             space=space,
+            active_provider_ids=_all_providers_active(space),
             model_id=model.id,
             tenant_flow_settings=None,
             reasoning_effort="high",
@@ -1167,6 +1175,7 @@ class TestPlannerContextPreparation:
             await service.prepare_message_context(
                 session=_make_session(tenant_id=user.tenant_id),
                 space=space,
+                active_provider_ids=_all_providers_active(space),
                 model_id=model.id,
                 tenant_flow_settings=None,
                 reasoning_effort="high",
@@ -1209,6 +1218,7 @@ class TestPlannerContextPreparation:
             await service.prepare_message_context(
                 session=_make_session(tenant_id=user.tenant_id),
                 space=space,
+                active_provider_ids=_all_providers_active(space),
                 model_id=model.id,
                 tenant_flow_settings=None,
                 reasoning_effort=" high ",
@@ -1257,6 +1267,7 @@ class TestPlannerContextPreparation:
         context = await service.prepare_message_context(
             session=session,
             space=space,
+            active_provider_ids=_all_providers_active(space),
             model_id=None,
             tenant_flow_settings=None,
             message_file_ids=[current_file.id],
@@ -1303,6 +1314,7 @@ class TestPlannerContextPreparation:
             await service.prepare_message_context(
                 session=session,
                 space=space,
+                active_provider_ids=_all_providers_active(space),
                 model_id=None,
                 tenant_flow_settings=None,
                 message_file_ids=current_file_ids,
@@ -1346,6 +1358,7 @@ class TestPlannerContextPreparation:
             await service.prepare_message_context(
                 session=_make_session(tenant_id=user.tenant_id),
                 space=space,
+                active_provider_ids=_all_providers_active(space),
                 model_id=None,
                 tenant_flow_settings={
                     "ai_builder": {
@@ -1364,6 +1377,7 @@ class TestPlannerContextPreparation:
             await service.prepare_message_context(
                 session=_make_session(tenant_id=user.tenant_id),
                 space=space,
+                active_provider_ids=_all_providers_active(space),
                 model_id=None,
                 tenant_flow_settings={
                     "ai_builder": {
@@ -1414,6 +1428,7 @@ class TestPlannerContextPreparation:
             await service.prepare_message_context(
                 session=session,
                 space=space,
+                active_provider_ids=_all_providers_active(space),
                 model_id=model.id,
                 tenant_flow_settings=None,
             )
@@ -2805,6 +2820,7 @@ async def test_prepare_message_context_stages_new_files_and_builds_attachment_co
     context = await service.prepare_message_context(
         session=session,
         space=space,
+        active_provider_ids=_all_providers_active(space),
         model_id=None,
         tenant_flow_settings=None,
         message_file_ids=[file_id],
@@ -2858,6 +2874,7 @@ async def test_prepare_message_context_does_not_persist_new_files_before_message
     context = await service.prepare_message_context(
         session=session,
         space=space,
+        active_provider_ids=_all_providers_active(space),
         model_id=None,
         tenant_flow_settings=None,
         message_file_ids=[file_id],
@@ -2910,6 +2927,7 @@ async def test_prepare_message_context_rejects_missing_or_unavailable_file_ids()
         await service.prepare_message_context(
             session=session,
             space=space,
+            active_provider_ids=_all_providers_active(space),
             model_id=None,
             tenant_flow_settings=None,
             message_file_ids=[uuid4()],

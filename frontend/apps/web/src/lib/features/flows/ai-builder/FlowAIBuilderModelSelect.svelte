@@ -12,18 +12,6 @@
   const service = getAIBuilderService();
 
   const activeModel = $derived(service.effectiveModel);
-  // A space can carry models without naming a default, and the server then
-  // falls back on its own. Naming the control beats naming a model we would
-  // only be guessing at.
-  const label = $derived(activeModel?.name ?? m.ai_builder_model_default());
-  // One model is normally no choice at all. But when the server named no
-  // default it may fall back to a model this list does not contain — an
-  // inactive provider's — so picking the one active model explicitly is the
-  // user's only way through. Offer it.
-  const canChoose = $derived(
-    service.availableModels.length > 1 ||
-      (service.availableModels.length === 1 && service.defaultModelId === null)
-  );
   const groups = $derived(
     groupModelsByVendor(
       service.availableModels.map((model) => ({ ...model, provider_type: model.provider })),
@@ -32,9 +20,10 @@
   );
 </script>
 
-{#if service.modelLoadFailed}
-  <!-- Saying nothing here would reproduce the very complaint this control
-       answers: the model picker missing, with no reason given. -->
+<!-- Nothing renders while the read is in flight; the composer never waits on
+     it. Every settled outcome says something, because silence here is the
+     complaint this control answers. -->
+{#if service.modelLoadStatus === "failed"}
   <div class="flex min-w-0 items-center gap-1" role="alert">
     <span class="text-destructive max-w-44 truncate text-[0.8125rem]">
       {m.failed_to_load_models()}
@@ -43,18 +32,22 @@
       {m.retry()}
     </Button>
   </div>
-{:else if canChoose}
+{:else if service.modelLoadStatus === "loaded" && service.availableModels.length === 0}
+  <!-- The turn will fail at the server for want of a planner model; saying so
+       here beats letting the user discover it by sending. -->
+  <span class="text-secondary max-w-72 truncate text-[0.8125rem]" role="status">
+    {m.no_completion_model_description()}
+  </span>
+{:else if activeModel && service.availableModels.length > 1}
   <ModelSelector.Root>
     <ModelSelector.Trigger
       class="composer-control"
-      aria-label={`${m.ai_builder_model_label()}: ${label}`}
+      aria-label={`${m.ai_builder_model_label()}: ${activeModel.name}`}
       title={m.ai_builder_model_usage_hint()}
       disabled={!service.canSendMessage}
     >
-      {#if activeModel}
-        <ModelSelector.Logo provider={activeModel.provider} />
-      {/if}
-      <ModelSelector.Name>{label}</ModelSelector.Name>
+      <ModelSelector.Logo provider={activeModel.provider} />
+      <ModelSelector.Name>{activeModel.name}</ModelSelector.Name>
     </ModelSelector.Trigger>
     <ModelSelector.Content align="start" class="w-72 max-w-[calc(100vw-2rem)]">
       <ModelSelector.Input placeholder={m.search_models()} />

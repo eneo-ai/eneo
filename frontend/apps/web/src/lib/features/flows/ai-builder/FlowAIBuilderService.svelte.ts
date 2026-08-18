@@ -7,6 +7,7 @@ import {
   type AIBuilderStreamState,
   type CreateFailureOutcome,
   type FlowAIBuilderState,
+  type ModelLoadStatus,
   type PendingPlanOperationKind
 } from "./FlowAIBuilderDriver";
 import { classifyAIBuilderConflict, type AIBuilderConflict } from "./aiBuilderConflict";
@@ -269,14 +270,8 @@ export class FlowAIBuilderService {
     return this.#driver.effectiveModel;
   }
 
-  /** Null means the server never named a default, so the composer must let the
-   *  user pick even from a single model. */
-  get defaultModelId(): string | null {
-    return this.#state.defaultModelId;
-  }
-
-  get modelLoadFailed(): boolean {
-    return this.#state.modelLoadFailed;
+  get modelLoadStatus(): ModelLoadStatus {
+    return this.#state.modelLoadStatus;
   }
 
   get selectedReasoningEffort(): string | null {

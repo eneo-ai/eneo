@@ -597,32 +597,18 @@ describe("FlowAIBuilder planner controls", () => {
     expect(screen.queryByRole("button", { name: new RegExp(m.reasoning_effort()) })).toBeNull();
   });
 
-  it("offers the lone model when the server names no default", async () => {
-    // No default means the server falls back on its own, possibly to a model
-    // this list excludes. Choosing explicitly is the only way through.
+  it("says the space has no planner model rather than showing nothing", async () => {
+    // A successful but empty read is not the same as an unread one: the turn
+    // will fail at the server, so the composer says so first.
     const { fetch } = makeFetch();
-    const noDefault = vi.fn(async (path: string, init?: Record<string, unknown>) =>
+    const empty = vi.fn(async (path: string, init?: Record<string, unknown>) =>
       path.endsWith("/models")
-        ? {
-            models: [
-              {
-                id: DEFAULT_MODEL_ID,
-                name: "Only active model",
-                provider: "openai",
-                reasoning_effort_options: []
-              }
-            ],
-            default_model_id: null
-          }
+        ? { models: [], default_model_id: null }
         : fetch(path as string, init as never)
     );
-    renderShell({ fetch: noDefault, stream: makeStream().stream });
+    renderShell({ fetch: empty, stream: makeStream().stream });
 
-    expect(
-      await screen.findByRole("button", {
-        name: `${m.ai_builder_model_label()}: ${m.ai_builder_model_default()}`
-      })
-    ).toBeTruthy();
+    expect(await screen.findByText(m.no_completion_model_description())).toBeTruthy();
   });
 
   it("says so and retries when the model read fails, without blocking the send", async () => {
@@ -666,6 +652,31 @@ describe("FlowAIBuilder planner controls", () => {
       })
     ).toBeTruthy();
     expect(screen.queryByText(m.failed_to_load_models())).toBeNull();
+  });
+
+  it("retries the model read once however fast the button is clicked", async () => {
+    // Two in-flight reads can land in either order, and a late failure would
+    // erase an earlier success. The status leaves "failed" before awaiting.
+    const { fetch } = makeFetch();
+    let modelReads = 0;
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => (release = resolve));
+    const slow = vi.fn(async (path: string, init?: Record<string, unknown>) => {
+      if (!path.endsWith("/models")) return fetch(path as string, init as never);
+      modelReads += 1;
+      if (modelReads === 1) throw new Error("models unavailable");
+      await held;
+      return { models: [], default_model_id: null };
+    });
+    renderShell({ fetch: slow, stream: makeStream().stream });
+
+    await screen.findByText(m.failed_to_load_models());
+    const retry = button(m.retry());
+    await fireEvent.click(retry);
+    await fireEvent.click(retry);
+
+    expect(modelReads).toBe(2);
+    release();
   });
 
   it("carries a chosen model through to the request", async () => {

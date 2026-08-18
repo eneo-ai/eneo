@@ -6,6 +6,7 @@ conversation loop and plan lifecycle live in focused collaborators.
 
 from __future__ import annotations
 
+from collections.abc import Set as AbstractSet
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Any, AsyncGenerator
 from uuid import UUID
@@ -369,6 +370,7 @@ class AIBuilderService:
         session: BuilderSession,
         space: "Space",
         model_id: UUID | None,
+        active_provider_ids: AbstractSet[UUID],
         tenant_flow_settings: dict[str, Any] | None,
         reasoning_effort: str | None = None,
         message: str | None = None,
@@ -378,6 +380,7 @@ class AIBuilderService:
         planner_context = build_planner_context(
             space,
             model_id=model_id,
+            active_provider_ids=active_provider_ids,
             tenant_flow_settings=tenant_flow_settings,
         )
         if (

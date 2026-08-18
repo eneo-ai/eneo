@@ -81,6 +81,7 @@ export interface PendingPlanOperation {
 export type CreateFailureOutcome = "confirmed_not_applied" | "unknown";
 
 export type AIBuilderStreamState = "idle" | "streaming" | "failed";
+export type ModelLoadStatus = "loading" | "loaded" | "failed";
 
 export interface FlowAIBuilderState {
   session: AIBuilderSession | null;
@@ -105,9 +106,11 @@ export interface FlowAIBuilderState {
    *  existed. */
   selectedModelId: string | null;
   selectedReasoningEffort: string | null;
-  /** The model read failed. Sending is unaffected, but the composer must say
-   *  so and offer a retry rather than silently showing no controls. */
-  modelLoadFailed: boolean;
+  /** Whether the model read has landed. Sending never waits on it, but the
+   *  composer has to tell "not yet" from "none configured" from "the read
+   *  broke" — silently showing nothing is the complaint these controls
+   *  answer. */
+  modelLoadStatus: ModelLoadStatus;
   draftSessions: AIBuilderDraftSession[];
   pendingOperation: PendingPlanOperation | null;
   createFailureOutcome: CreateFailureOutcome | null;
@@ -133,7 +136,7 @@ export function createInitialFlowAIBuilderState(): FlowAIBuilderState {
     defaultModelId: null,
     selectedModelId: null,
     selectedReasoningEffort: null,
-    modelLoadFailed: false,
+    modelLoadStatus: "loading",
     draftSessions: [],
     pendingOperation: null,
     createFailureOutcome: null,
@@ -295,9 +298,13 @@ export class FlowAIBuilderDriver {
   }
 
   async retryModelLoad(): Promise<void> {
-    if (!this.#state.modelLoadFailed) return;
+    // Only a failed read is retryable, and the status moves before the await,
+    // so a second click finds nothing to retry instead of racing the first.
+    if (this.#state.modelLoadStatus !== "failed") return;
     const owner = this.#currentSessionOwner();
     if (!owner) return;
+    this.#state.modelLoadStatus = "loading";
+    this.#notify();
     await this.#fetchModels(owner);
   }
 
@@ -1461,7 +1468,7 @@ export class FlowAIBuilderDriver {
       )
         ? (result.default_model_id ?? null)
         : null;
-      this.#state.modelLoadFailed = false;
+      this.#state.modelLoadStatus = "loaded";
       this.#notify();
     } catch {
       if (!this.#ownsSessionIdentity(owner)) return;
@@ -1469,7 +1476,7 @@ export class FlowAIBuilderDriver {
       this.#state.defaultModelId = null;
       this.#state.selectedModelId = null;
       this.#state.selectedReasoningEffort = null;
-      this.#state.modelLoadFailed = true;
+      this.#state.modelLoadStatus = "failed";
       this.#notify();
     }
   }
