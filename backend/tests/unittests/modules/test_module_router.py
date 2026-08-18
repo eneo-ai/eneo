@@ -4,12 +4,20 @@ from uuid import uuid4
 import pytest
 
 from eneo.main.exceptions import BadRequestException
+from eneo.main.models import ModelId
 from eneo.modules.module import (
     ModuleClientConfig,
     ModuleInDB,
+    ModuleTenantAssignment,
     ModuleTenantClientConfig,
 )
-from eneo.modules.module_router import update_module_client_config
+from eneo.modules.module_router import (
+    add_module_to_tenant,
+    disable_module_for_tenant,
+    enable_module_for_tenant,
+    update_module_client_config,
+)
+from eneo.tenants.tenant import TenantInDB
 
 TENANT_ID = uuid4()
 MODULE_ID = uuid4()
@@ -137,3 +145,72 @@ async def test_empty_patch_is_rejected_before_database_access():
         )
 
     module_repo.get_module.assert_not_awaited()
+
+
+async def test_bulk_assignment_audit_describes_effective_module_set():
+    module = make_module()
+    updated_tenant = TenantInDB(
+        id=TENANT_ID,
+        name="test-tenant",
+        quota_limit=1024,
+        modules=[module],
+    )
+    duplicate_ids = [ModelId(id=MODULE_ID), ModelId(id=MODULE_ID)]
+    tenant_service = AsyncMock()
+    tenant_service.replace_modules.return_value = updated_tenant
+    audit_service = AsyncMock()
+    container = MagicMock()
+    container.tenant_service.return_value = tenant_service
+    container.audit_service.return_value = audit_service
+
+    result = await add_module_to_tenant(
+        tenant_id=TENANT_ID,
+        module_ids=duplicate_ids,
+        container=container,
+    )
+
+    assert result == updated_tenant
+    target = audit_service.log.await_args.kwargs["metadata"]["target"]
+    assert target["replacement_module_count"] == 1
+    assert target["module_ids"] == [str(MODULE_ID)]
+    assert audit_service.log.await_args.kwargs["description"].endswith(
+        "with 1 module(s)"
+    )
+
+
+@pytest.mark.parametrize(
+    ("route", "enabled"),
+    [
+        (enable_module_for_tenant, True),
+        (disable_module_for_tenant, False),
+    ],
+)
+async def test_idempotent_assignment_noop_does_not_emit_change_audit(
+    route,
+    enabled: bool,
+):
+    assignment = ModuleTenantAssignment(
+        tenant_id=TENANT_ID,
+        module_id=MODULE_ID,
+        module_key="test-module",
+        enabled=enabled,
+        changed=False,
+    )
+    tenant_service = AsyncMock()
+    if enabled:
+        tenant_service.enable_module.return_value = assignment
+    else:
+        tenant_service.disable_module.return_value = assignment
+    audit_service = AsyncMock()
+    container = MagicMock()
+    container.tenant_service.return_value = tenant_service
+    container.audit_service.return_value = audit_service
+
+    result = await route(
+        tenant_id=TENANT_ID,
+        module_id=MODULE_ID,
+        container=container,
+    )
+
+    assert result == assignment
+    audit_service.log.assert_not_awaited()

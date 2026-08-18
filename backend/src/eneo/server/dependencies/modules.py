@@ -1,6 +1,6 @@
 from eneo.database.database import sessionmanager
 from eneo.main.logging import get_logger
-from eneo.modules.module import ModuleBase, Modules
+from eneo.modules.module import ModuleCreate, Modules
 from eneo.modules.module_repo import ModuleRepository
 
 logger = get_logger(__name__)
@@ -19,7 +19,7 @@ async def init_modules():
 
             # create new modules or update existing
             for name in modules:
-                module = ModuleBase(name=name)
+                module = ModuleCreate(name=name)
                 if module.name not in existing_modules_names:
                     await repository.add(module)
 

@@ -1777,6 +1777,19 @@ class UserService:
             },
         )
 
+    async def validate_active_identity(
+        self, user_in_db: "UserInDB", *, correlation_id: str
+    ) -> None:
+        """Apply the canonical live user and tenant state checks.
+
+        Authentication adapters that validate a non-core token audience, such
+        as the module auth broker, cannot call ``authenticate`` directly. They
+        still need the exact same suspension and inactivity policy as normal
+        API authentication, so this narrow public entry point keeps that policy
+        owned here instead of copying it into each adapter.
+        """
+        await self._check_user_and_tenant_state(user_in_db, correlation_id)
+
     async def authenticate_with_assistant_api_key(
         self,
         api_key: str | None,

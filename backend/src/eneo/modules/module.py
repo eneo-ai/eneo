@@ -2,7 +2,7 @@ from enum import Enum
 from typing import Optional
 from uuid import UUID
 
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, Field, field_validator
 
 from eneo.main.config import validate_redirect_uri
 from eneo.main.models import InDB
@@ -17,7 +17,32 @@ class Modules(str, Enum):
 
 
 class ModuleBase(BaseModel):
+    """A module's globally unique machine identity.
+
+    ``name`` predates the auth broker, but is its stable public module key. It
+    is intentionally treated as an opaque, case-sensitive value and has no
+    rename API. A separate display name can be introduced if one is needed.
+    """
+
     name: Modules | str
+
+
+class ModuleCreate(ModuleBase):
+    """Registration contract for a new stable module key."""
+
+    name: Modules | str = Field(min_length=1)
+
+    @field_validator("name")
+    @classmethod
+    def validate_stable_key(cls, value: Modules | str) -> Modules | str:
+        stripped = value.strip()
+        if not stripped:
+            raise ValueError("Module key must not be empty or blank.")
+        if stripped != value:
+            raise ValueError(
+                "Module key must not contain leading or trailing whitespace."
+            )
+        return value
 
 
 class ModuleClientConfig(BaseModel):
@@ -60,6 +85,16 @@ class ModuleClientConfig(BaseModel):
 class ModuleTenantClientConfig(ModuleClientConfig):
     tenant_id: UUID
     module_id: UUID
+
+
+class ModuleTenantAssignment(BaseModel):
+    """Narrow result for enabling or disabling one tenant module."""
+
+    tenant_id: UUID
+    module_id: UUID
+    module_key: str
+    enabled: bool
+    changed: bool
 
 
 class ModuleInDB(InDB, ModuleBase):

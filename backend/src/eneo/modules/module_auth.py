@@ -1,12 +1,13 @@
 import hashlib
 import json
 import secrets
+from dataclasses import dataclass
 from typing import Optional
 from urllib.parse import urlencode
 from uuid import UUID
 
 import redis.asyncio as aioredis
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from eneo.audit.application.audit_service import AuditService
 from eneo.audit.domain.action_types import ActionType
@@ -33,13 +34,22 @@ from eneo.modules.module import ModuleInDB
 from eneo.modules.module_repo import ModuleRepository
 from eneo.users.user import UserInDB
 from eneo.users.user_repo import UsersRepository
+from eneo.users.user_service import UserService
 
 _TICKET_KEY_PREFIX = "module_auth_ticket:"
 MODULE_AUDIENCE_PREFIX = "eneo-module:"
 
 
 class ModuleTicketRequest(BaseModel):
-    module_id: UUID
+    model_config = ConfigDict(extra="forbid")
+
+    module_key: str = Field(
+        min_length=1,
+        description=(
+            "Stable, case-sensitive public module key (the module's unique name), "
+            "not its database UUID."
+        ),
+    )
     redirect_uri: str
     state: Optional[str] = Field(
         default=None,
@@ -85,13 +95,30 @@ class ModuleTokenResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
     expires_in: int
-    module: str
+    module_key: str
     tenant_id: UUID
     user: ModuleTokenUser
 
 
-def module_audience(module_name: str) -> str:
-    return f"{MODULE_AUDIENCE_PREFIX}{module_name}"
+class ModuleResourceSessionResponse(BaseModel):
+    """Public identity returned after both module credentials pass."""
+
+    module_key: str
+    tenant_id: UUID
+    user: ModuleTokenUser
+
+
+@dataclass(frozen=True, slots=True)
+class ModuleRequestPrincipal:
+    """Live authorization result for one module resource request."""
+
+    module: ModuleInDB
+    user: UserInDB
+    api_key: ApiKeyV2InDB
+
+
+def module_audience(module_key: str) -> str:
+    return f"{MODULE_AUDIENCE_PREFIX}{module_key}"
 
 
 def _ticket_redis_key(ticket: str) -> str:
@@ -115,6 +142,7 @@ class ModuleAuthBroker:
         module_repo: ModuleRepository,
         api_key_repo: ApiKeysV2Repository,
         user_repo: UsersRepository,
+        user_service: UserService,
         auth_service: AuthService,
         audit_service: AuditService,
     ) -> None:
@@ -122,6 +150,7 @@ class ModuleAuthBroker:
         self.module_repo = module_repo
         self.api_key_repo = api_key_repo
         self.user_repo = user_repo
+        self.user_service = user_service
         self.auth_service = auth_service
         self.audit_service = audit_service
 
@@ -171,7 +200,7 @@ class ModuleAuthBroker:
     async def issue_ticket(
         self,
         user: UserInDB,
-        module_id: UUID,
+        module_key: str,
         redirect_uri: str,
         state: Optional[str] = None,
     ) -> ModuleTicketResponse:
@@ -184,7 +213,7 @@ class ModuleAuthBroker:
             raise BadRequestException("redirect_uri is invalid.")
         redirect_uri = normalized_redirect_uri
 
-        module = await self.module_repo.get_module(module_id)
+        module = await self.module_repo.get_module_by_key(module_key)
         if module is None:
             raise NotFoundException("Module not found.")
 
@@ -281,6 +310,9 @@ class ModuleAuthBroker:
         )
         if user is None or not user.is_active:
             raise AuthenticationException("User is not active.")
+        await self.user_service.validate_active_identity(
+            user, correlation_id="module-ticket-exchange"
+        )
 
         consumed = await self.redis_client.getdel(ticket_key)
         if consumed is None or consumed != raw:
@@ -310,7 +342,7 @@ class ModuleAuthBroker:
         return ModuleTokenResponse(
             access_token=access_token,
             expires_in=expires_in_minutes * 60,
-            module=module.name,
+            module_key=module.name,
             tenant_id=tenant_id,
             user=ModuleTokenUser(id=user.id, email=user.email, username=user.username),
         )
@@ -329,3 +361,52 @@ class ModuleAuthBroker:
             key=str(settings.jwt_secret),
             aud=module_audience(module.name),
         )
+
+    async def authenticate_resource_request(
+        self,
+        *,
+        module_key: str,
+        access_token: str,
+        api_key: ApiKeyV2InDB,
+    ) -> ModuleRequestPrincipal:
+        """Validate both credentials and all live module authorization state.
+
+        The raw service key must already have passed the normal API-key
+        resolver, including revocation, expiry, allowlist and rate-limit
+        checks. This method adds the module-specific binding and independently
+        validates the short-lived user token against the expected module
+        audience. Tenant assignment and user/tenant state are read on every
+        request so disabling either takes effect immediately.
+        """
+        registration_error = self._service_key_registration_error(api_key)
+        if registration_error is not None:
+            raise UnauthorizedException(
+                "Module resources require a service-owned sk_ key with write "
+                "or admin permission."
+            )
+
+        module = await self.module_repo.get_module_by_key(module_key)
+        if module is None:
+            raise NotFoundException("Module not found.")
+
+        config = await self.module_repo.get_module_client_config(
+            tenant_id=api_key.tenant_id,
+            module_id=module.id,
+        )
+        allowed_ids = {api_key.id, api_key.rotated_from_key_id} - {None}
+        if (
+            config is None
+            or config.service_key_id is None
+            or config.service_key_id not in allowed_ids
+        ):
+            raise UnauthorizedException("API key is not registered for this module.")
+
+        payload = self.validate_module_user_token(access_token, module)
+        user = await self.user_repo.get_user_by_email(payload.sub)
+        if user is None or not user.is_active or user.tenant_id != api_key.tenant_id:
+            raise AuthenticationException("Module user is not active in this tenant.")
+
+        await self.user_service.validate_active_identity(
+            user, correlation_id="module-resource-auth"
+        )
+        return ModuleRequestPrincipal(module=module, user=user, api_key=api_key)

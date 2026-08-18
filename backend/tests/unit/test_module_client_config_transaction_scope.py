@@ -15,6 +15,10 @@ def _walk_dependencies(dependant: Dependant) -> Iterator[Dependant]:
 
 
 MODULE_AUTH_TRANSACTION_ROUTES = [
+    ("POST", "/modules/"),
+    ("POST", "/modules/{tenant_id}/"),
+    ("PUT", "/modules/{tenant_id}/{module_id}/"),
+    ("DELETE", "/modules/{tenant_id}/{module_id}/"),
     ("PATCH", "/modules/{tenant_id}/{module_id}/client-config/"),
     ("POST", "/module-auth/tickets/"),
     ("POST", "/module-auth/token/"),

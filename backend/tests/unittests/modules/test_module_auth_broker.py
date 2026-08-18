@@ -27,6 +27,7 @@ from eneo.modules.module_auth import (
 
 TENANT_ID = uuid4()
 MODULE_ID = uuid4()
+MODULE_KEY = "tal-till-text"
 SERVICE_KEY_ID = uuid4()
 USER_ID = uuid4()
 REDIRECT_URI = "https://ttt.example.com/auth/callback"
@@ -51,7 +52,7 @@ class FakeRedis:
 def make_module(**overrides):
     values = {
         "id": MODULE_ID,
-        "name": "tal-till-text",
+        "name": MODULE_KEY,
         "created_at": None,
         "updated_at": None,
     }
@@ -97,9 +98,9 @@ def make_api_key(**overrides):
 
 def make_broker(module=None, config=None, user=None, redis=None):
     module_repo = AsyncMock()
-    module_repo.get_module.return_value = (
-        module if module is not None else make_module()
-    )
+    resolved_module = module if module is not None else make_module()
+    module_repo.get_module.return_value = resolved_module
+    module_repo.get_module_by_key.return_value = resolved_module
     module_repo.get_module_client_config.return_value = (
         config if config is not None else make_config()
     )
@@ -108,8 +109,10 @@ def make_broker(module=None, config=None, user=None, redis=None):
     user_repo.get_user_by_id_and_tenant_id.return_value = (
         user if user is not None else make_user()
     )
+    user_repo.get_user_by_email.return_value = user if user is not None else make_user()
 
     audit_service = AsyncMock()
+    user_service = AsyncMock()
     api_key_repo = AsyncMock()
     api_key_repo.get.return_value = make_api_key()
     auth_service = AuthService()
@@ -119,6 +122,7 @@ def make_broker(module=None, config=None, user=None, redis=None):
         module_repo=module_repo,
         api_key_repo=api_key_repo,
         user_repo=user_repo,
+        user_service=user_service,
         auth_service=auth_service,
         audit_service=audit_service,
     )
@@ -128,7 +132,7 @@ def make_broker(module=None, config=None, user=None, redis=None):
 async def issue(broker, user=None, redirect_uri=REDIRECT_URI, state=None):
     return await broker.issue_ticket(
         user=user if user is not None else make_user(),
-        module_id=MODULE_ID,
+        module_key=MODULE_KEY,
         redirect_uri=redirect_uri,
         state=state,
     )
@@ -140,6 +144,16 @@ def issued_ticket(result):
 
 
 class TestIssueTicket:
+    async def test_resolves_public_key_before_using_internal_module_id(self):
+        broker = make_broker()
+
+        await issue(broker)
+
+        broker.module_repo.get_module_by_key.assert_awaited_once_with(MODULE_KEY)
+        broker.module_repo.get_module_client_config.assert_awaited_once_with(
+            tenant_id=TENANT_ID, module_id=MODULE_ID
+        )
+
     async def test_issues_ticket_with_redirect_target(self):
         broker = make_broker()
         result = await issue(broker)
@@ -152,10 +166,14 @@ class TestIssueTicket:
 
     async def test_unknown_module_raises_not_found(self):
         broker = make_broker()
-        broker.module_repo.get_module.return_value = None
+        broker.module_repo.get_module_by_key.return_value = None
 
         with pytest.raises(NotFoundException):
             await issue(broker)
+
+        assert broker.redis_client.store == {}
+        broker.module_repo.get_module_client_config.assert_not_awaited()
+        broker.audit_service.log_async.assert_not_awaited()
 
     async def test_unconfigured_module_raises_bad_request(self):
         broker = make_broker(config=make_config(service_key_id=None))
@@ -194,6 +212,9 @@ class TestIssueTicket:
         with pytest.raises(UnauthorizedException):
             await issue(broker)
 
+        assert broker.redis_client.store == {}
+        broker.audit_service.log_async.assert_not_awaited()
+
     async def test_state_is_echoed_urlencoded_on_redirect_target(self):
         broker = make_broker()
         state = "abc/+&käll=1"
@@ -218,7 +239,7 @@ class TestExchangeTicket:
 
         result = await broker.exchange_ticket(api_key=make_api_key(), ticket=ticket)
 
-        assert result.module == "tal-till-text"
+        assert result.module_key == MODULE_KEY
         assert result.tenant_id == TENANT_ID
         assert result.user.id == USER_ID
         # Token decodes only with the module audience...
@@ -294,7 +315,7 @@ class TestExchangeTicket:
             )
 
         result = await broker.exchange_ticket(api_key=make_api_key(), ticket=ticket)
-        assert result.module == "tal-till-text"
+        assert result.module_key == MODULE_KEY
 
     async def test_rotated_successor_of_registered_key_accepted(self):
         broker = make_broker()
@@ -302,7 +323,7 @@ class TestExchangeTicket:
 
         rotated = make_api_key(id=uuid4(), rotated_from_key_id=SERVICE_KEY_ID)
         result = await broker.exchange_ticket(api_key=rotated, ticket=ticket)
-        assert result.module == "tal-till-text"
+        assert result.module_key == MODULE_KEY
 
     async def test_key_from_other_tenant_rejected(self):
         broker = make_broker()
@@ -322,6 +343,79 @@ class TestExchangeTicket:
 
         with pytest.raises(AuthenticationException):
             await broker.exchange_ticket(api_key=make_api_key(), ticket=ticket)
+
+
+class TestModuleResourceAuthentication:
+    async def module_token(self, broker, *, module_name=MODULE_KEY):
+        return broker.auth_service.create_access_token_for_user(
+            make_user(),
+            audience=module_audience(module_name),
+        )
+
+    async def test_validates_both_credentials_and_live_state(self):
+        broker = make_broker()
+        token = await self.module_token(broker)
+
+        principal = await broker.authenticate_resource_request(
+            module_key=MODULE_KEY,
+            access_token=token,
+            api_key=make_api_key(),
+        )
+
+        assert principal.module.id == MODULE_ID
+        assert principal.user.id == USER_ID
+        assert principal.api_key.id == SERVICE_KEY_ID
+        broker.module_repo.get_module_client_config.assert_awaited_once_with(
+            tenant_id=TENANT_ID,
+            module_id=MODULE_ID,
+        )
+        broker.user_service.validate_active_identity.assert_awaited_once_with(
+            principal.user,
+            correlation_id="module-resource-auth",
+        )
+
+    async def test_rejects_token_for_another_module(self):
+        broker = make_broker()
+        token = await self.module_token(broker, module_name="another-module")
+
+        with pytest.raises(AuthenticationException):
+            await broker.authenticate_resource_request(
+                module_key=MODULE_KEY,
+                access_token=token,
+                api_key=make_api_key(),
+            )
+
+    async def test_rejects_disabled_module_assignment(self):
+        broker = make_broker()
+        broker.module_repo.get_module_client_config.return_value = None
+
+        with pytest.raises(UnauthorizedException):
+            await broker.authenticate_resource_request(
+                module_key=MODULE_KEY,
+                access_token=await self.module_token(broker),
+                api_key=make_api_key(),
+            )
+
+    async def test_rejects_unbound_service_key(self):
+        broker = make_broker()
+
+        with pytest.raises(UnauthorizedException):
+            await broker.authenticate_resource_request(
+                module_key=MODULE_KEY,
+                access_token=await self.module_token(broker),
+                api_key=make_api_key(id=uuid4()),
+            )
+
+    async def test_rejects_user_from_another_tenant(self):
+        broker = make_broker()
+        broker.user_repo.get_user_by_email.return_value = make_user(tenant_id=uuid4())
+
+        with pytest.raises(AuthenticationException):
+            await broker.authenticate_resource_request(
+                module_key=MODULE_KEY,
+                access_token=await self.module_token(broker),
+                api_key=make_api_key(),
+            )
 
 
 class TestModuleClientConfig:
@@ -357,15 +451,29 @@ class TestModuleClientConfig:
 
 class TestModuleTicketRequest:
     def test_state_defaults_to_none(self):
-        request = ModuleTicketRequest(module_id=MODULE_ID, redirect_uri=REDIRECT_URI)
+        request = ModuleTicketRequest(module_key=MODULE_KEY, redirect_uri=REDIRECT_URI)
 
         assert request.state is None
+
+    def test_empty_module_key_is_rejected(self):
+        with pytest.raises(ValidationError):
+            ModuleTicketRequest(module_key="", redirect_uri=REDIRECT_URI)
+
+    def test_internal_module_id_is_not_a_supported_request_field(self):
+        with pytest.raises(ValidationError):
+            ModuleTicketRequest.model_validate(
+                {
+                    "module_key": MODULE_KEY,
+                    "module_id": str(MODULE_ID),
+                    "redirect_uri": REDIRECT_URI,
+                }
+            )
 
     @pytest.mark.parametrize("state", ["", "s" * 513])
     def test_empty_or_oversized_state_rejected(self, state):
         with pytest.raises(ValidationError):
             ModuleTicketRequest(
-                module_id=MODULE_ID, redirect_uri=REDIRECT_URI, state=state
+                module_key=MODULE_KEY, redirect_uri=REDIRECT_URI, state=state
             )
 
 

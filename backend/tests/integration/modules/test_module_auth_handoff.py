@@ -20,8 +20,7 @@ from eneo.authentication.auth_models import (
     ApiKeyType,
 )
 from eneo.database.database import get_session_with_transaction
-from eneo.main.models import ModelId
-from eneo.modules.module import ModuleBase
+from eneo.modules.module import ModuleCreate
 from eneo.tenants.tenant import TenantBase
 
 pytestmark = pytest.mark.integration
@@ -106,10 +105,10 @@ async def admin_token(db_container, patch_auth_service_jwt, admin_user) -> str:
 async def enabled_module(db_container, admin_user):
     async with db_container() as container:
         module = await container.module_repo().add(
-            ModuleBase(name=f"module-{uuid4().hex[:12]}")
+            ModuleCreate(name=f"module-{uuid4().hex[:12]}")
         )
-        await container.tenant_repo().add_modules(
-            [ModelId(id=module.id)], admin_user.tenant_id
+        await container.tenant_repo().enable_module(
+            tenant_id=admin_user.tenant_id, module_id=module.id
         )
         return module
 
@@ -144,6 +143,71 @@ async def create_api_key(
 
 def client_config_path(*, tenant_id, module_id) -> str:
     return f"/api/v1/modules/{tenant_id}/{module_id}/client-config/"
+
+
+@pytest.mark.asyncio
+async def test_ticket_request_uses_exact_public_module_key(
+    client,
+    admin_token,
+    enabled_module,
+):
+    headers = {"Authorization": f"Bearer {admin_token}"}
+
+    legacy_id = await client.post(
+        "/api/v1/module-auth/tickets/",
+        json={
+            "module_id": str(enabled_module.id),
+            "redirect_uri": REDIRECT_URI,
+        },
+        headers=headers,
+    )
+    assert legacy_id.status_code == 422, legacy_id.text
+
+    for unknown_key in (enabled_module.name.upper(), f"unknown-{uuid4().hex}"):
+        unknown = await client.post(
+            "/api/v1/module-auth/tickets/",
+            json={
+                "module_key": unknown_key,
+                "redirect_uri": REDIRECT_URI,
+            },
+            headers=headers,
+        )
+        assert unknown.status_code == 404, unknown.text
+
+    exact_key = await client.post(
+        "/api/v1/module-auth/tickets/",
+        json={
+            "module_key": enabled_module.name,
+            "redirect_uri": REDIRECT_URI,
+        },
+        headers=headers,
+    )
+    # The exact key resolves the enabled module and reaches the deliberately
+    # incomplete client config instead of falling through as unknown.
+    assert exact_key.status_code == 400, exact_key.text
+
+
+@pytest.mark.asyncio
+async def test_ticket_rejects_module_not_enabled_for_callers_tenant(
+    client,
+    db_container,
+    admin_token,
+):
+    async with db_container() as container:
+        other_module = await container.module_repo().add(
+            ModuleCreate(name=f"unassigned-{uuid4().hex[:12]}")
+        )
+
+    response = await client.post(
+        "/api/v1/module-auth/tickets/",
+        json={
+            "module_key": other_module.name,
+            "redirect_uri": REDIRECT_URI,
+        },
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+
+    assert response.status_code == 403, response.text
 
 
 @pytest.mark.asyncio
@@ -194,7 +258,7 @@ async def test_partial_config_patch_preserves_key_and_full_handoff_succeeds(
         method="POST",
         path="/api/v1/module-auth/tickets/",
         payload={
-            "module_id": str(enabled_module.id),
+            "module_key": enabled_module.name,
             "redirect_uri": UPDATED_REDIRECT_URI,
             "state": "module-csrf-binding-123",
         },
@@ -219,7 +283,7 @@ async def test_partial_config_patch_preserves_key_and_full_handoff_succeeds(
     )
     assert exchange.status_code == 200, exchange.text
     assert exchange.json()["tenant_id"] == str(admin_user.tenant_id)
-    assert exchange.json()["module"] == enabled_module.name
+    assert exchange.json()["module_key"] == enabled_module.name
 
     replay = await client.post(
         "/api/v1/module-auth/token/",

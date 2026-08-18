@@ -6,12 +6,18 @@ from eneo.authentication.auth_dependencies import require_session_auth
 from eneo.main.container.container import Container
 from eneo.main.exceptions import UnauthorizedException
 from eneo.modules.module_auth import (
+    ModuleResourceSessionResponse,
     ModuleTicketRequest,
     ModuleTicketResponse,
     ModuleTokenRequest,
     ModuleTokenResponse,
+    ModuleTokenUser,
 )
 from eneo.server.dependencies.container import get_container
+from eneo.server.dependencies.module_auth import (
+    get_module_request_container,
+    module_principal_from_request,
+)
 from eneo.server.protocol import responses
 
 router = APIRouter()
@@ -19,6 +25,10 @@ router = APIRouter()
 _AuthContainer = Annotated[
     Container,
     Depends(get_container(with_user=True, transaction_scope="function")),
+]
+_ModuleRequestContainer = Annotated[
+    Container,
+    Depends(get_module_request_container),
 ]
 
 
@@ -28,6 +38,8 @@ _AuthContainer = Annotated[
     status_code=status.HTTP_201_CREATED,
     description=(
         "Issue a one-time, short-lived login ticket for a module. "
+        "The request identifies the module by its stable public `module_key`, "
+        "not its internal database UUID. "
         "Requires a session token; the frontend redirects the browser to "
         "`redirect_target`, which is the ticket's only carrier - the module "
         "exchanges the ticket server-side. A module-supplied `state` value is "
@@ -46,7 +58,7 @@ async def issue_module_ticket(
 
     return await broker.issue_ticket(
         user=user,
-        module_id=payload.module_id,
+        module_key=payload.module_key,
         redirect_uri=payload.redirect_uri,
         state=payload.state,
     )
@@ -75,3 +87,34 @@ async def exchange_module_ticket(
 
     broker = container.module_auth_broker()
     return await broker.exchange_ticket(api_key=api_key, ticket=payload.ticket)
+
+
+@router.get(
+    "/{module_key}/session/",
+    response_model=ModuleResourceSessionResponse,
+    description=(
+        "Validate a module service key and module-user Bearer token together, "
+        "including their current tenant, module assignment and user state. "
+        "Module resource routes must enforce the same dependency directly; "
+        "calling this diagnostic endpoint first does not authorize a later call."
+    ),
+    responses=responses.get_responses([401, 403, 404]),
+    openapi_extra={
+        "security": [{"OAuth2PasswordBearer": [], "APIKeyHeader": []}],
+    },
+)
+async def validate_module_resource_session(
+    request: Request,
+    container: _ModuleRequestContainer,
+) -> ModuleResourceSessionResponse:
+    principal = module_principal_from_request(request)
+    user = container.user()
+    return ModuleResourceSessionResponse(
+        module_key=principal.module.name,
+        tenant_id=user.tenant_id,
+        user=ModuleTokenUser(
+            id=user.id,
+            email=user.email,
+            username=user.username,
+        ),
+    )

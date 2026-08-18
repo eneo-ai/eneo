@@ -53,8 +53,8 @@ class TestCategoryMappings:
             for action, cat in CATEGORY_MAPPINGS.items()
             if cat == "admin_actions"
         ]
-        assert len(admin_actions) == 47, (
-            f"Expected 47 admin actions, got {len(admin_actions)}"
+        assert len(admin_actions) == 49, (
+            f"Expected 49 admin actions, got {len(admin_actions)}"
         )
 
     def test_admin_actions_mapping(self):
@@ -84,7 +84,9 @@ class TestCategoryMappings:
             ActionType.CREDENTIALS_UPDATED,
             ActionType.FEDERATION_UPDATED,
             ActionType.MODULE_ADDED,
+            ActionType.MODULE_SET_REPLACED,
             ActionType.MODULE_ADDED_TO_TENANT,
+            ActionType.MODULE_REMOVED_FROM_TENANT,
             ActionType.MODULE_CLIENT_CONFIG_UPDATED,
         ]
 
@@ -258,7 +260,7 @@ class TestCategoryDistribution:
     def test_category_counts_match_expected(self):
         """Verify exact counts for each category."""
         expected_counts = {
-            "admin_actions": 47,
+            "admin_actions": 49,
             "user_actions": 45,
             "security_events": 8,
             "file_operations": 4,

@@ -33,7 +33,9 @@ CATEGORY_MAPPINGS = {
     ActionType.CREDENTIALS_UPDATED.value: "admin_actions",
     ActionType.FEDERATION_UPDATED.value: "admin_actions",
     ActionType.MODULE_ADDED.value: "admin_actions",
+    ActionType.MODULE_SET_REPLACED.value: "admin_actions",
     ActionType.MODULE_ADDED_TO_TENANT.value: "admin_actions",
+    ActionType.MODULE_REMOVED_FROM_TENANT.value: "admin_actions",
     ActionType.MODULE_CLIENT_CONFIG_UPDATED.value: "admin_actions",
     # SCIM Provisioning Actions (11 actions)
     ActionType.SCIM_USER_PROVISIONED.value: "admin_actions",
