@@ -9,15 +9,16 @@
   } from "@eneo/eneo-js";
   import {
     AlertCircle,
+    ArrowLeftRight,
     CheckCircle2,
     ChevronDown,
+    ExternalLink,
     HardDrive,
     KeyRound,
     Loader2,
     Settings2
   } from "lucide-svelte";
   import * as Alert from "$lib/components/ui/alert/index.js";
-  import { Badge } from "$lib/components/ui/badge/index.js";
   import { Button } from "$lib/components/ui/button/index.js";
   import * as Collapsible from "$lib/components/ui/collapsible/index.js";
   import * as Dialog from "$lib/components/ui/dialog/index.js";
@@ -34,7 +35,8 @@
     selectable: boolean;
     readiness_code: ObjectContentReadinessCode;
   };
-  type DialogMode = "create" | "rotate";
+  type DialogMode = "create" | "rotate" | "switch";
+  type SuccessKind = DialogMode | "switch-back";
   type LoadStatus = "idle" | "loading" | "error";
 
   type Props = {
@@ -55,13 +57,26 @@
   let dialogOpen = $state(false);
   let dialogMode = $state<DialogMode>("create");
   let advancedOpen = $state(false);
+  let previousOpen = $state(false);
   let submitting = $state(false);
   let submissionCode = $state<string | null>(null);
   let submissionUnknown = $state(false);
   let mutationOutcomeUnknown = $state(false);
   let connectionAlreadyConfigured = $state(false);
   let connectionRevisionConflict = $state(false);
-  let success = $state<DialogMode | null>(null);
+  let success = $state<SuccessKind | null>(null);
+  let switchInFlight = $state(false);
+  let previousActionCode = $state<string | null>(null);
+  let previousActionFailed = $state(false);
+  let abandonInFlight = $state(false);
+  let pendingActionCode = $state<string | null>(null);
+  let pendingActionFailed = $state(false);
+  let unresolvedPendingAbandon = $state<{ revision: number } | null>(null);
+  let unresolvedPreviousAction = $state<
+    | { kind: "switch-back"; endpointUrl: string; bucket: string; revision: number }
+    | { kind: "forget"; revision: number }
+    | null
+  >(null);
   let alertRef = $state<HTMLElement | null>(null);
 
   let endpointUrl = $state("");
@@ -92,6 +107,9 @@
       connection.credentials_can_be_managed === true &&
       connection.revision !== null
   );
+  const canSwitch = $derived(canRotate);
+  const previousDestination = $derived(connection?.previous_destination ?? null);
+  const pendingDestination = $derived(connection?.pending_destination ?? null);
   const formValid = $derived(
     accessKeyId.trim().length > 0 &&
       secretAccessKey.length > 0 &&
@@ -122,6 +140,14 @@
   }
 
   async function recoverConnection(): Promise<void> {
+    if (unresolvedPreviousAction) {
+      await resolvePreviousOutcome();
+      return;
+    }
+    if (unresolvedPendingAbandon) {
+      await resolvePendingOutcome();
+      return;
+    }
     if (
       (await loadConnection()) &&
       (mutationOutcomeUnknown || connectionAlreadyConfigured || connectionRevisionConflict)
@@ -166,6 +192,190 @@
     dialogOpen = true;
   }
 
+  function openSwitchDialog(): void {
+    dialogMode = "switch";
+    endpointUrl = "";
+    bucket = "";
+    region = "";
+    addressingStyle = "path";
+    resetSecrets();
+    resetSubmissionState();
+    mutationOutcomeUnknown = false;
+    connectionAlreadyConfigured = false;
+    connectionRevisionConflict = false;
+    advancedOpen = false;
+    dialogOpen = true;
+  }
+
+  function resetPreviousActionState(): void {
+    previousActionCode = null;
+    previousActionFailed = false;
+  }
+
+  function errorCode(error: unknown): string | null {
+    return error instanceof EneoError && typeof error.response?.code === "string"
+      ? error.response.code
+      : null;
+  }
+
+  function recordPreviousActionFailure(error: unknown): void {
+    previousActionCode = errorCode(error);
+    previousActionFailed = true;
+  }
+
+  // True when the server's outcome is genuinely unknown: either the backend
+  // said so explicitly, or the transport failed and no response arrived at
+  // all — the mutation may have committed either way.
+  function previousOutcomeIsUnknown(error: unknown): boolean {
+    if (errorCode(error) === "object_store_connection_mutation_outcome_unknown") return true;
+    return (
+      error instanceof EneoError && (error.stage === "CONNECTION" || error.stage === "UNKNOWN")
+    );
+  }
+
+  function reconcilePreviousOutcome(
+    current: ObjectStoreConnection
+  ): "committed" | "not-applied" | "diverged" {
+    const pending = unresolvedPreviousAction;
+    if (!pending) return "diverged";
+    if (pending.kind === "switch-back") {
+      if (current.endpoint_url === pending.endpointUrl && current.bucket === pending.bucket)
+        return "committed";
+    } else if (current.previous_destination == null) {
+      return "committed";
+    }
+    return current.previous_destination?.revision === pending.revision ? "not-applied" : "diverged";
+  }
+
+  // A 503 outcome-unknown means the mutation may have committed even though the
+  // response was lost. A later successful read is definitive, so reconcile
+  // against the state captured before the action instead of treating the
+  // ambiguity as a retryable failure: retrying a committed switch-back would
+  // reverse a completed cutover. Three outcomes: the mutation committed, the
+  // archive the administrator saw is untouched (retry is safe), or a
+  // concurrent change replaced it (review before acting again).
+  async function resolvePreviousOutcome(): Promise<void> {
+    const pending = unresolvedPreviousAction;
+    if (!pending) return;
+    if (!(await loadConnection())) return;
+    const outcome = connection === null ? "diverged" : reconcilePreviousOutcome(connection);
+    unresolvedPreviousAction = null;
+    if (outcome === "committed") {
+      if (pending.kind === "switch-back") success = "switch-back";
+      await onConnectionChanged?.();
+    } else {
+      previousActionFailed = true;
+      previousActionCode =
+        outcome === "not-applied"
+          ? "object_store_connection_mutation_outcome_unknown"
+          : "object_store_connection_revision_conflict";
+    }
+  }
+
+  // The abandon may have committed even though its response was lost.
+  // Reconcile against the attempt the administrator actually saw: gone means
+  // done; the same revision means untouched (retry is safe); a different
+  // revision means a newer attempt now owns the slot and must be reviewed
+  // first. The captured revision survives a failed refresh — retrying the
+  // load resumes this resolution instead of silently re-arming the button
+  // against whatever the reload happens to return.
+  async function resolvePendingOutcome(): Promise<void> {
+    const pending = unresolvedPendingAbandon;
+    if (!pending) return;
+    if (!(await loadConnection())) return;
+    unresolvedPendingAbandon = null;
+    const current = pendingDestination;
+    if (current !== null) {
+      pendingActionFailed = true;
+      pendingActionCode =
+        current.revision === pending.revision
+          ? "object_store_connection_mutation_outcome_unknown"
+          : "object_store_connection_revision_conflict";
+    }
+  }
+
+  async function abandonPendingDestination(): Promise<void> {
+    if (abandonInFlight || switchInFlight || unresolvedPendingAbandon) return;
+    const target = pendingDestination;
+    if (target === null) return;
+    abandonInFlight = true;
+    pendingActionCode = null;
+    pendingActionFailed = false;
+    try {
+      await eneo.objectStoreConnection.abandonPendingDestination(target.revision);
+      await loadConnection();
+    } catch (error: unknown) {
+      if (hasStatus(error, 403)) {
+        onAuthorityRevoked?.();
+      } else if (previousOutcomeIsUnknown(error)) {
+        unresolvedPendingAbandon = { revision: target.revision };
+        await resolvePendingOutcome();
+      } else {
+        pendingActionCode = errorCode(error);
+        pendingActionFailed = true;
+        await loadConnection();
+      }
+    } finally {
+      abandonInFlight = false;
+    }
+  }
+
+  async function switchBackDestination(): Promise<void> {
+    if (switchInFlight || unresolvedPreviousAction) return;
+    const target = previousDestination;
+    if (target === null) return;
+    switchInFlight = true;
+    resetPreviousActionState();
+    try {
+      connection = await eneo.objectStoreConnection.switchBackDestination(target.revision);
+      success = "switch-back";
+      await onConnectionChanged?.();
+    } catch (error: unknown) {
+      if (hasStatus(error, 403)) {
+        onAuthorityRevoked?.();
+      } else if (previousOutcomeIsUnknown(error)) {
+        success = null;
+        unresolvedPreviousAction = {
+          kind: "switch-back",
+          endpointUrl: target.endpoint_url,
+          bucket: target.bucket,
+          revision: target.revision
+        };
+        await resolvePreviousOutcome();
+      } else {
+        success = null;
+        recordPreviousActionFailure(error);
+        await loadConnection();
+      }
+    } finally {
+      switchInFlight = false;
+    }
+  }
+
+  async function forgetPreviousDestination(): Promise<void> {
+    if (switchInFlight || unresolvedPreviousAction) return;
+    const target = previousDestination;
+    if (target === null) return;
+    switchInFlight = true;
+    resetPreviousActionState();
+    try {
+      await eneo.objectStoreConnection.forgetPreviousDestination(target.revision);
+      await loadConnection();
+    } catch (error: unknown) {
+      if (hasStatus(error, 403)) {
+        onAuthorityRevoked?.();
+      } else if (previousOutcomeIsUnknown(error)) {
+        unresolvedPreviousAction = { kind: "forget", revision: target.revision };
+        await resolvePreviousOutcome();
+      } else {
+        recordPreviousActionFailure(error);
+        await loadConnection();
+      }
+    } finally {
+      switchInFlight = false;
+    }
+  }
+
   function resetSubmissionState(): void {
     submissionCode = null;
     submissionUnknown = false;
@@ -193,6 +403,16 @@
           addressing_style: addressingStyle
         };
         connection = await eneo.objectStoreConnection.create(candidate);
+      } else if (dialogMode === "switch") {
+        const destination: ObjectStoreConnectionCreate = {
+          endpoint_url: endpointUrl.trim(),
+          bucket: bucket.trim(),
+          region: region.trim(),
+          access_key_id: accessKeyId.trim(),
+          secret_access_key: secretAccessKey,
+          addressing_style: addressingStyle
+        };
+        connection = await eneo.objectStoreConnection.replaceDestination(destination);
       } else {
         if (connection?.revision === null || connection?.revision === undefined) return;
         const credentials: ObjectStoreCredentialRotation = {
@@ -254,8 +474,6 @@
     if (code === "object_store_probe_tls_failed") return m.storage_connection_error_tls_title();
     if (code === "object_store_plain_http_not_permitted")
       return m.storage_connection_error_http_title();
-    if (code === "object_store_endpoint_not_permitted")
-      return m.storage_connection_error_endpoint_not_permitted_title();
     if (code === "object_store_probe_binding_mismatch")
       return m.storage_connection_error_binding_title();
     if (code === "object_store_probe_integrity_failed")
@@ -264,6 +482,24 @@
       return m.storage_connection_error_encryption_title();
     if (code === "object_store_connection_revision_conflict")
       return m.storage_connection_error_conflict_title();
+    if (code === "object_store_policy_changed_during_switch")
+      return m.storage_switch_error_policy_changed_title();
+    if (code === "object_store_switch_back_diverged")
+      return m.storage_switch_error_diverged_title();
+    if (code === "object_store_destination_switch_blocked")
+      return m.storage_switch_error_blocked_title();
+    if (code === "object_store_new_writes_not_redirected")
+      return m.storage_switch_error_new_writes_title();
+    if (code === "object_store_moves_not_paused")
+      return m.storage_switch_error_moves_not_paused_title();
+    if (code === "object_store_destination_copy_incomplete")
+      return m.storage_switch_error_copy_incomplete_title();
+    if (code === "object_store_previous_destination_present")
+      return m.storage_switch_error_previous_present_title();
+    if (code === "object_store_connection_mutation_outcome_unknown")
+      return m.storage_switch_outcome_not_applied_title();
+    if (code === "object_store_destination_already_bound")
+      return m.storage_switch_error_already_bound_title();
     return m.storage_connection_error_unavailable_title();
   }
 
@@ -275,8 +511,6 @@
       return m.storage_connection_error_tls_description();
     if (code === "object_store_plain_http_not_permitted")
       return m.storage_connection_error_http_description();
-    if (code === "object_store_endpoint_not_permitted")
-      return m.storage_connection_error_endpoint_not_permitted_description();
     if (code === "object_store_probe_binding_mismatch")
       return m.storage_connection_error_binding_description();
     if (code === "object_store_probe_integrity_failed")
@@ -285,6 +519,24 @@
       return m.storage_connection_error_encryption_description();
     if (code === "object_store_connection_revision_conflict")
       return m.storage_connection_error_conflict_description();
+    if (code === "object_store_policy_changed_during_switch")
+      return m.storage_switch_error_policy_changed_description();
+    if (code === "object_store_switch_back_diverged")
+      return m.storage_switch_error_diverged_description();
+    if (code === "object_store_destination_switch_blocked")
+      return m.storage_switch_error_blocked_description();
+    if (code === "object_store_new_writes_not_redirected")
+      return m.storage_switch_error_new_writes_description();
+    if (code === "object_store_moves_not_paused")
+      return m.storage_switch_error_moves_not_paused_description();
+    if (code === "object_store_destination_copy_incomplete")
+      return m.storage_switch_error_copy_incomplete_description();
+    if (code === "object_store_previous_destination_present")
+      return m.storage_switch_error_previous_present_description();
+    if (code === "object_store_connection_mutation_outcome_unknown")
+      return m.storage_switch_outcome_not_applied_description();
+    if (code === "object_store_destination_already_bound")
+      return m.storage_switch_error_already_bound_description();
     return m.storage_connection_error_unavailable_description();
   }
 
@@ -310,12 +562,20 @@
       <Alert.Title>
         {success === "create"
           ? m.storage_connection_created_title()
-          : m.storage_connection_rotated_title()}
+          : success === "switch"
+            ? m.storage_switch_done_title()
+            : success === "switch-back"
+              ? m.storage_switch_back_done_title()
+              : m.storage_connection_rotated_title()}
       </Alert.Title>
       <Alert.Description>
         {success === "create"
           ? m.storage_connection_created_description()
-          : m.storage_connection_rotated_description()}
+          : success === "switch"
+            ? m.storage_switch_done_description()
+            : success === "switch-back"
+              ? m.storage_switch_back_done_description()
+              : m.storage_connection_rotated_description()}
       </Alert.Description>
     </Alert.Root>
   {/if}
@@ -372,7 +632,7 @@
           ? readinessLabel(capability.readiness_code)
           : m.storage_connection_health_unknown()}
       </p>
-      <p class="text-muted mt-1 text-xs">{m.storage_connection_platform_admin_only()}</p>
+      <p class="text-muted mt-1 text-xs">{m.storage_connection_storage_admin_only()}</p>
     </div>
   {:else if loadStatus === "loading"}
     <div class="flex flex-col gap-3" aria-busy="true">
@@ -412,13 +672,10 @@
         </div>
         <div>
           <dt class="text-secondary text-sm">{m.storage_connection_addressing_style()}</dt>
-          <dd class="mt-1 flex items-center gap-2 text-sm font-medium">
+          <dd class="mt-1 text-sm font-medium">
             {connection.addressing_style === "virtual"
               ? m.storage_connection_addressing_virtual()
               : m.storage_connection_addressing_path()}
-            <Badge variant="outline">
-              {m.storage_connection_revision({ revision: connection.revision ?? 0 })}
-            </Badge>
           </dd>
         </div>
       </dl>
@@ -429,16 +686,123 @@
         <p class="text-secondary max-w-[68ch] text-sm leading-5">
           {m.storage_connection_rotation_description()}
         </p>
-        <Button
-          class="shrink-0"
-          variant="outline"
-          onclick={openRotationDialog}
-          disabled={!canRotate}
-        >
-          <KeyRound data-icon="inline-start" aria-hidden="true" />
-          {m.storage_connection_rotate_action()}
-        </Button>
+        <div class="flex shrink-0 flex-col gap-2 sm:flex-row">
+          <Button variant="outline" onclick={openRotationDialog} disabled={!canRotate}>
+            <KeyRound data-icon="inline-start" aria-hidden="true" />
+            {m.storage_connection_rotate_action()}
+          </Button>
+          <Button variant="outline" onclick={openSwitchDialog} disabled={!canSwitch}>
+            <ArrowLeftRight data-icon="inline-start" aria-hidden="true" />
+            {m.storage_switch_action()}
+          </Button>
+        </div>
       </div>
+
+      {#if previousDestination}
+        <Collapsible.Root bind:open={previousOpen}>
+          <Collapsible.Trigger
+            class="hover:bg-hover-dimmer focus-visible:ring-ring flex w-full items-center gap-2 rounded-md px-3 py-2 text-left focus-visible:ring-2 focus-visible:outline-none [&[data-state=open]>svg]:rotate-180"
+          >
+            <span class="min-w-0 flex-1 text-sm font-medium">
+              {m.storage_switch_previous_title()}
+            </span>
+            <span class="text-muted max-w-72 truncate text-sm" title={previousDestination.bucket}>
+              {previousDestination.bucket}
+            </span>
+            <ChevronDown
+              aria-hidden="true"
+              class="size-4 shrink-0 transition-transform motion-reduce:transition-none"
+            />
+          </Collapsible.Trigger>
+          <Collapsible.Content class="pt-3">
+            <div class="border-default rounded-md border p-4">
+              <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                <div class="min-w-0">
+                  <p
+                    class="text-secondary truncate text-sm"
+                    title={previousDestination.endpoint_url}
+                  >
+                    {previousDestination.endpoint_url} · {previousDestination.bucket}
+                  </p>
+                  <p class="text-secondary mt-2 max-w-[68ch] text-sm leading-5">
+                    {m.storage_switch_previous_description()}
+                  </p>
+                  {#if previousActionFailed}
+                    <Alert.Root class="mt-3" variant="destructive" aria-live="assertive">
+                      <AlertCircle />
+                      <Alert.Title>{errorTitle(previousActionCode)}</Alert.Title>
+                      <Alert.Description>
+                        {errorDescription(previousActionCode)}
+                      </Alert.Description>
+                    </Alert.Root>
+                  {/if}
+                </div>
+                <div class="flex shrink-0 flex-col gap-2 sm:flex-row">
+                  <Button
+                    variant="outline"
+                    onclick={switchBackDestination}
+                    disabled={!canSwitch || switchInFlight}
+                    aria-busy={switchInFlight}
+                  >
+                    {#if switchInFlight}
+                      <Loader2 data-icon="inline-start" class="animate-spin" aria-hidden="true" />
+                    {/if}
+                    {m.storage_switch_back_action()}
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    onclick={forgetPreviousDestination}
+                    disabled={!canSwitch || switchInFlight}
+                  >
+                    {m.storage_switch_forget_action()}
+                  </Button>
+                </div>
+              </div>
+            </div>
+          </Collapsible.Content>
+        </Collapsible.Root>
+      {/if}
+
+      {#if pendingDestination}
+        <div class="border-default rounded-md border p-4">
+          <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+            <div class="min-w-0">
+              <p class="text-sm font-medium">{m.storage_pending_title()}</p>
+              <p class="text-secondary mt-1 truncate text-sm" title={pendingDestination.bucket}>
+                {pendingDestination.endpoint_url} · {pendingDestination.bucket}
+              </p>
+              <p class="text-secondary mt-2 max-w-[68ch] text-sm leading-5">
+                {m.storage_pending_description()}
+              </p>
+              {#if pendingActionFailed}
+                <Alert.Root class="mt-3" variant="destructive" aria-live="assertive">
+                  <AlertCircle />
+                  <Alert.Title>{errorTitle(pendingActionCode)}</Alert.Title>
+                  <Alert.Description>
+                    {errorDescription(pendingActionCode)}
+                  </Alert.Description>
+                </Alert.Root>
+              {/if}
+            </div>
+            <div class="flex shrink-0 flex-col gap-2 sm:flex-row">
+              <Button
+                variant="ghost"
+                onclick={abandonPendingDestination}
+                disabled={!canSwitch ||
+                  switchInFlight ||
+                  abandonInFlight ||
+                  unresolvedPendingAbandon !== null}
+                aria-busy={abandonInFlight}
+              >
+                {#if abandonInFlight}
+                  <Loader2 data-icon="inline-start" class="animate-spin" aria-hidden="true" />
+                {/if}
+                {m.storage_pending_abandon_action()}
+              </Button>
+            </div>
+          </div>
+        </div>
+      {/if}
     </div>
   {:else if connection?.source === "environment"}
     <Alert.Root>
@@ -480,12 +844,16 @@
       <Dialog.Title>
         {dialogMode === "create"
           ? m.storage_connection_dialog_create_title()
-          : m.storage_connection_dialog_rotate_title()}
+          : dialogMode === "switch"
+            ? m.storage_switch_dialog_title()
+            : m.storage_connection_dialog_rotate_title()}
       </Dialog.Title>
       <Dialog.Description>
         {dialogMode === "create"
           ? m.storage_connection_dialog_create_description()
-          : m.storage_connection_dialog_rotate_description()}
+          : dialogMode === "switch"
+            ? m.storage_switch_dialog_description()
+            : m.storage_connection_dialog_rotate_description()}
       </Dialog.Description>
     </Dialog.Header>
 
@@ -508,6 +876,31 @@
               <AlertCircle />
               <Alert.Title>{errorTitle(submissionCode)}</Alert.Title>
               <Alert.Description>{errorDescription(submissionCode)}</Alert.Description>
+            </Alert.Root>
+          {/if}
+
+          {#if dialogMode === "switch"}
+            <Alert.Root>
+              <AlertCircle />
+              <Alert.Title>{m.storage_switch_checklist_title()}</Alert.Title>
+              <Alert.Description>
+                <ul class="ml-4 list-disc space-y-1">
+                  <li>{m.storage_switch_checklist_copied()}</li>
+                  <li>{m.storage_switch_checklist_inline()}</li>
+                  <li>{m.storage_switch_checklist_reversible()}</li>
+                </ul>
+                <Button
+                  href="https://docs.eneo.ai/guides/object-content-storage#move-to-another-s3-compatible-service"
+                  target="_blank"
+                  rel="noreferrer"
+                  variant="link"
+                  size="sm"
+                  class="mt-2 h-auto w-fit px-0"
+                >
+                  {m.storage_switch_guide_link()}
+                  <ExternalLink data-icon="inline-end" aria-hidden="true" />
+                </Button>
+              </Alert.Description>
             </Alert.Root>
           {/if}
 
@@ -616,7 +1009,7 @@
             </Field.Field>
           </Field.Group>
 
-          {#if dialogMode === "create"}
+          {#if dialogMode !== "rotate"}
             <Collapsible.Root bind:open={advancedOpen}>
               <Collapsible.Trigger
                 class="hover:bg-muted/50 focus-visible:ring-ring flex w-full items-center justify-between rounded-md py-2 text-sm font-medium focus-visible:ring-2 focus-visible:outline-none"
@@ -661,14 +1054,16 @@
             <CheckCircle2 class="text-primary mt-0.5 size-4 shrink-0" aria-hidden="true" />
             <div class="min-w-0">
               <p class="text-primary font-medium">
-                {dialogMode === "create"
-                  ? m.storage_connection_probe_create_title()
-                  : m.storage_connection_probe_rotate_title()}
+                {dialogMode === "rotate"
+                  ? m.storage_connection_probe_rotate_title()
+                  : m.storage_connection_probe_create_title()}
               </p>
               <p class="mt-1 max-w-[65ch] leading-5">
-                {dialogMode === "create"
-                  ? m.storage_connection_probe_create_description()
-                  : m.storage_connection_probe_rotate_description()}
+                {dialogMode === "rotate"
+                  ? m.storage_connection_probe_rotate_description()
+                  : dialogMode === "switch"
+                    ? m.storage_switch_probe_description()
+                    : m.storage_connection_probe_create_description()}
               </p>
             </div>
           </div>
@@ -692,6 +1087,8 @@
             {m.storage_connection_testing()}
           {:else if dialogMode === "create"}
             {m.storage_connection_test_and_save()}
+          {:else if dialogMode === "switch"}
+            {m.storage_switch_test_and_switch()}
           {:else}
             {m.storage_connection_test_and_rotate()}
           {/if}

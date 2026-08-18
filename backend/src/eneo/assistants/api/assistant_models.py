@@ -143,6 +143,8 @@ class EffectiveConfigPublic(BaseModel):
         default_factory=_empty_uuid_list
     )
     prompt_locked: bool
+    default_reasoning_effort: str | None
+    reasoning_effort_user_configurable: bool
 
 
 class AssistantBase(BaseModel):
@@ -428,7 +430,7 @@ class DefaultAssistant(AssistantPublic):
     completion_model: Optional[CompletionModelSparse] = None
     insight_enabled: bool = False
     inline_file_text: bool = True
-    knowledge_mode: KnowledgeMode = KnowledgeMode.TOOL
+    knowledge_mode: KnowledgeMode = KnowledgeMode.INJECT
 
 
 SessionInDB.model_rebuild()

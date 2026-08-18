@@ -511,7 +511,13 @@ async def cleanup_database(
     test_settings: Settings,
 ):
     """
-    Automatically truncate all tables and reseed after each test for full isolation.
+    Automatically truncate all tables and reseed after each test.
+
+    This isolates row data, not everything: TRUNCATE resets pg_class but leaves
+    pg_statistic behind, so a test that runs ANALYZE hands its planner
+    statistics to whichever test runs next in the same worker. Tests that assert
+    on a query plan must measure statistics inside a rolled-back savepoint —
+    see tests/integration/skills/test_skill_adoption_projection.py.
 
     Optimized for speed:
     - Single TRUNCATE statement for all tables (instead of one per table)

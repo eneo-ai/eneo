@@ -1,6 +1,7 @@
 <script lang="ts">
   import { Page, Settings } from "$lib/components/layout";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager.js";
+  import { hasPermission } from "$lib/core/hasPermission.js";
 
   import { Button, Input, Tooltip } from "@eneo/ui";
   import { IconSparkles } from "@eneo/icons/sparkles";
@@ -30,6 +31,8 @@
   import IconUpload from "$lib/features/icons/IconUpload.svelte";
   import ApiKeysSettingsSection from "$lib/features/api-keys/ApiKeysSettingsSection.svelte";
   import SkillBindingsEditor from "$lib/features/skills/SkillBindingsEditor.svelte";
+  import { Badge } from "$lib/components/ui/badge/index.js";
+  import { resolve } from "$app/paths";
   import {
     loadSkillBindingCatalogPage,
     loadSkillBindingPreview
@@ -46,6 +49,14 @@
   const isHelpAssistant = $derived(
     (data.assistant as { is_help_assistant?: boolean }).is_help_assistant ?? false
   );
+
+  // URL-only file handling is backed by originals in object storage. Without a
+  // connected store file text is always inlined, so the toggle is locked and
+  // says why, with a link on to the setup page for those who can act on it.
+  const objectStorageMissing = $derived(!data.settings.object_store_configured);
+  // The storage controls require the storage permission and live inside the
+  // admin area, so only users who can reach and use that page are pointed at it.
+  const canConfigureStorage = $derived(hasPermission(data.user)({ allOf: ["admin", "storage"] }));
 
   const {
     state: { currentSpace },
@@ -576,9 +587,30 @@
               discardChanges("inline_file_text");
             }}
           >
+            <svelte:fragment slot="title">
+              {#if objectStorageMissing}
+                <Badge variant="secondary" class="ml-2">{m.inline_file_text_locked()}</Badge>
+              {/if}
+            </svelte:fragment>
+            <svelte:fragment slot="description">
+              {#if objectStorageMissing}
+                <p
+                  class="label-warning border-label-default bg-label-dimmer text-label-stronger mt-2.5 rounded-md border px-2 py-1 text-sm"
+                >
+                  <span class="font-bold">{m.hint()}:&nbsp;</span
+                  >{m.inline_file_text_object_storage_hint()}
+                  {#if canConfigureStorage}
+                    <a href={resolve("/admin/storage")} class="underline"
+                      >{m.configure_object_storage()}</a
+                    >
+                  {/if}
+                </p>
+              {/if}
+            </svelte:fragment>
             <div class="border-default flex h-14 border-b py-2">
               <Input.RadioSwitch
                 bind:value={$update.inline_file_text}
+                disabled={objectStorageMissing}
                 labelTrue={m.enable()}
                 labelFalse={m.disable()}
               ></Input.RadioSwitch>

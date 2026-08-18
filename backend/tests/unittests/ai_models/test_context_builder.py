@@ -14,8 +14,10 @@ from eneo.completion_models.infrastructure.context_builder import (
     count_tokens,
 )
 from eneo.completion_models.infrastructure.static_prompts import (
+    ATTACHED_FILE_REFERENCES_INSTRUCTION,
     HALLUCINATION_GUARD,
     SHOW_REFERENCES_PROMPT,
+    TOOL_NAMING_INSTRUCTION,
 )
 from eneo.files.file_models import File, FileType
 from eneo.questions.question import ToolCallInfo
@@ -660,6 +662,94 @@ def test_message_scaffolding_overhead_is_counted(context_builder: ContextBuilder
     context = context_builder.build_context(input_str=QUESTION, max_tokens=10000)
 
     assert context.token_count > count_tokens(QUESTION)
+
+
+def test_tool_naming_instruction_is_added_when_tools_are_advertised(
+    context_builder: ContextBuilder,
+):
+    context = context_builder.build_context(
+        input_str=QUESTION,
+        max_tokens=10000,
+        prompt="You are a helpful assistant.",
+        extra_tool_dicts=[
+            {
+                "type": "function",
+                "function": {
+                    "name": "files__ingest_urls",
+                    "description": "Fetch files from HTTPS links.",
+                    "parameters": {"type": "object", "properties": {}},
+                },
+            }
+        ],
+    )
+
+    assert TOOL_NAMING_INSTRUCTION in context.prompt
+    assert context.prompt.startswith("You are a helpful assistant.")
+
+
+def test_tool_naming_instruction_is_absent_without_tools(
+    context_builder: ContextBuilder,
+):
+    context = context_builder.build_context(
+        input_str=QUESTION,
+        max_tokens=10000,
+        prompt="You are a helpful assistant.",
+    )
+
+    assert context.prompt == "You are a helpful assistant."
+
+
+_URL_TOOL_DICT = {
+    "type": "function",
+    "function": {
+        "name": "files__read_file",
+        "description": "Read an attached file.",
+        "parameters": {"type": "object", "properties": {}},
+    },
+}
+
+
+def test_file_reference_instruction_requires_references_and_tools(
+    context_builder: ContextBuilder,
+):
+    # The arbitration rule is stated once in the system prompt (the
+    # per-message reference block carries mechanics only), and only when
+    # there is both a reference to arbitrate and a tool to pass it to.
+    file_id = uuid4()
+    file = MagicMock(spec=File)
+    file.id = file_id
+    file.name = "report.csv"
+    file.mimetype = "text/csv"
+    file.size = 10
+    file.file_type = FileType.TEXT
+    file.text = "a,b"
+
+    with_both = context_builder.build_context(
+        input_str=QUESTION,
+        max_tokens=10000,
+        prompt="You are a helpful assistant.",
+        files=[file],
+        file_reference_urls={file_id: "https://x/dl"},
+        extra_tool_dicts=[_URL_TOOL_DICT],
+    )
+    assert ATTACHED_FILE_REFERENCES_INSTRUCTION in with_both.prompt
+
+    without_tools = context_builder.build_context(
+        input_str=QUESTION,
+        max_tokens=10000,
+        prompt="You are a helpful assistant.",
+        files=[file],
+        file_reference_urls={file_id: "https://x/dl"},
+    )
+    assert ATTACHED_FILE_REFERENCES_INSTRUCTION not in without_tools.prompt
+
+    without_references = context_builder.build_context(
+        input_str=QUESTION,
+        max_tokens=10000,
+        prompt="You are a helpful assistant.",
+        extra_tool_dicts=[_URL_TOOL_DICT],
+    )
+    assert ATTACHED_FILE_REFERENCES_INSTRUCTION not in without_references.prompt
 
 
 def test_truncate_knowledge_if_too_many_chunks(context_builder: ContextBuilder):

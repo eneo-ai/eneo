@@ -28,6 +28,7 @@ class Permission(str, Enum):
     INTEGRATIONS = "integrations"
     SHARED_SPACES = "shared_spaces"
     API_KEYS = "api_keys"
+    STORAGE = "storage"
     ASSISTANT_DEBUG = "assistant_debug"
 
 

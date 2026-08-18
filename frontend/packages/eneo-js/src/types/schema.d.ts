@@ -5912,7 +5912,7 @@ export interface paths {
     };
     /**
      * Get Object Content Inventory
-     * @description Get bounded deployment-wide object-content inventory facts. Platform administrators only.
+     * @description Get bounded deployment-wide object-content inventory facts. Requires the storage administration permission (held by the Owner role by default).
      */
     get: operations["get_object_content_inventory_api_v1_admin_object_content_inventory_get"];
     put?: never;
@@ -5932,7 +5932,7 @@ export interface paths {
     };
     /**
      * Get Object Content Moves
-     * @description Get bounded aggregate progress and typed failure reasons for explicit object-content moves. Platform administrators only.
+     * @description Get bounded aggregate progress and typed failure reasons for explicit object-content moves. Requires the storage administration permission (held by the Owner role by default).
      */
     get: operations["get_object_content_moves_api_v1_admin_object_content_moves_get"];
     put?: never;
@@ -5976,7 +5976,7 @@ export interface paths {
     };
     /**
      * Get Object Store Connection
-     * @description Get the deployment-wide S3-compatible destination without returning credentials or internal object identifiers. Platform administrators only.
+     * @description Get the deployment-wide S3-compatible destination without returning credentials or internal object identifiers. Requires the storage administration permission (held by the Owner role by default).
      */
     get: operations["get_object_store_connection_api_v1_admin_object_store_connection_get"];
     put?: never;
@@ -6006,6 +6006,86 @@ export interface paths {
     put: operations["rotate_object_store_credentials_api_v1_admin_object_store_connection_credentials_put"];
     post?: never;
     delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/admin/object-store-connection/destination": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Replace Object Store Destination
+     * @description Switch the deployment to an S3-compatible destination the operator has already filled with a byte-for-byte copy of the content namespace. Refused while any write could still reach a destination. The previous destination is archived for switch-back; no bucket is ever deleted.
+     */
+    post: operations["replace_object_store_destination_api_v1_admin_object_store_connection_destination_post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/admin/object-store-connection/destination/switch-back": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Switch Back Object Store Destination
+     * @description Return to the archived previous destination using its stored credentials. Subject to the same write-quiescence preconditions as a forward switch.
+     */
+    post: operations["switch_back_object_store_destination_api_v1_admin_object_store_connection_destination_switch_back_post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/admin/object-store-connection/previous": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post?: never;
+    /**
+     * Forget Previous Object Store Destination
+     * @description Forget the archived previous destination. The bucket itself is operator-owned and is never touched; decommission it at the provider when it is no longer needed.
+     */
+    delete: operations["forget_previous_object_store_destination_api_v1_admin_object_store_connection_previous_delete"];
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/admin/object-store-connection/pending": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post?: never;
+    /**
+     * Abandon Pending Object Store Destination
+     * @description Abandon the pending destination attempt an interrupted or ambiguous change left behind. Releases its remote marker and clears the temporary records; the bucket itself is operator-owned and its content is never touched.
+     */
+    delete: operations["abandon_pending_object_store_destination_api_v1_admin_object_store_connection_pending_delete"];
     options?: never;
     head?: never;
     patch?: never;
@@ -6877,26 +6957,6 @@ export interface paths {
      * @description Complete the OAuth2 callback by exchanging the auth code for a user integration.
      */
     post: operations["on_auth_callback_api_v1_integrations_auth_callback_token__post"];
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
-  "/api/v1/sysadmin/users/{user_id}/platform-admin": {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    get?: never;
-    /**
-     * Set Platform Admin
-     * @description Grant or revoke session-backed platform-administrator authority for a user. Granting requires an active tenant administrator; revoking does not.
-     */
-    put: operations["set_platform_admin_api_v1_sysadmin_users__user_id__platform_admin_put"];
-    post?: never;
     delete?: never;
     options?: never;
     head?: never;
@@ -10883,6 +10943,11 @@ export interface components {
      */
     ContentMoveState: "pending" | "target_verified" | "failed";
     /**
+     * ContentOwner
+     * @enum {string}
+     */
+    ContentOwner: "file_content" | "icon" | "knowledge_file" | "other";
+    /**
      * ContentState
      * @enum {string}
      */
@@ -11590,7 +11655,7 @@ export interface components {
        * @default true
        */
       inline_file_text?: boolean;
-      /** @default tool */
+      /** @default inject */
       knowledge_mode?: components["schemas"]["KnowledgeMode"];
       /**
        * Data Retention Days
@@ -11761,6 +11826,10 @@ export interface components {
       default_disabled_mcp_server_ids?: string[];
       /** Prompt Locked */
       prompt_locked: boolean;
+      /** Default Reasoning Effort */
+      default_reasoning_effort: string | null;
+      /** Reasoning Effort User Configurable */
+      reasoning_effort_user_configurable: boolean;
     };
     /** EmbeddingModelCreate */
     EmbeddingModelCreate: {
@@ -12554,6 +12623,7 @@ export interface components {
       models_restriction: components["schemas"]["ModelsRestrictionPublic"];
       mcp_restriction: components["schemas"]["McpRestrictionPublic"];
       prompt_enforcement: components["schemas"]["PromptEnforcementPublic"];
+      reasoning_policy: components["schemas"]["ReasoningPolicyPublic"];
       skills: components["schemas"]["SkillsPolicyPublic"];
       /** Updated At */
       updated_at: string | null;
@@ -12565,6 +12635,7 @@ export interface components {
       models_restriction?: components["schemas"]["ModelsRestrictionInput"] | null;
       mcp_restriction?: components["schemas"]["McpRestrictionInput"] | null;
       prompt_enforcement?: components["schemas"]["PromptEnforcementInput"] | null;
+      reasoning_policy?: components["schemas"]["ReasoningPolicyInput"] | null;
       skills?: components["schemas"]["SkillsPolicyInput"] | null;
     };
     /** GroupChatAssistantPublic */
@@ -13211,6 +13282,7 @@ export interface components {
     IntegrationType: "confluence" | "sharepoint";
     /** InventoryPublic */
     InventoryPublic: {
+      owner: components["schemas"]["ContentOwner"];
       target: components["schemas"]["StorageKind"];
       state: components["schemas"]["ContentState"];
       /** Count */
@@ -14574,6 +14646,7 @@ export interface components {
     ObjectContentInventoryPublic: {
       /** Inventory */
       inventory: components["schemas"]["InventoryPublic"][];
+      postgresql_allocation: components["schemas"]["PostgresqlAllocationPublic"] | null;
     };
     /** ObjectContentMovesPublic */
     ObjectContentMovesPublic: {
@@ -14639,6 +14712,8 @@ export interface components {
       addressing_style?: ("path" | "virtual") | null;
       /** Updated At */
       updated_at?: string | null;
+      previous_destination?: components["schemas"]["PreviousObjectStoreDestination"] | null;
+      pending_destination?: components["schemas"]["PendingObjectStoreDestination"] | null;
     };
     /**
      * ObjectStoreConnectionSource
@@ -14659,6 +14734,14 @@ export interface components {
        * Format: password
        */
       secret_access_key: string;
+    };
+    /**
+     * ObjectStoreSwitchBackInput
+     * @description Names the archived destination the administrator intends to restore.
+     */
+    ObjectStoreSwitchBackInput: {
+      /** Expected Previous Revision */
+      expected_previous_revision: number;
     };
     /** OpenIdConnectLogin */
     OpenIdConnectLogin: {
@@ -15826,6 +15909,30 @@ export interface components {
       additional_redirect_uris?: string[] | null;
     };
     /**
+     * PendingObjectStoreDestination
+     * @description A destination attempt recorded by an interrupted or ambiguous switch.
+     */
+    PendingObjectStoreDestination: {
+      /** Revision */
+      revision: number;
+      /** Endpoint Url */
+      endpoint_url: string;
+      /** Region */
+      region: string;
+      /** Bucket */
+      bucket: string;
+      /**
+       * Addressing Style
+       * @enum {string}
+       */
+      addressing_style: "path" | "virtual";
+      /**
+       * Updated At
+       * Format: date-time
+       */
+      updated_at: string;
+    };
+    /**
      * PendingQueueSummary
      * @description Pending crawl queue summary.
      */
@@ -15866,6 +15973,7 @@ export interface components {
       | "integrations"
       | "shared_spaces"
       | "api_keys"
+      | "storage"
       | "assistant_debug";
     /** PermissionPublic */
     PermissionPublic: {
@@ -15900,26 +16008,11 @@ export interface components {
        */
       expected_published_revision_id: string;
     };
-    /** PlatformAdminGrantRequest */
-    PlatformAdminGrantRequest: {
-      /** Enabled */
-      enabled: boolean;
-    };
-    /** PlatformAdminGrantResponse */
-    PlatformAdminGrantResponse: {
-      /**
-       * User Id
-       * Format: uuid
-       */
-      user_id: string;
-      /** Is Platform Admin */
-      is_platform_admin: boolean;
-    };
     /**
      * PolicyActor
      * @enum {string}
      */
-    PolicyActor: "migration" | "platform_admin";
+    PolicyActor: "migration" | "storage_admin";
     /** PolicyCompletionModelInput */
     PolicyCompletionModelInput: {
       /**
@@ -15965,6 +16058,17 @@ export interface components {
       mcp_server_id: string;
       /** Is Default Enabled */
       is_default_enabled: boolean;
+    };
+    /** PostgresqlAllocationPublic */
+    PostgresqlAllocationPublic: {
+      /** Total Bytes */
+      total_bytes: number;
+      /** Inline Content Bytes */
+      inline_content_bytes: number;
+      /** Searchable Knowledge Bytes */
+      searchable_knowledge_bytes: number;
+      /** Other Bytes */
+      other_bytes: number;
     };
     /**
      * PreflightRequest
@@ -16052,6 +16156,27 @@ export interface components {
        * @default 0
        */
       skill_context_tokens?: number;
+    };
+    /** PreviousObjectStoreDestination */
+    PreviousObjectStoreDestination: {
+      /** Revision */
+      revision: number;
+      /** Endpoint Url */
+      endpoint_url: string;
+      /** Region */
+      region: string;
+      /** Bucket */
+      bucket: string;
+      /**
+       * Addressing Style
+       * @enum {string}
+       */
+      addressing_style: "path" | "virtual";
+      /**
+       * Updated At
+       * Format: date-time
+       */
+      updated_at: string;
     };
     /** PrivacyPolicy */
     PrivacyPolicy: {
@@ -16392,6 +16517,25 @@ export interface components {
        * Format: uuid
        */
       session_id: string;
+    };
+    /** ReasoningPolicyInput */
+    ReasoningPolicyInput: {
+      /** Default Effort */
+      default_effort?: string | null;
+      /**
+       * Allow User Override
+       * @default false
+       */
+      allow_user_override?: boolean;
+    };
+    /** ReasoningPolicyPublic */
+    ReasoningPolicyPublic: {
+      /** Configured */
+      configured: boolean;
+      /** Default Effort */
+      default_effort: string | null;
+      /** Allow User Override */
+      allow_user_override: boolean;
     };
     /**
      * ResourcePermission
@@ -17131,6 +17275,11 @@ export interface components {
        * @default false
        */
       file_references_enabled?: boolean;
+      /**
+       * Object Store Configured
+       * @default false
+       */
+      object_store_configured?: boolean;
     };
     /**
      * SharePointSubscriptionPublic
@@ -19764,11 +19913,6 @@ export interface components {
        * @description Timestamp when user was soft-deleted (null for active users)
        */
       deleted_at?: string | null;
-      /**
-       * Is Platform Admin
-       * @default false
-       */
-      is_platform_admin?: boolean;
       access_token?: components["schemas"]["AccessToken"] | null;
       /** Modules */
       readonly modules: string[];
@@ -19944,11 +20088,6 @@ export interface components {
        * @description Timestamp when user was soft-deleted (null for active users)
        */
       deleted_at?: string | null;
-      /**
-       * Is Platform Admin
-       * @default false
-       */
-      is_platform_admin?: boolean;
       /** Modules */
       readonly modules: string[];
       /** User Groups Ids */
@@ -20029,11 +20168,6 @@ export interface components {
        * @default 0
        */
       quota_used?: number;
-      /**
-       * Is Platform Admin
-       * @default false
-       */
-      is_platform_admin?: boolean;
       /** Truncated Api Key */
       truncated_api_key?: string | null;
       /** Quota Limit */
@@ -41413,6 +41547,285 @@ export interface operations {
       };
     };
   };
+  replace_object_store_destination_api_v1_admin_object_store_connection_destination_post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["ObjectStoreConnectionInput"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ObjectStoreConnectionPublic"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  switch_back_object_store_destination_api_v1_admin_object_store_connection_destination_switch_back_post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["ObjectStoreSwitchBackInput"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ObjectStoreConnectionPublic"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  forget_previous_object_store_destination_api_v1_admin_object_store_connection_previous_delete: {
+    parameters: {
+      query: {
+        /** @description Revision of the archived destination being forgotten */
+        expected_revision: number;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  abandon_pending_object_store_destination_api_v1_admin_object_store_connection_pending_delete: {
+    parameters: {
+      query: {
+        /** @description Revision of the pending destination attempt being abandoned */
+        expected_revision: number;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
   list_skills_api_v1_spaces__space_id__skills__get: {
     parameters: {
       query?: {
@@ -44342,68 +44755,6 @@ export interface operations {
       };
       /** @description Not Found */
       404: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["GeneralError"];
-        };
-      };
-      /** @description Validation Error */
-      422: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["HTTPValidationError"];
-        };
-      };
-    };
-  };
-  set_platform_admin_api_v1_sysadmin_users__user_id__platform_admin_put: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path: {
-        user_id: string;
-      };
-      cookie?: never;
-    };
-    requestBody: {
-      content: {
-        "application/json": components["schemas"]["PlatformAdminGrantRequest"];
-      };
-    };
-    responses: {
-      /** @description Successful Response */
-      200: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["PlatformAdminGrantResponse"];
-        };
-      };
-      /** @description Unauthorized */
-      401: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["GeneralError"];
-        };
-      };
-      /** @description Not Found */
-      404: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["GeneralError"];
-        };
-      };
-      /** @description Conflict */
-      409: {
         headers: {
           [name: string]: unknown;
         };

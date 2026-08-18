@@ -127,7 +127,6 @@ export async function getFeatureFlags(fetchFn: typeof fetch = fetch) {
   // UI Features (enabled by default)
   const showWebSearch = getFlagFromEnv("SHOW_WEB_SEARCH", false);
   const showHelpCenter = getFlagFromEnv("SHOW_HELP_CENTER", false);
-  const showChatDebugPanel = getFlagFromEnv("SHOW_CHAT_DEBUG_PANEL", false);
 
   // Auth
   const zitadelConfigured =
@@ -170,7 +169,6 @@ export async function getFeatureFlags(fetchFn: typeof fetch = fetch) {
     newAuth: useNewAuth,
     showWebSearch,
     showHelpCenter,
-    showChatDebugPanel,
     federationStatus
   });
 }

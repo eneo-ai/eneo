@@ -90,6 +90,7 @@ export type StorageKind = components["schemas"]["StorageKind"];
 export type ObjectContentReadinessCode = components["schemas"]["ObjectContentReadinessCode"];
 export type UploadLimitUseCase = components["schemas"]["UploadLimitUseCase"];
 export type ContentState = components["schemas"]["ContentState"];
+export type ContentOwner = components["schemas"]["ContentOwner"];
 export type ContentMoveState = components["schemas"]["ContentMoveState"];
 export type ContentMoveFailureCode = components["schemas"]["ContentMoveFailureCode"];
 export type DeploymentPolicy = components["schemas"]["DeploymentPolicyPublic"];

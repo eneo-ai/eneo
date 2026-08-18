@@ -3,11 +3,12 @@ from typing import Annotated, cast
 
 from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel, Field
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from eneo.authentication.auth_dependencies import (
-    require_platform_admin,
     require_session_auth,
+    require_storage_administration,
     require_user_identity,
 )
 from eneo.main.container.container import Container
@@ -15,6 +16,7 @@ from eneo.main.logging import get_logger
 from eneo.object_content.content import (
     ContentMoveFailureCode,
     ContentMoveState,
+    ContentOwner,
     ContentState,
     ObjectContentUnavailableError,
     StorageKind,
@@ -67,10 +69,10 @@ async def _require_policy_user_identity(
     await require_user_identity(container.user())
 
 
-async def _require_policy_platform_admin(
+async def _require_policy_storage_admin(
     container: _PolicyAdminContainer,
 ) -> None:
-    await require_platform_admin(container.user())
+    await require_storage_administration(container.user())
 
 
 class CapabilityPublic(BaseModel):
@@ -81,11 +83,19 @@ class CapabilityPublic(BaseModel):
 
 
 class InventoryPublic(BaseModel):
+    owner: ContentOwner
     target: StorageKind
     state: ContentState
     count: int
     bytes: int
     oldest_created_at: datetime | None
+
+
+class PostgresqlAllocationPublic(BaseModel):
+    total_bytes: int
+    inline_content_bytes: int
+    searchable_knowledge_bytes: int
+    other_bytes: int
 
 
 class DeploymentPolicyPublicValues(BaseModel):
@@ -109,6 +119,7 @@ class DeploymentPolicyPublic(BaseModel):
 
 class ObjectContentInventoryPublic(BaseModel):
     inventory: tuple[InventoryPublic, ...]
+    postgresql_allocation: PostgresqlAllocationPublic | None
 
 
 class MoveStatePublic(BaseModel):
@@ -192,9 +203,22 @@ async def _read_inventory(session: AsyncSession) -> ObjectContentInventoryPublic
             session
         ).inventory_facts()
 
+    allocation_facts = None
+    try:
+        async with session.begin():
+            allocation_facts = await ObjectContentReconciliationRepository(
+                session
+            ).postgresql_allocation_facts()
+    except SQLAlchemyError as exc:
+        logger.warning(
+            "PostgreSQL storage allocation is unavailable",
+            extra={"error_type": type(exc).__name__},
+        )
+
     return ObjectContentInventoryPublic(
         inventory=tuple(
             InventoryPublic(
+                owner=fact.owner,
                 target=fact.storage_kind,
                 state=fact.state,
                 count=fact.count,
@@ -202,7 +226,19 @@ async def _read_inventory(session: AsyncSession) -> ObjectContentInventoryPublic
                 oldest_created_at=fact.oldest_created_at,
             )
             for fact in inventory_facts
-        )
+        ),
+        postgresql_allocation=(
+            None
+            if allocation_facts is None
+            else PostgresqlAllocationPublic(
+                total_bytes=allocation_facts.total_bytes,
+                inline_content_bytes=allocation_facts.inline_content_bytes,
+                searchable_knowledge_bytes=(
+                    allocation_facts.searchable_knowledge_bytes
+                ),
+                other_bytes=allocation_facts.other_bytes,
+            )
+        ),
     )
 
 
@@ -257,12 +293,12 @@ async def get_deployment_policy(
     response_model=ObjectContentInventoryPublic,
     description=(
         "Get bounded deployment-wide object-content inventory facts. "
-        "Platform administrators only."
+        "Requires the storage administration permission (held by the Owner role by default)."
     ),
     dependencies=[
         Depends(_require_policy_session_auth),
         Depends(_require_policy_user_identity),
-        Depends(_require_policy_platform_admin),
+        Depends(_require_policy_storage_admin),
     ],
     responses=responses.get_responses([403]),
 )
@@ -277,12 +313,12 @@ async def get_object_content_inventory(
     response_model=ObjectContentMovesPublic,
     description=(
         "Get bounded aggregate progress and typed failure reasons for explicit "
-        "object-content moves. Platform administrators only."
+        "object-content moves. Requires the storage administration permission (held by the Owner role by default)."
     ),
     dependencies=[
         Depends(_require_policy_session_auth),
         Depends(_require_policy_user_identity),
-        Depends(_require_policy_platform_admin),
+        Depends(_require_policy_storage_admin),
     ],
     responses=responses.get_responses([403]),
 )
@@ -302,7 +338,7 @@ async def get_object_content_moves(
     dependencies=[
         Depends(_require_policy_session_auth),
         Depends(_require_policy_user_identity),
-        Depends(_require_policy_platform_admin),
+        Depends(_require_policy_storage_admin),
     ],
     responses=responses.get_responses([403, 503]),
 )
@@ -343,7 +379,7 @@ async def queue_object_content_moves(
         "object_content.moves_queued",
         extra={
             "actor_user_id": str(user.id),
-            "actor": {"type": "platform_admin", "via": "session"},
+            "actor": {"type": "storage_admin", "via": "session"},
             "target": request.target.value,
             "requested_limit": request.limit,
             "queued_count": result.queued_count,
@@ -366,7 +402,7 @@ async def queue_object_content_moves(
     dependencies=[
         Depends(_require_policy_session_auth),
         Depends(_require_policy_user_identity),
-        Depends(_require_policy_platform_admin),
+        Depends(_require_policy_storage_admin),
     ],
     responses=responses.get_responses([403, 409]),
 )
@@ -386,7 +422,7 @@ async def set_object_content_moves_paused(
         "object_content.move_pause_changed",
         extra={
             "actor_user_id": str(user.id),
-            "actor": {"type": "platform_admin", "via": "session"},
+            "actor": {"type": "storage_admin", "via": "session"},
             "old_paused": old.moves_paused,
             "new_paused": updated.moves_paused,
             "policy_revision": updated.revision,
@@ -409,7 +445,7 @@ async def set_object_content_moves_paused(
     dependencies=[
         Depends(_require_policy_session_auth),
         Depends(_require_policy_user_identity),
-        Depends(_require_policy_platform_admin),
+        Depends(_require_policy_storage_admin),
     ],
     responses=responses.get_responses([403, 409]),
 )
@@ -440,7 +476,7 @@ async def replace_deployment_policy(
         "object_content.deployment_policy_changed",
         extra={
             "actor_user_id": str(user.id),
-            "actor": {"type": "platform_admin", "via": "session"},
+            "actor": {"type": "storage_admin", "via": "session"},
             "old": _log_values(old),
             "new": _log_values(updated),
         },

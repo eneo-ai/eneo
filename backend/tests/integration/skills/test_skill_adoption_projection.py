@@ -10,6 +10,8 @@ from eneo.database.tables.governance_policy_table import GovernancePolicies
 from eneo.database.tables.skill_table import (
     AppSkillBindings,
     AssistantSkillBindings,
+    SkillRevisions,
+    Skills,
 )
 from eneo.database.tables.spaces_table import Spaces, SpacesUsers
 from eneo.governance_policy.domain.governance_policy import PolicyScope
@@ -45,49 +47,139 @@ def _walk_plan(node: Mapping[str, object]) -> list[Mapping[str, object]]:
     return nodes
 
 
+# Every relation the adoption projection reads. Integration tests share one
+# PostgreSQL container per xdist worker, and the autouse cleanup truncates every
+# table between them — but TRUNCATE resets pg_class while leaving pg_statistic
+# behind. Each test therefore inherits column statistics describing whichever
+# test last analysed these tables, and under `pytest -n 2` that is whatever the
+# worker happened to run first. Measuring the statistics here makes the plan a
+# function of this test's own rows.
+_PLAN_RELATIONS = (
+    Apps.__tablename__,
+    AppSkillBindings.__tablename__,
+    Assistants.__tablename__,
+    AssistantSkillBindings.__tablename__,
+    SkillRevisions.__tablename__,
+    Skills.__tablename__,
+    Spaces.__tablename__,
+)
+
+
+def _describe_scan(node: Mapping[str, object]) -> str:
+    """Name the access path a scan took, so a failing plan explains itself.
+
+    A bitmap heap scan keeps the index name on its child node and reports its
+    predicate as ``Recheck Cond``, so both are read here.
+    """
+    names = [node.get("Index Name")]
+    children = node.get("Plans")
+    if isinstance(children, list):
+        names.extend(
+            child.get("Index Name") for child in children if isinstance(child, dict)
+        )
+    used = [name for name in names if isinstance(name, str)]
+    condition = node.get("Index Cond") or node.get("Recheck Cond") or node.get("Filter")
+    return f"{node.get('Node Type')} via {used or 'no index'} on {condition!r}"
+
+
 async def _explain_captured_statement(
     session,
     *,
     statement: str,
     parameters: tuple[object, ...],
 ) -> list[Mapping[str, object]]:
-    connection = await session.connection()
-    await connection.exec_driver_sql("SET LOCAL enable_seqscan = off")
-    explained = await connection.exec_driver_sql(
-        f"EXPLAIN (ANALYZE, COSTS OFF, SUMMARY OFF, FORMAT JSON) {statement}",
-        parameters,
-    )
-    document = explained.scalar_one()
-    assert isinstance(document, list)
-    assert len(document) == 1
-    root = document[0]
-    assert isinstance(root, dict)
-    plan = root.get("Plan")
-    assert isinstance(plan, dict)
-    return _walk_plan(plan)
+    """Plan ``statement`` against statistics measured from this test's own rows.
+
+    The refresh and the EXPLAIN share a savepoint that is always rolled back, so
+    the shared database keeps the statistics it had: pg_statistic reverts with
+    the savepoint, and the row counts ANALYZE writes into pg_class in place are
+    reset by the truncating cleanup fixture. That isolation is why the refresh
+    belongs here rather than once after seeding.
+    """
+    savepoint = await session.begin_nested()
+    try:
+        connection = await session.connection()
+        for relation in _PLAN_RELATIONS:
+            await connection.exec_driver_sql(f"ANALYZE {relation}")
+        await connection.exec_driver_sql("SET LOCAL enable_seqscan = off")
+        explained = await connection.exec_driver_sql(
+            f"EXPLAIN (ANALYZE, COSTS OFF, SUMMARY OFF, FORMAT JSON) {statement}",
+            parameters,
+        )
+        document = explained.scalar_one()
+        assert isinstance(document, list)
+        assert len(document) == 1
+        root = document[0]
+        assert isinstance(root, dict)
+        plan = root.get("Plan")
+        assert isinstance(plan, dict)
+        return _walk_plan(plan)
+    finally:
+        await savepoint.rollback()
 
 
-def _assert_bounded_composite_scan(
+async def _assert_bounded_composite_seek(
+    session,
     nodes: list[Mapping[str, object]],
     *,
-    index_name: str,
+    relation_name: str,
     range_column: str,
     maximum_rows: int,
 ) -> None:
-    index_node = next(
-        (node for node in nodes if node.get("Index Name") == index_name),
+    """The continuation must seek a bounded ``(skill_id, range_column)`` range.
+
+    Which index serves the seek is the planner's business, so the index the plan
+    actually chose is the one checked against the catalogue: it has to lead with
+    those two columns, the cursor has to reach it as a range bound rather than a
+    filter, and the scan has to read a page's worth of rows rather than every
+    binding for the Skill.
+    """
+    scans = [node for node in nodes if node.get("Relation Name") == relation_name]
+    seek = next(
+        (
+            node
+            for node in scans
+            if node.get("Node Type") in {"Index Scan", "Index Only Scan"}
+            and "skill_id" in str(node.get("Index Cond", ""))
+            and f"{range_column} >" in str(node.get("Index Cond", ""))
+        ),
         None,
     )
-    assert index_node is not None
-    condition = index_node.get("Index Cond")
-    assert isinstance(condition, str)
-    assert "skill_id" in condition
-    assert range_column in condition
-    actual_rows = index_node.get("Actual Rows")
-    actual_loops = index_node.get("Actual Loops")
+    assert seek is not None, (
+        f"{relation_name} was not reached by an index seek on"
+        f" (skill_id, {range_column}); the planner chose"
+        f" {[_describe_scan(node) for node in scans]}"
+    )
+    index_name = seek.get("Index Name")
+    assert isinstance(index_name, str)
+    ordered_columns = (
+        await session.scalars(
+            sa.text(
+                """
+                SELECT attribute.attname
+                FROM pg_index AS selected
+                JOIN LATERAL unnest(selected.indkey)
+                    WITH ORDINALITY AS key(attnum, position) ON TRUE
+                JOIN pg_attribute AS attribute
+                  ON attribute.attrelid = selected.indrelid
+                 AND attribute.attnum = key.attnum
+                WHERE selected.indexrelid = to_regclass(:index_name)
+                ORDER BY key.position
+                """
+            ),
+            {"index_name": index_name},
+        )
+    ).all()
+    assert tuple(ordered_columns[:2]) == ("skill_id", range_column), (
+        f"{index_name} serves the seek but leads with {tuple(ordered_columns[:2])}"
+    )
+    actual_rows = seek.get("Actual Rows")
+    actual_loops = seek.get("Actual Loops")
+    rows_removed = seek.get("Rows Removed by Filter", 0)
     assert isinstance(actual_rows, int | float)
     assert isinstance(actual_loops, int | float)
-    assert actual_rows * actual_loops <= maximum_rows
+    assert isinstance(rows_removed, int | float)
+    assert (actual_rows + rows_removed) * actual_loops <= maximum_rows
 
 
 async def test_adoption_projection_counts_exact_revisions_and_distinct_spaces(
@@ -549,18 +641,10 @@ async def test_adoption_continuations_seek_composite_binding_indexes(
             sa.event.remove(sync_engine, "before_cursor_execute", capture_statement)
         assert assistant_page is not None
         assert len(captured_statements) == 1
-        assistant_nodes = await _explain_captured_statement(
-            session,
-            statement=captured_statements[0][0],
-            parameters=captured_statements[0][1],
-        )
-        _assert_bounded_composite_scan(
-            assistant_nodes,
-            index_name="ix_assistant_skill_bindings_skill_id_assistant_id",
-            range_column="assistant_id",
-            maximum_rows=page_limit + 1,
-        )
+        assistant_statement = captured_statements[0]
 
+        # Both pages are captured before either is explained, so that measuring
+        # the statistics for one plan cannot influence the other's query.
         captured_statements.clear()
         sa.event.listen(sync_engine, "before_cursor_execute", capture_statement)
         try:
@@ -577,14 +661,30 @@ async def test_adoption_continuations_seek_composite_binding_indexes(
             sa.event.remove(sync_engine, "before_cursor_execute", capture_statement)
         assert app_page is not None
         assert len(captured_statements) == 1
+        app_statement = captured_statements[0]
+
+        assistant_nodes = await _explain_captured_statement(
+            session,
+            statement=assistant_statement[0],
+            parameters=assistant_statement[1],
+        )
+        await _assert_bounded_composite_seek(
+            session,
+            assistant_nodes,
+            relation_name=AssistantSkillBindings.__tablename__,
+            range_column="assistant_id",
+            maximum_rows=page_limit + 1,
+        )
+
         app_nodes = await _explain_captured_statement(
             session,
-            statement=captured_statements[0][0],
-            parameters=captured_statements[0][1],
+            statement=app_statement[0],
+            parameters=app_statement[1],
         )
-        _assert_bounded_composite_scan(
+        await _assert_bounded_composite_seek(
+            session,
             app_nodes,
-            index_name="ix_app_skill_bindings_skill_id_app_id",
+            relation_name=AppSkillBindings.__tablename__,
             range_column="app_id",
             maximum_rows=page_limit + 1,
         )

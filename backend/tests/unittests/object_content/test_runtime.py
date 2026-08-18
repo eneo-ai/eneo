@@ -13,8 +13,8 @@ import pytest
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncSession
 
 from eneo.database.database import DatabaseSessionManager
-from eneo.database.tables.object_content_table import (
-    ObjectContentReconciliationState,
+from eneo.database.tables.object_store_binding_table import (
+    ObjectStoreBindings,
 )
 from eneo.object_content.configuration import (
     ObjectContentCoreSettings,
@@ -57,7 +57,7 @@ class _ReadinessDatabase(DatabaseSessionManager):
         super().__init__()
         self.available = available
         self.active_object_content = active_object_content
-        self.binding_state = ObjectContentReconciliationState()
+        self.binding_state: ObjectStoreBindings | None = None
         self.connect_count = 0
         self.connect_in_flight = 0
         self.peak_connect_in_flight = 0
@@ -86,17 +86,40 @@ class _ReadinessDatabase(DatabaseSessionManager):
     @asynccontextmanager
     async def session(self) -> AsyncGenerator[AsyncSession]:
         session = MagicMock(spec=AsyncSession)
-        result = MagicMock()
-        result.one_or_none.return_value = self.binding_state
-        session.scalars = AsyncMock(return_value=result)
-        snapshot = MagicMock()
-        snapshot.one_or_none.side_effect = lambda: (
-            self.binding_state.store_deployment_id,
-            self.binding_state.store_binding_id,
-            self.binding_state.store_binding_confirmed_at,
-            self.binding_state.store_binding_create_started_at,
-        )
-        session.execute = AsyncMock(return_value=snapshot)
+
+        def rows() -> MagicMock:
+            result = MagicMock()
+            result.one_or_none.return_value = self.binding_state
+            return result
+
+        session.scalars = AsyncMock(side_effect=lambda *_a, **_k: rows())
+
+        async def execute(statement: object, *_args: object) -> MagicMock:
+            # Model the binding-row lifecycle: an INSERT creates the row from
+            # its bound values; a column SELECT snapshots the current row.
+            if getattr(statement, "is_insert", False):
+                if self.binding_state is None:
+                    params = statement.compile().params  # type: ignore[attr-defined]
+                    row = ObjectStoreBindings()
+                    row.slot = params.get("slot", 1)
+                    row.deployment_id = params["deployment_id"]
+                    row.binding_id = params["binding_id"]
+                    self.binding_state = row
+                return MagicMock()
+            snapshot = MagicMock()
+            snapshot.one_or_none.side_effect = lambda: (
+                None
+                if self.binding_state is None
+                else (
+                    self.binding_state.deployment_id,
+                    self.binding_state.binding_id,
+                    self.binding_state.confirmed_at,
+                    self.binding_state.create_started_at,
+                )
+            )
+            return snapshot
+
+        session.execute = AsyncMock(side_effect=execute)
 
         async def scalar(statement: object) -> object:
             if "now()" in str(statement).lower():

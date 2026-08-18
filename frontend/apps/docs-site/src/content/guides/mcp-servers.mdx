@@ -4,6 +4,14 @@ Model Context Protocol (MCP) servers give assistants access to external tools an
 
 import { Callout } from 'nextra/components'
 
+<Callout type="info">
+  This guide covers administrator setup for external MCP servers. For the
+  deeper architecture—including knowledge retrieval modes, Eneo's built-in
+  loopback MCP servers, and how internal and external tools interoperate—see
+  [Knowledge Retrieval and MCP
+  Interoperability](/docs/knowledge-retrieval-and-mcp).
+</Callout>
+
 ## Overview
 
 MCP is an open protocol that lets AI assistants call external tools — such as searching a database, creating tickets, or fetching live data. Eneo connects to MCP servers over **Streamable HTTP** transport and acts as a proxy between assistants and the remote server.

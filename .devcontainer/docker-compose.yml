@@ -12,14 +12,22 @@ services:
     environment:
       - POSTGRES_HOST=db
       - REDIS_HOST=redis
+      # Optional operator-managed object storage. Leave these unset and
+      # instead connect through Admin > Storage against the object-content
+      # profile below: endpoint http://object-content:8333, signing region
+      # local, bucket eneo-object-content-dev, and the profile's dev
+      # credentials. post-start.sh prints these values when the profile is
+      # running.
       - OBJECT_CONTENT_ENDPOINT_URL
       - OBJECT_CONTENT_REGION
       - OBJECT_CONTENT_BUCKET
       - OBJECT_CONTENT_ACCESS_KEY_ID
       - OBJECT_CONTENT_SECRET_ACCESS_KEY
       - OBJECT_CONTENT_DEPLOYMENT_ID
-      - OBJECT_CONTENT_ALLOW_INSECURE_HTTP
-      - OBJECT_CONTENT_ADMIN_ALLOWED_ENDPOINT_ORIGINS
+      # Plain HTTP is fine for local development; production keeps the
+      # HTTPS-only default. Container env wins over backend/.env, so override
+      # this from the host environment if you need to test the refusal.
+      - OBJECT_CONTENT_ALLOW_INSECURE_HTTP=${OBJECT_CONTENT_ALLOW_INSECURE_HTTP:-true}
     volumes:
       - ../:/workspace
       # Isolate .venv from host to prevent host-side uv/python from corrupting it

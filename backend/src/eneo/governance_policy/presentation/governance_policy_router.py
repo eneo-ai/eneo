@@ -113,6 +113,21 @@ def _policy_changes(
             if after.default_prompt_library_id
             else None,
         }
+    if before.default_reasoning_effort != after.default_reasoning_effort:
+        changes["default_reasoning_effort"] = {
+            "old": before.default_reasoning_effort,
+            "new": after.default_reasoning_effort,
+        }
+    if before.reasoning_policy_configured != after.reasoning_policy_configured:
+        changes["reasoning_policy_configured"] = {
+            "old": before.reasoning_policy_configured,
+            "new": after.reasoning_policy_configured,
+        }
+    if before.allow_user_reasoning_effort != after.allow_user_reasoning_effort:
+        changes["allow_user_reasoning_effort"] = {
+            "old": before.allow_user_reasoning_effort,
+            "new": after.allow_user_reasoning_effort,
+        }
 
     before_skill_entries = skill_binding_audit_entries(before_skills)
     after_skill_entries = skill_binding_audit_entries(after_skills)
@@ -198,6 +213,13 @@ async def update_governance_policy(
             payload.prompt_enforcement.prompt_library_id,
         )
 
+    reasoning_policy = None
+    if payload.reasoning_policy is not None:
+        reasoning_policy = (
+            payload.reasoning_policy.default_effort,
+            payload.reasoning_policy.allow_user_override,
+        )
+
     skill_intents = None
     if payload.skills is not None:
         skill_intents = assistant_skill_binding_intents_from_input(
@@ -208,6 +230,7 @@ async def update_governance_policy(
         models_restriction=models_restriction,
         mcp_restriction=mcp_restriction,
         prompt_enforcement=prompt_enforcement,
+        reasoning_policy=reasoning_policy,
         skill_intents=skill_intents,
     )
     if (

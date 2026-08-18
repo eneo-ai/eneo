@@ -32,7 +32,7 @@ from eneo.files.file_models import (
     ContentDisposition,
     FileType,
 )
-from eneo.files.file_reference import url_only_file_ids
+from eneo.files.file_reference import referenced_file_ids, url_only_file_ids
 from eneo.files.file_service import FileService
 from eneo.main.exceptions import UnauthorizedException
 
@@ -132,10 +132,22 @@ class TestFileReferencesString:
         files = [self._file(with_url), self._file(without_url)]
         block = build_file_references_string(files, {with_url: "https://x/dl"})
         assert "https://x/dl" in block
-        assert block.count('"url"') == 1
+        assert block.count('"url":') == 1
 
     def test_empty_when_no_file_in_map(self):
         assert build_file_references_string([self._file(uuid4())], {}) == ""
+
+    def test_preamble_carries_mechanics_only(self):
+        # The block repeats per message with referenced files (history
+        # included), so it states what the entries are and that the bytes are
+        # absent; the tool-arbitration rules live in the system prompt
+        # (ATTACHED_FILE_REFERENCES_INSTRUCTION), stated once per request.
+        fid = uuid4()
+        block = build_file_references_string([self._file(fid)], {fid: "https://x/dl"})
+        assert "signed attachment reference" in block
+        assert "raw bytes are NOT in this prompt" in block
+        assert "read_file" not in block
+        assert "re-upload" not in block
 
 
 class TestInlineFileTextToggle:
@@ -189,6 +201,21 @@ def _reference_settings(base_url: str | None = "http://host.docker.internal:8123
     return SimpleNamespace(file_reference_base_url=base_url, public_origin=None)
 
 
+def _enable_file_references(
+    monkeypatch,
+    base_url: str | None = "http://host.docker.internal:8123",
+    object_store: bool = True,
+):
+    """Put the deployment in the state URL-only mode requires: a reference base
+    URL to mint against and an object store holding the originals."""
+    monkeypatch.setattr(
+        file_reference_mod, "get_settings", lambda: _reference_settings(base_url)
+    )
+    monkeypatch.setattr(
+        file_reference_mod, "object_store_configured", lambda: object_store
+    )
+
+
 def _stub_file(
     file_type: FileType = FileType.TEXT,
     original_available: bool = True,
@@ -206,23 +233,21 @@ def _stub_file(
 
 class TestUrlOnlyFileIds:
     def test_empty_when_inlining_enabled(self, monkeypatch):
-        monkeypatch.setattr(
-            file_reference_mod, "get_settings", lambda: _reference_settings()
-        )
+        _enable_file_references(monkeypatch)
         assert url_only_file_ids([_stub_file()], inline_file_text=True) == set()
 
     def test_empty_without_base_url(self, monkeypatch):
-        monkeypatch.setattr(
-            file_reference_mod,
-            "get_settings",
-            lambda: _reference_settings(base_url=None),
-        )
+        _enable_file_references(monkeypatch, base_url=None)
+        assert url_only_file_ids([_stub_file()], inline_file_text=False) == set()
+
+    def test_empty_without_object_storage(self, monkeypatch):
+        """The assistant toggle is locked on inlining without an object store,
+        so a value saved while one was connected must not keep files URL-only."""
+        _enable_file_references(monkeypatch, object_store=False)
         assert url_only_file_ids([_stub_file()], inline_file_text=False) == set()
 
     def test_selects_only_text_files_with_original(self, monkeypatch):
-        monkeypatch.setattr(
-            file_reference_mod, "get_settings", lambda: _reference_settings()
-        )
+        _enable_file_references(monkeypatch)
         text_with_original = _stub_file()
         text_without_original = _stub_file(original_available=False)
         image_with_original = _stub_file(file_type=FileType.IMAGE)
@@ -234,6 +259,32 @@ class TestUrlOnlyFileIds:
         assert ids == {text_with_original.id}
 
 
+class TestReferencedFileIds:
+    """Files a signed reference URL can serve, independent of inlining mode.
+
+    ``url_only_file_ids`` must always be this set gated on inlining being off,
+    so the two predicates cannot drift apart across the send path, preflight
+    count, and fit guard.
+    """
+
+    def test_ignores_the_inlining_mode(self, monkeypatch):
+        _enable_file_references(monkeypatch)
+        stored = _stub_file()
+
+        ids = referenced_file_ids([stored, _stub_file(original_available=False)])
+
+        assert ids == {stored.id}
+        assert url_only_file_ids([stored], inline_file_text=True) == set()
+        assert url_only_file_ids([stored], inline_file_text=False) == ids
+
+    def test_empty_without_base_url_or_object_store(self, monkeypatch):
+        _enable_file_references(monkeypatch, base_url=None)
+        assert referenced_file_ids([_stub_file()]) == set()
+
+        _enable_file_references(monkeypatch, object_store=False)
+        assert referenced_file_ids([_stub_file()]) == set()
+
+
 class TestSendPathUrlOnlyFiltering:
     """URL-only parents keep their text out of context (context_builder) — these
     tests pin that their derived vision images stay out of the request too."""
@@ -242,9 +293,7 @@ class TestSendPathUrlOnlyFiltering:
     async def test_message_derived_images_dropped_for_url_only_parent(
         self, monkeypatch
     ):
-        monkeypatch.setattr(
-            file_reference_mod, "get_settings", lambda: _reference_settings()
-        )
+        _enable_file_references(monkeypatch)
         stored_parent = _stub_file()
         plain_parent = _stub_file(original_available=False, name="small.pdf")
         stored_derived = _stub_file(
@@ -281,9 +330,7 @@ class TestSendPathUrlOnlyFiltering:
 
     @pytest.mark.asyncio
     async def test_history_derivatives_skip_url_only_parents(self, monkeypatch):
-        monkeypatch.setattr(
-            file_reference_mod, "get_settings", lambda: _reference_settings()
-        )
+        _enable_file_references(monkeypatch)
         stored_parent = _stub_file()
         plain_parent = _stub_file(original_available=False, name="small.pdf")
         question = SimpleNamespace(files=[stored_parent, plain_parent])
@@ -311,9 +358,7 @@ class TestSendPathUrlOnlyFiltering:
     async def test_fit_guard_ignores_url_only_uploads(self, monkeypatch):
         import eneo.assistants.assistant_service as assistant_service_mod
 
-        monkeypatch.setattr(
-            file_reference_mod, "get_settings", lambda: _reference_settings()
-        )
+        _enable_file_references(monkeypatch)
         fit_check = MagicMock()
         monkeypatch.setattr(
             assistant_service_mod,

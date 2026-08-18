@@ -390,6 +390,7 @@ class SettingService:
             provisioning=provisioning,
             api_key_expiry_notifications=api_key_expiry_notifications,
             file_references_enabled=bool(file_reference_base_url(app_settings)),
+            object_store_configured=self.object_content.object_store_configured,
         )
 
     async def get_settings(self) -> SettingsPublic:
