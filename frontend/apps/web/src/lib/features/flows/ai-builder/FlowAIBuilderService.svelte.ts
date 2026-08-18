@@ -262,6 +262,30 @@ export class FlowAIBuilderService {
     return this.#state.availableModels;
   }
 
+  /** The model the next turn runs on — the override when set, else the server
+   *  default. Null until the list arrives; the composer hides its controls
+   *  rather than blocking on it. */
+  get effectiveModel(): AIBuilderModel | null {
+    void this.#state;
+    return this.#driver.effectiveModel;
+  }
+
+  get hasModelOverride(): boolean {
+    return this.#state.selectedModelId !== null;
+  }
+
+  get selectedReasoningEffort(): string | null {
+    return this.#state.selectedReasoningEffort;
+  }
+
+  selectModel(modelId: string): void {
+    this.#driver.selectModel(modelId);
+  }
+
+  selectReasoningEffort(reasoningEffort: string | null): void {
+    this.#driver.selectReasoningEffort(reasoningEffort);
+  }
+
   get draftSessions(): AIBuilderDraftSession[] {
     return this.#state.draftSessions;
   }

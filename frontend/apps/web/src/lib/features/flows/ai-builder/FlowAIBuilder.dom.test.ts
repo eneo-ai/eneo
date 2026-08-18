@@ -532,6 +532,72 @@ describe("FlowAIBuilder bootstrap", () => {
 
 // ---- Discovery: task, reply, questions --------------------------------------------
 
+describe("FlowAIBuilder planner controls", () => {
+  const SECOND_MODEL_ID = "11111111-1111-4111-8111-111111111198";
+
+  /** Same fixtures, but a space that offers a genuine model choice. */
+  function withTwoModels(reasoning: string[] = []) {
+    const { fetch } = makeFetch();
+    return vi.fn(async (path: string, init?: Record<string, unknown>) =>
+      path.endsWith("/models")
+        ? {
+            models: [
+              {
+                id: DEFAULT_MODEL_ID,
+                name: "Test model",
+                provider: "openai",
+                reasoning_effort_options: reasoning
+              },
+              {
+                id: SECOND_MODEL_ID,
+                name: "Second model",
+                provider: "openai",
+                reasoning_effort_options: []
+              }
+            ],
+            default_model_id: DEFAULT_MODEL_ID
+          }
+        : fetch(path as string, init as never)
+    );
+  }
+
+  it("names the model the turn will run on once the space offers a choice", async () => {
+    renderShell({ fetch: withTwoModels(), stream: makeStream().stream });
+
+    expect(
+      await screen.findByRole("button", {
+        name: `${m.ai_builder_model_label()}: Test model`
+      })
+    ).toBeTruthy();
+  });
+
+  it("stays out of the composer when the space has a single model", async () => {
+    const { fetch } = makeFetch();
+    const { service } = renderShell({ fetch, stream: makeStream().stream });
+
+    await waitFor(() => expect(service().availableModels).toHaveLength(1));
+    expect(screen.queryByRole("button", { name: /Test model/ })).toBeNull();
+  });
+
+  it("offers reasoning only for a model that advertises efforts", async () => {
+    // The contract is explicit: an empty option list means no control at all.
+    renderShell({ fetch: withTwoModels(["low", "high"]), stream: makeStream().stream });
+
+    expect(
+      await screen.findByRole("button", {
+        name: `${m.reasoning_effort()}: ${m.default_behavior()}`
+      })
+    ).toBeTruthy();
+  });
+
+  it("has no reasoning control when the active model advertises none", async () => {
+    const { service } = renderShell({ fetch: withTwoModels(), stream: makeStream().stream });
+
+    await waitFor(() => expect(service().availableModels).toHaveLength(2));
+    expect(screen.queryByRole("button", { name: new RegExp(m.reasoning_effort()) })).toBeNull();
+  });
+});
+
 describe("FlowAIBuilder discovery screens", () => {
   it("sends the task, waits on the reply screen, then shows the first question", async () => {
     const { fetch } = makeFetch();

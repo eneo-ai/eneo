@@ -583,6 +583,105 @@ describe("FlowAIBuilderDriver", () => {
     ]);
   });
 
+  describe("planner model and reasoning selection", () => {
+    const ALTERNATE_MODEL_ID = "11111111-1111-4111-8111-111111111198";
+
+    function makeSendableDriver() {
+      const result = makeDriver({
+        streamImpl: vi.fn(async (_path, _init, handlers) => {
+          completeStream(handlers);
+        })
+      });
+      result.driver.seedState({
+        session: makeSession({ latest_plan_id: null }),
+        availableModels: [
+          makeModel({ reasoning_effort_options: ["low", "high"] }),
+          makeModel({ id: ALTERNATE_MODEL_ID, name: "Alternate model" })
+        ],
+        defaultModelId: DEFAULT_MODEL_ID
+      });
+      return result;
+    }
+
+    it("omits model_id while the server default stands", async () => {
+      // Staying silent lets the server apply its own default. Pinning the
+      // default explicitly would freeze it for the rest of the session.
+      const { driver, stream } = makeSendableDriver();
+
+      await driver.sendMessage("Sammanfatta rapporter");
+
+      const body = stream.mock.calls[0]?.[1].requestBody["application/json"];
+      expect(body.model_id).toBeUndefined();
+      expect(body.reasoning_effort).toBeUndefined();
+    });
+
+    it("sends the override and effort the user chose", async () => {
+      const { driver, stream } = makeSendableDriver();
+
+      driver.selectReasoningEffort("high");
+      await driver.sendMessage("Sammanfatta rapporter");
+
+      const first = stream.mock.calls[0]?.[1].requestBody["application/json"];
+      expect(first.model_id).toBeUndefined();
+      expect(first.reasoning_effort).toBe("high");
+
+      driver.selectModel(ALTERNATE_MODEL_ID);
+      await driver.sendMessage("Och lägg till en sammanfattning");
+
+      const second = stream.mock.calls[1]?.[1].requestBody["application/json"];
+      expect(second.model_id).toBe(ALTERNATE_MODEL_ID);
+    });
+
+    it("still sends when the model list never arrives", async () => {
+      // The control was removed once because a slow list blocked the first
+      // message. Selection is a refinement now, never a precondition.
+      const { driver, stream } = makeDriver({
+        streamImpl: vi.fn(async (_path, _init, handlers) => {
+          completeStream(handlers);
+        })
+      });
+      driver.seedState({
+        session: makeSession({ latest_plan_id: null }),
+        availableModels: [],
+        defaultModelId: null
+      });
+
+      await driver.sendMessage("Sammanfatta rapporter");
+
+      expect(stream).toHaveBeenCalledOnce();
+      expect(driver.effectiveModel).toBeNull();
+    });
+
+    it("reads efforts from the server default before any override", () => {
+      const { driver } = makeSendableDriver();
+
+      expect(driver.effectiveModel?.id).toBe(DEFAULT_MODEL_ID);
+
+      driver.selectReasoningEffort("low");
+      expect(driver.state.selectedReasoningEffort).toBe("low");
+    });
+
+    it("refuses an effort the active model does not advertise", () => {
+      const { driver } = makeSendableDriver();
+
+      driver.selectReasoningEffort("max");
+
+      expect(driver.state.selectedReasoningEffort).toBeNull();
+    });
+
+    it("drops the effort when the model changes", () => {
+      // Efforts are named per model; carrying "high" onto a model that never
+      // offered it would send a value the server rejects.
+      const { driver } = makeSendableDriver();
+      driver.selectReasoningEffort("high");
+
+      driver.selectModel(ALTERNATE_MODEL_ID);
+
+      expect(driver.state.selectedReasoningEffort).toBeNull();
+      expect(driver.effectiveModel?.id).toBe(ALTERNATE_MODEL_ID);
+    });
+  });
+
   it("initializes edit mode by creating or resuming the session immediately", async () => {
     const fetch = vi
       .fn()

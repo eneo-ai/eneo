@@ -92,9 +92,18 @@ export interface FlowAIBuilderState {
   applyResult: ApplyResult | null;
   isConflict: boolean;
   statusMessage: AIBuilderStatus | null;
-  /** Display names for per-step model refs. The planner model itself is the
-   *  server's default; the client never chooses or sends one. */
+  /** Display names for per-step model refs, and the choices behind the
+   *  composer's planner controls. */
   availableModels: AIBuilderModel[];
+  /** The planner model the server applies when the client sends none. Display
+   *  data: it names what will run before the user has chosen anything. */
+  defaultModelId: string | null;
+  /** An explicit planner override, or null to let the server default apply.
+   *  Never a precondition for sending — an unread model list simply leaves it
+   *  null, which is the same request the client sent before the control
+   *  existed. */
+  selectedModelId: string | null;
+  selectedReasoningEffort: string | null;
   draftSessions: AIBuilderDraftSession[];
   pendingOperation: PendingPlanOperation | null;
   createFailureOutcome: CreateFailureOutcome | null;
@@ -117,6 +126,9 @@ export function createInitialFlowAIBuilderState(): FlowAIBuilderState {
     isConflict: false,
     statusMessage: null,
     availableModels: [],
+    defaultModelId: null,
+    selectedModelId: null,
+    selectedReasoningEffort: null,
     draftSessions: [],
     pendingOperation: null,
     createFailureOutcome: null,
@@ -246,6 +258,35 @@ export class FlowAIBuilderDriver {
 
   get isStreaming(): boolean {
     return this.#state.streamState === "streaming";
+  }
+
+  /** The model the next turn will actually run on: the user's override when
+   *  there is one, otherwise the server default. Null while the list is
+   *  unread — the send path treats that as "server decides", never as an
+   *  error. */
+  get effectiveModel(): AIBuilderModel | null {
+    const id = this.#state.selectedModelId ?? this.#state.defaultModelId;
+    return this.#state.availableModels.find((model) => model.id === id) ?? null;
+  }
+
+  selectModel(modelId: string): void {
+    if (!this.#state.availableModels.some((model) => model.id === modelId)) return;
+    this.#state.selectedModelId = modelId;
+    // Efforts are named per model; carrying one across a switch could send a
+    // value the new model does not accept.
+    this.#state.selectedReasoningEffort = null;
+    this.#notify();
+  }
+
+  selectReasoningEffort(reasoningEffort: string | null): void {
+    if (
+      reasoningEffort !== null &&
+      !(this.effectiveModel?.reasoning_effort_options ?? []).includes(reasoningEffort)
+    ) {
+      return;
+    }
+    this.#state.selectedReasoningEffort = reasoningEffort;
+    this.#notify();
   }
 
   seedState(partial: Partial<FlowAIBuilderState>): void {
@@ -589,6 +630,15 @@ export class FlowAIBuilderDriver {
       message,
       ui_language: getLocale()
     };
+    // Only an explicit override is sent. Staying silent lets the server apply
+    // its own default, which can change between turns without the client
+    // pinning a stale one.
+    if (this.#state.selectedModelId) {
+      requestBody.model_id = this.#state.selectedModelId;
+    }
+    if (this.#state.selectedReasoningEffort) {
+      requestBody.reasoning_effort = this.#state.selectedReasoningEffort;
+    }
     if (questionAnswer) {
       requestBody.question_answer = questionAnswer;
     }
@@ -1394,10 +1444,18 @@ export class FlowAIBuilderDriver {
       })) as { models: AIBuilderModel[]; default_model_id: string | null };
       if (!this.#ownsSessionIdentity(owner)) return;
       this.#state.availableModels = result.models;
+      this.#state.defaultModelId = result.models.some(
+        (model) => model.id === result.default_model_id
+      )
+        ? result.default_model_id
+        : null;
       this.#notify();
     } catch {
       if (!this.#ownsSessionIdentity(owner)) return;
       this.#state.availableModels = [];
+      this.#state.defaultModelId = null;
+      this.#state.selectedModelId = null;
+      this.#state.selectedReasoningEffort = null;
       this.#notify();
     }
   }

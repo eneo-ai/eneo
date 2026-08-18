@@ -17,6 +17,8 @@
   import { IconCancel } from "@eneo/icons/cancel";
   import { IconTrash } from "@eneo/icons/trash";
   import { getAIBuilderService } from "./FlowAIBuilderService.svelte.ts";
+  import FlowAIBuilderModelSelect from "./FlowAIBuilderModelSelect.svelte";
+  import FlowAIBuilderReasoningSelect from "./FlowAIBuilderReasoningSelect.svelte";
   import { getAIBuilderAttachmentRules } from "./builderAttachmentRules";
   import {
     clearComposerDraft,
@@ -573,6 +575,9 @@
           <IconAttachment class="composer-attach-icon" />
           <span class="composer-attach-label">{m.attach_files()}</span>
         </button>
+
+        <FlowAIBuilderModelSelect />
+        <FlowAIBuilderReasoningSelect />
       </div>
 
       <Button
@@ -982,6 +987,45 @@
     flex-shrink: 0;
   }
 
+  /* The planner-model and reasoning triggers live in other components but sit
+     in this row, so the composer owns their appearance: one definition, and
+     they read as siblings of the attach button rather than as imported
+     widgets. Specificity here deliberately beats the shadcn utilities. */
+  .composer-actions-left :global(.composer-control) {
+    height: 1.75rem;
+    max-width: 13rem;
+    gap: 0.375rem;
+    padding: 0 0.5rem;
+    border: 0;
+    border-radius: 0.5rem;
+    color: var(--text-secondary);
+    background: transparent;
+    font-size: 0.8125rem;
+    font-weight: 500;
+    line-height: 1;
+    transition:
+      color 120ms ease,
+      background 120ms ease;
+  }
+
+  .composer-actions-left :global(.composer-control:hover:not(:disabled)),
+  .composer-actions-left :global(.composer-control[aria-expanded="true"]),
+  .composer-actions-left :global(.composer-control[data-state="open"]) {
+    color: var(--text-primary);
+    background: var(--background-hover-default);
+  }
+
+  .composer-actions-left :global(.composer-control:focus-visible) {
+    outline: 2px solid var(--accent-stronger);
+    outline-offset: 2px;
+    box-shadow: none;
+  }
+
+  .composer-actions-left :global(.composer-control:disabled) {
+    cursor: not-allowed;
+    opacity: 0.55;
+  }
+
   /* Compact mobile controls keep the composer usable above the keyboard. */
   @media (max-width: 639px) {
     .composer-attach,
@@ -997,6 +1041,11 @@
       width: 2.75rem;
       justify-content: center;
       padding: 0;
+    }
+
+    .composer-actions-left :global(.composer-control) {
+      min-height: 2.75rem;
+      max-width: 9rem;
     }
   }
 
