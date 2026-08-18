@@ -29,7 +29,7 @@ The security model has four layers:
 1. **Scoped credentials.** Each module gets one dedicated `sk_` service key with the narrowest scope and permission that works. The secret stays in the module's server environment and is never returned to the browser.
 2. **Network isolation.** Modules join only `module_net`. That network is internal and has no route to PostgreSQL, Redis or the public internet. Backend and Traefik bridge the required boundaries.
 3. **BFF isolation.** The browser talks only to the module domain. Server-side module code performs Eneo API calls and ticket exchange.
-4. **Dual request authorization.** Every protected module operation must send both the bound service key and the module-user Bearer token. `require_module_request(<server-owned-module-key>)` validates the live service-key state, exact tenant-module binding, token audience, user, tenant and current assignment in one dependency. The resource route—not the diagnostic session call and not the BFF alone—must apply it on every request. Disabling the user, tenant, service key or module assignment takes effect on the next request. A normal Eneo browser logout does not centrally revoke an already issued stateless module token; its residual lifetime is bounded by the configured short token TTL.
+4. **Dual request authorization.** Every protected module operation must send both the bound service key and the module-user Bearer token. `require_module_request(<server-owned-module-key>)` validates the live service-key state, exact tenant-module binding, token audience, user, tenant and current assignment in one dependency. The resource route—not the diagnostic session call and not the BFF alone—must apply it on every request. Disabling the user, tenant, service key or module assignment takes effect on the next request — including on every token refresh, which runs the same dependency. A normal Eneo browser logout does not centrally revoke an already issued stateless module token; its residual lifetime is bounded by the short token TTL and, across refreshes, by the absolute session ceiling (`MODULE_AUTH_MAX_SESSION_HOURS`, default 8 hours from the original handoff).
 
 Modules on the same `module_net` are not network-isolated from each other. Backend authorization and separately scoped service keys are therefore the real module-to-module authorization boundary.
 
@@ -42,6 +42,17 @@ Modules do not register their own IdP clients. Eneo remains the installation's O
 3. The module verifies and consumes `state`, exchanges the ticket server-side with its registered service key, establishes its own session and removes ticket data from the browser URL.
 
 The ticket is single-use, expires after about 30 seconds and is consumed with Redis `GETDEL`. The installation must use Redis 6.2 or newer; the bundled stack uses Redis 7.
+
+### Module session lifetime and token refresh
+
+The exchanged module user token is short-lived (`MODULE_AUTH_TOKEN_EXPIRY_MINUTES`, default 60). The exchange response carries `session_expires_at`: an absolute ceiling fixed at the original handoff (`MODULE_AUTH_MAX_SESSION_HOURS`, default 8 hours). A module renews its token with `POST /api/v1/module-auth/{module_key}/token/refresh/`, authenticated exactly like a resource call — bound service key plus the current, still-valid Bearer token. Refresh re-validates live user, tenant, key and assignment state, returns a token carrying the original handoff time, and clips the new expiry at the ceiling; it never accepts an expired token.
+
+A module implementing refresh must:
+
+- refresh proactively from server-side code — below roughly half the remaining token lifetime, and always before starting a long operation such as an upload;
+- treat any refresh failure (`401` or `403`) as a signal to end its own session and restart the login handoff, which stays transparent while the user's Eneo session is alive;
+- treat a small `expires_in` in a refresh response as the approaching ceiling, and complete or persist pending work before it;
+- update its own session expiry from each response instead of assuming a fixed lifetime; the module session cookie must never outlive the token it wraps.
 
 ### Stable module identity
 
@@ -253,7 +264,7 @@ Complete the mandatory browser smoke test in a private window:
 2. Confirm navigation to Eneo `/module-login`, followed by the normal Eneo/IdP login.
 3. Confirm return to the exact registered module callback and then to a clean module URL without `ticket` or `state`.
 4. Confirm the module has established its own secure session cookie.
-5. Execute one resource operation whose backend route itself requires both module credentials; verify that a disabled user, a wrong-tenant token, a revoked service key or a disabled tenant-module assignment is denied on the next request. A normal Eneo browser logout alone does not revoke an already minted stateless module token; verify instead that its short expiry bounds the remaining session.
+5. Execute one resource operation whose backend route itself requires both module credentials; verify that a disabled user, a wrong-tenant token, a revoked service key or a disabled tenant-module assignment is denied on the next request — and that a token refresh is denied under the same conditions. A normal Eneo browser logout alone does not revoke an already minted stateless module token; verify instead that its short expiry bounds the remaining session and that refresh stops working at `session_expires_at`.
 
 Step 5 cannot pass on this branch because the Flow resource routes have not adopted the module dependency. Automate the complete cross-repository flow as a release gate once that runtime exists. Health and diagnostic-session checks alone cannot detect a Flow route that forgot to enforce its authorization dependency.
 

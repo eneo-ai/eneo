@@ -57,7 +57,7 @@ lifetimes. None of them can substitute for another.
 | --- | --- | --- | --- |
 | Eneo session JWT (`aud` = Eneo) | Browser cookie on the Eneo domain | Deployment-configured (`JWT_EXPIRY_TIME`) | The user's normal Eneo login; authorizes ticket issuance |
 | Login ticket | Redirect URL only, then gone | **30 s**, single use (`MODULE_AUTH_TICKET_TTL_SECONDS`) | One-time handoff from the Eneo session to the module |
-| Module user token (`aud` = `eneo-module:<module_key>`) | Module server session, never the browser | **60 min**, no refresh (`MODULE_AUTH_TOKEN_EXPIRY_MINUTES`) | Proves *which user* the module acts for |
+| Module user token (`aud` = `eneo-module:<module_key>`) | Module server session, never the browser | **60 min**, refreshable up to a fixed **8 h** session ceiling (`MODULE_AUTH_TOKEN_EXPIRY_MINUTES`, `MODULE_AUTH_MAX_SESSION_HOURS`) | Proves *which user* the module acts for |
 | `sk_` service key | Module server environment | Until rotated/expired/revoked | Proves *which module deployment* is calling |
 
 Audience scoping isolates the tokens in both directions: a module user token
@@ -151,72 +151,99 @@ sequenceDiagram
 
 Because step 4 reads current state on every request, disabling a user, a
 tenant, a service key or a tenant-module assignment takes effect on the next
-request — there is no cached module authorization to wait out. The one
-exception is the stateless module user token itself: an Eneo browser logout
-does not revoke an already minted token; its residual lifetime is bounded by
-the short token TTL.
+request — there is no cached module authorization to wait out. Token refresh
+runs exactly the same checks, so a disabled identity cannot renew either. The
+one exception is the stateless module user token itself: an Eneo browser
+logout does not revoke an already minted token; its residual lifetime is
+bounded by the short token TTL and, across refreshes, by the absolute session
+ceiling.
 
 Which users may enter a module is decided by tenant assignment: any active
 user in a tenant with the module enabled can complete the handoff. Per-user,
 per-resource authorization is the job of the resource routes, which execute as
 the real user.
 
-## Lifetimes and long-running work
+## Lifetimes, refresh and long-running work
 
-Two settings control the broker's lifetimes:
+Three settings control the broker's lifetimes:
 
 | Setting | Default | What it bounds |
 | --- | --- | --- |
 | `MODULE_AUTH_TICKET_TTL_SECONDS` | 30 | Redirect gap between Eneo issuing the ticket and the module exchanging it |
-| `MODULE_AUTH_TOKEN_EXPIRY_MINUTES` | 60 | The module user token, and therefore the maximum module session length |
+| `MODULE_AUTH_TOKEN_EXPIRY_MINUTES` | 60 | One module user token — the sliding window a refresh renews |
+| `MODULE_AUTH_MAX_SESSION_HOURS` | 8 | The whole module session, measured from the original ticket exchange |
 
 The ticket TTL only needs to cover an HTTP redirect plus one server-side
 call, because a ticket is always issued *after* the Eneo session exists —
 the slow part of a first login (the IdP round-trip) happens before issuance.
 
-The token TTL follows one design rule:
+The token follows a **sliding window under a fixed ceiling**. Every token
+carries the timestamp of the original handoff. A module renews its token with
+`POST /api/v1/module-auth/{module_key}/token/refresh/`, authenticated exactly
+like a resource call: the bound `sk_` key plus the current, still-valid
+Bearer token. The response is a fresh token whose expiry is clipped at
+`session_expires_at` — the handoff time plus the ceiling, returned unchanged
+by both the exchange and every refresh.
 
-<Callout type="warning">
-  **The token TTL must comfortably exceed the module's longest single
-  request.** There is deliberately no refresh endpoint: a fresh token requires
-  a fresh handoff. A module that performs long uploads (for example
-  speech-to-text audio) must fit each upload inside the remaining token
-  lifetime.
-</Callout>
+```mermaid
+sequenceDiagram
+  autonumber
+  participant M as Module BFF
+  participant A as Eneo backend
 
-What this means in practice:
+  Note over M: Token below ~50% lifetime,<br/>or a long operation is next
+  M->>A: POST /module-auth/key/token/refresh/ (sk_ + current token)
+  A->>A: Full dual-credential validation (live state)
+  A->>A: handoff_at + ceiling not passed?
+  A-->>M: Fresh token, expiry clipped at session_expires_at
+  Note over M: Update session expiry from response
+  M--xA: After the ceiling or with an expired token: 401
+  Note over M: End module session, restart login handoff<br/>(transparent while the Eneo session lives)
+```
 
+Why this shape:
+
+- **Refresh cannot outlive a kill switch.** Every refresh re-runs the same
+  live-state checks as a resource call, so disabling the user, tenant, key or
+  assignment also stops renewal immediately. The module token never leaves
+  the module server, so refresh exposes nothing new to the browser.
+- **The ceiling re-anchors access in the central login.** Refresh alone could
+  otherwise keep a module session alive indefinitely without any Eneo
+  session. The ceiling forces a periodic return through `/module-login`,
+  which stays a quick redirect while the user's Eneo session is alive.
+- **An expired token never refreshes.** Renewal after expiry is always a new
+  handoff. This keeps the contract crisp and pushes modules to refresh
+  proactively rather than react to failures.
+
+What this means for module implementations:
+
+- **Refresh proactively.** Renew below roughly half the remaining token
+  lifetime, and always immediately before a long operation such as an upload.
+  A refreshed token guarantees the whole token window is available.
 - **Expiry is checked when a request starts.** A single long request that
-  begins while the token is valid is not aborted mid-flight when the token
-  expires. What fails is the *next* request.
-- **Renewal is a new handoff, and it is cheap.** While the user's Eneo
-  session is alive, redirecting through `/module-login` again issues a fresh
-  ticket without any IdP interaction — the user typically only sees a quick
-  redirect. Modules should treat this as the normal renewal path, not as an
-  error case.
-- **Modules should preflight long operations.** The reference module stores
-  `expires_at` next to its session. Before starting an operation that cannot
-  be cheaply retried (a long recording, a large upload), compare the remaining
-  lifetime with the expected duration; if it will not fit, persist the pending
-  work (for example the recorded audio) and re-run the handoff *first*. A
-  top-level redirect discards page state, so stash before you redirect.
+  begins while the token is valid is not aborted mid-flight. What fails is
+  the *next* request — which proactive refresh prevents.
 - **Prefer one long request over many small ones for uploads.** A single
   upload request is validated once at the start; a chunked protocol is
   validated per chunk and can lose access between chunks.
-
-The reference module implementation additionally caps its own session cookie
-at `min(expires_in, 60 min)`, so the module session can never outlive the
-token it wraps.
+- **Watch `expires_in` near the ceiling.** A refresh close to
+  `session_expires_at` returns a clipped, short `expires_in`. Treat that as
+  the signal to complete or persist pending work; when the ceiling passes,
+  persist state first, then re-run the handoff — a top-level redirect
+  discards page state.
+- **Track lifetimes from responses.** Update the module session expiry from
+  each exchange and refresh response; the module session cookie must never
+  outlive the token it wraps.
 
 ### Tuning
 
-Both settings are deployment-wide backend environment variables. Raising
-`MODULE_AUTH_TOKEN_EXPIRY_MINUTES` lengthens the window in which a stateless
-token stays valid after logout for **all** modules, so raise it only as far
-as the slowest legitimate module operation requires. If modules with very
-different needs appear (a 5-minute lookup tool next to a 3-hour batch tool),
-a per-module TTL in the client config is the intended evolution path rather
-than a deployment-wide increase.
+All three settings are deployment-wide backend environment variables. The
+token TTL should stay short — refresh makes a long base TTL unnecessary, and
+the TTL is exactly the window in which a stateless token survives an Eneo
+logout. Size the ceiling to the longest legitimate *working session*, not the
+longest request; the 8-hour default covers a workday. If modules with very
+different session needs appear, a per-module ceiling in the client config is
+the intended evolution path rather than a deployment-wide increase.
 
 ## Failure modes
 
@@ -227,7 +254,8 @@ than a deployment-wide increase.
 | `/module-login` redirects to login | No or expired Eneo session (backend answered 401) | Normal login, then the handoff resumes automatically |
 | Ticket exchange fails with 401 | Ticket expired (>30 s), already used, or unknown | Module restarts the handoff; the user usually just sees a redirect |
 | Ticket exchange fails with 403 | Wrong service key: not the registered key (or its direct rotation successor), wrong tenant, wrong type/ownership/permission | Operator re-binds `service_key_id` in the client config; the ticket itself is *not* consumed |
-| Resource call fails after login worked | Token expired, user/tenant deactivated, module unassigned, or key revoked since login | Re-handoff (token expiry) or operator action (state changes are immediate by design) |
+| Token refresh fails with 401 | Token already expired, or the session ceiling (`session_expires_at`) has passed | Module ends its session and restarts the login handoff — a quick redirect while the Eneo session is alive |
+| Resource call fails after login worked | Token expired, user/tenant deactivated, module unassigned, or key revoked since login | Refresh proactively (token expiry) or operator action (state changes are immediate by design) |
 
 ## Registration and binding model
 
@@ -285,13 +313,15 @@ client-config changes and tenant assignment changes all produce audit events
   service key of the ticket's tenant, and a module deployment holds one key.
   Serving several tenants from one module deployment requires one deployment
   (or at least one key + callback pair) per tenant today.
-- **No token refresh.** Renewal is always a new handoff. This is deliberate:
-  it keeps the token contract small and forces renewal through the central
-  session gate, but it also puts a hard ceiling on unattended module work.
+- **Refresh requires an unexpired token.** A module that lets its token lapse
+  cannot renew server-side; it must send the browser through a new login
+  handoff. Long unattended work beyond the session ceiling is out of scope by
+  design — the ceiling is what re-anchors module access in the central login.
 - **Logout latency.** A stateless module token survives Eneo logout until it
-  expires. Everything the token can reach still re-validates live user and
-  tenant state per request, so deactivating the user closes access
-  immediately even while the token is unexpired.
+  expires, and refresh (which does not involve the browser) can renew it up
+  to the session ceiling. Everything the token can reach still re-validates
+  live user and tenant state per request, so deactivating the user closes
+  access — including renewal — immediately.
 - **User identity is email-based.** Like Eneo session JWTs, the module token
   identifies the user by email (`sub`); the broker then requires that user to
   exist and be active in the service key's tenant.
