@@ -141,8 +141,9 @@ services:
       - "traefik.http.routers.eneo-backend-secure.priority=10"
     healthcheck:
       # Module containers (docker-compose.modules.yml) gate their startup on
-      # readiness. Liveness remains available separately at /api/livez.
-      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/api/readyz', timeout=5)\""]
+      # this check. /api/healthz exists on released images too, where the
+      # /api/readyz alias is not yet available; liveness stays at /api/livez.
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/api/healthz', timeout=5)\""]
       interval: 30s
       timeout: 10s
       retries: 5
