@@ -7612,7 +7612,7 @@ export interface paths {
     put?: never;
     /**
      * Add Module
-     * @description Register a new global module.
+     * @description Register a new global module. The module key is immutable, case-sensitive and restricted to a URL-safe slug: letters and digits plus '.', '_' or '-', starting with a letter or digit.
      */
     post: operations["add_module_api_v1_modules__post"];
     delete?: never;

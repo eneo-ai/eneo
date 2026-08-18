@@ -60,7 +60,11 @@ A module implementing refresh must:
 
 - It is not the module row's database UUID.
 - Treat it as immutable: a new key creates a new module identity.
-- Use lowercase kebab-case for new keys.
+- Use lowercase kebab-case for new keys. Registration enforces a URL-safe
+  slug (letters and digits plus `.`, `_` or `-`, starting with a letter or
+  digit) because the key travels as a URL path segment in the session and
+  refresh routes, as the `MODULE_KEY` environment variable and as a
+  JWT-audience suffix.
 - The module image receives this value through the canonical `MODULE_KEY` environment variable.
 
 ### Required callback behavior

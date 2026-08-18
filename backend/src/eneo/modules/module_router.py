@@ -51,7 +51,11 @@ async def get_modules(
 @router.post(
     "/",
     response_model=ModuleInDB,
-    description="Register a new global module.",
+    description=(
+        "Register a new global module. The module key is immutable, "
+        "case-sensitive and restricted to a URL-safe slug: letters and "
+        "digits plus '.', '_' or '-', starting with a letter or digit."
+    ),
     responses=responses.get_responses([409]),
 )
 async def add_module(module: ModuleCreate, container: _MutationContainer) -> ModuleInDB:

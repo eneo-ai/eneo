@@ -1,3 +1,4 @@
+import re
 from enum import Enum
 from typing import Optional
 from uuid import UUID
@@ -16,12 +17,22 @@ class Modules(str, Enum):
     ENEO_APPLICATIONS = "eneo-applications"
 
 
+# The stable key travels as a URL path segment (the auth-broker session and
+# refresh routes), a module-side environment variable and a JWT-audience
+# suffix, so new keys are restricted to an ASCII slug. A '/' in particular can
+# never be routed: it is decoded before path matching, so such a module could
+# exchange its first token but never validate or renew the session.
+_MODULE_KEY_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
+
+
 class ModuleBase(BaseModel):
     """A module's globally unique machine identity.
 
     ``name`` predates the auth broker, but is its stable public module key. It
-    is intentionally treated as an opaque, case-sensitive value and has no
-    rename API. A separate display name can be introduced if one is needed.
+    is case-sensitive and has no rename API; registration restricts new keys
+    to a URL-safe slug. Read models stay permissive so rows that predate the
+    restriction (e.g. ``SWE Models``) keep loading. A separate display name
+    can be introduced if one is needed.
     """
 
     name: Modules | str
@@ -35,12 +46,10 @@ class ModuleCreate(ModuleBase):
     @field_validator("name")
     @classmethod
     def validate_stable_key(cls, value: Modules | str) -> Modules | str:
-        stripped = value.strip()
-        if not stripped:
-            raise ValueError("Module key must not be empty or blank.")
-        if stripped != value:
+        if not _MODULE_KEY_PATTERN.fullmatch(value):
             raise ValueError(
-                "Module key must not contain leading or trailing whitespace."
+                "Module key must be a URL-safe slug: letters and digits plus "
+                "'.', '_' or '-', starting with a letter or digit."
             )
         return value
 

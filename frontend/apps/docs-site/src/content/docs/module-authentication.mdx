@@ -291,7 +291,9 @@ The short version of the [operator
 guide](https://github.com/eneo-ai/eneo/blob/develop/docs/deployment/MODULES.md):
 
 1. **Register the module key** (once, global): `POST /api/v1/modules/` with the
-   stable `module_key` as `name`.
+   stable `module_key` as `name`. The key must be a URL-safe slug (letters
+   and digits plus `.`, `_` or `-`) — it becomes a URL path segment in the
+   session and refresh routes.
 2. **Enable it for the tenant**: `PUT /api/v1/modules/{tenant_id}/{module_id}/`
    (idempotent, preserves other modules).
 3. **Mint a dedicated `sk_` service key** as a tenant admin: service-owned,

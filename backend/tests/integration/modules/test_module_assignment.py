@@ -35,6 +35,23 @@ async def test_registering_duplicate_module_key_returns_name_collision(
 
 
 @pytest.mark.asyncio
+async def test_registering_non_url_safe_module_key_is_rejected(
+    client,
+    test_settings,
+):
+    """A key like 'reports/v2' would pass handoff (the key rides in JSON) but
+    could never reach the path-segment session and refresh routes, so it must
+    be unrepresentable from registration on."""
+    response = await client.post(
+        "/api/v1/modules/",
+        json={"name": "reports/v2"},
+        headers={"X-API-Key": test_settings.eneo_super_duper_api_key},
+    )
+
+    assert response.status_code == 422, response.text
+
+
+@pytest.mark.asyncio
 async def test_targeted_module_enable_and_disable_preserve_other_assignments(
     client,
     db_container,
