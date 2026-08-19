@@ -1138,6 +1138,89 @@ async def test_proposal_retry_config_finalizes_create_compiled_proposal_with_inv
 
 
 @pytest.mark.asyncio
+async def test_create_admission_rehomes_field_shaped_step_before_compilation() -> None:
+    submission = _make_submission()
+    planning_state = _committed_text_planning_state()
+    resource_catalog = build_ai_builder_resource_catalog(
+        available_models=[], available_kbs=[]
+    )
+    schema = build_propose_flow_tool_schema(resource_catalog=resource_catalog)
+    process_create = AsyncMock(
+        return_value=ToolProcessingResult(feedback="Continue with normal validation.")
+    )
+    arguments = {
+        "flow_name": "Neighbour consultation summary",
+        "plan_rationale": "Structure submitted consultation responses.",
+        "steps": [
+            {
+                "name": "Structure responses",
+                "instructions": "Extract the requested facts from every response.",
+                "output_fields": [
+                    {
+                        "name": "case_overview",
+                        "field_type": "object",
+                        "description": "Overview of the case.",
+                    },
+                    {
+                        "name": "Review responses",
+                        "instructions": "Identify missing or contradictory details.",
+                    },
+                ],
+            },
+            {
+                "name": "data_quality_notes",
+                "field_type": "array",
+                "description": "Missing or contradictory source details.",
+                "item_fields": [
+                    {
+                        "name": "description",
+                        "field_type": "string",
+                        "description": "The quality issue.",
+                    }
+                ],
+            },
+        ],
+    }
+    invocation = _make_retry_invocation(
+        resource_catalog=resource_catalog,
+        arguments=arguments,
+    )
+    config = submission._proposal_retry_config(
+        target_kind=TargetKind.CREATE,
+        assistant_snapshots=None,
+        request_id="req-field-shaped-step",
+        planning_state=planning_state,
+        plan_edit_context=None,
+        prior_spec_for_revision=None,
+        usage_tracker=None,
+        proposal_tool_schema=schema,
+        compile_context=create_compile_context_from_planning_state(planning_state),
+    )
+
+    with patch(
+        "eneo.flows.ai_builder.ai_builder_proposal_submission."
+        "process_create_intent_arguments",
+        new=process_create,
+    ):
+        result = await config.process_tool_invocation(invocation)
+
+    assert result.feedback == "Continue with normal validation."
+    process_create.assert_awaited_once()
+    admitted = process_create.await_args.kwargs["arguments"]
+    assert [step["name"] for step in admitted["steps"]] == [
+        "Structure responses",
+        "Review responses",
+    ]
+    assert [field["name"] for field in admitted["steps"][0]["output_fields"]] == [
+        "case_overview",
+    ]
+    assert [field["name"] for field in admitted["steps"][1]["output_fields"]] == [
+        "data_quality_notes"
+    ]
+    assert len(arguments["steps"]) == 2
+
+
+@pytest.mark.asyncio
 async def test_repair_invocation_validates_the_prepared_schema_before_compilation(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

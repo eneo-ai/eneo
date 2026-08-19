@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections import deque
 from copy import deepcopy
 from typing import TYPE_CHECKING, Any, Literal, NotRequired, TypedDict, cast
 
@@ -283,6 +284,155 @@ def validate_propose_flow_tool_arguments(
     ) from error
 
 
+def admit_propose_flow_tool_arguments(
+    *,
+    arguments: dict[str, Any],
+    tool_schema: ProposalToolSchema,
+) -> dict[str, Any]:
+    """Admit one proposal payload after lossless schema-guided normalization.
+
+    Some non-strict tool implementations occasionally close the adjacent
+    ``steps`` and ``output_fields`` arrays at the wrong boundary. The prepared
+    create schema makes those cases unambiguous: each complete object matches
+    exactly one of the two shapes. Rehome only that exact shape, then apply the
+    unchanged proposal schema to the full payload.
+    """
+
+    admitted = _rehome_misplaced_create_children(
+        arguments=arguments,
+        tool_schema=tool_schema,
+    )
+    validate_propose_flow_tool_arguments(
+        arguments=admitted,
+        tool_schema=tool_schema,
+    )
+    return admitted
+
+
+def _rehome_misplaced_create_children(
+    *,
+    arguments: dict[str, Any],
+    tool_schema: ProposalToolSchema,
+) -> dict[str, Any]:
+    parameters = tool_schema["function"]["parameters"]
+    raw_properties = parameters.get("properties")
+    if not isinstance(raw_properties, dict):
+        return arguments
+    properties = cast(dict[str, object], raw_properties)
+    steps_schema = properties.get("steps")
+    if not isinstance(steps_schema, dict):
+        return arguments
+    step_schema = cast(dict[str, object], steps_schema).get("items")
+    if not isinstance(step_schema, dict):
+        return arguments
+    step_schema_map = cast(dict[str, object], step_schema)
+    step_properties = step_schema_map.get("properties")
+    raw_required_step_keys = step_schema_map.get("required")
+    if not isinstance(step_properties, dict) or not isinstance(
+        raw_required_step_keys, list
+    ):
+        return arguments
+    step_properties_map = cast(dict[str, object], step_properties)
+    allowed_step_keys = frozenset(step_properties_map)
+    required_step_keys = frozenset(
+        value
+        for value in cast(list[object], raw_required_step_keys)
+        if isinstance(value, str)
+    )
+    output_fields_schema = step_properties_map.get("output_fields")
+    if not isinstance(output_fields_schema, dict):
+        return arguments
+    field_schema = cast(dict[str, object], output_fields_schema).get("items")
+    if not isinstance(field_schema, dict):
+        return arguments
+    field_schema_map = cast(dict[str, object], field_schema)
+    raw_field_properties = field_schema_map.get("properties")
+    raw_required_field_keys = field_schema_map.get("required")
+    if not isinstance(raw_field_properties, dict) or not isinstance(
+        raw_required_field_keys, list
+    ):
+        return arguments
+    allowed_field_keys = frozenset(cast(dict[str, object], raw_field_properties).keys())
+    required_field_keys = frozenset(
+        value
+        for value in cast(list[object], raw_required_field_keys)
+        if isinstance(value, str)
+    )
+
+    raw_steps = arguments.get("steps")
+    if not isinstance(raw_steps, list):
+        return arguments
+    pending = deque(cast(list[object], raw_steps))
+    admitted_steps: list[object] = []
+    changed = False
+    while pending:
+        candidate = pending.popleft()
+        previous = admitted_steps[-1] if admitted_steps else None
+        candidate_map = (
+            cast(dict[str, object], candidate) if isinstance(candidate, dict) else None
+        )
+        previous_map = (
+            cast(dict[str, object], previous) if isinstance(previous, dict) else None
+        )
+        if (
+            candidate_map is not None
+            and "instructions" not in candidate_map
+            and required_field_keys.issubset(candidate_map)
+            and candidate_map.keys() <= allowed_field_keys
+            and previous_map is not None
+            and isinstance(previous_map.get("instructions"), str)
+        ):
+            existing_fields = previous_map.get("output_fields")
+            if existing_fields is None or isinstance(existing_fields, list):
+                admitted_steps[-1] = {
+                    **previous_map,
+                    "output_fields": [
+                        *cast(list[object], existing_fields or []),
+                        candidate_map,
+                    ],
+                }
+                changed = True
+                continue
+
+        nested_steps: list[object] = []
+        if (
+            candidate_map is not None
+            and required_step_keys.issubset(candidate_map)
+            and candidate_map.keys() <= allowed_step_keys
+        ):
+            raw_output_fields = candidate_map.get("output_fields")
+            if isinstance(raw_output_fields, list):
+                admitted_fields: list[object] = []
+                for output_field in cast(list[object], raw_output_fields):
+                    output_field_map = (
+                        cast(dict[str, object], output_field)
+                        if isinstance(output_field, dict)
+                        else None
+                    )
+                    if (
+                        output_field_map is not None
+                        and required_step_keys.issubset(output_field_map)
+                        and output_field_map.keys() <= allowed_step_keys
+                    ):
+                        nested_steps.append(output_field_map)
+                        changed = True
+                    else:
+                        admitted_fields.append(cast(object, output_field))
+                if nested_steps:
+                    candidate_map = {**candidate_map}
+                    if admitted_fields:
+                        candidate_map["output_fields"] = admitted_fields
+                    else:
+                        candidate_map.pop("output_fields", None)
+
+        admitted_steps.append(candidate_map or cast(object, candidate))
+        pending.extendleft(reversed(nested_steps))
+
+    if not changed:
+        return arguments
+    return {**arguments, "steps": admitted_steps}
+
+
 def _actionable_validation_error(
     error: jsonschema.ValidationError,
 ) -> jsonschema.ValidationError:
@@ -349,6 +499,7 @@ def _matching_discriminator_branch_index(
 
 
 __all__ = [
+    "admit_propose_flow_tool_arguments",
     "build_propose_flow_tool_schema",
     "ProposalToolArgumentsError",
     "ProposalToolSchema",
