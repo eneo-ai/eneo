@@ -756,7 +756,7 @@ async def test_service_key_direct_flow_get_requires_admin_and_preserves_runtime_
 
 @pytest.mark.integration
 @pytest.mark.asyncio
-async def test_service_key_space_scoped_published_runtime_surfaces_work_and_ai_builder_stays_denied(
+async def test_service_key_space_scoped_published_runtime_surfaces_work(
     client, flow_admin_token
 ):
     space_id = await _create_space(client, token=flow_admin_token)
@@ -831,14 +831,6 @@ async def test_service_key_space_scoped_published_runtime_surfaces_work_and_ai_b
     listed_ids = {item["id"] for item in list_runs_resp.json()["items"]}
     assert service_run_id in listed_ids
     assert human_run_id not in listed_ids
-
-    ai_builder_resp = await client.post(
-        "/api/v1/flows/ai-builder/sessions",
-        json={"space_id": space_id, "target_kind": "create"},
-        headers={"X-API-Key": secret},
-    )
-    assert ai_builder_resp.status_code == 403, ai_builder_resp.text
-    assert ai_builder_resp.json()["code"] == "insufficient_space_permission"
 
 
 @pytest.mark.integration

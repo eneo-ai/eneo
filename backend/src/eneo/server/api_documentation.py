@@ -78,15 +78,6 @@ TAGS_METADATA = [
         ),
     },
     {
-        "name": "ai-builder",
-        "description": (
-            "AI Builder workflow for flow creation and editing. Recommended consumer "
-            "sequence: create or resume a session, send one or more messages, inspect "
-            "the proposed plan, approve it, then apply it. All AI Builder endpoints "
-            "remain nested under `/flows` because the builder is a flow-drafting subsystem."
-        ),
-    },
-    {
         "name": "flow-packages",
         "description": (
             "Flow package export, validation, and import-planning operations for "

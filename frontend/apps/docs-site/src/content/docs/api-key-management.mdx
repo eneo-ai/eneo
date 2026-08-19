@@ -71,7 +71,7 @@ Published-Flow runtime routes are a separate, Flow-scoped exception, and they ar
 - cancel its own runs, and edit, approve, reject, or resume human-review checkpoints for runs the same key created;
 - delete only its own unattached upload through `DELETE /api/v1/flows/{flow_id}/runtime-files/{file_id}/`. Once a runtime file is attached to persisted run or rerun state, cleanup returns `409` with `code: "flow_runtime_file_attached"` instead of deleting it.
 
-`flows = read` covers the read half of that journey: published flows, runtime paths, run contracts, own run status, and active review checkpoints. Authoring—draft create, update, delete, publish, template management, and AI Builder—stays with user principals.
+`flows = read` covers the read half of that journey: published flows, runtime paths, run contracts, own run status, and active review checkpoints. Authoring—draft create, update, delete, publish, and template management—stays with user principals.
 
 Two related guardrails come from the same principle:
 

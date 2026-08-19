@@ -25,8 +25,6 @@ from eneo.settings.setting_service import (
     SettingService,
 )
 from eneo.settings.settings import (
-    AIBuilderBudgetSettingsPublic,
-    AIBuilderBudgetSettingsUpdate,
     FlowClassificationRetentionPoliciesPublic,
     FlowClassificationRetentionPolicyPreviewRequest,
     FlowClassificationRetentionPolicyPublic,
@@ -99,10 +97,6 @@ class _FlowSettingsServiceProtocol(Protocol):
     async def update_flow_retention_policy(
         self, payload: FlowRetentionPolicyUpdate
     ) -> FlowRetentionPolicyPublic: ...
-    async def get_ai_builder_budget_settings(self) -> AIBuilderBudgetSettingsPublic: ...
-    async def update_ai_builder_budget_settings(
-        self, payload: AIBuilderBudgetSettingsUpdate
-    ) -> AIBuilderBudgetSettingsPublic: ...
 
 
 def _settings_error_response(
@@ -560,7 +554,7 @@ async def update_flow_runtime_policy(
     summary="Get mapped execution policy",
     description=(
         "Return the tenant ceilings for mapped provider-call fan-out and aggregate "
-        "estimated input tokens. A null call ceiling blocks new mapped Builder "
+        "estimated input tokens. A null call ceiling blocks new mapped authoring "
         "authoring; a null token ceiling disables only that aggregate token check. "
         "Published definitions keep their explicit file or item bounds."
     ),
@@ -883,49 +877,6 @@ async def preview_flow_classification_retention_policy(
         no_purge=payload.no_purge,
     )
     return FlowRetentionImpactPreviewPublic.from_domain(preview)
-
-
-@settings_admin_router.get(
-    "/ai-builder-budget",
-    response_model=AIBuilderBudgetSettingsPublic,
-    summary="Get AI Builder resource budget settings",
-    description=(
-        "Return effective prompt reserves, message and attachment limits, "
-        "template-inspection limits, and their fixed system ceilings."
-    ),
-    responses={403: _flow_settings_admin_forbidden_response()},
-)
-async def get_ai_builder_budget_settings(
-    container: Annotated[Container, Depends(get_container(with_user=True))],
-) -> AIBuilderBudgetSettingsPublic:
-    validate_permission(container.user(), Permission.ADMIN)
-    service = cast(_FlowSettingsServiceProtocol, container.settings_service())
-    return await service.get_ai_builder_budget_settings()
-
-
-@settings_admin_router.patch(
-    "/ai-builder-budget",
-    response_model=AIBuilderBudgetSettingsPublic,
-    summary="Update AI Builder resource budget settings",
-    description=(
-        "Update tenant-owned prompt reserves, message and attachment limits, "
-        "and template-inspection limits."
-    ),
-    responses={
-        400: _flow_settings_invalid_payload_response(
-            "Invalid AI Builder settings payload.",
-            "At least one AI Builder setting must be provided.",
-        ),
-        403: _flow_settings_admin_forbidden_response(),
-    },
-)
-async def update_ai_builder_budget_settings(
-    payload: AIBuilderBudgetSettingsUpdate,
-    container: Annotated[Container, Depends(get_container(with_user=True))],
-) -> AIBuilderBudgetSettingsPublic:
-    validate_permission(container.user(), Permission.ADMIN)
-    service = cast(_FlowSettingsServiceProtocol, container.settings_service())
-    return await service.update_ai_builder_budget_settings(payload)
 
 
 @settings_admin_router.patch(

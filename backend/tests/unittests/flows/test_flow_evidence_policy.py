@@ -169,7 +169,7 @@ def test_apply_flow_evidence_policy_patch_preserves_unrelated_settings() -> None
     current_settings = {
         "input_limits": {"max_files_per_run": 10},
         "retention_policy": {"run_debug_evidence_days": 7},
-        "ai_builder": {"minimum_conversation_budget_tokens": 6000},
+        "future_extension": {"minimum_budget_tokens": 6000},
         "runtime_policy": {"default_step_timeout_seconds": 900},
         "document_render_limits": {"max_source_chars": 500_000},
         "evidence_policy": {"classification_3": "broken"},
@@ -183,7 +183,7 @@ def test_apply_flow_evidence_policy_patch_preserves_unrelated_settings() -> None
     for key in (
         "input_limits",
         "retention_policy",
-        "ai_builder",
+        "future_extension",
         "runtime_policy",
         "document_render_limits",
     ):

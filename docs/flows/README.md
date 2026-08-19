@@ -1,6 +1,6 @@
 # Flows documentation
 
-Four documents cover Eneo Flows and the Flow AI Builder. Read them in this
+Three documents cover Eneo Flows. Read them in this
 order; each says what it owns, so nothing is documented twice.
 
 | Read this | When you need |
@@ -8,7 +8,6 @@ order; each says what it owns, so nothing is documented twice.
 | [Flow developer quickstart](./flow-developer-quickstart.md) | The core data model, the published runtime contract, and what a step may take as input and produce as output. Start here. |
 | [Flow architecture](./architecture.md) | Module ownership, runtime journeys, the policy decisions that are settled, and which guard tests enforce them. |
 | [Flow package layout](./package-layout.md) | Where a root-level Flow module belongs. Read before adding or moving one. |
-| [AI-byggaren design](../design/ai-builder/) | What the builder's screens are meant to be, and what the build deliberately does differently. |
 
 ## Decisions live in ADRs, not here
 
@@ -22,10 +21,8 @@ wins and the page is stale.
 
 ## Where the code is
 
-- Backend: `backend/src/eneo/flows` — layered per the package layout page; the
-  AI Builder is `backend/src/eneo/flows/ai_builder`.
-- Frontend: `frontend/apps/web/src/lib/features/flows`, with the builder under
-  `.../flows/ai-builder`.
+- Backend: `backend/src/eneo/flows` — layered per the package layout page.
+- Frontend: `frontend/apps/web/src/lib/features/flows`.
 - Portable packages: `backend/src/eneo/flow_packages`, deliberately outside
   `eneo.flows`.
 

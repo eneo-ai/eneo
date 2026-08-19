@@ -334,9 +334,9 @@ async def _seed_flow_run_contract_data(
             version=1,
             definition_json={
                 "metadata_json": {
-                    "ai_builder": {
+                    "authoring_extension": {
                         "origin": {
-                            "builder_session_id": "builder-session-123",
+                            "session_id": "authoring-session-123",
                         }
                     }
                 },
@@ -2247,16 +2247,16 @@ async def test_flow_run_evidence_export_returns_redacted_json_attachment(
         for item in payload["redaction"]["masked_fields"]
     )
     assert (
-        "bundle.definition_snapshot.metadata_json.ai_builder.origin.builder_session_id"
+        "bundle.definition_snapshot.metadata_json.authoring_extension.origin.session_id"
         not in payload["redaction"]["masked_paths"]
     )
     assert payload["bundle"]["run"]["trace_id"] == seeded["trace_id"]
     assert payload["bundle"]["run"]["input_payload_json"]["api_key"] == "[REDACTED]"
     assert (
-        payload["bundle"]["definition_snapshot"]["metadata_json"]["ai_builder"][
-            "origin"
-        ]["builder_session_id"]
-        == "builder-session-123"
+        payload["bundle"]["definition_snapshot"]["metadata_json"][
+            "authoring_extension"
+        ]["origin"]["session_id"]
+        == "authoring-session-123"
     )
     assert (
         payload["bundle"]["step_results"][0]["effective_prompt"]

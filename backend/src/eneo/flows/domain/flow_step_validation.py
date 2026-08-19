@@ -79,7 +79,7 @@ class FlowGraphIssueCode(StrEnum):
 
 @dataclass(frozen=True, slots=True)
 class FlowStepGraphIssue:
-    # `code` is the canonical diagnostic consumed by Builder; `exception_code`
+    # `code` is the canonical diagnostic consumed by authoring clients; `exception_code`
     # preserves the legacy BadRequest/FlowStepValidationError `.code` surface.
     step_order: int | None
     code: FlowGraphIssueCode

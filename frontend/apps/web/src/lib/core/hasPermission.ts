@@ -1,7 +1,7 @@
 import type { Permission, Role } from "@eneo/eneo-js";
 
 const flowPermissionExpansions: Partial<Record<Permission, Permission[]>> = {
-  flows: ["flows_view", "flows_run", "flows_manage", "flows_ai_builder"],
+  flows: ["flows_view", "flows_run", "flows_manage"],
   flows_manage: ["flows_view", "flows_run"],
   flows_run: ["flows_view"]
 };

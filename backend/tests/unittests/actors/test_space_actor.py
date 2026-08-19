@@ -90,7 +90,6 @@ class MockPermission:
     FLOWS_VIEW = "flows_view"
     FLOWS_RUN = "flows_run"
     FLOWS_MANAGE = "flows_manage"
-    FLOWS_AI_BUILDER = "flows_ai_builder"
 
 
 def _actor(user, space: MockSpace) -> SpaceActor:

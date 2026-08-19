@@ -45,17 +45,7 @@ _LEGACY_FORM_FIELD_TYPE_NORMALIZATION = {
 _FORM_FIELD_TYPES_BY_VALUE = {
     field_type.value: field_type for field_type in FlowFormFieldType
 }
-_FLOW_METADATA_TOP_LEVEL_KEYS = frozenset(
-    {"form_schema", "care_data_policy", "wizard", "ai_builder"}
-)
-_AI_BUILDER_METADATA_KEYS = frozenset({"origin"})
-_AI_BUILDER_ORIGIN_FIELD_NAMES = (
-    "builder_session_id",
-    "builder_plan_id",
-    "builder_spec_hash",
-    "applied_at",
-)
-_AI_BUILDER_ORIGIN_KEYS = frozenset(_AI_BUILDER_ORIGIN_FIELD_NAMES)
+_FLOW_METADATA_TOP_LEVEL_KEYS = frozenset({"form_schema", "care_data_policy", "wizard"})
 
 
 class FlowFormField(BaseModel):
@@ -83,28 +73,12 @@ class FlowCareDataPolicy(BaseModel):
     pre_approval_visibility: CareDataPreApprovalVisibility | None = None
 
 
-class FlowAIBuilderOriginMetadata(BaseModel):
-    model_config = ConfigDict(extra="forbid", frozen=True)
-
-    builder_session_id: str
-    builder_plan_id: str
-    builder_spec_hash: str
-    applied_at: str
-
-
-class FlowAIBuilderMetadata(BaseModel):
-    model_config = ConfigDict(extra="forbid", frozen=True)
-
-    origin: FlowAIBuilderOriginMetadata
-
-
 class FlowMetadata(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     form_schema: FlowFormSchema | None = None
     care_data_policy: FlowCareDataPolicy = Field(default_factory=FlowCareDataPolicy)
     wizard: FlowPersistedJsonObject | None = None
-    ai_builder: FlowAIBuilderMetadata | None = None
 
 
 def form_field_name_error(
@@ -233,7 +207,6 @@ def parse_flow_metadata(
         payload["care_data_policy"] = care_data_policy
 
     _parse_wizard_metadata(payload, mode=mode)
-    _parse_ai_builder_metadata(payload, mode=mode)
 
     return FlowMetadata.model_validate(payload)
 
@@ -305,70 +278,6 @@ def _parse_wizard_metadata(
             return
         raise BadRequestException("metadata_json.wizard must be an object.")
     payload["wizard"] = wizard
-
-
-def _parse_ai_builder_metadata(
-    payload: dict[str, object],
-    *,
-    mode: FlowMetadataParseMode,
-) -> None:
-    if "ai_builder" not in payload:
-        return
-
-    ai_builder = clone_json_object(payload["ai_builder"])
-    if ai_builder is None:
-        if mode is FlowMetadataParseMode.PERSISTED_READ:
-            payload.pop("ai_builder", None)
-            return
-        raise BadRequestException("metadata_json.ai_builder must be an object.")
-
-    unknown_keys = set(ai_builder) - _AI_BUILDER_METADATA_KEYS
-    if unknown_keys and mode is FlowMetadataParseMode.WRITE:
-        unknown = ", ".join(sorted(unknown_keys))
-        raise BadRequestException(
-            f"metadata_json.ai_builder contains unknown fields: {unknown}"
-        )
-
-    origin = _parse_ai_builder_origin(ai_builder.get("origin"), mode=mode)
-    if origin is None:
-        if mode is FlowMetadataParseMode.WRITE:
-            raise BadRequestException("metadata_json.ai_builder.origin is required.")
-        payload.pop("ai_builder", None)
-        return
-    payload["ai_builder"] = FlowAIBuilderMetadata(origin=origin)
-
-
-def _parse_ai_builder_origin(
-    value: object,
-    *,
-    mode: FlowMetadataParseMode,
-) -> FlowAIBuilderOriginMetadata | None:
-    origin = clone_json_object(value)
-    if origin is None:
-        if mode is FlowMetadataParseMode.WRITE:
-            raise BadRequestException(
-                "metadata_json.ai_builder.origin must be an object."
-            )
-        return None
-
-    unknown_keys = set(origin) - _AI_BUILDER_ORIGIN_KEYS
-    if unknown_keys and mode is FlowMetadataParseMode.WRITE:
-        unknown = ", ".join(sorted(unknown_keys))
-        raise BadRequestException(
-            f"metadata_json.ai_builder.origin contains unknown fields: {unknown}"
-        )
-
-    origin_payload: dict[str, str] = {}
-    for key in _AI_BUILDER_ORIGIN_FIELD_NAMES:
-        item = origin.get(key)
-        if not isinstance(item, str):
-            if mode is FlowMetadataParseMode.WRITE:
-                raise BadRequestException(
-                    f"metadata_json.ai_builder.origin.{key} must be a string."
-                )
-            return None
-        origin_payload[key] = item
-    return FlowAIBuilderOriginMetadata.model_validate(origin_payload)
 
 
 def _parse_care_data_policy(

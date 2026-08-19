@@ -122,7 +122,7 @@ def _binding(
     local_resource_kind: str = LocalResourceKind.COMPLETION_MODEL.value,
     local_resource_id: UUID | None = None,
     tenant_id: UUID | None = None,
-    source: str = "ai_builder",
+    source: str = FlowResourceBindingSource.PACKAGE_IMPORT.value,
 ) -> FlowResourceBindings:
     return FlowResourceBindings(
         flow_id=flow.id,
@@ -446,7 +446,6 @@ def test_flow_resource_binding_metadata_matches_resource_ref_contract() -> None:
     )
     assert FLOW_RESOURCE_SLOT_LOCAL_KIND_PAIR_VALUES == RESOURCE_SLOT_LOCAL_KIND_PAIRS
     assert FLOW_RESOURCE_BINDING_SOURCE_VALUES == (
-        FlowResourceBindingSource.AI_BUILDER.value,
         FlowResourceBindingSource.PACKAGE_IMPORT.value,
         FlowResourceBindingSource.MANUAL_ADMIN.value,
     )

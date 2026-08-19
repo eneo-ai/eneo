@@ -44,6 +44,5 @@ roles:
       - flows_view
       - flows_run
       - flows_manage
-      - flows_ai_builder
       - flows_trace
       - assistant_debug

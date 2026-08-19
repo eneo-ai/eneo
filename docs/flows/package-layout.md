@@ -44,7 +44,6 @@ Allowed target homes:
 - `infrastructure`: persistence and external storage adapters.
 - `runtime`: worker, executor, step execution, and runtime adapter code.
 - `canonical-home`: an existing top-level package that is already a stable home.
-- `plugin`: Flow-adjacent plugin boundary.
 - `remove-merge-later`: duplicate or temporary root import surface to delete.
 
 ## Portable transfer
@@ -65,7 +64,6 @@ contract: change the rows freely, keep the shape.
 
 | Entry | Kind | Target home | Rationale |
 | --------------------------------- | ------- | -------------- | ------------------------------------------------------------------------------------- |
-| ai_builder | package | plugin | Flow AI Builder plugin boundary; only shared contracts should cross into Flow proper. |
 | api | package | canonical-home | HTTP adapters and API schemas already live here. |
 | application | package | canonical-home | Flow use cases and application services already live here. |
 | domain | package | canonical-home | Domain entities and invariants already live here. |
@@ -78,7 +76,6 @@ contract: change the rows freely, keep the shape.
 | enums | module | domain | Shared Flow vocabularies belong with domain contracts. |
 | execution_backend | module | runtime | Execution backend selection is runtime behavior. |
 | flow_access_policy | module | application | Access policy supports use-case authorization decisions. |
-| flow_ai_builder_budget_settings | module | plugin | Builder budget settings should live with the builder boundary. |
 | flow_api_error_code | module | api | Public Flow error catalog is API-facing. |
 | flow_api_exceptions | module | api | Public Flow error helpers are API-facing. |
 | flow_error_taxonomy | module | api | Public Flow error taxonomy is API consumer-facing metadata. |

@@ -17,7 +17,6 @@ from eneo.database.tables.app_table import AppRunsFiles, AppsFiles
 from eneo.database.tables.assistant_table import AssistantsFiles
 from eneo.database.tables.files_table import Files
 from eneo.database.tables.flow_tables import (
-    BuilderSessionFiles,
     FlowOutboxDeliveryStatus,
     FlowRunAuditOutbox,
     FlowRunRerunOperations,
@@ -845,15 +844,6 @@ def _assistant_file_exists() -> sa.Exists:
     )
 
 
-def _builder_session_file_exists() -> sa.Exists:
-    return (
-        sa.select(sa.literal(1))
-        .select_from(BuilderSessionFiles)
-        .where(BuilderSessionFiles.file_id == Files.id)
-        .exists()
-    )
-
-
 def _child_file_exists() -> sa.Exists:
     # A derived child blocks parent purge: cascading could delete a referenced child.
     child_files = aliased(Files)
@@ -877,7 +867,6 @@ _FILE_REFERENCE_EXISTS_BY_TABLE: Mapping[str, Callable[[], sa.Exists]] = (
             AppRunsFiles.__tablename__: _app_run_file_exists,
             QuestionsFiles.__tablename__: _question_file_exists,
             AssistantsFiles.__tablename__: _assistant_file_exists,
-            BuilderSessionFiles.__tablename__: _builder_session_file_exists,
         }
     )
 )

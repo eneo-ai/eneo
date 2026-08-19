@@ -131,7 +131,7 @@
     <div class="mx-auto flex w-full max-w-6xl flex-col gap-8 px-4 py-6 sm:px-6 sm:py-8">
       <div class="grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_18rem]">
         <aside
-          class="border-border order-first border-b pb-6 lg:order-last lg:sticky lg:top-6 lg:border-b-0 lg:border-l lg:pb-0 lg:pl-6"
+          class="border-border order-first border-b pb-6 lg:sticky lg:top-6 lg:order-last lg:border-b-0 lg:border-l lg:pb-0 lg:pl-6"
           aria-labelledby="skill-availability-heading"
         >
           <h2 id="skill-availability-heading" class="text-base font-semibold">

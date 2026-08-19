@@ -1,32 +1,17 @@
 import type { FlowSparse } from "@eneo/eneo-js";
 import { m } from "$lib/paraglide/messages";
-import type { RecoverableAIBuilderDraftSession } from "$lib/features/flows/ai-builder/protocol";
 
-/** One row in the Flöden list: a saved flow or an in-progress AI draft.
- *  Both kinds sort and filter together — a draft is where a flow starts. */
-export type FlowListRow =
-  | {
-      kind: "flow";
-      id: string;
-      name: string;
-      subtitle: string | null;
-      status: "published" | "draft";
-      ownerUserId: string | null;
-      updatedAt: string | null;
-      flow: FlowSparse;
-    }
-  | {
-      kind: "ai_draft";
-      id: string;
-      name: string | null;
-      subtitle: string | null;
-      status: "draft";
-      /** Same three phases as the builder rail; the list can only see two of them. */
-      phase: "understanding" | "reviewing";
-      ownerUserId: null;
-      updatedAt: string | null;
-      draft: RecoverableAIBuilderDraftSession;
-    };
+/** One saved flow row in the Flöden list. */
+export type FlowListRow = {
+  kind: "flow";
+  id: string;
+  name: string;
+  subtitle: string | null;
+  status: "published" | "draft";
+  ownerUserId: string | null;
+  updatedAt: string | null;
+  flow: FlowSparse;
+};
 
 export type FlowListFilter = "all" | "published" | "drafts";
 
@@ -62,34 +47,19 @@ const FLOW_OUTPUT_LABELS: Record<NonNullable<FlowSparse["output_type"]>, () => s
   docx: () => m.flow_list_output_docx()
 };
 
-export function buildFlowListRows(
-  flows: readonly FlowSparse[],
-  drafts: readonly RecoverableAIBuilderDraftSession[]
-): FlowListRow[] {
-  const flowRows: FlowListRow[] = flows.map((flow) => ({
-    kind: "flow",
-    id: flow.id,
-    name: flow.name,
-    subtitle: describeFlow(flow),
-    status: flow.published_version != null ? "published" : "draft",
-    ownerUserId: flow.owner_user_id ?? flow.created_by_user_id ?? null,
-    updatedAt: flow.updated_at ?? flow.created_at ?? null,
-    flow
-  }));
-  const draftRows: FlowListRow[] = drafts.map((draft) => ({
-    kind: "ai_draft",
-    id: draft.session_id,
-    name: draft.draft_title?.trim() || null,
-    subtitle: null,
-    status: "draft",
-    phase: draft.status === "awaiting_approval" ? "reviewing" : "understanding",
-    ownerUserId: null,
-    updatedAt: draft.updated_at ?? draft.created_at ?? null,
-    draft
-  }));
-  return [...flowRows, ...draftRows].sort(
-    (a, b) => timestamp(b.updatedAt) - timestamp(a.updatedAt)
-  );
+export function buildFlowListRows(flows: readonly FlowSparse[]): FlowListRow[] {
+  return flows
+    .map<FlowListRow>((flow) => ({
+      kind: "flow",
+      id: flow.id,
+      name: flow.name,
+      subtitle: describeFlow(flow),
+      status: flow.published_version != null ? "published" : "draft",
+      ownerUserId: flow.owner_user_id ?? flow.created_by_user_id ?? null,
+      updatedAt: flow.updated_at ?? flow.created_at ?? null,
+      flow
+    }))
+    .sort((a, b) => timestamp(b.updatedAt) - timestamp(a.updatedAt));
 }
 
 function timestamp(value: string | null): number {
@@ -109,7 +79,7 @@ export function filterFlowListRows(
     if (!query) return true;
     // The row may show a derived summary instead of the description, but the
     // description is still what people remember a flow by.
-    const description = row.kind === "flow" ? (row.flow.description ?? "") : "";
+    const description = row.flow.description ?? "";
     const haystack = `${row.name ?? ""} ${row.subtitle ?? ""} ${description}`.toLocaleLowerCase();
     return haystack.includes(query);
   });

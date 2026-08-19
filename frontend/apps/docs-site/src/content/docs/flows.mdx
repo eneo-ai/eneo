@@ -7,8 +7,7 @@ A Flow is a multi-step AI pipeline you build inside a space. You design it as a 
 <Callout type="info">
   If you want to build on Flows from your own application, read this page first
   and then continue with the{" "}
-  <a href="/guides/flows">Eneo Flows API consumer guide</a>. If you want to draft a
-  Flow conversationally, read <a href="/docs/ai-builder">AI Builder</a>.
+  <a href="/guides/flows">Eneo Flows API consumer guide</a>.
 </Callout>
 
 ![High-level Flows lifecycle diagram showing user-principal-only authoring, publishing to a versioned definition, and runtime execution with outputs, artifacts, and evidence](/diagrams/flows-overview.svg)
@@ -203,7 +202,7 @@ Publish errors identify the exact location: question errors point to
 
 ### `compose_text`
 
-`compose_text` assembles final text from resolved input bindings without calling an LLM, RAG retrieval, or MCP tools. AI Builder uses it for source-section document reports after semantic steps have already produced the section body, source label, source file id, and optional overview fields.
+`compose_text` assembles final text from resolved input bindings without calling an LLM, RAG retrieval, or MCP tools. It is useful for source-section document reports after semantic steps have already produced the section body, source label, source file id, and optional overview fields.
 
 Current validation rules are strict:
 
@@ -372,9 +371,9 @@ Current enforcement prevents a step from lowering the effective classification o
 ### Supported external effects
 
 Flow input may use HTTP GET. HTTP POST input and MCP servers or tools are not
-supported in Flow authoring, AI Builder, published runtime definitions, or Flow
-packages. Standalone assistants and conversations retain their separately owned
-MCP behavior.
+supported in Flow authoring, published runtime definitions, or Flow packages.
+Standalone assistants and conversations retain their separately owned MCP
+behavior.
 
 Terminal HTTP POST output remains supported through the durable webhook outbox,
 with an **at-least-once sender contract**. Delivery can be duplicated after a
@@ -396,7 +395,6 @@ fails the run without a sixth POST.
 Current authoring policy is intentionally narrow:
 
 - drafts are user-principal-owned
-- AI Builder requires a user principal
 - service keys are not supported for draft editing
 - tenant admins and space owners can override draft ownership according to the current authoring rules
 
@@ -424,7 +422,7 @@ That split is deliberate. A service key is a **runtime principal**, not a draft 
 
 ### Core rules
 
-- **Drafts are user-principal-owned.** Draft create, update, and delete, publish/unpublish, template management, flow-assistant authoring, and AI Builder require a user principal. Reading a draft additionally allows an admin service key whose scope covers the flow.
+- **Drafts are user-principal-owned.** Draft create, update, and delete, publish/unpublish, template management, and flow-assistant authoring require a user principal. Reading a draft additionally allows an admin service key whose scope covers the flow.
 - **Published runtime is broader.** Published flows can be executed by a user principal or a service key, but runtime visibility still depends on who owns the run and who is a trusted operator.
 - **Own-run isolation matters.** Service keys are always own-run-only. They do not become cross-run space operators, even if the key is scoped to a space.
 - **Trusted operator roles use user principals.** In this context, trusted in-space operators means **space owner** and **space admin**. Tenant admin remains the tenant-wide trusted operator.
@@ -454,7 +452,6 @@ _Once a run exists, what you can see depends on who you are. Evidence is additio
 | Create runs                              | Yes                         | Yes                      | Yes                         | Yes                       | Yes, published only                                         |
 | Read run status, step outputs, artifacts | Own runs                    | Own runs                 | In-scope runs               | Tenant-wide runs          | Own runs only                                               |
 | Evidence view / export                   | Own runs, policy-gated      | Own runs, policy-gated   | In-scope runs, policy-gated | Tenant-wide, policy-gated | Own runs only, explicit `flow_evidence` capability required |
-| AI Builder                               | Yes                         | n/a                      | Yes                         | Yes                       | No                                                          |
 
 If you need the endpoint-by-endpoint version of this model, use the access matrix in the <a href="/guides/flows-api-guide#access-matrix">Flow Runtime API Reference</a>.
 
@@ -517,7 +514,7 @@ The purpose is not to disable all evidence support. It is to keep normal inspect
 
 ## Authoring surfaces
 
-Flows have two user-principal authoring surfaces:
+Flows have one user-principal authoring surface:
 
 ### Direct flow authoring
 
@@ -527,19 +524,6 @@ The draft API under `/api/v1/flows/` covers:
 - publish and unpublish
 - template asset upload and inspection
 - assistant-specific step configuration routes
-
-### AI Builder
-
-AI Builder lives under `/api/v1/flows/ai-builder/` and is session-based. It supports:
-
-- creating or resuming sessions
-- sending planner messages over SSE
-- reading plans and session state
-- approving and applying plans
-
-Important current rule: **AI Builder requires a user principal**. It relies on flow-edit permission checks plus creator-scoped session access, so it is not a service-key authoring surface.
-
-For the product mental model, including form fields, **"Underlag till steget"**, knowledge sources, external delivery, and token usage, see <a href="/docs/ai-builder">AI Builder</a>.
 
 ## Practical takeaway
 

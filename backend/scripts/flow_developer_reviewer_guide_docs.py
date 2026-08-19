@@ -827,7 +827,7 @@ REVIEWER_VALIDATION_COMMANDS: tuple[ReviewerValidationCommand, ...] = (
         label="Import boundary",
         command="uv run lint-imports --no-cache",
         workdir="backend",
-        when_to_run="Run after changing Flow package layout or dependencies across the engine and AI Builder boundary.",
+        when_to_run="Run after changing Flow package layout or dependency boundaries.",
         referenced_paths=("backend/.importlinter",),
         requires_path_arguments=False,
     ),

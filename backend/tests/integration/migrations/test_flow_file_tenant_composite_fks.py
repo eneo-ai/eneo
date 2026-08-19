@@ -16,7 +16,6 @@ from alembic import command
 from alembic.config import Config
 from eneo.database.tables.files_table import Files
 from eneo.database.tables.flow_tables import (
-    BuilderSessionFiles,
     FlowRunStepInputFiles,
     FlowRunStepResultFiles,
     FlowRuntimeUploadedFiles,
@@ -619,11 +618,6 @@ def test_models_declare_composite_file_tenant_identity() -> None:
             "fk_flow_run_step_result_files_file_tenant",
             "RESTRICT",
         ),
-        (
-            BuilderSessionFiles.__table__,
-            "fk_builder_session_files_file_tenant",
-            "CASCADE",
-        ),
     )
     for table, constraint_name, ondelete in expected_relationships:
         constraint = _foreign_key(table, constraint_name)
@@ -668,17 +662,6 @@ def test_models_declare_composite_file_tenant_identity() -> None:
         ("flow_runtime_uploaded_files", "tenant_id"),
     )
     assert runtime_provenance.ondelete == "RESTRICT"
-
-    builder_file_index = next(
-        (
-            index
-            for index in BuilderSessionFiles.__table__.indexes
-            if index.name == "ix_builder_session_files_file_id"
-        ),
-        None,
-    )
-    assert builder_file_index is not None
-    assert tuple(column.name for column in builder_file_index.columns) == ("file_id",)
 
     assert any(
         index.name == "ix_flow_template_assets_file_id"

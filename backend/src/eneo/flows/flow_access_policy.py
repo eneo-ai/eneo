@@ -2,8 +2,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum
-from typing import TYPE_CHECKING, Callable, NoReturn
-from uuid import UUID
 
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.principal import FlowPrincipal
@@ -11,27 +9,12 @@ from eneo.main.exceptions import UnauthorizedException
 from eneo.roles.permissions import Permission, has_permission
 from eneo.users.user import UserInDB
 
-if TYPE_CHECKING:
-    from eneo.authentication.auth_dependencies import ScopeFilter
-
 
 class FlowApiAction(str, Enum):
     VIEW = "view"
     RUN = "run"
     EDIT = "edit"
     TRACE_VIEW = "trace_view"
-    BUILDER_SESSION_CREATE = "builder_session_create"
-    BUILDER_SESSION_LIST = "builder_session_list"
-    BUILDER_MESSAGE_SEND = "builder_message_send"
-    BUILDER_SESSION_READ = "builder_session_read"
-    BUILDER_ATTACHMENT_DETACH = "builder_attachment_detach"
-    BUILDER_MODELS_LIST = "builder_models_list"
-    BUILDER_PLAN_READ = "builder_plan_read"
-    BUILDER_PLAN_LIST = "builder_plan_list"
-    BUILDER_SESSION_CANCEL = "builder_session_cancel"
-    BUILDER_PLAN_APPROVE = "builder_plan_approve"
-    BUILDER_PLAN_APPLY = "builder_plan_apply"
-    BUILDER_PLAN_REVISE = "builder_plan_revise"
     REVIEW = "review"
     RESUME = "resume"
     RERUN = "rerun"
@@ -75,11 +58,6 @@ class FlowActionRequirement:
     service_key_runtime_alternative: ServiceKeyRuntimeAlternative | None = None
 
 
-_BUILDER_PERMISSIONS = (
-    Permission.FLOWS_MANAGE,
-    Permission.FLOWS_AI_BUILDER,
-)
-
 FLOW_ACTION_REQUIREMENTS: dict[FlowApiAction, FlowActionRequirement] = {
     FlowApiAction.VIEW: FlowActionRequirement(
         required_permissions=(Permission.FLOWS_VIEW,),
@@ -104,78 +82,6 @@ FLOW_ACTION_REQUIREMENTS: dict[FlowApiAction, FlowActionRequirement] = {
         required_permissions=(Permission.FLOWS_VIEW, Permission.FLOWS_TRACE),
         denial_message="You do not have permission to view flow trace.",
         service_key_capability="trace",
-    ),
-    FlowApiAction.BUILDER_SESSION_CREATE: FlowActionRequirement(
-        required_permissions=_BUILDER_PERMISSIONS,
-        denial_message="You do not have permission to use Flow AI Builder.",
-        service_key_capability="ai_builder",
-        requires_flow_edit=True,
-    ),
-    FlowApiAction.BUILDER_SESSION_LIST: FlowActionRequirement(
-        required_permissions=_BUILDER_PERMISSIONS,
-        denial_message="You do not have permission to use Flow AI Builder.",
-        service_key_capability="ai_builder",
-        requires_flow_edit=True,
-    ),
-    FlowApiAction.BUILDER_MESSAGE_SEND: FlowActionRequirement(
-        required_permissions=_BUILDER_PERMISSIONS,
-        denial_message="You do not have permission to use Flow AI Builder.",
-        service_key_capability="ai_builder",
-        requires_flow_edit=True,
-    ),
-    FlowApiAction.BUILDER_SESSION_READ: FlowActionRequirement(
-        required_permissions=_BUILDER_PERMISSIONS,
-        denial_message="You do not have permission to use Flow AI Builder.",
-        service_key_capability="ai_builder",
-        requires_flow_edit=True,
-    ),
-    FlowApiAction.BUILDER_ATTACHMENT_DETACH: FlowActionRequirement(
-        required_permissions=_BUILDER_PERMISSIONS,
-        denial_message="You do not have permission to use Flow AI Builder.",
-        service_key_capability="ai_builder",
-        requires_flow_edit=True,
-    ),
-    FlowApiAction.BUILDER_MODELS_LIST: FlowActionRequirement(
-        required_permissions=_BUILDER_PERMISSIONS,
-        denial_message="You do not have permission to use Flow AI Builder.",
-        service_key_capability="ai_builder",
-        requires_flow_edit=True,
-    ),
-    FlowApiAction.BUILDER_PLAN_READ: FlowActionRequirement(
-        required_permissions=_BUILDER_PERMISSIONS,
-        denial_message="You do not have permission to use Flow AI Builder.",
-        service_key_capability="ai_builder",
-        requires_flow_edit=True,
-    ),
-    FlowApiAction.BUILDER_PLAN_LIST: FlowActionRequirement(
-        required_permissions=_BUILDER_PERMISSIONS,
-        denial_message="You do not have permission to use Flow AI Builder.",
-        service_key_capability="ai_builder",
-        requires_flow_edit=True,
-    ),
-    FlowApiAction.BUILDER_SESSION_CANCEL: FlowActionRequirement(
-        required_permissions=_BUILDER_PERMISSIONS,
-        denial_message="You do not have permission to use Flow AI Builder.",
-        service_key_capability="ai_builder",
-        requires_flow_edit=True,
-    ),
-    FlowApiAction.BUILDER_PLAN_APPROVE: FlowActionRequirement(
-        required_permissions=_BUILDER_PERMISSIONS,
-        denial_message="You do not have permission to use Flow AI Builder.",
-        service_key_capability="ai_builder",
-        requires_flow_edit=True,
-    ),
-    FlowApiAction.BUILDER_PLAN_APPLY: FlowActionRequirement(
-        required_permissions=_BUILDER_PERMISSIONS,
-        denial_message="You do not have permission to use Flow AI Builder.",
-        service_key_capability="ai_builder",
-        requires_flow_edit=True,
-    ),
-    FlowApiAction.BUILDER_PLAN_REVISE: FlowActionRequirement(
-        required_permissions=_BUILDER_PERMISSIONS,
-        denial_message="You do not have permission to use Flow AI Builder.",
-        service_key_capability="ai_builder",
-        requires_flow_edit=True,
     ),
     FlowApiAction.REVIEW: FlowActionRequirement(
         required_permissions=(Permission.FLOWS_MANAGE,),
@@ -265,20 +171,3 @@ def raise_service_key_not_supported(
         code=FlowApiErrorCode.SERVICE_KEY_PRINCIPAL_NOT_SUPPORTED.value,
         context=context,
     )
-
-
-def require_ai_builder_space_scope(
-    scope_filter: ScopeFilter,
-    *,
-    space_id: UUID,
-    raise_scope_mismatch: Callable[[], NoReturn],
-) -> None:
-    scoped_space_id = ai_builder_scoped_space_id(scope_filter)
-    if scoped_space_id is not None and scoped_space_id != space_id:
-        raise_scope_mismatch()
-
-
-def ai_builder_scoped_space_id(scope_filter: ScopeFilter) -> UUID | None:
-    if scope_filter.scope_type != "space":
-        return None
-    return scope_filter.space_id

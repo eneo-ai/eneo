@@ -31,11 +31,6 @@ from eneo.completion_models.infrastructure.context_builder import (
 from eneo.files.file_models import FileType
 from eneo.files.file_service import FileService
 from eneo.files.text import PDF_TEXT_LIKELY_REVERSED_WARNING
-from eneo.flows.ai_builder.ai_builder_new_step_compiler import (
-    compile_step_input_bindings,
-    derive_input_contract,
-)
-from eneo.flows.ai_builder.ai_builder_new_step_models import PreviousFieldRef
 from eneo.flows.domain.canonical_json_hash import canonical_json_hash
 from eneo.flows.domain.flow import (
     FlowRun,
@@ -47,13 +42,6 @@ from eneo.flows.domain.flow import (
 from eneo.flows.domain.mapped_execution_policy import FlowMappedExecutionPolicy
 from eneo.flows.domain.step_output import OUTPUT_TEXT_OVERFLOW_KEY
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
-from eneo.flows.flow_authoring_spec import (
-    AssistantSpec,
-    InputSource,
-    InputType,
-    OutputType,
-    StepSpec,
-)
 from eneo.flows.flow_run_input_envelope import (
     RerunInputOverride,
     build_rerun_execution_input_envelope,
@@ -714,71 +702,34 @@ async def test_resolve_step_input_json_source_refs_build_exact_structured_projec
             structured={"decisions": ["Approve"], "unused": "drop me too"},
         ),
     ]
-    prior_specs = [
-        StepSpec(
-            plan_step_ref="step_a",
-            name="Extract meeting facts",
-            assistant_spec=AssistantSpec(instructions="Extract meeting facts."),
-            input_source=InputSource.FLOW_INPUT,
-            output_type=OutputType.JSON,
-            output_contract={
+    input_bindings = {
+        "source_refs": [
+            {
+                "step_ref": "step_a",
+                "output": "structured",
+                "field_path": "meeting.summary",
+            },
+            {
+                "step_ref": "step_b",
+                "output": "structured",
+                "field_path": "decisions",
+            },
+        ]
+    }
+    input_contract = {
+        "type": "object",
+        "properties": {
+            "meeting": {
                 "type": "object",
-                "properties": {
-                    "meeting": {
-                        "type": "object",
-                        "properties": {
-                            "summary": {"type": "string"},
-                            "unused": {"type": "string"},
-                        },
-                        "required": ["summary", "unused"],
-                        "additionalProperties": False,
-                    },
-                    "unused": {"type": "string"},
-                },
-                "required": ["meeting", "unused"],
+                "properties": {"summary": {"type": "string"}},
+                "required": ["summary"],
                 "additionalProperties": False,
             },
-        ),
-        StepSpec(
-            plan_step_ref="step_b",
-            name="Extract decisions",
-            assistant_spec=AssistantSpec(instructions="Extract decisions."),
-            input_source=InputSource.PREVIOUS_STEP,
-            output_type=OutputType.JSON,
-            output_contract={
-                "type": "object",
-                "properties": {
-                    "decisions": {
-                        "type": "array",
-                        "items": {"type": "string"},
-                    },
-                    "unused": {"type": "string"},
-                },
-                "required": ["decisions", "unused"],
-                "additionalProperties": False,
-            },
-        ),
-    ]
-    input_bindings = compile_step_input_bindings(
-        input_source=InputSource.PREVIOUS_STEP,
-        input_type=InputType.JSON,
-        uses_form_fields=[],
-        uses_previous_fields=[
-            PreviousFieldRef(from_step=1, field_path="meeting.summary"),
-            PreviousFieldRef(from_step=2, field_path="decisions"),
-        ],
-        uses_previous_outputs=[],
-        prior_steps=prior_specs,
-        require_declared_previous_fields=True,
-    )
-    assert input_bindings is not None
-    input_contract = derive_input_contract(
-        input_source=InputSource.PREVIOUS_STEP,
-        input_type=InputType.JSON,
-        prior_steps=prior_specs,
-        input_bindings=input_bindings,
-    )
-    assert input_contract is not None
+            "decisions": {"type": "array", "items": {"type": "string"}},
+        },
+        "required": ["meeting", "decisions"],
+        "additionalProperties": False,
+    }
     step = _runtime_step(
         step_order=3,
         input_source="previous_step",

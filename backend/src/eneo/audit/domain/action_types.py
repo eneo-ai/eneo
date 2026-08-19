@@ -128,14 +128,6 @@ class ActionType(str, Enum):
     FLOW_RUN_REVIEW_CHECKPOINT_CANCELLED = "flow_run_review_checkpoint_cancelled"
     FLOW_RUN_REVIEW_CHECKPOINT_EXPIRED = "flow_run_review_checkpoint_expired"
 
-    # AI Builder Actions
-    AI_BUILDER_SESSION_CREATED = "ai_builder_session_created"
-    AI_BUILDER_PLAN_APPROVED = "ai_builder_plan_approved"
-    AI_BUILDER_PLAN_REVISED = "ai_builder_plan_revised"
-    AI_BUILDER_FLOW_APPLIED = "ai_builder_flow_applied"
-    AI_BUILDER_ATTACHMENT_DETACHED = "ai_builder_attachment_detached"
-    AI_BUILDER_SESSION_CANCELLED = "ai_builder_session_cancelled"
-
     # Security Classification Actions
     SECURITY_CLASSIFICATION_CREATED = "security_classification_created"
     SECURITY_CLASSIFICATION_UPDATED = "security_classification_updated"

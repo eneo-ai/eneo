@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import datetime
 from typing import TYPE_CHECKING, Annotated, Literal, TypeAlias
 from uuid import UUID
 
@@ -37,15 +36,6 @@ if TYPE_CHECKING:
     from eneo.flows.flow_template_asset_service import FlowTemplateAssetService
 
 
-class AIBuilderFlowAuthoringOrigin(BaseModel):
-    kind: Literal["ai_builder"] = "ai_builder"
-    session_id: UUID
-    plan_id: UUID
-    spec_hash: str
-    applied_at: datetime
-    description_override_manual: bool = False
-
-
 class FlowPackageAuthoringOrigin(BaseModel):
     kind: Literal["flow_package"] = "flow_package"
     package_id: str
@@ -53,10 +43,7 @@ class FlowPackageAuthoringOrigin(BaseModel):
     content_checksum: str
 
 
-FlowAuthoringOrigin: TypeAlias = Annotated[
-    AIBuilderFlowAuthoringOrigin | FlowPackageAuthoringOrigin,
-    Field(discriminator="kind"),
-]
+FlowAuthoringOrigin: TypeAlias = FlowPackageAuthoringOrigin
 
 
 class TemplateAttachmentIntent(BaseModel):
@@ -361,13 +348,10 @@ def _expected_revision(command: FlowAuthoringCommand) -> int | None:
 def _binding_source_for_origin(
     origin: FlowAuthoringOrigin,
 ) -> FlowResourceBindingSource:
-    if origin.kind == "ai_builder":
-        return FlowResourceBindingSource.AI_BUILDER
     return FlowResourceBindingSource.PACKAGE_IMPORT
 
 
 __all__ = [
-    "AIBuilderFlowAuthoringOrigin",
     "CreateFlowAuthoringCommand",
     "EditFlowAuthoringCommand",
     "FlowAuthoringCommand",

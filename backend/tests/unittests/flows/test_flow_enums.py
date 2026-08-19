@@ -6,7 +6,6 @@ import pytest
 from pydantic import ValidationError
 
 from eneo.database.tables.flow_tables import (
-    BUILDER_PLAN_STATUS_VALUES,
     FLOW_RUN_REVIEW_CHECKPOINT_STATE_VALUES,
     FLOW_RUN_STATUS_VALUES,
     FLOW_STEP_ATTEMPT_STATUS_VALUES,
@@ -17,7 +16,6 @@ from eneo.database.tables.flow_tables import (
     FLOW_STEP_RESULT_STATUS_VALUES,
     FLOW_TEMPLATE_ASSET_STATUS_VALUES,
 )
-from eneo.flows.ai_builder.ai_builder_domain_models import PlanStatus
 from eneo.flows.api.flow_models import (
     FlowInputSource,
     FlowInputType,
@@ -70,11 +68,7 @@ def test_shared_flow_enums_match_current_table_constants() -> None:
     )
 
 
-def test_ai_builder_plan_status_enum_matches_table_constant() -> None:
-    assert tuple(item.value for item in PlanStatus) == BUILDER_PLAN_STATUS_VALUES
-
-
-def test_flow_and_ai_builder_enums_are_exported_from_shared_module() -> None:
+def test_flow_enums_are_exported_from_shared_module() -> None:
     assert FlowInputSource.__module__ == "eneo.flows.enums"
     assert FlowInputType.__module__ == "eneo.flows.enums"
     assert FlowOutputMode.__module__ == "eneo.flows.enums"
@@ -146,7 +140,7 @@ def test_flow_step_round_trips_string_fields_as_shared_enums() -> None:
     assert isinstance(step.output_type, FlowOutputType)
 
 
-def test_ai_builder_step_spec_keeps_builder_subset_restrictions() -> None:
+def test_flow_authoring_step_spec_keeps_supported_subset_restrictions() -> None:
     with pytest.raises(ValidationError):
         StepSpec(
             plan_step_ref="step_a",

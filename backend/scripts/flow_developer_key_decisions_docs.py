@@ -40,8 +40,6 @@ FLOW_DEVELOPER_KEY_DECISION_SLUGS = (
     "review-checkpoint-persistence-owner",
     "bounded-jsonb-policy",
     "public-flow-api-error-codes",
-    "import-boundaries",
-    "ai-builder-assembly-plan",
     "review-checkpoint-state-machine",
     "rerun-lineage",
 )
@@ -248,59 +246,6 @@ FLOW_DEVELOPER_KEY_DECISIONS: tuple[FlowDeveloperKeyDecision, ...] = (
         ),
     ),
     _decision(
-        slug="import-boundaries",
-        title="Import boundaries and Flow AI Builder isolation",
-        context="Flow proper and Flow AI Builder evolve together but should not share orchestration internals.",
-        decision="Import-linter blocks Flow engine imports from the AI Builder plugin boundary.",
-        consequences=(
-            "Reject new engine dependencies on `ai_builder` modules outside the explicit router bridge.",
-            "Update package-layout docs and import-linter together when root modules move.",
-        ),
-        source_refs=(
-            _source("Import-linter contract", "backend/.importlinter"),
-            _source("Package layout", "docs/flows/package-layout.md"),
-        ),
-    ),
-    _decision(
-        slug="ai-builder-assembly-plan",
-        title="AI Builder create plans assemble before lowering",
-        context="Create-mode AI Builder must separate semantic intent from deterministic Flow mechanics without downstream rewrite passes.",
-        decision="`FlowAssemblyPlan` is the create-path compile contract: validate deterministic step mechanics at construction, then lower once into `FlowDraftSpecCore`.",
-        consequences=(
-            "Keep `FlowAssemblyPlan` compile-time only; do not persist it or make it a second Flow definition.",
-            "Validate capability support, step order, previous-output refs, form-field placement, source exposure, source-reader obligations, and result-contract output fields on the plan.",
-            "Allow fan-in only for aggregate or compare body writers; linear plans must stay adjacent or targeted.",
-            "Keep topology admission, fixed-step construction, plan validation, and lowering in their respective assembly modules.",
-            "Reject new create-mode rewrites that change underlag, renderer, transcription, or template-fill mechanics after lowering.",
-        ),
-        source_refs=(
-            _source(
-                "Assembly plan",
-                "backend/src/eneo/flows/ai_builder/ai_builder_assembly/plan.py",
-            ),
-            _source(
-                "Topology admission",
-                "backend/src/eneo/flows/ai_builder/ai_builder_assembly/create.py",
-            ),
-            _source(
-                "Fixed planned steps",
-                "backend/src/eneo/flows/ai_builder/ai_builder_assembly/fixed_steps.py",
-            ),
-            _source(
-                "Plan lowering",
-                "backend/src/eneo/flows/ai_builder/ai_builder_assembly/lower.py",
-            ),
-            _source(
-                "Capability manifest",
-                "backend/src/eneo/flows/flow_capability_manifest.py",
-            ),
-            _source(
-                "Step chain rules",
-                "backend/src/eneo/flows/step_chain_rules.py",
-            ),
-        ),
-    ),
-    _decision(
         slug="review-checkpoint-state-machine",
         title="Review checkpoint as a revisioned state machine",
         context="Human review is a sub-lifecycle with edits, approval, rejection, expiry, and resume.",
@@ -477,9 +422,7 @@ def _render_decision_map() -> str:
         '  runtime --> exceptions["Typed lifecycle exceptions"]',
         '  api["API contract"] --> errors["FlowApiErrorCode"]',
         '  api --> http["Authored HTTP config"]',
-        '  boundaries["Architecture boundaries"] --> imports["Import-linter"]',
-        '  boundaries --> builder["AI Builder assembly"]',
-        '  boundaries --> principals["FlowPrincipal"]',
+        '  boundaries["Architecture boundaries"] --> principals["FlowPrincipal"]',
     )
 
 

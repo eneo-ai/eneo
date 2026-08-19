@@ -193,24 +193,6 @@ def test_published_definition_has_verified_functional_and_forensic_owners() -> N
     assert "authorized evidence" in owner.rationale
 
 
-def test_builder_plan_proposal_json_has_typed_owner() -> None:
-    owner = FLOW_JSONB_COLUMN_OWNERS[("builder_plans", "proposal_json")]
-
-    assert owner.owner_module == "eneo.flows.ai_builder.ai_builder_domain_models"
-    assert owner.envelope_name == "FlowBuilderProposal"
-    assert owner.owner_symbols == (
-        "FlowBuilderProposal",
-        "FlowBuilderProposal.from_persisted_json",
-        "FlowBuilderProposal.storage_json",
-    )
-    assert owner.storage_category is FlowJsonbStorageCategory.IMMUTABLE_SNAPSHOT
-    assert (
-        owner.schema_version_policy
-        is FlowJsonbSchemaVersionPolicy.EMBEDDED_SCHEMA_VERSION
-    )
-    assert owner.corruption_behavior is FlowJsonbCorruptionBehavior.FAIL_PLAN_LOAD
-
-
 def test_flow_package_import_plan_is_owner_validated_audit_shape() -> None:
     owner = FLOW_JSONB_COLUMN_OWNERS[("flow_package_imports", "import_plan_json")]
 
@@ -223,29 +205,3 @@ def test_flow_package_import_plan_is_owner_validated_audit_shape() -> None:
     )
     assert owner.corruption_behavior is FlowJsonbCorruptionBehavior.REJECT_BEFORE_WRITE
     assert "auditable" in owner.rationale
-
-
-def test_builder_session_conversation_has_typed_owner() -> None:
-    owner = FLOW_JSONB_COLUMN_OWNERS[("builder_sessions", "conversation")]
-
-    assert owner.owner_module == "eneo.flows.ai_builder.ai_builder_domain_models"
-    assert owner.envelope_name == "ConversationMessage"
-    assert owner.storage_category is FlowJsonbStorageCategory.BUILDER_SESSION_STATE
-    assert (
-        owner.schema_version_policy
-        is FlowJsonbSchemaVersionPolicy.OWNER_VALIDATED_SHAPE
-    )
-    assert owner.corruption_behavior is FlowJsonbCorruptionBehavior.FAIL_SESSION_LOAD
-
-
-def test_builder_session_planning_state_has_typed_owner() -> None:
-    owner = FLOW_JSONB_COLUMN_OWNERS[("builder_sessions", "planning_state_jsonb")]
-
-    assert owner.owner_module == "eneo.flows.ai_builder.planning_state"
-    assert owner.envelope_name == "PlanningState"
-    assert owner.storage_category is FlowJsonbStorageCategory.BUILDER_SESSION_STATE
-    assert (
-        owner.schema_version_policy
-        is FlowJsonbSchemaVersionPolicy.EMBEDDED_SCHEMA_VERSION
-    )
-    assert owner.corruption_behavior is FlowJsonbCorruptionBehavior.FAIL_SESSION_LOAD

@@ -187,11 +187,11 @@
                     <Table.Cell class="min-w-0 font-medium @4xl:w-[22%]">
                       <a
                         href={resolve(`/spaces/${spaceRouteId}/skills/${skill.id}`)}
-                        class="text-foreground hover:text-accent-default focus-visible:ring-ring line-clamp-2 break-words whitespace-normal rounded-sm hover:underline focus-visible:ring-2 focus-visible:outline-none"
+                        class="text-foreground hover:text-accent-default focus-visible:ring-ring line-clamp-2 rounded-sm break-words whitespace-normal hover:underline focus-visible:ring-2 focus-visible:outline-none"
                       >
                         {skill.display_name}
                       </a>
-                      <p class="text-muted-foreground mt-0.5 break-all whitespace-normal text-xs">
+                      <p class="text-muted-foreground mt-0.5 text-xs break-all whitespace-normal">
                         {skill.slug}
                       </p>
                       <div class="mt-2 @md:hidden">
@@ -202,7 +202,7 @@
                         </Badge>
                       </div>
                       <p
-                        class="text-muted-foreground mt-2 line-clamp-2 min-w-0 break-words whitespace-normal pr-2 text-sm leading-6 @4xl:hidden"
+                        class="text-muted-foreground mt-2 line-clamp-2 min-w-0 pr-2 text-sm leading-6 break-words whitespace-normal @4xl:hidden"
                       >
                         {skill.description}
                       </p>

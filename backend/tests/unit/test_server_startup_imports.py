@@ -60,7 +60,6 @@ import sys
 import eneo.flows.api.flow_run_contract_models
 
 assert "eneo.flows.api.flow_router" not in sys.modules
-assert "eneo.flows.ai_builder.ai_builder_router" not in sys.modules
 """
 
     result = subprocess.run(
@@ -175,7 +174,7 @@ def test_flow_canonical_layer_imports_are_available() -> None:
     )
 
 
-def test_flow_and_ai_builder_routes_have_unique_contracts_and_docs() -> None:
+def test_flow_routes_have_unique_contracts_and_docs() -> None:
     module = importlib.import_module("eneo.server.main")
     app = module.app
 
@@ -213,11 +212,8 @@ def test_flow_and_ai_builder_routes_have_unique_contracts_and_docs() -> None:
     assert missing_docs == []
 
 
-def test_flow_and_ai_builder_request_models_expose_openapi_examples() -> None:
+def test_flow_request_models_expose_openapi_examples() -> None:
     flow_models = importlib.import_module("eneo.flows.api.flow_models")
-    ai_builder_api_models = importlib.import_module(
-        "eneo.flows.ai_builder.ai_builder_api_models"
-    )
     file_models = importlib.import_module("eneo.files.file_models")
     assistant_models = importlib.import_module("eneo.assistants.api.assistant_models")
 
@@ -227,9 +223,6 @@ def test_flow_and_ai_builder_request_models_expose_openapi_examples() -> None:
         flow_models.FlowRunCreateRequest,
         flow_models.FlowRunStepRerunRequest,
         flow_models.FlowAssistantCreateRequest,
-        ai_builder_api_models.CreateSessionRequest,
-        ai_builder_api_models.SendMessageRequest,
-        ai_builder_api_models.ApplyPlanRequest,
         file_models.SignedURLRequest,
         assistant_models.AssistantUpdatePublic,
     ]
@@ -239,14 +232,11 @@ def test_flow_and_ai_builder_request_models_expose_openapi_examples() -> None:
         assert "example" in extra and extra["example"]
 
 
-def test_flow_and_ai_builder_response_models_expose_openapi_examples() -> None:
+def test_flow_response_models_expose_openapi_examples() -> None:
     flow_models = importlib.import_module("eneo.flows.api.flow_models")
     flow_graph = importlib.import_module("eneo.flows.api.flow_graph")
     flow_template_asset_models = importlib.import_module(
         "eneo.flows.api.flow_template_asset_models"
-    )
-    ai_builder_api_models = importlib.import_module(
-        "eneo.flows.ai_builder.ai_builder_api_models"
     )
 
     models_with_examples = [
@@ -263,13 +253,6 @@ def test_flow_and_ai_builder_response_models_expose_openapi_examples() -> None:
         flow_models.FlowRunDebugExport,
         flow_models.FlowRunEvidenceResponse,
         flow_models.FlowRunEvidenceExportResponse,
-        ai_builder_api_models.SessionResponse,
-        ai_builder_api_models.SessionListResponse,
-        ai_builder_api_models.SessionModelsResponse,
-        ai_builder_api_models.PlanResponse,
-        ai_builder_api_models.SessionPlansResponse,
-        ai_builder_api_models.PlanApprovalResponse,
-        ai_builder_api_models.ApplyResultResponse,
     ]
 
     for model in models_with_examples:
@@ -277,53 +260,12 @@ def test_flow_and_ai_builder_response_models_expose_openapi_examples() -> None:
         assert "example" in extra and extra["example"]
 
 
-def test_flow_and_ai_builder_openapi_documents_parameters_and_error_examples() -> None:
+def test_flow_openapi_documents_parameters_and_error_examples() -> None:
     module = importlib.import_module("eneo.server.main")
     schema = module.app.openapi()
     tags = {tag["name"]: tag for tag in schema.get("tags", [])}
 
     assert tags["flows"]["description"]
-    assert tags["ai-builder"]["description"]
-
-    send_message_operation = schema["paths"][
-        "/api/v1/flows/ai-builder/sessions/{session_id}/messages"
-    ]["post"]
-    assert send_message_operation["tags"] == ["ai-builder"]
-    send_message_params = {
-        param["name"]: param for param in send_message_operation["parameters"]
-    }
-    assert send_message_params["session_id"]["description"]
-    assert send_message_operation["responses"]["200"]["content"]["text/event-stream"][
-        "example"
-    ]
-    assert (
-        send_message_operation["responses"]["403"]["content"]["application/json"][
-            "example"
-        ]["code"]
-        == "insufficient_scope"
-    )
-    assert (
-        send_message_operation["responses"]["404"]["content"]["application/json"][
-            "example"
-        ]["code"]
-        == "not_found"
-    )
-
-    apply_plan_operation = schema["paths"][
-        "/api/v1/flows/ai-builder/plans/{plan_id}/apply"
-    ]["post"]
-    assert apply_plan_operation["tags"] == ["ai-builder"]
-    apply_plan_params = {
-        param["name"]: param for param in apply_plan_operation["parameters"]
-    }
-    assert apply_plan_params["plan_id"]["description"]
-    assert (
-        apply_plan_operation["responses"]["409"]["content"]["application/json"][
-            "example"
-        ]["code"]
-        == "stale_revision"
-    )
-
     get_flow_operation = schema["paths"]["/api/v1/flows/{id}/"]["get"]
     get_flow_params = {
         param["name"]: param for param in get_flow_operation["parameters"]

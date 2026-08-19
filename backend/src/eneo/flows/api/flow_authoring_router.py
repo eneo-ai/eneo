@@ -69,7 +69,7 @@ _FLOW_SERVICE_KEY_DISCOVERY_DESCRIPTION = (
     "Service-key principals may use this endpoint only for published-flow discovery in "
     "their scoped space. Service-key webapps should use the returned ids with "
     "`GET /api/v1/flows/{id}/published/` and the runtime paths from that response; "
-    "draft authoring and AI Builder still require a user principal."
+    "draft authoring still requires a user principal."
 )
 
 _FLOW_PUBLISHED_RUNTIME_DESCRIPTION = (

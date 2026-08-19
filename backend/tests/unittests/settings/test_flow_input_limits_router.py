@@ -11,8 +11,6 @@ from eneo.flows.domain.flow_classification_retention_policy import (
 )
 from eneo.roles.permissions import Permission
 from eneo.settings.settings import (
-    AIBuilderBudgetSettingsPublic,
-    AIBuilderBudgetSettingsUpdate,
     FlowClassificationRetentionPolicyUpdate,
     FlowDocumentRenderLimitsPublic,
     FlowDocumentRenderLimitsUpdate,
@@ -27,7 +25,6 @@ from eneo.settings.settings import (
     FlowRuntimePolicyUpdate,
 )
 from eneo.settings.settings_router import (
-    get_ai_builder_budget_settings,
     get_flow_document_render_limits,
     get_flow_evidence_policy,
     get_flow_input_limits,
@@ -35,7 +32,6 @@ from eneo.settings.settings_router import (
     get_flow_runtime_policy,
     list_flow_classification_retention_policies,
     put_flow_classification_retention_policy,
-    update_ai_builder_budget_settings,
     update_flow_document_render_limits,
     update_flow_evidence_policy,
     update_flow_input_limits,
@@ -245,76 +241,6 @@ async def test_patch_flow_runtime_policy_delegates_to_service() -> None:
 
     assert response.default_step_timeout_seconds == 1200
     service.update_flow_runtime_policy.assert_awaited_once_with(payload)
-
-
-@pytest.mark.asyncio
-async def test_get_ai_builder_budget_settings_delegates_to_service() -> None:
-    container = MagicMock()
-    service = AsyncMock()
-    service.get_ai_builder_budget_settings.return_value = AIBuilderBudgetSettingsPublic(
-        conversation_safety_buffer_tokens=1500,
-        minimum_conversation_budget_tokens=6000,
-        max_attachments=37,
-        max_message_chars=12000,
-        max_template_inspection_uncompressed_bytes=67108864,
-        max_template_placeholders=750,
-        max_attachments_hard_limit=100,
-        max_message_chars_hard_limit=50000,
-        max_template_inspection_uncompressed_bytes_hard_limit=209715200,
-        max_template_placeholders_hard_limit=10000,
-        max_template_archive_entries_per_file_hard_limit=2048,
-        max_template_uncompressed_bytes_per_file_hard_limit=52428800,
-        max_planning_state_payload_bytes_hard_limit=131072,
-        budget_token_hard_limit=10000000,
-    )
-    container.settings_service.return_value = service
-    container.user.return_value = SimpleNamespace(
-        id="u", tenant_id="t", permissions=[Permission.ADMIN]
-    )
-
-    response = await get_ai_builder_budget_settings(container=container)
-
-    assert response.conversation_safety_buffer_tokens == 1500
-    assert response.minimum_conversation_budget_tokens == 6000
-    service.get_ai_builder_budget_settings.assert_awaited_once_with()
-
-
-@pytest.mark.asyncio
-async def test_patch_ai_builder_budget_settings_delegates_to_service() -> None:
-    container = MagicMock()
-    service = AsyncMock()
-    service.update_ai_builder_budget_settings.return_value = (
-        AIBuilderBudgetSettingsPublic(
-            conversation_safety_buffer_tokens=1800,
-            minimum_conversation_budget_tokens=5000,
-            max_attachments=42,
-            max_message_chars=15000,
-            max_template_inspection_uncompressed_bytes=67108864,
-            max_template_placeholders=800,
-            max_attachments_hard_limit=100,
-            max_message_chars_hard_limit=50000,
-            max_template_inspection_uncompressed_bytes_hard_limit=209715200,
-            max_template_placeholders_hard_limit=10000,
-            max_template_archive_entries_per_file_hard_limit=2048,
-            max_template_uncompressed_bytes_per_file_hard_limit=52428800,
-            max_planning_state_payload_bytes_hard_limit=131072,
-            budget_token_hard_limit=10000000,
-        )
-    )
-    container.settings_service.return_value = service
-    container.user.return_value = SimpleNamespace(
-        id="u", tenant_id="t", permissions=[Permission.ADMIN]
-    )
-
-    payload = AIBuilderBudgetSettingsUpdate(
-        conversation_safety_buffer_tokens=1800,
-    )
-    response = await update_ai_builder_budget_settings(
-        payload=payload, container=container
-    )
-
-    assert response.conversation_safety_buffer_tokens == 1800
-    service.update_ai_builder_budget_settings.assert_awaited_once_with(payload)
 
 
 @pytest.mark.asyncio

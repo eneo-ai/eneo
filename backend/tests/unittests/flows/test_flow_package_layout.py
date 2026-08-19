@@ -15,8 +15,8 @@ FLOW_DEVELOPER_ARCHITECTURE_DOCS_GENERATOR = (
     BACKEND_ROOT / "scripts" / "flow_developer_architecture_docs.py"
 )
 
-EXPECTED_ROOT_MODULES = 65
-EXPECTED_ROOT_PACKAGES = 7
+EXPECTED_ROOT_MODULES = 64
+EXPECTED_ROOT_PACKAGES = 6
 
 
 class _LayoutRow(Protocol):

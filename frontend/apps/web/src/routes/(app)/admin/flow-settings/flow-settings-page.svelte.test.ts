@@ -138,12 +138,6 @@ function pageData(mappedOverrides: Record<string, unknown> = {}) {
       deployment_default_max_provider_calls: 100,
       ...mappedOverrides
     },
-    aiBuilderBudgetSettings: {
-      max_attachments: 100,
-      max_message_chars: 50_000,
-      max_attachments_hard_limit: 100,
-      max_message_chars_hard_limit: 50_000
-    },
     ragEvidencePolicy: {
       max_sources_with_recorded_passages: 25,
       max_recorded_passages_per_source: 5,

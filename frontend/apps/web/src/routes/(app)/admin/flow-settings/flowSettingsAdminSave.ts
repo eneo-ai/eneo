@@ -1,5 +1,4 @@
 import type {
-  AIBuilderBudgetSettingsUpdate,
   Eneo,
   FlowInputLimitsUpdate,
   FlowMappedExecutionPolicyUpdate,
@@ -12,7 +11,6 @@ type SettingsWriter = Pick<
   | "updateFlowInputLimits"
   | "updateFlowRuntimePolicy"
   | "updateMappedExecutionPolicy"
-  | "updateAIBuilderBudgetSettings"
   | "updateRagEvidencePolicy"
 >;
 
@@ -20,7 +18,6 @@ export type FlowAdminSettingsUpdates = {
   inputLimits: FlowInputLimitsUpdate | null;
   runtimePolicy: FlowRuntimePolicyUpdate | null;
   mappedExecution: FlowMappedExecutionPolicyUpdate | null;
-  builderBudget: AIBuilderBudgetSettingsUpdate | null;
   ragEvidence: FlowRagEvidencePolicyUpdate | null;
 };
 
@@ -40,9 +37,6 @@ export async function saveFlowAdminSettings(
   const mappedExecution = updates.mappedExecution
     ? await settings.updateMappedExecutionPolicy(updates.mappedExecution)
     : null;
-  const builderBudget = updates.builderBudget
-    ? await settings.updateAIBuilderBudgetSettings(updates.builderBudget)
-    : null;
   const ragEvidence = updates.ragEvidence
     ? await settings.updateRagEvidencePolicy(updates.ragEvidence)
     : null;
@@ -51,7 +45,6 @@ export async function saveFlowAdminSettings(
     inputLimits,
     runtimePolicy,
     mappedExecution,
-    builderBudget,
     ragEvidence
   };
 }

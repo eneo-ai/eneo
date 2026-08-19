@@ -1,6 +1,6 @@
 """Tests for the stable-schema failure-event contract.
 
-These tests pin the wire shape callers (AI Builder, flows runtime, worker
+These tests pin the wire shape callers (Flow runtime and workers
 jobs) rely on. A regression here is a breaking change for log queries
 and replay tooling, so the tests assert field names, types, and the
 core-schema-wins-on-collision rule explicitly.
@@ -77,8 +77,8 @@ class TestLogFailureEvent:
         logger, handler = captured_logger
         log_failure_event(
             logger,
-            event="ai_builder.failure",
-            component="ai_builder",
+            event="flow_runtime.failure",
+            component="flow_runtime",
             operation="planner_turn",
             failure_kind="parse_failed",
             failure_code="validation_error",
@@ -96,9 +96,9 @@ class TestLogFailureEvent:
         assert len(handler.records) == 1
         extras = _extras(handler.records[0])
         assert extras == {
-            "event": "ai_builder.failure",
+            "event": "flow_runtime.failure",
             "schema_version": FAILURE_EVENT_SCHEMA_VERSION,
-            "component": "ai_builder",
+            "component": "flow_runtime",
             "operation": "planner_turn",
             "failure_kind": "parse_failed",
             "failure_code": "validation_error",
@@ -143,8 +143,8 @@ class TestLogFailureEvent:
         logger, handler = captured_logger
         log_failure_event(
             logger,
-            event="ai_builder.failure",
-            component="ai_builder",
+            event="flow_runtime.failure",
+            component="flow_runtime",
             operation="planner_turn",
             failure_kind="rejected",
             extra={
@@ -155,7 +155,7 @@ class TestLogFailureEvent:
         )
 
         extras = _extras(handler.records[0])
-        assert extras["event"] == "ai_builder.failure"
+        assert extras["event"] == "flow_runtime.failure"
         assert extras["failure_kind"] == "rejected"
         assert getattr(handler.records[0], "caller_field") == "ok"
 

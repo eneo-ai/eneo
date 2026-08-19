@@ -115,7 +115,6 @@ from eneo.flows.runtime.flow_runtime_trace import (
     FLOW_STEP_EXECUTE_SPAN_NAME,
     FLOW_STEP_SPAN_ATTRIBUTE_KEYS,
 )
-from eneo.flows.source_identity import RUNTIME_SOURCE_IDENTITY_FIELDS
 from eneo.flows.type_policies import INPUT_TYPE_POLICIES
 from eneo.main.exceptions import ErrorCodes
 from tests.unit.api_key_test_utils import flatten_routes
@@ -159,7 +158,6 @@ FLOW_CONSUMER_DELETED_FLAT_HREFS = (
 )
 FLOW_OVERVIEW = DOCS_SITE_CONTENT_ROOT / "docs" / "flows.mdx"
 FLOW_ARCHITECTURE_GUIDE = REPO_ROOT / "docs" / "flows" / "architecture.md"
-AI_BUILDER_DOC = DOCS_SITE_CONTENT_ROOT / "docs" / "ai-builder.mdx"
 API_KEY_MANAGEMENT = DOCS_SITE_CONTENT_ROOT / "docs" / "api-key-management.mdx"
 FLOW_DEVELOPER_DOCS_DIR = DOCS_SITE_CONTENT_ROOT / "docs" / "flows-for-developers"
 FLOW_DEVELOPER_DOCS_DATA_SCHEMA = FLOW_DEVELOPER_DOCS_DIR / "data-schema.mdx"
@@ -782,35 +780,6 @@ def _heading_section(page: str, heading: str) -> str:
     if next_heading is None:
         return section
     return section[: next_heading.start()]
-
-
-def test_ai_builder_docs_define_per_source_identity_contract() -> None:
-    contract_section = _heading_section(
-        _read(AI_BUILDER_DOC),
-        "## Inputs, outputs, and contracts",
-    )
-
-    for field_name in RUNTIME_SOURCE_IDENTITY_FIELDS:
-        assert f"`{field_name}`" in contract_section
-    assert "required JSON Schema `string` properties" in contract_section
-    assert "runtime writes both fields from uploaded file metadata" in contract_section
-    assert "not model output" in contract_section
-
-
-def test_ai_builder_docs_define_template_attachment_lifecycle() -> None:
-    section = _heading_section(
-        _read(AI_BUILDER_DOC),
-        "## Template attachments and reference material",
-    )
-    normalized = " ".join(section.split())
-
-    assert "exactly one confirmed DOCX template" in normalized
-    assert "reuses the same uploaded File" in normalized
-    assert "inside the atomic plan-apply transaction" in normalized
-    assert "not materialized as Flow inputs or resources" in normalized
-    assert "not sent again at Flow runtime" in normalized
-    assert "audio input required" in normalized
-    assert "zero model calls and zero model tokens" in normalized
 
 
 def _flow_developer_meta_titles() -> dict[str, str]:
@@ -1438,7 +1407,6 @@ def test_flow_developer_docs_data_schema_is_generated_from_backend_metadata() ->
         'flow_classification_retention_policies |o--|| security_classifications : "CASCADE"'
         in page
     )
-    assert 'builder_sessions |o--o| builder_plans : "NO ACTION"' in page
     for boundary_table in FLOW_SCHEMA_BOUNDARY_TABLE_NAMES - {"tenants"}:
         assert f" {boundary_table} : " in page
     assert "flow_step_dependencies" not in page
@@ -1680,10 +1648,6 @@ def test_flow_developer_docs_how_built_is_generated_from_layout_sources() -> Non
     assert "\\n" not in first_diagram
     assert "<br/>" in first_diagram
     assert '-. "must not import" .->' not in first_diagram
-    assert (
-        'engine["Flow engine"] -.->|must not import| builder["Flow AI Builder plugin"]'
-        in first_diagram
-    )
     assert "## Related" in page
     assert "/docs/flows-for-developers/run-lifecycle" in page
     assert _non_empty_lines(page)[0] == FLOW_DOCS_RELATED_NEXTRA_CARDS_IMPORT
@@ -1694,14 +1658,6 @@ def test_flow_developer_docs_how_built_is_generated_from_layout_sources() -> Non
     assert "`tenant_id`" in page
     assert "`flow_run_access_denied`" in page
     assert "`auth_layer`" in page
-    assert "## AI Builder create compile spine" in page
-    assert "`FlowAssemblyPlan` owns topology" in page
-    assert "`lower_assembly_plan`" in page
-    assert "`architecture_materialization_failed`" in page
-    assert "AI Builder create compile shape" in page
-    assert page.index("## AI Builder create compile spine") < page.index(
-        "## Change index"
-    )
 
     change_index_section = page.split("## Change index", maxsplit=1)[1].split(
         "## Module ownership",
@@ -2049,9 +2005,8 @@ def test_flow_developer_docs_key_decisions_is_generated_from_decision_catalog() 
     assert "curated reviewer view" in page
     assert PLACEHOLDER_DOC_PATTERN.search(page) is None
     assert len(mermaid_blocks) == 1
-    assert len(generator.FLOW_DEVELOPER_KEY_DECISIONS) == 11
+    assert len(generator.FLOW_DEVELOPER_KEY_DECISIONS) == 9
     assert "cross-principal denial tests" in page
-    assert "`FlowAssemblyPlan`" in page
 
     for slug in generator.FLOW_DEVELOPER_KEY_DECISION_SLUGS:
         assert any(
@@ -2063,8 +2018,6 @@ def test_flow_developer_docs_key_decisions_source_references_exist() -> None:
     page = _read(FLOW_DEVELOPER_DOCS_KEY_DECISIONS)
     referenced_files = sorted(set(FLOW_DEVELOPER_SOURCE_FILE_REF_PATTERN.findall(page)))
 
-    assert "backend/.importlinter" in referenced_files
-    assert "docs/flows/package-layout.md" in referenced_files
     assert referenced_files
     assert all(":" not in file_ref for file_ref in referenced_files)
     missing_files = [
@@ -2124,7 +2077,7 @@ def test_flow_developer_key_decision_catalog_rejects_drift() -> None:
     with pytest.raises(ValueError, match="one short sentence"):
         generator.validate_flow_developer_key_decisions((over_budget, *decisions[1:]))
 
-    with pytest.raises(ValueError, match="exactly 11 decisions"):
+    with pytest.raises(ValueError, match="exactly 9 decisions"):
         generator.validate_flow_developer_key_decisions(decisions[:-1])
 
 
@@ -2851,7 +2804,6 @@ def test_flow_consumer_journey_is_the_public_flows_entry_point() -> None:
         '"flows-api-guide": "Flow Runtime API Reference"'
     )
     assert "# Flow Runtime API Reference" in api_reference
-    assert "AI Builder" not in api_reference
 
 
 def test_flow_consumer_guides_keep_api_guide_as_reference_owner() -> None:
@@ -3002,26 +2954,6 @@ def test_flow_runtime_endpoint_registry_rejects_missing_runtime_field_projection
         _assert_flow_runtime_endpoint_fields_match_runtime_paths(broken_contracts)
 
 
-def test_flow_consumer_scenarios_map_to_buildable_goldens() -> None:
-    from tests.unittests.flows.ai_builder.eval_matrix.golden_cases import (
-        GOLDEN_CASES,
-    )
-
-    golden_ids = {case.case_id for case in GOLDEN_CASES}
-    documented_scenarios = [
-        scenario
-        for generator in _load_flow_consumer_guide_generators().values()
-        for scenario in generator.SCENARIOS
-    ]
-
-    assert "audio_to_docx_template__advanced" in golden_ids
-    assert documented_scenarios
-
-    for scenario in documented_scenarios:
-        assert scenario.golden_ids
-        assert set(scenario.golden_ids) <= golden_ids
-
-
 def test_flow_consumer_capability_matrix_is_manifest_backed_and_bounded() -> None:
     designing_generator = _load_flow_consumer_guide_docs_generator(
         "flow_consumer_designing_flows_docs",
@@ -3129,7 +3061,6 @@ def test_flow_consumer_guides_document_unsupported_features_with_alternatives() 
         assert callout.feature in pages
         assert callout.supported_alternative in pages
 
-    assert "AI Builder" not in _read(FLOW_CONSUMER_FAQ_GUIDE)
     assert "webhook delivery" not in pages
 
 

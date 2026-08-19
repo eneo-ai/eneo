@@ -9,9 +9,6 @@ from eneo.flows.domain.mapped_execution_policy import (
 from eneo.flows.domain.rag_evidence_policy import (
     validate_flow_rag_evidence_policy_object,
 )
-from eneo.flows.flow_ai_builder_budget_settings import (
-    validate_ai_builder_budget_settings_object,
-)
 from eneo.flows.flow_document_limits import (
     validate_flow_document_render_limits_object,
 )
@@ -36,7 +33,6 @@ FLOW_SETTINGS_DOCUMENT_RENDER_LIMITS_KEY: Final[str] = "document_render_limits"
 FLOW_SETTINGS_RUNTIME_POLICY_KEY: Final[str] = "runtime_policy"
 FLOW_SETTINGS_EVIDENCE_POLICY_KEY: Final[str] = "evidence_policy"
 FLOW_SETTINGS_RETENTION_POLICY_KEY: Final[str] = "retention_policy"
-FLOW_SETTINGS_AI_BUILDER_KEY: Final[str] = "ai_builder"
 FLOW_SETTINGS_MAPPED_EXECUTION_KEY: Final[str] = "mapped_execution"
 FLOW_SETTINGS_RAG_EVIDENCE_KEY: Final[str] = "rag_evidence"
 
@@ -47,7 +43,6 @@ FLOW_SETTINGS_TOP_LEVEL_KEYS: Final[frozenset[str]] = frozenset(
         FLOW_SETTINGS_RUNTIME_POLICY_KEY,
         FLOW_SETTINGS_EVIDENCE_POLICY_KEY,
         FLOW_SETTINGS_RETENTION_POLICY_KEY,
-        FLOW_SETTINGS_AI_BUILDER_KEY,
         FLOW_SETTINGS_MAPPED_EXECUTION_KEY,
         FLOW_SETTINGS_RAG_EVIDENCE_KEY,
     }
@@ -109,12 +104,6 @@ def validate_flow_settings_object(value: object | None) -> dict[str, Any]:
     if FLOW_SETTINGS_DOCUMENT_RENDER_LIMITS_KEY in settings:
         validate_flow_document_render_limits_object(
             settings[FLOW_SETTINGS_DOCUMENT_RENDER_LIMITS_KEY]
-        )
-    if FLOW_SETTINGS_AI_BUILDER_KEY in settings:
-        _translate_value_error(
-            lambda: validate_ai_builder_budget_settings_object(
-                settings[FLOW_SETTINGS_AI_BUILDER_KEY]
-            )
         )
     if FLOW_SETTINGS_RETENTION_POLICY_KEY in settings:
         _translate_value_error(

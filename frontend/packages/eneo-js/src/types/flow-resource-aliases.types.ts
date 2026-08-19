@@ -260,6 +260,7 @@ const validFlow: Flow = {
   space_id: "00000000-0000-0000-0000-000000000020",
   name: "Contract smoke flow",
   description: null,
+  step_count: 1,
   run_history_retention: {
     state: "days",
     effective_days: 14,
@@ -635,6 +636,7 @@ const validProviderCallEvidence: FlowProviderCallEvidence = {
   attempt_no: 1,
   ordinal: 1,
   status: "completed",
+  call_kind: "completion",
   request_schema_version: 2,
   provider_request_hash: "a".repeat(64),
   requested_model: "openai/gpt-4o-mini",

@@ -115,15 +115,6 @@ FLOW_SCHEMA_MODEL_REGISTRY: tuple[FlowSchemaModelEntry, ...] = (
         FlowClassificationRetentionPolicies, FlowSchemaAggregate.RETENTION
     ),
     FlowSchemaModelEntry(
-        flow_tables.BuilderSessions, FlowSchemaAggregate.DEFERRED_ADJACENT
-    ),
-    FlowSchemaModelEntry(
-        flow_tables.BuilderPlans, FlowSchemaAggregate.DEFERRED_ADJACENT
-    ),
-    FlowSchemaModelEntry(
-        flow_tables.BuilderSessionFiles, FlowSchemaAggregate.DEFERRED_ADJACENT
-    ),
-    FlowSchemaModelEntry(
         flow_tables.FlowPackageImports, FlowSchemaAggregate.DEFERRED_ADJACENT
     ),
 )
@@ -164,8 +155,8 @@ _AGGREGATE_DESCRIPTIONS = {
         "`no_purge` only block deletion, they never activate it."
     ),
     FlowSchemaAggregate.DEFERRED_ADJACENT: (
-        "AI Builder sessions and Flow package imports. They reference Flow "
-        "tables but are not part of the run or history model."
+        "Flow package imports reference Flow tables but are not part of the "
+        "run or history model."
     ),
 }
 

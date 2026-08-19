@@ -85,7 +85,7 @@ def _flow(*steps: FlowStep, metadata_json: dict | None = None) -> Flow:
     )
 
 
-def test_shared_compile_does_not_stamp_ai_builder_metadata() -> None:
+def test_shared_compile_preserves_core_metadata() -> None:
     spec = FlowDraftSpecCore(
         flow_name="Audio flow",
         flow_description="Transcribes audio",
@@ -114,7 +114,6 @@ def test_shared_compile_does_not_stamp_ai_builder_metadata() -> None:
     assert changeset.metadata_json is not None
     assert changeset.metadata_json["form_schema"]["fields"][0]["name"] == "case_id"
     assert changeset.metadata_json["wizard"]["transcription_enabled"] is True
-    assert "ai_builder" not in changeset.metadata_json
 
 
 def test_shared_compile_distinguishes_absent_and_empty_form_fields() -> None:

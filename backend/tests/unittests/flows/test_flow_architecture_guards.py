@@ -31,7 +31,7 @@ FLOW_SOURCE_ROOT = BACKEND_ROOT / "src" / "eneo" / "flows"
 FLOW_RUNTIME_ROOT = FLOW_SOURCE_ROOT / "runtime"
 FLOW_API_ROOT = FLOW_SOURCE_ROOT / "api"
 FLOW_TASKS_PATH = FLOW_RUNTIME_ROOT / "tasks.py"
-FLOW_API_PACKAGES = {"api", "ai_builder"}
+FLOW_API_PACKAGES = {"api"}
 DATA_RETENTION_ROOT = BACKEND_ROOT / "src" / "eneo" / "data_retention"
 PYRIGHT_REPORT_UNKNOWN_MEMBER_IGNORE_RE = re.compile(
     r"#\s*pyright\s*:\s*ignore\s*\[\s*[^\]]*\breportUnknownMemberType\b[^\]]*\]"
@@ -65,23 +65,8 @@ class _LocalJsonAliasDefinition:
     line: int
 
 
-ALLOWED_LOCAL_JSON_ALIAS_DEFINITIONS = frozenset(
-    {
-        _LocalJsonAliasException(
-            relative_path="ai_builder/ai_builder_conversation_metadata.py",
-            name="JsonScalar",
-        ),
-        _LocalJsonAliasException(
-            relative_path="ai_builder/ai_builder_error_contract.py",
-            name="JsonScalar",
-        ),
-        _LocalJsonAliasException(
-            relative_path="ai_builder/ai_builder_event_models.py",
-            name="JsonScalar",
-        ),
-    }
-)
-MAX_LOCAL_JSON_ALIAS_ALLOWLIST_SIZE = 3
+ALLOWED_LOCAL_JSON_ALIAS_DEFINITIONS = frozenset()
+MAX_LOCAL_JSON_ALIAS_ALLOWLIST_SIZE = 0
 _REMOVED_TYPED_OUTPUT_HELPERS = frozenset(
     {
         "augment_prompt_for_typed_output",

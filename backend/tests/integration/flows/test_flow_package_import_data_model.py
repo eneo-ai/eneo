@@ -1146,7 +1146,7 @@ async def test_flow_package_export_import_route_roundtrip_creates_second_draft(
             fake_log_flow_package_export,
         )
 
-        ai_builder_spec = FlowDraftSpecCore(
+        imported_spec = FlowDraftSpecCore(
             flow_name="Route Import Demo",
             steps=[
                 StepSpec(
@@ -1160,10 +1160,10 @@ async def test_flow_package_export_import_route_roundtrip_creates_second_draft(
                 )
             ],
         )
-        ai_builder_apply = await FlowAuthoringCommandService().apply(
+        imported_apply = await FlowAuthoringCommandService().apply(
             command=CreateFlowAuthoringCommand(
                 space_id=space.id,
-                spec=ai_builder_spec,
+                spec=imported_spec,
                 origin=FlowPackageAuthoringOrigin(
                     package_id="se.demo.route-import",
                     package_version="1.0.0",
@@ -1175,9 +1175,7 @@ async def test_flow_package_export_import_route_roundtrip_creates_second_draft(
         )
         await session.flush()
 
-        exported_flow = await container.flow_service().get_flow(
-            ai_builder_apply.flow_id
-        )
+        exported_flow = await container.flow_service().get_flow(imported_apply.flow_id)
 
         async def fake_require_flow_edit_access(
             request: Request,
@@ -1186,7 +1184,7 @@ async def test_flow_package_export_import_route_roundtrip_creates_second_draft(
             flow_id: UUID,
             allow_service_key_principals: bool = False,
         ) -> FlowAccessContext:
-            assert flow_id == ai_builder_apply.flow_id
+            assert flow_id == imported_apply.flow_id
             assert allow_service_key_principals is False
             return FlowAccessContext(
                 flow=exported_flow,
@@ -1201,7 +1199,7 @@ async def test_flow_package_export_import_route_roundtrip_creates_second_draft(
         )
 
         export_response = await flow_package_router.export_flow_package(
-            id=ai_builder_apply.flow_id,
+            id=imported_apply.flow_id,
             export_request=FlowPackageExportRequest(
                 package_id="se.demo.route-roundtrip",
                 package_version="1.0.0",
@@ -1225,7 +1223,7 @@ async def test_flow_package_export_import_route_roundtrip_creates_second_draft(
         await session.flush()
 
         assert not isinstance(second_import, JSONResponse)
-        assert second_import.flow_id != ai_builder_apply.flow_id
+        assert second_import.flow_id != imported_apply.flow_id
         assert second_import.flow_name == "Route Import Demo (2)"
         assert second_import.package_id == "se.demo.route-roundtrip"
         assert second_import.package_version == "1.0.0"

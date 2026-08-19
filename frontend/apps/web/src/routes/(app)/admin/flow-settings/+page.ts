@@ -5,7 +5,6 @@ export const load = async (event) => {
     flowInputLimits,
     flowRuntimePolicy,
     mappedExecutionPolicy,
-    aiBuilderBudgetSettings,
     ragEvidencePolicy,
     securityClassifications,
     flowClassificationRetentionPolicies
@@ -14,7 +13,6 @@ export const load = async (event) => {
     eneo.settings.getFlowInputLimits(),
     eneo.settings.getFlowRuntimePolicy(),
     eneo.settings.getMappedExecutionPolicy(),
-    eneo.settings.getAIBuilderBudgetSettings(),
     eneo.settings.getRagEvidencePolicy(),
     eneo.securityClassifications.list(),
     eneo.settings.listFlowClassificationRetentionPolicies()
@@ -24,7 +22,6 @@ export const load = async (event) => {
     flowInputLimits,
     flowRuntimePolicy,
     mappedExecutionPolicy,
-    aiBuilderBudgetSettings,
     ragEvidencePolicy,
     securityClassifications,
     flowClassificationRetentionPolicies

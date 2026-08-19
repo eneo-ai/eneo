@@ -163,17 +163,13 @@ skip_covered = false
 [tool.mutmut]
 source_paths = ["src/eneo"]
 only_mutate = [
-    "src/eneo/flows/ai_builder/ai_builder_action_policy.py",
-    "src/eneo/flows/ai_builder/ai_builder_architecture_commit.py",
-    "src/eneo/flows/ai_builder/ai_builder_commit_invariance.py",
-    "src/eneo/flows/ai_builder/ai_builder_send_lease.py",
-    "src/eneo/flows/flow_ai_builder_budget_settings.py",
+    "src/eneo/flows/flow_access_policy.py",
+    "src/eneo/flows/flow_metadata.py",
+    "src/eneo/flows/flow_settings.py",
 ]
 pytest_add_cli_args_test_selection = [
-    "tests/unittests/flows/ai_builder/test_ai_builder_action_policy.py",
-    "tests/unittests/flows/ai_builder/test_ai_builder_architecture_commit.py",
-    "tests/unittests/flows/ai_builder/test_ai_builder_commit_invariance.py",
-    "tests/unittests/flows/ai_builder/test_ai_builder_send_lease.py",
+    "tests/unittests/flows/test_flow_access_policy.py",
+    "tests/unittests/flows/test_flow_metadata.py",
     "tests/unittests/tenants/test_tenant_flow_settings.py",
 ]
 

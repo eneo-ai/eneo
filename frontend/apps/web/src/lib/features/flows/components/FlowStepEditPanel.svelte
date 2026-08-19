@@ -142,9 +142,7 @@
     formSchema,
     onStepChanged,
     onJsonValidationChanged,
-    onOpenTranscriptionSettings,
-    onBuildFlowWithAI,
-    onEditStepWithAI
+    onOpenTranscriptionSettings
   }: {
     steps: FlowStep[];
     activeStepId: string | null;
@@ -167,8 +165,6 @@
     onStepChanged?: (detail: { index: number; step: FlowStep }) => void;
     onJsonValidationChanged?: (detail: { hasErrors: boolean; fields: string[] }) => void;
     onOpenTranscriptionSettings?: () => void;
-    onBuildFlowWithAI?: () => void;
-    onEditStepWithAI?: (step: FlowStep) => void;
   } = $props();
 
   // ---------------------------------------------------------------------------
@@ -842,11 +838,6 @@
                 {m.flow_starter_drafting_action()}
               </Button>
             {/if}
-            {#if onBuildFlowWithAI}
-              <Button variant="outline" onclick={onBuildFlowWithAI}>
-                {m.ai_builder_empty_state_cta()}
-              </Button>
-            {/if}
           </div>
           {#if isAdvancedMode}
             <p class="text-muted max-w-lg text-xs leading-relaxed">
@@ -887,11 +878,6 @@
               </h2>
             {/if}
           </div>
-          {#if onEditStepWithAI && activeStep.id && !isPublished}
-            <Button variant="outline" size="sm" onclick={() => onEditStepWithAI?.(activeStep)}>
-              {m.flow_step_change_with_ai()}
-            </Button>
-          {/if}
         </div>
         {#if stepSummaryModel}
           <FlowStepSummaryCard

@@ -7,7 +7,12 @@
     ObjectContentMoves,
     StorageKind
   } from "@eneo/eneo-js";
-  import { AlertCircle, ChevronDown, Database, HardDrive, Info, Loader2 } from "lucide-svelte";
+  import AlertCircle from "lucide-svelte/icons/alert-circle";
+  import ChevronDown from "lucide-svelte/icons/chevron-down";
+  import Database from "lucide-svelte/icons/database";
+  import HardDrive from "lucide-svelte/icons/hard-drive";
+  import Info from "lucide-svelte/icons/info";
+  import Loader2 from "lucide-svelte/icons/loader-2";
   import * as Alert from "$lib/components/ui/alert/index.js";
   import { Badge } from "$lib/components/ui/badge/index.js";
   import { Button } from "$lib/components/ui/button/index.js";

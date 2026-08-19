@@ -1,7 +1,6 @@
 # Flow Architecture
 
-Scope: Flows proper. Flow AI Builder appears here only when a Flow proper file
-depends on the same runtime or contract surface.
+Scope: Flows proper.
 
 This document is the maintainer entry point for Flows. It names the current
 owners, runtime journeys, blocked policy decisions, and guard tests.
@@ -279,24 +278,16 @@ Use two different designs:
 | Exhaustive work where every uploaded source must be read, extracted, cited, or summarized | Map the reader over bounded source units, then compose typed outputs downstream.        | `PassThroughStepHandler` dispatches valid per-source readers and fails closed for invalid `per_source` configuration. See `backend/src/eneo/flows/runtime/step_handlers/pass_through.py::PassThroughStepHandler.execute`. |
 | Selective question answering over a large library where only relevant passages matter     | Use knowledge retrieval/RAG so the model receives selected chunks, not the full corpus. | Retrieval stays an assistant/knowledge concern, not a Flow step-input transport.                                                                                                                                                                                   |
 
-For Flow AI Builder-generated multi-source document readers, the current
-runtime map is explicit:
+For multi-source document readers, the runtime map is explicit:
 
-1. Builder lowering carries `runtime_input_execution_mode` from the planned step
-   into the compiled step draft. See
-   `backend/src/eneo/flows/ai_builder/ai_builder_assembly/lower.py::_new_step_draft_from_planned_step`.
-2. Builder lowering removes runtime-owned source identity fields from the
-   model-facing output guidance while preserving them in the persisted step
-   contract. See
-   `backend/src/eneo/flows/ai_builder/ai_builder_assembly/lower.py::_assistant_output_fields_for_planned_step`.
-3. `PerSourceReader` lists the bound runtime file ids and executes one model
+1. `PerSourceReader` lists the bound runtime file ids and executes one model
    call per source file. See
    `backend/src/eneo/flows/runtime/step_handlers/per_source_reader.py::execute_per_source_reader`
    and `backend/src/eneo/flows/runtime/step_handlers/per_source_reader.py::_execute_one_source`.
-4. The runtime stamps `source_label` and `source_file_id` after each call, so the
+2. The runtime stamps `source_label` and `source_file_id` after each call, so the
    model does not own source identity. See
    `backend/src/eneo/flows/runtime/step_handlers/per_source_reader.py::_source_document_items`.
-5. Per-source diagnostics preserve source count, token totals, per-source token
+3. Per-source diagnostics preserve source count, token totals, per-source token
    records, input text previews, and extraction diagnostics. See
    `backend/src/eneo/flows/runtime/step_handlers/per_source_reader.py::_assemble_per_source_output`,
    `backend/src/eneo/flows/runtime/step_handlers/per_source_reader.py::_per_source_runtime_metadata`,
