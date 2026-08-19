@@ -8263,7 +8263,12 @@ async def test_ai_builder_api_resolved_architecture_emits_requirements_summary(
         ),
         patch(
             "eneo.flows.ai_builder.ai_builder_discovery_runtime.classify_slots",
-            new=AsyncMock(return_value=SlotClassificationResult()),
+            new=AsyncMock(
+                return_value=SlotClassificationAttempt(
+                    outcome="resolved",
+                    result=SlotClassificationResult(),
+                )
+            ),
         ),
     ):
         session_id = await _create_ai_builder_session(
@@ -10425,7 +10430,12 @@ async def test_ai_builder_api_named_content_fields_can_be_edited_on_the_card(
         ),
         patch(
             "eneo.flows.ai_builder.ai_builder_discovery_runtime.classify_slots",
-            new=AsyncMock(return_value=SlotClassificationAttempt(outcome="skipped")),
+            new=AsyncMock(
+                return_value=SlotClassificationAttempt(
+                    outcome="resolved",
+                    result=SlotClassificationResult(),
+                )
+            ),
         ),
     ):
         session_id = await _create_ai_builder_session(
