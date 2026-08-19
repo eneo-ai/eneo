@@ -134,6 +134,51 @@ def test_battle_cases_and_fixture_manifest_cannot_drift_apart() -> None:
     assert {name: on_disk.get(name) for name in pinned} == pinned
 
 
+def test_long_context_cohort_covers_large_municipal_format_journeys() -> None:
+    harness = _load_module(
+        "ai_builder_api_battle_test_long_context",
+        GENERATOR_PATH.with_name("ai_builder_api_battle_test.py"),
+    )
+    cases = harness._read_cases_file(CASES_PATH)
+    long_context_cases = [case for case in cases if "long_context" in case.cohorts]
+
+    assert len(long_context_cases) == 10
+    assert all(5_000 <= len(case.prompt) <= 10_000 for case in long_context_cases)
+    assert {
+        case.case_id: hashlib.sha256(case.prompt.encode("utf-8")).hexdigest()
+        for case in long_context_cases
+    } == {
+        "long_context_livsmedelsverksamhet_json_to_pdf": "ae7c9df9b8708fe9ee60e3b4db06ee082877f6d600d37924345dfd314e69f529",
+        "long_context_bygglov_pdf_to_docx": "2bcd291a87dd606ca827259315a74e016b3426ec9436ebab02106f8494941d39",
+        "long_context_grannehornande_text_to_docx": "b131e8ac9e64d63db3ff38c10b29162db4e7bdcfb3c4a5efc00c8a91c18a10b2",
+        "long_context_foreningsbidrag_documents_to_docx": "5c79177edea2561672862deb59c521f534f269b16465795ce022cdcc32eb3dce",
+        "long_context_varmepumpsanmalan_json_pdf_to_pdf": "cd507c50f75cd3dd78bf6c55085fd510040ebabbcabcb41532f257306bbadc78",
+        "long_context_miljofarlig_verksamhet_documents_to_json": "854d955eb73a7c39fe9dcd9a132445e61e882828660e0c23b0c94e2e299a7f76",
+        "long_context_serveringstillstand_json_pdf_to_docx": "0fed3247a4a6c0f4b992a9a4b9f35793ab73d30598df1344ccbca65fc62aef5f",
+        "long_context_synpunkt_text_to_json": "e2eceb8a445ca69d57848886f7c443d7cc99b48b24d3e3cad9f84843194ea669",
+        "long_context_allman_handling_text_to_json": "26e362fea31af1e2ee82d78bc693915243f566fb1883515ed2c4bdfac418e49d",
+        "long_context_inackorderingstillagg_pdf_to_pdf": "ab21302b04d630b904079ad98107e694934e97469552dea296253c1478eaffe7",
+    }
+    assert {
+        (
+            case.expected.get("expected_primary_input_type"),
+            case.expected.get("terminal_output_type"),
+        )
+        for case in long_context_cases
+        if case.expected is not None
+    } == {
+        ("document", "docx"),
+        ("document", "pdf"),
+        ("json", "pdf"),
+        ("document", "json"),
+        ("file", "docx"),
+        ("file", "json"),
+        ("file", "pdf"),
+        ("text", "docx"),
+        ("text", "json"),
+    }
+
+
 def _question_observation(
     harness: ModuleType,
     *,

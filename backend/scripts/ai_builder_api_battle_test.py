@@ -79,6 +79,7 @@ JsonObject = dict[str, Any]
 DEFAULT_CASES_FILE = Path(__file__).with_name("ai_builder_api_battle_cases.json")
 FIXTURE_DIR = Path(__file__).with_name("fixtures") / "ai_builder_battle"
 FIXTURE_MANIFEST_FILE = FIXTURE_DIR / "manifest.json"
+PROMPT_FIXTURE_DIR = FIXTURE_DIR / "prompts"
 SUPPORTED_FIXTURE_MANIFEST_VERSION = 1
 # Confirming is a content-free structured action: text beside a confirmation is
 # a change request the Builder reads as one, so the harness sends none.
@@ -1040,6 +1041,7 @@ _CASE_KEYS = frozenset(
     {
         "id",
         "prompt",
+        "prompt_file",
         "complexity",
         "domain",
         "required",
@@ -1180,7 +1182,7 @@ def _read_cases_file(path: Path) -> list[BattleCase]:
                 + ", ".join(sorted(str(key) for key in unknown_case_keys))
             )
         case_id = _required_string(raw_case, "id")
-        prompt = _required_string(raw_case, "prompt").strip()
+        prompt = _required_prompt(raw_case).strip()
         if not prompt:
             raise ValueError(f"{path} case {case_id} has an empty prompt.")
         if case_id in seen_case_ids:
@@ -9311,6 +9313,23 @@ def _required_string(payload: Mapping[str, Any], key: str) -> str:
     if not isinstance(value, str) or not value:
         raise ValueError(f"Missing string field: {key}")
     return value
+
+
+def _required_prompt(payload: Mapping[str, Any]) -> str:
+    value = payload.get("prompt")
+    prompt_file = payload.get("prompt_file")
+    if value is not None and prompt_file is not None:
+        raise ValueError("Use either prompt or prompt_file, not both")
+    if isinstance(value, str) and value:
+        return value
+    if isinstance(prompt_file, str) and Path(prompt_file).name == prompt_file:
+        path = PROMPT_FIXTURE_DIR / prompt_file
+        if path.is_file():
+            prompt = path.read_text(encoding="utf-8").strip()
+            if prompt:
+                return prompt
+        raise ValueError(f"Prompt fixture does not exist or is empty: {prompt_file}")
+    raise ValueError("Missing prompt string or valid prompt fixture filename")
 
 
 def _optional_string(payload: Mapping[str, Any], key: str) -> str | None:
