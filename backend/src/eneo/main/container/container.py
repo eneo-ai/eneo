@@ -300,18 +300,12 @@ from eneo.mcp_servers.application.mcp_server_service import MCPServerService
 from eneo.mcp_servers.application.mcp_server_settings_service import (
     MCPServerSettingsService,
 )
-from eneo.mcp_servers.application.mcp_session_lifecycle_service import (
-    McpSessionLifecycleService,
-)
 from eneo.mcp_servers.infrastructure.mappers.mcp_server_mapper import (
     MCPServerMapper,
     MCPServerToolMapper,
 )
 from eneo.mcp_servers.infrastructure.proxy.mcp_proxy_factory import (
     MCPProxySessionFactory,
-)
-from eneo.mcp_servers.infrastructure.repo_impl.chat_session_mcp_state_repo_impl import (
-    ChatSessionMcpStateRepo,
 )
 from eneo.mcp_servers.infrastructure.repo_impl.mcp_server_repo_impl import (
     MCPServerRepoImpl,
@@ -1350,20 +1344,9 @@ class Container(containers.DeclarativeContainer):
         session=session,
         user=user,
     )
-    chat_session_mcp_state_repo = providers.Factory(
-        ChatSessionMcpStateRepo,
-        session=session,
-    )
     mcp_proxy_session_factory = providers.Factory(
         MCPProxySessionFactory,
         encryption_service=encryption_service,
-    )
-    mcp_session_lifecycle_service = providers.Factory(
-        McpSessionLifecycleService,
-        state_repo=chat_session_mcp_state_repo,
-        mcp_server_repo=mcp_server_repo,
-        proxy_factory=mcp_proxy_session_factory,
-        user=user,
     )
     session_service = providers.Factory(
         SessionService,
@@ -1372,7 +1355,6 @@ class Container(containers.DeclarativeContainer):
         session_repo=session_repo,
         file_service=file_service,
         file_content_loader_factory=providers.Object(_file_content_loader_for_session),
-        mcp_session_lifecycle_service=mcp_session_lifecycle_service,
     )
     resource_mover_service = providers.Factory(
         ResourceMoverService,
@@ -1628,7 +1610,6 @@ class Container(containers.DeclarativeContainer):
         mcp_server_repo=mcp_server_repo,
         mcp_server_tool_repo=mcp_server_tool_repo,
         user=user,
-        mcp_state_repo=chat_session_mcp_state_repo,
         encryption_service=encryption_service,
     )
     tenant_integration_service = providers.Factory(

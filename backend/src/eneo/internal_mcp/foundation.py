@@ -12,8 +12,7 @@ claim fixing the scope, so tools take no scope arguments and cannot be
 pointed at another assistant.
 
 Internal servers are stateless (``stateless_http=True``): no MCP protocol
-session id is ever assigned, so the proxy's per-chat-session resume
-bookkeeping naturally skips them, and any backend worker can serve a loopback
+session id is ever assigned, and any backend worker can serve a loopback
 call regardless of which worker initiated it.
 
 The ephemeral :class:`MCPServer` entities built per completion are never

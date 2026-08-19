@@ -245,9 +245,8 @@ class TestMCPClientListToolsErrorPropagation:
         assert chunks_sent < total_chunks
 
     @pytest.mark.asyncio
-    @pytest.mark.parametrize("method", ["initialize", "ping"])
-    async def test_control_responses_are_bounded_before_sdk_decoding(
-        self, monkeypatch: pytest.MonkeyPatch, method: str
+    async def test_initialize_response_is_bounded_before_sdk_decoding(
+        self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         app = FastAPI()
         chunks_sent = 0
@@ -260,12 +259,6 @@ class TestMCPClientListToolsErrorPropagation:
             1024,
             raising=False,
         )
-        monkeypatch.setattr(
-            mcp_client_module,
-            "MCP_PING_RESPONSE_MAX_BYTES",
-            1024,
-            raising=False,
-        )
 
         @app.post("/mcp")
         async def mcp_endpoint(request: Request) -> Response:
@@ -274,25 +267,17 @@ class TestMCPClientListToolsErrorPropagation:
             request_method = payload.get("method")
             if request_method == "notifications/initialized":
                 return Response(status_code=202)
-            if request_method != method:
+            if request_method != "initialize":
                 return Response(status_code=400)
 
-            if method == "initialize":
-                prefix = (
-                    b'{"jsonrpc":"2.0","id":'
-                    + json.dumps(payload["id"]).encode()
-                    + b',"result":{"protocolVersion":"2025-06-18",'
-                    b'"capabilities":{"tools":{}},"serverInfo":'
-                    b'{"name":"control-test","version":"1"},"instructions":"'
-                )
-                suffix = b'"}}'
-            else:
-                prefix = (
-                    b'{"jsonrpc":"2.0","id":'
-                    + json.dumps(payload["id"]).encode()
-                    + b',"result":{"padding":"'
-                )
-                suffix = b'"}}'
+            prefix = (
+                b'{"jsonrpc":"2.0","id":'
+                + json.dumps(payload["id"]).encode()
+                + b',"result":{"protocolVersion":"2025-06-18",'
+                b'"capabilities":{"tools":{}},"serverInfo":'
+                b'{"name":"control-test","version":"1"},"instructions":"'
+            )
+            suffix = b'"}}'
 
             async def oversized_response() -> AsyncIterator[bytes]:
                 nonlocal chunks_sent
@@ -318,10 +303,7 @@ class TestMCPClientListToolsErrorPropagation:
                 name="control-test",
                 http_url=url,
             )
-            client = MCPClient(
-                server,
-                resume_mcp_session_id="control-session" if method == "ping" else None,
-            )
+            client = MCPClient(server)
             with pytest.raises(MCPClientError, match="wire response exceeds"):
                 async with client:
                     pass
@@ -330,7 +312,7 @@ class TestMCPClientListToolsErrorPropagation:
         assert chunks_sent < total_chunks
 
     @pytest.mark.asyncio
-    async def test_failed_catalog_cleanup_does_not_buffer_delete_body(self) -> None:
+    async def test_sdk_session_termination_does_not_buffer_delete_body(self) -> None:
         app = FastAPI()
         delete_stream_closed = asyncio.Event()
         delete_chunks_sent = 0
@@ -355,8 +337,6 @@ class TestMCPClientListToolsErrorPropagation:
                 )
             if method == "notifications/initialized":
                 return Response(status_code=202)
-            if method == "tools/list":
-                return Response(status_code=500)
             return Response(status_code=400)
 
         @app.delete("/mcp")
@@ -379,13 +359,11 @@ class TestMCPClientListToolsErrorPropagation:
             client = MCPClient(
                 MCPServer(tenant_id=uuid4(), name="cleanup-test", http_url=url)
             )
+            # Exiting the client tears down the transport; the SDK sends the
+            # session-terminating DELETE itself because the server assigned a
+            # session id on initialize.
             async with client:
-                assigned_id = client.assigned_mcp_session_id
-                assert assigned_id == "cleanup-session"
-                with pytest.raises(MCPClientError, match="Failed to list tools"):
-                    await client.list_tools()
-
-            await client.terminate_protocol_session(assigned_id)
+                pass
 
         await asyncio.wait_for(delete_stream_closed.wait(), timeout=1)
         assert delete_chunks_sent < total_chunks
@@ -726,54 +704,6 @@ class TestMCPClientAuthenticationErrorMapping:
 
         with pytest.raises(MCPClientError):
             await client.list_tools()
-
-
-# =============================================================================
-# Mcp-Session-Id is carried only via the SDK transport, never the headers dict
-# =============================================================================
-
-
-class TestMCPClientSessionHeaderNotDuplicated:
-    """The resume session id must reach the wire exactly once.
-
-    Putting ``Mcp-Session-Id`` in the headers dict passed to the SDK makes it
-    both the httpx client default and the per-request base, while the SDK also
-    adds it from ``transport.session_id``. httpx folds the two copies into a
-    single comma-joined value (``id, id``) that shape-validating servers reject
-    with HTTP 400. The header must therefore be carried only by seeding the
-    transport's ``session_id`` — ``_build_auth_headers`` must never emit it.
-    """
-
-    @pytest.mark.asyncio
-    async def test_resume_session_id_absent_from_auth_headers(self):
-        server = MagicMock()
-        server.name = "test-server"
-        server.http_url = "http://localhost:8080"
-        server.http_auth_type = "bearer"
-
-        client = MCPClient(
-            server,
-            auth_credentials={"token": "secret"},
-            resume_mcp_session_id="fa5613e2-3f1a-448c-8702-8364cdd65da0",
-        )
-
-        headers = await client._build_auth_headers()
-
-        assert {k.lower() for k in headers} == {"authorization"}
-        assert not any(k.lower() == "mcp-session-id" for k in headers)
-
-    @pytest.mark.asyncio
-    async def test_fresh_connect_auth_headers_have_no_session_id(self):
-        server = MagicMock()
-        server.name = "test-server"
-        server.http_url = "http://localhost:8080"
-        server.http_auth_type = "bearer"
-
-        client = MCPClient(server, auth_credentials={"token": "secret"})
-
-        headers = await client._build_auth_headers()
-
-        assert not any(k.lower() == "mcp-session-id" for k in headers)
 
 
 # =============================================================================

@@ -28,9 +28,6 @@ if TYPE_CHECKING:
     from eneo.mcp_servers.domain.repositories.mcp_server_tool_repo import (
         MCPServerToolRepository,
     )
-    from eneo.mcp_servers.infrastructure.repo_impl.chat_session_mcp_state_repo_impl import (
-        ChatSessionMcpStateRepo,
-    )
     from eneo.security_classifications.domain.entities.security_classification import (
         SecurityClassification,
     )
@@ -100,14 +97,12 @@ class MCPServerService:
         mcp_server_repo: "MCPServerRepository",
         mcp_server_tool_repo: "MCPServerToolRepository",
         user: "UserInDB",
-        mcp_state_repo: "ChatSessionMcpStateRepo",
         encryption_service: "EncryptionService | None" = None,
     ):
         super().__init__()
         self.repo = mcp_server_repo
         self.tool_repo = mcp_server_tool_repo
         self.user = user
-        self.mcp_state_repo = mcp_state_repo
         self.encryption_service = encryption_service
 
     # Keys in http_auth_config_schema that contain secrets
@@ -375,13 +370,8 @@ class MCPServerService:
             mcp_server.http_auth_config_schema = self._encrypt_auth_config(
                 http_auth_config_schema
             )
-        if identity_mode_changed:
-            mcp_server.identity_policy_generation += 1
-
         try:
             mcp_server = await self.repo.update(mcp_server)
-            if identity_mode_changed:
-                await self.mcp_state_repo.delete_for_server(mcp_server.id)
         except IntegrityError as e:
             raise NameCollisionException(
                 "An MCP server with this name already exists."

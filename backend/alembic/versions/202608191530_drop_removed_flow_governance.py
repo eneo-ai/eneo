@@ -1,7 +1,7 @@
 """Drop partial rerun and retention-governance schema.
 
 Revision ID: 202608191530
-Revises: 202608181700
+Revises: 202608181700, 202608181000
 Create Date: 2026-08-19 15:30:00.000000
 """
 
@@ -10,7 +10,7 @@ from collections.abc import Sequence
 from alembic import op
 
 revision: str = "202608191530"
-down_revision: str | None = "202608181700"
+down_revision: str | Sequence[str] | None = ("202608181700", "202608181000")
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

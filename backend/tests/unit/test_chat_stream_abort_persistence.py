@@ -30,6 +30,7 @@ from eneo.ai_models.completion_models.completion_model import (
     McpToolReference,
     ResponseType,
     TokenUsage,
+    ToolCallMetadata,
 )
 from eneo.sessions import session_service as session_service_module
 from eneo.sessions.session_service import (
@@ -770,6 +771,103 @@ async def test_non_streaming_handle_response_persists_context_without_changing_c
     assert persisted["context_prompt_tokens"] == 520
     assert persisted["context_completion_tokens"] == 40
     assert persisted["skill_context_tokens"] == 37
+
+
+async def test_non_streaming_handle_response_persists_tool_calls_for_replay():
+    """Tool calls executed on the non-streaming path must be persisted on the
+    question (arguments + result text) so later turns replay them to the LLM,
+    exactly like the streaming path does."""
+
+    response = SimpleNamespace(
+        completion=Completion(
+            text="ok",
+            tool_calls_metadata=[
+                ToolCallMetadata(
+                    server_name="Server",
+                    tool_name="tool",
+                    title="Tool title",
+                    arguments={"q": "x"},
+                    tool_call_id="call_1",
+                    approved=True,
+                    result_status="succeeded",
+                    result="tool-ok",
+                    mcp_tool_name="server__tool",
+                )
+            ],
+        ),
+        total_token_count=10,
+        usage=None,
+        extended_logging=None,
+    )
+    session_service_mock = AsyncMock()
+    session_service_mock.complete_question_with_answer = AsyncMock()
+    svc = _make_assistant_service_for_streaming(session_service_mock)
+
+    from eneo.assistants.assistant_service import AssistantService
+
+    with patch("eneo.assistants.assistant_service.count_tokens", return_value=4):
+        answer = await AssistantService._handle_response(  # pyright: ignore[reportPrivateUsage]
+            svc,  # pyright: ignore[reportArgumentType]
+            response=response,
+            datastore_result=SimpleNamespace(info_blobs=[], no_duplicate_chunks=[]),
+            question="hello?",
+            files=[],
+            completion_model=SimpleNamespace(id=uuid4(), name="gpt-4"),
+            session=_make_session_in_db(),
+            stream=False,
+            assistant_id=uuid4(),
+            question_id=uuid4(),
+            **_skill_runtime_args(),
+        )
+
+    assert answer == "ok"
+    persisted = session_service_mock.complete_question_with_answer.await_args.kwargs
+    tool_calls = persisted["tool_calls"]
+    assert tool_calls is not None and len(tool_calls) == 1
+    persisted_call = tool_calls[0]
+    assert persisted_call.server_name == "Server"
+    assert persisted_call.tool_name == "tool"
+    assert persisted_call.title == "Tool title"
+    assert persisted_call.arguments == {"q": "x"}
+    assert persisted_call.tool_call_id == "call_1"
+    assert persisted_call.approved is True
+    assert persisted_call.result_status == "succeeded"
+    assert persisted_call.result == "tool-ok"
+    assert persisted_call.mcp_tool_name == "server__tool"
+
+
+async def test_non_streaming_handle_response_persists_no_tool_calls_when_none():
+    """A plain non-streaming answer without tool use persists tool_calls=None."""
+
+    response = SimpleNamespace(
+        completion=Completion(text="ok"),
+        total_token_count=10,
+        usage=None,
+        extended_logging=None,
+    )
+    session_service_mock = AsyncMock()
+    session_service_mock.complete_question_with_answer = AsyncMock()
+    svc = _make_assistant_service_for_streaming(session_service_mock)
+
+    from eneo.assistants.assistant_service import AssistantService
+
+    with patch("eneo.assistants.assistant_service.count_tokens", return_value=4):
+        await AssistantService._handle_response(  # pyright: ignore[reportPrivateUsage]
+            svc,  # pyright: ignore[reportArgumentType]
+            response=response,
+            datastore_result=SimpleNamespace(info_blobs=[], no_duplicate_chunks=[]),
+            question="hello?",
+            files=[],
+            completion_model=SimpleNamespace(id=uuid4(), name="gpt-4"),
+            session=_make_session_in_db(),
+            stream=False,
+            assistant_id=uuid4(),
+            question_id=uuid4(),
+            **_skill_runtime_args(),
+        )
+
+    persisted = session_service_mock.complete_question_with_answer.await_args.kwargs
+    assert persisted["tool_calls"] is None
 
 
 @pytest.mark.asyncio

@@ -40,9 +40,6 @@ from eneo.users.user import UserInDB
 if TYPE_CHECKING:
     from eneo.ai_models.completion_models.completion_model import McpToolReference
     from eneo.completion_models.infrastructure.web_search import WebSearchResult
-    from eneo.mcp_servers.application.mcp_session_lifecycle_service import (
-        McpSessionLifecycleService,
-    )
 
 logger = get_logger(__name__)
 
@@ -162,7 +159,6 @@ class SessionService:
         file_service: FileService | None = None,
         assistant_service: AssistantService | None = None,
         group_chat_service: GroupChatService | None = None,
-        mcp_session_lifecycle_service: "McpSessionLifecycleService | None" = None,
         file_content_loader_factory: (
             Callable[[AsyncSession], FileContentLoader] | None
         ) = None,
@@ -174,7 +170,6 @@ class SessionService:
         self.file_service = file_service
         self.assistant_service = assistant_service
         self.group_chat_service = group_chat_service
-        self.mcp_session_lifecycle_service = mcp_session_lifecycle_service
         self._file_content_loader_factory = file_content_loader_factory
 
     def _file_content_loader(self, session: AsyncSession) -> FileContentLoader | None:
@@ -323,10 +318,6 @@ class SessionService:
         owned_session = self._check_exists_and_belongs_to_user(
             session, assistant_id=assistant_id, group_chat_id=group_chat_id
         )
-        if self.mcp_session_lifecycle_service is not None:
-            await self.mcp_session_lifecycle_service.terminate_for_chat_session(
-                owned_session.id
-            )
         return await self.session_repo.delete(owned_session.id)
 
     async def create_session(
@@ -337,10 +328,10 @@ class SessionService:
     ) -> SessionInDB:
         """Create the conversation identity in a short committed transaction.
 
-        Completion setup may create durable external state, including MCP
-        protocol sessions, before the request transaction ends. Committing the
+        Completion setup may create durable child state (e.g. staged MCP tool
+        definitions) before the request transaction ends. Committing the
         parent row here makes those child writes independently durable and
-        prevents a later request rollback from orphaning remote state.
+        prevents a later request rollback from orphaning them.
         """
         session_add = self._build_session_add(
             name=name,
